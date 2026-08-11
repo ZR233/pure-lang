@@ -558,7 +558,6 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
     assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
-    assert_eq!(snapshot.active_turns, Vec::new());
     let ask = store
         .read_interaction("ask-recovered")
         .await

@@ -9,8 +9,9 @@ use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_a
 use crate::studio::records::ThreadRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRecoveryCleanupPreview,
-    StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
+    InteractionRuntime, StudioActiveTurn, StudioProductEventRuntime,
+    StudioRecoveryCleanupPreview, StudioRecoveryIssueAction, StudioRuntimeSnapshot,
+    StudioRuntimeState, StudioStore,
 };
 
 mod history;
@@ -93,10 +94,43 @@ pub struct StudioRuntime {
 impl StudioRuntime {
     /// Returns whether a turn or durable task prevents a safe application update.
     pub async fn is_busy_for_update(&self) -> Result<bool> {
-        if !self.runtime_snapshot().active_turns.is_empty() {
+        if !self.derive_active_turns().await?.is_empty() {
             return Ok(true);
         }
         Ok(!self.store.list_active_task_runs().await?.is_empty())
+    }
+
+    /// 从 agent framework 派生当前所有活动 turn。
+    ///
+    /// 活动 turn 列表不再手工维护：canonical source 是每个 agent 的
+    /// `AgentSnapshot.active_turn_id`。这里聚合所有 root thread 的活动 turn，
+    /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
+    async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
+        let Ok(framework) = self.agent_framework().await else {
+            return Ok(Vec::new());
+        };
+        let runtime = framework.handle();
+        let snapshots = runtime
+            .list()
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let mut turns = Vec::new();
+        for snapshot in snapshots {
+            let Some(turn_id) = snapshot.active_turn_id.clone() else {
+                continue;
+            };
+            turns.push(StudioActiveTurn {
+                thread_id: snapshot.identity.id.to_string(),
+                turn_id: turn_id.to_string(),
+            });
+        }
+        Ok(turns)
+    }
+
+    /// 测试用：返回派生的活动 turn 列表。
+    #[cfg(test)]
+    pub(in crate::studio) async fn active_turns_for_test(&self) -> Vec<StudioActiveTurn> {
+        self.derive_active_turns().await.unwrap_or_default()
     }
 
     pub async fn thread_task_view(

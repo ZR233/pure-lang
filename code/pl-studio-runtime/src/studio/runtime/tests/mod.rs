@@ -280,7 +280,7 @@ fn responses_sse(mut events: Vec<serde_json::Value>) -> String {
 async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
         loop {
-            if runtime.runtime_snapshot().active_turns.is_empty() {
+            if runtime.active_turns_for_test().await.is_empty() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

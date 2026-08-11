@@ -111,7 +111,6 @@ impl StudioRuntime {
             self.mcp_runtime.clone(),
             self.lsp_runtime.clone(),
             self.interactions.clone(),
-            self.runtime_state.clone(),
             self.task_coordinator.clone(),
             self.agent_resources.clone(),
             self.product_events.clone(),

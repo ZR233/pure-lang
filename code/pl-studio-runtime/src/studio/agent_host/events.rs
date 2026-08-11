@@ -11,9 +11,7 @@ use tokio::sync::{mpsc, watch};
 use crate::studio::task_coordinator::{
     RecordTaskAgentFailure, TaskPlannerWakeRequest, TaskPlannerWakeSource,
 };
-use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
-};
+use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
 
 use super::resources::StudioAgentResources;
 use super::{StudioPlanConfirmationProjector, wait_for_runtime};
@@ -25,7 +23,6 @@ pub(in crate::studio) struct StudioAgentCommitObserver {
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
     store: StudioStore,
     plan_confirmations: StudioPlanConfirmationProjector,
-    runtime_state: StudioRuntimeState,
 }
 
 struct StudioAgentEventProjector {
@@ -63,7 +60,6 @@ impl StudioAgentCommitObserver {
     pub(super) fn new(
         store: StudioStore,
         interactions: InteractionRuntime,
-        runtime_state: StudioRuntimeState,
         coordinator: std::sync::Arc<crate::studio::task_coordinator::TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: StudioProductEventRuntime,
@@ -100,7 +96,6 @@ impl StudioAgentCommitObserver {
             runtime,
             store,
             plan_confirmations,
-            runtime_state,
         }
     }
 
@@ -151,32 +146,8 @@ impl StudioAgentCommitObserver {
 
 impl AgentCommitObserver for StudioAgentCommitObserver {
     async fn publish(&self, committed: AgentCommittedEvent) {
-        self.project_runtime_state(&committed);
         if self.sender.send(committed).is_err() {
             tracing::warn!("Studio agent event projector is no longer running");
-        }
-    }
-}
-
-impl StudioAgentCommitObserver {
-    fn project_runtime_state(&self, committed: &AgentCommittedEvent) {
-        for event in &committed.runtime_events {
-            match &event.kind {
-                AgentRuntimeEventKind::TurnQueued { input, .. } => {
-                    self.runtime_state
-                        .mark_active_turn(input.thread_id.to_string(), input.turn_id.to_string());
-                }
-                AgentRuntimeEventKind::TurnFinished { outcome, .. }
-                | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
-                    self.runtime_state
-                        .clear_active_turn(outcome.thread_id.as_str(), outcome.turn_id.as_str());
-                }
-                AgentRuntimeEventKind::Registered { .. }
-                | AgentRuntimeEventKind::StateChanged { .. }
-                | AgentRuntimeEventKind::TurnStarted { .. }
-                | AgentRuntimeEventKind::ThreadOpened { .. }
-                | AgentRuntimeEventKind::Faulted { .. } => {}
-            }
         }
     }
 }

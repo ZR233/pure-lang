@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, bail};
@@ -257,7 +256,8 @@ pub struct StudioTaskRecoveryResult {
 /// 服务级别错误。
 ///
 /// 恢复问题不在此快照中：它们由 [`crate::studio::StudioRecoveryRegistry`] 独立
-/// 持有，避免与频繁的生命周期转换竞争同一把锁。
+/// 持有，避免与频繁的生命周期转换竞争同一把锁。活动 turn 列表也不再持久存储：
+/// [`StudioRuntime`] 在需要时从 agent framework 派生，避免与 turn 事件双写。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioRuntimeSnapshot {
@@ -268,6 +268,18 @@ pub struct StudioRuntimeSnapshot {
     pub error: Option<String>,
 }
 
+impl StudioRuntimeSnapshot {
+    /// 构造一个不含活动 turn 的最小快照。
+    pub(super) fn from_status(status: StudioRuntimeStatus, updated_at: i64, error: Option<String>) -> Self {
+        Self {
+            status,
+            active_turns: Vec::new(),
+            updated_at,
+            error,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StudioRuntimeState {
     inner: Arc<Mutex<StudioRuntimeStateInner>>,
@@ -276,7 +288,6 @@ pub struct StudioRuntimeState {
 #[derive(Debug)]
 struct StudioRuntimeStateInner {
     status: StudioRuntimeStatus,
-    active_turns: BTreeMap<String, String>,
     updated_at: i64,
     error: Option<String>,
 }
@@ -286,7 +297,6 @@ impl StudioRuntimeState {
         Self {
             inner: Arc::new(Mutex::new(StudioRuntimeStateInner {
                 status: StudioRuntimeStatus::Uninitialized,
-                active_turns: BTreeMap::new(),
                 updated_at: unix_seconds(),
                 error: None,
             })),
@@ -302,7 +312,7 @@ impl StudioRuntimeState {
 
     pub fn snapshot(&self) -> StudioRuntimeSnapshot {
         let inner = self.inner.lock().expect("runtime state mutex poisoned");
-        snapshot_from_inner(&inner)
+        StudioRuntimeSnapshot::from_status(inner.status, inner.updated_at, inner.error.clone())
     }
 
     pub fn transition(
@@ -321,57 +331,17 @@ impl StudioRuntimeState {
         inner.status = target;
         inner.updated_at = unix_seconds();
         inner.error = error;
-        if matches!(
-            target,
-            StudioRuntimeStatus::Uninitialized
-                | StudioRuntimeStatus::Stopped
-                | StudioRuntimeStatus::Failed
-        ) {
-            inner.active_turns.clear();
-        }
-        Ok(snapshot_from_inner(&inner))
-    }
-
-    pub fn mark_active_turn(&self, thread_id: String, turn_id: String) -> StudioRuntimeSnapshot {
-        let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
-        inner.active_turns.insert(thread_id, turn_id);
-        inner.updated_at = unix_seconds();
-        snapshot_from_inner(&inner)
-    }
-
-    pub fn clear_active_turn(&self, thread_id: &str, turn_id: &str) -> StudioRuntimeSnapshot {
-        let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
-        if inner
-            .active_turns
-            .get(thread_id)
-            .is_some_and(|active_turn_id| active_turn_id == turn_id)
-        {
-            inner.active_turns.remove(thread_id);
-        }
-        inner.updated_at = unix_seconds();
-        snapshot_from_inner(&inner)
+        Ok(StudioRuntimeSnapshot::from_status(
+            inner.status,
+            inner.updated_at,
+            inner.error.clone(),
+        ))
     }
 }
 
 impl Default for StudioRuntimeState {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn snapshot_from_inner(inner: &StudioRuntimeStateInner) -> StudioRuntimeSnapshot {
-    StudioRuntimeSnapshot {
-        status: inner.status,
-        active_turns: inner
-            .active_turns
-            .iter()
-            .map(|(thread_id, turn_id)| StudioActiveTurn {
-                thread_id: thread_id.clone(),
-                turn_id: turn_id.clone(),
-            })
-            .collect(),
-        updated_at: inner.updated_at,
-        error: inner.error.clone(),
     }
 }
 
@@ -403,23 +373,19 @@ mod tests {
     }
 
     #[test]
-    fn runtime_state_rejects_invalid_transition_and_clears_active_turns() {
+    fn runtime_state_rejects_invalid_transition() {
         let state = StudioRuntimeState::ready();
-        let snapshot = state.mark_active_turn("session-a".to_string(), "turn-a".to_string());
 
-        assert_eq!(snapshot.active_turns.len(), 1);
-        assert!(
-            state
-                .transition(StudioRuntimeStatus::Stopped, None)
-                .is_err()
-        );
+        // Ready -> Stopped is not a legal direct transition.
+        assert!(state
+            .transition(StudioRuntimeStatus::Stopped, None)
+            .is_err());
         state
             .transition(StudioRuntimeStatus::ShuttingDown, None)
             .unwrap();
         let stopped = state
             .transition(StudioRuntimeStatus::Stopped, None)
             .unwrap();
-
-        assert_eq!(stopped.active_turns, Vec::new());
+        assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
     }
 }

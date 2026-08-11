@@ -14,9 +14,7 @@ use pl_core::{AgentRuntimeHost, AgentRuntimeOptions};
 use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
-};
+use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
 
 use events::StudioAgentCommitObserver;
 pub(in crate::studio) use events::{
@@ -45,7 +43,6 @@ impl StudioAgentHost {
         mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
-        runtime_state: StudioRuntimeState,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: StudioProductEventRuntime,
@@ -69,7 +66,6 @@ impl StudioAgentHost {
             observer: StudioAgentCommitObserver::new(
                 store,
                 interactions,
-                runtime_state,
                 coordinator,
                 resources,
                 product_events,

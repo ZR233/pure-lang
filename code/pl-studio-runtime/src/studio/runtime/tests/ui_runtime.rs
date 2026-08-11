@@ -456,7 +456,7 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
         .unwrap();
 
     assert_eq!(submitted.thread_id, session.id);
-    assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
+    assert_eq!(runtime.active_turns_for_test().await.len(), 1);
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
         .await
         .unwrap()
@@ -662,7 +662,7 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
         .unwrap();
 
     assert_eq!(root.lifecycle, crate::AgentLifecycleState::Closed);
-    assert!(snapshot.active_turns.is_empty());
+    assert!(runtime.active_turns_for_test().await.is_empty());
     assert!(runtime.list_projects().await.unwrap().is_empty());
     assert!(
         store
