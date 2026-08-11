@@ -1,7 +1,7 @@
 use anyhow::Context;
 
 use super::snapshot::studio_snapshot_inner;
-use crate::api::studio::runtime::active_bridge;
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::types::{BridgeError, BridgeStudioSnapshotResponse, BridgeThreadMode};
 use pl_studio_runtime::StudioMode;
 

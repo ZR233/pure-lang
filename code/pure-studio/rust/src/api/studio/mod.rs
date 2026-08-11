@@ -1,6 +1,7 @@
+#[path = "runtime.rs"]
+mod bridge_runtime;
 mod convert;
 pub mod handlers;
-mod runtime;
 pub mod subscription;
 pub mod types;
 
@@ -20,28 +21,7 @@ pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
     create_product_subscription, subscribe_thread,
 };
-pub use self::types::{
-    BridgeActiveTurn, BridgeConversationRecoveryMode, BridgeError, BridgeErrorCode,
-    BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto, BridgeModelCapabilities,
-    BridgeModelCatalogDescriptor, BridgeModelDescriptor, BridgeModelPricing,
-    BridgeModelReasoningDescriptor, BridgeProductEventEnvelope, BridgeProductEventPayload,
-    BridgeProviderCatalogSnapshot, BridgeProviderConnectionModeDescriptor,
-    BridgeProviderPresetDescriptor, BridgeProviderServiceCapabilitiesDescriptor,
-    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
-    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
-    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeStudioSnapshotResponse,
-    BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto,
-    BridgeTaskGitFingerprintDto, BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto,
-    BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto, BridgeTaskRecoveryTargetKind,
-    BridgeTaskRecoveryTurnDto, BridgeThreadContextDisposition, BridgeThreadSubscriptionUpdate,
-    BridgeThreadTurnPage, BridgeWebSearchProviderCapabilitiesDescriptor,
-    BridgeWebSearchSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, GeneralSettingsInput,
-    InstructionsSettingsInput, InterruptTurnResponse, ListThreadTurnsRequest, McpServerInput,
-    McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput, ProviderSecretInput,
-    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, RoleInput, RuntimeSnapshot,
-    SkillSummaryDto, SkillsResponse, SkillsSettingsInput, StartTurnResponse, SteerTurnResponse,
-    WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
-};
+pub use self::types::*;
 
 #[cfg(test)]
 mod tests {

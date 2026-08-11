@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use pl_core::{
-    AgentActivityState, AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot, AgentTurnOutcome,
-    DurableMailboxEnvelope, MailboxDeliveryState, RestoredAgentRuntime, RestoredThreadSnapshot,
-    ThreadActorState, ThreadCommit, ThreadCommitOutcome, ThreadContextState, ThreadId,
-    ThreadRepository, TurnId, TurnOutcomeKind,
+    ActiveKind, AgentActivityState, AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot,
+    AgentTurnOutcome, DurableMailboxEnvelope, MailboxDeliveryState, RestoredAgentRuntime,
+    RestoredThreadSnapshot, ThreadActorState, ThreadCommit, ThreadCommitOutcome,
+    ThreadContextState, ThreadId, ThreadRepository, TurnId, TurnOutcomeKind,
 };
 use pl_protocol::{
     Thread as ThreadRecord, ThreadItem, ThreadItemContent, ThreadNotification, ThreadSnapshot,
@@ -919,10 +919,11 @@ fn restored_activity(
     }
     match active_turn {
         Some(turn) if turn.status == "queued" => AgentActivityState::Queued,
+        // 老数据兼容：waitingInteraction phase 的 Turn 在 turn_from_model 里已降级为
+        // completed，不会进入 active turn 查询；这里不再映射该 phase。
         Some(turn) => match turn.phase.as_deref() {
-            Some("runningTool") => AgentActivityState::WaitingTool,
-            Some("waitingInteraction") => AgentActivityState::WaitingInteraction,
-            _ => AgentActivityState::Running,
+            Some("runningTool") => AgentActivityState::Active(ActiveKind::WaitingTool),
+            _ => AgentActivityState::Active(ActiveKind::Running),
         },
         None if !pending.is_empty() => AgentActivityState::Queued,
         None => AgentActivityState::Idle,
@@ -982,19 +983,28 @@ fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
         .as_deref()
         .map(serde_json::from_str)
         .transpose()?;
-    let state = match model.status.as_str() {
-        "queued" => TurnState::Queued,
-        "inProgress" => TurnState::InProgress {
-            phase: turn_phase_from_label(model.phase.as_deref().unwrap_or("preparing"))?,
-        },
-        "completed" => TurnState::Completed,
-        "failed" => TurnState::Failed {
-            reason: model.reason.clone().unwrap_or_default(),
-        },
-        "interrupted" => TurnState::Interrupted {
-            reason: model.reason.clone().unwrap_or_default(),
-        },
-        other => return Err(store_error(format!("unknown Turn status {other}"))),
+    // 老数据兼容：schema v1 可能把等待交互的 Turn 存成
+    // status=inProgress + phase=waitingInteraction。新设计下这种 Turn 应是 completed
+    // （pending Interaction 是 completion boundary），读回时降级。
+    let state = if model.status.as_str() == "inProgress"
+        && model.phase.as_deref() == Some("waitingInteraction")
+    {
+        TurnState::Completed
+    } else {
+        match model.status.as_str() {
+            "queued" => TurnState::Queued,
+            "inProgress" => TurnState::InProgress {
+                phase: turn_phase_from_label(model.phase.as_deref().unwrap_or("preparing"))?,
+            },
+            "completed" => TurnState::Completed,
+            "failed" => TurnState::Failed {
+                reason: model.reason.clone().unwrap_or_default(),
+            },
+            "interrupted" => TurnState::Interrupted {
+                reason: model.reason.clone().unwrap_or_default(),
+            },
+            other => return Err(store_error(format!("unknown Turn status {other}"))),
+        }
     };
     Ok(Turn {
         id: model.id,

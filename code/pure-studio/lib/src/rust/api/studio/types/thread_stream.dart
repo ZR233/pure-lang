@@ -1033,7 +1033,6 @@ enum BridgeTurnPhase {
   responding,
   planning,
   runningTool,
-  waitingInteraction,
   persisting,
 }
 

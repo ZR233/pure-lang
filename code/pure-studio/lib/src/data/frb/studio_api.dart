@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/frb_generated.dart';
+import '../../shared/studio_driver_state.dart';
 
 part 'studio_bridge_event.dart';
 part 'studio_thread_stream.dart';

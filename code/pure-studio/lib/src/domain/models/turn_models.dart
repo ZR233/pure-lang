@@ -6,9 +6,6 @@ enum StudioTurnActivity {
   responding,
   planning,
   runningTool,
-  waitingForApproval,
-  waitingForUserInput,
-  waitingForPlanConfirmation,
   persisting,
 }
 

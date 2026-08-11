@@ -427,15 +427,14 @@ void registerShellSettingsTests() {
                 _emptyState(),
                 _testTurn(
                   threadId: 'session-1',
-                  state: const StudioTurnState.inProgress(
-                    StudioTurnActivity.waitingForUserInput,
-                  ),
+                  state: const StudioTurnState.completed(),
                 ),
               ),
               const [
                 PendingInteraction(
                   id: 'interaction-1',
                   threadId: 'session-1',
+                  turnId: 'turn-1',
                   kind: InteractionKind.userInput,
                   title: 'Pending',
                   body: 'Pending interaction',

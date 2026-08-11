@@ -1,9 +1,8 @@
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest,
-    AgentLifecycleState, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult,
-    AgentSubmitRequest, AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState,
-    TurnId,
+    AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest, AgentLifecycleState,
+    AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSubmitRequest,
+    AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState, TurnId,
 };
 use super::AgentLoop;
 
@@ -83,9 +82,6 @@ where
         }
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
-        if self.active.is_none() && next.has_triggering_input() {
-            next.snapshot.activity = AgentActivityState::Queued;
-        }
         self.commit_transition(next, Vec::new(), |snapshot| {
             AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
@@ -259,9 +255,6 @@ where
         let mut next = self.state.clone();
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
-        if self.active.is_none() && next.has_triggering_input() {
-            next.snapshot.activity = AgentActivityState::Queued;
-        }
         let interaction = request.interaction;
         self.commit_transition_with_thread_facts(
             next,

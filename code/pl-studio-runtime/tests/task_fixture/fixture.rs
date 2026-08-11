@@ -93,7 +93,13 @@ impl TaskFlowFixture {
     pub async fn wait_for_no_active_turns(&self) -> Result<()> {
         let deadline = Instant::now() + TEST_TIMEOUT;
         loop {
-            if self.runtime.runtime_snapshot().active_turns.is_empty() {
+            if self
+                .runtime
+                .runtime_snapshot()
+                .await?
+                .active_turns
+                .is_empty()
+            {
                 return Ok(());
             }
             if Instant::now() >= deadline {

@@ -34,7 +34,7 @@ impl StudioRuntime {
         // Serialize turn registration with the updater's final idle check.
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         if !matches!(
-            self.runtime_snapshot().status,
+            self.runtime_snapshot().await?.status,
             crate::StudioRuntimeStatus::Ready
         ) {
             bail!("Studio runtime is not ready");
@@ -69,7 +69,7 @@ impl StudioRuntime {
     pub async fn resume_task(&self, thread_id: String) -> Result<StudioSubmitPromptResponse> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         if !matches!(
-            self.runtime_snapshot().status,
+            self.runtime_snapshot().await?.status,
             crate::StudioRuntimeStatus::Ready
         ) {
             bail!("Studio runtime is not ready");
@@ -148,7 +148,8 @@ impl StudioRuntime {
                 .stop_task(&thread_id, &handle, TaskStopOrigin::UserRequest, reason)
                 .await?;
             let emitter = self.interaction_emitter(thread_id.clone());
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_thread(&thread_id, "interrupted by user", emitter)
                 .await?;
             return Ok(StudioStopPromptResponse {
@@ -185,7 +186,8 @@ impl StudioRuntime {
             Err(error) => return Err(anyhow::anyhow!(error)),
         }
         let emitter = self.interaction_emitter(thread_id.clone());
-        self.interactions
+        self.agent_facility
+            .interactions
             .cancel_thread(&thread_id, "interrupted by user", emitter)
             .await?;
         Ok(StudioStopPromptResponse {
@@ -372,7 +374,8 @@ impl StudioRuntime {
             )
             .await?
         } else {
-            self.interactions
+            self.agent_facility
+                .interactions
                 .resolve(&interaction_id, resolution, emitter)
                 .await?
         };
@@ -441,6 +444,7 @@ impl StudioRuntime {
             let _ = self.ensure_thread_agent(&thread_id).await?;
             let emitter = self.interaction_emitter(thread_id);
             let recovered = self
+                .agent_facility
                 .interactions
                 .recover_user_input(interaction, emitter)
                 .await?;
@@ -474,7 +478,8 @@ impl StudioRuntime {
                 }
                 emitter(interaction).await?;
             }
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_recovered_tool_approvals(
                     &thread_id,
                     "application restarted before approval completed",

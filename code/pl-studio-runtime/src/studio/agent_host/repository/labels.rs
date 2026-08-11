@@ -9,7 +9,7 @@
 //! 否则 `cargo check` 会在穷尽 match 处报错。
 
 use pl_core::{
-    AgentActivityState, AgentLifecycleState, AgentTurnOutcome, MailboxPresentation,
+    ActiveKind, AgentActivityState, AgentLifecycleState, AgentTurnOutcome, MailboxPresentation,
     ThreadActorState, TurnOutcomeKind,
 };
 use pl_protocol::{
@@ -29,9 +29,11 @@ pub(super) fn thread_status_label(state: &ThreadActorState) -> &'static str {
         AgentLifecycleState::Active => match state.snapshot.activity {
             AgentActivityState::Idle => "idle",
             AgentActivityState::Queued
-            | AgentActivityState::Running
+            | AgentActivityState::Active(ActiveKind::Running)
             | AgentActivityState::Cancelling => "running",
-            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
+            AgentActivityState::Active(
+                ActiveKind::WaitingTool | ActiveKind::WaitingInteraction,
+            ) => "waiting",
         },
     }
 }
@@ -44,12 +46,12 @@ pub(super) fn thread_status_from_label(label: &str) -> Result<ThreadStatus, Pure
 /// 把 agent 当前活动状态映射成活动 turn 的 `phase` 列值。
 pub(super) fn activity_phase(activity: AgentActivityState) -> &'static str {
     match activity {
-        AgentActivityState::WaitingTool => "runningTool",
-        AgentActivityState::WaitingInteraction => "waitingInteraction",
+        AgentActivityState::Active(ActiveKind::WaitingTool) => "runningTool",
+        AgentActivityState::Active(ActiveKind::WaitingInteraction) => "waitingInteraction",
         AgentActivityState::Queued => "preparing",
-        AgentActivityState::Running | AgentActivityState::Cancelling | AgentActivityState::Idle => {
-            "responding"
-        }
+        AgentActivityState::Active(ActiveKind::Running)
+        | AgentActivityState::Cancelling
+        | AgentActivityState::Idle => "responding",
     }
 }
 

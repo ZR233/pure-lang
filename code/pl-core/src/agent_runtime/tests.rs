@@ -41,6 +41,7 @@ struct TestRepository {
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
     fail_lifecycle: Arc<Mutex<Option<AgentLifecycleState>>>,
+    fail_fault: Arc<Mutex<bool>>,
     fail_turn_queue: Arc<Mutex<bool>>,
     fail_turn_started: Arc<Mutex<bool>>,
 }
@@ -55,6 +56,7 @@ impl TestRepository {
             fail_terminal: Arc::new(Mutex::new(false)),
             fail_registration: Arc::new(Mutex::new(false)),
             fail_lifecycle: Arc::new(Mutex::new(None)),
+            fail_fault: Arc::new(Mutex::new(false)),
             fail_turn_queue: Arc::new(Mutex::new(false)),
             fail_turn_started: Arc::new(Mutex::new(false)),
         }
@@ -84,6 +86,10 @@ impl TestRepository {
 
     fn fail_next_turn_started_commit(&self) {
         *self.fail_turn_started.lock().unwrap() = true;
+    }
+
+    fn fail_next_fault_commit(&self) {
+        *self.fail_fault.lock().unwrap() = true;
     }
 
     fn fail_next_turn_queue_commit(&self) {
@@ -138,6 +144,15 @@ impl ThreadRepository for TestRepository {
         if should_fail_lifecycle {
             self.fail_lifecycle.lock().unwrap().take();
             return Err(TestError("lifecycle commit failed".to_string()));
+        }
+        if commit
+            .facts
+            .runtime_events
+            .iter()
+            .any(|event| matches!(event.kind, AgentRuntimeEventKind::Faulted { .. }))
+            && std::mem::take(&mut *self.fail_fault.lock().unwrap())
+        {
+            return Err(TestError("fault commit failed".to_string()));
         }
         if *self.fail_terminal.lock().unwrap()
             && commit
@@ -1397,7 +1412,42 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
 }
 
 #[tokio::test]
-async fn turn_started_repository_failure_faults_only_the_in_memory_actor() {
+async fn fault_commit_failure_preserves_in_memory_turn_outcome() {
+    let repository = TestRepository::empty();
+    repository.fail_terminal_commits();
+    repository.fail_next_fault_commit();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "fail terminal and fault"),
+        )
+        .await
+        .unwrap();
+
+    let waited = wait_for_idle(&handle, agent_id).await;
+
+    assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Faulted);
+    assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
+    let outcome = waited
+        .last_turn
+        .expect("in-memory fallback must retain the failed turn outcome");
+    assert_eq!(outcome.kind, TurnOutcomeKind::Failed);
+    assert!(
+        outcome
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("terminal commit failed"))
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn turn_started_repository_failure_commits_faulted_state() {
     let repository = TestRepository::empty();
     repository.fail_next_turn_started_commit();
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
@@ -1427,11 +1477,11 @@ async fn turn_started_repository_failure_faults_only_the_in_memory_actor() {
     );
 
     let durable = repository.state(&agent_id).snapshot;
-    assert_eq!(durable.lifecycle, AgentLifecycleState::Active);
-    assert_eq!(durable.activity, AgentActivityState::Queued);
+    assert_eq!(durable.lifecycle, AgentLifecycleState::Faulted);
+    assert_eq!(durable.activity, AgentActivityState::Idle);
     assert_eq!(durable.active_turn_id, None);
     assert_eq!(durable.pending_inputs, 1);
-    assert_eq!(durable.last_turn, None);
+    assert_eq!(durable.last_turn, waited.snapshot.last_turn);
     runtime.shutdown().await.unwrap();
 
     let restarted_host = TestHost::new(repository.clone(), FactoryMode::Fail);
@@ -1439,9 +1489,9 @@ async fn turn_started_repository_failure_faults_only_the_in_memory_actor() {
         .await
         .unwrap();
     let recovered = wait_for_idle(&restarted.handle(), agent_id.clone()).await;
-    assert_eq!(recovered.snapshot.lifecycle, AgentLifecycleState::Active);
+    assert_eq!(recovered.snapshot.lifecycle, AgentLifecycleState::Faulted);
     assert_eq!(recovered.snapshot.activity, AgentActivityState::Idle);
-    assert_eq!(recovered.snapshot.pending_inputs, 0);
+    assert_eq!(recovered.snapshot.pending_inputs, 1);
     assert_eq!(
         restarted_host
             .turn_factory
@@ -1449,10 +1499,59 @@ async fn turn_started_repository_failure_faults_only_the_in_memory_actor() {
             .lock()
             .unwrap()
             .as_slice(),
-        ["fail turn start"]
+        [] as [&str; 0]
     );
     assert_eq!(repository.state(&agent_id).snapshot, recovered.snapshot);
     restarted.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn turn_activity_change_commits_event_and_snapshot_atomically() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let events = host.events.clone();
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let turn_id = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "wait for tool"),
+        )
+        .await
+        .unwrap();
+
+    handle
+        .set_activity(agent_id.clone(), turn_id.clone(), ActiveKind::WaitingTool)
+        .await
+        .unwrap();
+
+    let snapshot = handle.snapshot(agent_id.clone()).await.unwrap();
+    assert_eq!(
+        snapshot.activity,
+        AgentActivityState::Active(ActiveKind::WaitingTool)
+    );
+    let activity_event = {
+        let committed = events.runtime.lock().unwrap();
+        committed
+            .iter()
+            .find_map(|event| match &event.kind {
+                AgentRuntimeEventKind::TurnActivityChanged {
+                    turn_id: event_turn_id,
+                    kind,
+                    snapshot,
+                    ..
+                } if event_turn_id == &turn_id => Some((*kind, snapshot.clone())),
+                _ => None,
+            })
+            .expect("activity change must publish a committed runtime event")
+    };
+    assert_eq!(activity_event.0, ActiveKind::WaitingTool);
+    assert_eq!(activity_event.1, snapshot);
+    assert_eq!(repository.state(&agent_id).snapshot, snapshot);
+    handle.cancel_turn(agent_id, turn_id).await.unwrap();
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -1460,7 +1559,7 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
     let mut state = registration("root", "chat").into_durable_state();
     state.snapshot.revision = 7;
     state.snapshot.event_sequence = 11;
-    state.snapshot.activity = AgentActivityState::Running;
+    state.snapshot.activity = AgentActivityState::Active(ActiveKind::Running);
     state.snapshot.active_turn_id = Some(TurnId::new("old-turn").unwrap());
     let repository = TestRepository::with_state(state);
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);

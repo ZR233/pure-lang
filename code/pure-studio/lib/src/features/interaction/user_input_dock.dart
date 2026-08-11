@@ -435,6 +435,7 @@ class _QuestionStep extends StatelessWidget {
         if (question.isOther || question.options.isEmpty) ...[
           const SizedBox(height: 8),
           TextField(
+            key: StudioDriverKeys.userInputText(questionKey),
             controller: controller,
             obscureText: question.isSecret,
             minLines: 1,

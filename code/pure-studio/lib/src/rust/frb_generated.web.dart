@@ -279,7 +279,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_bridge_thread_subscription_update(dynamic raw);
 
   @protected
-  BridgeActiveTurn dco_decode_bridge_active_turn(dynamic raw);
+  BridgeAgentActivity dco_decode_bridge_agent_activity(dynamic raw);
 
   @protected
   BridgeAgentDirectoryEntryDto dco_decode_bridge_agent_directory_entry_dto(
@@ -712,9 +712,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
-
-  @protected
-  List<BridgeActiveTurn> dco_decode_list_bridge_active_turn(dynamic raw);
 
   @protected
   List<BridgeConversationRecoveryMode>
@@ -1358,7 +1355,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeActiveTurn sse_decode_bridge_active_turn(SseDeserializer deserializer);
+  BridgeAgentActivity sse_decode_bridge_agent_activity(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAgentDirectoryEntryDto sse_decode_bridge_agent_directory_entry_dto(
@@ -1899,11 +1898,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
-
-  @protected
-  List<BridgeActiveTurn> sse_decode_list_bridge_active_turn(
-    SseDeserializer deserializer,
-  );
 
   @protected
   List<BridgeConversationRecoveryMode>
@@ -2676,8 +2670,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_active_turn(
-    BridgeActiveTurn self,
+  void sse_encode_bridge_agent_activity(
+    BridgeAgentActivity self,
     SseSerializer serializer,
   );
 
@@ -3343,12 +3337,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_list_bridge_active_turn(
-    List<BridgeActiveTurn> self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_list_bridge_conversation_recovery_mode(

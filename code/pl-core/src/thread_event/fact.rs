@@ -1,9 +1,6 @@
-use pl_protocol::{
-    InteractionStatus, ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot, Turn,
-    TurnPhase, TurnState,
-};
+use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot};
 
-use super::projector::ThreadProjectionBatch;
+use super::projector::{ThreadProjectionBatch, interaction_completion_turn};
 
 #[derive(Debug, Clone)]
 pub struct ThreadNotificationFact {
@@ -31,31 +28,21 @@ pub(crate) fn project_thread_facts(
     for mut fact in facts {
         rebind_thread(&mut fact.notification, thread_id);
         if let ThreadNotification::InteractionChanged { interaction } = &fact.notification
-            && active_turn_id.as_deref() == Some(interaction.scope.turn_id.as_str())
+            && let Some(turn) = interaction_completion_turn(
+                thread_id,
+                active_turn_id.as_deref(),
+                interaction,
+                fact.emitted_at,
+            )
         {
             revision = revision.saturating_add(1);
             notifications.push(ThreadNotificationEnvelope {
                 thread_id: thread_id.to_string(),
                 revision,
                 emitted_at: fact.emitted_at,
-                notification: ThreadNotification::TurnUpdated {
-                    turn: Turn {
-                        id: interaction.scope.turn_id.clone(),
-                        thread_id: thread_id.to_string(),
-                        state: TurnState::InProgress {
-                            phase: if interaction.status == InteractionStatus::Pending {
-                                TurnPhase::WaitingInteraction
-                            } else {
-                                TurnPhase::Thinking
-                            },
-                        },
-                        failure: None,
-                        started_at: None,
-                        updated_at: fact.emitted_at,
-                        completed_at: None,
-                    },
-                },
+                notification: ThreadNotification::TurnCompleted { turn },
             });
+            active_turn_id = None;
         }
         match &fact.notification {
             ThreadNotification::TurnStarted { turn } | ThreadNotification::TurnUpdated { turn } => {
@@ -138,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_interaction_updates_only_its_active_origin_turn() {
+    fn pending_interaction_completes_its_active_origin_turn() {
         let current = snapshot(Some(turn("turn-1")));
         let projected = project_thread_facts(
             "thread-1",
@@ -151,18 +138,14 @@ mod tests {
             )],
         );
 
+        // origin Turn 落 completed，随后只下发 InteractionChanged。
         assert_eq!(projected.notifications.len(), 2);
-        let ThreadNotification::TurnUpdated { turn } = &projected.notifications[0].notification
+        let ThreadNotification::TurnCompleted { turn } = &projected.notifications[0].notification
         else {
-            panic!("active origin turn must receive a phase update");
+            panic!("active origin turn must complete on pending interaction");
         };
         assert_eq!(turn.id, "turn-1");
-        assert_eq!(
-            turn.state,
-            TurnState::InProgress {
-                phase: TurnPhase::WaitingInteraction
-            }
-        );
+        assert_eq!(turn.state, TurnState::Completed);
     }
 
     fn snapshot(active_turn: Option<Turn>) -> ThreadSnapshot {

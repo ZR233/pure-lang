@@ -18,6 +18,7 @@ void registerInteractionTests() {
       const interaction = PendingInteraction(
         id: 'interaction-1',
         threadId: 'session-1',
+        turnId: 'turn-1',
         kind: InteractionKind.planConfirmation,
         title: 'Confirm plan',
         body: 'Plan body',
@@ -61,6 +62,7 @@ void registerInteractionTests() {
     const interaction = PendingInteraction(
       id: 'plan-1',
       threadId: 'session-1',
+      turnId: 'turn-1',
       kind: InteractionKind.planConfirmation,
       title: 'Confirm plan',
       body: 'Plan body',

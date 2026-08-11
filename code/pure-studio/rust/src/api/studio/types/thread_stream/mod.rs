@@ -137,7 +137,6 @@ pub enum BridgeTurnPhase {
     Responding,
     Planning,
     RunningTool,
-    WaitingInteraction,
     Persisting,
 }
 

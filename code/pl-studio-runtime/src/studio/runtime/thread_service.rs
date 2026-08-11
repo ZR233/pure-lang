@@ -38,7 +38,8 @@ impl StudioRuntime {
             .store
             .create_thread(project_id, title, StudioMode::Simple)
             .await?;
-        self.product_events
+        self.agent_facility
+            .product_events
             .emit_thread_directory(project_id)
             .await?;
         Ok(thread)
@@ -73,13 +74,15 @@ impl StudioRuntime {
         }
         for candidate in &thread_tree {
             let emitter = self.interaction_emitter(candidate.id.clone());
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_thread(&candidate.id, "thread archived", emitter)
                 .await?;
         }
         let archived = self.store.archive_thread(&thread_id).await?;
         if let Some(thread) = &archived {
-            self.product_events
+            self.agent_facility
+                .product_events
                 .emit_thread_directory(&thread.project_id)
                 .await?;
         }
@@ -104,13 +107,15 @@ impl StudioRuntime {
         }
         for thread_id in thread_ids {
             let emitter = self.interaction_emitter(thread_id.clone());
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_thread(&thread_id, "project archived", emitter)
                 .await?;
         }
         let archived = self.store.archive_project(project_id).await?;
         if archived.is_some() {
-            self.product_events
+            self.agent_facility
+                .product_events
                 .emit_thread_directory(project_id)
                 .await?;
         }
@@ -162,7 +167,8 @@ impl StudioRuntime {
             }
             return Err(error);
         }
-        self.product_events
+        self.agent_facility
+            .product_events
             .emit_thread_directory(&thread.project_id)
             .await?;
         Ok(())

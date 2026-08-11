@@ -1,9 +1,9 @@
 use super::snapshot::studio_snapshot_inner;
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::settings::{
     mcp_transport_from_label, normalized_string_list, provider_settings_edit,
     web_search_config_from_input, web_search_settings_dto,
 };
-use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, BridgeProviderCatalogSnapshot, BridgeStudioSnapshotResponse,
     BridgeWebSearchSettingsDto, InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput,

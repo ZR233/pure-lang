@@ -1,9 +1,12 @@
 use crate::config::StudioRole;
-use crate::{PlanLifecycleState, StudioAgentDirectoryEntry, StudioAgentProgressRuntime};
+use crate::{
+    PlanLifecycleState, StudioAgentActivity, StudioAgentDirectoryEntry, StudioAgentProgressRuntime,
+};
 use pl_core::{
-    AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId, AgentLifecycleState,
-    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot,
-    AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxPresentation, ThreadId, TurnOutcomeKind,
+    ActiveKind, AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId,
+    AgentLifecycleState, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle,
+    AgentSnapshot, AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxPresentation, ThreadId,
+    TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -198,6 +201,7 @@ impl StudioAgentEventProjector {
             AgentRuntimeEventKind::Registered { snapshot }
             | AgentRuntimeEventKind::StateChanged { snapshot }
             | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
+            | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
             | AgentRuntimeEventKind::Faulted { snapshot, .. } => {
                 self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
                     .await?;
@@ -468,7 +472,7 @@ impl StudioAgentEventProjector {
                         .as_ref()
                         .and_then(|outcome| outcome.reason.clone()),
                     lifecycle: lifecycle_label(snapshot.lifecycle).to_string(),
-                    activity: activity_label(snapshot.activity).to_string(),
+                    activity: studio_agent_activity(snapshot.activity),
                     progress,
                     updated_at: snapshot.updated_at,
                     summary_age_seconds,
@@ -631,10 +635,12 @@ fn status_label(snapshot: &AgentSnapshot) -> &'static str {
         AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
         AgentLifecycleState::Faulted => "failed",
         AgentLifecycleState::Active => match snapshot.activity {
-            AgentActivityState::Queued => "running",
-            AgentActivityState::Running => "running",
-            AgentActivityState::WaitingTool
-            | AgentActivityState::WaitingInteraction
+            AgentActivityState::Queued | AgentActivityState::Active(ActiveKind::Running) => {
+                "running"
+            }
+            AgentActivityState::Active(
+                ActiveKind::WaitingTool | ActiveKind::WaitingInteraction,
+            )
             | AgentActivityState::Cancelling => "waiting",
             AgentActivityState::Idle => "idle",
         },
@@ -671,14 +677,18 @@ const fn lifecycle_label(lifecycle: AgentLifecycleState) -> &'static str {
     }
 }
 
-const fn activity_label(activity: AgentActivityState) -> &'static str {
+const fn studio_agent_activity(activity: AgentActivityState) -> StudioAgentActivity {
     match activity {
-        AgentActivityState::Idle => "idle",
-        AgentActivityState::Queued => "queued",
-        AgentActivityState::Running => "running",
-        AgentActivityState::WaitingTool => "waitingTool",
-        AgentActivityState::WaitingInteraction => "waitingInteraction",
-        AgentActivityState::Cancelling => "cancelling",
+        AgentActivityState::Idle => StudioAgentActivity::Idle,
+        AgentActivityState::Queued => StudioAgentActivity::Queued,
+        AgentActivityState::Active(ActiveKind::Running) => StudioAgentActivity::ActiveRunning,
+        AgentActivityState::Active(ActiveKind::WaitingTool) => {
+            StudioAgentActivity::ActiveWaitingTool
+        }
+        AgentActivityState::Active(ActiveKind::WaitingInteraction) => {
+            StudioAgentActivity::ActiveWaitingInteraction
+        }
+        AgentActivityState::Cancelling => StudioAgentActivity::Cancelling,
     }
 }
 

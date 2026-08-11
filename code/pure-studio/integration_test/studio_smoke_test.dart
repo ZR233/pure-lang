@@ -73,9 +73,24 @@ void main() {
     await tester.tap(find.byKey(StudioDriverKeys.userInputSubmit));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(StudioDriverKeys.planAdjustmentInput), findsOneWidget);
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.planAdjustmentInput),
+      'Keep the typed origin-turn assertion.',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.planContinue), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.planContinue));
+    await tester.pumpAndSettle();
+
     expect(find.byKey(StudioDriverKeys.planImplement), findsOneWidget);
     await tester.tap(find.byKey(StudioDriverKeys.planImplement));
     await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.planDismiss), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.planDismiss));
+    await tester.pumpAndSettle();
+
     expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);
 
     expect(

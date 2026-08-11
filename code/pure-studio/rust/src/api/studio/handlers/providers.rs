@@ -1,5 +1,5 @@
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::settings::provider_usage_dto;
-use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, ProviderUsagesResponse, SkillSummaryDto, SkillsResponse,
 };

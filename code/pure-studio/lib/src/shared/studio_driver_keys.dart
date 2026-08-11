@@ -36,6 +36,7 @@ abstract final class StudioDriverKeys {
   static const providerSave = ValueKey<String>('provider-save');
   static const providerCancel = ValueKey<String>('provider-cancel');
   static const planImplement = ValueKey<String>('plan-implement');
+  static const planDismiss = ValueKey<String>('plan-dismiss');
   static const planAdjustmentInput = ValueKey<String>('plan-adjustment-input');
   static const planContinue = ValueKey<String>('plan-continue');
   static const toolApprove = ValueKey<String>('tool-approve');
@@ -94,6 +95,9 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> userInputOption(String questionId, int optionIndex) =>
       ValueKey<String>('user-input-option-$questionId-$optionIndex');
+
+  static ValueKey<String> userInputText(String questionId) =>
+      ValueKey<String>('user-input-text-$questionId');
 
   static ValueKey<String> agentRow(String id) =>
       ValueKey<String>('agent-thread-$id');

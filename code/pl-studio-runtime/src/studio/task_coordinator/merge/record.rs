@@ -98,6 +98,10 @@ impl TaskCoordinator {
         {
             bail!("task_record_merge string fields must not be empty");
         }
+        if let Some(runtime) = runtime {
+            self.await_closed_agent_projection(runtime, executor_agent_id)
+                .await?;
+        }
 
         if let Some(record) = self
             .find_recorded_planner_merge(thread_id, executor_agent_id, input.completion_revision)

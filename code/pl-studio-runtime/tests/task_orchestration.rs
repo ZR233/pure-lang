@@ -142,7 +142,14 @@ async fn run_offline_task_flow() -> Result<()> {
             .await?
             .is_empty()
     );
-    assert!(fixture.runtime.runtime_snapshot().active_turns.is_empty());
+    assert!(
+        fixture
+            .runtime
+            .runtime_snapshot()
+            .await?
+            .active_turns
+            .is_empty()
+    );
 
     fixture
         .runtime

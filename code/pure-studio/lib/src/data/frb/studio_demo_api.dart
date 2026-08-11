@@ -774,6 +774,7 @@ class DemoStudioApi implements StudioApi {
         PendingInteraction(
           id: interactionId,
           threadId: threadId,
+          turnId: 'driver-origin-turn',
           kind: InteractionKind.userInput,
           title: '',
           body: '',
@@ -1009,6 +1010,14 @@ class DriverDemoStudioApi extends DemoStudioApi {
     const threadId = 'thread-main';
     final workspace = state.workspacesByThread[threadId];
     if (workspace == null) return state;
+    StudioDriverState.publishTurn(
+      StudioTurnView(
+        turnId: 'driver-origin-turn',
+        threadId: threadId,
+        state: const StudioTurnState.completed(),
+        updatedAt: DateTime.now(),
+      ),
+    );
     return state.copyWith(
       workspacesByThread: {
         ...state.workspacesByThread,
@@ -1017,6 +1026,7 @@ class DriverDemoStudioApi extends DemoStudioApi {
             PendingInteraction(
               id: 'driver-tool',
               threadId: threadId,
+              turnId: 'driver-origin-turn',
               kind: InteractionKind.toolApproval,
               title: 'Approve demo tool',
               body: 'Run a deterministic demo command.',
@@ -1028,6 +1038,7 @@ class DriverDemoStudioApi extends DemoStudioApi {
             PendingInteraction(
               id: 'driver-input',
               threadId: threadId,
+              turnId: 'driver-origin-turn',
               kind: InteractionKind.userInput,
               title: 'Demo question',
               body: 'Choose a deterministic answer.',
@@ -1045,14 +1056,39 @@ class DriverDemoStudioApi extends DemoStudioApi {
               ),
             ),
             PendingInteraction(
-              id: 'driver-plan',
+              id: 'driver-plan-continue',
               threadId: threadId,
+              turnId: 'driver-origin-turn',
               kind: InteractionKind.planConfirmation,
-              title: 'Confirm demo plan',
+              title: 'Adjust demo plan',
+              body: 'Continue planning with deterministic feedback.',
+              payload: PlanConfirmationInteractionPayload(
+                planId: 'driver-plan-continue',
+                content: '1. Verify continue-planning resolution.',
+              ),
+            ),
+            PendingInteraction(
+              id: 'driver-plan-implement',
+              threadId: threadId,
+              turnId: 'driver-origin-turn',
+              kind: InteractionKind.planConfirmation,
+              title: 'Implement demo plan',
               body: 'Implement the deterministic demo plan.',
               payload: PlanConfirmationInteractionPayload(
-                planId: 'driver-plan',
-                content: '1. Verify stable Driver keys.',
+                planId: 'driver-plan-implement',
+                content: '1. Verify implement-fresh-context resolution.',
+              ),
+            ),
+            PendingInteraction(
+              id: 'driver-plan-dismiss',
+              threadId: threadId,
+              turnId: 'driver-origin-turn',
+              kind: InteractionKind.planConfirmation,
+              title: 'Dismiss demo plan',
+              body: 'Dismiss the deterministic demo plan.',
+              payload: PlanConfirmationInteractionPayload(
+                planId: 'driver-plan-dismiss',
+                content: '1. Verify dismiss resolution.',
               ),
             ),
           ],

@@ -277,7 +277,7 @@ as List<StudioRecoveryIssue>,
 /// @nodoc
 mixin _$SidebarView {
 
- List<StudioProject> get projects; List<StudioThread> get rootThreads; String? get selectedProjectId; String? get selectedRootThreadId; bool get isBusy; List<StudioRecoveryIssue> get recoveryIssues;
+ List<StudioProject> get projects; List<StudioThread> get rootThreads; String? get selectedProjectId; String? get selectedRootThreadId; bool get isBusy; Map<String, StudioRecoveryIssue> get projectRecoveryIssues; Map<String, StudioRecoveryIssue> get threadRecoveryIssues;
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -288,16 +288,16 @@ $SidebarViewCopyWith<SidebarView> get copyWith => _$SidebarViewCopyWithImpl<Side
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, projects)&&const DeepCollectionEquality().equals(other.rootThreads, rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.recoveryIssues, recoveryIssues));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, projects)&&const DeepCollectionEquality().equals(other.rootThreads, rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.projectRecoveryIssues, projectRecoveryIssues)&&const DeepCollectionEquality().equals(other.threadRecoveryIssues, threadRecoveryIssues));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(projects),const DeepCollectionEquality().hash(rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(recoveryIssues));
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(projects),const DeepCollectionEquality().hash(rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(projectRecoveryIssues),const DeepCollectionEquality().hash(threadRecoveryIssues));
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
+  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, projectRecoveryIssues: $projectRecoveryIssues, threadRecoveryIssues: $threadRecoveryIssues)';
 }
 
 
@@ -308,7 +308,7 @@ abstract mixin class $SidebarViewCopyWith<$Res>  {
   factory $SidebarViewCopyWith(SidebarView value, $Res Function(SidebarView) _then) = _$SidebarViewCopyWithImpl;
 @useResult
 $Res call({
- List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
+ List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, Map<String, StudioRecoveryIssue> projectRecoveryIssues, Map<String, StudioRecoveryIssue> threadRecoveryIssues
 });
 
 
@@ -325,15 +325,16 @@ class _$SidebarViewCopyWithImpl<$Res>
 
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? projectRecoveryIssues = null,Object? threadRecoveryIssues = null,}) {
   return _then(_self.copyWith(
 projects: null == projects ? _self.projects : projects // ignore: cast_nullable_to_non_nullable
 as List<StudioProject>,rootThreads: null == rootThreads ? _self.rootThreads : rootThreads // ignore: cast_nullable_to_non_nullable
 as List<StudioThread>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,selectedRootThreadId: freezed == selectedRootThreadId ? _self.selectedRootThreadId : selectedRootThreadId // ignore: cast_nullable_to_non_nullable
 as String?,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable
-as bool,recoveryIssues: null == recoveryIssues ? _self.recoveryIssues : recoveryIssues // ignore: cast_nullable_to_non_nullable
-as List<StudioRecoveryIssue>,
+as bool,projectRecoveryIssues: null == projectRecoveryIssues ? _self.projectRecoveryIssues : projectRecoveryIssues // ignore: cast_nullable_to_non_nullable
+as Map<String, StudioRecoveryIssue>,threadRecoveryIssues: null == threadRecoveryIssues ? _self.threadRecoveryIssues : threadRecoveryIssues // ignore: cast_nullable_to_non_nullable
+as Map<String, StudioRecoveryIssue>,
   ));
 }
 
@@ -418,10 +419,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  Map<String, StudioRecoveryIssue> projectRecoveryIssues,  Map<String, StudioRecoveryIssue> threadRecoveryIssues)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SidebarView() when $default != null:
-return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.projectRecoveryIssues,_that.threadRecoveryIssues);case _:
   return orElse();
 
 }
@@ -439,10 +440,10 @@ return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.s
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  Map<String, StudioRecoveryIssue> projectRecoveryIssues,  Map<String, StudioRecoveryIssue> threadRecoveryIssues)  $default,) {final _that = this;
 switch (_that) {
 case _SidebarView():
-return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.projectRecoveryIssues,_that.threadRecoveryIssues);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -459,10 +460,10 @@ return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.s
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  Map<String, StudioRecoveryIssue> projectRecoveryIssues,  Map<String, StudioRecoveryIssue> threadRecoveryIssues)?  $default,) {final _that = this;
 switch (_that) {
 case _SidebarView() when $default != null:
-return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.projectRecoveryIssues,_that.threadRecoveryIssues);case _:
   return null;
 
 }
@@ -474,7 +475,7 @@ return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.s
 
 
 class _SidebarView extends SidebarView {
-  const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioThread> rootThreads, required this.selectedProjectId, required this.selectedRootThreadId, required this.isBusy, required final  List<StudioRecoveryIssue> recoveryIssues}): _projects = projects,_rootThreads = rootThreads,_recoveryIssues = recoveryIssues,super._();
+  const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioThread> rootThreads, required this.selectedProjectId, required this.selectedRootThreadId, required this.isBusy, required final  Map<String, StudioRecoveryIssue> projectRecoveryIssues, required final  Map<String, StudioRecoveryIssue> threadRecoveryIssues}): _projects = projects,_rootThreads = rootThreads,_projectRecoveryIssues = projectRecoveryIssues,_threadRecoveryIssues = threadRecoveryIssues,super._();
 
 
  final  List<StudioProject> _projects;
@@ -494,11 +495,18 @@ class _SidebarView extends SidebarView {
 @override final  String? selectedProjectId;
 @override final  String? selectedRootThreadId;
 @override final  bool isBusy;
- final  List<StudioRecoveryIssue> _recoveryIssues;
-@override List<StudioRecoveryIssue> get recoveryIssues {
-  if (_recoveryIssues is EqualUnmodifiableListView) return _recoveryIssues;
+ final  Map<String, StudioRecoveryIssue> _projectRecoveryIssues;
+@override Map<String, StudioRecoveryIssue> get projectRecoveryIssues {
+  if (_projectRecoveryIssues is EqualUnmodifiableMapView) return _projectRecoveryIssues;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_recoveryIssues);
+  return EqualUnmodifiableMapView(_projectRecoveryIssues);
+}
+
+ final  Map<String, StudioRecoveryIssue> _threadRecoveryIssues;
+@override Map<String, StudioRecoveryIssue> get threadRecoveryIssues {
+  if (_threadRecoveryIssues is EqualUnmodifiableMapView) return _threadRecoveryIssues;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableMapView(_threadRecoveryIssues);
 }
 
 
@@ -512,16 +520,16 @@ _$SidebarViewCopyWith<_SidebarView> get copyWith => __$SidebarViewCopyWithImpl<_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other._projects, _projects)&&const DeepCollectionEquality().equals(other._rootThreads, _rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other._recoveryIssues, _recoveryIssues));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other._projects, _projects)&&const DeepCollectionEquality().equals(other._rootThreads, _rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other._projectRecoveryIssues, _projectRecoveryIssues)&&const DeepCollectionEquality().equals(other._threadRecoveryIssues, _threadRecoveryIssues));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(_recoveryIssues));
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(_projectRecoveryIssues),const DeepCollectionEquality().hash(_threadRecoveryIssues));
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
+  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, projectRecoveryIssues: $projectRecoveryIssues, threadRecoveryIssues: $threadRecoveryIssues)';
 }
 
 
@@ -532,7 +540,7 @@ abstract mixin class _$SidebarViewCopyWith<$Res> implements $SidebarViewCopyWith
   factory _$SidebarViewCopyWith(_SidebarView value, $Res Function(_SidebarView) _then) = __$SidebarViewCopyWithImpl;
 @override @useResult
 $Res call({
- List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
+ List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, Map<String, StudioRecoveryIssue> projectRecoveryIssues, Map<String, StudioRecoveryIssue> threadRecoveryIssues
 });
 
 
@@ -549,15 +557,16 @@ class __$SidebarViewCopyWithImpl<$Res>
 
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? projectRecoveryIssues = null,Object? threadRecoveryIssues = null,}) {
   return _then(_SidebarView(
 projects: null == projects ? _self._projects : projects // ignore: cast_nullable_to_non_nullable
 as List<StudioProject>,rootThreads: null == rootThreads ? _self._rootThreads : rootThreads // ignore: cast_nullable_to_non_nullable
 as List<StudioThread>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,selectedRootThreadId: freezed == selectedRootThreadId ? _self.selectedRootThreadId : selectedRootThreadId // ignore: cast_nullable_to_non_nullable
 as String?,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable
-as bool,recoveryIssues: null == recoveryIssues ? _self._recoveryIssues : recoveryIssues // ignore: cast_nullable_to_non_nullable
-as List<StudioRecoveryIssue>,
+as bool,projectRecoveryIssues: null == projectRecoveryIssues ? _self._projectRecoveryIssues : projectRecoveryIssues // ignore: cast_nullable_to_non_nullable
+as Map<String, StudioRecoveryIssue>,threadRecoveryIssues: null == threadRecoveryIssues ? _self._threadRecoveryIssues : threadRecoveryIssues // ignore: cast_nullable_to_non_nullable
+as Map<String, StudioRecoveryIssue>,
   ));
 }
 

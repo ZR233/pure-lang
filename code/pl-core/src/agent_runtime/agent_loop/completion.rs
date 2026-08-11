@@ -1,4 +1,4 @@
-use super::super::{AgentActivityState, AgentRuntimeEventKind, AgentRuntimeHost};
+use super::super::{AgentRuntimeEventKind, AgentRuntimeHost};
 use super::AgentLoop;
 use super::running_turn::{TurnCompletion, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
@@ -19,11 +19,11 @@ where
             return;
         }
         if let Err(error) = self.flush_pending_traces().await {
-            self.fault_in_memory(error.to_string());
+            self.fault(error.to_string()).await;
             return;
         }
         if let Err(error) = self.flush_pending_observations().await {
-            self.fault_in_memory(error.to_string());
+            self.fault(error.to_string()).await;
             return;
         }
         let compactions = completion
@@ -36,7 +36,7 @@ where
                 .persist_turn_observation(compaction_observation(compaction, unix_timestamp()))
                 .await
             {
-                self.fault_in_memory(error.to_string());
+                self.fault(error.to_string()).await;
                 return;
             }
         }
@@ -92,11 +92,6 @@ where
         next.active_input = None;
         next.refresh_mailbox_snapshot();
         next.snapshot.last_turn = Some(outcome.clone());
-        next.snapshot.activity = if next.has_triggering_input() {
-            AgentActivityState::Queued
-        } else {
-            AgentActivityState::Idle
-        };
         let committed = self
             .commit_transition(next, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::TurnFinished {
@@ -107,7 +102,7 @@ where
             })
             .await;
         if let Err(error) = committed {
-            self.fault_in_memory(error.to_string());
+            self.fault(error.to_string()).await;
             return;
         }
         if self.dispatch_enabled && self.state.has_triggering_input() {

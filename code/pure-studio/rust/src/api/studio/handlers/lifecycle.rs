@@ -2,8 +2,8 @@ use super::snapshot::{
     bootstrap_studio_inner, ensure_project_recovery_available, studio_snapshot_from_projects_inner,
     studio_snapshot_inner,
 };
+use crate::api::studio::bridge_runtime::{BridgeLifecycle, BridgeRuntime, active_bridge, bridge};
 use crate::api::studio::convert::runtime::runtime_snapshot;
-use crate::api::studio::runtime::{BridgeLifecycle, BridgeRuntime, active_bridge, bridge};
 use crate::api::studio::types::{BridgeError, BridgeStudioSnapshotResponse, RuntimeSnapshot};
 use anyhow::Context;
 use flutter_rust_bridge::frb;
@@ -24,10 +24,9 @@ pub async fn initialize_runtime() -> Result<RuntimeSnapshot, BridgeError> {
         BridgeLifecycle::Stopped | BridgeLifecycle::ShuttingDown => {
             Err(BridgeError::runtime_stopped())
         }
-        BridgeLifecycle::Initialized | BridgeLifecycle::Started => Ok(runtime_snapshot(
-            bridge.studio.initialize_runtime().await?,
-            bridge.studio.recovery_issues(),
-        )),
+        BridgeLifecycle::Initialized | BridgeLifecycle::Started => {
+            Ok(runtime_snapshot(bridge.studio.initialize_runtime().await?))
+        }
     }
 }
 
@@ -39,15 +38,11 @@ pub async fn start_runtime() -> Result<RuntimeSnapshot, BridgeError> {
             Err(BridgeError::runtime_stopped())
         }
         BridgeLifecycle::Initialized => {
-            let snapshot =
-                runtime_snapshot(bridge.studio.start_runtime().await?, bridge.studio.recovery_issues());
+            let snapshot = runtime_snapshot(bridge.studio.start_runtime().await?);
             *lifecycle = BridgeLifecycle::Started;
             Ok(snapshot)
         }
-        BridgeLifecycle::Started => Ok(runtime_snapshot(
-            bridge.studio.runtime_snapshot(),
-            bridge.studio.recovery_issues(),
-        )),
+        BridgeLifecycle::Started => Ok(runtime_snapshot(bridge.studio.runtime_snapshot().await?)),
     }
 }
 
@@ -59,10 +54,7 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
             let mut lifecycle = bridge.lifecycle.lock().await;
             match *lifecycle {
                 BridgeLifecycle::Stopped => {
-                    return Ok(runtime_snapshot(
-                        bridge.studio.runtime_snapshot(),
-                        bridge.studio.recovery_issues(),
-                    ));
+                    return Ok(runtime_snapshot(bridge.studio.runtime_snapshot().await?));
                 }
                 BridgeLifecycle::ShuttingDown => false,
                 BridgeLifecycle::Initialized | BridgeLifecycle::Started => {
@@ -92,10 +84,7 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
     crate::diagnostics::shutdown();
     *bridge.lifecycle.lock().await = BridgeLifecycle::Stopped;
     bridge.shutdown_complete.notify_waiters();
-    Ok(runtime_snapshot(
-        shutdown_result?,
-        bridge.studio.recovery_issues(),
-    ))
+    Ok(runtime_snapshot(shutdown_result?))
 }
 
 pub(super) async fn shutdown_runtime_for_update(

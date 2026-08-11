@@ -15,7 +15,10 @@ use crate::studio::mappers::project_record;
 use crate::studio::paths::{default_db_path, project_name, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
-use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
+use crate::studio::store_support::{
+    PREVIOUS_STUDIO_DATABASE_SCHEMA_VERSION, STUDIO_DATABASE_SCHEMA_VERSION,
+    initialize_studio_schema, migrate_studio_schema,
+};
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
@@ -42,16 +45,28 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
+        let mut migration_from = None;
         let existing_is_compatible = if database_exists {
             match inspect_database(&path).await {
                 Ok(()) => true,
                 Err(error) => {
-                    tracing::warn!(
-                        path = %path.display(),
-                        error = %error,
-                        "Studio database is incompatible and will be rebuilt"
-                    );
-                    false
+                    match inspect_database_version(&path, PREVIOUS_STUDIO_DATABASE_SCHEMA_VERSION)
+                        .await
+                    {
+                        Ok(()) => {
+                            migration_from = Some(PREVIOUS_STUDIO_DATABASE_SCHEMA_VERSION);
+                            true
+                        }
+                        Err(migration_error) => {
+                            tracing::warn!(
+                                path = %path.display(),
+                                error = %error,
+                                migration_error = %migration_error,
+                                "Studio database is incompatible and will be rebuilt"
+                            );
+                            false
+                        }
+                    }
                 }
             }
         } else {
@@ -72,6 +87,14 @@ impl StudioStore {
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
+            } else if let Some(from_version) = migration_from {
+                let migrated_turns = migrate_studio_schema(&db, from_version).await?;
+                tracing::info!(
+                    from_version,
+                    to_version = STUDIO_DATABASE_SCHEMA_VERSION,
+                    migrated_turns,
+                    "migrated Studio database schema"
+                );
             }
             validate_database(&db).await
         }
@@ -238,8 +261,12 @@ async fn connect_read_only_database(path: &Path) -> Result<DatabaseConnection> {
 }
 
 async fn inspect_database(path: &Path) -> Result<()> {
+    inspect_database_version(path, STUDIO_DATABASE_SCHEMA_VERSION).await
+}
+
+async fn inspect_database_version(path: &Path, expected_version: i64) -> Result<()> {
     let database = connect_read_only_database(path).await?;
-    let validation = validate_database(&database).await;
+    let validation = validate_database_version(&database, expected_version).await;
     let close = database.close().await;
     match (validation, close) {
         (Ok(()), Ok(())) => Ok(()),
@@ -252,11 +279,15 @@ async fn inspect_database(path: &Path) -> Result<()> {
 }
 
 async fn validate_database(db: &DatabaseConnection) -> Result<()> {
+    validate_database_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await
+}
+
+async fn validate_database_version(db: &DatabaseConnection, expected_version: i64) -> Result<()> {
     let version = database_schema_version(db).await?;
-    if version != STUDIO_DATABASE_SCHEMA_VERSION {
+    if version != expected_version {
         return Err(StudioDatabaseError::UnsupportedSchema {
             found: version,
-            supported: STUDIO_DATABASE_SCHEMA_VERSION,
+            supported: expected_version,
         }
         .into());
     }

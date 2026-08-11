@@ -5,7 +5,7 @@ use super::super::host::{
 };
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentActivityState, AgentCommittedEvent, AgentInferenceCommit, AgentLifecycleState,
+    ActiveKind, AgentCommittedEvent, AgentInferenceCommit, AgentLifecycleState,
     AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
     AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState,
     ThreadCommit, ThreadCommitOutcome, ThreadId, ThreadMutation, TurnId,
@@ -23,23 +23,37 @@ where
     pub(super) async fn set_activity(
         &mut self,
         turn_id: TurnId,
-        activity: AgentActivityState,
+        kind: ActiveKind,
     ) -> AgentRuntimeResult<()> {
-        let Some(active) = &self.active else {
+        let Some(active) = &mut self.active else {
             return Ok(());
         };
         if active.turn_id != turn_id
             || self.state.snapshot.lifecycle != AgentLifecycleState::Active
-            || self.state.snapshot.activity == activity
+            || active.kind == kind
         {
             return Ok(());
         }
-        let mut next = self.state.clone();
-        next.snapshot.activity = activity;
-        self.commit_transition(next, Vec::new(), |snapshot| {
-            AgentRuntimeEventKind::StateChanged { snapshot }
-        })
-        .await
+        let previous_kind = active.kind;
+        let thread_id = active.thread_id.clone();
+        active.kind = kind;
+        let result = self
+            .commit_transition(self.state.clone(), Vec::new(), |snapshot| {
+                AgentRuntimeEventKind::TurnActivityChanged {
+                    turn_id: turn_id.clone(),
+                    thread_id,
+                    kind,
+                    snapshot,
+                }
+            })
+            .await;
+        if result.is_err()
+            && let Some(active) = self.active.as_mut()
+            && active.turn_id == turn_id
+        {
+            active.kind = previous_kind;
+        }
+        result
     }
 
     pub(super) async fn checkpoint(

@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../domain/models/studio_enums.dart';
 import '../domain/models/turn_models.dart';
@@ -23,20 +23,7 @@ extension StudioLocalizationsX on BuildContext {
   }
 
   String turnActivityLabel(StudioTurnActivity activity) {
-    return switch (activity) {
-      StudioTurnActivity.preparing => l10n.statusTurnPreparing,
-      StudioTurnActivity.thinking => l10n.timelineReasoningActive,
-      StudioTurnActivity.responding => l10n.statusTurnResponding,
-      StudioTurnActivity.planning => l10n.statusTurnPlanning,
-      StudioTurnActivity.runningTool => l10n.statusTurnRunningTool,
-      StudioTurnActivity.waitingForApproval =>
-        l10n.statusTurnWaitingForApproval,
-      StudioTurnActivity.waitingForUserInput =>
-        l10n.statusTurnWaitingForUserInput,
-      StudioTurnActivity.waitingForPlanConfirmation =>
-        l10n.statusTurnWaitingForPlanConfirmation,
-      StudioTurnActivity.persisting => l10n.statusTurnPersisting,
-    };
+    return activity.label(l10n);
   }
 
   String interactionKindLabel(InteractionKind kind) {
@@ -129,4 +116,26 @@ extension StudioLocalizationsX on BuildContext {
       _ => role,
     };
   }
+}
+
+extension StudioTurnActivityX on StudioTurnActivity {
+  IconData get icon => switch (this) {
+    StudioTurnActivity.preparing => Icons.menu_book_outlined,
+    StudioTurnActivity.thinking => Icons.psychology_alt_outlined,
+    StudioTurnActivity.responding => Icons.edit_note_outlined,
+    StudioTurnActivity.planning => Icons.route_outlined,
+    StudioTurnActivity.runningTool => Icons.build_outlined,
+    StudioTurnActivity.persisting => Icons.save_outlined,
+  };
+
+  bool get drivesToolGroup => this == StudioTurnActivity.runningTool;
+
+  String label(AppLocalizations l10n) => switch (this) {
+    StudioTurnActivity.preparing => l10n.statusTurnPreparing,
+    StudioTurnActivity.thinking => l10n.timelineReasoningActive,
+    StudioTurnActivity.responding => l10n.statusTurnResponding,
+    StudioTurnActivity.planning => l10n.statusTurnPlanning,
+    StudioTurnActivity.runningTool => l10n.statusTurnRunningTool,
+    StudioTurnActivity.persisting => l10n.statusTurnPersisting,
+  };
 }

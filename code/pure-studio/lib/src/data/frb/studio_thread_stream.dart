@@ -372,8 +372,6 @@ StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
         frb.BridgeTurnPhase.responding => StudioTurnActivity.responding,
         frb.BridgeTurnPhase.planning => StudioTurnActivity.planning,
         frb.BridgeTurnPhase.runningTool => StudioTurnActivity.runningTool,
-        frb.BridgeTurnPhase.waitingInteraction =>
-          StudioTurnActivity.waitingForUserInput,
         frb.BridgeTurnPhase.persisting => StudioTurnActivity.persisting,
       }),
       completed: () => const StudioTurnState.completed(),
@@ -498,6 +496,7 @@ PendingInteraction _interactionFromFrb(frb.BridgeInteractionRequest value) {
   return PendingInteraction(
     id: value.interactionId,
     threadId: value.scope.threadId,
+    turnId: value.scope.turnId,
     kind: kind,
     title: _interactionTitle(kind, payload),
     body: _interactionBody(kind, payload),

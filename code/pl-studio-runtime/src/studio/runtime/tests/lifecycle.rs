@@ -388,7 +388,7 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
             .is_none()
     );
     assert_ne!(
-        busy_runtime.runtime_snapshot().status,
+        busy_runtime.runtime_snapshot().await.unwrap().status,
         StudioRuntimeStatus::Stopped
     );
 
@@ -623,7 +623,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     );
     let _ = runtime.ensure_thread_agent(&session.id).await.unwrap();
     runtime
-        .interactions
+        .interactions()
         .create(
             interaction.clone(),
             runtime.interaction_emitter(session.id.clone()),
@@ -1228,7 +1228,7 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
     );
     let _ = first.ensure_thread_agent(&thread.id).await.unwrap();
     first
-        .interactions
+        .interactions()
         .create(
             interaction.clone(),
             first.interaction_emitter(thread.id.clone()),

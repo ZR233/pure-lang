@@ -9,8 +9,8 @@ use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v4_with_typed_task_failures() {
-    let root = unique_test_root("schema-v4");
+async fn creates_canonical_schema_v5_with_typed_task_failures() {
+    let root = unique_test_root("schema-v5");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -123,6 +123,61 @@ async fn creates_canonical_schema_v4_with_typed_task_failures() {
     }
 
     drop(store);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn migrates_schema_v4_waiting_interaction_turns_without_rebuild() {
+    let root = unique_test_root("schema-v4-turn-migration");
+    let database_path = root.join("studio.sqlite");
+    let store = StudioStore::open(&database_path).await.unwrap();
+    store
+        .database()
+        .execute_unprepared(
+            "INSERT INTO projects \
+             (id, name, path, created_at, updated_at, last_opened_at, closed) \
+             VALUES ('project-1', 'Project', 'C:/project', 1, 1, 1, 0); \
+             INSERT INTO threads \
+             (id, project_id, title, mode, root_thread_id, parent_thread_id, role, agent_path, \
+              status, revision, runtime_revision, event_sequence, metadata_json, usage_json, \
+              last_context_tokens, trace_sequence, created_at, updated_at, archived) \
+             VALUES ('thread-1', 'project-1', 'Thread', 'chat', 'thread-1', NULL, 'main', \
+                     'thread-1', 'running', 1, 1, 1, '{}', '{}', NULL, 0, 1, 7, 0); \
+             INSERT INTO turns \
+             (id, thread_id, ordinal, revision, status, phase, reason, model_json, usage_json, \
+              failure_json, budget_limit_json, rollover_compacted, rollover_compaction_error, \
+              metadata_json, started_at, updated_at, completed_at) \
+             VALUES ('turn-1', 'thread-1', 1, 1, 'inProgress', 'waitingInteraction', NULL, \
+                     NULL, '{}', NULL, NULL, 0, NULL, NULL, 2, 7, NULL);",
+        )
+        .await
+        .unwrap();
+    drop(store);
+    create_database(&database_path, "PRAGMA user_version = 4;").await;
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    let turn = migrated
+        .database()
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT status, phase, completed_at FROM turns WHERE id = 'turn-1'".to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(turn.try_get::<String>("", "status").unwrap(), "completed");
+    assert_eq!(turn.try_get::<Option<String>>("", "phase").unwrap(), None);
+    assert_eq!(
+        turn.try_get::<Option<i64>>("", "completed_at").unwrap(),
+        Some(7)
+    );
+    assert_eq!(migrated.list_projects().await.unwrap().len(), 1);
+
+    drop(migrated);
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

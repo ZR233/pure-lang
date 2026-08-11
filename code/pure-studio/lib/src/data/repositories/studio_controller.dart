@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
+import '../../shared/studio_driver_state.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
 import 'studio_state_reducer.dart';
@@ -53,7 +54,11 @@ class StudioController extends _$StudioController {
     final current = state.value;
     if (current == null ||
         current.selectedProjectId == projectId ||
-        current.recoveryIssueForProject(projectId) != null) {
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.project,
+              projectId: projectId,
+            ) !=
+            null) {
       return;
     }
     await _adoptProductState(await _api.selectProject(projectId));
@@ -64,7 +69,11 @@ class StudioController extends _$StudioController {
     final projectId = current?.selectedProjectId;
     if (current == null ||
         projectId == null ||
-        current.recoveryIssueForProject(projectId) != null) {
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.project,
+              projectId: projectId,
+            ) !=
+            null) {
       return;
     }
     await _adoptProductState(await _api.createThread(projectId));
@@ -77,7 +86,11 @@ class StudioController extends _$StudioController {
         .firstOrNull;
     if (current == null ||
         thread == null ||
-        current.recoveryIssueForThread(threadId) != null ||
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.thread,
+              threadId: threadId,
+            ) !=
+            null ||
         (current.isBusy && current.selectedRootThread?.id == threadId)) {
       return;
     }
@@ -127,7 +140,12 @@ class StudioController extends _$StudioController {
     final target = current.threads
         .where((thread) => thread.id == threadId)
         .firstOrNull;
-    if (target == null || current.recoveryIssueForThread(threadId) != null) {
+    if (target == null ||
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.thread,
+              threadId: threadId,
+            ) !=
+            null) {
       return;
     }
     final root = current.selectedRootThread;
@@ -140,7 +158,11 @@ class StudioController extends _$StudioController {
     if (current == null ||
         current.selectedThreadId == threadId ||
         !current.threads.any((thread) => thread.id == threadId) ||
-        current.recoveryIssueForThread(threadId) != null) {
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.thread,
+              threadId: threadId,
+            ) !=
+            null) {
       return;
     }
     state = AsyncData(
@@ -493,9 +515,7 @@ class StudioController extends _$StudioController {
   Future<void> retryRecoveryIssue(String issueId) async {
     final current = state.value;
     if (current == null) return;
-    final issue = current.recoveryIssues
-        .where((candidate) => candidate.id == issueId)
-        .firstOrNull;
+    final issue = current.recoveryIssue(id: issueId);
     if (issue == null || !issue.canRetry) return;
     await _adoptProductState(
       await _api.retryRecoveryIssue(
@@ -586,6 +606,11 @@ class StudioController extends _$StudioController {
           unawaited(loadOlderHistory(threadId));
         }
       case ThreadNotificationFrame(:final revision, :final update):
+        if (const bool.fromEnvironment('PURE_STUDIO_DRIVER')) {
+          if (update case ThreadTurnUpdate(:final turn)) {
+            StudioDriverState.publishTurn(turn);
+          }
+        }
         final reduced = applyThreadUpdate(
           current,
           threadId: threadId,

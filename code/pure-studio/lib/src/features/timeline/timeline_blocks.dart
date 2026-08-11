@@ -57,7 +57,7 @@ class _TurnActivityBlock extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: _TimelineActivitySummary(
-        icon: _turnActivityIcon(activity),
+        icon: activity?.icon ?? Icons.schedule_outlined,
         label: _turnActivityLabel(context, turn.state),
         isCurrentActivity: true,
         muted: activity == StudioTurnActivity.thinking,
@@ -73,22 +73,6 @@ String _turnActivityLabel(BuildContext context, StudioTurnState state) {
     StudioTurnStatus.completed ||
     StudioTurnStatus.failed ||
     StudioTurnStatus.cancelled => '',
-  };
-}
-
-IconData _turnActivityIcon(StudioTurnActivity? activity) {
-  return switch (activity) {
-    null => Icons.schedule_outlined,
-    StudioTurnActivity.preparing => Icons.menu_book_outlined,
-    StudioTurnActivity.thinking => Icons.psychology_alt_outlined,
-    StudioTurnActivity.responding => Icons.edit_note_outlined,
-    StudioTurnActivity.planning => Icons.route_outlined,
-    StudioTurnActivity.runningTool => Icons.build_outlined,
-    StudioTurnActivity.waitingForApproval ||
-    StudioTurnActivity.waitingForUserInput ||
-    StudioTurnActivity.waitingForPlanConfirmation =>
-      Icons.pending_actions_outlined,
-    StudioTurnActivity.persisting => Icons.save_outlined,
   };
 }
 

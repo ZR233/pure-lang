@@ -68,7 +68,7 @@ class _Sidebar extends ConsumerWidget {
                       project: project,
                       compact: compact,
                       selected: project.id == state.selectedProjectId,
-                      recoveryIssue: state.recoveryIssueForProject(project.id),
+                      recoveryIssue: state.projectRecoveryIssues[project.id],
                     ),
                   const SizedBox(height: 12),
                   if (!compact) ...[
@@ -80,7 +80,7 @@ class _Sidebar extends ConsumerWidget {
                       thread: thread,
                       selected: thread.id == state.selectedRootThreadId,
                       compact: compact,
-                      recoveryIssue: state.recoveryIssueForThread(thread.id),
+                      recoveryIssue: state.threadRecoveryIssues[thread.id],
                       canArchive:
                           thread.id != state.selectedRootThreadId ||
                           !state.isBusy,
@@ -604,7 +604,7 @@ class _SidebarActions extends ConsumerWidget {
     final selectedProjectId = state.selectedProjectId;
     final canCreateThread =
         selectedProjectId != null &&
-        state.recoveryIssueForProject(selectedProjectId) == null;
+        !state.projectRecoveryIssues.containsKey(selectedProjectId);
     final hasUpdate = ref.watch(
       studioUpdateControllerProvider.select((state) => state.hasUpdate),
     );

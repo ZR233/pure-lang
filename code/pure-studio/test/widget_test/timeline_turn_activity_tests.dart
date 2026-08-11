@@ -16,20 +16,6 @@ void registerTimelineTurnActivityTests() {
       (StudioTurnState.inProgress(StudioTurnActivity.responding), '回复中'),
       (StudioTurnState.inProgress(StudioTurnActivity.planning), '规划中'),
       (StudioTurnState.inProgress(StudioTurnActivity.runningTool), '运行工具'),
-      (
-        StudioTurnState.inProgress(StudioTurnActivity.waitingForApproval),
-        '等待工具授权',
-      ),
-      (
-        StudioTurnState.inProgress(StudioTurnActivity.waitingForUserInput),
-        '等待输入',
-      ),
-      (
-        StudioTurnState.inProgress(
-          StudioTurnActivity.waitingForPlanConfirmation,
-        ),
-        '等待计划确认',
-      ),
       (StudioTurnState.inProgress(StudioTurnActivity.persisting), '保存本轮结果'),
     ];
 
@@ -176,51 +162,6 @@ void registerTimelineTurnActivityTests() {
       findsOneWidget,
     );
   });
-
-  testWidgets(
-    'interaction waiting replaces the active tool with one typed row',
-    (tester) async {
-      final tool = _toolTimelinePart(
-        id: 'tool-current',
-        groupId: 'turn-1:assistant',
-        turnId: 'turn-1',
-        name: 'request_user_input',
-        status: 'running',
-      );
-      const cases = [
-        (StudioTurnActivity.waitingForApproval, '等待工具授权'),
-        (StudioTurnActivity.waitingForUserInput, '等待输入'),
-        (StudioTurnActivity.waitingForPlanConfirmation, '等待计划确认'),
-      ];
-
-      for (final (activity, label) in cases) {
-        await tester.pumpWidget(
-          _timelineApp(
-            locale: const Locale('zh', 'Hans'),
-            home: Scaffold(
-              body: TimelineView(
-                threadId: 'session-1',
-                rows: timelineRowsFromFixtureParts([tool]),
-                turn: _testTurn(
-                  threadId: 'session-1',
-                  turnId: 'turn-1',
-                  state: StudioTurnState.inProgress(activity),
-                ),
-              ),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text(label), findsOneWidget, reason: label);
-        expect(find.textContaining('request_user_input'), findsNothing);
-        expect(
-          find.byKey(const ValueKey('timeline-current-activity')),
-          findsOneWidget,
-        );
-      }
-    },
-  );
 
   testWidgets(
     'non-user rows have no generic avatar and terminal errors persist',

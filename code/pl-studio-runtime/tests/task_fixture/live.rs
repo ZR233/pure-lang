@@ -122,7 +122,13 @@ impl LiveTaskFixture {
                 );
             }
 
-            if self.runtime.runtime_snapshot().active_turns.is_empty() {
+            if self
+                .runtime
+                .runtime_snapshot()
+                .await?
+                .active_turns
+                .is_empty()
+            {
                 let idle_started = idle_since.get_or_insert_with(Instant::now);
                 if idle_started.elapsed() >= IDLE_FAILURE_GRACE {
                     bail!(
@@ -178,7 +184,14 @@ impl LiveTaskFixture {
                             && matches!(thread.status.as_str(), "queued" | "running" | "waiting")
                     });
 
-            if self.runtime.runtime_snapshot().active_turns.is_empty() && !child_is_active {
+            if self
+                .runtime
+                .runtime_snapshot()
+                .await?
+                .active_turns
+                .is_empty()
+                && !child_is_active
+            {
                 let idle_started = idle_since.get_or_insert_with(Instant::now);
                 if idle_started.elapsed() >= IDLE_FAILURE_GRACE {
                     bail!(
@@ -196,7 +209,13 @@ impl LiveTaskFixture {
     pub async fn wait_for_no_active_turns(&self) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if self.runtime.runtime_snapshot().active_turns.is_empty() {
+            if self
+                .runtime
+                .runtime_snapshot()
+                .await?
+                .active_turns
+                .is_empty()
+            {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -315,7 +334,7 @@ impl LiveTaskFixture {
                     .join("\n")
             })
             .unwrap_or_else(|error| format!("thread item query failed: {error:#}"));
-        let runtime = format!("{:#?}", self.runtime.runtime_snapshot());
+        let runtime = format!("{:#?}", self.runtime.runtime_snapshot().await);
         let git = if self.workspace.join(".git").exists() {
             git_output(&self.workspace, &["status", "--porcelain"])
                 .unwrap_or_else(|error| format!("git status failed: {error:#}"))

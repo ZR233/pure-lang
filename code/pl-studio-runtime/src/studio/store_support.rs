@@ -1,10 +1,14 @@
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use sea_orm::sea_query::{Expr, ExprTrait, Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
+use sea_orm::{
+    ConditionalStatement, ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement,
+    TransactionTrait,
+};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 4;
+pub(super) const PREVIOUS_STUDIO_DATABASE_SCHEMA_VERSION: i64 = 4;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 5;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
@@ -32,6 +36,46 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
     Ok(())
 }
 
+pub(super) async fn migrate_studio_schema(
+    db: &DatabaseConnection,
+    from_version: i64,
+) -> Result<u64> {
+    ensure!(
+        from_version == PREVIOUS_STUDIO_DATABASE_SCHEMA_VERSION,
+        "unsupported Studio database migration from schema {from_version}"
+    );
+    let tx = db.begin().await?;
+    let row = tx
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS candidate_count FROM turns \
+             WHERE status = 'inProgress' AND phase = 'waitingInteraction'"
+                .to_string(),
+        ))
+        .await?
+        .context("Studio turn migration dry-run returned no count")?;
+    let candidate_count = row.try_get::<i64>("", "candidate_count")?;
+    ensure!(
+        candidate_count >= 0,
+        "Studio turn migration dry-run returned a negative count"
+    );
+    let result = tx
+        .execute_unprepared(
+            "UPDATE turns \
+             SET status = 'completed', phase = NULL, completed_at = updated_at \
+             WHERE status = 'inProgress' AND phase = 'waitingInteraction'",
+        )
+        .await?;
+    let migrated = result.rows_affected();
+    ensure!(
+        migrated == candidate_count as u64,
+        "Studio turn migration expected {candidate_count} rows but updated {migrated}"
+    );
+    set_schema_version(&tx, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    tx.commit().await?;
+    Ok(migrated)
+}
+
 pub(super) fn non_empty_title(title: &str) -> String {
     let title = title.trim();
     if title.is_empty() {
@@ -41,7 +85,7 @@ pub(super) fn non_empty_title(title: &str) -> String {
     }
 }
 
-async fn set_schema_version(db: &DatabaseConnection, version: i64) -> Result<()> {
+async fn set_schema_version(db: &impl ConnectionTrait, version: i64) -> Result<()> {
     db.execute_unprepared(&format!("PRAGMA user_version = {version}"))
         .await?;
     Ok(())

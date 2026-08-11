@@ -73,6 +73,7 @@ impl StudioRuntime {
                     .await?;
                 let started = async {
                     let resolved = self
+                        .agent_facility
                         .interactions
                         .resolve(
                             &interaction_id,
@@ -177,6 +178,7 @@ impl StudioRuntime {
             }
             PlanConfirmationResolution::Dismiss => {
                 let resolved = self
+                    .agent_facility
                     .interactions
                     .resolve(
                         &interaction_id,

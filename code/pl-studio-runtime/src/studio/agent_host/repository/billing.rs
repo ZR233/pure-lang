@@ -234,8 +234,9 @@ mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
     use pl_core::{
-        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
-        DurableCommitFacts, ThreadActorState, ThreadContextState, ThreadId, ThreadMutation, TurnId,
+        ActiveKind, AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId,
+        AgentSnapshot, DurableCommitFacts, ThreadActorState, ThreadContextState, ThreadId,
+        ThreadMutation, TurnId,
     };
     use pl_protocol::{
         AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
@@ -475,7 +476,7 @@ mod tests {
             snapshot: AgentSnapshot {
                 identity,
                 lifecycle: AgentLifecycleState::Active,
-                activity: AgentActivityState::Running,
+                activity: AgentActivityState::Active(ActiveKind::Running),
                 active_turn_id: Some(turn_id.clone()),
                 pending_inputs: 0,
                 progress: None,

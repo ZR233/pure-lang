@@ -271,7 +271,13 @@ async fn assert_task_invariants(
     {
         bail!("Task retained pending interactions");
     }
-    if !fixture.runtime.runtime_snapshot().active_turns.is_empty() {
+    if !fixture
+        .runtime
+        .runtime_snapshot()
+        .await?
+        .active_turns
+        .is_empty()
+    {
         bail!("Task retained active turns");
     }
     if git_output(&fixture.workspace, &["rev-parse", "HEAD"])? != task.expected_head {

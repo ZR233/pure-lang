@@ -1,3 +1,44 @@
+sealed class StudioAgentActivity {
+  const StudioAgentActivity();
+
+  static const idle = StudioAgentIdle();
+  static const queued = StudioAgentQueued();
+  static const activeRunning = StudioAgentActiveRunning();
+  static const activeWaitingTool = StudioAgentActiveWaitingTool();
+  static const activeWaitingInteraction = StudioAgentActiveWaitingInteraction();
+  static const cancelling = StudioAgentCancelling();
+
+  @override
+  bool operator ==(Object other) => runtimeType == other.runtimeType;
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+}
+
+final class StudioAgentIdle extends StudioAgentActivity {
+  const StudioAgentIdle();
+}
+
+final class StudioAgentQueued extends StudioAgentActivity {
+  const StudioAgentQueued();
+}
+
+final class StudioAgentActiveRunning extends StudioAgentActivity {
+  const StudioAgentActiveRunning();
+}
+
+final class StudioAgentActiveWaitingTool extends StudioAgentActivity {
+  const StudioAgentActiveWaitingTool();
+}
+
+final class StudioAgentActiveWaitingInteraction extends StudioAgentActivity {
+  const StudioAgentActiveWaitingInteraction();
+}
+
+final class StudioAgentCancelling extends StudioAgentActivity {
+  const StudioAgentCancelling();
+}
+
 class StudioAgentView {
   const StudioAgentView({
     required this.id,
@@ -6,6 +47,7 @@ class StudioAgentView {
     required this.role,
     required this.task,
     required this.status,
+    required this.activity,
     required this.updatedAt,
     this.parentPath,
     this.summary,
@@ -14,7 +56,6 @@ class StudioAgentView {
     this.reason,
     this.rootThreadId,
     this.lifecycle,
-    this.activity,
     this.progress,
     this.summaryAgeSeconds,
   });
@@ -32,7 +73,7 @@ class StudioAgentView {
   final String? reason;
   final String? rootThreadId;
   final String? lifecycle;
-  final String? activity;
+  final StudioAgentActivity activity;
   final AgentProgressView? progress;
   final int? summaryAgeSeconds;
   final DateTime updatedAt;

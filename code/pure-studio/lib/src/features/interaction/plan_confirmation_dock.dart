@@ -199,6 +199,7 @@ class _PlanDecisionActions extends StatelessWidget {
     final actions = DockActions(
       children: [
         TextButton.icon(
+          key: StudioDriverKeys.planDismiss,
           icon: const Icon(Icons.close),
           label: Text(context.l10n.interactionPlanIgnore),
           onPressed: onDismiss,

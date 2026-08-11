@@ -270,7 +270,11 @@ pub struct StudioRuntimeSnapshot {
 
 impl StudioRuntimeSnapshot {
     /// 构造一个不含活动 turn 的最小快照。
-    pub(super) fn from_status(status: StudioRuntimeStatus, updated_at: i64, error: Option<String>) -> Self {
+    pub(super) fn from_status(
+        status: StudioRuntimeStatus,
+        updated_at: i64,
+        error: Option<String>,
+    ) -> Self {
         Self {
             status,
             active_turns: Vec::new(),
@@ -377,9 +381,11 @@ mod tests {
         let state = StudioRuntimeState::ready();
 
         // Ready -> Stopped is not a legal direct transition.
-        assert!(state
-            .transition(StudioRuntimeStatus::Stopped, None)
-            .is_err());
+        assert!(
+            state
+                .transition(StudioRuntimeStatus::Stopped, None)
+                .is_err()
+        );
         state
             .transition(StudioRuntimeStatus::ShuttingDown, None)
             .unwrap();

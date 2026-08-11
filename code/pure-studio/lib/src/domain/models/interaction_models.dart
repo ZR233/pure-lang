@@ -71,6 +71,7 @@ class PendingInteraction {
   const PendingInteraction({
     required this.id,
     required this.threadId,
+    required this.turnId,
     required this.kind,
     required this.title,
     required this.body,
@@ -79,6 +80,7 @@ class PendingInteraction {
 
   final String id;
   final String threadId;
+  final String turnId;
   final InteractionKind kind;
   final String title;
   final String body;

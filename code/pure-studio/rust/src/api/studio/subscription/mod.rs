@@ -6,9 +6,9 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::event::bridge_product_event;
 use crate::api::studio::convert::thread_stream::bridge_thread_update;
-use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, BridgeProductEventEnvelope, BridgeThreadSubscriptionUpdate,
 };

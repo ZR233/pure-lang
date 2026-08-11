@@ -1,5 +1,6 @@
 use super::super::host::initial_transcript_mutation;
-use super::super::{AgentActivityState, AgentIdentity, AgentLifecycleState, ThreadActorState};
+use super::super::state::derive_activity;
+use super::super::{AgentIdentity, AgentLifecycleState, ThreadActorState};
 use super::*;
 
 enum SpawnCompensation {
@@ -128,7 +129,8 @@ where
             queued_at: unix_timestamp(),
         });
         state.refresh_mailbox_snapshot();
-        state.snapshot.activity = AgentActivityState::Queued;
+        state.snapshot.activity =
+            derive_activity(state.snapshot.lifecycle, None, state.has_triggering_input());
         turn_id
     });
     let lease = host
@@ -260,7 +262,6 @@ where
     let expected_revision = state.snapshot.revision;
     state.snapshot.revision = expected_revision.saturating_add(1);
     state.snapshot.event_sequence = state.snapshot.event_sequence.saturating_add(1);
-    state.snapshot.activity = AgentActivityState::Idle;
     state.snapshot.active_turn_id = None;
     match &compensation {
         SpawnCompensation::RolledBack => {
@@ -273,6 +274,8 @@ where
             state.snapshot.lifecycle = AgentLifecycleState::Faulted;
         }
     }
+    state.snapshot.activity =
+        derive_activity(state.snapshot.lifecycle, None, state.has_triggering_input());
     state.snapshot.updated_at = unix_timestamp();
     let event = AgentRuntimeEvent {
         agent_id: state.snapshot.identity.id.clone(),

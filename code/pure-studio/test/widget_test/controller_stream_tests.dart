@@ -244,6 +244,7 @@ void registerControllerStreamTests() {
       const interaction = PendingInteraction(
         id: 'interaction-1',
         threadId: 'session-1',
+        turnId: 'turn-1',
         kind: InteractionKind.userInput,
         title: 'Question',
         body: 'Continue?',

@@ -1,8 +1,8 @@
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::thread_stream::{
     bridge_thread, bridge_thread_item, bridge_thread_snapshot, bridge_turn,
 };
-use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, BridgeThread, BridgeThreadContextDisposition, BridgeThreadSnapshot,
     BridgeThreadTurnHistory, BridgeThreadTurnPage, ListThreadTurnsRequest,

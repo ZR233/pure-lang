@@ -78,28 +78,34 @@ fn parse_cursor(cursor: &str) -> Result<i64> {
 }
 
 fn turn_record(model: &turn::Model) -> Result<Turn> {
-    let state = match model.status.as_str() {
-        "queued" => TurnState::Queued,
-        "inProgress" => TurnState::InProgress {
-            phase: match model.phase.as_deref().unwrap_or("preparing") {
-                "preparing" => TurnPhase::Preparing,
-                "thinking" => TurnPhase::Thinking,
-                "responding" => TurnPhase::Responding,
-                "planning" => TurnPhase::Planning,
-                "runningTool" => TurnPhase::RunningTool,
-                "waitingInteraction" => TurnPhase::WaitingInteraction,
-                "persisting" => TurnPhase::Persisting,
-                phase => bail!("unknown Turn phase {phase}"),
+    // 老数据兼容：schema v1 的 waitingInteraction phase Turn 在新设计下应为 completed。
+    let state = if model.status.as_str() == "inProgress"
+        && model.phase.as_deref() == Some("waitingInteraction")
+    {
+        TurnState::Completed
+    } else {
+        match model.status.as_str() {
+            "queued" => TurnState::Queued,
+            "inProgress" => TurnState::InProgress {
+                phase: match model.phase.as_deref().unwrap_or("preparing") {
+                    "preparing" => TurnPhase::Preparing,
+                    "thinking" => TurnPhase::Thinking,
+                    "responding" => TurnPhase::Responding,
+                    "planning" => TurnPhase::Planning,
+                    "runningTool" => TurnPhase::RunningTool,
+                    "persisting" => TurnPhase::Persisting,
+                    phase => bail!("unknown Turn phase {phase}"),
+                },
             },
-        },
-        "completed" => TurnState::Completed,
-        "failed" => TurnState::Failed {
-            reason: model.reason.clone().unwrap_or_default(),
-        },
-        "interrupted" => TurnState::Interrupted {
-            reason: model.reason.clone().unwrap_or_default(),
-        },
-        status => bail!("unknown Turn status {status}"),
+            "completed" => TurnState::Completed,
+            "failed" => TurnState::Failed {
+                reason: model.reason.clone().unwrap_or_default(),
+            },
+            "interrupted" => TurnState::Interrupted {
+                reason: model.reason.clone().unwrap_or_default(),
+            },
+            status => bail!("unknown Turn status {status}"),
+        }
     };
     Ok(Turn {
         id: model.id.clone(),

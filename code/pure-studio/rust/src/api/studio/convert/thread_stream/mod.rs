@@ -175,7 +175,6 @@ fn turn_phase(value: TurnPhase) -> BridgeTurnPhase {
         TurnPhase::Responding => BridgeTurnPhase::Responding,
         TurnPhase::Planning => BridgeTurnPhase::Planning,
         TurnPhase::RunningTool => BridgeTurnPhase::RunningTool,
-        TurnPhase::WaitingInteraction => BridgeTurnPhase::WaitingInteraction,
         TurnPhase::Persisting => BridgeTurnPhase::Persisting,
     }
 }

@@ -1,3 +1,4 @@
+mod agent_projection;
 mod completion;
 mod coordinator;
 mod design;

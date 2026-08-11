@@ -24,13 +24,13 @@ impl StudioRuntime {
     }
 
     pub(super) async fn start_mcp_health_watcher(&self) {
-        let mut watcher = self.mcp_health_watcher.lock().await;
+        let mut watcher = self.external_runtimes.mcp_health_watcher.lock().await;
         if watcher.as_ref().is_some_and(|handle| !handle.is_finished()) {
             return;
         }
 
         let runtime = self.clone();
-        let mut updates = self.mcp_runtime.subscribe();
+        let mut updates = self.external_runtimes.mcp.subscribe();
         *watcher = Some(tokio::spawn(async move {
             while let Ok(()) | Err(RecvError::Lagged(_)) = updates.recv().await {
                 if let Err(error) = runtime.emit_mcp_health_snapshot().await {
@@ -44,7 +44,13 @@ impl StudioRuntime {
     }
 
     pub(super) async fn stop_mcp_health_watcher(&self) {
-        if let Some(handle) = self.mcp_health_watcher.lock().await.take() {
+        if let Some(handle) = self
+            .external_runtimes
+            .mcp_health_watcher
+            .lock()
+            .await
+            .take()
+        {
             handle.abort();
         }
     }
@@ -53,15 +59,16 @@ impl StudioRuntime {
         let config = self.config_store.load_or_default()?;
         let servers = effective_mcp_servers(&config);
         match refresh {
-            McpRuntimeRefresh::Reconcile => self.mcp_runtime.reconcile(servers).await?,
-            McpRuntimeRefresh::Recheck => self.mcp_runtime.recheck(servers).await?,
+            McpRuntimeRefresh::Reconcile => self.external_runtimes.mcp.reconcile(servers).await?,
+            McpRuntimeRefresh::Recheck => self.external_runtimes.mcp.recheck(servers).await?,
         }
         self.emit_mcp_health_snapshot().await
     }
 
     async fn emit_mcp_health_snapshot(&self) -> Result<()> {
         let health = self.mcp_health_snapshot().await?;
-        self.product_events
+        self.agent_facility
+            .product_events
             .emit(None, StudioProductEventKind::McpHealthChanged { health });
         Ok(())
     }
@@ -69,8 +76,8 @@ impl StudioRuntime {
     async fn mcp_health_snapshot(&self) -> Result<StudioMcpHealth> {
         let config = self.config_store.load_or_default()?;
         let servers = effective_mcp_servers(&config);
-        let snapshots = self.mcp_runtime.snapshots().await;
-        let active_mcp_servers = self.mcp_runtime.available_server_names().await;
+        let snapshots = self.external_runtimes.mcp.snapshots().await;
+        let active_mcp_servers = self.external_runtimes.mcp.available_server_names().await;
         Ok(mcp_health_from_effective(
             servers,
             snapshots,

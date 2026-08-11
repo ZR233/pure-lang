@@ -351,6 +351,7 @@ class _FakeStudioApi implements StudioApi {
     return PendingInteraction(
       id: interactionId,
       threadId: initialState.selectedThreadId ?? '',
+      turnId: 'turn-response',
       kind: InteractionKind.userInput,
       title: '',
       body: '',

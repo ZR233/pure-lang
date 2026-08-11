@@ -5,11 +5,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::state::unix_timestamp;
-use super::{
-    AgentAccessPolicy, AgentActivityState, AgentDirectoryWaitMessage, AgentId, AgentLifecycleState,
-    AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector,
-    ThreadContextState, ThreadId,
-};
+use super::*;
 use crate::tool::ToolBudgetTiming;
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
 
@@ -661,7 +657,7 @@ mod tests {
                 depth: 0,
             },
             lifecycle: AgentLifecycleState::Active,
-            activity: AgentActivityState::Running,
+            activity: AgentActivityState::Active(ActiveKind::Running),
             message: Some(super::super::AgentProgressCheckpoint {
                 stage: AgentProgressStage::Verifying,
                 summary: "验证完成".to_string(),
@@ -698,11 +694,11 @@ mod tests {
     fn read_session_age_gate_only_applies_while_agent_has_active_work() {
         assert!(session_read_requires_age_gate(
             AgentLifecycleState::Active,
-            AgentActivityState::Running,
+            AgentActivityState::Active(ActiveKind::Running),
         ));
         assert!(session_read_requires_age_gate(
             AgentLifecycleState::Active,
-            AgentActivityState::WaitingTool,
+            AgentActivityState::Active(ActiveKind::WaitingTool),
         ));
         assert!(!session_read_requires_age_gate(
             AgentLifecycleState::Active,

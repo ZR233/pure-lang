@@ -1,8 +1,8 @@
+use crate::api::studio::bridge_runtime::BridgeRuntime;
 use crate::api::studio::convert::records::{project_dto, thread_from_record};
 use crate::api::studio::convert::runtime::{bridge_recovery_issue, bridge_task_runtime};
 use crate::api::studio::convert::settings::studio_settings_dto;
 use crate::api::studio::convert::thread_stream::bridge_thread;
-use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{BridgeGeneralSettingsDto, BridgeStudioSnapshotResponse};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -146,15 +146,10 @@ pub(super) fn ensure_project_recovery_available(
     bridge: &'static BridgeRuntime,
     project_id: &str,
 ) -> Result<()> {
-    if bridge
-        .studio
-        .recovery_issues()
-        .iter()
-        .any(|issue| {
-            issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project
-                && issue.project_id.as_deref() == Some(project_id)
-        })
-    {
+    if bridge.studio.recovery_issues().iter().any(|issue| {
+        issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project
+            && issue.project_id.as_deref() == Some(project_id)
+    }) {
         anyhow::bail!("selected project is blocked by a recovery issue");
     }
     Ok(())

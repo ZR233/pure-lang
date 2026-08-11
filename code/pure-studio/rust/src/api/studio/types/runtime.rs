@@ -5,10 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
     pub status: BridgeRuntimeStatus,
-    pub active_turns: Vec<BridgeActiveTurn>,
     pub updated_at: i64,
     pub error: Option<String>,
-    pub recovery_issues: Vec<BridgeStudioRecoveryIssueDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,13 +18,6 @@ pub enum BridgeRuntimeStatus {
     ShuttingDown,
     Stopped,
     Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeActiveTurn {
-    pub thread_id: String,
-    pub turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -304,6 +295,17 @@ pub struct BridgeAgentProgressDto {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeAgentActivity {
+    Idle,
+    Queued,
+    ActiveRunning,
+    ActiveWaitingTool,
+    ActiveWaitingInteraction,
+    Cancelling,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeAgentDirectoryEntryDto {
@@ -320,7 +322,7 @@ pub struct BridgeAgentDirectoryEntryDto {
     pub error: Option<String>,
     pub reason: Option<String>,
     pub lifecycle: String,
-    pub activity: String,
+    pub activity: BridgeAgentActivity,
     pub progress: Option<BridgeAgentProgressDto>,
     pub updated_at: i64,
     pub summary_age_seconds: u64,

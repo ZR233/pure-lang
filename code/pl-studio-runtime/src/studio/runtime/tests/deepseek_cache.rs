@@ -237,7 +237,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
             let accepted_count = model_server.accepted.load(Ordering::Relaxed);
             let server_errors = model_server.errors().await;
             let server_finished = model_server.handle.is_finished();
-            let snapshot = runtime.runtime_snapshot();
+            let snapshot = runtime.runtime_snapshot().await?;
             let thread_snapshot = runtime.thread_snapshot(&thread.id).await;
             bail!(
                 "{error:#}; model requests={request_count}; accepted={accepted_count}; \

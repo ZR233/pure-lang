@@ -4,7 +4,7 @@ use crate::{
     InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, TodoListSnapshot, TokenUsageSnapshot,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 1;
+pub const THREAD_SCHEMA_VERSION: u32 = 2;
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,7 +109,6 @@ pub enum TurnPhase {
     Responding,
     Planning,
     RunningTool,
-    WaitingInteraction,
     Persisting,
 }
 
@@ -446,7 +445,6 @@ crate::impl_labeled_enum!(
         TurnPhase::Responding => "responding",
         TurnPhase::Planning => "planning",
         TurnPhase::RunningTool => "runningTool",
-        TurnPhase::WaitingInteraction => "waitingInteraction",
         TurnPhase::Persisting => "persisting",
     ]
 );

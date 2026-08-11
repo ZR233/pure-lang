@@ -208,11 +208,24 @@ StudioAgentView _agentDirectoryEntryFromFrb(
     error: agent.error,
     reason: agent.reason,
     lifecycle: agent.lifecycle,
-    activity: agent.activity,
+    activity: _agentActivityFromFrb(agent.activity),
     progress: _agentProgressFromFrb(agent.progress),
     updatedAt: _dateFromUnix(agent.updatedAt),
     summaryAgeSeconds: agent.summaryAgeSeconds.toInt(),
   );
+}
+
+StudioAgentActivity _agentActivityFromFrb(frb.BridgeAgentActivity activity) {
+  return switch (activity) {
+    frb.BridgeAgentActivity.idle => StudioAgentActivity.idle,
+    frb.BridgeAgentActivity.queued => StudioAgentActivity.queued,
+    frb.BridgeAgentActivity.activeRunning => StudioAgentActivity.activeRunning,
+    frb.BridgeAgentActivity.activeWaitingTool =>
+      StudioAgentActivity.activeWaitingTool,
+    frb.BridgeAgentActivity.activeWaitingInteraction =>
+      StudioAgentActivity.activeWaitingInteraction,
+    frb.BridgeAgentActivity.cancelling => StudioAgentActivity.cancelling,
+  };
 }
 
 AgentProgressView? _agentProgressFromFrb(frb.BridgeAgentProgressDto? progress) {

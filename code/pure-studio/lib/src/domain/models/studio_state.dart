@@ -190,6 +190,7 @@ class StudioState {
                 role: thread.role,
                 task: thread.title,
                 status: thread.status,
+                activity: StudioAgentActivity.idle,
                 summary: null,
                 depth: thread.isRoot ? 0 : 1,
                 error: null,
@@ -228,22 +229,19 @@ class StudioState {
       .where((issue) => issue.scope == RecoveryIssueScope.application)
       .toList();
 
-  StudioRecoveryIssue? recoveryIssueForProject(String projectId) {
+  StudioRecoveryIssue? recoveryIssue({
+    RecoveryIssueScope? scope,
+    String? projectId,
+    String? threadId,
+    String? id,
+  }) {
     return recoveryIssues
         .where(
           (issue) =>
-              issue.scope == RecoveryIssueScope.project &&
-              issue.projectId == projectId,
-        )
-        .firstOrNull;
-  }
-
-  StudioRecoveryIssue? recoveryIssueForThread(String threadId) {
-    return recoveryIssues
-        .where(
-          (issue) =>
-              issue.scope == RecoveryIssueScope.thread &&
-              issue.threadId == threadId,
+              (scope == null || issue.scope == scope) &&
+              (projectId == null || issue.projectId == projectId) &&
+              (threadId == null || issue.threadId == threadId) &&
+              (id == null || issue.id == id),
         )
         .firstOrNull;
   }

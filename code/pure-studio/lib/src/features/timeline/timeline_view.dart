@@ -557,11 +557,7 @@ TimelineRow? _currentActivityRow(List<TimelineRow> rows, StudioTurnView? turn) {
     if (activity == StudioTurnActivity.thinking && row.reasoningGroup != null) {
       return row;
     }
-    if ((activity == StudioTurnActivity.runningTool ||
-            activity == StudioTurnActivity.waitingForApproval ||
-            activity == StudioTurnActivity.waitingForUserInput ||
-            activity == StudioTurnActivity.waitingForPlanConfirmation) &&
-        row.toolGroup != null) {
+    if (activity.drivesToolGroup && row.toolGroup != null) {
       return row;
     }
   }

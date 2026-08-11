@@ -5,8 +5,8 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::watch;
 
 use super::{
-    AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeError, AgentRuntimeEvent,
-    AgentRuntimeEventKind, AgentRuntimeResult, AgentSnapshot,
+    ActiveKind, AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeError,
+    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSnapshot,
 };
 
 /// Agent Directory 的 canonical 快照。
@@ -148,7 +148,7 @@ fn directory_fact_changed(
     if previous.progress != snapshot.progress
         || previous.lifecycle != snapshot.lifecycle
         || (previous.activity != snapshot.activity
-            && snapshot.activity == AgentActivityState::WaitingInteraction)
+            && snapshot.activity == AgentActivityState::Active(ActiveKind::WaitingInteraction))
     {
         return true;
     }
@@ -167,6 +167,7 @@ fn snapshot_for_event(kind: &AgentRuntimeEventKind) -> AgentSnapshot {
         | AgentRuntimeEventKind::TurnQueued { snapshot, .. }
         | AgentRuntimeEventKind::TurnStarted { snapshot, .. }
         | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
+        | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
         | AgentRuntimeEventKind::TurnFinished { snapshot, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { snapshot, .. }
         | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.clone(),

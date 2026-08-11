@@ -36,38 +36,36 @@ abstract class SidebarView with _$SidebarView {
     required String? selectedProjectId,
     required String? selectedRootThreadId,
     required bool isBusy,
-    required List<StudioRecoveryIssue> recoveryIssues,
+    required Map<String, StudioRecoveryIssue> projectRecoveryIssues,
+    required Map<String, StudioRecoveryIssue> threadRecoveryIssues,
   }) = _SidebarView;
 
   factory SidebarView.fromState(StudioState state) {
+    final projectRecoveryIssues = <String, StudioRecoveryIssue>{};
+    for (final project in state.projects) {
+      final issue = state.recoveryIssue(
+        scope: RecoveryIssueScope.project,
+        projectId: project.id,
+      );
+      if (issue != null) projectRecoveryIssues[project.id] = issue;
+    }
+    final threadRecoveryIssues = <String, StudioRecoveryIssue>{};
+    for (final thread in state.rootThreads) {
+      final issue = state.recoveryIssue(
+        scope: RecoveryIssueScope.thread,
+        threadId: thread.id,
+      );
+      if (issue != null) threadRecoveryIssues[thread.id] = issue;
+    }
     return SidebarView(
       projects: state.projects,
       rootThreads: state.rootThreads,
       selectedProjectId: state.selectedProjectId,
       selectedRootThreadId: state.selectedRootThread?.id,
       isBusy: state.isBusy,
-      recoveryIssues: state.recoveryIssues,
+      projectRecoveryIssues: projectRecoveryIssues,
+      threadRecoveryIssues: threadRecoveryIssues,
     );
-  }
-
-  StudioRecoveryIssue? recoveryIssueForProject(String projectId) {
-    for (final issue in recoveryIssues) {
-      if (issue.scope == RecoveryIssueScope.project &&
-          issue.projectId == projectId) {
-        return issue;
-      }
-    }
-    return null;
-  }
-
-  StudioRecoveryIssue? recoveryIssueForThread(String threadId) {
-    for (final issue in recoveryIssues) {
-      if (issue.scope == RecoveryIssueScope.thread &&
-          issue.threadId == threadId) {
-        return issue;
-      }
-    }
-    return null;
   }
 }
 

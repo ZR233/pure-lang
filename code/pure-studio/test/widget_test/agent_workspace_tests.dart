@@ -173,6 +173,7 @@ StudioState _rootAndChildState() {
       PendingInteraction(
         id: 'child-interaction',
         threadId: 'child-1',
+        turnId: 'child-turn',
         kind: InteractionKind.userInput,
         title: 'Review input',
         body: 'Continue?',

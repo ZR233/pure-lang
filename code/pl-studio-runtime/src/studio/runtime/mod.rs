@@ -9,9 +9,8 @@ use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_a
 use crate::studio::records::ThreadRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioActiveTurn, StudioProductEventRuntime,
-    StudioRecoveryCleanupPreview, StudioRecoveryIssueAction, StudioRuntimeSnapshot,
-    StudioRuntimeState, StudioStore,
+    InteractionRuntime, StudioActiveTurn, StudioProductEventRuntime, StudioRecoveryCleanupPreview,
+    StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
 };
 
 mod history;
@@ -76,19 +75,29 @@ pub struct StudioResolveInteractionResponse {
 pub struct StudioRuntime {
     store: StudioStore,
     config_store: ConfigStore,
-    mcp_runtime: McpRuntimeHandle,
-    mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    lsp_runtime: pl_lsp::LspRuntimeRegistry,
-    interactions: InteractionRuntime,
-    product_events: StudioProductEventRuntime,
+    external_runtimes: StudioExternalRuntimes,
+    agent_facility: StudioAgentFacility,
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
-    agent_framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
-    agent_resources: StudioAgentResources,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
+}
+
+#[derive(Clone)]
+struct StudioExternalRuntimes {
+    mcp: McpRuntimeHandle,
+    mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    lsp: pl_lsp::LspRuntimeRegistry,
+}
+
+#[derive(Clone)]
+struct StudioAgentFacility {
+    framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
+    resources: StudioAgentResources,
+    interactions: InteractionRuntime,
+    product_events: StudioProductEventRuntime,
 }
 
 impl StudioRuntime {
@@ -106,7 +115,7 @@ impl StudioRuntime {
     /// `AgentSnapshot.active_turn_id`。这里聚合所有 root thread 的活动 turn，
     /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
     async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
-        let Ok(framework) = self.agent_framework().await else {
+        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
             return Ok(Vec::new());
         };
         let runtime = framework.handle();
@@ -116,6 +125,9 @@ impl StudioRuntime {
             .map_err(|error| anyhow::anyhow!(error))?;
         let mut turns = Vec::new();
         for snapshot in snapshots {
+            if snapshot.identity.parent_id.is_some() {
+                continue;
+            }
             let Some(turn_id) = snapshot.active_turn_id.clone() else {
                 continue;
             };
@@ -201,13 +213,14 @@ impl StudioRuntime {
             self.close_project_agent_trees(&[thread_id.to_string()])
                 .await?;
             let emitter = self.interaction_emitter(thread_id.to_string());
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_thread(thread_id, "recovery context reset", emitter)
                 .await?;
             self.store.reset_agent_sessions_for_root(thread_id).await?;
         }
         let _ = self.recovery.remove(issue_id);
-        Ok(self.runtime_snapshot())
+        self.runtime_snapshot().await
     }
 
     pub async fn retry_recovery_issue(&self, issue_id: &str) -> Result<StudioRuntimeSnapshot> {
@@ -221,7 +234,7 @@ impl StudioRuntime {
         }
         self.task_coordinator.retry_recovery_issue(&issue).await?;
         let _ = self.recovery.remove(issue_id);
-        Ok(self.runtime_snapshot())
+        self.runtime_snapshot().await
     }
 
     async fn cleanup_project_issue(
@@ -242,13 +255,15 @@ impl StudioRuntime {
         thread_ids.sort();
         thread_ids.dedup();
         let root_thread_ids = thread_ids.iter().cloned().collect::<BTreeSet<_>>();
-        self.agent_resources
+        self.agent_facility
+            .resources
             .begin_cleanup_takeover(&root_thread_ids)
             .await;
         self.close_project_agent_trees(&thread_ids).await?;
         for thread_id in &thread_ids {
             let emitter = self.interaction_emitter(thread_id.clone());
-            self.interactions
+            self.agent_facility
+                .interactions
                 .cancel_thread(thread_id, "project cleaned up", emitter)
                 .await?;
         }
@@ -256,11 +271,12 @@ impl StudioRuntime {
             .execute_recovery_cleanup(&issue, &preview)
             .await?;
         self.store.quarantine_project(project_id).await?;
-        self.agent_resources
+        self.agent_facility
+            .resources
             .complete_cleanup_takeover(&root_thread_ids)
             .await;
         let _ = self.recovery.remove_for_project(project_id);
-        Ok(self.runtime_snapshot())
+        self.runtime_snapshot().await
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {

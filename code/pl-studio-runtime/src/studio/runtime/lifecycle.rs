@@ -44,17 +44,21 @@ impl StudioRuntime {
         let interactions = InteractionRuntime::new(store.clone());
         let product_events = StudioProductEventRuntime::new(store.clone());
         Self {
-            interactions,
-            product_events,
             store,
             config_store,
-            mcp_runtime: McpRuntime::new(LocalMcpRuntimeHost).handle(),
-            mcp_health_watcher: Default::default(),
-            lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
+            external_runtimes: super::StudioExternalRuntimes {
+                mcp: McpRuntime::new(LocalMcpRuntimeHost).handle(),
+                mcp_health_watcher: Default::default(),
+                lsp: pl_lsp::LspRuntimeRegistry::new(),
+            },
+            agent_facility: super::StudioAgentFacility {
+                framework: Default::default(),
+                resources: StudioAgentResources::default(),
+                interactions,
+                product_events,
+            },
             runtime_state,
             recovery: crate::studio::StudioRecoveryRegistry::new(),
-            agent_framework: Default::default(),
-            agent_resources: StudioAgentResources::default(),
             task_coordinator,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
@@ -67,11 +71,11 @@ impl StudioRuntime {
     }
 
     pub fn interactions(&self) -> &InteractionRuntime {
-        &self.interactions
+        &self.agent_facility.interactions
     }
 
     pub fn product_events(&self) -> &StudioProductEventRuntime {
-        &self.product_events
+        &self.agent_facility.product_events
     }
 
     pub fn config_store(&self) -> &ConfigStore {
@@ -79,11 +83,11 @@ impl StudioRuntime {
     }
 
     pub fn mcp_runtime(&self) -> &McpRuntimeHandle {
-        &self.mcp_runtime
+        &self.external_runtimes.mcp
     }
 
     pub fn lsp_runtime(&self) -> &pl_lsp::LspRuntimeRegistry {
-        &self.lsp_runtime
+        &self.external_runtimes.lsp
     }
 
     /// 返回当前所有恢复问题的快照。
@@ -94,26 +98,28 @@ impl StudioRuntime {
         self.recovery.snapshot()
     }
 
-    pub fn runtime_snapshot(&self) -> StudioRuntimeSnapshot {
-        self.runtime_state.snapshot()
+    pub async fn runtime_snapshot(&self) -> Result<StudioRuntimeSnapshot> {
+        let mut snapshot = self.runtime_state.snapshot();
+        snapshot.active_turns = self.derive_active_turns().await?;
+        Ok(snapshot)
     }
 
     pub(in crate::studio) async fn agent_framework(
         &self,
     ) -> Result<std::sync::Arc<StudioAgentRuntime>> {
-        let mut framework = self.agent_framework.lock().await;
+        let mut framework = self.agent_facility.framework.lock().await;
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
         let host = StudioAgentHost::new(
             self.store.clone(),
             self.config_store.clone(),
-            self.mcp_runtime.clone(),
-            self.lsp_runtime.clone(),
-            self.interactions.clone(),
+            self.external_runtimes.mcp.clone(),
+            self.external_runtimes.lsp.clone(),
+            self.agent_facility.interactions.clone(),
             self.task_coordinator.clone(),
-            self.agent_resources.clone(),
-            self.product_events.clone(),
+            self.agent_facility.resources.clone(),
+            self.agent_facility.product_events.clone(),
         );
         let repaired_roles = self.store.repair_root_thread_roles().await?;
         if repaired_roles > 0 {
@@ -174,7 +180,7 @@ impl StudioRuntime {
     }
 
     async fn shutdown_agent_framework(&self) -> Result<()> {
-        let framework = self.agent_framework.lock().await.take();
+        let framework = self.agent_facility.framework.lock().await.take();
         if let Some(framework) = framework {
             framework.host().detach_runtime().await;
             framework
@@ -191,8 +197,11 @@ impl StudioRuntime {
             barrier.wait().await;
         }
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        if matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
-            return Ok(self.runtime_snapshot());
+        if matches!(
+            self.runtime_snapshot().await?.status,
+            StudioRuntimeStatus::Ready
+        ) {
+            return self.runtime_snapshot().await;
         }
         let _ = self
             .runtime_state
@@ -210,8 +219,10 @@ impl StudioRuntime {
         match initialization {
             Ok(report) => {
                 self.recovery.replace(report.issues);
-                self.runtime_state
-                    .transition(StudioRuntimeStatus::Ready, None)
+                let _ = self
+                    .runtime_state
+                    .transition(StudioRuntimeStatus::Ready, None)?;
+                self.runtime_snapshot().await
             }
             Err(error) => {
                 let message = format!("{error:#}");
@@ -224,7 +235,10 @@ impl StudioRuntime {
     }
 
     pub async fn start_runtime(&self) -> Result<StudioRuntimeSnapshot> {
-        if !matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
+        if !matches!(
+            self.runtime_snapshot().await?.status,
+            StudioRuntimeStatus::Ready
+        ) {
             let _ = self.initialize_runtime().await?;
         }
         self.start_mcp_health_watcher().await;
@@ -235,7 +249,7 @@ impl StudioRuntime {
                 .transition(StudioRuntimeStatus::Failed, Some(message));
             return Err(error);
         }
-        Ok(self.runtime_snapshot())
+        self.runtime_snapshot().await
     }
 
     /// Stops all Studio runtime services.
@@ -257,9 +271,9 @@ impl StudioRuntime {
     }
 
     async fn shutdown_runtime_locked(&self) -> Result<StudioRuntimeSnapshot> {
-        let status = self.runtime_snapshot().status;
+        let status = self.runtime_snapshot().await?.status;
         if matches!(status, StudioRuntimeStatus::Stopped) {
-            return Ok(self.runtime_snapshot());
+            return self.runtime_snapshot().await;
         }
         let _ = self
             .runtime_state
@@ -267,10 +281,12 @@ impl StudioRuntime {
         self.shutdown_agent_framework().await?;
         self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;
-        self.mcp_runtime.shutdown().await;
-        self.lsp_runtime.shutdown().await;
-        self.runtime_state
-            .transition(StudioRuntimeStatus::Stopped, None)
+        self.external_runtimes.mcp.shutdown().await;
+        self.external_runtimes.lsp.shutdown().await;
+        let _ = self
+            .runtime_state
+            .transition(StudioRuntimeStatus::Stopped, None)?;
+        self.runtime_snapshot().await
     }
 
     pub async fn shutdown(&self) {
@@ -284,7 +300,10 @@ impl StudioRuntime {
             .await?
             .context("selected project not found")?;
         let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
-        self.lsp_runtime.reconcile_workspace(workspace_root).await;
+        self.external_runtimes
+            .lsp
+            .reconcile_workspace(workspace_root)
+            .await;
         Ok(())
     }
 

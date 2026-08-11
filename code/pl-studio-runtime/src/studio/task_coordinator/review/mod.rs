@@ -188,6 +188,7 @@ impl TaskCoordinator {
     pub(crate) fn task_status_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
+        runtime: Option<AgentRuntimeHandle>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
@@ -198,6 +199,7 @@ impl TaskCoordinator {
             move |_: TaskStatusInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
+                let runtime = runtime.clone();
                 async move {
                     let run = coordinator
                         .store
@@ -207,7 +209,13 @@ impl TaskCoordinator {
                     let completions = coordinator.store.list_work_completions(&run.id).await?;
                     let merges = coordinator.store.list_merge_records(&run.id).await?;
                     let merge_candidates = coordinator
-                        .merge_candidates(&run, &work_units, &completions, &merges)
+                        .merge_candidates(
+                            &run,
+                            &work_units,
+                            &completions,
+                            &merges,
+                            runtime.as_ref(),
+                        )
                         .await?;
                     let output = TaskStatusOutput {
                         work_units: work_units
@@ -322,6 +330,7 @@ impl TaskCoordinator {
         work_units: &[WorkUnitRecord],
         completions: &[WorkCompletionRecord],
         merges: &[MergeRecord],
+        runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<Vec<MergeCandidate>> {
         if run.phase != TaskRunPhase::Merging {
             return Ok(Vec::new());
@@ -336,6 +345,10 @@ impl TaskCoordinator {
             let Some(executor_agent_id) = work_unit.executor_thread_id.as_deref() else {
                 continue;
             };
+            if let Some(runtime) = runtime {
+                self.await_closed_agent_projection(runtime, executor_agent_id)
+                    .await?;
+            }
             let executor = self
                 .store
                 .read_thread(executor_agent_id)

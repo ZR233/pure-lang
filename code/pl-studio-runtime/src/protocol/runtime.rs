@@ -82,6 +82,17 @@ pub struct StudioAgentProgressRuntime {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioAgentActivity {
+    Idle,
+    Queued,
+    ActiveRunning,
+    ActiveWaitingTool,
+    ActiveWaitingInteraction,
+    Cancelling,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioAgentDirectoryEntry {
@@ -98,7 +109,7 @@ pub struct StudioAgentDirectoryEntry {
     pub error: Option<String>,
     pub reason: Option<String>,
     pub lifecycle: String,
-    pub activity: String,
+    pub activity: StudioAgentActivity,
     pub progress: Option<StudioAgentProgressRuntime>,
     pub updated_at: i64,
     pub summary_age_seconds: u64,

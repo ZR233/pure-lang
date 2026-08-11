@@ -3,12 +3,12 @@ use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
 use super::host::{AgentCommitObserver, ThreadRepository};
-use super::state::{AgentRuntimeError, unix_timestamp};
+use super::state::{AgentRuntimeError, derive_activity, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommittedEvent, AgentLifecycleState, AgentRuntimeEvent,
-    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult,
-    AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, ThreadCommitOutcome, ThreadId,
-    TurnId, TurnOutcomeKind,
+    AgentActivityState, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentTurnOutcome,
+    MailboxDeliveryState, RestoredAgentRuntime, ThreadCommitOutcome, ThreadId, TurnId,
+    TurnOutcomeKind,
 };
 use crate::thread_event::{project_runtime_event, runtime_event_thread_id};
 use crate::{ThreadEventBus, ThreadEventBusHandle, ThreadEventOptions};
@@ -160,10 +160,7 @@ where
             || had_active_input
             || matches!(
                 agent.state.snapshot.activity,
-                AgentActivityState::Running
-                    | AgentActivityState::WaitingTool
-                    | AgentActivityState::WaitingInteraction
-                    | AgentActivityState::Cancelling
+                AgentActivityState::Active(_) | AgentActivityState::Cancelling
             );
         if !interrupted {
             recovered.push(agent);
@@ -195,14 +192,11 @@ where
         agent.state.snapshot.active_turn_id = None;
         agent.state.snapshot.last_turn = Some(outcome.clone());
         agent.state.refresh_mailbox_snapshot();
-        agent.state.snapshot.activity = if agent.state.has_triggering_input() {
-            AgentActivityState::Queued
-        } else {
-            AgentActivityState::Idle
-        };
-        if agent.state.snapshot.lifecycle != AgentLifecycleState::Active {
-            agent.state.snapshot.activity = AgentActivityState::Idle;
-        }
+        agent.state.snapshot.activity = derive_activity(
+            agent.state.snapshot.lifecycle,
+            None,
+            agent.state.has_triggering_input(),
+        );
         agent.state.snapshot.updated_at = unix_timestamp();
         let event = AgentRuntimeEvent {
             agent_id: agent.state.snapshot.identity.id.clone(),

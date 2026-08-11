@@ -650,7 +650,7 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
         .unwrap();
 
     let preview = runtime.preview_project_cleanup(&project.id).await.unwrap();
-    let snapshot = runtime
+    runtime
         .cleanup_project(&project.id, &preview.expected_revision)
         .await
         .unwrap();

@@ -25,6 +25,7 @@ pub(crate) fn project_trace_events(
     traces: &[TraceEvent],
 ) -> ThreadProjectionBatch {
     let mut projector = Projector::new(thread_id, current.revision);
+    let mut active_turn_id = current.active_turn.as_ref().map(|turn| turn.id.clone());
     for trace in traces {
         match &trace.kind {
             TraceEventKind::TracePartStarted { item } => {
@@ -68,15 +69,14 @@ pub(crate) fn project_trace_events(
             TraceEventKind::InteractionChanged { event } => {
                 let mut interaction = event.interaction.clone();
                 interaction.scope.thread_id = thread_id.to_string();
-                let phase = if interaction.status == pl_protocol::InteractionStatus::Pending {
-                    TurnPhase::WaitingInteraction
-                } else {
-                    TurnPhase::Thinking
-                };
-                if current.active_turn.as_ref().map(|turn| turn.id.as_str())
-                    == Some(interaction.scope.turn_id.as_str())
-                {
-                    projector.turn_updated(&interaction.scope.turn_id, phase, trace.timestamp);
+                if let Some(turn) = interaction_completion_turn(
+                    thread_id,
+                    active_turn_id.as_deref(),
+                    &interaction,
+                    trace.timestamp,
+                ) {
+                    projector.push(trace.timestamp, ThreadNotification::TurnCompleted { turn });
+                    active_turn_id = None;
                 }
                 projector.push(
                     trace.timestamp,
@@ -208,6 +208,7 @@ pub(crate) fn project_runtime_event(
         AgentRuntimeEventKind::Registered { .. }
         | AgentRuntimeEventKind::StateChanged { .. }
         | AgentRuntimeEventKind::ThreadOpened { .. }
+        | AgentRuntimeEventKind::TurnActivityChanged { .. }
         | AgentRuntimeEventKind::Faulted { .. } => {}
     }
     projector.finish()
@@ -217,6 +218,7 @@ pub(crate) fn runtime_event_thread_id(event: &AgentRuntimeEvent) -> Option<&str>
     match &event.kind {
         AgentRuntimeEventKind::TurnQueued { input, .. } => Some(input.thread_id.as_str()),
         AgentRuntimeEventKind::TurnStarted { thread_id, .. } => Some(thread_id.as_str()),
+        AgentRuntimeEventKind::TurnActivityChanged { thread_id, .. } => Some(thread_id.as_str()),
         AgentRuntimeEventKind::TurnFinished { outcome, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
             Some(outcome.thread_id.as_str())
@@ -287,6 +289,25 @@ fn turn(
         updated_at,
         completed_at,
     }
+}
+
+pub(super) fn interaction_completion_turn(
+    thread_id: &str,
+    active_turn_id: Option<&str>,
+    interaction: &pl_protocol::InteractionRequest,
+    emitted_at: i64,
+) -> Option<Turn> {
+    (interaction.status == pl_protocol::InteractionStatus::Pending
+        && active_turn_id == Some(interaction.scope.turn_id.as_str()))
+    .then(|| {
+        turn(
+            &interaction.scope.turn_id,
+            thread_id,
+            TurnState::Completed,
+            None,
+            emitted_at,
+        )
+    })
 }
 
 fn phase_for_item(item: &TracePart) -> Option<TurnPhase> {

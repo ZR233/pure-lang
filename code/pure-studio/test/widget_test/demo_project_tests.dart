@@ -114,10 +114,29 @@ void registerDemoProjectTests() {
     final frame = await api.subscribeThread('thread-main').first;
 
     final snapshot = frame as ThreadSnapshotFrame;
-    expect(snapshot.workspace.interactions.map((item) => item.kind), [
-      InteractionKind.toolApproval,
-      InteractionKind.userInput,
-      InteractionKind.planConfirmation,
-    ]);
+    expect(
+      snapshot.workspace.interactions.map(
+        (item) => (item.id, item.kind, item.turnId),
+      ),
+      [
+        ('driver-tool', InteractionKind.toolApproval, 'driver-origin-turn'),
+        ('driver-input', InteractionKind.userInput, 'driver-origin-turn'),
+        (
+          'driver-plan-continue',
+          InteractionKind.planConfirmation,
+          'driver-origin-turn',
+        ),
+        (
+          'driver-plan-implement',
+          InteractionKind.planConfirmation,
+          'driver-origin-turn',
+        ),
+        (
+          'driver-plan-dismiss',
+          InteractionKind.planConfirmation,
+          'driver-origin-turn',
+        ),
+      ],
+    );
   });
 }

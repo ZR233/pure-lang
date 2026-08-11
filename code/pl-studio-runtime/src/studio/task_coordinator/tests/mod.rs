@@ -927,7 +927,7 @@ async fn task_status_exposes_only_relative_worktree_locators() {
     fixture.submit(&source_head).await.unwrap();
     let tool = fixture
         .coordinator
-        .task_status_tool(fixture.root_thread_id.clone());
+        .task_status_tool(fixture.root_thread_id.clone(), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let output = tool
         .execute(
@@ -971,6 +971,51 @@ async fn task_status_exposes_only_relative_worktree_locators() {
         !json
             .to_string()
             .contains(&fixture.worktree.to_string_lossy().to_string())
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn closed_thread_projection_barrier_waits_for_durable_status() {
+    let fixture = DeliveryFixture::new("closed-projection-barrier", vec!["src"]).await;
+    persist_closed_executor_thread(
+        &fixture.store,
+        &fixture.root_thread_id,
+        &fixture.subagent.id,
+    )
+    .await
+    .unwrap();
+    let updated_at = crate::studio::ids::unix_seconds() + 1;
+    fixture
+        .store
+        .update_thread_status(&fixture.subagent.id, "idle", None, None, updated_at)
+        .await
+        .unwrap();
+    let store = fixture.store.clone();
+    let executor_id = fixture.subagent.id.clone();
+    let projection = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        store
+            .update_thread_status(&executor_id, "closed", None, None, updated_at + 1)
+            .await
+    });
+
+    fixture
+        .coordinator
+        .await_closed_thread(&fixture.subagent.id)
+        .await
+        .unwrap();
+
+    projection.await.unwrap().unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .read_thread(&fixture.subagent.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        "closed"
     );
     fixture.cleanup();
 }

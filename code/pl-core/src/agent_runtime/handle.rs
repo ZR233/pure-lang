@@ -9,7 +9,7 @@ use super::agent_loop::{AgentLoopCommand, AgentLoopHandle};
 use super::coordinator::{AgentRegistry, CoordinatorCommand};
 use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
+    ActiveKind, AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
     AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId,
     AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
     AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
@@ -181,14 +181,14 @@ impl AgentRuntimeHandle {
         &self,
         agent_id: AgentId,
         turn_id: TurnId,
-        activity: AgentActivityState,
+        kind: ActiveKind,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(
             &agent_id,
             AgentLoopCommand::SetActivity {
                 turn_id,
-                activity,
+                kind,
                 reply,
             },
         )
@@ -450,7 +450,9 @@ fn current_wait_result<'a>(
     }
     let interactions = snapshots
         .into_iter()
-        .filter(|snapshot| snapshot.activity == AgentActivityState::WaitingInteraction)
+        .filter(|snapshot| {
+            snapshot.activity == AgentActivityState::Active(ActiveKind::WaitingInteraction)
+        })
         .collect::<Vec<_>>();
     (!interactions.is_empty()).then_some(AgentDirectoryWaitResult {
         reason: AgentDirectoryWaitReason::Interaction,
@@ -470,8 +472,9 @@ fn changed_wait_result(
                 || snapshot.last_turn != previous.last_turn
             {
                 AgentDirectoryWaitReason::Terminal
-            } else if snapshot.activity == AgentActivityState::WaitingInteraction
-                && previous.activity != AgentActivityState::WaitingInteraction
+            } else if snapshot.activity
+                == AgentActivityState::Active(ActiveKind::WaitingInteraction)
+                && previous.activity != AgentActivityState::Active(ActiveKind::WaitingInteraction)
             {
                 AgentDirectoryWaitReason::Interaction
             } else if snapshot.progress != previous.progress {

@@ -6,6 +6,7 @@ import '../domain/models/studio_models.dart';
 abstract final class StudioDriverState {
   static TaskRuntimeView? _task;
   static AgentWorkspaceView? _workspace;
+  static final Map<String, StudioTurnView> _lastTurnsByThread = {};
   static String? _planContent;
   static TaskRecoveryPreview? _taskRecoveryPreview;
   static TaskRecoveryResult? _taskRecoveryResult;
@@ -16,6 +17,12 @@ abstract final class StudioDriverState {
 
   static void publishWorkspace(AgentWorkspaceView workspace) {
     _workspace = workspace;
+    final turn = workspace.turn;
+    if (turn != null) publishTurn(turn);
+  }
+
+  static void publishTurn(StudioTurnView turn) {
+    _lastTurnsByThread[turn.threadId] = turn;
   }
 
   static void publishPlan(String content) {
@@ -37,6 +44,9 @@ abstract final class StudioDriverState {
 
   static String snapshotJson() {
     final workspace = _workspace;
+    final lastTurn = workspace == null
+        ? null
+        : _lastTurnsByThread[workspace.threadId];
     return jsonEncode({
       'planContent': _planContent,
       'workspace': workspace == null
@@ -48,10 +58,16 @@ abstract final class StudioDriverState {
               'threadStatus': workspace.thread.status,
               'isBusy': workspace.isBusy,
               'isTaskPaused': workspace.isTaskPaused,
+              'composer': {
+                'mode': workspace.composerMode.name,
+                'lockedByInteraction': workspace.activeInteraction != null,
+              },
+              'interactionCount': workspace.activeInteraction == null ? 0 : 1,
               'activeInteraction': workspace.activeInteraction == null
                   ? null
                   : {
                       'id': workspace.activeInteraction!.id,
+                      'turnId': workspace.activeInteraction!.turnId,
                       'kind': workspace.activeInteraction!.kind.name,
                     },
               'turn': workspace.turn == null
@@ -65,6 +81,7 @@ abstract final class StudioDriverState {
                           .toUtc()
                           .toIso8601String(),
                     },
+              'lastTurn': lastTurn == null ? null : _turnJson(lastTurn),
               'timelineProgress': _timelineProgress(workspace),
             },
       'task': _task == null ? null : _taskJson(_task!),
@@ -290,4 +307,13 @@ abstract final class StudioDriverState {
       ]),
     };
   }
+
+  static Map<String, Object?> _turnJson(StudioTurnView turn) => {
+    'id': turn.turnId,
+    'threadId': turn.threadId,
+    'status': turn.state.status.name,
+    'activity': turn.state.activity?.name,
+    'reason': turn.state.reason,
+    'updatedAt': turn.updatedAt.toUtc().toIso8601String(),
+  };
 }

@@ -8,22 +8,13 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-class BridgeActiveTurn {
-  final String threadId;
-  final String turnId;
-
-  const BridgeActiveTurn({required this.threadId, required this.turnId});
-
-  @override
-  int get hashCode => threadId.hashCode ^ turnId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeActiveTurn &&
-          runtimeType == other.runtimeType &&
-          threadId == other.threadId &&
-          turnId == other.turnId;
+enum BridgeAgentActivity {
+  idle,
+  queued,
+  activeRunning,
+  activeWaitingTool,
+  activeWaitingInteraction,
+  cancelling,
 }
 
 class BridgeAgentDirectoryEntryDto {
@@ -40,7 +31,7 @@ class BridgeAgentDirectoryEntryDto {
   final String? error;
   final String? reason;
   final String lifecycle;
-  final String activity;
+  final BridgeAgentActivity activity;
   final BridgeAgentProgressDto? progress;
   final PlatformInt64 updatedAt;
   final BigInt summaryAgeSeconds;
@@ -1333,26 +1324,17 @@ class BridgeTaskWorkUnitDto {
 
 class RuntimeSnapshot {
   final BridgeRuntimeStatus status;
-  final List<BridgeActiveTurn> activeTurns;
   final PlatformInt64 updatedAt;
   final String? error;
-  final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
 
   const RuntimeSnapshot({
     required this.status,
-    required this.activeTurns,
     required this.updatedAt,
     this.error,
-    required this.recoveryIssues,
   });
 
   @override
-  int get hashCode =>
-      status.hashCode ^
-      activeTurns.hashCode ^
-      updatedAt.hashCode ^
-      error.hashCode ^
-      recoveryIssues.hashCode;
+  int get hashCode => status.hashCode ^ updatedAt.hashCode ^ error.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1360,8 +1342,6 @@ class RuntimeSnapshot {
       other is RuntimeSnapshot &&
           runtimeType == other.runtimeType &&
           status == other.status &&
-          activeTurns == other.activeTurns &&
           updatedAt == other.updatedAt &&
-          error == other.error &&
-          recoveryIssues == other.recoveryIssues;
+          error == other.error;
 }

@@ -72,7 +72,7 @@ impl TaskCoordinator {
             core.register_tool(
                 self.task_request_integrated_review_tool(thread_id, runtime.clone()),
             );
-            core.register_tool(self.task_status_tool(thread_id));
+            core.register_tool(self.task_status_tool(thread_id, Some(runtime.clone())));
             core.register_tool(self.task_complete_tool(thread_id));
             core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
             return;

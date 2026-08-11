@@ -1,5 +1,5 @@
+use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::thread_stream::bridge_interaction;
-use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, BridgeInteractionRequest, BridgeInteractionResolution,
     BridgePlanConfirmationResolution, BridgeToolApprovalResolution, InterruptTurnResponse,

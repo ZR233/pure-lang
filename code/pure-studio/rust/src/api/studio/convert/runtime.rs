@@ -1,33 +1,13 @@
-use crate::api::studio::types::{
-    BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeBudgetLimitDto,
-    BridgeBudgetUsageDto, BridgeConversationRecoveryMode, BridgeLspHealthDto, BridgeMcpHealthDto,
-    BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto,
-    BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope,
-    BridgeRecoveryResourcePresence, BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto,
-    BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto, BridgeTaskGitFingerprintDto,
-    BridgeTaskMergeDto, BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto,
-    BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto, BridgeTaskRecoveryTargetKind,
-    BridgeTaskRecoveryTurnDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto,
-    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
-};
+use crate::api::studio::types::*;
 use pl_protocol::ConversationRecoveryMode;
-use pl_studio_runtime::{
-    StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview,
-    StudioRecoveryIssue, StudioRuntimeSnapshot as CoreRuntimeSnapshot, StudioTaskGitFingerprint,
-    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
-    StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
-};
+use pl_studio_runtime::*;
 // ── Core conversion functions ──
 
-/// 把 runtime lifecycle 快照与恢复问题列表组装成 FRB `RuntimeSnapshot`。
+/// 把 core lifecycle 快照转换成 FRB `RuntimeSnapshot`。
 ///
-/// 恢复问题不再随 lifecycle 快照下发；调用方从 `StudioRecoveryRegistry` 取出后
-/// 单独传入。该字段在 Dart 侧未被消费，保留仅为兼容既有 FRB 类型，后续重生成时
-/// 可移除。
-pub(crate) fn runtime_snapshot(
-    snapshot: CoreRuntimeSnapshot,
-    recovery_issues: Vec<StudioRecoveryIssue>,
-) -> RuntimeSnapshot {
+/// UI 从 per-thread stream 派生活动 turn，并从 Studio bootstrap/snapshot 响应读取
+/// 恢复问题；lifecycle 快照只承载 lifecycle 本身。
+pub(crate) fn runtime_snapshot(snapshot: StudioRuntimeSnapshot) -> RuntimeSnapshot {
     RuntimeSnapshot {
         status: match snapshot.status {
             pl_studio_runtime::StudioRuntimeStatus::Uninitialized => {
@@ -43,17 +23,8 @@ pub(crate) fn runtime_snapshot(
             pl_studio_runtime::StudioRuntimeStatus::Stopped => BridgeRuntimeStatus::Stopped,
             pl_studio_runtime::StudioRuntimeStatus::Failed => BridgeRuntimeStatus::Failed,
         },
-        active_turns: snapshot
-            .active_turns
-            .into_iter()
-            .map(|turn| BridgeActiveTurn {
-                thread_id: turn.thread_id,
-                turn_id: turn.turn_id,
-            })
-            .collect(),
         updated_at: snapshot.updated_at,
         error: snapshot.error,
-        recovery_issues: recovery_issues.into_iter().map(bridge_recovery_issue).collect(),
     }
 }
 
@@ -540,7 +511,16 @@ pub(crate) fn bridge_agent_directory_entry(
         error: agent.error,
         reason: agent.reason,
         lifecycle: agent.lifecycle,
-        activity: agent.activity,
+        activity: match agent.activity {
+            StudioAgentActivity::Idle => BridgeAgentActivity::Idle,
+            StudioAgentActivity::Queued => BridgeAgentActivity::Queued,
+            StudioAgentActivity::ActiveRunning => BridgeAgentActivity::ActiveRunning,
+            StudioAgentActivity::ActiveWaitingTool => BridgeAgentActivity::ActiveWaitingTool,
+            StudioAgentActivity::ActiveWaitingInteraction => {
+                BridgeAgentActivity::ActiveWaitingInteraction
+            }
+            StudioAgentActivity::Cancelling => BridgeAgentActivity::Cancelling,
+        },
         progress: agent.progress.map(|progress| BridgeAgentProgressDto {
             stage: progress.stage,
             summary: progress.summary,

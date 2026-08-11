@@ -72,7 +72,7 @@ where
                     format!("{error}; close rollback failed: {rollback_error}")
                 }
             };
-            self.fault_in_memory(reason.clone());
+            self.fault(reason.clone()).await;
             return Err(AgentRuntimeError::Repository(reason));
         }
         if let Err(error) = self.flush_pending_traces().await {
@@ -83,12 +83,11 @@ where
                     format!("{error}; close rollback failed: {rollback_error}")
                 }
             };
-            self.fault_in_memory(reason.clone());
+            self.fault(reason.clone()).await;
             return Err(AgentRuntimeError::Repository(reason));
         }
         let mut closing = self.state.clone();
         closing.snapshot.lifecycle = AgentLifecycleState::Closing;
-        closing.snapshot.activity = AgentActivityState::Idle;
         closing.snapshot.active_turn_id = None;
         closing.active_input = None;
         if let Err(error) = self
@@ -101,7 +100,7 @@ where
                 let reason = format!(
                     "failed to persist closing state: {error}; close rollback failed: {rollback_error}"
                 );
-                self.fault_in_memory(reason.clone());
+                self.fault(reason.clone()).await;
                 return Err(AgentRuntimeError::Lifecycle(reason));
             }
             return Err(error);
@@ -123,7 +122,6 @@ where
         closed.pending_inputs.clear();
         closed.active_input = None;
         closed.snapshot.lifecycle = AgentLifecycleState::Closed;
-        closed.snapshot.activity = AgentActivityState::Idle;
         closed.snapshot.active_turn_id = None;
         closed.snapshot.pending_inputs = 0;
         if let Err(error) = self
@@ -158,14 +156,6 @@ where
             CloseCompensation::Restored => AgentLifecycleState::Active,
             CloseCompensation::Faulted { .. } => AgentLifecycleState::Faulted,
         };
-        next.snapshot.activity = match &compensation {
-            CloseCompensation::Restored if self.dispatch_enabled && next.has_triggering_input() => {
-                AgentActivityState::Queued
-            }
-            CloseCompensation::Restored | CloseCompensation::Faulted { .. } => {
-                AgentActivityState::Idle
-            }
-        };
         let event_compensation = compensation;
         if let Err(error) = self
             .commit_transition(next, Vec::new(), move |snapshot| match event_compensation {
@@ -176,7 +166,7 @@ where
             })
             .await
         {
-            self.fault_in_memory(error.to_string());
+            self.fault(error.to_string()).await;
             return Err(error);
         }
         if restored && self.dispatch_enabled && self.state.has_triggering_input() {
@@ -189,8 +179,10 @@ where
         if self.active.is_none() {
             return Ok(());
         }
-        self.interrupt_active_turn("runtime_shutdown")
-            .await
-            .inspect_err(|error| self.fault_in_memory(error.to_string()))
+        let result = self.interrupt_active_turn("runtime_shutdown").await;
+        if let Err(error) = &result {
+            self.fault(error.to_string()).await;
+        }
+        result
     }
 }
