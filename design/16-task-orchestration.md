@@ -90,9 +90,10 @@ Studio 的 `request_user_input` 对 Simple、Task root 和可用 child 一律形
 `interaction-resolution:{interactionId}` 作为稳定 mail ID，把 resolved Interaction 与 hidden input
 在同一 Thread repository 事务提交。idle root/child 立即启动新 Turn，活动中的任何 Turn 都只令
 该 input 排队，绝不 steer；它没有 Planner wake coalescing key。重复答复按 Interaction 状态和
-稳定 mail ID 幂等，进程重启后也只能 materialize 一次。Interaction resolution 只能更新仍 active
-的 origin Turn phase，不能让 terminal origin 或无关活动 Turn 重新变成 active。ToolApproval 继续
-使用原有审批流程。PlanConfirmation 的 `ContinuePlanning` 仍属于 Planner phase，但回答中的调整
+稳定 mail ID 幂等，进程重启后也只能 materialize 一次。Interaction resolution 只更新 Interaction
+并提交 fresh durable input，不能修改或复活 terminal origin Turn，也不能覆盖无关活动 Turn。
+ToolApproval 继续使用原有审批流程。PlanConfirmation 的 `ContinuePlanning` 仍属于 Planner phase，
+但回答中的调整
 要求必须与 resolved Interaction 在同一个 Thread repository 事务写入 hidden durable input，复用
 `interaction-resolution:{interactionId}`、StartOrQueue、no-steer、无 coalescing 的规则；fresh Planner
 Turn 必须再次调用 `plan_exit` 生成新的确认。`ImplementFreshContext` 与 `Dismiss` 保持既有 Task

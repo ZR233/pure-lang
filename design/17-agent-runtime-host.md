@@ -15,6 +15,20 @@ ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像�
 identity、live Item overlay 和当前 prompt generation/context baseline。它不缓存完整历史，也不
 拥有 Task/worktree；context baseline 只用于生成模型输入差量，不能成为 runtime 事实源。
 
+Agent activity 不再是调用方可独立写入的状态轴。公开形状固定为：
+
+```text
+Idle | Queued | Active(Running | WaitingTool | WaitingInteraction) | Cancelling
+```
+
+ThreadActor 在每次 commit 前从 lifecycle、RunningTurn.kind/cancelling 与 pending triggering input
+派生 activity，优先级为：active cancellation → Cancelling，active Turn → Active(kind)，无 active
+Turn 且存在 triggering input → Queued，其余 → Idle；非 Active lifecycle 不保留活动投影。调用方
+不能直接修改 snapshot.activity。trace/tool/interaction 只更新 RunningTurn.kind，并在同一次
+repository CAS 中提交 `TurnActivityChanged` runtime event 与新 snapshot。这样 durable snapshot、
+directory watch 和产品投影共享一个提交点，重启恢复只从 active Turn 与 pending input 重建，不
+维护第二份 activity truth。
+
 所有改变 canonical session 的 Thread transition 都由 runtime 根据提交前后 session 自动派生
 `Append | Replace | None`，调用方不能在 transcript 已变化时省略 context mutation。child 注册若
 携带非空初始 transcript，必须写 replacement baseline；工作上下文与 child snapshot 同次提交。
@@ -44,7 +58,8 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 
 ## 17.3 取消与恢复
 
-RunningTurn 包含 turnId、进程内 identity、CancellationToken、abort handle、done 和 steer sender。
+RunningTurn 包含 turnId、进程内 identity、当前 ActiveKind、CancellationToken、abort handle、done
+和 steer sender。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
 abort；终态数据库事务成功后才能广播 turnCompleted。
 
