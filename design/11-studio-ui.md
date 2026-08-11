@@ -124,7 +124,9 @@ UI 展示固定 role 时按当前 locale 使用本地化名称（中文为探索
 不能因本地化映射缺失而隐藏或改写身份；空 role 使用本地化的通用 Agent 名称。
 
 Turn phase 只在 timeline 尾部的一个活动块显示：preparing、thinking、responding、planning、
-runningTool、waitingInteraction、persisting。终态后移除活动块；失败和中断由 Turn 终态展示。
+runningTool、persisting。终态后移除活动块；失败和中断由 Turn 终态展示。“等待用户交互”
+不是 Turn phase，而是由 Thread 上挂的 pending Interaction 派生的 UI 状态——交互 dock
+出现时 composer 锁定，Interaction 消失时解锁。
 
 ## 11.7 Product stream 与恢复
 

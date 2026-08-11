@@ -69,10 +69,12 @@ RunningTurn 必须把“pending Interaction 已 durable 提交”携带为显式
 `RequiredTool` policy 不能把这个边界重写成 validation failure；它只在普通 Turn completion 时检查
 业务 finalization tool，fresh Turn 继续继承同一 policy。
 
-Interaction 的 `WaitingInteraction/Thinking` phase 是 active origin Turn 的派生投影，不是启动 Turn
-的依据。ThreadActor 只在 Interaction scope 的 turnId 等于 authoritative snapshot 当前 active Turn
-时生成 phase 更新；terminal origin 或无关活动 Turn 只接收 Interaction 变化，不能被 resolution
-复活或覆盖。普通 `budgetLimited` 不触发 continuation；预算续轮必须由产品状态机另行授权。
+pending Interaction 是 active origin Turn 的成功 completion boundary，不再表达为独立的
+等待 phase。ThreadActor 在 Interaction scope 的 turnId 等于 authoritative snapshot 当前
+active Turn 时，把 pending Interaction 与随后的 `EndTurn` 一起提交，原 Turn 落 `completed`；
+“等待用户”状态由 Thread 上挂的 pending Interaction 派生。Interaction resolution 通过稳定
+mail ID 的 durable hidden input 在 fresh Turn 继续，绝不复活已 terminal 的 origin Turn 或
+覆盖无关 Turn。普通 `budgetLimited` 不触发 continuation；预算续轮必须由产品状态机另行授权。
 
 重启无法恢复物理连接。repository 在 manager 启动前收束遗留 active Turn/Item、恢复 queued
 input 和 pending Interaction；manager 只创建 idle ThreadActor。任何恢复路径都不自动执行模型。

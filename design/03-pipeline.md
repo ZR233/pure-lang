@@ -20,8 +20,12 @@
 ## 3.2 Turn 与 Item
 
 `Turn.status` 为 `queued | inProgress | completed | failed | interrupted`。活动 phase 为
-`preparing | thinking | responding | planning | runningTool | waitingInteraction | persisting`。
+`preparing | thinking | responding | planning | runningTool | persisting`。
 Thread 没有 active Turn 即 idle，不持久化第二套 agent activity 或 last outcome。
+
+pending Interaction 是一种成功的 completion boundary：当 Turn 因 pending
+Interaction 结束时，Turn 落 `completed`，不进入专门的“等待交互” phase。“是否
+等待用户”由 Thread 上挂的 pending Interaction 派生，不进 Turn 状态机。
 
 Item 使用固定 ordinal，首次创建后 `threadId/turnId/kind/ordinal/createdAt` 不可改变。Item kind：
 

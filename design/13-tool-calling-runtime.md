@@ -123,9 +123,11 @@ Planner/Task phase 语义，但必须复用同一 durable continuation 边界：
 steer。新的 Planner Turn 必须重新完成 `plan_exit`；`ImplementFreshContext` 和 `Dismiss` 继续使用
 各自的实施启动与忽略语义，不因计划调整路径而改变。
 
-Interaction phase 只影响其 origin Turn。只有 origin Turn 仍是 Thread 当前 active Turn 时，pending
-可投影 `WaitingInteraction`，resolution 可投影 `Thinking`；origin 已 terminal 或当前活动的是其他
-Turn 时，只提交 Interaction 自身变化，不得复活旧 Turn、覆盖无关 Turn 或伪造 active 状态。
+pending Interaction 是成功的 Turn completion boundary，不是 Turn 内的等待 phase。当
+origin Turn 仍是 Thread 当前 active Turn 时，pending Interaction 与随后的 `EndTurn` 一起提交：
+原 Turn 落 `completed`，“等待用户”状态由 Thread 上挂的 pending Interaction 派生。Interaction
+resolution 通过稳定 mail ID 的 durable hidden input 在 fresh Turn 继续，绝不复活已 terminal 的
+origin Turn、覆盖无关 Turn 或伪造 active 状态。
 
 Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查：只读取最新完整 plan Item，
 并在没有对应 interaction、没有活动 TaskRun、且 plan 未进入实施或终态时补建确认。重复 attach
