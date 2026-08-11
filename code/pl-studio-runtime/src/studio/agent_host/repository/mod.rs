@@ -1,16 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use pl_core::{
-    AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSession,
-    AgentSnapshot, AgentTurnOutcome, DurableMailboxEnvelope, MailboxDeliveryState,
-    MailboxPresentation, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
-    ThreadCommit, ThreadCommitOutcome, ThreadContextState, ThreadId, ThreadRepository, TurnId,
-    TurnOutcomeKind,
+    AgentActivityState, AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot, AgentTurnOutcome,
+    DurableMailboxEnvelope, MailboxDeliveryState, RestoredAgentRuntime, RestoredThreadSnapshot,
+    ThreadActorState, ThreadCommit, ThreadCommitOutcome, ThreadContextState, ThreadId,
+    ThreadRepository, TurnId, TurnOutcomeKind,
 };
 use pl_protocol::{
-    InteractionKind, InteractionStatus, Thread as ThreadRecord, ThreadItem, ThreadItemContent,
-    ThreadItemStatus, ThreadMode, ThreadNotification, ThreadSnapshot, ThreadStatus, Turn,
-    TurnPhase, TurnState,
+    Thread as ThreadRecord, ThreadItem, ThreadItemContent, ThreadNotification, ThreadSnapshot,
+    Turn, TurnState,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -23,6 +21,7 @@ use crate::studio::entity::{interaction, item, thread, thread_input, turn};
 
 mod billing;
 mod context;
+mod labels;
 
 use billing::{
     aggregate_billing_usage, authoritative_turn_usage, persist_inference_billing, restore_billing,
@@ -31,6 +30,12 @@ use billing::{
 use context::{
     SessionSnapshotAuditError, audit_session_snapshot, persist_session_snapshot,
     restore_session_snapshot, serialize_thread_metadata,
+};
+use labels::{
+    activity_phase, interaction_kind_label, interaction_status_label, item_kind_label,
+    item_status_label, lifecycle_from_status, outcome_columns, presentation_from_label,
+    presentation_label, thread_status_from_label, thread_status_label, turn_phase_from_label,
+    turn_state_columns,
 };
 
 /// Studio 单库对 canonical Thread 状态的 CAS repository。
@@ -904,15 +909,6 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
     Ok(depth)
 }
 
-fn lifecycle_from_status(status: &str) -> Result<AgentLifecycleState, PureError> {
-    match status {
-        "closed" => Ok(AgentLifecycleState::Closed),
-        "failed" => Ok(AgentLifecycleState::Faulted),
-        "idle" | "running" | "waiting" | "completed" => Ok(AgentLifecycleState::Active),
-        other => Err(store_error(format!("unknown Thread status {other}"))),
-    }
-}
-
 fn restored_activity(
     status: &str,
     active_turn: Option<&turn::Model>,
@@ -968,11 +964,7 @@ fn thread_from_model(model: thread::Model) -> Result<ThreadRecord, PureError> {
         id: model.id,
         project_id: model.project_id,
         title: model.title,
-        mode: match model.mode.as_str() {
-            "task" => ThreadMode::Task,
-            "simple" => ThreadMode::Simple,
-            other => return Err(store_error(format!("unknown Thread mode {other}"))),
-        },
+        mode: labels::thread_mode_from_label(&model.mode)?,
         root_thread_id: model.root_thread_id,
         parent_thread_id: model.parent_thread_id,
         role: model.role,
@@ -1015,149 +1007,6 @@ fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
     })
 }
 
-fn thread_status_label(state: &ThreadActorState) -> &'static str {
-    match state.snapshot.lifecycle {
-        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
-        AgentLifecycleState::Faulted => "failed",
-        AgentLifecycleState::Active => match state.snapshot.activity {
-            AgentActivityState::Idle => "idle",
-            AgentActivityState::Queued
-            | AgentActivityState::Running
-            | AgentActivityState::Cancelling => "running",
-            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
-        },
-    }
-}
-
-fn thread_status_from_label(label: &str) -> Result<ThreadStatus, PureError> {
-    match label {
-        "idle" => Ok(ThreadStatus::Idle),
-        "running" => Ok(ThreadStatus::Running),
-        "waiting" => Ok(ThreadStatus::Waiting),
-        "completed" => Ok(ThreadStatus::Completed),
-        "failed" => Ok(ThreadStatus::Failed),
-        "closed" => Ok(ThreadStatus::Closed),
-        other => Err(store_error(format!("unknown Thread status {other}"))),
-    }
-}
-
-fn turn_state_columns(state: &TurnState) -> (&'static str, Option<&'static str>, Option<&str>) {
-    match state {
-        TurnState::Queued => ("queued", None, None),
-        TurnState::InProgress { phase } => ("inProgress", Some(turn_phase_label(*phase)), None),
-        TurnState::Completed => ("completed", None, None),
-        TurnState::Failed { reason } => ("failed", None, Some(reason.as_str())),
-        TurnState::Interrupted { reason } => ("interrupted", None, Some(reason.as_str())),
-    }
-}
-
-fn activity_phase(activity: AgentActivityState) -> &'static str {
-    match activity {
-        AgentActivityState::WaitingTool => "runningTool",
-        AgentActivityState::WaitingInteraction => "waitingInteraction",
-        AgentActivityState::Queued => "preparing",
-        AgentActivityState::Running | AgentActivityState::Cancelling | AgentActivityState::Idle => {
-            "responding"
-        }
-    }
-}
-
-fn turn_phase_label(phase: TurnPhase) -> &'static str {
-    match phase {
-        TurnPhase::Preparing => "preparing",
-        TurnPhase::Thinking => "thinking",
-        TurnPhase::Responding => "responding",
-        TurnPhase::Planning => "planning",
-        TurnPhase::RunningTool => "runningTool",
-        TurnPhase::WaitingInteraction => "waitingInteraction",
-        TurnPhase::Persisting => "persisting",
-    }
-}
-
-fn turn_phase_from_label(label: &str) -> Result<TurnPhase, PureError> {
-    match label {
-        "preparing" => Ok(TurnPhase::Preparing),
-        "thinking" => Ok(TurnPhase::Thinking),
-        "responding" => Ok(TurnPhase::Responding),
-        "planning" => Ok(TurnPhase::Planning),
-        "runningTool" => Ok(TurnPhase::RunningTool),
-        "waitingInteraction" => Ok(TurnPhase::WaitingInteraction),
-        "persisting" => Ok(TurnPhase::Persisting),
-        other => Err(store_error(format!("unknown Turn phase {other}"))),
-    }
-}
-
-fn outcome_columns(outcome: &AgentTurnOutcome) -> (&'static str, Option<&str>) {
-    match outcome.kind {
-        TurnOutcomeKind::Completed => ("completed", outcome.reason.as_deref()),
-        TurnOutcomeKind::Failed => ("failed", outcome.reason.as_deref()),
-        TurnOutcomeKind::Cancelled => ("interrupted", outcome.reason.as_deref()),
-        TurnOutcomeKind::BudgetLimited => (
-            "interrupted",
-            outcome.reason.as_deref().or(Some("budgetLimited")),
-        ),
-    }
-}
-
-fn item_kind_label(content: &ThreadItemContent) -> &'static str {
-    match content {
-        ThreadItemContent::UserMessage { .. } => "userMessage",
-        ThreadItemContent::AgentMessage { .. } => "agentMessage",
-        ThreadItemContent::Reasoning { .. } => "reasoning",
-        ThreadItemContent::Plan { .. } => "plan",
-        ThreadItemContent::ToolCall { .. } => "toolCall",
-        ThreadItemContent::File { .. } => "file",
-        ThreadItemContent::ContextCompaction { .. } => "contextCompaction",
-    }
-}
-
-fn item_status_label(status: ThreadItemStatus) -> &'static str {
-    match status {
-        ThreadItemStatus::Started => "started",
-        ThreadItemStatus::Streaming => "streaming",
-        ThreadItemStatus::AwaitingApproval => "awaitingApproval",
-        ThreadItemStatus::Approved => "approved",
-        ThreadItemStatus::Denied => "denied",
-        ThreadItemStatus::Running => "running",
-        ThreadItemStatus::Completed => "completed",
-        ThreadItemStatus::Failed => "failed",
-        ThreadItemStatus::Interrupted => "interrupted",
-        ThreadItemStatus::BudgetLimited => "budgetLimited",
-    }
-}
-
-fn presentation_label(value: MailboxPresentation) -> &'static str {
-    match value {
-        MailboxPresentation::User => "user",
-        MailboxPresentation::Hidden => "hidden",
-    }
-}
-
-fn presentation_from_label(value: &str) -> Result<MailboxPresentation, PureError> {
-    match value {
-        "user" => Ok(MailboxPresentation::User),
-        "hidden" => Ok(MailboxPresentation::Hidden),
-        other => Err(store_error(format!("unknown input presentation {other}"))),
-    }
-}
-
-fn interaction_kind_label(value: InteractionKind) -> &'static str {
-    match value {
-        InteractionKind::UserInput => "userInput",
-        InteractionKind::ToolApproval => "toolApproval",
-        InteractionKind::PlanConfirmation => "planConfirmation",
-    }
-}
-
-fn interaction_status_label(value: InteractionStatus) -> &'static str {
-    match value {
-        InteractionStatus::Pending => "pending",
-        InteractionStatus::Resolved => "resolved",
-        InteractionStatus::Cancelled => "cancelled",
-        InteractionStatus::Expired => "expired",
-    }
-}
-
 fn u64_from_i64(value: i64) -> Result<u64, PureError> {
     u64::try_from(value).map_err(|error| store_error(error.to_string()))
 }
@@ -1173,6 +1022,7 @@ fn store_error(error: impl std::fmt::Display) -> PureError {
 #[cfg(test)]
 mod outcome_tests {
     use super::*;
+    use pl_core::MailboxPresentation;
 
     #[test]
     fn budget_limited_turn_restores_typed_rollover_state() {

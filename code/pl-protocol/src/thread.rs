@@ -436,3 +436,56 @@ pub struct ThreadTurnHistory {
     #[serde(default)]
     pub context_disposition: ThreadContextDisposition,
 }
+
+crate::impl_labeled_enum!(
+    TurnPhase,
+    "TurnPhase",
+    [
+        TurnPhase::Preparing => "preparing",
+        TurnPhase::Thinking => "thinking",
+        TurnPhase::Responding => "responding",
+        TurnPhase::Planning => "planning",
+        TurnPhase::RunningTool => "runningTool",
+        TurnPhase::WaitingInteraction => "waitingInteraction",
+        TurnPhase::Persisting => "persisting",
+    ]
+);
+
+crate::impl_labeled_enum!(
+    ThreadItemStatus,
+    "ThreadItemStatus",
+    [
+        ThreadItemStatus::Started => "started",
+        ThreadItemStatus::Streaming => "streaming",
+        ThreadItemStatus::AwaitingApproval => "awaitingApproval",
+        ThreadItemStatus::Approved => "approved",
+        ThreadItemStatus::Denied => "denied",
+        ThreadItemStatus::Running => "running",
+        ThreadItemStatus::Completed => "completed",
+        ThreadItemStatus::Failed => "failed",
+        ThreadItemStatus::Interrupted => "interrupted",
+        ThreadItemStatus::BudgetLimited => "budgetLimited",
+    ]
+);
+
+crate::impl_labeled_enum!(
+    ThreadMode,
+    "ThreadMode",
+    [
+        ThreadMode::Simple => "simple",
+        ThreadMode::Task => "task",
+    ]
+);
+
+crate::impl_labeled_enum!(
+    ThreadStatus,
+    "ThreadStatus",
+    [
+        ThreadStatus::Idle => "idle",
+        ThreadStatus::Running => "running",
+        ThreadStatus::Waiting => "waiting",
+        ThreadStatus::Completed => "completed",
+        ThreadStatus::Failed => "failed",
+        ThreadStatus::Closed => "closed",
+    ]
+);

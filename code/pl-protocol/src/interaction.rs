@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::event::{UserInputAnswer, UserQuestion};
+use crate::labeled::LabeledEnum;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -14,11 +15,7 @@ pub enum InteractionKind {
 
 impl InteractionKind {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::UserInput => "userInput",
-            Self::ToolApproval => "toolApproval",
-            Self::PlanConfirmation => "planConfirmation",
-        }
+        self.label()
     }
 }
 
@@ -33,12 +30,7 @@ pub enum InteractionStatus {
 
 impl InteractionStatus {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Resolved => "resolved",
-            Self::Cancelled => "cancelled",
-            Self::Expired => "expired",
-        }
+        self.label()
     }
 }
 
@@ -133,3 +125,24 @@ pub enum PlanConfirmationResolution {
 pub struct InteractionChangedEvent {
     pub interaction: InteractionRequest,
 }
+
+crate::impl_labeled_enum!(
+    InteractionKind,
+    "InteractionKind",
+    [
+        InteractionKind::UserInput => "userInput",
+        InteractionKind::ToolApproval => "toolApproval",
+        InteractionKind::PlanConfirmation => "planConfirmation",
+    ]
+);
+
+crate::impl_labeled_enum!(
+    InteractionStatus,
+    "InteractionStatus",
+    [
+        InteractionStatus::Pending => "pending",
+        InteractionStatus::Resolved => "resolved",
+        InteractionStatus::Cancelled => "cancelled",
+        InteractionStatus::Expired => "expired",
+    ]
+);

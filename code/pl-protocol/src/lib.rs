@@ -2,6 +2,7 @@ mod billing;
 mod error;
 mod event;
 mod interaction;
+mod labeled;
 mod mcp;
 mod message;
 mod model_context;
@@ -27,6 +28,7 @@ pub use interaction::{
     InteractionResolution, InteractionScope, InteractionStatus, PlanConfirmationResolution,
     ToolApprovalResolution,
 };
+pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole,

@@ -1,12 +1,14 @@
-use crate::{
-    InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
-    InteractionStatus,
-};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
+
+use pl_protocol::LabeledEnum;
 
 use crate::studio::entity as entities;
 use crate::studio::records::{
     AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility,
+};
+use crate::{
+    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
+    InteractionScope, InteractionStatus,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -77,10 +79,16 @@ pub fn interaction_record(model: entities::interaction::Model) -> Result<Interac
             let id = &model.id;
             format!("failed to parse interaction resolution: {id}")
         })?;
+    let kind = InteractionKind::from_label(&model.kind)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .with_context(|| format!("unsupported interaction kind in studio db: {}", model.id))?;
+    let status = InteractionStatus::from_label(&model.status)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .with_context(|| format!("unsupported interaction status in studio db: {}", model.id))?;
     Ok(InteractionRequest {
         interaction_id: model.id,
-        kind: interaction_kind_from_label(&model.kind)?,
-        status: interaction_status_from_label(&model.status)?,
+        kind,
+        status,
         scope: InteractionScope {
             thread_id: model.thread_id,
             turn_id: model.turn_id,
@@ -94,23 +102,4 @@ pub fn interaction_record(model: entities::interaction::Model) -> Result<Interac
         resolved_at: model.resolved_at,
         resolution,
     })
-}
-
-fn interaction_kind_from_label(label: &str) -> Result<crate::InteractionKind> {
-    match label {
-        "userInput" => Ok(crate::InteractionKind::UserInput),
-        "toolApproval" => Ok(crate::InteractionKind::ToolApproval),
-        "planConfirmation" => Ok(crate::InteractionKind::PlanConfirmation),
-        other => bail!("unsupported interaction kind in studio db: {other}"),
-    }
-}
-
-fn interaction_status_from_label(label: &str) -> Result<InteractionStatus> {
-    match label {
-        "pending" => Ok(InteractionStatus::Pending),
-        "resolved" => Ok(InteractionStatus::Resolved),
-        "cancelled" => Ok(InteractionStatus::Cancelled),
-        "expired" => Ok(InteractionStatus::Expired),
-        other => bail!("unsupported interaction status in studio db: {other}"),
-    }
 }
