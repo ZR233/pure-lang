@@ -241,15 +241,38 @@ where
     where
         F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
     {
-        self.commit_transition_with_thread_facts(next, trace_events, Vec::new(), event_kind)
+        self.commit_transition_with_thread_facts(next, trace_events, Vec::new(), None, event_kind)
             .await
     }
 
+    /// 与 [`commit_transition`] 相同，但同时把一次阶段提交原子追加到
+    /// `thread_submissions`（同一事务）。
+    pub(super) async fn commit_progress_transition<F>(
+        &mut self,
+        next: ThreadActorState,
+        submission: super::super::ProgressSubmissionCommit,
+        event_kind: F,
+    ) -> AgentRuntimeResult<()>
+    where
+        F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
+    {
+        self.commit_transition_with_thread_facts(
+            next,
+            Vec::new(),
+            Vec::new(),
+            Some(submission),
+            event_kind,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn commit_transition_with_thread_facts<F>(
         &mut self,
         mut next: ThreadActorState,
         trace_events: Vec<TraceEvent>,
         thread_facts: Vec<ThreadNotificationFact>,
+        submission: Option<super::super::ProgressSubmissionCommit>,
         event_kind: F,
     ) -> AgentRuntimeResult<()>
     where
@@ -348,6 +371,14 @@ where
         }
         let committed_trace_events = trace_events.clone();
         let committed_thread_events = projected.notifications.clone();
+        let mut facts = DurableCommitFacts::from_state(
+            &next,
+            vec![event.clone()],
+            trace_events,
+            thread_projection,
+            context,
+        );
+        facts.submission = submission;
         let result = self
             .host
             .repository()
@@ -355,13 +386,7 @@ where
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    vec![event.clone()],
-                    trace_events,
-                    thread_projection,
-                    context,
-                ),
+                facts,
                 mutation: ThreadMutation::SnapshotAndQueue,
             })
             .await

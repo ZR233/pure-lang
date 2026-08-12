@@ -399,6 +399,8 @@ pub struct BridgeTaskReviewFindingDto {
     pub severity: String,
     pub title: String,
     pub body: String,
+    #[serde(default)]
+    pub recommendation: String,
     pub path: Option<String>,
     pub line: Option<u32>,
     pub design_references: Vec<BridgeTaskDesignReferenceDto>,

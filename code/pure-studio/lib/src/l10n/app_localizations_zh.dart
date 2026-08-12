@@ -393,6 +393,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskFindings => '审查发现';
 
   @override
+  String get statusTaskRecommendation => '修复建议';
+
+  @override
   String get statusTaskError => '错误';
 
   @override
@@ -1892,6 +1895,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskFindings => '审查发现';
+
+  @override
+  String get statusTaskRecommendation => '修复建议';
 
   @override
   String get statusTaskError => '错误';

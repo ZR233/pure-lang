@@ -112,9 +112,21 @@ Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `snapsho
 
 ## 17.4 Agent control plane
 
-模型工具名继续使用 spawn_agent、send_message、interrupt_agent、list_agents、wait_agents、
-read_agent_session 和 close_agent；它们以 agentPath 解析 ThreadId。Thread directory 保存
-root/parent/role/path/status/progress，不保存第二份 timeline 或 last turn outcome。
+模型工具名使用 spawn_agent、report_progress、send_message、interrupt_agent、list_agents、
+wait_agents、read_agent_session、read_agent_submissions 和 close_agent；它们以 agentPath 解析
+ThreadId。Thread directory 保存 root/parent/role/path/status/progress，不保存第二份 timeline
+或 last turn outcome。
+
+通信模型为 **pull**：子代理不得向父代理或 peer 主动 push 消息。
+
+- `send_message` 是唯一的消息插入原语，且仅允许 **parent→direct-child** 方向（main→sub
+  调度）。user→planner 由宿主 `AgentRuntimeHandle::submit` 走同一原语。所有 agent（含 Task
+  planner）共享同一套协作基础能力，不再按模式剥离 send_message。
+- `report_progress` 是子代理向主代理汇报的唯一通道：每次调用追加一条 durable 阶段提交到
+  `thread_submissions`（含可选 `detail` 实质负载），并照旧更新 snapshot checkpoint。主代理通过
+  `wait_agents`（实时最新增量）或 `read_agent_submissions`（全历史、分页、不截断、子代理关闭
+  后仍可查）主动 pull。`report_progress` 从不创建 completion 或 review 授权。
+- `thread_submissions` 表生命周期隶属于该 Thread（主 agent 会话树），子代理关闭后行保留。
 
 `wait_agents` 订阅 directory watch 后重读 snapshot，只因 progress、interaction 或 terminal
 变化返回，并只返回本次变化 agent 的最新 progress message 和精简状态；没有 timer、轮询或

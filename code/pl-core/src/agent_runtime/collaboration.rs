@@ -16,14 +16,20 @@ const TOOL_INTERRUPT_AGENT: &str = "interrupt_agent";
 const TOOL_LIST_AGENTS: &str = "list_agents";
 const TOOL_WAIT_AGENTS: &str = "wait_agents";
 const TOOL_READ_AGENT_SESSION: &str = "read_agent_session";
+const TOOL_READ_AGENT_SUBMISSIONS: &str = "read_agent_submissions";
 const TOOL_CLOSE_AGENT: &str = "close_agent";
 const SESSION_READ_MIN_AGE_SECONDS: i64 = 300;
+const DEFAULT_SUBMISSION_OFFSET: usize = 0;
+const DEFAULT_SUBMISSION_LIMIT: usize = 20;
+const MAX_SUBMISSION_LIMIT: usize = 50;
+/// read_agent_submissions 单页硬字节上限：覆盖默认 12KB 安全阈值，保证 detail 全文返回。
+const MAX_SUBMISSION_OUTPUT_BYTES: usize = 64 * 1024;
 
 mod support;
 use support::{
-    agent_path, filter_visible, fork_session, json_output, object_schema, parse_agent_id,
-    parse_input, progress_schema, send_message_schema, spawn_schema, target_schema, tool_error,
-    wait_schema,
+    agent_path, filter_visible, fork_session, json_output, json_output_with_budget, object_schema,
+    parse_agent_id, parse_input, progress_schema, send_message_schema, spawn_schema,
+    submissions_schema, target_schema, tool_error, wait_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -44,22 +50,13 @@ impl AgentCollaborationTools {
     }
 
     /// 返回可直接注册到 `TurnEngine` 的协作工具。
+    ///
+    /// 所有 agent（含 Task planner）共享同一套基础能力：send_message 仅允许
+    /// parent→direct-child 调度，子代理向主代理的报告改由 durable 阶段提交
+    /// 与 read_agent_submissions 查询承载。
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
-        self.tools_matching(|_| true)
-    }
-
-    /// 返回由产品层接管 `send_message` 准入时使用的其余协作工具。
-    pub fn tools_without_send_message(&self) -> Vec<Arc<dyn Tool>> {
-        self.tools_matching(|kind| !matches!(kind, CollaborationToolKind::SendMessage))
-    }
-
-    fn tools_matching(
-        &self,
-        include: impl Fn(CollaborationToolKind) -> bool,
-    ) -> Vec<Arc<dyn Tool>> {
         CollaborationToolKind::ALL
             .into_iter()
-            .filter(|kind| include(*kind))
             .map(|kind| {
                 Arc::new(CollaborationTool {
                     kind,
@@ -81,11 +78,12 @@ enum CollaborationToolKind {
     List,
     Wait,
     ReadSession,
+    ReadSubmissions,
     Close,
 }
 
 impl CollaborationToolKind {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Spawn,
         Self::ReportProgress,
         Self::SendMessage,
@@ -93,6 +91,7 @@ impl CollaborationToolKind {
         Self::List,
         Self::Wait,
         Self::ReadSession,
+        Self::ReadSubmissions,
         Self::Close,
     ];
 
@@ -105,6 +104,7 @@ impl CollaborationToolKind {
             Self::List => TOOL_LIST_AGENTS,
             Self::Wait => TOOL_WAIT_AGENTS,
             Self::ReadSession => TOOL_READ_AGENT_SESSION,
+            Self::ReadSubmissions => TOOL_READ_AGENT_SUBMISSIONS,
             Self::Close => TOOL_CLOSE_AGENT,
         }
     }
@@ -113,10 +113,10 @@ impl CollaborationToolKind {
         match self {
             Self::Spawn => "Spawn a child agent using one of the roles allowed for this turn.",
             Self::ReportProgress => {
-                "Record the caller's current execution stage, concise summary, and next step. This is a checkpoint only and never creates a durable completion or review authorization."
+                "Record the caller's current execution stage, concise summary, next step, and optional detailed report. Appends a durable submission the orchestrator can read later; never creates a completion or review authorization."
             }
             Self::SendMessage => {
-                "Send a message to an accessible agent without interrupting its active turn."
+                "Insert a steering message into a direct child agent's session without interrupting its active turn. Only parent-to-direct-child is allowed."
             }
             Self::Interrupt => "Interrupt an accessible agent's current turn.",
             Self::List => {
@@ -127,6 +127,9 @@ impl CollaborationToolKind {
             }
             Self::ReadSession => {
                 "Read a bounded filtered digest for a terminal or potentially stuck agent."
+            }
+            Self::ReadSubmissions => {
+                "Read the durable stage submission history for an agent (full content, paginated, not truncated; works after the target has closed)."
             }
             Self::Close => "Close an accessible child agent and its product resources.",
         }
@@ -141,6 +144,7 @@ impl CollaborationToolKind {
             | Self::Interrupt
             | Self::List
             | Self::ReadSession
+            | Self::ReadSubmissions
             | Self::Close => ToolBudgetTiming::Count,
         }
     }
@@ -167,7 +171,7 @@ impl Tool for CollaborationTool {
         match self.kind {
             CollaborationToolKind::Spawn => spawn_schema(&self.policy),
             CollaborationToolKind::ReportProgress => progress_schema(),
-            CollaborationToolKind::SendMessage => send_message_schema(&self.policy.message_targets),
+            CollaborationToolKind::SendMessage => send_message_schema(),
             CollaborationToolKind::Interrupt => target_schema(
                 &self.policy.message_targets,
                 "Agent id whose current turn should be interrupted.",
@@ -178,6 +182,7 @@ impl Tool for CollaborationTool {
                 &self.policy.list_targets,
                 "Agent id whose bounded session digest should be read.",
             ),
+            CollaborationToolKind::ReadSubmissions => submissions_schema(&self.policy.list_targets),
             CollaborationToolKind::Close => {
                 target_schema(&self.policy.close_targets, "Agent id to close.")
             }
@@ -191,6 +196,7 @@ impl Tool for CollaborationTool {
                 | CollaborationToolKind::Interrupt
                 | CollaborationToolKind::List
                 | CollaborationToolKind::ReadSession
+                | CollaborationToolKind::ReadSubmissions
         )
     }
 
@@ -218,6 +224,7 @@ impl Tool for CollaborationTool {
                 CollaborationToolKind::List => self.list(input).await,
                 CollaborationToolKind::Wait => self.wait(input, context).await,
                 CollaborationToolKind::ReadSession => self.read_session(input).await,
+                CollaborationToolKind::ReadSubmissions => self.read_submissions(input).await,
                 CollaborationToolKind::Close => self.close(input).await,
             }
         })
@@ -292,6 +299,7 @@ impl CollaborationTool {
                 args.stage.into(),
                 args.summary,
                 args.next_step,
+                args.detail,
             )
             .await
             .map_err(|error| tool_error(TOOL_REPORT_PROGRESS, error.to_string()))?;
@@ -301,8 +309,23 @@ impl CollaborationTool {
     async fn send_message(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
         let args: SendMessageArgs = parse_input(TOOL_SEND_MESSAGE, input.arguments)?;
         let target = parse_agent_id(TOOL_SEND_MESSAGE, args.target)?;
-        self.authorize(&self.policy.message_targets, &target)
-            .await?;
+        // 单一消息插入原语：仅允许父代理向其直接子代理插入调度消息。
+        // 子代理不得向父代理或 peer push；子代理向主代理的报告改由 durable
+        // 阶段提交 + 主代理主动查询（read_agent_submissions）承载。
+        let snapshot = self
+            .runtime
+            .snapshot(target.clone())
+            .await
+            .map_err(|error| tool_error(TOOL_SEND_MESSAGE, error.to_string()))?;
+        if snapshot.identity.parent_id.as_ref() != Some(&self.caller) {
+            return Err(tool_error(
+                TOOL_SEND_MESSAGE,
+                format!(
+                    "agent `{target}` is not a direct child of `{}`; send_message only steers direct children",
+                    self.caller
+                ),
+            ));
+        }
         let turn_id = self
             .runtime
             .submit_current_session(
@@ -458,6 +481,23 @@ impl CollaborationTool {
         json_output(json!(digest))
     }
 
+    async fn read_submissions(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+        let args: SubmissionsArgs = parse_input(TOOL_READ_AGENT_SUBMISSIONS, input.arguments)?;
+        let target = parse_agent_id(TOOL_READ_AGENT_SUBMISSIONS, args.target)?;
+        self.authorize(&self.policy.list_targets, &target).await?;
+        let offset = args.offset.unwrap_or(DEFAULT_SUBMISSION_OFFSET);
+        let limit = args
+            .limit
+            .unwrap_or(DEFAULT_SUBMISSION_LIMIT)
+            .clamp(1, MAX_SUBMISSION_LIMIT);
+        let page = self
+            .runtime
+            .read_submissions(target, offset, limit)
+            .await
+            .map_err(|error| tool_error(TOOL_READ_AGENT_SUBMISSIONS, error.to_string()))?;
+        json_output_with_budget(json!(page), MAX_SUBMISSION_OUTPUT_BYTES)
+    }
+
     async fn close(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
         let args: TargetArgs = parse_input(TOOL_CLOSE_AGENT, input.arguments)?;
         let target = parse_agent_id(TOOL_CLOSE_AGENT, args.target)?;
@@ -570,6 +610,8 @@ struct ProgressArgs {
     stage: ProgressStage,
     summary: String,
     next_step: String,
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -614,6 +656,16 @@ struct WaitArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmissionsArgs {
+    target: String,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EmptyArgs {}
 
@@ -642,7 +694,7 @@ mod tests {
         assert!(
             CollaborationToolKind::ReportProgress
                 .description()
-                .contains("never creates a durable completion")
+                .contains("never creates a completion")
         );
     }
 

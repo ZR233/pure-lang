@@ -806,6 +806,12 @@ abstract class AppLocalizations {
   /// **'Findings'**
   String get statusTaskFindings;
 
+  /// No description provided for @statusTaskRecommendation.
+  ///
+  /// In en, this message translates to:
+  /// **'How to fix'**
+  String get statusTaskRecommendation;
+
   /// No description provided for @statusTaskError.
   ///
   /// In en, this message translates to:

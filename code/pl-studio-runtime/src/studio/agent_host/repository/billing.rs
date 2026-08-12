@@ -525,6 +525,7 @@ mod tests {
                     billing,
                     runtime_delta,
                 }),
+                submission: None,
             },
             mutation: ThreadMutation::ReplaceThread { thread_id },
         }

@@ -387,6 +387,7 @@ TaskRuntimeView _stoppedTask({
           severity: 'major',
           title: '缺少状态投影',
           body: '补齐 completion revision。',
+          recommendation: '在 task_status 投影中追加 completionRevision 字段。',
           path: 'lib/app.dart',
           line: 42,
           designReferences: [],

@@ -115,6 +115,7 @@
   "statusTaskScope": "范围",
   "statusTaskCompletionRevision": "完成版本",
   "statusTaskFindings": "审查发现",
+  "statusTaskRecommendation": "修复建议",
   "statusTaskError": "错误",
   "statusTaskFailed": "任务失败",
   "statusTaskRecoverable": "可继续",

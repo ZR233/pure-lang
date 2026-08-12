@@ -9,8 +9,8 @@ use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v5_with_typed_task_failures() {
-    let root = unique_test_root("schema-v5");
+async fn creates_canonical_schema_v6_with_thread_submissions() {
+    let root = unique_test_root("schema-v6");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -22,6 +22,7 @@ async fn creates_canonical_schema_v5_with_typed_task_failures() {
         "projects",
         "threads",
         "thread_inputs",
+        "thread_submissions",
         "turns",
         "items",
         "thread_context_segments",
@@ -40,6 +41,23 @@ async fn creates_canonical_schema_v5_with_typed_task_failures() {
         assert!(
             table_exists(store.database(), table).await,
             "missing {table}"
+        );
+    }
+    let submission_columns = table_columns(store.database(), "thread_submissions").await;
+    for column in [
+        "id",
+        "thread_id",
+        "ordinal",
+        "stage",
+        "summary",
+        "next_step",
+        "detail",
+        "revision",
+        "created_at",
+    ] {
+        assert!(
+            submission_columns.contains(&column.to_string()),
+            "missing thread_submissions.{column}"
         );
     }
     let work_unit_columns = table_columns(store.database(), "work_units").await;
@@ -175,6 +193,42 @@ async fn migrates_schema_v4_waiting_interaction_turns_without_rebuild() {
         turn.try_get::<Option<i64>>("", "completed_at").unwrap(),
         Some(7)
     );
+    assert_eq!(migrated.list_projects().await.unwrap().len(), 1);
+
+    drop(migrated);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn migrates_schema_v5_adds_thread_submissions_without_rebuild() {
+    let root = unique_test_root("schema-v5-thread-submissions");
+    let database_path = root.join("studio.sqlite");
+    let store = StudioStore::open(&database_path).await.unwrap();
+    // Simulate a real v5 database: it has the v5 DDL but predates thread_submissions.
+    store
+        .database()
+        .execute_unprepared(
+            "DROP INDEX IF EXISTS idx_thread_submissions_ordinal; \
+             DROP TABLE IF EXISTS thread_submissions; \
+             INSERT INTO projects \
+             (id, name, path, created_at, updated_at, last_opened_at, closed) \
+             VALUES ('project-1', 'Project', 'C:/project', 1, 1, 1, 0);",
+        )
+        .await
+        .unwrap();
+    drop(store);
+    create_database(&database_path, "PRAGMA user_version = 5;").await;
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(
+        table_exists(migrated.database(), "thread_submissions").await,
+        "migration must create thread_submissions"
+    );
+    // Data is preserved (the DB was migrated, not rebuilt).
     assert_eq!(migrated.list_projects().await.unwrap().len(), 1);
 
     drop(migrated);

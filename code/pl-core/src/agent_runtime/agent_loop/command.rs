@@ -55,10 +55,16 @@ pub(crate) enum AgentLoopCommand {
         stage: AgentProgressStage,
         summary: String,
         next_step: String,
+        detail: Option<String>,
         reply: oneshot::Sender<AgentRuntimeResult<AgentProgressCheckpoint>>,
     },
     ReadSession {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSessionDigest>>,
+    },
+    ReadSubmissions {
+        offset: usize,
+        limit: usize,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSubmissionPage>>,
     },
     StartPendingInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,

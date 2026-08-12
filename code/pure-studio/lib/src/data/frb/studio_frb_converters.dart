@@ -150,6 +150,7 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
                 severity: finding.severity,
                 title: finding.title,
                 body: finding.body,
+                recommendation: finding.recommendation,
                 path: finding.path,
                 line: finding.line,
                 designReferences: [

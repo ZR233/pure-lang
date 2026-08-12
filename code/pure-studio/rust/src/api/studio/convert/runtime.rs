@@ -449,6 +449,7 @@ pub(crate) fn bridge_task_runtime(
                         severity: finding.severity,
                         title: finding.title,
                         body: finding.body,
+                        recommendation: finding.recommendation,
                         path: finding.path,
                         line: finding.line,
                         design_references: finding

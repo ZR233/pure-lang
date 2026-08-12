@@ -44,6 +44,13 @@ pub enum ToolRuntimeEvent {
         artifact_bytes: u64,
         result_hash: String,
     },
+    /// 声明该工具输出需要越过默认 12KB 安全阈值的硬字节上限。
+    ///
+    /// 只读概览工具（如 `read_agent_submissions`、`read_review_round`、`task_status`）
+    /// 用它保证结构化结果完整投影给模型；仍应配合分页控制总体体积。
+    OutputBudget {
+        max_bytes: usize,
+    },
     EndTurn,
 }
 

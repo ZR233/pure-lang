@@ -3600,16 +3600,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeTaskReviewFindingDto(
       severity: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
       body: dco_decode_String(arr[2]),
-      path: dco_decode_opt_String(arr[3]),
-      line: dco_decode_opt_box_autoadd_u_32(arr[4]),
+      recommendation: dco_decode_String(arr[3]),
+      path: dco_decode_opt_String(arr[4]),
+      line: dco_decode_opt_box_autoadd_u_32(arr[5]),
       designReferences: dco_decode_list_bridge_task_design_reference_dto(
-        arr[5],
+        arr[6],
       ),
     );
   }
@@ -7285,6 +7286,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_severity = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
     var var_body = sse_decode_String(deserializer);
+    var var_recommendation = sse_decode_String(deserializer);
     var var_path = sse_decode_opt_String(deserializer);
     var var_line = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_designReferences = sse_decode_list_bridge_task_design_reference_dto(
@@ -7294,6 +7296,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       severity: var_severity,
       title: var_title,
       body: var_body,
+      recommendation: var_recommendation,
       path: var_path,
       line: var_line,
       designReferences: var_designReferences,
@@ -11228,6 +11231,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.severity, serializer);
     sse_encode_String(self.title, serializer);
     sse_encode_String(self.body, serializer);
+    sse_encode_String(self.recommendation, serializer);
     sse_encode_opt_String(self.path, serializer);
     sse_encode_opt_box_autoadd_u_32(self.line, serializer);
     sse_encode_list_bridge_task_design_reference_dto(

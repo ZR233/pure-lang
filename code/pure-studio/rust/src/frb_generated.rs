@@ -3738,6 +3738,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskReviewFindingDt
         let mut var_severity = <String>::sse_decode(deserializer);
         let mut var_title = <String>::sse_decode(deserializer);
         let mut var_body = <String>::sse_decode(deserializer);
+        let mut var_recommendation = <String>::sse_decode(deserializer);
         let mut var_path = <Option<String>>::sse_decode(deserializer);
         let mut var_line = <Option<u32>>::sse_decode(deserializer);
         let mut var_designReferences = <Vec<
@@ -3747,6 +3748,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskReviewFindingDt
             severity: var_severity,
             title: var_title,
             body: var_body,
+            recommendation: var_recommendation,
             path: var_path,
             line: var_line,
             design_references: var_designReferences,
@@ -8376,6 +8378,7 @@ impl flutter_rust_bridge::IntoDart
             self.severity.into_into_dart().into_dart(),
             self.title.into_into_dart().into_dart(),
             self.body.into_into_dart().into_dart(),
+            self.recommendation.into_into_dart().into_dart(),
             self.path.into_into_dart().into_dart(),
             self.line.into_into_dart().into_dart(),
             self.design_references.into_into_dart().into_dart(),
@@ -11506,6 +11509,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskReviewFindingDt
         <String>::sse_encode(self.severity, serializer);
         <String>::sse_encode(self.title, serializer);
         <String>::sse_encode(self.body, serializer);
+        <String>::sse_encode(self.recommendation, serializer);
         <Option<String>>::sse_encode(self.path, serializer);
         <Option<u32>>::sse_encode(self.line, serializer);
         <Vec<crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto>>::sse_encode(

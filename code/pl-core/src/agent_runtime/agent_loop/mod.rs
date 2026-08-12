@@ -19,6 +19,7 @@ mod persist;
 mod recovery;
 mod running_turn;
 mod session_digest;
+mod submissions;
 
 struct LoopChannels {
     command_sender: mpsc::Sender<AgentLoopCommand>,
@@ -169,13 +170,22 @@ where
                             stage,
                             summary,
                             next_step,
+                            detail,
                             reply,
                         } => {
-                            let result = self.report_progress(stage, summary, next_step).await;
+                            let result = self.report_progress(stage, summary, next_step, detail).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReadSession { reply } => {
                             let _ = reply.send(self.read_session());
+                        }
+                        AgentLoopCommand::ReadSubmissions {
+                            offset,
+                            limit,
+                            reply,
+                        } => {
+                            let result = self.read_submissions(offset, limit).await;
+                            let _ = reply.send(result);
                         }
                         AgentLoopCommand::StartPendingInputs { reply } => {
                             self.dispatch_enabled = true;

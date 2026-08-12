@@ -86,6 +86,43 @@ pub mod thread_input {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod thread_submission {
+    use super::*;
+
+    /// 子代理向主代理汇报的 durable 阶段提交记录。
+    ///
+    /// 每次 `report_progress` 调用追加一行；主代理通过只读查询工具按 thread 全量
+    /// 拉取，不依赖子代理 push。生命周期隶属于该 thread（主 agent 会话树），
+    /// 子代理关闭后行保留，可继续查询。
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "thread_submissions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub thread_id: String,
+        pub ordinal: i64,
+        pub stage: String,
+        pub summary: String,
+        pub next_step: String,
+        pub detail: Option<String>,
+        pub revision: i64,
+        pub created_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {
+        #[sea_orm(
+            belongs_to = "super::thread::Entity",
+            from = "Column::ThreadId",
+            to = "super::thread::Column::Id",
+            on_delete = "Cascade"
+        )]
+        Thread,
+    }
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod turn {
     use super::*;
 

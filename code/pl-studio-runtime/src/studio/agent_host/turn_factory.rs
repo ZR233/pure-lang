@@ -230,13 +230,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             context.snapshot.identity.id.clone(),
             policy.collaboration.clone(),
         );
-        let collaboration_tools =
-            if mode == StudioMode::Task && context.snapshot.identity.parent_id.is_none() {
-                collaboration.tools_without_send_message()
-            } else {
-                collaboration.tools()
-            };
-        for tool in collaboration_tools {
+        // 所有 agent（含 Task planner）共享同一套协作基础能力。send_message 统一
+        // 作为 parent→direct-child 调度原语；子代理向主代理的报告改由 durable
+        // 阶段提交 + read_agent_submissions 主动查询承载。
+        for tool in collaboration.tools() {
             engine.register_tool(tool);
         }
 

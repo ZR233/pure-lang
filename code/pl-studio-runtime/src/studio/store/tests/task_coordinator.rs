@@ -567,6 +567,9 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             severity: "major".to_string(),
             title: format!("revision {revision} needs work"),
             body: "apply the requested correction".to_string(),
+            recommendation: format!(
+                "replace the placeholder in revision {revision} with the validated value"
+            ),
             path: Some("src/lib.rs".to_string()),
             line: Some(revision),
             design_references: Vec::new(),
@@ -664,6 +667,8 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
                     severity: "major".to_string(),
                     title: "correct the implementation".to_string(),
                     body: "apply the requested correction".to_string(),
+                    recommendation: "swap the branch order so the validated path returns first"
+                        .to_string(),
                     path: Some("src/lib.rs".to_string()),
                     line: Some(1),
                     design_references: Vec::new(),

@@ -384,6 +384,12 @@ class _ReviewDetail extends StatelessWidget {
                     value: finding.body,
                     valueMaxLines: 4,
                   ),
+                  if (finding.recommendation.trim().isNotEmpty)
+                    StatusDetailRow(
+                      label: context.l10n.statusTaskRecommendation,
+                      value: finding.recommendation,
+                      valueMaxLines: 6,
+                    ),
                   if (finding.path case final path?)
                     StatusDetailRow(
                       label: context.l10n.statusTaskSource,

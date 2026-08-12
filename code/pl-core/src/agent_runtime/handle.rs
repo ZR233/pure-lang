@@ -13,9 +13,9 @@ use super::{
     AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId,
     AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
     AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
-    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
-    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
-    ConversationRecoveryTarget, ThreadId, TurnId,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage, AgentSubmitRequest,
+    AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
+    ConversationRecoveryResult, ConversationRecoveryTarget, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -233,13 +233,14 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 更新调用 agent 的显式进度 checkpoint。
+    /// 更新调用 agent 的显式进度 checkpoint，并追加一条 durable 阶段提交记录。
     pub async fn report_progress(
         &self,
         agent_id: AgentId,
         stage: AgentProgressStage,
         summary: String,
         next_step: String,
+        detail: Option<String>,
     ) -> AgentRuntimeResult<AgentProgressCheckpoint> {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(
@@ -248,6 +249,7 @@ impl AgentRuntimeHandle {
                 stage,
                 summary,
                 next_step,
+                detail,
                 reply,
             },
         )
@@ -263,6 +265,26 @@ impl AgentRuntimeHandle {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(&agent_id, AgentLoopCommand::ReadSession { reply })
             .await?;
+        receive(receiver).await?
+    }
+
+    /// 读取目标 agent 的 durable 阶段提交历史（分页、不截断、关闭后可查）。
+    pub async fn read_submissions(
+        &self,
+        agent_id: AgentId,
+        offset: usize,
+        limit: usize,
+    ) -> AgentRuntimeResult<AgentSubmissionPage> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::ReadSubmissions {
+                offset,
+                limit,
+                reply,
+            },
+        )
+        .await?;
         receive(receiver).await?
     }
 
