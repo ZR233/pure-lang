@@ -7,10 +7,26 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::studio::task_coordinator::AllocateExecutor;
-use crate::{StudioMode, StudioStore};
+use crate::{StudioMode, StudioStore, Tool};
 
 const DESIGN_PATCH: &str =
     "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch";
+
+#[tokio::test]
+async fn task_update_design_description_explains_content_prefixes() {
+    let coordinator = Arc::new(TaskCoordinator::new(
+        StudioStore::open_memory().await.unwrap(),
+    ));
+    let tool = coordinator.task_update_design_tool("root-thread");
+    let patch_description = tool.input_schema()["properties"]["patch"]["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    assert!(tool.description().contains("control prefix"));
+    assert!(tool.description().contains("`-- old` and `+- new`"));
+    assert!(patch_description.contains("`-- old` and `+- new`"));
+}
 
 #[tokio::test]
 async fn design_patch_commits_and_atomically_opens_executor_gate() {

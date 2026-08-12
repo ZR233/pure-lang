@@ -49,13 +49,13 @@ impl WorkspaceFileToolKind {
                 "Read a UTF-8 text file by 1-based source lines. Use startLine and nextStartLine for deterministic paging; each call returns at most 500 lines."
             }
             Self::ListFiles => {
-                "List descendants from the agent workspace with an optional glob and bounded result count. Omit path or use `.` for the workspace root. A missing or empty workspace directory returns an empty list."
+                "List descendants from the agent workspace with an optional glob and bounded result count. Omit path or use `.` for the workspace root. For pagination, reuse the exact nextCursor and keep path, cwd, glob, and includeDirs unchanged; limit may change. Any intervening workspace write, exec, or Git mutation invalidates existing cursors. A missing or empty workspace directory returns an empty list."
             }
             Self::SearchFiles => {
-                "Search workspace file contents using the required query field and return structured matches with path, line, column, and text."
+                "Search workspace file contents using the required query field and return structured matches with path, line, column, and text. For pagination, reuse the exact nextCursor and keep query, path, cwd, glob, caseSensitive, literal, and contextLines unchanged; limit may change. Any intervening workspace write, exec, or Git mutation invalidates existing cursors."
             }
             Self::ApplyPatch => {
-                "Apply a Codex-style patch to workspace files. The input field must contain a complete patch beginning with *** Begin Patch and ending with *** End Patch."
+                "Apply a Codex-style patch to workspace files. The input field must contain a complete patch beginning with *** Begin Patch and ending with *** End Patch. Every Update hunk line starts with a control prefix: space for context, `-` for deletion, or `+` for addition. Preserve a leading `-` or `+` in the file content after that prefix; for example, replace Markdown `- old` with `-- old` and `+- new`."
             }
         }
     }
@@ -101,7 +101,7 @@ impl WorkspaceFileToolKind {
                     "cursor",
                     json!({
                         "type": "string",
-                        "description": "Opaque continuation returned as nextCursor by the previous call. Omit it on the first page."
+                        "description": "Exact nextCursor from the corresponding previous page. Omit it on the first page. When set, keep path, cwd, glob, and includeDirs identical to the call that produced it; limit may change. Never mix cursors between calls. Any intervening workspace write, exec, or Git mutation invalidates it."
                     }),
                     false,
                 ),
@@ -165,7 +165,7 @@ impl WorkspaceFileToolKind {
                     "cursor",
                     json!({
                         "type": "string",
-                        "description": "Opaque continuation returned as nextCursor by the previous call. Omit it on the first page."
+                        "description": "Exact nextCursor from the corresponding previous page. Omit it on the first page. When set, keep query, path, cwd, glob, caseSensitive, literal, and contextLines identical to the call that produced it; limit may change. Never mix cursors between calls. Any intervening workspace write, exec, or Git mutation invalidates it."
                     }),
                     false,
                 ),
@@ -185,7 +185,7 @@ impl WorkspaceFileToolKind {
                     "input",
                     json!({
                         "type": "string",
-                        "description": "The entire contents of the apply_patch command."
+                        "description": "The entire contents of the apply_patch command. In an Update hunk, prefix each line with space (context), `-` (deletion), or `+` (addition). Keep any leading `-` or `+` from the file content after that control prefix; replacing Markdown `- old` with `- new` requires `-- old` and `+- new`."
                     }),
                     true,
                 ),
@@ -218,4 +218,50 @@ fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
         "required": required,
         "additionalProperties": false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pagination_descriptions_name_cursor_bound_parameters() {
+        let list = WorkspaceFileToolKind::ListFiles;
+        let list_schema = list.input_schema();
+        let list_cursor = list_schema["properties"]["cursor"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            list.description()
+                .contains("keep path, cwd, glob, and includeDirs unchanged")
+        );
+        assert!(list_cursor.contains("keep path, cwd, glob, and includeDirs identical"));
+        assert!(list_cursor.contains("limit may change"));
+
+        let search = WorkspaceFileToolKind::SearchFiles;
+        let search_schema = search.input_schema();
+        let search_cursor = search_schema["properties"]["cursor"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(search.description().contains(
+            "keep query, path, cwd, glob, caseSensitive, literal, and contextLines unchanged"
+        ));
+        assert!(search_cursor.contains(
+            "keep query, path, cwd, glob, caseSensitive, literal, and contextLines identical"
+        ));
+        assert!(search_cursor.contains("limit may change"));
+    }
+
+    #[test]
+    fn apply_patch_description_explains_content_prefixes() {
+        let kind = WorkspaceFileToolKind::ApplyPatch;
+        let schema = kind.input_schema();
+        let input = schema["properties"]["input"]["description"]
+            .as_str()
+            .unwrap();
+
+        assert!(kind.description().contains("control prefix"));
+        assert!(kind.description().contains("`-- old` and `+- new`"));
+        assert!(input.contains("`-- old` and `+- new`"));
+    }
 }

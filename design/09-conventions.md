@@ -45,6 +45,10 @@ pub trait ModelProvider: Send + Sync {
 
 前端输入应在 `pure-studio` 边界转换为明确类型，例如 `CompileMode`。
 
+工具 schema 必须完整描述影响参数有效性的约束。分页 cursor 只能与生成它的请求投影配套使用；续页必须保留 cursor 所绑定的过滤、路径和匹配参数，工作区发生变更后旧 cursor 失效。
+
+Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下文、`-` 表示删除、`+` 表示新增。内容本身以 `-` 或 `+` 开头时，该字符必须放在控制前缀之后；例如把 Markdown 项目符号 `- old` 替换为 `- new` 时，删除行写作 `-- old`，新增行写作 `+- new`。
+
 ## 9.5 模块和导出
 
 模块默认私有。公开 API 通过 crate 根明确 `pub use`。

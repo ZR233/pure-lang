@@ -92,12 +92,12 @@ impl TaskCoordinator {
         let root_thread_id = root_thread_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
-            "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
+            "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. Every Update hunk line starts with a control prefix: space for context, `-` for deletion, or `+` for addition. Preserve a leading `-` or `+` in the file content after that prefix; for example, replace Markdown `- old` with `-- old` and `+- new`. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
             strict_tool_input_schema([ToolInputSchemaField::required(
                 "patch",
                 serde_json::json!({
                     "type": "string",
-                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt."
+                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt. In an Update hunk, prefix each line with space (context), `-` (deletion), or `+` (addition). Keep any leading `-` or `+` from the file content after that control prefix; replacing Markdown `- old` with `- new` requires `-- old` and `+- new`."
                 }),
             )]),
             move |input, context| {
