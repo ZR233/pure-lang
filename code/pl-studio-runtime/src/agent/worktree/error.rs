@@ -1,64 +1,54 @@
-use std::fmt;
-
 /// Studio task agent worktree 管理错误。
 ///
 /// 该类型只在 [`super::WorktreeManager`] 内部使用；对外统一映射为
 /// `pl_protocol::PureError::ToolExecutionFailed { tool: "worktree", error }`，
 /// 不跨 crate 新增错误枚举变体。
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum WorktreeError {
     /// 无法解析 repo 根（不在 git 仓库或路径不存在）。
+    #[error("invalid repo root: {0}")]
     InvalidRepoRoot(String),
     /// 分支名不安全，被 `GitPolicy::validate_branch` 拒绝。
+    #[error("unsafe git branch `{0}`")]
     UnsafeBranch(String),
     /// git 命令执行失败（退出码非零或启动失败）。
+    #[error("git {args} failed{}", git_stderr_suffix(.stderr))]
     GitCommand { args: String, stderr: String },
     /// 文件系统操作失败。
+    #[error("worktree io error: {0}")]
     Io(String),
     /// worktree 支持未启用。
+    #[error("worktree support is disabled")]
     Disabled,
     /// 一个资源操作失败，且其补偿清理也失败。
+    #[error("{operation}; rollback failed: {cleanup}")]
     OperationFailedWithCleanup {
         operation: Box<WorktreeError>,
         cleanup: Box<WorktreeError>,
     },
     /// 清理流程中的一个或多个独立步骤失败。
+    #[error("{context} cleanup failed{}", cleanup_failures_suffix(.failures))]
     CleanupFailed {
         context: String,
         failures: Vec<WorktreeError>,
     },
 }
 
-impl fmt::Display for WorktreeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidRepoRoot(msg) => write!(f, "invalid repo root: {msg}"),
-            Self::UnsafeBranch(branch) => write!(f, "unsafe git branch `{branch}`"),
-            Self::GitCommand { args, stderr } => {
-                let stderr = stderr.trim();
-                if stderr.is_empty() {
-                    write!(f, "git {args} failed")
-                } else {
-                    write!(f, "git {args} failed: {stderr}")
-                }
-            }
-            Self::Io(msg) => write!(f, "worktree io error: {msg}"),
-            Self::Disabled => write!(f, "worktree support is disabled"),
-            Self::OperationFailedWithCleanup { operation, cleanup } => {
-                write!(f, "{operation}; rollback failed: {cleanup}")
-            }
-            Self::CleanupFailed { context, failures } => {
-                write!(f, "{context} cleanup failed")?;
-                for failure in failures {
-                    write!(f, "; {failure}")?;
-                }
-                Ok(())
-            }
-        }
+fn git_stderr_suffix(stderr: &str) -> String {
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        String::new()
+    } else {
+        format!(": {stderr}")
     }
 }
 
-impl std::error::Error for WorktreeError {}
+fn cleanup_failures_suffix(failures: &[WorktreeError]) -> String {
+    failures
+        .iter()
+        .map(|failure| format!("; {failure}"))
+        .collect()
+}
 
 impl From<WorktreeError> for pl_protocol::PureError {
     fn from(error: WorktreeError) -> Self {

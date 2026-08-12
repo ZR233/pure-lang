@@ -37,7 +37,8 @@ eof_line: "*** End of File" LF
 
 pub type PatchResult<T> = Result<T, PatchError>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct PatchError {
     message: String,
 }
@@ -57,14 +58,6 @@ impl PatchError {
         self.message
     }
 }
-
-impl std::fmt::Display for PatchError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.message.fmt(formatter)
-    }
-}
-
-impl std::error::Error for PatchError {}
 
 /// 为 patch 结果提供面向用户的路径展示。
 ///

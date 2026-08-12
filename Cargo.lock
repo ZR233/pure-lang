@@ -2100,6 +2100,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -2136,6 +2137,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -2154,6 +2156,7 @@ name = "pl-patch"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -2174,6 +2177,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_norway",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2189,6 +2193,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-util",

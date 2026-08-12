@@ -19,6 +19,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
 time = { workspace = true }
 flutter_rust_bridge = "=2.12.0"
 
