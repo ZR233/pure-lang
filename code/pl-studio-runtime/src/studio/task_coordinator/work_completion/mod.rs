@@ -40,13 +40,6 @@ struct ReportCompletionInput {
     result: CompletionResultInput,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TaskSendMessageInput {
-    target: String,
-    message: String,
-}
-
 #[derive(Clone, Copy)]
 struct CompletionValidation<'a> {
     scope: &'a DeliveryScope,
@@ -64,7 +57,8 @@ impl TaskCoordinator {
         snapshot: &AgentSnapshot,
     ) {
         if snapshot.identity.parent_id.is_none() {
-            core.register_tool(self.task_send_message_tool(thread_id, runtime.clone()));
+            // planner 复用框架统一的 send_message（parent→direct-child）调度子代理；
+            // 不再注册 Task 专用 send_message。
             core.register_tool(self.task_spawn_executor_tool(thread_id, runtime.clone()));
             core.register_tool(self.task_update_design_tool(thread_id));
             core.register_tool(self.task_record_merge_tool(thread_id, runtime.clone()));
@@ -73,6 +67,7 @@ impl TaskCoordinator {
                 self.task_request_integrated_review_tool(thread_id, runtime.clone()),
             );
             core.register_tool(self.task_status_tool(thread_id, Some(runtime.clone())));
+            core.register_tool(self.read_review_round_tool(thread_id));
             core.register_tool(self.task_complete_tool(thread_id));
             core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
             return;
@@ -87,59 +82,6 @@ impl TaskCoordinator {
             "explorer" | "planner" => {}
             _ => {}
         }
-    }
-
-    fn task_send_message_tool(
-        self: &Arc<Self>,
-        thread_id: &str,
-        runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
-        let coordinator = self.clone();
-        let thread_id = thread_id.to_string();
-        RegisteredTool::from_typed_fallible_execution_result(
-            "send_message",
-            "Send a message to a direct Task child when its durable work state accepts input.",
-            strict_tool_input_schema([
-                ToolInputSchemaField::required("target", serde_json::json!({"type":"string"})),
-                ToolInputSchemaField::required("message", serde_json::json!({"type":"string"})),
-            ]),
-            move |input: TaskSendMessageInput, _context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    let target = pl_core::AgentId::new(input.target)?;
-                    let snapshot = runtime
-                        .snapshot(target.clone())
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                    let root = crate::studio::agent_host::root_agent_id(&thread_id);
-                    if snapshot.identity.parent_id.as_ref() != Some(&root) {
-                        bail!("send_message target is not a direct child of this Task planner");
-                    }
-                    if snapshot.identity.role.as_str() == "executor" {
-                        coordinator
-                            .store
-                            .authorize_executor_message(&thread_id, target.as_str())
-                            .await?;
-                    }
-                    let turn_id = runtime
-                        .submit_current_session(
-                            target.clone(),
-                            pl_core::AgentCurrentSessionSubmitRequest::start(input.message)
-                                .with_presentation(pl_core::MailboxPresentation::Hidden),
-                        )
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                    ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
-                        "target": target,
-                        "turnId": turn_id,
-                    }))
-                    .map_err(anyhow::Error::from)
-                }
-            },
-        )
-        .with_effect(ToolEffect::AgentControl)
     }
 
     pub(crate) fn report_completion_tool(
@@ -199,6 +141,7 @@ impl TaskCoordinator {
                                 completion.revision
                             ),
                             "wait for the planner to request an independent reviewer".to_string(),
+                            /* detail */ None,
                         )
                         .await
                     {

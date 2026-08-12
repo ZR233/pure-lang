@@ -84,6 +84,7 @@ pub(super) fn finalize_tool_item(
                 ToolRuntimeEvent::OutputArtifacts { .. } => {}
                 ToolRuntimeEvent::CacheHit { .. } => {}
                 ToolRuntimeEvent::OutputMetrics { .. } => {}
+                ToolRuntimeEvent::OutputBudget { .. } => {}
                 ToolRuntimeEvent::EndTurn => {}
             }
         }
@@ -122,7 +123,18 @@ pub(super) fn tool_execution_record(
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
     let (envelope, status) = match result {
         Ok(output) => {
-            let model_visible_text = model_visible_tool_output(&output.description);
+            let budget_bytes = output.runtime_events.iter().find_map(|event| match event {
+                ToolRuntimeEvent::OutputBudget { max_bytes } => Some(*max_bytes),
+                _ => None,
+            });
+            let model_visible_text = match budget_bytes {
+                Some(max_bytes) => crate::tool::model_visible_tool_output_with_budget(
+                    &output.description,
+                    max_bytes / crate::tool::TOKEN_ESTIMATE_BYTES,
+                    max_bytes,
+                ),
+                None => model_visible_tool_output(&output.description),
+            };
             let mut runtime_events = output.runtime_events;
             if !runtime_events
                 .iter()
@@ -180,6 +192,7 @@ fn tool_execution_record_from_envelope(
         | ToolRuntimeEvent::OutputArtifacts { .. }
         | ToolRuntimeEvent::CacheHit { .. }
         | ToolRuntimeEvent::OutputMetrics { .. }
+        | ToolRuntimeEvent::OutputBudget { .. }
         | ToolRuntimeEvent::EndTurn => None,
     });
     let (raw_bytes, model_visible_bytes, artifact_bytes) = runtime_events
@@ -196,6 +209,7 @@ fn tool_execution_record_from_envelope(
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,
         })
         .unwrap_or((
@@ -243,6 +257,7 @@ fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Valu
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputMetrics { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,
         })
         .flatten()
@@ -272,6 +287,7 @@ fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::Trace
         | ToolRuntimeEvent::ToolResultRevision { .. }
         | ToolRuntimeEvent::OutputArtifacts { .. }
         | ToolRuntimeEvent::CacheHit { .. }
+        | ToolRuntimeEvent::OutputBudget { .. }
         | ToolRuntimeEvent::EndTurn => None,
     })
 }

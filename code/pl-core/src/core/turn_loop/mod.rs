@@ -1120,6 +1120,7 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
             | crate::tool::ToolRuntimeEvent::CacheHit { .. }
             | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
+            | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
             | crate::tool::ToolRuntimeEvent::EndTurn => None,
         })
         .flatten()
@@ -1136,6 +1137,7 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
+        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
         | crate::tool::ToolRuntimeEvent::EndTurn => None,
     });
     let metrics = result.runtime_events.iter().find_map(|event| match event {
@@ -1150,6 +1152,7 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::CacheHit { .. }
+        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
         | crate::tool::ToolRuntimeEvent::EndTurn => None,
     });
     ToolResultReceipt {

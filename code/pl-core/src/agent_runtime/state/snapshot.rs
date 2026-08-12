@@ -51,6 +51,58 @@ pub struct AgentProgressCheckpoint {
     pub updated_at: i64,
 }
 
+/// 一次 `report_progress` 追加到 durable 提交日志的载荷。
+///
+/// 写入 `thread_submissions`；主代理通过 `read_agent_submissions` 主动拉取全历史，
+/// 不依赖子代理 push。detail 承载实质报告内容（替代被移除的 send_message message 体），
+/// 全文返回、分页不截断。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSubmissionRecord {
+    pub stage: AgentProgressStage,
+    pub summary: String,
+    pub next_step: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub revision: u64,
+    pub created_at: i64,
+}
+
+/// `read_agent_submissions` 的分页结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSubmissionPage {
+    pub items: Vec<AgentSubmissionRecord>,
+    pub offset: usize,
+    pub limit: usize,
+    pub total: usize,
+    pub has_more: bool,
+}
+
+/// 一次 commit 中需要原子追加到 durable 提交日志的 typed 载荷。
+#[derive(Debug, Clone)]
+pub struct ProgressSubmissionCommit {
+    pub stage: AgentProgressStage,
+    pub summary: String,
+    pub next_step: String,
+    pub detail: Option<String>,
+    pub revision: u64,
+    pub created_at: i64,
+}
+
+impl ProgressSubmissionCommit {
+    pub fn to_record(&self) -> AgentSubmissionRecord {
+        AgentSubmissionRecord {
+            stage: self.stage,
+            summary: self.summary.clone(),
+            next_step: self.next_step.clone(),
+            detail: self.detail.clone(),
+            revision: self.revision,
+            created_at: self.created_at,
+        }
+    }
+}
+
 /// `read_agent_session` 可返回的公开消息角色。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -307,15 +307,25 @@ where
         stage: AgentProgressStage,
         summary: String,
         next_step: String,
+        detail: Option<String>,
     ) -> AgentRuntimeResult<AgentProgressCheckpoint> {
         let summary = bounded_required_text("summary", summary, 1_200)?;
         let next_step = bounded_required_text("nextStep", next_step, 500)?;
-        if let Some(current) = &self.state.snapshot.progress
-            && current.stage == stage
-            && current.summary == summary
-            && current.next_step == next_step
-        {
-            return Ok(current.clone());
+        let detail = bounded_optional_text("detail", detail, 20_000)?;
+        // 携带 detail 的提交总是记录（实质报告内容）；仅短字段相同时才去重。
+        let unchanged = detail.is_none()
+            && self
+                .state
+                .snapshot
+                .progress
+                .as_ref()
+                .is_some_and(|current| {
+                    current.stage == stage
+                        && current.summary == summary
+                        && current.next_step == next_step
+                });
+        if unchanged {
+            return Ok(self.state.snapshot.progress.clone().expect("checked above"));
         }
         let revision = self
             .state
@@ -323,16 +333,25 @@ where
             .progress
             .as_ref()
             .map_or(1, |progress| progress.revision.saturating_add(1));
+        let created_at = unix_timestamp();
         let checkpoint = AgentProgressCheckpoint {
+            stage,
+            summary: summary.clone(),
+            next_step: next_step.clone(),
+            revision,
+            updated_at: created_at,
+        };
+        let submission = super::super::ProgressSubmissionCommit {
             stage,
             summary,
             next_step,
+            detail,
             revision,
-            updated_at: unix_timestamp(),
+            created_at,
         };
         let mut next = self.state.clone();
         next.snapshot.progress = Some(checkpoint.clone());
-        self.commit_transition(next, Vec::new(), |snapshot| {
+        self.commit_progress_transition(next, submission, |snapshot| {
             AgentRuntimeEventKind::StateChanged { snapshot }
         })
         .await?;
@@ -403,6 +422,26 @@ fn bounded_required_text(
         )));
     }
     Ok(value)
+}
+
+fn bounded_optional_text(
+    field: &str,
+    value: Option<String>,
+    max_chars: usize,
+) -> AgentRuntimeResult<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > max_chars {
+        return Err(AgentRuntimeError::InvalidInput(format!(
+            "{field} exceeds {max_chars} characters"
+        )));
+    }
+    Ok(Some(value))
 }
 
 #[cfg(test)]

@@ -265,6 +265,7 @@ where
                     interaction: Box::new(interaction),
                 },
             )],
+            None,
             |snapshot| AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
                 snapshot,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use super::{
     DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, MAX_MODEL_TOOL_OUTPUT_BYTES, OutputTruncation,
     ToolRuntimeEvent, enforce_model_output_limit, model_visible_tool_output,
-    model_visible_tool_output_with_tokens,
+    model_visible_tool_output_with_budget, model_visible_tool_output_with_tokens,
 };
 
 /// 通用工具输入。
@@ -56,6 +56,8 @@ pub struct ToolExecutionResult<Artifact = serde_json::Value> {
     pub model_output: String,
     pub ends_turn: bool,
     pub output_artifacts: Vec<Artifact>,
+    /// 声明的模型可见输出硬字节上限；`Some` 时要求 dispatch 越过默认 12KB 安全阈值。
+    pub output_bytes_budget: Option<usize>,
 }
 
 impl<Artifact> ToolExecutionResult<Artifact> {
@@ -103,6 +105,52 @@ impl<Artifact> ToolExecutionResult<Artifact> {
         Self::with_model_output(success, output, model_output, ends_turn, output_artifacts)
     }
 
+    /// 构造一个同时抬高软 token 预算与硬字节上限的结果。
+    ///
+    /// 用于 `task_status`、`read_agent_submissions`、`read_review_round` 等只读概览工具：
+    /// 它们需要越过默认 [`super::MAX_MODEL_TOOL_OUTPUT_BYTES`] 安全阈值完整返回结构化
+    /// 数据，但仍由分页控制总体体积。其他工具应继续使用 [`Self::new`] / [`Self::json`]。
+    pub fn with_model_budget(
+        success: bool,
+        output: String,
+        ends_turn: bool,
+        max_output_tokens: usize,
+        max_output_bytes: usize,
+        output_artifacts: Vec<Artifact>,
+    ) -> Self {
+        let model_output =
+            model_visible_tool_output_with_budget(&output, max_output_tokens, max_output_bytes);
+        Self {
+            success,
+            output,
+            model_output,
+            ends_turn,
+            output_artifacts,
+            output_bytes_budget: Some(max_output_bytes),
+        }
+    }
+
+    /// 序列化 JSON 值并用抬高的预算构造结果。
+    pub fn json_with_budget(
+        value: impl Serialize,
+        max_output_tokens: usize,
+        max_output_bytes: usize,
+    ) -> Result<Self, PureError> {
+        let output =
+            serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
+                tool: "registered_tool".to_string(),
+                error: format!("failed to serialize JSON output: {error}"),
+            })?;
+        Ok(Self::with_model_budget(
+            true,
+            output,
+            false,
+            max_output_tokens,
+            max_output_bytes,
+            Vec::new(),
+        ))
+    }
+
     pub fn with_model_output(
         success: bool,
         output: String,
@@ -116,6 +164,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             model_output: enforce_model_output_limit(&model_output, MAX_MODEL_TOOL_OUTPUT_BYTES),
             ends_turn,
             output_artifacts,
+            output_bytes_budget: None,
         }
     }
 
@@ -135,23 +184,33 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             })
             .collect::<Vec<_>>();
         let artifact_bytes = tool_output_artifact_bytes(&artifacts);
-        let mut output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
-            model_output: self.model_output,
-            success: self.success,
-            ends_turn: self.ends_turn,
-        });
+        // self.model_output 已由 with_model_tokens / with_model_budget 投影过，
+        // 这里直接作为 description，不再二次夹紧；最终字节预算由 dispatch 根据
+        // OutputBudget 事件统一应用。
+        let mut runtime_events = Vec::new();
         if !artifacts.is_empty() {
-            output
-                .runtime_events
-                .push(ToolRuntimeEvent::OutputArtifacts { artifacts });
+            runtime_events.push(ToolRuntimeEvent::OutputArtifacts { artifacts });
         }
-        output.runtime_events.push(ToolRuntimeEvent::OutputMetrics {
+        runtime_events.push(ToolRuntimeEvent::OutputMetrics {
             raw_bytes,
             model_visible_bytes,
             artifact_bytes,
             result_hash: crate::canonical_content_hash(self.output.as_bytes()),
         });
-        output
+        if let Some(max_bytes) = self.output_bytes_budget {
+            runtime_events.push(ToolRuntimeEvent::OutputBudget { max_bytes });
+        }
+        if self.ends_turn {
+            runtime_events.push(ToolRuntimeEvent::EndTurn);
+        }
+        ToolOutput {
+            description: self.model_output,
+            truncated: crate::OutputTruncation::empty(),
+            output_file: std::path::PathBuf::new(),
+            exit_code: if self.success { Some(0) } else { Some(1) },
+            timed_out: false,
+            runtime_events,
+        }
     }
 }
 
@@ -227,6 +286,7 @@ impl ToolOutput {
                 } => None,
                 ToolRuntimeEvent::CacheHit { .. } => None,
                 ToolRuntimeEvent::OutputMetrics { .. } => None,
+                ToolRuntimeEvent::OutputBudget { .. } => None,
                 ToolRuntimeEvent::EndTurn => None,
             })
             .flatten()
@@ -251,6 +311,7 @@ impl ToolOutput {
             } => false,
             ToolRuntimeEvent::CacheHit { .. } => false,
             ToolRuntimeEvent::OutputMetrics { .. } => false,
+            ToolRuntimeEvent::OutputBudget { .. } => false,
         })
     }
 

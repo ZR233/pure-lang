@@ -37,6 +37,7 @@ struct TestRepository {
     states: Arc<Mutex<BTreeMap<AgentId, ThreadActorState>>>,
     mutations: Arc<Mutex<Vec<ThreadMutation>>>,
     contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
+    submissions: Arc<Mutex<BTreeMap<AgentId, Vec<AgentSubmissionRecord>>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
@@ -52,6 +53,7 @@ impl TestRepository {
             states: Arc::new(Mutex::new(BTreeMap::new())),
             mutations: Arc::new(Mutex::new(Vec::new())),
             contexts: Arc::new(Mutex::new(Vec::new())),
+            submissions: Arc::new(Mutex::new(BTreeMap::new())),
             fail_trace: Arc::new(Mutex::new(false)),
             fail_terminal: Arc::new(Mutex::new(false)),
             fail_registration: Arc::new(Mutex::new(false)),
@@ -195,8 +197,42 @@ impl ThreadRepository for TestRepository {
             .lock()
             .unwrap()
             .push(commit.facts.context.clone());
+        if let Some(submission) = commit.facts.submission.as_ref() {
+            self.submissions
+                .lock()
+                .unwrap()
+                .entry(commit.agent_id.clone())
+                .or_default()
+                .push(submission.to_record());
+        }
         states.insert(commit.agent_id, commit.next_state);
         Ok(ThreadCommitOutcome::Applied)
+    }
+
+    async fn list_submissions(
+        &self,
+        thread_id: &ThreadId,
+        offset: usize,
+        limit: usize,
+    ) -> std::result::Result<AgentSubmissionPage, Self::Error> {
+        let all = self
+            .submissions
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
+            .unwrap_or_default();
+        let total = all.len();
+        let limit = limit.max(1);
+        let items = all.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
+        let returned = items.len();
+        Ok(AgentSubmissionPage {
+            items,
+            offset,
+            limit,
+            total,
+            has_more: offset + returned < total,
+        })
     }
 }
 
@@ -596,6 +632,75 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
     assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Failed);
     assert_eq!(repository.state(&agent_id).snapshot, waited.snapshot);
     assert_eq!(host.events.runtime_len(), 4);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn report_progress_appends_durable_submission_with_detail() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    // 携带 detail 的提交始终追加到 durable 日志。
+    handle
+        .report_progress(
+            agent_id.clone(),
+            AgentProgressStage::Implementing,
+            "wiring submissions".to_string(),
+            "verify pagination".to_string(),
+            Some("replaced ephemeral progress with thread_submissions append".to_string()),
+        )
+        .await
+        .unwrap();
+    // 仅短字段、与上次相同 → 去重，不追加。
+    handle
+        .report_progress(
+            agent_id.clone(),
+            AgentProgressStage::Implementing,
+            "wiring submissions".to_string(),
+            "verify pagination".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+    // 新 detail → 再追加一条。
+    handle
+        .report_progress(
+            agent_id.clone(),
+            AgentProgressStage::Verifying,
+            "running tests".to_string(),
+            "ship it".to_string(),
+            Some("added integration test for read_agent_submissions".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let page = handle
+        .read_submissions(agent_id.clone(), 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.items[0].stage, AgentProgressStage::Implementing);
+    assert_eq!(
+        page.items[0].detail.as_deref(),
+        Some("replaced ephemeral progress with thread_submissions append")
+    );
+    assert_eq!(page.items[1].stage, AgentProgressStage::Verifying);
+
+    // 分页：第二页为空，has_more 反映总数。
+    let next = handle
+        .read_submissions(agent_id.clone(), 2, 10)
+        .await
+        .unwrap();
+    assert!(next.items.is_empty());
+    assert!(!next.has_more);
+
     runtime.shutdown().await.unwrap();
 }
 

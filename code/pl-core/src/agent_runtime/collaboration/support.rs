@@ -148,13 +148,64 @@ pub(super) fn progress_schema() -> Value {
             json!({ "type": "string", "maxLength": 500 }),
             true,
         ),
+        (
+            "detail",
+            json!({
+                "type": "string",
+                "maxLength": 20000,
+                "description": "Optional substantive report content appended to the durable submission log and read in full by the orchestrator via read_agent_submissions."
+            }),
+            false,
+        ),
     ])
 }
 
-pub(super) fn send_message_schema(selector: &AgentTargetSelector) -> Value {
+/// send_message 的 schema：target 是运行时校验的直接子代理，因此这里只给字符串类型。
+pub(super) fn send_message_schema() -> Value {
     object_schema(vec![
-        ("target", target_property_schema(selector, None), true),
+        (
+            "target",
+            json!({
+                "type": "string",
+                "description": "Id of a direct child agent to steer. Only parent-to-direct-child insertion is allowed."
+            }),
+            true,
+        ),
         ("message", json!({ "type": "string" }), true),
+    ])
+}
+
+pub(super) fn submissions_schema(selector: &AgentTargetSelector) -> Value {
+    object_schema(vec![
+        (
+            "target",
+            target_property_schema(
+                selector,
+                Some("Agent id whose durable stage submission history should be read."),
+            ),
+            true,
+        ),
+        (
+            "offset",
+            json!({
+                "type": "integer",
+                "minimum": 0,
+                "default": 0,
+                "description": "Zero-based offset into the submission history."
+            }),
+            false,
+        ),
+        (
+            "limit",
+            json!({
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 20,
+                "description": "Maximum number of submissions to return in this page."
+            }),
+            false,
+        ),
     ])
 }
 
@@ -247,6 +298,26 @@ pub(super) fn json_output(value: Value) -> Result<ToolOutput, PureError> {
         exit_code: None,
         timed_out: false,
         runtime_events: Vec::new(),
+    })
+}
+
+/// 与 [`json_output`] 相同，但声明更大的模型可见输出硬字节上限。
+///
+/// 用于 `read_agent_submissions` 等需要完整返回结构化历史的只读查询；仍应配合
+/// 分页控制单次返回体积。
+pub(super) fn json_output_with_budget(
+    value: Value,
+    max_bytes: usize,
+) -> Result<ToolOutput, PureError> {
+    let description = serde_json::to_string(&value)
+        .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))?;
+    Ok(ToolOutput {
+        description,
+        truncated: crate::OutputTruncation::empty(),
+        output_file: std::path::PathBuf::new(),
+        exit_code: None,
+        timed_out: false,
+        runtime_events: vec![crate::tool::ToolRuntimeEvent::OutputBudget { max_bytes }],
     })
 }
 

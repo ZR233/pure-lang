@@ -188,8 +188,9 @@ wall-clock、各调用执行时长之和、最长执行时长、模型可见结�
 Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当前 Turn 的 typed terminal 保存，
 但 WorkUnit 不立即失败。Task coordinator 对同一 executor、Thread 和 worktree 强制执行一次
 `WallClockRollover` compaction，并用确定性 hidden input 开启下一 Turn。一个 tranche 最多四个
-30 分钟切片；第四次耗尽后 WorkUnit 进入 `needsAttention`，由 Planner 停止、拆分或通过
-`task_send_message` 显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和压缩失败
+30 分钟切片；第四次耗尽后 WorkUnit 进入 `needsAttention`，由 Planner 停止或拆分恢复。planner
+用统一的 `send_message`（parent→direct-child）向子代理下发调度消息；不再有 Task 专用 send_message，
+也不在发消息时隐式重置 WorkUnit tranche。非 wall-clock budget、用户停止、Task 取消和压缩失败
 都不自动续轮。pending continuation 必须持久化并使用 WorkUnit/来源 Turn 组成的幂等键恢复。
 
 一般 `budgetLimited` 不因 UserInput fresh-turn 机制获得自动续轮；只有上述 Task executor

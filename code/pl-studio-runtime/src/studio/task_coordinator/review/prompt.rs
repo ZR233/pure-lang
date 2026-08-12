@@ -107,7 +107,7 @@ pub(crate) async fn build_review_prompt(
         }
     };
     Ok(format!(
-        "# 审查任务\n\n## 用户确认的完整 plan\n{}\n\n{}\n\n## 既往审查\n```json\n{}\n```\n\n## design 文件索引\n{}\n",
+        "# 审查任务\n\n## 用户确认的完整 plan\n{}\n\n{}\n\n## finding 输出契约\n每条 finding 必须给出可执行的 `recommendation`：写清「改成什么、为什么」，必要时给内联代码片段或精确到函数/行号的最小改法，让 executor 能据此直接 rework。只描述问题而不给出改法的 finding 会被拒绝。\n示例：`recommendation`: \"将 `Config::load` 中的 `unwrap()` 改为传播错误：`let bytes = std::fs::read(&path)?;`，因为配置缺失时应让上层决定回退而非 panic。\"\n\n## 既往审查\n```json\n{}\n```\n\n## design 文件索引\n{}\n",
         run.plan,
         target,
         serde_json::to_string_pretty(&prior_reviews)?,

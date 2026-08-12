@@ -1141,6 +1141,7 @@ class BridgeTaskReviewFindingDto {
   final String severity;
   final String title;
   final String body;
+  final String recommendation;
   final String? path;
   final int? line;
   final List<BridgeTaskDesignReferenceDto> designReferences;
@@ -1149,6 +1150,7 @@ class BridgeTaskReviewFindingDto {
     required this.severity,
     required this.title,
     required this.body,
+    required this.recommendation,
     this.path,
     this.line,
     required this.designReferences,
@@ -1159,6 +1161,7 @@ class BridgeTaskReviewFindingDto {
       severity.hashCode ^
       title.hashCode ^
       body.hashCode ^
+      recommendation.hashCode ^
       path.hashCode ^
       line.hashCode ^
       designReferences.hashCode;
@@ -1171,6 +1174,7 @@ class BridgeTaskReviewFindingDto {
           severity == other.severity &&
           title == other.title &&
           body == other.body &&
+          recommendation == other.recommendation &&
           path == other.path &&
           line == other.line &&
           designReferences == other.designReferences;

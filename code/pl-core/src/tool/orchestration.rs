@@ -167,6 +167,7 @@ fn deferred_namespace(name: &str) -> Option<DeferredNamespaceTarget> {
             | "list_agents"
             | "wait_agents"
             | "read_agent_session"
+            | "read_agent_submissions"
             | "close_agent"
             | "report_progress"
     ) {

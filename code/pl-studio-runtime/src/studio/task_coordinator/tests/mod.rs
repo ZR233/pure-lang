@@ -728,21 +728,6 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
         ExecutorContinuationState::NeedsAttention
     );
 
-    fixture
-        .store
-        .authorize_executor_message(&fixture.root_thread_id, &fixture.subagent.id)
-        .await
-        .unwrap();
-    let restarted = fixture.work_unit().await;
-    assert_eq!(restarted.status, WorkUnitStatus::Running);
-    assert_eq!(restarted.execution_status, ThreadExecutionStatus::Queued);
-    assert_eq!(restarted.budget_slice_count, 1);
-    assert_eq!(restarted.budget_limit, None);
-    assert_eq!(
-        restarted.continuation_state,
-        ExecutorContinuationState::None
-    );
-    assert_eq!(restarted.continuation_source_turn_id, None);
     fixture.cleanup();
 }
 

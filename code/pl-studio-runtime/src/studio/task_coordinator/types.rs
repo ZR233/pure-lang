@@ -683,6 +683,10 @@ pub(crate) struct ReviewFinding {
     pub(crate) severity: String,
     pub(crate) title: String,
     pub(crate) body: String,
+    /// 可执行的修复建议：写清改成什么、为什么，必要时内联代码片段。
+    /// 审查者只读，不直接打补丁；executor 据此 rework。
+    #[serde(default)]
+    pub(crate) recommendation: String,
     pub(crate) path: Option<String>,
     pub(crate) line: Option<u32>,
     #[serde(default)]

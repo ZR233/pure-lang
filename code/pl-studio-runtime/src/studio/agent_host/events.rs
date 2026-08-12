@@ -692,7 +692,7 @@ const fn studio_agent_activity(activity: AgentActivityState) -> StudioAgentActiv
     }
 }
 
-const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
+pub(crate) const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
     match stage {
         AgentProgressStage::Exploring => "exploring",
         AgentProgressStage::Implementing => "implementing",
@@ -700,6 +700,17 @@ const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
         AgentProgressStage::Blocked => "blocked",
         AgentProgressStage::ReadyForCompletion => "readyForCompletion",
         AgentProgressStage::ReadyForReview => "readyForReview",
+    }
+}
+
+pub(crate) fn progress_stage_from_label(label: &str) -> AgentProgressStage {
+    match label {
+        "implementing" => AgentProgressStage::Implementing,
+        "verifying" => AgentProgressStage::Verifying,
+        "blocked" => AgentProgressStage::Blocked,
+        "readyForCompletion" => AgentProgressStage::ReadyForCompletion,
+        "readyForReview" => AgentProgressStage::ReadyForReview,
+        _ => AgentProgressStage::Exploring,
     }
 }
 

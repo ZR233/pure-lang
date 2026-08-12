@@ -396,6 +396,7 @@ fn cache_entry(
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,
         })
         .unwrap_or_else(|| {
@@ -443,6 +444,7 @@ fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKind) -> Tool
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,
         })
         .unwrap_or((0, entry.result_hash.clone()));

@@ -73,10 +73,11 @@ pub use mcp_tool::{
 };
 pub use model_output::{
     DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
-    MAX_MODEL_TOOL_OUTPUT_BYTES, MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS, enforce_model_output_limit,
+    MAX_MODEL_TOOL_OUTPUT_BYTES, MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS, TOKEN_ESTIMATE_BYTES,
+    enforce_model_output_limit, enforce_model_output_limit_with_cap,
     model_tool_output_batch_token_budget, model_visible_tool_output,
-    model_visible_tool_output_batch_with_tokens, model_visible_tool_output_with_bytes,
-    model_visible_tool_output_with_tokens,
+    model_visible_tool_output_batch_with_tokens, model_visible_tool_output_with_budget,
+    model_visible_tool_output_with_bytes, model_visible_tool_output_with_tokens,
 };
 pub use orchestration::{
     ToolOrchestrationOptions, estimate_tool_result_tokens, estimate_tool_schema_tokens,
@@ -348,6 +349,7 @@ mod tests {
                 output_artifacts: vec![ArtifactRecord {
                     id: "artifact-1".to_string(),
                 }],
+                output_bytes_budget: None,
             }
         );
     }
@@ -370,6 +372,7 @@ mod tests {
                 model_output: "full output".to_string(),
                 ends_turn: true,
                 output_artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
+                output_bytes_budget: None,
             }
         );
         assert_eq!(
@@ -381,7 +384,6 @@ mod tests {
                 exit_code: Some(0),
                 timed_out: false,
                 runtime_events: vec![
-                    ToolRuntimeEvent::EndTurn,
                     ToolRuntimeEvent::OutputArtifacts {
                         artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
                     },
@@ -391,6 +393,7 @@ mod tests {
                         artifact_bytes: 19,
                         result_hash: crate::canonical_content_hash(b"full output"),
                     },
+                    ToolRuntimeEvent::EndTurn,
                 ],
             }
         );
@@ -413,6 +416,7 @@ mod tests {
                 model_output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
                 ends_turn: false,
                 output_artifacts: Vec::new(),
+                output_bytes_budget: None,
             }
         );
     }

@@ -468,6 +468,7 @@ class TaskReviewFindingView {
     required this.severity,
     required this.title,
     required this.body,
+    required this.recommendation,
     required this.path,
     required this.line,
     required this.designReferences,
@@ -476,6 +477,7 @@ class TaskReviewFindingView {
   final String severity;
   final String title;
   final String body;
+  final String recommendation;
   final String? path;
   final int? line;
   final List<TaskDesignReferenceView> designReferences;

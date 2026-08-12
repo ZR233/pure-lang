@@ -412,6 +412,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskFindings => 'Findings';
 
   @override
+  String get statusTaskRecommendation => 'How to fix';
+
+  @override
   String get statusTaskError => 'Error';
 
   @override

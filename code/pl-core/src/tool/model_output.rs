@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-const TOKEN_ESTIMATE_BYTES: usize = 4;
+pub const TOKEN_ESTIMATE_BYTES: usize = 4;
 
 pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 3_000;
 pub const DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS: usize = DEFAULT_MODEL_TOOL_OUTPUT_TOKENS * 2;
@@ -48,7 +48,7 @@ fn project_model_visible_tool_output(
         })
         .to_string()
     };
-    enforce_model_output_limit(&projected, enforced_bytes)
+    enforce_model_output_limit_with_cap(&projected, enforced_bytes)
 }
 
 /// 为同一模型响应产生的工具结果分配统一 token 预算。
@@ -141,8 +141,26 @@ fn fair_output_byte_allocations(outputs: &[String], max_total_bytes: usize) -> V
 }
 
 /// 对所有工具输出执行最终字节预算，任何工具或产品 adapter 都不能绕过。
+///
+/// 硬上限被夹紧到 [`MAX_MODEL_TOOL_OUTPUT_BYTES`] 安全阈值。需要更大预算的只读
+/// 概览工具（如 `task_status`、`read_agent_submissions`、`read_review_round`）
+/// 应改用 [`enforce_model_output_limit_with_cap`]。
 pub fn enforce_model_output_limit(output: &str, requested_max_bytes: usize) -> String {
-    let max_bytes = requested_max_bytes.clamp(1, MAX_MODEL_TOOL_OUTPUT_BYTES);
+    enforce_model_output_limit_inner(
+        output,
+        requested_max_bytes.clamp(1, MAX_MODEL_TOOL_OUTPUT_BYTES),
+    )
+}
+
+/// 与 [`enforce_model_output_limit`] 相同的投影逻辑，但允许调用方显式越过
+/// [`MAX_MODEL_TOOL_OUTPUT_BYTES`] 默认安全阈值。
+///
+/// 仅用于已通过分页或结构化概览控制总体体积、且业务上必须完整返回的只读工具。
+pub fn enforce_model_output_limit_with_cap(output: &str, max_bytes: usize) -> String {
+    enforce_model_output_limit_inner(output, max_bytes.max(1))
+}
+
+fn enforce_model_output_limit_inner(output: &str, max_bytes: usize) -> String {
     if output.len() <= max_bytes {
         return output.to_string();
     }
@@ -183,6 +201,21 @@ pub fn enforce_model_output_limit(output: &str, requested_max_bytes: usize) -> S
     let head = utf8_prefix(output, head_budget);
     let tail = utf8_suffix(output, tail_budget);
     format!("{head}{MARKER}{tail}")
+}
+
+/// 为需要完整返回的只读工具同时指定软 token 预算与硬字节上限。
+///
+/// 软预算控制常规投影体积；硬上限允许越过 [`MAX_MODEL_TOOL_OUTPUT_BYTES`]
+/// 但仍保证最终输出有界。调用方应同时提供分页，避免单次返回过大。
+pub fn model_visible_tool_output_with_budget(
+    output: &str,
+    max_output_tokens: usize,
+    max_output_bytes: usize,
+) -> String {
+    let projection_bytes = max_output_tokens
+        .saturating_mul(TOKEN_ESTIMATE_BYTES)
+        .clamp(1, max_output_bytes);
+    project_model_visible_tool_output(output, projection_bytes, max_output_bytes)
 }
 
 fn bounded_json_tool_output(mut value: Value, max_bytes: usize) -> Value {
@@ -375,5 +408,37 @@ mod tests {
         let projected = model_visible_tool_output_with_bytes("{\"value\":true}", 1);
 
         assert!(projected.len() <= 1);
+    }
+
+    #[test]
+    fn default_enforce_keeps_twelve_kb_ceiling_for_oversized_output() {
+        let oversized = "x".repeat(MAX_MODEL_TOOL_OUTPUT_BYTES * 2);
+
+        let projected = enforce_model_output_limit(&oversized, MAX_MODEL_TOOL_OUTPUT_BYTES * 4);
+
+        assert!(projected.len() <= MAX_MODEL_TOOL_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn with_budget_raises_hard_ceiling_while_still_bounded() {
+        let hard_bytes = MAX_MODEL_TOOL_OUTPUT_BYTES * 4;
+        let oversized = json!({ "text": "x".repeat(hard_bytes / 2 + 1) }).to_string();
+        assert!(oversized.len() > MAX_MODEL_TOOL_OUTPUT_BYTES);
+
+        let projected = model_visible_tool_output_with_budget(&oversized, 16_000, hard_bytes);
+
+        assert!(projected.len() <= hard_bytes);
+        assert!(projected.len() > MAX_MODEL_TOOL_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn with_budget_still_truncates_when_output_exceeds_custom_cap() {
+        let hard_bytes = MAX_MODEL_TOOL_OUTPUT_BYTES * 2;
+        let oversized = "x".repeat(hard_bytes * 2);
+
+        let projected = model_visible_tool_output_with_budget(&oversized, 16_000, hard_bytes);
+
+        assert!(projected.len() <= hard_bytes);
+        assert!(serde_json::from_str::<Value>(&projected).is_ok());
     }
 }

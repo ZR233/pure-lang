@@ -209,62 +209,6 @@ impl StudioStore {
         finish_transaction(tx, result).await
     }
 
-    pub(crate) async fn authorize_executor_message(
-        &self,
-        thread_id: &str,
-        agent_id: &str,
-    ) -> Result<()> {
-        let tx = self.db.begin().await?;
-        let result = async {
-            let work_unit = executor_work_unit(&tx, agent_id).await?;
-            let run = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
-                .one(&tx)
-                .await?
-                .context("executor task run not found")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if run.root_thread_id != thread_id
-                || run.stop_requested != 0
-                || phase == TaskRunPhase::Stopping
-                || phase.is_terminal()
-            {
-                bail!("executor is not accepting messages for this task");
-            }
-            let work_status = WorkUnitStatus::from_str(&work_unit.status)
-                .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-            if !matches!(
-                work_status,
-                WorkUnitStatus::Running
-                    | WorkUnitStatus::AwaitingCompletion
-                    | WorkUnitStatus::ChangesRequested
-                    | WorkUnitStatus::NeedsAttention
-            ) {
-                bail!(
-                    "executor cannot receive a message while work unit is {}",
-                    work_unit.status
-                );
-            }
-            if work_status == WorkUnitStatus::NeedsAttention {
-                let continuation_revision = work_unit.continuation_revision.saturating_add(1);
-                let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                active.status = Set(WorkUnitStatus::Running.as_str().to_string());
-                active.execution_status = Set(ThreadExecutionStatus::Queued.as_str().to_string());
-                active.execution_error = Set(None);
-                active.budget_limit_json = Set(None);
-                active.budget_slice_count = Set(1);
-                active.continuation_state =
-                    Set(ExecutorContinuationState::None.as_str().to_string());
-                active.continuation_source_turn_id = Set(None);
-                active.continuation_revision = Set(continuation_revision);
-                active.updated_at = Set(unix_seconds());
-                active.update(&tx).await?;
-            }
-            Ok(())
-        }
-        .await;
-        finish_transaction(tx, result).await
-    }
-
     pub(crate) async fn settle_executor_turn_finished(
         &self,
         agent_id: &str,

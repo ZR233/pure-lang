@@ -163,6 +163,7 @@
   "statusTaskScope": "Scope",
   "statusTaskCompletionRevision": "Completion revision",
   "statusTaskFindings": "Findings",
+  "statusTaskRecommendation": "How to fix",
   "statusTaskError": "Error",
   "statusTaskFailed": "Task failed",
   "statusTaskRecoverable": "Can continue",

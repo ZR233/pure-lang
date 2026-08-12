@@ -43,6 +43,13 @@ WorkUnit 直接保存 executorThreadId、requestedByCallId、attempt、scopeHint
 worktree、branch、状态、summary/error 和 cleanup disposition。ReviewRound 直接保存
 reviewerThreadId、scope、目标 completion/HEAD、verdict 和 findings。
 
+每条 `ReviewFinding` 必须给出可执行的 `recommendation`：写清改成什么、为什么，必要时附内联
+片段或精确到函数/行号的最小改法，让 executor 据此直接 rework；`review_exit` 校验会拒绝
+`changesRequired/blocked` 下缺失 `recommendation` 的 finding。`task_status` 的 reviews 只投影
+概览（verdict/summary/findings_count/has_recommendations），省略 findings 明细；planner 用
+`read_review_round(roundId, offset, limit)` 分页读取单轮完整 findings（含 recommendation），
+保证不被默认输出预算截断。
+
 WorkUnit 状态为 Pending、Running、AwaitingCompletion、ReadyForReview、Reviewing、
 ChangesRequested、Approved、Merged、NoDelivery、NeedsAttention、Failed、Cancelled。
 WorkUnit 额外持久化当前 tranche 的 budget slice count、typed continuation state、来源 Turn 与
@@ -158,8 +165,10 @@ executor 的单个 Turn 保持 30 分钟 wall-clock 上限。前三个 `WallCloc
 executor 或 WorkUnit 标记为失败：runtime 先对同一 Thread 强制执行 `WallClockRollover`
 compaction，再以 `workUnitId + sourceTurnId` 生成确定性 hidden continuation input，在同一
 worktree 开启下一切片。一个 tranche 最多四个切片；第四次 wall-clock 耗尽进入
-NeedsAttention 并保留 executor/worktree，等待 Planner 停止、拆分或用 `task_send_message`
-显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和 rollover compaction 失败都不
+NeedsAttention 并保留 executor/worktree，等待 Planner 停止或拆分。planner 用统一的
+`send_message`（parent→direct-child）向子代理下发调度消息；不再有 Task 专用的 send_message，
+也不再在发消息时隐式重置 WorkUnit tranche（NeedsAttention 的恢复由 planner 显式停止/拆分/
+重新 spawn 驱动）。非 wall-clock budget、用户停止、Task 取消和 rollover compaction 失败都不
 自动续轮；pending continuation 在重启时按幂等键对账已有 active/terminal Turn，禁止重复增加切片。
 rollover replacement transcript 必须先与 TurnFinished 在 repository 提交链上持久化成功，再允许
 hidden continuation 入队；提交失败时 actor 不推进内存 session，也不启动下一 Turn。

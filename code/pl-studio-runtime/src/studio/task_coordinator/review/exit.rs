@@ -140,6 +140,9 @@ fn validate_review_exit(
         if finding.title.trim().is_empty() || finding.body.trim().is_empty() {
             bail!("review findings require non-empty title and body");
         }
+        if finding.recommendation.trim().is_empty() {
+            bail!("review findings require a concrete recommendation explaining how to fix it");
+        }
         let design_claim = finding.title.to_ascii_lowercase().contains("design")
             || finding.body.to_ascii_lowercase().contains("design")
             || finding.title.contains("设计")
@@ -220,11 +223,12 @@ fn review_exit_schema() -> serde_json::Value {
                         "severity":{"type":"string"},
                         "title":{"type":"string"},
                         "body":{"type":"string"},
+                        "recommendation":{"type":"string","description":"Concrete, executable fix: what to change, why, and an inline snippet when useful. Reviewer is read-only and does not apply patches."},
                         "path":{"type":["string","null"]},
                         "line":{"type":["integer","null"]},
                         "designReferences":{"type":"array","items":reference}
                     },
-                    "required":["severity","title","body","path","line","designReferences"],
+                    "required":["severity","title","body","recommendation","path","line","designReferences"],
                     "additionalProperties":false
                 }
             }),
@@ -256,6 +260,8 @@ mod tests {
             severity: "high".to_string(),
             title: "Bug".to_string(),
             body: "The implementation can fail.".to_string(),
+            recommendation:
+                "Return the error instead of unwrapping; map it into ConfigError::Read.".to_string(),
             path: Some("code/example.rs".to_string()),
             line: Some(12),
             design_references: Vec::new(),
@@ -265,7 +271,7 @@ mod tests {
                 verdict: ReviewVerdict::Pass,
                 summary: "reviewed".to_string(),
                 design_references: vec![reference("Review design")],
-                findings: vec![finding],
+                findings: vec![finding.clone()],
             },
             &read_design(),
         )
@@ -283,5 +289,33 @@ mod tests {
 
         assert!(pass_error.to_string().contains("pass requires"));
         assert!(changes_error.to_string().contains("concrete finding"));
+    }
+
+    #[test]
+    fn changes_required_finding_without_recommendation_is_rejected() {
+        let finding = ReviewFinding {
+            severity: "high".to_string(),
+            title: "Bug".to_string(),
+            body: "The implementation can fail.".to_string(),
+            recommendation: "   ".to_string(),
+            path: Some("code/example.rs".to_string()),
+            line: Some(12),
+            design_references: Vec::new(),
+        };
+        let error = validate_review_exit(
+            ReviewExitInput {
+                verdict: ReviewVerdict::ChangesRequired,
+                summary: "reviewed".to_string(),
+                design_references: vec![reference("Review design")],
+                findings: vec![finding],
+            },
+            &read_design(),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("recommendation"),
+            "expected recommendation requirement, got: {error}"
+        );
     }
 }

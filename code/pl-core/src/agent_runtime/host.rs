@@ -51,6 +51,9 @@ pub struct DurableCommitFacts {
     pub runtime_events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
     pub inference: Option<super::AgentInferenceCommit>,
+    /// `report_progress` 触发时追加到 `thread_submissions` 的阶段提交记录。
+    #[allow(clippy::struct_field_names)]
+    pub submission: Option<super::ProgressSubmissionCommit>,
 }
 
 impl DurableCommitFacts {
@@ -103,6 +106,7 @@ impl DurableCommitFacts {
             runtime_events,
             trace_events,
             inference: None,
+            submission: None,
         }
     }
 }
@@ -207,6 +211,16 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
         &self,
         commit: ThreadCommit,
     ) -> impl Future<Output = std::result::Result<ThreadCommitOutcome, Self::Error>> + Send;
+
+    /// 读取某 agent 的 durable 阶段提交历史（含已关闭 agent）。
+    ///
+    /// 用于主代理主动 pull 子代理报告：覆盖全状态、按提交顺序分页、不截断。
+    fn list_submissions(
+        &self,
+        thread_id: &super::ThreadId,
+        offset: usize,
+        limit: usize,
+    ) -> impl Future<Output = std::result::Result<super::AgentSubmissionPage, Self::Error>> + Send;
 }
 
 /// 宿主为一次 turn 构造模型、instructions、工具和产品策略的端口。
