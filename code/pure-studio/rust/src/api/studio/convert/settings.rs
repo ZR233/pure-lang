@@ -341,7 +341,7 @@ pub(crate) fn provider_settings_edit(
             .into_iter()
             .map(|provider| provider_edit(provider, current))
             .collect::<Result<Vec<_>>>()?,
-        roles: input.roles.into_iter().map(role_edit).collect(),
+        roles: input.roles.into_iter().map(RoleEdit::from).collect(),
     })
 }
 
@@ -577,12 +577,14 @@ fn zhipu_window_labels(window: &ZhipuQuotaWindow) -> (&'static str, &str) {
     }
 }
 
-fn role_edit(input: RoleInput) -> RoleEdit {
-    RoleEdit {
-        key: input.key,
-        provider: input.provider,
-        model: input.model,
-        effort: input.effort,
+impl From<RoleInput> for RoleEdit {
+    fn from(input: RoleInput) -> Self {
+        Self {
+            key: input.key,
+            provider: input.provider,
+            model: input.model,
+            effort: input.effort,
+        }
     }
 }
 

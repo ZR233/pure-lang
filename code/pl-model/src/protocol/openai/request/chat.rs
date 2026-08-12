@@ -61,10 +61,7 @@ impl ChatRequestBody {
                         content: (!text.is_empty()).then_some(text),
                         reasoning_content: msg.reasoning_content.clone(),
                         tool_calls: parse_tool_calls_from_metadata(&msg.metadata)?.map(|calls| {
-                            calls
-                                .into_iter()
-                                .map(ChatMessageToolCall::from_tool_call)
-                                .collect()
+                            calls.into_iter().map(ChatMessageToolCall::from).collect()
                         }),
                     });
                 }
@@ -179,8 +176,8 @@ enum ChatMessageToolCall {
     },
 }
 
-impl ChatMessageToolCall {
-    fn from_tool_call(tool_call: ToolCall) -> Self {
+impl From<ToolCall> for ChatMessageToolCall {
+    fn from(tool_call: ToolCall) -> Self {
         let invalid_arguments = tool_call.invalid_arguments;
         match tool_call.payload {
             ToolCallPayload::Function { arguments } => Self::Function {
@@ -246,7 +243,7 @@ impl ChatTool {
                 custom: ChatToolCustom {
                     name: name.clone(),
                     description: description.clone(),
-                    format: ToolFormatBody::from_format(format),
+                    format: ToolFormatBody::from(format),
                 },
             },
             ToolSchema::Namespace { .. }

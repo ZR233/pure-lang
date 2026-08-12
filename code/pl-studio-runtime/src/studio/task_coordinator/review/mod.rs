@@ -85,8 +85,8 @@ struct ModelReviewOverview {
     updated_at: i64,
 }
 
-impl ModelReviewOverview {
-    fn from_record(record: ReviewRoundRecord) -> Self {
+impl From<ReviewRoundRecord> for ModelReviewOverview {
+    fn from(record: ReviewRoundRecord) -> Self {
         let has_recommendations = record
             .findings
             .iter()
@@ -269,7 +269,7 @@ impl TaskCoordinator {
                         .list_review_rounds(&run.id)
                         .await?
                         .into_iter()
-                        .map(ModelReviewOverview::from_record)
+                        .map(ModelReviewOverview::from)
                         .collect::<Vec<_>>();
                     let output = TaskStatusOutput {
                         work_units: work_units

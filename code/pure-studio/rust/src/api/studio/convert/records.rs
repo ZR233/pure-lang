@@ -1,11 +1,13 @@
 use crate::api::studio::types::ProjectDto;
 
-pub(crate) fn project_dto(project: pl_studio_runtime::ProjectRecord) -> ProjectDto {
-    ProjectDto {
-        id: project.id,
-        name: project.name,
-        path: project.path,
-        updated_at: project.updated_at,
+impl From<pl_studio_runtime::ProjectRecord> for ProjectDto {
+    fn from(project: pl_studio_runtime::ProjectRecord) -> Self {
+        Self {
+            id: project.id,
+            name: project.name,
+            path: project.path,
+            updated_at: project.updated_at,
+        }
     }
 }
 

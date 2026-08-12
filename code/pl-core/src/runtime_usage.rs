@@ -169,8 +169,10 @@ impl ModelTokenUsageSnapshot {
     pub fn total_tokens(&self) -> u64 {
         self.total_tokens
     }
+}
 
-    pub fn from_model_usage(usage: &TokenUsage) -> Self {
+impl From<&TokenUsage> for ModelTokenUsageSnapshot {
+    fn from(usage: &TokenUsage) -> Self {
         Self {
             input_tokens: usage.prompt_tokens,
             cached_input_tokens: usage.cached_prompt_tokens,
@@ -439,7 +441,7 @@ mod tests {
         };
 
         assert_eq!(
-            ModelTokenUsageSnapshot::from_model_usage(&usage),
+            ModelTokenUsageSnapshot::from(&usage),
             ModelTokenUsageSnapshot {
                 input_tokens: 10,
                 cached_input_tokens: 4,

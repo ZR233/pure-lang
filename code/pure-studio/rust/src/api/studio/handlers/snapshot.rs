@@ -1,5 +1,5 @@
 use crate::api::studio::bridge_runtime::BridgeRuntime;
-use crate::api::studio::convert::records::{project_dto, thread_from_record};
+use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::runtime::{bridge_recovery_issue, bridge_task_runtime};
 use crate::api::studio::convert::settings::studio_settings_dto;
 use crate::api::studio::convert::thread_stream::bridge_thread;
@@ -103,7 +103,7 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     let settings = studio_settings_dto(&config, general_settings, web_search_role)?;
 
     Ok(BridgeStudioSnapshotResponse {
-        projects: projects.into_iter().map(project_dto).collect(),
+        projects: projects.into_iter().map(Into::into).collect(),
         selected_project_id,
         threads: threads
             .into_iter()

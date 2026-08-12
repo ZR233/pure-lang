@@ -360,7 +360,7 @@ impl SearchSettings {
                 allowed_domains: config.allowed_domains.clone(),
             }),
             allowed_callers: vec![SearchAllowedCaller::Direct],
-            external_web_access: ExternalWebAccess::from_mode(config.mode),
+            external_web_access: ExternalWebAccess::from(config.mode),
         }
     }
 }
@@ -378,8 +378,8 @@ pub enum ExternalWebAccess {
     Mode(ExternalWebAccessMode),
 }
 
-impl ExternalWebAccess {
-    pub fn from_mode(mode: WebSearchMode) -> Self {
+impl From<WebSearchMode> for ExternalWebAccess {
+    fn from(mode: WebSearchMode) -> Self {
         match mode {
             WebSearchMode::Disabled | WebSearchMode::Cached => Self::Boolean(false),
             WebSearchMode::Indexed => Self::Mode(ExternalWebAccessMode::Indexed),
@@ -509,7 +509,7 @@ mod tests {
                 WebSearchMode::Indexed,
                 WebSearchMode::Live,
             ]
-            .map(ExternalWebAccess::from_mode),
+            .map(ExternalWebAccess::from),
             [
                 ExternalWebAccess::Boolean(false),
                 ExternalWebAccess::Boolean(false),

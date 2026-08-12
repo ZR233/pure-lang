@@ -1,6 +1,4 @@
-use super::runtime::{
-    bridge_agent_directory_entry, bridge_lsp_health, bridge_mcp_health, bridge_task_runtime,
-};
+use super::runtime::{bridge_agent_directory_entry, bridge_mcp_health, bridge_task_runtime};
 use super::thread_stream::bridge_thread;
 use crate::api::studio::types::{BridgeProductEventEnvelope, BridgeProductEventPayload};
 use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
@@ -28,7 +26,7 @@ pub(crate) fn bridge_product_event(
             }
             StudioProductEventKind::LspHealthChanged { health } => {
                 BridgeProductEventPayload::LspHealthChanged {
-                    health: bridge_lsp_health(health),
+                    health: health.into(),
                 }
             }
             StudioProductEventKind::TaskChanged {

@@ -13,8 +13,8 @@ pub(super) enum ToolFormatBody {
     Grammar { syntax: String, definition: String },
 }
 
-impl ToolFormatBody {
-    pub(super) fn from_format(format: &ToolFormat) -> Self {
+impl From<&ToolFormat> for ToolFormatBody {
+    fn from(format: &ToolFormat) -> Self {
         match format {
             ToolFormat::Text => Self::Text,
             ToolFormat::Grammar { syntax, definition } => Self::Grammar {

@@ -225,7 +225,7 @@ pub fn completion_response_snapshot(
     CompletionResponseSnapshot {
         id: response.response_id.clone(),
         output,
-        usage: ModelTokenUsageSnapshot::from_model_usage(&response.usage),
+        usage: ModelTokenUsageSnapshot::from(&response.usage),
     }
 }
 

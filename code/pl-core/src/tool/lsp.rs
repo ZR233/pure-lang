@@ -61,15 +61,15 @@ impl From<LspQueryOperationInput> for pl_lsp::LspQueryOperation {
     }
 }
 
-impl LspQueryInput {
-    fn into_query(self) -> LspQuery {
-        LspQuery {
-            operation: self.operation.into(),
-            file_path: self.file_path,
-            line: self.line,
-            character: self.character,
-            query: self.query,
-            max_results: self.max_results,
+impl From<LspQueryInput> for LspQuery {
+    fn from(input: LspQueryInput) -> Self {
+        Self {
+            operation: input.operation.into(),
+            file_path: input.file_path,
+            line: input.line,
+            character: input.character,
+            query: input.query,
+            max_results: input.max_results,
             language_id: None,
         }
     }
@@ -109,8 +109,8 @@ impl Tool for LspQueryTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let query =
-                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into_query();
+            let query: LspQuery =
+                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into();
             let query = resolve_query_path(query, &context, self.name())?;
             let result = self
                 .registry
@@ -229,8 +229,8 @@ impl Tool for LspLanguageTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let mut query =
-                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into_query();
+            let mut query: LspQuery =
+                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into();
             query.language_id = Some(self.language_id.clone());
             let query = resolve_query_path(query, &context, self.name())?;
             let result = self

@@ -66,11 +66,7 @@ impl ResponsesRequestBody {
                         ));
                     }
                     if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata)? {
-                        input.extend(
-                            tool_calls
-                                .into_iter()
-                                .map(ResponsesInputItem::from_tool_call),
-                        );
+                        input.extend(tool_calls.into_iter().map(ResponsesInputItem::from));
                     }
                 }
                 MessageRole::Tool => {
@@ -104,20 +100,15 @@ impl ResponsesRequestBody {
                 }
                 MessageRole::System | MessageRole::User | MessageRole::Assistant => {
                     input.push(ResponsesInputItem::message(
-                        ResponsesRole::from_message_role(msg.role),
+                        ResponsesRole::from(msg.role),
                         responses_content_for_message(&msg.content, msg.role)?,
                     ));
                 }
             }
         }
 
-        let tools = (!request.tools.is_empty()).then(|| {
-            request
-                .tools
-                .iter()
-                .map(ResponsesTool::from_schema)
-                .collect()
-        });
+        let tools = (!request.tools.is_empty())
+            .then(|| request.tools.iter().map(ResponsesTool::from).collect());
 
         Ok(Self {
             model: request.model.clone(),
@@ -131,10 +122,7 @@ impl ResponsesRequestBody {
             store: request.store,
             previous_response_id: request.previous_response_id.clone(),
             prompt_cache_key: request.prompt_cache_key.clone(),
-            reasoning: request
-                .reasoning
-                .as_ref()
-                .map(ResponsesReasoning::from_config),
+            reasoning: request.reasoning.as_ref().map(ResponsesReasoning::from),
         })
     }
 }
@@ -196,8 +184,10 @@ impl ResponsesInputItem {
     fn message(role: ResponsesRole, content: Vec<ResponsesContent>) -> Self {
         Self::typed(ResponsesTypedInputItem::Message { role, content })
     }
+}
 
-    fn from_tool_call(tool_call: ToolCall) -> Self {
+impl From<ToolCall> for ResponsesInputItem {
+    fn from(tool_call: ToolCall) -> Self {
         let invalid_arguments = tool_call.invalid_arguments;
         match tool_call.payload {
             ToolCallPayload::Function { arguments } => {
@@ -233,8 +223,8 @@ enum ResponsesRole {
     Tool,
 }
 
-impl ResponsesRole {
-    fn from_message_role(role: MessageRole) -> Self {
+impl From<MessageRole> for ResponsesRole {
+    fn from(role: MessageRole) -> Self {
         match role {
             MessageRole::System => Self::Developer,
             MessageRole::User => Self::User,
@@ -299,8 +289,8 @@ enum ResponsesTool {
     },
 }
 
-impl ResponsesTool {
-    fn from_schema(tool: &ToolSchema) -> Self {
+impl From<&ToolSchema> for ResponsesTool {
+    fn from(tool: &ToolSchema) -> Self {
         match tool {
             ToolSchema::Function {
                 name,
@@ -327,7 +317,7 @@ impl ResponsesTool {
             } => Self::Custom {
                 name: name.clone(),
                 description: description.clone(),
-                format: ToolFormatBody::from_format(format),
+                format: ToolFormatBody::from(format),
                 defer_loading: *defer_loading,
                 allowed_callers: allowed_callers.clone(),
                 output_schema: output_schema.clone(),
@@ -339,7 +329,7 @@ impl ResponsesTool {
             } => Self::Namespace {
                 name: name.clone(),
                 description: description.clone(),
-                tools: tools.iter().map(Self::from_schema).collect(),
+                tools: tools.iter().map(Self::from).collect(),
             },
             ToolSchema::ToolSearch => Self::ToolSearch,
             ToolSchema::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
@@ -372,8 +362,8 @@ struct ResponsesReasoning {
     summary: Option<ResponsesReasoningSummary>,
 }
 
-impl ResponsesReasoning {
-    fn from_config(reasoning: &ReasoningConfig) -> Self {
+impl From<&ReasoningConfig> for ResponsesReasoning {
+    fn from(reasoning: &ReasoningConfig) -> Self {
         Self {
             summary: reasoning
                 .summary

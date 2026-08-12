@@ -129,7 +129,7 @@ pub(crate) fn bridge_task_recovery_preview(
             .into_iter()
             .map(bridge_task_recovery_target)
             .collect(),
-        main_git_fingerprint: bridge_task_git_fingerprint(preview.main_git_fingerprint),
+        main_git_fingerprint: preview.main_git_fingerprint.into(),
         completion_revision_fingerprint: preview.completion_revision_fingerprint,
         review_revision_fingerprint: preview.review_revision_fingerprint,
         merge_revision_fingerprint: preview.merge_revision_fingerprint,
@@ -143,7 +143,7 @@ pub(crate) fn task_recovery_request(
         recovery_id: request.recovery_id,
         root_thread_id: request.root_thread_id,
         target_thread_id: request.target_thread_id,
-        mode: conversation_recovery_mode_from_bridge(request.mode),
+        mode: request.mode.into(),
         turn_ids: request.turn_ids,
         preview: task_recovery_preview_from_bridge(request.preview),
     }
@@ -158,7 +158,7 @@ pub(crate) fn bridge_task_recovery_result(
         work_unit_id: result.work_unit_id,
         root_thread_id: result.root_thread_id,
         target_thread_id: result.target_thread_id,
-        mode: bridge_conversation_recovery_mode(result.mode),
+        mode: result.mode.into(),
         recovery_revision: result.recovery_revision,
         runtime_revision: result.runtime_revision,
         thread_revision: result.thread_revision,
@@ -168,7 +168,7 @@ pub(crate) fn bridge_task_recovery_result(
         removed_input_count: result.removed_input_count,
         stop_cleared: result.stop_cleared,
         resume_turn_id: result.resume_turn_id,
-        git_fingerprint: bridge_task_git_fingerprint(result.git_fingerprint),
+        git_fingerprint: result.git_fingerprint.into(),
     }
 }
 
@@ -203,26 +203,26 @@ fn bridge_task_recovery_target(target: StudioTaskRecoveryTarget) -> BridgeTaskRe
         available_modes: target
             .available_modes
             .into_iter()
-            .map(bridge_conversation_recovery_mode)
+            .map(BridgeConversationRecoveryMode::from)
             .collect(),
-        git_fingerprint: bridge_task_git_fingerprint(target.git_fingerprint),
+        git_fingerprint: target.git_fingerprint.into(),
     }
 }
 
-fn bridge_task_git_fingerprint(
-    fingerprint: StudioTaskGitFingerprint,
-) -> BridgeTaskGitFingerprintDto {
-    BridgeTaskGitFingerprintDto {
-        workspace_root: fingerprint.workspace_root,
-        git_common_dir: fingerprint.git_common_dir,
-        branch: fingerprint.branch,
-        head: fingerprint.head,
-        base_commit: fingerprint.base_commit,
-        expected_head: fingerprint.expected_head,
-        operation: fingerprint.operation,
-        index_diff_hash: fingerprint.index_diff_hash,
-        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
-        untracked_content_hash: fingerprint.untracked_content_hash,
+impl From<StudioTaskGitFingerprint> for BridgeTaskGitFingerprintDto {
+    fn from(fingerprint: StudioTaskGitFingerprint) -> Self {
+        Self {
+            workspace_root: fingerprint.workspace_root,
+            git_common_dir: fingerprint.git_common_dir,
+            branch: fingerprint.branch,
+            head: fingerprint.head,
+            base_commit: fingerprint.base_commit,
+            expected_head: fingerprint.expected_head,
+            operation: fingerprint.operation,
+            index_diff_hash: fingerprint.index_diff_hash,
+            working_tree_diff_hash: fingerprint.working_tree_diff_hash,
+            untracked_content_hash: fingerprint.untracked_content_hash,
+        }
     }
 }
 
@@ -277,50 +277,50 @@ fn task_recovery_preview_from_bridge(
                 available_modes: target
                     .available_modes
                     .into_iter()
-                    .map(conversation_recovery_mode_from_bridge)
+                    .map(ConversationRecoveryMode::from)
                     .collect(),
-                git_fingerprint: task_git_fingerprint_from_bridge(target.git_fingerprint),
+                git_fingerprint: target.git_fingerprint.into(),
             })
             .collect(),
-        main_git_fingerprint: task_git_fingerprint_from_bridge(preview.main_git_fingerprint),
+        main_git_fingerprint: preview.main_git_fingerprint.into(),
         completion_revision_fingerprint: preview.completion_revision_fingerprint,
         review_revision_fingerprint: preview.review_revision_fingerprint,
         merge_revision_fingerprint: preview.merge_revision_fingerprint,
     }
 }
 
-fn task_git_fingerprint_from_bridge(
-    fingerprint: BridgeTaskGitFingerprintDto,
-) -> StudioTaskGitFingerprint {
-    StudioTaskGitFingerprint {
-        workspace_root: fingerprint.workspace_root,
-        git_common_dir: fingerprint.git_common_dir,
-        branch: fingerprint.branch,
-        head: fingerprint.head,
-        base_commit: fingerprint.base_commit,
-        expected_head: fingerprint.expected_head,
-        operation: fingerprint.operation,
-        index_diff_hash: fingerprint.index_diff_hash,
-        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
-        untracked_content_hash: fingerprint.untracked_content_hash,
+impl From<BridgeTaskGitFingerprintDto> for StudioTaskGitFingerprint {
+    fn from(fingerprint: BridgeTaskGitFingerprintDto) -> Self {
+        Self {
+            workspace_root: fingerprint.workspace_root,
+            git_common_dir: fingerprint.git_common_dir,
+            branch: fingerprint.branch,
+            head: fingerprint.head,
+            base_commit: fingerprint.base_commit,
+            expected_head: fingerprint.expected_head,
+            operation: fingerprint.operation,
+            index_diff_hash: fingerprint.index_diff_hash,
+            working_tree_diff_hash: fingerprint.working_tree_diff_hash,
+            untracked_content_hash: fingerprint.untracked_content_hash,
+        }
     }
 }
 
-fn bridge_conversation_recovery_mode(
-    mode: ConversationRecoveryMode,
-) -> BridgeConversationRecoveryMode {
-    match mode {
-        ConversationRecoveryMode::RewindTail => BridgeConversationRecoveryMode::RewindTail,
-        ConversationRecoveryMode::RebuildThread => BridgeConversationRecoveryMode::RebuildThread,
+impl From<ConversationRecoveryMode> for BridgeConversationRecoveryMode {
+    fn from(mode: ConversationRecoveryMode) -> Self {
+        match mode {
+            ConversationRecoveryMode::RewindTail => Self::RewindTail,
+            ConversationRecoveryMode::RebuildThread => Self::RebuildThread,
+        }
     }
 }
 
-fn conversation_recovery_mode_from_bridge(
-    mode: BridgeConversationRecoveryMode,
-) -> ConversationRecoveryMode {
-    match mode {
-        BridgeConversationRecoveryMode::RewindTail => ConversationRecoveryMode::RewindTail,
-        BridgeConversationRecoveryMode::RebuildThread => ConversationRecoveryMode::RebuildThread,
+impl From<BridgeConversationRecoveryMode> for ConversationRecoveryMode {
+    fn from(mode: BridgeConversationRecoveryMode) -> Self {
+        match mode {
+            BridgeConversationRecoveryMode::RewindTail => Self::RewindTail,
+            BridgeConversationRecoveryMode::RebuildThread => Self::RebuildThread,
+        }
     }
 }
 
@@ -556,8 +556,10 @@ pub(crate) fn bridge_mcp_health(health: StudioMcpHealth) -> BridgeMcpHealthDto {
     }
 }
 
-pub(crate) fn bridge_lsp_health(health: StudioLspHealth) -> BridgeLspHealthDto {
-    BridgeLspHealthDto {
-        active_lsp_servers: health.active_lsp_servers,
+impl From<StudioLspHealth> for BridgeLspHealthDto {
+    fn from(health: StudioLspHealth) -> Self {
+        Self {
+            active_lsp_servers: health.active_lsp_servers,
+        }
     }
 }
