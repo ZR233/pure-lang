@@ -7,7 +7,8 @@ pub const DEFAULT_ALLOWED_SUPPORT_DIRS: &[&str] = &["references", "templates", "
 
 pub type SkillCoreResult<T> = Result<T, SkillCoreError>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct SkillCoreError {
     message: String,
 }
@@ -27,14 +28,6 @@ impl SkillCoreError {
         self.message
     }
 }
-
-impl std::fmt::Display for SkillCoreError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.message.fmt(formatter)
-    }
-}
-
-impl std::error::Error for SkillCoreError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

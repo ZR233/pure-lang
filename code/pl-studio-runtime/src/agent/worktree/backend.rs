@@ -26,8 +26,10 @@ pub(crate) enum CreateFailureDisposition {
 }
 
 /// 带资源所有权 disposition 的 worktree create 失败。
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
 pub struct WorktreeCreateFailure {
+    #[source]
     error: WorktreeError,
     disposition: CreateFailureDisposition,
 }
@@ -57,18 +59,6 @@ impl WorktreeCreateFailure {
     /// 取出原始 worktree 错误。
     pub fn into_error(self) -> WorktreeError {
         self.error
-    }
-}
-
-impl fmt::Display for WorktreeCreateFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.error.fmt(formatter)
-    }
-}
-
-impl std::error::Error for WorktreeCreateFailure {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
     }
 }
 

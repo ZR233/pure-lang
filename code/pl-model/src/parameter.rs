@@ -5,7 +5,6 @@
 //! 透传写入 API 请求体，不包含任何 provider 特定代码。
 
 use std::collections::BTreeMap;
-use std::fmt;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -119,32 +118,15 @@ impl Default for ModelParameterCandidateRequest<'_> {
 }
 
 /// 模型参数候选值解析错误。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ModelParameterCandidateError {
     /// 显式候选值不属于参数声明的值域。
+    #[error("candidate `{candidate}` is not supported by parameter `{parameter}`")]
     UnsupportedCandidate {
         parameter: String,
         candidate: String,
     },
 }
-
-impl fmt::Display for ModelParameterCandidateError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedCandidate {
-                parameter,
-                candidate,
-            } => {
-                write!(
-                    formatter,
-                    "candidate `{candidate}` is not supported by parameter `{parameter}`"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ModelParameterCandidateError {}
 
 /// 选中某候选值时对请求体的修改动作。
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

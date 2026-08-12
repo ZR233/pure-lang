@@ -202,16 +202,9 @@ impl<'de> Deserialize<'de> for ContextSectionId {
 }
 
 /// 空上下文段标识错误。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("context section id must not be empty")]
 pub struct ContextSectionIdError;
-
-impl fmt::Display for ContextSectionIdError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("context section id must not be empty")
-    }
-}
-
-impl std::error::Error for ContextSectionIdError {}
 
 /// 每次 inference 都重新注入、且不会被 history compaction 替换的工作上下文。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

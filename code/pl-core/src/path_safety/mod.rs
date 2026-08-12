@@ -4,20 +4,25 @@
 //! inspected without following links so Unix symbolic links and every Windows
 //! reparse point remain explicit filesystem boundaries.
 
-use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 mod remove;
 pub use remove::{remove_dir_all_no_follow, remove_dir_all_no_follow_async};
 
 /// A failure while validating or safely traversing a host filesystem path.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PathSafetyError {
     /// The candidate is not lexically contained by the trusted root.
+    #[error("path '{}' is outside trusted root '{}'", .path.display(), .root.display())]
     OutsideRoot { root: PathBuf, path: PathBuf },
     /// An existing path component is a symbolic link or Windows reparse point.
+    #[error(
+        "path contains a symbolic link or Windows reparse point: '{}'",
+        .path.display()
+    )]
     LinkOrReparse { path: PathBuf },
     /// A filesystem operation failed for a specific path.
+    #[error("failed to {operation} '{}': {source}", .path.display())]
     Io {
         operation: &'static str,
         path: PathBuf,
@@ -31,42 +36,6 @@ impl PathSafetyError {
             operation,
             path: path.to_path_buf(),
             source,
-        }
-    }
-}
-
-impl fmt::Display for PathSafetyError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OutsideRoot { root, path } => write!(
-                formatter,
-                "path '{}' is outside trusted root '{}'",
-                path.display(),
-                root.display()
-            ),
-            Self::LinkOrReparse { path } => write!(
-                formatter,
-                "path contains a symbolic link or Windows reparse point: '{}'",
-                path.display()
-            ),
-            Self::Io {
-                operation,
-                path,
-                source,
-            } => write!(
-                formatter,
-                "failed to {operation} '{}': {source}",
-                path.display()
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PathSafetyError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io { source, .. } => Some(source),
-            Self::OutsideRoot { .. } | Self::LinkOrReparse { .. } => None,
         }
     }
 }

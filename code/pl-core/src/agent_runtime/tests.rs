@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,16 +14,9 @@ use super::host::ThreadContextMutation;
 use super::*;
 use crate::{AgentSession, Message};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{0}")]
 struct TestError(String);
-
-impl fmt::Display for TestError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for TestError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FactoryMode {

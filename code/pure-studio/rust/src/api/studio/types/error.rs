@@ -25,8 +25,9 @@ pub enum BridgeErrorCode {
     Internal,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
+#[error("{message} (correlation id: {correlation_id})")]
 pub struct BridgeError {
     pub code: BridgeErrorCode,
     pub message: String,
@@ -149,18 +150,6 @@ impl BridgeError {
         bridge_error
     }
 }
-
-impl std::fmt::Display for BridgeError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{} (correlation id: {})",
-            self.message, self.correlation_id
-        )
-    }
-}
-
-impl std::error::Error for BridgeError {}
 
 impl From<anyhow::Error> for BridgeError {
     fn from(error: anyhow::Error) -> Self {

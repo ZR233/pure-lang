@@ -35,59 +35,25 @@ impl Default for ThreadEventOptions {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ThreadEventError {
+    #[error("thread event channel not found: {0}")]
     ThreadNotFound(String),
-    ThreadMismatch {
-        expected: String,
-        actual: String,
-    },
-    RevisionGap {
-        expected: u64,
-        actual: u64,
-    },
+    #[error("thread notification targets {actual}, expected {expected}")]
+    ThreadMismatch { expected: String, actual: String },
+    #[error("thread revision gap: expected {expected}, got {actual}")]
+    RevisionGap { expected: u64, actual: u64 },
+    #[error("item {item_id} revision gap: expected {expected}, got {actual}")]
     ItemRevisionGap {
         item_id: String,
         expected: u64,
         actual: u64,
     },
+    #[error("thread projection invariant failed: {0}")]
     ProjectionInvariant(String),
+    #[error("thread event state lock poisoned")]
     LockPoisoned,
 }
-
-impl fmt::Display for ThreadEventError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ThreadNotFound(thread_id) => {
-                write!(formatter, "thread event channel not found: {thread_id}")
-            }
-            Self::ThreadMismatch { expected, actual } => write!(
-                formatter,
-                "thread notification targets {actual}, expected {expected}"
-            ),
-            Self::RevisionGap { expected, actual } => {
-                write!(
-                    formatter,
-                    "thread revision gap: expected {expected}, got {actual}"
-                )
-            }
-            Self::ItemRevisionGap {
-                item_id,
-                expected,
-                actual,
-            } => write!(
-                formatter,
-                "item {item_id} revision gap: expected {expected}, got {actual}"
-            ),
-            Self::ProjectionInvariant(message) => {
-                write!(formatter, "thread projection invariant failed: {message}")
-            }
-            Self::LockPoisoned => formatter.write_str("thread event state lock poisoned"),
-        }
-    }
-}
-
-impl std::error::Error for ThreadEventError {}
 
 #[derive(Clone)]
 pub struct ThreadEventBus {
