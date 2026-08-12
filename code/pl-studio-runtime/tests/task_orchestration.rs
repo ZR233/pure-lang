@@ -14,6 +14,7 @@ use task_fixture::{
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "scripted planner requires ripgrep on the host"]
 async fn offline_task_flow_completes_through_worktree_merge_review_and_continuations() -> Result<()>
 {
     tokio::time::timeout(Duration::from_secs(120), run_offline_task_flow())
