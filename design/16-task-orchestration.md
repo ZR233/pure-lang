@@ -58,6 +58,16 @@ continuation revision；这些字段是重启恢复和幂等续轮的 canonical 
 每次 durable transition 在一个 SQLite 事务中更新所有相关产品记录。Task phase 不复制进
 Thread runtime snapshot，Thread 状态也不缓存进 Task 表。
 
+Task 生命周期工具只在 Turn 准备时已经解析到 active TaskRun 时安装。规划确认前的 Task root
+没有 TaskRun，因此不暴露 `task_status`、executor/review/merge/complete 等 TaskService 工具，只保留
+通用能力和规划阶段的 `plan_exit`。创建 TaskRun 后启动的 fresh Turn 根据 active run 与最新 phase
+获得相应工具集合；已经开始的 Turn 持有固定工具 lease，不在运行中动态增删工具。
+
+Studio 的 Simple root、Task planner、explorer、reviewer 和 executor 在所有 Task 阶段都允许
+`ToolEffect::Process`，因此 `exec` / `write_stdin` 始终可见。workspace mutability 不限制 shell，
+runtime 也不分析命令正文是否写入；Planner、Explorer、Reviewer 是否应修改现场由角色职责与提示词
+约束，而不是 Process effect 或 shell 内容检查。
+
 ## 16.4 Planner 与等待
 
 Task root 只允许 planner 创建 explorer；executor 通过 `task_spawn_executor` 创建，reviewer
@@ -73,8 +83,8 @@ planner 读取有界 child Thread 诊断，不是失败判据。
 review request 成功创建 reviewer 后必须结束当前 planner Turn。reviewer 提交 durable verdict 后，
 Runtime 以稳定 mail ID 提交一次隐藏 continuation；root Thread 已 idle 时立即启动，仍有活动 Turn 时
 只排入下一 Turn，绝不 steer 旧 Turn。新的 planner Turn 从最新 Task phase 重新解析 canonical
-workspace 与 tool policy。这样 delivery pass 进入 Merging 后才授予主 workspace 写入、普通 exec
-与 Git 能力，旧 Turn 的只读 snapshot 不会被阶段变化旁路。
+workspace 与 tool policy。Process effect 在所有阶段可用，但主 workspace 的产品写入、Git 合并和
+记账职责仍只在相应 phase 执行；旧 Turn 的固定 lease 不能取得新 phase 才安装的 Task 生命周期工具。
 
 review verdict、reviewer terminal failure 和 executor completed/failed terminal outcome 都先提交到 Task
 repository，再派生稳定 ID 的 Planner wake。executor failure 只唤醒 planner 读取 `task_status` 并
@@ -185,6 +195,10 @@ WorkUnit 进入 Approved 或 NoDelivery。executor 在普通结束或失败时�
 Completion，WorkUnit 保留可 follow-up 的 durable terminal execution 状态，并生成一次 Planner
 wake；review changes-requested 后的 rework failure 也走同一路径，不能静默停在
 `AwaitingCompletion/failed`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
+
+Reviewer 在产品语义上仍是只读角色，不得通过 shell 修改 workspace、Git 或其他现场。审查前可以
+使用 `list_files`，或通过 `exec` 运行 `rg` / `rg --files` 定位设计和代码；定位之后仍必须用
+`read_file` 阅读至少一个相关 `design/**` 文档，才能提交 `review_exit`。
 
 每个 Agent Turn 结束时，Studio 从结构化 `TurnFailure` 派生独立的
 `TaskFailureDisposition`。capacity、transport、408/409/425/429、5xx 和普通验证失败为

@@ -94,6 +94,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(run) = active_task_run.as_ref() {
             ensure_task_accepts_turn(run)?;
         }
+        if mode == StudioMode::Task
+            && context.snapshot.identity.parent_id.is_some()
+            && matches!(
+                context.snapshot.identity.role.as_str(),
+                "executor" | "reviewer"
+            )
+            && active_task_run.is_none()
+        {
+            return Err(turn_error(
+                "Task executor or reviewer has no active TaskRun",
+            ));
+        }
         let workspace = AgentWorkspaceResolver::new(self.store.clone())
             .resolve(
                 &context.snapshot.identity,
@@ -205,6 +217,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 &thread_record.root_thread_id,
                 context.runtime.clone(),
                 &context.snapshot,
+                active_task_run.as_ref(),
             );
         }
         self.mcp_runtime

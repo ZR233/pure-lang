@@ -55,7 +55,7 @@ fn live_api_key() -> Option<String> {
 fn allowed_tool(name: &str) -> bool {
     matches!(
         name,
-        "read_file" | "list_files" | "search_files" | "stat_path" | "apply_patch"
+        "read_file" | "list_files" | "stat_path" | "apply_patch"
     )
 }
 

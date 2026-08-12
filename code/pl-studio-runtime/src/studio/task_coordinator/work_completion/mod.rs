@@ -6,8 +6,8 @@ use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
 use super::{
-    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
+    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRunRecord,
+    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{
@@ -55,7 +55,11 @@ impl TaskCoordinator {
         thread_id: &str,
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
+        active_task_run: Option<&TaskRunRecord>,
     ) {
+        if active_task_run.is_none() {
+            return;
+        }
         if snapshot.identity.parent_id.is_none() {
             // planner 复用框架统一的 send_message（parent→direct-child）调度子代理；
             // 不再注册 Task 专用 send_message。

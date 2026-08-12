@@ -23,7 +23,6 @@ fn shared_tool_schemas_describe_host_independent_workspace_surface() {
             "write_stdin",
             "read_file",
             "list_files",
-            "search_files",
             "apply_patch",
             "request_user_input",
             "update_todo_list",
@@ -176,7 +175,6 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "write_stdin",
         "read_file",
         "list_files",
-        "search_files",
         "apply_patch",
         "request_user_input",
         "update_todo_list",
@@ -209,19 +207,6 @@ fn workspace_file_schemas_use_codex_camel_case_fields() {
     assert!(list_schema.pointer("/properties/includeDirs").is_some());
     assert!(list_schema.pointer("/properties/max_files").is_none());
     assert!(list_schema.pointer("/properties/include_dirs").is_none());
-
-    let search_schema = crate::tool::WorkspaceFileToolKind::SearchFiles.input_schema();
-    assert!(search_schema.pointer("/properties/caseSensitive").is_some());
-    assert!(search_schema.pointer("/properties/limit").is_some());
-    assert!(search_schema.pointer("/properties/cursor").is_some());
-    assert!(search_schema.pointer("/properties/contextLines").is_some());
-    assert!(
-        search_schema
-            .pointer("/properties/case_sensitive")
-            .is_none()
-    );
-    assert!(search_schema.pointer("/properties/max_matches").is_none());
-    assert!(search_schema.pointer("/properties/context_lines").is_none());
 }
 
 #[test]
@@ -236,7 +221,7 @@ fn workspace_file_tool_kind_rejects_dot_aliases() {
     );
     assert_eq!(
         crate::tool::WorkspaceFileToolKind::from_name("search_files"),
-        Some(crate::tool::WorkspaceFileToolKind::SearchFiles)
+        None
     );
     assert_eq!(
         crate::tool::WorkspaceFileToolKind::from_name("apply_patch"),
@@ -248,10 +233,6 @@ fn workspace_file_tool_kind_rejects_dot_aliases() {
     );
     assert_eq!(
         crate::tool::WorkspaceFileToolKind::from_name("list.files"),
-        None
-    );
-    assert_eq!(
-        crate::tool::WorkspaceFileToolKind::from_name("search.files"),
         None
     );
     assert_eq!(
@@ -397,13 +378,11 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(!schema_names_without_backend.contains(&"exec".to_string()));
     assert!(!schema_names_without_backend.contains(&"read_file".to_string()));
     assert!(!schema_names_without_backend.contains(&"list_files".to_string()));
-    assert!(!schema_names_without_backend.contains(&"search_files".to_string()));
     assert!(!schema_names_without_backend.contains(&"apply_patch".to_string()));
     assert!(core.tools.get("exec").is_none());
     assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("read_file").is_none());
     assert!(core.tools.get("list_files").is_none());
-    assert!(core.tools.get("search_files").is_none());
     assert!(core.tools.get("apply_patch").is_none());
 
     let mut core = TurnEngine::default_provider().unwrap();
@@ -423,7 +402,7 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(core.tools.get("write_stdin").is_some());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("list_files").is_some());
-    assert!(core.tools.get("search_files").is_some());
+    assert!(core.tools.get("search_files").is_none());
     assert!(core.tools.get("apply_patch").is_some());
 }
 

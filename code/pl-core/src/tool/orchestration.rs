@@ -117,7 +117,6 @@ fn programmatic_eligible(schema: &ToolSchema, effect: Option<ToolEffect>) -> boo
         name,
         "read_file"
             | "list_files"
-            | "search_files"
             | "stat_path"
             | "git_status"
             | "git_diff"

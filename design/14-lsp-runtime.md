@@ -75,7 +75,7 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 
 位置类输入使用 1-based `line` / `character`，内部转换为 LSP 0-based UTF-16 position。输出为结构化 JSON 文本，包含 `success`、`operation`、`serverId`、`result`、`resultCount`、`fileCount`。
 
-当 `lsp_query_rust`（或其他语言对应的 LSP 工具）可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或 LSP 返回不可用错误时，回退到文件工具、`search_files` 或 `exec`/`rg`。
+当 `lsp_query_rust`（或其他语言对应的 LSP 工具）可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配或配置搜索回退到 `exec` + `rg`，文件名搜索回退到 `exec` + `rg --files`；非支持语言、LSP 未激活或 LSP 返回不可用错误时使用相同回退，当前平台没有 ripgrep 时再使用等价的平台命令。
 
 ## 文件同步
 

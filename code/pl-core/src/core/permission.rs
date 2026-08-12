@@ -69,7 +69,7 @@ pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value
             argument_path(arguments, "path").into_iter().collect()
         }
         "lsp_query" => argument_path(arguments, "filePath").into_iter().collect(),
-        "list_files" | "search_files" => argument_path(arguments, "path")
+        "list_files" => argument_path(arguments, "path")
             .into_iter()
             .filter(|path| !path.trim().is_empty())
             .collect(),

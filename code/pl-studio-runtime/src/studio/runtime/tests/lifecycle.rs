@@ -898,8 +898,8 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
             }]
         }),
     );
-    let (base_url, server) =
-        serve_http_sequence(vec![TestHttpResponse::sse(question_response)]).await;
+    let (base_url, server, mut requests) =
+        serve_http_sequence_recording(vec![TestHttpResponse::sse(question_response)]).await;
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -960,6 +960,30 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
         .await
         .unwrap()
         .unwrap();
+    let request = requests.recv().await.unwrap();
+    let tool_names = response_tool_names(&request);
+    for required in ["exec", "write_stdin", "plan_exit"] {
+        assert!(
+            tool_names.contains(&required),
+            "planning request omitted {required}: {tool_names:?}"
+        );
+    }
+    for unavailable in [
+        "search_files",
+        "task_status",
+        "task_spawn_executor",
+        "task_update_design",
+        "task_record_merge",
+        "task_request_delivery_review",
+        "task_request_integrated_review",
+        "task_complete",
+        "task_stop",
+    ] {
+        assert!(
+            !tool_names.contains(&unavailable),
+            "planning request unexpectedly exposed {unavailable}: {tool_names:?}"
+        );
+    }
     wait_for_no_active_turn(&runtime).await;
 
     let origin = turn::Entity::find_by_id(&submitted.turn_id)
@@ -979,6 +1003,97 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
             .status,
         InteractionStatus::Pending
     );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn fresh_task_run_turn_installs_task_status_and_process_tools() {
+    let (base_url, server, mut requests) =
+        serve_http_sequence_recording(vec![TestHttpResponse::sse(responses_final_text_sse(
+            "active-task-tools",
+            "TaskRun tools observed",
+        ))])
+        .await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-active-task-tools-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "pure@example.com"],
+        vec!["config", "user.name", "Pure Test"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(workspace.join("README.md"), "active task tools\n").unwrap();
+    for args in [vec!["add", "README.md"], vec!["commit", "-m", "init"]] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Active Task tools", StudioMode::Task)
+        .await
+        .unwrap();
+    let run = runtime
+        .task_coordinator
+        .start_confirmed_task(&thread.id, "implement active task tools", &workspace)
+        .await
+        .unwrap();
+
+    runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "读取当前 Task 状态".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
+        .await
+        .unwrap()
+        .unwrap();
+    wait_for_no_active_turn(&runtime).await;
+
+    let request = requests.recv().await.unwrap();
+    let tool_names = response_tool_names(&request);
+    for required in ["exec", "write_stdin", "task_status", "task_update_design"] {
+        assert!(
+            tool_names.contains(&required),
+            "active Task request omitted {required}: {tool_names:?}"
+        );
+    }
+    assert!(!tool_names.contains(&"search_files"));
+    let durable = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert_eq!(durable.id, run.id);
+    assert_eq!(durable.root_thread_id, thread.id);
 
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(root).await;

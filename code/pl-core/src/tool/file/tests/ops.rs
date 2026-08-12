@@ -299,72 +299,7 @@ async fn list_cursor_is_bound_to_workspace_epoch() {
 }
 
 #[tokio::test]
-async fn search_files_accepts_pattern_as_search_text() {
-    let root = unique_temp_dir("search-pattern-text");
-    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
-    tokio::fs::write(root.join("src/args.rs"), "fn parse_args() {}\n")
-        .await
-        .unwrap();
-    let tool = search_files_tool();
-
-    let output = tool
-        .execute(
-            input(serde_json::json!({
-                "path": "src/args.rs",
-                "query": "fn parse_args",
-                "literal": true
-            })),
-            context(&root).await,
-        )
-        .await
-        .unwrap();
-
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-    assert_eq!(value["count"], serde_json::json!(1));
-    assert_eq!(
-        value["files"][0],
-        serde_json::json!({
-            "path": "src/args.rs",
-            "matches": [{
-                "line": 1,
-                "column": 1,
-                "text": "fn parse_args() {}",
-            }],
-        })
-    );
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn search_files_treats_empty_path_as_current_directory() {
-    let root = unique_temp_dir("search-empty-path");
-    tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("AGENTS.md"), "project constraints\n")
-        .await
-        .unwrap();
-    let tool = search_files_tool();
-
-    let output = tool
-        .execute(
-            input(serde_json::json!({
-                "path": "",
-                "query": "project constraints",
-                "literal": true
-            })),
-            context(&root).await,
-        )
-        .await
-        .unwrap();
-
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-    assert_eq!(value["path"], serde_json::json!("."));
-    assert_eq!(value["count"], serde_json::json!(1));
-    assert_eq!(value["files"][0]["path"], serde_json::json!("AGENTS.md"));
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn list_and_search_treat_empty_cursor_as_first_page() {
+async fn list_treats_empty_cursor_as_first_page() {
     let root = unique_temp_dir("empty-cursor-first-page");
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("README.md"), "maintainers\n")
@@ -382,25 +317,10 @@ async fn list_and_search_treat_empty_cursor_as_first_page() {
         )
         .await
         .expect("list first page");
-    let searched = search_files_tool()
-        .execute(
-            input(serde_json::json!({
-                "path": "",
-                "query": "maintainers",
-                "literal": true,
-                "cursor": "   ",
-            })),
-            context(&root).await,
-        )
-        .await
-        .expect("search first page");
     let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
-    let searched: serde_json::Value = serde_json::from_str(&searched.description).unwrap();
 
     assert_eq!(listed["count"], 1);
-    assert_eq!(searched["count"], 1);
     assert_eq!(listed["cursorReset"], false);
-    assert_eq!(searched["cursorReset"], false);
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -412,12 +332,11 @@ async fn malformed_cursor_is_explicitly_reset_to_first_page() {
         .await
         .unwrap();
 
-    let output = search_files_tool()
+    let output = list_files_tool()
         .execute(
             input(serde_json::json!({
                 "path": "",
-                "query": "maintainers",
-                "literal": true,
+                "glob": "README*",
                 "cursor": "x",
             })),
             context(&root).await,
@@ -432,38 +351,7 @@ async fn malformed_cursor_is_explicitly_reset_to_first_page() {
 }
 
 #[tokio::test]
-async fn search_files_file_pattern_filters_paths() {
-    let root = unique_temp_dir("search-file-pattern");
-    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
-    tokio::fs::write(root.join("src/lib.rs"), "needle\n")
-        .await
-        .unwrap();
-    tokio::fs::write(root.join("src/readme.txt"), "needle\n")
-        .await
-        .unwrap();
-    let tool = search_files_tool();
-
-    let output = tool
-        .execute(
-            input(serde_json::json!({
-                "path": "src",
-                "query": "needle",
-                "glob": "*.rs",
-                "literal": true
-            })),
-            context(&root).await,
-        )
-        .await
-        .unwrap();
-
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-    assert_eq!(value["count"], serde_json::json!(1));
-    assert_eq!(value["files"][0]["path"], serde_json::json!("src/lib.rs"));
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn list_and_search_skip_symbolic_link_directories() {
+async fn list_skips_symbolic_link_directories() {
     let root = unique_temp_dir("skip-symbolic-link");
     let outside = unique_temp_dir("symbolic-link-target");
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -487,23 +375,9 @@ async fn list_and_search_skip_symbolic_link_directories() {
         )
         .await
         .expect("list should skip symbolic link directories");
-    let searched = search_files_tool()
-        .execute(
-            input(serde_json::json!({
-                "query": "needle",
-                "literal": true,
-                "limit": 10,
-            })),
-            context(&root).await,
-        )
-        .await
-        .expect("search should skip symbolic link directories");
     let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
-    let searched: serde_json::Value = serde_json::from_str(&searched.description).unwrap();
 
     assert_eq!(listed["files"], serde_json::json!(["visible.txt"]));
-    assert_eq!(searched["count"], 1);
-    assert_eq!(searched["files"][0]["path"], "visible.txt");
     remove_directory_symlink(&root.join("linked")).unwrap();
     let _ = tokio::fs::remove_dir_all(root).await;
     let _ = tokio::fs::remove_dir_all(outside).await;

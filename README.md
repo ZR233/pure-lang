@@ -94,7 +94,7 @@ pure-lang/
 │   │   ├── src/interfaces/     # 端口定义
 │   │   ├── src/mcp/            # MCP 动态工具运行时
 │   │   ├── src/tool/           # 工具系统
-│   │   │   ├── command/          # Shell 进程管理（bash + write_stdin）
+│   │   │   ├── command/          # Shell 进程管理（exec + write_stdin）
 │   │   │   ├── file/             # 文件操作（read、write、apply_patch）
 │   │   │   ├── multi_agent/      # 子代理编排工具
 │   │   │   ├── ask_user.rs       # 向用户提问
@@ -156,8 +156,8 @@ pure-lang/
 
 | 分类 | 工具 |
 |------|------|
-| Shell | `bash`, `write_stdin` |
-| 文件读取 | `read_file`, `list_files`, `search_files`, `stat_path` |
+| Shell | `exec`, `write_stdin`（内容搜索用 `rg`，文件搜索用 `rg --files`） |
+| 文件读取 | `read_file`, `list_files`, `stat_path` |
 | 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
 | 补丁 | `apply_patch` |
 | 代码智能 | `lsp_query` |

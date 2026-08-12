@@ -8,8 +8,7 @@ use crate::tool::file::path::{WorkspacePaths, matches_pattern};
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
-    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
     WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
 use super::ops::tool_error;
@@ -210,20 +209,6 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
         files.truncate(request.max_files);
         Ok(WorkspaceFileListResult { files, truncated })
     }
-
-    async fn search(
-        &self,
-        request: WorkspaceFileSearchRequest,
-    ) -> Result<WorkspaceFileSearchResult> {
-        let root = self
-            .resolve_existing(request.cwd.as_deref(), &request.path)
-            .await?;
-        let mut matches = Vec::new();
-        search_entries(&self.paths, &root, &request, &mut matches).await?;
-        let truncated = matches.len() > request.max_matches;
-        matches.truncate(request.max_matches);
-        Ok(WorkspaceFileSearchResult { matches, truncated })
-    }
 }
 
 async fn collect_entries(
@@ -296,73 +281,10 @@ fn display_relative_to(root: &Path, path: &Path) -> Option<String> {
     Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
-async fn search_entries(
-    paths: &WorkspacePaths,
-    root: &Path,
-    request: &WorkspaceFileSearchRequest,
-    output: &mut Vec<WorkspaceFileSearchMatch>,
-) -> Result<()> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(path) = stack.pop() {
-        if output.len() > request.max_matches {
-            break;
-        }
-        let Some(metadata) = traversal_metadata(&path).await? else {
-            continue;
-        };
-        if metadata.is_dir() {
-            if is_skipped_dir(&path) {
-                continue;
-            }
-            for entry in real_directory_entries_async(&path)
-                .await
-                .map_err(|error| tool_error("file", error))?
-            {
-                stack.push(entry);
-            }
-            continue;
-        }
-        if !metadata.is_file() {
-            continue;
-        }
-        let display = paths.display_relative(&path);
-        if !matches_pattern(&display, request.glob.as_deref()) {
-            continue;
-        }
-        let Ok(content) = tokio::fs::read_to_string(&path).await else {
-            continue;
-        };
-        for (line_index, line) in content.lines().enumerate() {
-            if output.len() > request.max_matches {
-                break;
-            }
-            if let Some(column) = match_line(line, &request.query, request.case_sensitive) {
-                output.push(WorkspaceFileSearchMatch {
-                    path: display.clone(),
-                    line: line_index + 1,
-                    column,
-                    text: line.to_string(),
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
 async fn traversal_metadata(path: &Path) -> Result<Option<std::fs::Metadata>> {
     metadata_if_real_async(path)
         .await
         .map_err(|error| tool_error("file", error))
-}
-
-fn match_line(line: &str, query: &str, case_sensitive: bool) -> Option<usize> {
-    if case_sensitive {
-        line.find(query).map(|index| index + 1)
-    } else {
-        line.to_lowercase()
-            .find(&query.to_lowercase())
-            .map(|index| index + 1)
-    }
 }
 
 fn is_skipped_dir(path: &Path) -> bool {

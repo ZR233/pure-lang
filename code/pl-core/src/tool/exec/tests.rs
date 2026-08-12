@@ -563,21 +563,58 @@ async fn full_access_allows_working_directory_outside_workspace() {
 }
 
 #[tokio::test]
-async fn exec_rejects_read_only_workspace() {
+async fn exec_allows_search_read_and_write_in_read_only_workspace() {
     let (tool, root) = test_tool_with_root();
+    tokio::fs::write(root.join("read-only-source.txt"), "read-only fixture\n")
+        .await
+        .unwrap();
     let mut context = test_context();
     context.workspace = crate::tool::AgentWorkspace::confined(
         root.clone(),
         crate::tool::WorkspaceMutability::ReadOnly,
     );
 
-    let error = tool
-        .execute(tool_input("echo denied", "read-only", "exec"), context)
+    let search = tool
+        .execute(
+            tool_input("rg --version", "read-only", "search"),
+            context.clone(),
+        )
         .await
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+    assert_eq!(search.exit_code, Some(0));
+    assert!(search.truncated.stdout.content.contains("ripgrep"));
 
-    assert!(error.contains("read-only"), "{error}");
+    #[cfg(windows)]
+    let read_command = "Get-Content -LiteralPath 'read-only-source.txt'";
+    #[cfg(not(windows))]
+    let read_command = "cat read-only-source.txt";
+    let read = tool
+        .execute(
+            tool_input(read_command, "read-only", "read"),
+            context.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.exit_code, Some(0));
+    assert!(read.truncated.stdout.content.contains("read-only fixture"));
+
+    #[cfg(windows)]
+    let write_command = "Set-Content -LiteralPath 'shell-write.txt' -Value 'written'";
+    #[cfg(not(windows))]
+    let write_command = "printf written > shell-write.txt";
+    let write = tool
+        .execute(tool_input(write_command, "read-only", "write"), context)
+        .await
+        .unwrap();
+    assert_eq!(write.exit_code, Some(0));
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("shell-write.txt"))
+            .await
+            .unwrap()
+            .trim(),
+        "written"
+    );
+
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

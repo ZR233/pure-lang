@@ -97,10 +97,9 @@ pub use web_search::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchTool};
 pub use workspace_file::apply_patch_to_backend;
 pub use workspace_file::{
     ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
-    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend,
+    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, WorkspaceFileBackend,
     WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
-    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
     WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
     WorkspaceFileWriteRequest, execute_workspace_file_tool,
 };

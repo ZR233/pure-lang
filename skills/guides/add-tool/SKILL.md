@@ -157,7 +157,7 @@ workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；�
 
 | 模块 | 工具 | 特点 |
 |------|------|------|
-| **workspace_file/**、**file/** | `read_file`, `list_files`, `search_files`, `apply_patch` 等 | 共享 schema + local/host backend；写操作持有 workspace 写锁 |
+| **workspace_file/**、**file/** | `read_file`, `list_files`, `apply_patch` 等 | 共享 schema + local/host backend；内容/文件搜索使用 `exec` + `rg`/`rg --files`，写操作持有 workspace 写锁 |
 | **exec/mod.rs** | `exec`, `write_stdin` | 唯一命令工具协议，共享 `CommandProcessManager`；`command/` 是 backend 与进程管理实现 |
 | **skill/** | `skills_list`, `skill_view`, `skill_manage` | 技能目录访问，严格输入解析 |
 | **agent_runtime/collaboration.rs** | `spawn_agent`, `report_progress`, `send_message`, `interrupt_agent`, `list_agents`, `wait_agents`, `read_agent_session`, `close_agent` | 子代理树、显式进度和事件驱动等待 |

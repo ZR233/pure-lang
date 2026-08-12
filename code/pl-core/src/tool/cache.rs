@@ -575,10 +575,7 @@ fn deterministic_failure(
     original_call_id: String,
     error: &PureError,
 ) -> Option<ToolFailureEnvelopeV1> {
-    if !matches!(
-        tool_name,
-        "read_file" | "list_files" | "search_files" | "stat_path"
-    ) {
+    if !matches!(tool_name, "read_file" | "list_files" | "stat_path") {
         return None;
     }
     if !matches!(

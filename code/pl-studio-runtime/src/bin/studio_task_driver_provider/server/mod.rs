@@ -153,7 +153,7 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
         let step = next_step(&mut progress, role);
         if state.failure_mode == FailureMode::InvalidApiKeyPlanner
             && role == ScriptRole::Planner
-            && step == 3
+            && step == 4
         {
             let action = "invalid_api_key(planner)";
             append_request_log(&state.request_log, role.label(), step, action, &request)?;

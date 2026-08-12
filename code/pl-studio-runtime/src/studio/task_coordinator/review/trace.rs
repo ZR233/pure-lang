@@ -23,8 +23,16 @@ pub(super) async fn validate_review_trace(
         let metadata =
             ToolResultMetadata::from_metadata(&message.metadata).map_err(anyhow::Error::msg)?;
         let output = crate::message_content_text(&message.content);
-        if matches!(metadata.tool_name.as_str(), "search_files" | "list_files")
-            && successful_output(&output)
+        if metadata.tool_name == "list_files" && successful_output(&output) {
+            locator_seen = true;
+            continue;
+        }
+        if metadata.tool_name == "exec"
+            && successful_exec_output(&output)
+            && metadata
+                .tool_call_arguments
+                .as_deref()
+                .is_some_and(is_ripgrep_locator)
         {
             locator_seen = true;
             continue;
@@ -70,7 +78,7 @@ pub(super) async fn validate_review_trace(
             .push_str(text.unwrap_or_default());
     }
     if !locator_seen {
-        bail!("reviewer must use search_files or list_files before review_exit");
+        bail!("reviewer must use list_files or exec with rg/rg --files before review_exit");
     }
     if read_design.is_empty() {
         bail!("reviewer must successfully read at least one relevant design document");
@@ -98,6 +106,34 @@ fn successful_read_output(output: &str) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .is_some()
         })
+}
+
+fn successful_exec_output(output: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()
+        .is_some_and(|value| {
+            value.get("status").and_then(serde_json::Value::as_str) == Some("completed")
+                && value.get("exitCode").and_then(serde_json::Value::as_i64) == Some(0)
+        })
+}
+
+fn is_ripgrep_locator(arguments: &str) -> bool {
+    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(arguments) else {
+        return false;
+    };
+    let Some(command) = arguments
+        .get("command")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+    else {
+        return false;
+    };
+    let command = command.strip_prefix('&').map(str::trim).unwrap_or(command);
+    command
+        .split_whitespace()
+        .next()
+        .map(|executable| executable.trim_matches(['\'', '"']))
+        .is_some_and(|executable| matches!(executable, "rg" | "rg.exe"))
 }
 
 async fn validate_design_read_path(workspace: &Path, raw: &str) -> Result<String> {

@@ -57,13 +57,13 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 即使会话权限是 `full-access` 也不能逃逸。只有 `boundary=hostPermitted` 且权限策略明确放行时，
 本地 backend 才能解析 workspace 外路径。
 
-模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`search_files` 和 `apply_patch`。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
+模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`list_files` 和 `apply_patch` 等通用入口。模型没有独立的内容搜索文件工具；文本搜索优先通过 `exec` 运行 `rg`，文件名或文件列表搜索优先运行 `rg --files`，当前平台没有 ripgrep 时才使用等价的平台命令。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
-主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只约束 `cwd`，不分析命令正文。
+主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只解析并约束 `cwd`，不分析命令正文的读写行为；`WorkspaceMutability::ReadOnly` 不阻止 shell 启动。因此 shell 技术上可以写 workspace，或在 permission mode 允许时访问 `cwd` 之外的显式路径；角色提示负责约束 Planner、Explorer 和 Reviewer 遵守各自职责。cwd 解析、permission mode、超时、取消和进程回收语义不变。
 
-本地 `list_files` / `search_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次搜索失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
+本地 `list_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次遍历失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
 
 MCP tools 由 `McpRuntimeHandle` 的 turn lease 构造为普通 `RegisteredTool` 并注册进同一个
 `ToolRegistry`。handler 捕获 generation lease、server id 和远端 raw tool name，因而与内置工具
@@ -100,7 +100,7 @@ namespace 描述、`allowed_callers` 与 `output_schema`；延迟加载只减少
 Tool Search，Turn lease 中全部可见工具恢复 eager function schema，执行与权限语义不变。
 
 Programmatic eligibility 由注册表中可信的 typed contract 计算，不接受模型或第三方 annotation
-自行提升。首期白名单为 `read_file`、`list_files`、`search_files`、`stat_path`、LSP 查询、
+自行提升。首期白名单为 `read_file`、`list_files`、`stat_path`、LSP 查询、
 `git_status`、`git_diff`、`git_workspace_info`、MCP resource 读取和 effect 明确为 Read 的动态 MCP。
 WorkspaceWrite、Process、BranchControl、effect 未知 MCP、审批/交互与 agent-control 不设置
 `allowed_callers: programmatic`。program 内的每个嵌套调用仍逐个经过注册、模式、路径和权限校验；
@@ -361,7 +361,7 @@ generation、RegisteredTool builder 和结果转换器拆分。
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。
 
-文件搜索工具的参数名必须避免把“搜索内容”和“路径过滤”混在一起。`search_files` 使用必填 `pattern` 表示要在 UTF-8 文件内容中查找的 literal text；可选 `filePattern` 仅用于过滤被搜索的文件路径，例如 `*.rs` 或 `src/*`。`search_files` 不暴露 `query` 字段，也不把 `pattern` 解释为路径过滤。`list_files.pattern` 只在列目录语境下表示条目路径过滤，不参与文件内容搜索。
+模型工具集合不提供独立文件内容搜索 schema、缓存、分页、programmatic eligibility 或 backend 契约。`list_files.glob` 只在列目录语境下表示条目路径过滤，不参与文件内容搜索。内容搜索使用 `exec` + `rg`，文件发现使用 `exec` + `rg --files`；这两类命令属于 Process effect，不进入确定性只读工具缓存。
 
 ## Studio 展示
 
@@ -369,6 +369,9 @@ Studio Timeline 直接按 ThreadItem ordinal 投影。每个工具调用是一�
 Item 首次插入时固定 id、类型、ordinal 和位置，后续只更新 revision、内容与状态。Flutter 对排序后的
 Item 单次扫描，只在视觉层合并相邻 toolCall；任何非工具 Item 立即结束分组。工具组详情显示工具名、
 状态、关键路径或命令摘要；失败、拒绝、中断和预算限制必须显示结构化原因。
+
+工具集合变化不迁移或删除历史 ThreadItem。历史会话中的已移除工具调用继续作为普通 toolCall Item
+显示，Flutter 使用通用工具展示逻辑读取其名称、参数和既有结果，不尝试重新注册或执行该工具。
 
 工具、命令、文件修改和子代理协作活动的用户可读文本由 Flutter 根据结构化 Item 生成；Todo
 由独立侧栏读取 runtime snapshot。后端不新增本地化 `activityText`。固定标签和状态说明由 Flutter

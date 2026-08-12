@@ -17,7 +17,6 @@ impl ToolEffect {
         match name {
             "read_file"
             | "list_files"
-            | "search_files"
             | "stat_path"
             | "skills_list"
             | "skill_view"

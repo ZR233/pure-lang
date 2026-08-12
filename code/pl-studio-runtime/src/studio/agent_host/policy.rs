@@ -104,19 +104,23 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
             StudioMode::Task => {
                 let mut effects = vec![
                     ToolEffect::Read,
+                    ToolEffect::Process,
                     ToolEffect::AgentControl,
                     ToolEffect::BranchControl,
                 ];
                 if context.task_phase == Some(TaskRunPhase::Merging) {
                     effects.push(ToolEffect::WorkspaceWrite);
-                    effects.push(ToolEffect::Process);
                 }
                 effects
             }
         };
     }
     match snapshot.identity.role.as_str() {
-        "explorer" | "reviewer" => vec![ToolEffect::Read, ToolEffect::AgentControl],
+        "explorer" | "reviewer" => vec![
+            ToolEffect::Read,
+            ToolEffect::Process,
+            ToolEffect::AgentControl,
+        ],
         "executor" => vec![
             ToolEffect::Read,
             ToolEffect::WorkspaceWrite,
@@ -124,7 +128,7 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
             ToolEffect::AgentControl,
             ToolEffect::BranchControl,
         ],
-        "planner" => vec![ToolEffect::Read],
+        "planner" => vec![ToolEffect::Read, ToolEffect::Process],
         _ => vec![ToolEffect::Read],
     }
 }
@@ -163,5 +167,80 @@ fn finalization(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> TurnF
 fn required_tool(name: &str) -> TurnFinalizationPolicy {
     TurnFinalizationPolicy::RequiredTool {
         name: name.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{
+        AgentActivityState, AgentId, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
+    };
+
+    use super::*;
+
+    #[test]
+    fn process_effect_is_available_to_every_studio_role_and_task_phase() {
+        let visible = ToolVisibilitySet::from_tool_names(["exec", "write_stdin"]);
+        let root = snapshot("planner", true);
+        let task_phases = [
+            None,
+            Some(TaskRunPhase::Planning),
+            Some(TaskRunPhase::PendingConfirmation),
+            Some(TaskRunPhase::DesignUpdating),
+            Some(TaskRunPhase::Implementing),
+            Some(TaskRunPhase::Merging),
+            Some(TaskRunPhase::Reviewing),
+            Some(TaskRunPhase::Reworking),
+        ];
+        for task_phase in task_phases {
+            let policy = studio_execution_policy(
+                &root,
+                StudioPolicyContext {
+                    mode: StudioMode::Task,
+                    task_phase,
+                },
+                visible.clone(),
+            );
+            assert!(policy.allowed_effects.contains(ToolEffect::Process));
+            assert!(policy.visible_tools.contains("exec"));
+            assert!(policy.visible_tools.contains("write_stdin"));
+        }
+
+        for role in ["planner", "explorer", "reviewer", "executor"] {
+            let policy = studio_execution_policy(
+                &snapshot(role, false),
+                StudioPolicyContext {
+                    mode: StudioMode::Task,
+                    task_phase: Some(TaskRunPhase::Implementing),
+                },
+                visible.clone(),
+            );
+            assert!(
+                policy.allowed_effects.contains(ToolEffect::Process),
+                "{role} should allow Process"
+            );
+            assert!(policy.visible_tools.contains("exec"));
+            assert!(policy.visible_tools.contains("write_stdin"));
+        }
+    }
+
+    fn snapshot(role: &str, root: bool) -> AgentSnapshot {
+        AgentSnapshot {
+            identity: AgentIdentity {
+                id: AgentId::new(format!("agent-{role}")).unwrap(),
+                parent_id: (!root).then(|| AgentId::new("agent-root").unwrap()),
+                role: AgentRoleId::new(role).unwrap(),
+                depth: u32::from(!root),
+            },
+            lifecycle: AgentLifecycleState::Active,
+            activity: AgentActivityState::Idle,
+            active_turn_id: None,
+            pending_inputs: 0,
+            progress: None,
+            last_turn: None,
+            revision: 0,
+            event_sequence: 0,
+            updated_at: 0,
+        }
     }
 }

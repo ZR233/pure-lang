@@ -163,8 +163,8 @@ pub trait Tool: fmt::Debug + Send + Sync {
     }
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
         match self.name() {
-            "read_file" | "list_files" | "search_files" | "stat_path" | "skills_list"
-            | "skill_view" | "git_workspace_info" | "git_status" | "git_diff" => {
+            "read_file" | "list_files" | "stat_path" | "skills_list" | "skill_view"
+            | "git_workspace_info" | "git_status" | "git_diff" => {
                 ToolCachePolicy::UntilWorkspaceMutation
             }
             _ => ToolCachePolicy::Never,

@@ -51,10 +51,6 @@ fn list_files_tool() -> LocalWorkspaceFileTool {
     LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ListFiles)
 }
 
-fn search_files_tool() -> LocalWorkspaceFileTool {
-    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::SearchFiles)
-}
-
 fn apply_patch_tool() -> LocalWorkspaceFileTool {
     LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ApplyPatch)
 }

@@ -107,7 +107,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = (20, 11, 6);
+        let expected = (21, 11, 6);
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -201,6 +201,14 @@ async fn scripted_response(
 async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
     let response = match step {
         0 => (
+            "exec(planner rg --files)",
+            tool_call(
+                "planner-explore-files",
+                "exec",
+                serde_json::json!({"command": "rg --files"}),
+            ),
+        ),
+        1 => (
             "plan_exit",
             tool_call(
                 "plan",
@@ -210,11 +218,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             ),
         ),
-        1 => (
+        2 => (
             "final",
             final_text("plan-submitted", "Plan submitted for confirmation."),
         ),
-        2 => (
+        3 => (
             "task_update_design(initial)",
             tool_call(
                 "design-initial",
@@ -222,7 +230,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": INITIAL_DESIGN_PATCH}),
             ),
         ),
-        3 => (
+        4 => (
             "task_spawn_executor(exact duplicate)",
             repeated_tool_call(
                 "spawn-executor",
@@ -239,7 +247,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             ),
         ),
-        4..=7 => {
+        5..=8 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "wait_agents(executor)",
@@ -250,11 +258,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        8 => (
+        9 => (
             "task_status(completion)",
             tool_call("status-completion", "task_status", serde_json::json!({})),
         ),
-        9 => {
+        10 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "task_request_delivery_review",
@@ -265,11 +273,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        10 => (
+        11 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        11 => (
+        12 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -277,7 +285,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        12 => {
+        13 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "close_agent(executor)",
@@ -288,7 +296,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        13 => {
+        14 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -309,7 +317,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        14 => ("task_record_merge", {
+        15 => ("task_record_merge", {
             let task = current_task(state).await?;
             let executor_id = executor_agent_id(state).await?;
             let completion = task
@@ -335,7 +343,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             )
         }),
-        15 => (
+        16 => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -343,7 +351,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        16 => (
+        17 => (
             "task_request_integrated_review",
             tool_call(
                 "request-integrated-review",
@@ -351,7 +359,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        17 => (
+        18 => (
             "list_agents(integrated-review)",
             tool_call(
                 "list-integrated-review",
@@ -359,7 +367,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        18 => (
+        19 => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -367,7 +375,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        19 => (
+        20 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
@@ -571,10 +579,7 @@ async fn next_step(state: &ScriptState, role: ScriptRole) -> usize {
 }
 
 fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
-    let tools = request
-        .get("tools")
-        .and_then(serde_json::Value::as_array)
-        .context("model request has no tools array")?;
+    let tools = request_tools(request)?;
     let names = tools
         .iter()
         .filter_map(|tool| {
@@ -598,15 +603,29 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
         return Ok(ScriptRole::Reviewer);
     }
     if names.contains("plan_exit") || names.contains("task_update_design") {
-        validate_planner_spawn_contract(tools)?;
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
 }
 
 fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: usize) -> Result<()> {
+    if role == ScriptRole::Planner {
+        let tools = request_tools(request)?;
+        if step <= 2 {
+            validate_planning_contract(tools)?;
+        } else {
+            validate_planner_spawn_contract(tools)?;
+        }
+    }
+    if role == ScriptRole::Planner && step == 1 {
+        let output = latest_function_call_output(request)
+            .context("Planner rg --files did not return a tool result")?;
+        if !output.contains("\"status\":\"completed\"") || !output.contains("\"exitCode\":0") {
+            bail!("Planner rg --files was expected to succeed before plan_exit: {output}");
+        }
+    }
     if role == ScriptRole::Planner
-        && step == 4
+        && step == 5
         && !latest_function_call_output(request)
             .is_some_and(|output| output.contains("\"reused\":true"))
     {
@@ -633,6 +652,50 @@ fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: us
             .context("executor patch failure did not return a tool result")?;
         if !output.contains("Tool execution error:") {
             bail!("fixture patch was expected to fail before reread: {output}");
+        }
+    }
+    Ok(())
+}
+
+fn request_tools(request: &serde_json::Value) -> Result<&[serde_json::Value]> {
+    request
+        .get("tools")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .context("model request has no tools array")
+}
+
+fn validate_planning_contract(tools: &[serde_json::Value]) -> Result<()> {
+    let names = tools
+        .iter()
+        .filter_map(|tool| {
+            tool.get("name")
+                .or_else(|| {
+                    tool.get("function")
+                        .and_then(|function| function.get("name"))
+                })
+                .and_then(serde_json::Value::as_str)
+        })
+        .collect::<BTreeSet<_>>();
+    for required in ["exec", "write_stdin", "plan_exit"] {
+        if !names.contains(required) {
+            bail!("planning tools do not include {required}: {names:?}");
+        }
+    }
+    for unavailable in [
+        "search_files",
+        "task_status",
+        "task_spawn_executor",
+        "task_update_design",
+        "task_record_merge",
+        "task_request_delivery_review",
+        "task_request_integrated_review",
+        "read_review_round",
+        "task_complete",
+        "task_stop",
+    ] {
+        if names.contains(unavailable) {
+            bail!("planning tools unexpectedly include {unavailable}: {names:?}");
         }
     }
     Ok(())

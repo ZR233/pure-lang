@@ -244,9 +244,9 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     let history = AgentSession::from_messages(vec![
         crate::tool_result_history_message(
             "call-search".to_string(),
-            "search_files".to_string(),
-            r#"{"query":"review design"}"#.to_string(),
-            r#"{"matches":["design/guide.md"]}"#.to_string(),
+            "exec".to_string(),
+            r#"{"command":"rg --files design"}"#.to_string(),
+            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string(),
         ),
         crate::tool_result_history_message(
             "call-read".to_string(),

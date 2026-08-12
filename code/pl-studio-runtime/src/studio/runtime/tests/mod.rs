@@ -39,8 +39,20 @@ impl TestHttpResponse {
 async fn serve_http_sequence(
     responses: Vec<TestHttpResponse>,
 ) -> (String, tokio::task::JoinHandle<usize>) {
+    let (base_url, handle, _requests) = serve_http_sequence_recording(responses).await;
+    (base_url, handle)
+}
+
+async fn serve_http_sequence_recording(
+    responses: Vec<TestHttpResponse>,
+) -> (
+    String,
+    tokio::task::JoinHandle<usize>,
+    tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let (requests_tx, requests_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = tokio::spawn(async move {
         let response_count = responses.len();
         for response in responses {
@@ -71,6 +83,12 @@ async fn serve_http_sequence(
                 assert_ne!(n, 0);
                 buffer.extend_from_slice(&temp[..n]);
             }
+            let body_start = header_end + 4;
+            let request = serde_json::from_slice(
+                &buffer[body_start..body_start.saturating_add(content_length)],
+            )
+            .unwrap();
+            let _ = requests_tx.send(request);
 
             let response_bytes = format!(
                 "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -85,7 +103,7 @@ async fn serve_http_sequence(
         response_count
     });
 
-    (format!("http://{addr}"), handle)
+    (format!("http://{addr}"), handle, requests_rx)
 }
 
 async fn serve_delayed_sse() -> (
@@ -288,6 +306,19 @@ async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
     })
     .await
     .unwrap();
+}
+
+fn response_tool_names(request: &serde_json::Value) -> Vec<&str> {
+    request["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            tool.get("name")
+                .or_else(|| tool.pointer("/function/name"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .collect()
 }
 
 mod config;

@@ -12,20 +12,16 @@ use crate::tool::text_document::{
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileReadRequest,
-    WorkspaceFileSearchRequest, WorkspaceFileStatRequest,
+    WorkspaceFileStatRequest,
 };
 use super::patch::apply_patch_to_backend;
-use super::schema::{
-    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileToolKind,
-};
+use super::schema::{TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, WorkspaceFileToolKind};
 
 const DEFAULT_READ_FILE_LINES: usize = 200;
 const MAX_READ_FILE_LINES: usize = 500;
 const MAX_READ_PATH_SUGGESTIONS: usize = 5;
 const DEFAULT_LIST_FILES_LIMIT: usize = 100;
 const MAX_LIST_FILES_LIMIT: usize = 200;
-const DEFAULT_SEARCH_MATCH_LIMIT: usize = 100;
-const MAX_SEARCH_MATCH_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkspaceFileToolExecution {
@@ -70,9 +66,6 @@ where
     let value = match kind {
         WorkspaceFileToolKind::ReadFile => read_file(backend, arguments).await?,
         WorkspaceFileToolKind::ListFiles => list_files(backend, arguments, workspace_epoch).await?,
-        WorkspaceFileToolKind::SearchFiles => {
-            search_files(backend, arguments, workspace_epoch).await?
-        }
         WorkspaceFileToolKind::ApplyPatch => apply_patch(backend, arguments).await?,
     };
     Ok(Some(WorkspaceFileToolExecution::json(value)?))
@@ -264,91 +257,10 @@ where
     }))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SearchFilesInput {
-    query: String,
-    path: Option<String>,
-    cwd: Option<String>,
-    glob: Option<String>,
-    case_sensitive: Option<bool>,
-    literal: Option<bool>,
-    limit: Option<usize>,
-    cursor: Option<String>,
-    context_lines: Option<usize>,
-}
-
-async fn search_files<B>(backend: &B, arguments: Value, workspace_epoch: u64) -> Result<Value>
-where
-    B: WorkspaceFileBackend,
-{
-    let input: SearchFilesInput = parse_input(arguments, TOOL_SEARCH_FILES)?;
-    let path = path_or_current(input.path);
-    let limit = input.limit.unwrap_or(DEFAULT_SEARCH_MATCH_LIMIT);
-    if !(1..=MAX_SEARCH_MATCH_LIMIT).contains(&limit) {
-        return Err(tool_error(
-            TOOL_SEARCH_FILES,
-            format!("limit must be between 1 and {MAX_SEARCH_MATCH_LIMIT}"),
-        ));
-    }
-    let case_sensitive = input.case_sensitive.unwrap_or(true);
-    let literal = input.literal.unwrap_or(false);
-    let context_lines = input.context_lines.unwrap_or(0);
-    if context_lines > 20 {
-        return Err(tool_error(
-            TOOL_SEARCH_FILES,
-            "contextLines must be between 0 and 20",
-        ));
-    }
-    let cursor_key = cursor_key(&json!({
-        "query": input.query,
-        "path": path,
-        "cwd": input.cwd,
-        "glob": input.glob,
-        "caseSensitive": case_sensitive,
-        "literal": literal,
-        "contextLines": context_lines,
-        "workspaceEpoch": workspace_epoch,
-    }));
-    let cursor = decode_cursor(input.cursor.as_deref(), CursorKind::Search, &cursor_key)?;
-    let offset = cursor.offset;
-    let result = backend
-        .search(WorkspaceFileSearchRequest {
-            query: input.query.clone(),
-            path: path.clone(),
-            cwd: input.cwd,
-            glob: input.glob.clone(),
-            case_sensitive,
-            literal,
-            max_matches: offset.saturating_add(limit).saturating_add(1),
-            context_lines,
-        })
-        .await?;
-    let end = offset.saturating_add(limit).min(result.matches.len());
-    let matches = result.matches.get(offset..end).unwrap_or_default();
-    let files = group_search_matches(matches);
-    let has_more = end < result.matches.len() || result.truncated;
-    let next_cursor = has_more.then(|| encode_cursor(CursorKind::Search, &cursor_key, end));
-    let result_hash =
-        crate::working_set::canonical_content_hash(serde_json::to_string(matches)?.as_bytes());
-    Ok(json!({
-        "query": input.query,
-        "path": path,
-        "glob": input.glob,
-        "files": files,
-        "count": matches.len(),
-        "nextCursor": next_cursor,
-        "cursorReset": cursor.reset,
-        "resultHash": result_hash,
-        "workspaceEpoch": workspace_epoch,
-    }))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum CursorKind {
     List,
-    Search,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -414,21 +326,6 @@ fn decode_cursor(
     })
 }
 
-fn group_search_matches(matches: &[super::WorkspaceFileSearchMatch]) -> Vec<Value> {
-    let mut grouped = std::collections::BTreeMap::<&str, Vec<Value>>::new();
-    for item in matches {
-        grouped.entry(&item.path).or_default().push(json!({
-            "line": item.line,
-            "column": item.column,
-            "text": item.text,
-        }));
-    }
-    grouped
-        .into_iter()
-        .map(|(path, matches)| json!({ "path": path, "matches": matches }))
-        .collect()
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ApplyPatchInput {
@@ -467,9 +364,6 @@ fn input_guidance(tool: &str) -> &'static str {
     match tool {
         TOOL_READ_FILE => "Allowed fields: path, cwd, startLine, maxLines",
         TOOL_LIST_FILES => "Allowed fields: path, cwd, glob, limit, cursor, includeDirs",
-        TOOL_SEARCH_FILES => {
-            "Allowed fields: query, path, cwd, glob, caseSensitive, literal, limit, cursor, contextLines"
-        }
         TOOL_APPLY_PATCH => {
             "Allowed fields: input, cwd. Re-read changed files and generate a smaller patch after a context conflict"
         }
