@@ -1,61 +1,27 @@
-use std::process::Stdio;
-#[cfg(unix)]
-use std::time::Duration;
+use std::io;
 
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
+#[cfg(windows)]
+use process_wrap::tokio::{CreationFlags, JobObject};
 use tokio::process::Command;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+const CREATE_NO_WINDOW: windows::Win32::System::Threading::PROCESS_CREATION_FLAGS =
+    windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
-pub(crate) fn configure_background_command(command: &mut Command) {
-    command.kill_on_drop(true);
+pub(crate) type ManagedChild = Box<dyn ChildWrapper>;
+
+pub(crate) fn spawn_background(command: Command) -> io::Result<ManagedChild> {
+    let mut command = CommandWrap::from(command);
+    command.wrap(KillOnDrop);
     #[cfg(windows)]
     {
-        command.creation_flags(CREATE_NO_WINDOW);
+        command.wrap(CreationFlags(CREATE_NO_WINDOW));
+        command.wrap(JobObject);
     }
     #[cfg(unix)]
-    {
-        command.process_group(0);
-    }
-}
-
-pub(crate) async fn terminate_process_tree(pid: Option<u32>) {
-    let Some(pid) = pid else { return };
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("taskkill");
-        command
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        configure_background_command(&mut command);
-        let _ = command.status().await;
-    }
-    #[cfg(unix)]
-    {
-        let group = format!("-{pid}");
-        let mut terminate = Command::new("kill");
-        terminate
-            .args(["-TERM", "--", &group])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        configure_background_command(&mut terminate);
-        let delivered = terminate
-            .status()
-            .await
-            .map(|status| status.success())
-            .unwrap_or(false);
-        if delivered {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-        let mut kill = Command::new("kill");
-        kill.args(["-KILL", "--", &group])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        configure_background_command(&mut kill);
-        let _ = kill.status().await;
-    }
+    command.wrap(ProcessGroup::leader());
+    command.spawn()
 }

@@ -3,7 +3,7 @@
 //! `pl-core` 只定义可 serde 的模型路由值对象；本模块组合 Studio 的运行时、
 //! instructions、skills、MCP 与 UI 配置，并独占文件格式、schema 版本和默认角色。
 
-mod migration;
+mod credential;
 mod mode;
 mod store;
 
@@ -27,7 +27,7 @@ pub use pl_core::config::{
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use store::{ConfigPaths, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 13;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 14;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;

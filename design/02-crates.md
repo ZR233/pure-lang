@@ -137,4 +137,5 @@ Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责
 attachments 一起移入时间戳 archive；全部归档成功后才创建新库。
 
 不导入旧会话或 Task，不保留运行期 migration dispatcher。任何锁定、损坏或归档失败都
-fail closed 并保留原文件。`config.toml` 继续使用 schema 12。
+fail closed 并保留原文件。`config.toml` 使用 schema 14；provider API token 由系统凭据库保存，
+TOML 不持久化明文 secret。

@@ -109,7 +109,7 @@ fn clean_directory(directory: &Path, cutoff: SystemTime, owns: fn(&str) -> bool)
 }
 
 fn is_owned_log_name(file_name: &str) -> bool {
-    (file_name.starts_with("studio-")
+    (file_name.starts_with("studio.")
         || file_name.starts_with("error-")
         || file_name.starts_with("dart-error-"))
         && file_name.ends_with(".log")
@@ -139,7 +139,7 @@ mod tests {
         let crash_dir = root.join("crashes");
         std::fs::create_dir_all(&log_dir)?;
         std::fs::create_dir_all(&crash_dir)?;
-        let expired = log_dir.join("studio-2026-08-01.log");
+        let expired = log_dir.join("studio.2026-08-01.log");
         let dart_error = log_dir.join("dart-error-2026-08-01.log");
         let boundary = log_dir.join("error-2026-08-02.log");
         let unrelated = log_dir.join("other-2026-08-01.log");

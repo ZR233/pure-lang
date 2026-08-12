@@ -1,4 +1,5 @@
 mod agent_runtime;
+pub mod atomic_file;
 pub mod attachment;
 pub mod config;
 mod context_assembler;

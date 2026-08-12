@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
-serde_norway = { workspace = true }
+gray_matter = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

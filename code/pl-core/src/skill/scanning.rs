@@ -191,35 +191,59 @@ pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
     {
         return files;
     }
-    find_skill_files_inner(root, 0, &mut files);
-    files
-}
-
-fn find_skill_files_inner(dir: &Path, depth: usize, files: &mut Vec<PathBuf>) {
-    if depth > super::MAX_SKILL_SCAN_DEPTH {
-        return;
-    }
-    let skill_file = dir.join(SKILL_FILE_NAME);
-    if metadata_if_real(&skill_file)
-        .ok()
-        .flatten()
-        .is_some_and(|metadata| metadata.is_file())
-    {
-        files.push(skill_file);
-        return;
-    }
-    let Ok(entries) = real_directory_entries(dir) else {
-        return;
-    };
-    for path in entries {
-        let Some(metadata) = metadata_if_real(&path).ok().flatten() else {
-            continue;
-        };
-        if !metadata.is_dir() || should_skip_dir(&path) {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .max_depth(Some(super::MAX_SKILL_SCAN_DEPTH + 1))
+        .hidden(true)
+        .follow_links(false)
+        .require_git(false)
+        .sort_by_file_name(std::cmp::Ord::cmp)
+        .filter_entry(|entry| {
+            entry.depth() == 0
+                || entry
+                    .path()
+                    .file_name()
+                    .is_some_and(|name| name == SKILL_FILE_NAME)
+                || !should_skip_dir(entry.path())
+        });
+    for entry in builder.build().filter_map(std::result::Result::ok) {
+        if entry.depth() == 0 || entry.file_name() != SKILL_FILE_NAME {
             continue;
         }
-        find_skill_files_inner(&path, depth + 1, files);
+        let path = entry.into_path();
+        if metadata_if_real(&path)
+            .ok()
+            .flatten()
+            .is_some_and(|metadata| metadata.is_file())
+        {
+            files.push(path);
+        }
     }
+    files.sort();
+    files.dedup();
+    files.retain(|skill_file| {
+        skill_file
+            .parent()
+            .and_then(|directory| directory.parent())
+            .map(|mut ancestor| {
+                while ancestor.starts_with(root) && ancestor != root {
+                    if metadata_if_real(&ancestor.join(SKILL_FILE_NAME))
+                        .ok()
+                        .flatten()
+                        .is_some_and(|metadata| metadata.is_file())
+                    {
+                        return false;
+                    }
+                    let Some(parent) = ancestor.parent() else {
+                        break;
+                    };
+                    ancestor = parent;
+                }
+                true
+            })
+            .unwrap_or(true)
+    });
+    files
 }
 
 fn should_skip_dir(path: &Path) -> bool {

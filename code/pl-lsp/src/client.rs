@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use lsp_server::Message;
 use lsp_types::{FileChangeType, ProgressParams, PublishDiagnosticsParams};
 use serde_json::Value;
 use tokio::io::BufReader;
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::client_config::{initialize_params, watched_file_event_params};
@@ -18,14 +19,12 @@ use crate::client_server::{
     apply_progress_status, clear_progress_status, record_last_error_status,
     respond_to_server_request,
 };
-use crate::client_wire::{
-    PendingRequests, fail_pending, notify_raw, request_raw, response_id, response_result,
-};
 use crate::diagnostics::DiagnosticSink;
-use crate::framing::read_message;
-use crate::process::{configure_background_command, terminate_process_tree};
+use crate::process::{ManagedChild, spawn_background};
+use crate::rpc::RpcClient;
 use crate::server_definition::LspServerDefinition;
 use crate::status::{LspClientRuntimeStatus, LspClientStatus};
+use crate::transport::LspTransport;
 use crate::types::{LspResult, LspRuntimeError};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -35,12 +34,12 @@ const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
 
 pub(crate) struct LspClient {
     definition: LspServerDefinition,
-    child: Mutex<Option<Child>>,
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
-    pending: PendingRequests,
+    child: Mutex<Option<ManagedChild>>,
+    transport: Mutex<Option<LspTransport>>,
+    rpc: RwLock<Option<RpcClient>>,
     opened_files: Mutex<HashMap<PathBuf, OpenDocument>>,
-    next_id: AtomicI64,
-    initialized: AtomicBool,
+    initialized: Arc<AtomicBool>,
+    connection_generation: Arc<AtomicU64>,
     start_lock: Mutex<()>,
     diagnostics: DiagnosticSink,
     status: Arc<Mutex<LspClientStatus>>,
@@ -67,11 +66,11 @@ impl LspClient {
         Self {
             definition,
             child: Mutex::new(None),
-            stdin: Arc::new(Mutex::new(None)),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            transport: Mutex::new(None),
+            rpc: RwLock::new(None),
             opened_files: Mutex::new(HashMap::new()),
-            next_id: AtomicI64::new(1),
-            initialized: AtomicBool::new(false),
+            initialized: Arc::new(AtomicBool::new(false)),
+            connection_generation: Arc::new(AtomicU64::new(0)),
             start_lock: Mutex::new(()),
             diagnostics,
             status: Arc::new(Mutex::new(LspClientStatus::default())),
@@ -80,15 +79,7 @@ impl LspClient {
 
     pub async fn request(&self, method: &str, params: Value) -> LspResult<Value> {
         self.ensure_started().await?;
-        let result = request_raw(
-            &self.stdin,
-            &self.pending,
-            &self.next_id,
-            method,
-            params,
-            REQUEST_TIMEOUT,
-        )
-        .await;
+        let result = self.rpc()?.request(method, params, REQUEST_TIMEOUT).await;
         if let Err(error) = &result
             && !is_content_modified_error(error)
         {
@@ -99,7 +90,7 @@ impl LspClient {
 
     pub async fn notify(&self, method: &str, params: Value) -> LspResult<()> {
         self.ensure_started().await?;
-        notify_raw(&self.stdin, method, params).await
+        self.rpc()?.notify(method, params).await
     }
 
     pub async fn open_document(&self, path: &Path, uri: &str) -> LspResult<()> {
@@ -181,32 +172,31 @@ impl LspClient {
     }
 
     pub async fn shutdown(&self) {
-        if self.initialized.swap(false, Ordering::Relaxed) {
-            let _ = request_raw(
-                &self.stdin,
-                &self.pending,
-                &self.next_id,
-                "shutdown",
-                Value::Null,
-                Duration::from_secs(3),
-            )
-            .await;
-            let _ = notify_raw(&self.stdin, "exit", Value::Null).await;
+        if self.initialized.swap(false, Ordering::Relaxed)
+            && let Ok(rpc) = self.rpc()
+        {
+            let _ = rpc
+                .request("shutdown", Value::Null, Duration::from_secs(3))
+                .await;
+            let _ = rpc.notify("exit", Value::Null).await;
         }
-        self.stdin.lock().await.take();
         if let Some(mut child) = self.child.lock().await.take() {
-            let pid = child.id();
-            if tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait())
-                .await
-                .is_err()
-            {
-                terminate_process_tree(pid).await;
-                let _ = child.start_kill();
-                let _ = child.wait().await;
+            match tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) | Err(_) => {
+                    let kill = child.kill();
+                    let _ = std::pin::Pin::from(kill).await;
+                }
             }
         }
+        self.connection_generation.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut rpc) = self.rpc.write() {
+            rpc.take();
+        }
+        if let Some(mut transport) = self.transport.lock().await.take() {
+            let _ = tokio::task::spawn_blocking(move || transport.close()).await;
+        }
         self.opened_files.lock().await.clear();
-        self.pending.lock().await.clear();
         self.clear_progress().await;
     }
 
@@ -218,12 +208,12 @@ impl LspClient {
         if !self.initialized.load(Ordering::Relaxed) {
             return Ok(());
         }
-        notify_raw(
-            &self.stdin,
-            "workspace/didChangeWatchedFiles",
-            watched_file_event_params(path, typ)?,
-        )
-        .await
+        self.rpc()?
+            .notify(
+                "workspace/didChangeWatchedFiles",
+                watched_file_event_params(path, typ)?,
+            )
+            .await
     }
 
     async fn ensure_started(&self) -> LspResult<()> {
@@ -234,14 +224,14 @@ impl LspClient {
         if self.initialized.load(Ordering::Relaxed) {
             return Ok(());
         }
+        self.stop_stale_connection().await;
 
         let mut command = Command::new(&self.definition.command);
         command.args(&self.definition.args);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
-        configure_background_command(&mut command);
-        let mut child = command.spawn().map_err(|error| {
+        let mut child = spawn_background(command).map_err(|error| {
             let message = format!(
                 "Failed to start LSP server '{}': {error}",
                 self.definition.id
@@ -249,12 +239,25 @@ impl LspClient {
             LspRuntimeError::Unavailable(message)
         })?;
 
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take();
-        self.stdin.lock().await.replace(stdin);
+        let stdin = child.stdin().take().ok_or_else(|| {
+            LspRuntimeError::Unavailable("LSP child stdin pipe is unavailable".to_string())
+        })?;
+        let stdout = child.stdout().take().ok_or_else(|| {
+            LspRuntimeError::Unavailable("LSP child stdout pipe is unavailable".to_string())
+        })?;
+        let stderr = child.stderr().take();
+        let (transport, inbound) = LspTransport::spawn(stdin, stdout)?;
+        let rpc = RpcClient::new(transport.sender()?);
+        let generation = self.connection_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.spawn_dispatcher(inbound, rpc.clone(), generation);
+        self.transport.lock().await.replace(transport);
+        self.rpc
+            .write()
+            .map_err(|_| {
+                LspRuntimeError::Unavailable("LSP connection state is poisoned".to_string())
+            })?
+            .replace(rpc.clone());
         self.child.lock().await.replace(child);
-        self.spawn_reader(stdout);
 
         if let Some(stderr) = stderr {
             let status = self.status.clone();
@@ -279,100 +282,118 @@ impl LspClient {
             });
         }
 
-        let initialize = request_raw(
-            &self.stdin,
-            &self.pending,
-            &self.next_id,
-            "initialize",
-            initialize_params(&self.definition),
-            STARTUP_TIMEOUT,
-        )
-        .await;
+        let initialize = rpc
+            .request(
+                "initialize",
+                initialize_params(&self.definition),
+                STARTUP_TIMEOUT,
+            )
+            .await;
         if let Err(error) = initialize {
             self.record_last_error(error.to_string()).await;
             self.shutdown().await;
             return Err(error);
         }
-        notify_raw(&self.stdin, "initialized", serde_json::json!({})).await?;
+        if let Err(error) = rpc.notify("initialized", serde_json::json!({})).await {
+            self.record_last_error(error.to_string()).await;
+            self.shutdown().await;
+            return Err(error);
+        }
         self.initialized.store(true, Ordering::Relaxed);
         Ok(())
     }
 
-    fn spawn_reader(&self, stdout: tokio::process::ChildStdout) {
-        let pending = self.pending.clone();
-        let stdin = self.stdin.clone();
+    fn spawn_dispatcher(
+        &self,
+        mut inbound: tokio::sync::mpsc::Receiver<LspResult<Message>>,
+        rpc: RpcClient,
+        generation: u64,
+    ) {
         let diagnostics = self.diagnostics.clone();
         let status = self.status.clone();
         let updates = self.diagnostics.updates.clone();
         let server_id = self.definition.id.clone();
+        let initialized = self.initialized.clone();
+        let connection_generation = self.connection_generation.clone();
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                let message = match read_message(&mut reader).await {
-                    Ok(Some(message)) => message,
-                    Ok(None) => break,
+            while let Some(message) = inbound.recv().await {
+                let message = match message {
+                    Ok(message) => message,
                     Err(error) => {
-                        fail_pending(&pending, error).await;
+                        rpc.fail_pending(error.to_string()).await;
                         break;
                     }
                 };
-                let value = match serde_json::from_slice::<Value>(&message) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        fail_pending(&pending, error.into()).await;
-                        continue;
+                match message {
+                    Message::Request(request) => {
+                        let response =
+                            respond_to_server_request(request, &server_id, &status, &updates).await;
+                        let _ = rpc.respond(response).await;
                     }
-                };
-                if let Some(method) = value.get("method").and_then(Value::as_str) {
-                    if let Some(id) = response_id(&value) {
-                        let _ = respond_to_server_request(
-                            &stdin,
-                            id,
-                            method,
-                            value.get("params"),
-                            &server_id,
-                            &status,
-                            &updates,
-                        )
-                        .await;
-                    } else if method == "$/progress"
-                        && let Some(params) = value.get("params")
-                        && let Ok(params) = serde_json::from_value::<ProgressParams>(params.clone())
-                    {
-                        if apply_progress_status(&status, params).await {
+                    Message::Notification(notification) => match notification.method.as_str() {
+                        "$/progress" => {
+                            if let Ok(params) =
+                                serde_json::from_value::<ProgressParams>(notification.params)
+                                && apply_progress_status(&status, params).await
+                            {
+                                let _ = updates.send(());
+                            }
+                        }
+                        "textDocument/publishDiagnostics" => {
+                            if let Ok(params) = serde_json::from_value::<PublishDiagnosticsParams>(
+                                notification.params,
+                            ) {
+                                diagnostics.publish(params).await;
+                            }
+                        }
+                        _ => {}
+                    },
+                    Message::Response(response) => {
+                        let result = response.response_result.clone().map_err(|error| {
+                            LspRuntimeError::Server {
+                                code: i64::from(error.code),
+                                message: error.message,
+                            }
+                        });
+                        if let Err(error) = &result
+                            && !is_content_modified_error(error)
+                            && record_last_error_status(&status, error.to_string()).await
+                        {
                             let _ = updates.send(());
                         }
-                    } else if method == "textDocument/publishDiagnostics"
-                        && let Some(params) = value.get("params")
-                        && let Ok(params) =
-                            serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
-                    {
-                        diagnostics.publish(params).await;
-                    }
-                    continue;
-                }
-                if let Some(id) = response_id(&value) {
-                    let result = response_result(value);
-                    if let Err(error) = &result
-                        && !is_content_modified_error(error)
-                        && record_last_error_status(&status, error.to_string()).await
-                    {
-                        let _ = updates.send(());
-                    }
-                    if let Some(sender) = pending.lock().await.remove(&id) {
-                        let _ = sender.send(result);
+                        rpc.complete(response).await;
                     }
                 }
             }
             if clear_progress_status(&status).await {
                 let _ = updates.send(());
             }
-            fail_pending(
-                &pending,
-                LspRuntimeError::Unavailable(format!("{server_id} connection closed")),
-            )
-            .await;
+            rpc.fail_pending(format!("{server_id} connection closed"))
+                .await;
+            if generation_is_current(&connection_generation, generation) {
+                initialized.store(false, Ordering::Relaxed);
+            }
         });
+    }
+
+    fn rpc(&self) -> LspResult<RpcClient> {
+        self.rpc
+            .read()
+            .map_err(|_| {
+                LspRuntimeError::Unavailable("LSP connection state is poisoned".to_string())
+            })?
+            .clone()
+            .ok_or_else(|| LspRuntimeError::Unavailable("LSP transport unavailable".to_string()))
+    }
+
+    async fn stop_stale_connection(&self) {
+        if self.child.lock().await.is_none()
+            && self.transport.lock().await.is_none()
+            && self.rpc.read().is_ok_and(|rpc| rpc.is_none())
+        {
+            return;
+        }
+        self.shutdown().await;
     }
 
     async fn record_last_error(&self, message: String) {
@@ -386,6 +407,10 @@ impl LspClient {
             let _ = self.diagnostics.updates.send(());
         }
     }
+}
+
+fn generation_is_current(current: &AtomicU64, generation: u64) -> bool {
+    current.load(Ordering::Relaxed) == generation
 }
 
 fn is_error_stderr_line(line: &str) -> bool {

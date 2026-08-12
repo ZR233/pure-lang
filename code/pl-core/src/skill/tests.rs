@@ -5,9 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pretty_assertions::assert_eq;
 
-use super::scanning::{support_file_path, validate_skill_document};
+use super::scanning::{find_skill_files, support_file_path, validate_skill_document};
 use super::system::install_system_skills;
-use super::{SKILL_FILE_NAME, SkillCatalog, SkillSourceKind, SkillsConfig, build_skills_prompt};
+use super::{
+    MAX_SKILL_SCAN_DEPTH, SKILL_FILE_NAME, SkillCatalog, SkillMetadata, SkillSourceKind,
+    SkillsConfig, build_skills_prompt, bump_project_view,
+};
 
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
@@ -91,6 +94,83 @@ fn disabled_skills_are_filtered() {
 
     assert!(catalog.skills.is_empty());
     fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn scan_stops_below_discovered_skill() {
+    let root = temp_dir("parent-stops-scan");
+    let parent = root.join("parent");
+    let child = parent.join("child");
+    write_skill(&parent, "parent", "parent");
+    write_skill(&child, "child", "child");
+
+    assert_eq!(find_skill_files(&root), vec![parent.join(SKILL_FILE_NAME)]);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn scan_respects_maximum_directory_depth() {
+    let root = temp_dir("maximum-depth");
+    let included = (0..MAX_SKILL_SCAN_DEPTH).fold(root.clone(), |path, index| {
+        path.join(format!("level-{index}"))
+    });
+    let excluded = included.join("too-deep");
+    write_skill(&included, "included", "included");
+    write_skill(&excluded, "excluded", "excluded");
+
+    assert_eq!(
+        find_skill_files(&root),
+        vec![included.join(SKILL_FILE_NAME)]
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn usage_update_replaces_existing_file_atomically() {
+    let project = temp_dir("usage-replace");
+    let skill_dir = project.join("skills").join("usage");
+    write_skill(&skill_dir, "usage", "usage");
+    let skill = SkillMetadata {
+        name: "usage".to_string(),
+        description: "usage".to_string(),
+        category: None,
+        platforms: Vec::new(),
+        source: SkillSourceKind::Project,
+        path: skill_dir.clone(),
+    };
+
+    bump_project_view(&project, &skill).unwrap();
+    bump_project_view(&project, &skill).unwrap();
+
+    let usage: super::SkillUsage =
+        serde_json::from_str(&fs::read_to_string(skill_dir.join(super::USAGE_FILE_NAME)).unwrap())
+            .unwrap();
+    assert_eq!(usage.views, 2);
+    assert_eq!(usage.uses, 2);
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
+fn corrupted_usage_is_observable() {
+    let project = temp_dir("usage-corrupted");
+    let skill_dir = project.join("skills").join("usage");
+    write_skill(&skill_dir, "usage", "usage");
+    fs::write(skill_dir.join(super::USAGE_FILE_NAME), "not-json").unwrap();
+    let skill = SkillMetadata {
+        name: "usage".to_string(),
+        description: "usage".to_string(),
+        category: None,
+        platforms: Vec::new(),
+        source: SkillSourceKind::Project,
+        path: skill_dir,
+    };
+
+    let error = bump_project_view(&project, &skill).unwrap_err().to_string();
+
+    assert!(error.contains("failed to parse skill usage"));
+    fs::remove_dir_all(project).unwrap();
 }
 
 #[test]

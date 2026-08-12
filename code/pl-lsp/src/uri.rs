@@ -1,36 +1,29 @@
 use std::path::{Path, PathBuf};
 
+use url::Url;
+
 pub(crate) fn path_to_file_uri(path: &Path) -> String {
     debug_assert!(
         path.is_absolute(),
         "LSP file URI paths must already be absolute: {}",
         path.display()
     );
-    let absolute = path.to_path_buf();
-    if cfg!(windows) {
-        let path = normalize_windows_verbatim_path(&absolute.to_string_lossy()).replace('\\', "/");
-        if let Some(unc_path) = path.strip_prefix("//") {
-            let encoded = encode_path(unc_path);
-            format!("file://{encoded}")
-        } else {
-            let encoded = encode_path(&path);
-            format!("file:///{encoded}")
-        }
+    let normalized = if cfg!(windows) {
+        PathBuf::from(normalize_windows_verbatim_path(&path.to_string_lossy()))
     } else {
-        let path = absolute.to_string_lossy().replace('\\', "/");
-        let encoded = encode_path(&path);
-        format!("file://{encoded}")
-    }
+        path.to_path_buf()
+    };
+    Url::from_file_path(&normalized)
+        .expect("absolute LSP paths must convert to file URLs")
+        .into()
 }
 
 pub(crate) fn file_uri_to_path(uri: &str) -> PathBuf {
-    let mut value = uri.strip_prefix("file://").unwrap_or(uri).to_string();
-    if value.starts_with('/') && value.as_bytes().get(2) == Some(&b':') {
-        value.remove(0);
-    } else if cfg!(windows) && !value.starts_with('/') && !value.is_empty() {
-        value = format!("//{value}");
-    }
-    PathBuf::from(decode_path(&value))
+    Url::parse(uri)
+        .ok()
+        .filter(|url| url.scheme() == "file")
+        .and_then(|url| url.to_file_path().ok())
+        .unwrap_or_else(|| PathBuf::from(uri))
 }
 
 pub(crate) fn uri_display_path(uri: &str, workspace_root: Option<&Path>) -> String {
@@ -47,19 +40,6 @@ pub(crate) fn normalize_separators(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn encode_path(path: &str) -> String {
-    let mut output = String::with_capacity(path.len());
-    for byte in path.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b':' | b'-' | b'_' | b'.' | b'~' => {
-                output.push(byte as char)
-            }
-            _ => output.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    output
-}
-
 fn normalize_windows_verbatim_path(path: &str) -> String {
     if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{path}")
@@ -68,26 +48,6 @@ fn normalize_windows_verbatim_path(path: &str) -> String {
     } else {
         path.to_string()
     }
-}
-
-fn decode_path(path: &str) -> String {
-    let mut output = Vec::with_capacity(path.len());
-    let bytes = path.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3])
-            && let Ok(value) = u8::from_str_radix(hex, 16)
-        {
-            output.push(value);
-            index += 3;
-            continue;
-        }
-        output.push(bytes[index]);
-        index += 1;
-    }
-    String::from_utf8(output).unwrap_or_else(|_| path.to_string())
 }
 
 #[cfg(test)]

@@ -2,14 +2,14 @@ mod client;
 mod client_config;
 mod client_retry;
 mod client_server;
-mod client_wire;
 mod diagnostics;
 mod formatting;
-mod framing;
 mod process;
 mod registry;
+mod rpc;
 mod server_definition;
 mod status;
+mod transport;
 mod types;
 mod uri;
 

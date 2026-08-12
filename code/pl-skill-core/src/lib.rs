@@ -1,5 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
+use gray_matter::{Matter, engine::YAML};
 use serde::{Deserialize, Serialize};
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
@@ -57,38 +58,17 @@ pub struct SkillDocument {
 
 pub fn parse_skill_document(content: &str) -> SkillCoreResult<SkillDocument> {
     let normalized = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let Some(after_open) = normalized.strip_prefix("---") else {
-        return Err(SkillCoreError::new(
-            "skill must start with YAML frontmatter",
-        ));
-    };
-    let after_open = after_open
-        .strip_prefix("\r\n")
-        .or_else(|| after_open.strip_prefix('\n'))
-        .ok_or_else(|| SkillCoreError::new("skill frontmatter opener must be on its own line"))?;
-    let mut frontmatter = String::new();
-    let mut body_start = None;
-    let mut consumed = 0;
-    for line in after_open.split_inclusive('\n') {
-        consumed += line.len();
-        if line.trim() == "---" {
-            body_start = Some(consumed);
-            break;
-        }
-        frontmatter.push_str(line);
-    }
-    let Some(body_start) = body_start else {
-        return Err(SkillCoreError::new(
-            "skill frontmatter is missing closing ---",
-        ));
-    };
-    let frontmatter =
-        serde_norway::from_str::<SkillFrontmatter>(&frontmatter).map_err(|error| {
+    let parsed = Matter::<YAML>::new()
+        .parse::<SkillFrontmatter>(normalized)
+        .map_err(|error| {
             SkillCoreError::new(format!("failed to parse skill frontmatter: {error}"))
         })?;
+    let frontmatter = parsed
+        .data
+        .ok_or_else(|| SkillCoreError::new("skill must start with YAML frontmatter"))?;
     Ok(SkillDocument {
         frontmatter,
-        body: after_open[body_start..].to_string(),
+        body: parsed.content,
     })
 }
 
@@ -255,7 +235,7 @@ mod tests {
                 metadata: SkillFrontmatterMetadata::default(),
             }
         );
-        assert_eq!(document.body, "Body\n");
+        assert_eq!(document.body, "Body");
     }
 
     #[test]

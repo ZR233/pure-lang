@@ -15,8 +15,9 @@ v1 只内置 `rust-analyzer`：
 
 `pl-lsp` 负责 LSP 协议和运行时：
 
-- 实现 stdio JSON-RPC `Content-Length` framing。
-- 维护语言服务器进程、request id、pending response、notification handler。
+- 使用 `lsp-server::Message` 实现 stdio JSON-RPC framing 与 typed message 边界；两个专用阻塞
+  I/O 线程通过有界 Tokio channel 桥接异步 runtime。
+- 维护语言服务器进程、异步 request id/pending response、notification handler。
 - 维护 server 快照、打开文档版本、diagnostics 缓存。
 - 提供 `LspRuntimeRegistry` 给 `pl-core` 和 Studio 复用。
 - 关闭 runtime 时先走 LSP `shutdown` / `exit`，再显式等待子进程退出；超时后按进程树强制终止，Drop 只作为兜底清理。

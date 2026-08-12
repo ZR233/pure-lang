@@ -263,7 +263,7 @@ mod tests {
                 String::from_utf8_lossy(&default.stderr)
             );
         }
-        let default_logs = read_logs(&default_root.join("Pure Studio").join("logs"), "studio-")?;
+        let default_logs = read_main_logs(&default_root.join("Pure Studio").join("logs"))?;
         let default_errors = read_logs(&default_root.join("Pure Studio").join("logs"), "error-")?;
         assert!(default_logs.contains("FILTER_WARN"));
         assert!(default_logs.contains("FILTER_ERROR"));
@@ -284,8 +284,7 @@ mod tests {
                 String::from_utf8_lossy(&rust_log.stderr)
             );
         }
-        let rust_log_contents =
-            read_logs(&rust_log_root.join("Pure Studio").join("logs"), "studio-")?;
+        let rust_log_contents = read_main_logs(&rust_log_root.join("Pure Studio").join("logs"))?;
         assert!(rust_log_contents.contains("FILTER_INFO"));
         assert!(!rust_log_contents.contains("FILTER_TRACE"));
 
@@ -302,7 +301,7 @@ mod tests {
                 String::from_utf8_lossy(&cli.stderr)
             );
         }
-        let cli_logs = read_logs(&cli_root.join("Pure Studio").join("logs"), "studio-")?;
+        let cli_logs = read_main_logs(&cli_root.join("Pure Studio").join("logs"))?;
         assert!(cli_logs.contains("FILTER_TRACE"));
         assert!(cli_logs.contains("FILTER_INFO"));
 
@@ -400,5 +399,9 @@ mod tests {
             }
         }
         Ok(contents)
+    }
+
+    fn read_main_logs(directory: &Path) -> Result<String> {
+        read_logs(directory, "studio.")
     }
 }

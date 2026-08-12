@@ -90,10 +90,19 @@ fn current_platform() -> &'static str {
     }
 }
 
-pub(super) fn load_usage(skill_dir: &Path) -> Option<super::SkillUsage> {
-    std::fs::read_to_string(skill_dir.join(super::USAGE_FILE_NAME))
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
+pub(super) fn load_usage(skill_dir: &Path) -> Result<Option<super::SkillUsage>> {
+    let path = skill_dir.join(super::USAGE_FILE_NAME);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_str(&content).map(Some).map_err(|error| {
+        PureError::ConfigError(format!(
+            "failed to parse skill usage {}: {error}",
+            path.display()
+        ))
+    })
 }
 
 pub(super) fn save_usage(
@@ -107,7 +116,7 @@ pub(super) fn save_usage(
     let content = serde_json::to_string_pretty(usage).map_err(|error| {
         PureError::ConfigError(format!("failed to serialize skill usage: {error}"))
     })?;
-    std::fs::write(usage_path, content)?;
+    crate::atomic_file::write_file_atomically(&usage_path, content.as_bytes())?;
     Ok(())
 }
 

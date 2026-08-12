@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::process::{configure_background_command, terminate_process_tree};
+use crate::process::spawn_background;
 use crate::server_definition::LspServerDefinition;
 use crate::server_definition::RUST_ANALYZER_ID;
 
@@ -100,26 +100,23 @@ async fn run_command_capture(
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_background_command(&mut command_process);
-    let mut child = command_process.spawn().map_err(|error| {
+    let mut child = spawn_background(command_process).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ProbeError::MissingCommand
         } else {
             ProbeError::Failed(error.to_string())
         }
     })?;
-    let pid = child.id();
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    let stdout = child.stdout().take();
+    let stderr = child.stderr().take();
     let stdout_task = tokio::spawn(read_child_output(stdout));
     let stderr_task = tokio::spawn(read_child_output(stderr));
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => return Err(ProbeError::Failed(error.to_string())),
         Err(_) => {
-            terminate_process_tree(pid).await;
-            let _ = child.start_kill();
-            let _ = child.wait().await;
+            let kill = child.kill();
+            let _ = std::pin::Pin::from(kill).await;
             return Err(ProbeError::Failed(timeout_message.to_string()));
         }
     };

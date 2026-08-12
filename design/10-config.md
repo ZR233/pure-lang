@@ -25,9 +25,9 @@ Windows 下对应：
 SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 13 表达。
+`~/.pure/config.toml` schema 14 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 13。schema 12 在首次加载时迁移：内建模型改用当前 canonical 模型 transport；additional/explicit 模型继承旧 provider 的协议和连接方式；GPT 保留旧 HTTP/WS 选择，不兼容组合回退到模型默认并记录可见迁移诊断。迁移保留 provider、凭证、headers、路由、自定义模型和显式服务能力，并通过与普通保存相同的临时文件 + rename 原子写入 schema 13。schema 5–11、未知版本、无法解析或无法校验的配置仍先完整写入拒绝备份，再用 schema 13 默认配置重建；重建只按当前 bundled preset ID 恢复凭证。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema 14；旧 schema、未知版本、无法解析或无法校验的配置直接报错，不迁移、不归档、不重建。配置写入使用同目录临时文件和原子替换。
 
 `pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical settings/bootstrap snapshot，由 Flutter store 原子替换对应配置状态。bootstrap 与设置保存响应不得携带 `configJson`、`generalSettingsJson` 或 raw map；FRB typed DTO 是 Flutter 配置状态的唯一入口。校验失败时只展示错误并保留当前 canonical 状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
@@ -41,7 +41,7 @@ SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig`、schema version 13 与 12→13 迁移。
+- `StudioConfig` 与唯一支持的 schema version 14。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
 - 生成 Thread 首轮固定的 instruction snapshot。
@@ -78,7 +78,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 13
+schema_version = 14
 
 [runtime]
 permission_mode = "request-approval"
@@ -141,7 +141,7 @@ effort = "high"
 [models.providers.deepseek]
 name = "DeepSeek"
 base_url = "https://api.deepseek.com"
-bearer_token = "sk-..."
+# API token 由系统凭据库保存，TOML 中不出现明文 secret。
 tool_wire_policy = "function_fallback"
 
 preset = "deepseek"
@@ -168,12 +168,12 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 13，provider catalog snapshot schema 为 6。
+`ProviderId`。当前 StudioConfig schema 为 14，provider catalog snapshot schema 为 6。
 
 每个 provider 实例持久化：
 
 - 可选 `preset` 身份；完全自定义 provider 不保存 preset。
-- 实例字段：`name`、`base_url`、`bearer_token`/`bearer_token_env`、`http_headers`、
+- 实例字段：`name`、`base_url`、`bearer_token_env`、`http_headers`、
   `tool_wire_policy` 与 `apply_patch_tool_type`。
 - `catalog`：`Bundled { catalog, additional_models, connection_overrides }` 或
   `Explicit { models, connection_overrides }`。
@@ -427,9 +427,9 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 ## 10.12 凭据策略
 
-配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。Provider 也可保存 `bearer_token_env` 环境变量名；运行时通过 `resolved_bearer_token()` 解析凭据，非空的显式 token 优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
+Provider 的 API token 保存到操作系统凭据库，service 固定为 `pure-studio`，account 为 `provider:{provider_id}`；`~/.pure/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
-schema v4 不再保留旧的 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`；手工配置可使用当前的 `bearer_token_env`。后续版本可以增加系统凭据库模式。
+设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。旧 schema 不读取凭据，也不生成兼容备份。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
 

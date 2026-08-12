@@ -12,6 +12,13 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+url = { workspace = true }
+process-wrap = { workspace = true }
+lsp-server = { workspace = true }
+tokio-util = { workspace = true, features = ["io-util"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

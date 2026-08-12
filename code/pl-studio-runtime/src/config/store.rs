@@ -1,16 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use pl_core::{ProviderId, builtin_provider_catalog};
-use serde::Deserialize;
+use std::sync::Arc;
 
 use crate::{PureError, Result};
 
-use super::migration::{PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION, migrate_v12, schema_version};
+use super::credential::{CredentialStore, MemoryCredentialStore, SystemCredentialStore};
 use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,9 +15,19 @@ pub struct ConfigPaths {
     config_file: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConfigStore {
     paths: ConfigPaths,
+    credentials: Arc<dyn CredentialStore>,
+}
+
+impl std::fmt::Debug for ConfigStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ConfigStore")
+            .field("paths", &self.paths)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ConfigPaths {
@@ -49,11 +55,21 @@ impl ConfigPaths {
 
 impl ConfigStore {
     pub fn default_app() -> Result<Self> {
-        Ok(Self::new(ConfigPaths::for_current_user()?))
+        Ok(Self::with_credential_store(
+            ConfigPaths::for_current_user()?,
+            Arc::new(SystemCredentialStore),
+        ))
     }
 
+    /// 创建使用进程内凭据存储的隔离配置实例。
+    ///
+    /// 生产桌面应用必须使用 [`Self::default_app`]，避免测试、fixture 或 driver 修改用户的系统凭据库。
     pub fn new(paths: ConfigPaths) -> Self {
-        Self { paths }
+        Self::with_credential_store(paths, Arc::new(MemoryCredentialStore::default()))
+    }
+
+    fn with_credential_store(paths: ConfigPaths, credentials: Arc<dyn CredentialStore>) -> Self {
+        Self { paths, credentials }
     }
 
     pub fn paths(&self) -> &ConfigPaths {
@@ -66,60 +82,41 @@ impl ConfigStore {
 
     pub fn load_or_default(&self) -> Result<StudioConfig> {
         if !self.config_exists() {
-            return Ok(StudioConfig::default_config());
+            let mut config = StudioConfig::default_config();
+            self.hydrate_credentials(&mut config)?;
+            return Ok(config);
         }
         let content = fs::read_to_string(self.paths.config_file())?;
-        match schema_version(&content) {
-            Ok(PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION) => match migrate_v12(&content) {
-                Ok(migration) => {
-                    self.save(&migration.config)?;
-                    for diagnostic in migration.diagnostics {
-                        tracing::warn!(diagnostic, "Studio 配置已从 schema 12 迁移到 schema 13");
-                    }
-                    Ok(migration.config)
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "Studio schema 12 配置迁移失败，将按拒绝配置处理");
-                    self.replace_rejected_config()
-                }
-            },
-            Ok(_) => match parse_current_config(&content) {
-                Ok(config) => Ok(config),
-                Err(error) => {
-                    tracing::warn!(%error, "Studio 配置不兼容，将归档并重建");
-                    self.replace_rejected_config()
-                }
-            },
-            Err(error) => {
-                tracing::warn!(%error, "Studio 配置无法读取 schema，将归档并重建");
-                self.replace_rejected_config()
-            }
-        }
+        let mut config = parse_current_config(&content)?;
+        self.hydrate_credentials(&mut config)?;
+        Ok(config)
     }
 
     pub fn load(&self) -> Result<StudioConfig> {
         let content = fs::read_to_string(self.paths.config_file())?;
-        parse_current_config(&content)
+        let mut config = parse_current_config(&content)?;
+        self.hydrate_credentials(&mut config)?;
+        Ok(config)
     }
 
     pub fn save(&self, config: &StudioConfig) -> Result<()> {
         config.validate()?;
-        let content = toml::to_string_pretty(config).map_err(|error| {
+        let persisted_provider_ids = self.persisted_provider_ids()?;
+        let mut persisted = config.clone();
+        clear_inline_credentials(&mut persisted);
+        let content = toml::to_string_pretty(&persisted).map_err(|error| {
             PureError::ConfigError(format!("failed to serialize Studio config: {error}"))
         })?;
         fs::create_dir_all(self.paths.config_dir())?;
-        let temporary = temporary_path(self.paths.config_file());
-        let result = (|| -> Result<()> {
-            let mut file = fs::File::create(&temporary)?;
-            file.write_all(content.as_bytes())?;
-            file.sync_all()?;
-            replace_file_atomically(&temporary, self.paths.config_file())?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+        let previous = self.apply_credentials(config, persisted_provider_ids)?;
+        if let Err(error) = pl_core::atomic_file::write_file_atomically(
+            self.paths.config_file(),
+            content.as_bytes(),
+        ) {
+            self.restore_credentials(&previous);
+            return Err(error.into());
         }
-        result
+        Ok(())
     }
 
     pub fn init_default(&self) -> Result<StudioConfig> {
@@ -134,19 +131,82 @@ impl ConfigStore {
         Ok(config)
     }
 
-    fn replace_rejected_config(&self) -> Result<StudioConfig> {
-        let rejected_content = fs::read_to_string(self.paths.config_file())?;
-        let credentials = toml::from_str::<RejectedConfigCredentials>(&rejected_content).ok();
-        let backup = rejected_backup_path(self.paths.config_file());
-        fs::copy(self.paths.config_file(), &backup)?;
-        fs::remove_file(self.paths.config_file())?;
-
-        let mut config = StudioConfig::default_config();
-        if let Some(credentials) = credentials {
-            restore_provider_credentials(&mut config, credentials);
+    fn hydrate_credentials(&self, config: &mut StudioConfig) -> Result<()> {
+        for (provider_id, provider) in &mut config.models.providers {
+            provider.bearer_token = self.credentials.load(provider_id.as_str())?;
         }
-        self.save(&config)?;
-        Ok(config)
+        Ok(())
+    }
+
+    fn persisted_provider_ids(&self) -> Result<BTreeSet<String>> {
+        if !self.config_exists() {
+            return Ok(BTreeSet::new());
+        }
+        let content = fs::read_to_string(self.paths.config_file())?;
+        let persisted = parse_current_config(&content)?;
+        Ok(persisted
+            .models
+            .providers
+            .keys()
+            .map(|provider_id| provider_id.as_str().to_string())
+            .collect())
+    }
+
+    fn apply_credentials(
+        &self,
+        config: &StudioConfig,
+        mut provider_ids: BTreeSet<String>,
+    ) -> Result<Vec<(String, Option<String>)>> {
+        let mut previous = Vec::new();
+        provider_ids.extend(
+            config
+                .models
+                .providers
+                .keys()
+                .map(|provider_id| provider_id.as_str().to_string()),
+        );
+        for provider_id in provider_ids {
+            let desired = config
+                .models
+                .providers
+                .iter()
+                .find(|(candidate, _)| candidate.as_str() == provider_id)
+                .and_then(|(_, provider)| provider.bearer_token.as_deref())
+                .filter(|secret| !secret.trim().is_empty());
+            let old = self.credentials.load(&provider_id)?;
+            previous.push((provider_id.clone(), old));
+            let result = match desired {
+                Some(secret) => self.credentials.save(&provider_id, secret),
+                None => self.credentials.delete(&provider_id),
+            }
+            .and_then(|()| {
+                let actual = self.credentials.load(&provider_id)?;
+                if actual.as_deref() == desired {
+                    Ok(())
+                } else {
+                    Err(PureError::ConfigError(format!(
+                        "system credential verification failed for provider {provider_id}"
+                    )))
+                }
+            });
+            if let Err(error) = result {
+                self.restore_credentials(&previous);
+                return Err(error);
+            }
+        }
+        Ok(previous)
+    }
+
+    fn restore_credentials(&self, previous: &[(String, Option<String>)]) {
+        for (provider_id, secret) in previous.iter().rev() {
+            let result = match secret {
+                Some(secret) => self.credentials.save(provider_id, secret),
+                None => self.credentials.delete(provider_id),
+            };
+            if let Err(error) = result {
+                tracing::error!(%error, provider_id, "回滚系统凭据失败");
+            }
+        }
     }
 }
 
@@ -154,115 +214,24 @@ fn parse_current_config(content: &str) -> Result<StudioConfig> {
     let config: StudioConfig = toml::from_str(content).map_err(|error| {
         PureError::ConfigError(format!("failed to parse Studio config: {error}"))
     })?;
+    if config
+        .models
+        .providers
+        .values()
+        .any(|provider| provider.bearer_token.is_some())
+    {
+        return Err(PureError::ConfigError(
+            "schema 14 forbids inline provider bearer_token; use the Studio credential store"
+                .to_string(),
+        ));
+    }
     config.validate()?;
     Ok(config)
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct RejectedConfigCredentials {
-    #[serde(default)]
-    models: RejectedModelCredentials,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RejectedModelCredentials {
-    #[serde(default)]
-    providers: BTreeMap<String, ProviderCredentials>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ProviderCredentials {
-    #[serde(default)]
-    bearer_token: Option<String>,
-    #[serde(default)]
-    bearer_token_env: Option<String>,
-}
-
-fn restore_provider_credentials(config: &mut StudioConfig, credentials: RejectedConfigCredentials) {
-    let presets = builtin_provider_catalog().presets;
-    for (provider_id, credentials) in credentials.models.providers {
-        let Ok(provider_id) = ProviderId::new(provider_id) else {
-            continue;
-        };
-        if !config.models.providers.contains_key(&provider_id)
-            && let Some(preset) = presets
-                .iter()
-                .find(|preset| preset.id.as_str() == provider_id.as_str())
-        {
-            config
-                .models
-                .providers
-                .insert(provider_id.clone(), preset.provider.clone());
-        }
-        let Some(provider) = config.models.providers.get_mut(&provider_id) else {
-            continue;
-        };
-        if credentials.bearer_token.is_some() {
-            provider.bearer_token = credentials.bearer_token;
-        }
-        if credentials.bearer_token_env.is_some() {
-            provider.bearer_token_env = credentials.bearer_token_env;
-        }
-    }
-}
-
-fn rejected_backup_path(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(STUDIO_CONFIG_FILE_NAME);
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    path.with_file_name(format!("{file_name}.rejected.{stamp}.bak"))
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    path.with_extension(format!("tmp-{}-{stamp}", std::process::id()))
-}
-
-fn replace_file_atomically(source: &Path, target: &Path) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-
-        use windows_sys::Win32::Storage::FileSystem::{
-            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-        };
-
-        let source = source
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let target = target
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        // SAFETY: both path buffers are NUL-terminated and remain alive for the duration of the
-        // call. The temporary file lives beside the target, so replacement stays on one volume.
-        let replaced = unsafe {
-            MoveFileExW(
-                source.as_ptr(),
-                target.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
-        if replaced == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    #[cfg(not(windows))]
-    {
-        fs::rename(source, target)
+fn clear_inline_credentials(config: &mut StudioConfig) {
+    for provider in config.models.providers.values_mut() {
+        provider.bearer_token = None;
     }
 }
 
@@ -279,307 +248,255 @@ fn user_home_dir() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
 
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::config::STUDIO_CONFIG_SCHEMA_VERSION;
-
-    const DEEPSEEK_V12: &str = r#"
-schema_version = 12
-
-[models.providers.deepseek]
-name = "DeepSeek"
-base_url = "https://api.deepseek.com"
-
-[models.providers.deepseek.transport]
-source = "preset"
-preset = "deepseek"
-connection_mode = "http"
-
-[models.providers.deepseek.catalog]
-source = "bundled"
-catalog = "deepseek"
-
-[[models.providers.deepseek.catalog.additional_models]]
-slug = "legacy-deepseek-extra"
-display_name = "Legacy DeepSeek Extra"
-
-[models.routes.explorer]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-effort = "high"
-
-[models.routes.planner]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-effort = "high"
-
-[models.routes.executor]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-effort = "high"
-
-[models.routes.reviewer]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-effort = "high"
-"#;
-
-    const CUSTOM_RESPONSES_V12: &str = r#"
-schema_version = 12
-
-[models.providers.proxy]
-name = "Responses Proxy"
-base_url = "https://proxy.example/v1"
-bearer_token = "preserved-secret"
-
-[models.providers.proxy.http_headers]
-x-test = "preserved"
-
-[models.providers.proxy.transport]
-source = "custom"
-protocol = "responses"
-connection_mode = "http"
-
-[models.providers.proxy.catalog]
-source = "explicit"
-
-[[models.providers.proxy.catalog.models]]
-slug = "proxy-model"
-display_name = "Proxy Model"
-
-[models.routes.explorer]
-provider = "proxy"
-model = "proxy-model"
-
-[models.routes.planner]
-provider = "proxy"
-model = "proxy-model"
-
-[models.routes.executor]
-provider = "proxy"
-model = "proxy-model"
-
-[models.routes.reviewer]
-provider = "proxy"
-model = "proxy-model"
-"#;
-
-    const OPENAI_HTTP_V12: &str = r#"
-schema_version = 12
-
-[models.providers.openai]
-name = "OpenAI HTTP"
-base_url = "https://api.openai.com/v1"
-
-[models.providers.openai.transport]
-source = "preset"
-preset = "openai"
-connection_mode = "http"
-
-[models.providers.openai.catalog]
-source = "bundled"
-catalog = "openai"
-
-[models.routes.explorer]
-provider = "openai"
-model = "gpt-5.6-sol"
-effort = "low"
-
-[models.routes.planner]
-provider = "openai"
-model = "gpt-5.6-sol"
-effort = "low"
-
-[models.routes.executor]
-provider = "openai"
-model = "gpt-5.6-sol"
-effort = "low"
-
-[models.routes.reviewer]
-provider = "openai"
-model = "gpt-5.6-sol"
-effort = "low"
-"#;
 
     fn temp_home(name: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after Unix epoch")
-            .as_nanos();
-        env::temp_dir().join(format!(
-            "pl-studio-config-{name}-{}-{stamp}",
-            std::process::id()
-        ))
+        tempfile::Builder::new()
+            .prefix(&format!("pl-studio-config-{name}-"))
+            .tempdir()
+            .unwrap()
+            .keep()
+    }
+
+    fn test_store(name: &str) -> ConfigStore {
+        ConfigStore::with_credential_store(
+            ConfigPaths::from_home(temp_home(name)),
+            Arc::new(MemoryCredentialStore::default()),
+        )
     }
 
     #[test]
-    fn rejected_document_is_archived_and_only_provider_credentials_are_restored() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("rejected")));
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let rejected = r#"
-schema_version = 11
+    fn save_persists_no_secret_and_load_hydrates_from_credential_store() {
+        let store = test_store("roundtrip");
+        let mut config = StudioConfig::default_config();
+        config
+            .models
+            .providers
+            .values_mut()
+            .next()
+            .unwrap()
+            .bearer_token = Some("system-secret".to_string());
 
-[models.providers.openai]
-bearer_token = "existing-secret"
-bearer_token_env = "ORIGINAL_OPENAI_API_KEY"
+        store.save(&config).unwrap();
 
-[models.routes.planner]
-provider = "openai"
-model = "obsolete-model"
-reasoning_effort = "medium"
-"#;
-        fs::write(store.paths().config_file(), rejected).unwrap();
-
-        let config = store.load_or_default().unwrap();
-
-        assert_eq!(config.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        let openai = &config.models.providers[&ProviderId::new("openai").unwrap()];
-        assert_eq!(openai.bearer_token.as_deref(), Some("existing-secret"));
-        assert_eq!(
-            openai.bearer_token_env.as_deref(),
-            Some("ORIGINAL_OPENAI_API_KEY")
-        );
-        assert_ne!(
-            config.models.routes[&crate::StudioRole::Planner.id()].model,
-            "obsolete-model"
-        );
+        let persisted = fs::read_to_string(store.paths().config_file()).unwrap();
+        assert!(!persisted.contains("system-secret"));
+        assert!(!persisted.contains("bearer_token ="));
         assert_eq!(store.load().unwrap(), config);
-
-        let backup = fs::read_dir(store.paths().config_dir())
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .find(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("config.toml.rejected.")
-            })
-            .expect("rejected config backup");
-        assert_eq!(fs::read_to_string(backup.path()).unwrap(), rejected);
     }
 
     #[test]
-    fn schema_12_bundled_models_migrate_to_the_model_transport_matrix() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-bundled")));
+    fn old_schema_is_rejected_without_migration() {
+        let store = test_store("old-schema");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), DEEPSEEK_V12).unwrap();
-
-        let config = store.load_or_default().unwrap();
-
-        assert_eq!(config.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        let provider = &config.models.providers[&ProviderId::new("deepseek").unwrap()];
-        assert_eq!(provider.preset_id().unwrap().as_str(), "deepseek");
-        let flash = provider.to_provider_info("deepseek-v4-flash").unwrap();
-        let pro = provider.to_provider_info("deepseek-v4-pro").unwrap();
-        assert_eq!(flash.protocol, pl_model::ProviderWireProtocol::Responses);
-        assert_eq!(
-            pro.protocol,
-            pl_model::ProviderWireProtocol::ChatCompletions
-        );
-        assert_eq!(
-            flash.connection_mode,
-            pl_model::ProviderConnectionMode::Http
-        );
-        assert_eq!(pro.connection_mode, pl_model::ProviderConnectionMode::Http);
-        let additional = provider
-            .declared_models()
+        let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .into_iter()
-            .find(|model| model.slug == "legacy-deepseek-extra")
+            .replace("schema_version = 14", "schema_version = 13");
+        fs::write(store.paths().config_file(), legacy).unwrap();
+
+        let error = store.load_or_default().unwrap_err().to_string();
+
+        assert!(error.contains("schema version"));
+    }
+
+    #[test]
+    fn schema_14_rejects_inline_bearer_token() {
+        let store = test_store("inline-secret");
+        let mut config = StudioConfig::default_config();
+        config
+            .models
+            .providers
+            .values_mut()
+            .next()
+            .unwrap()
+            .bearer_token = Some("forbidden-secret".to_string());
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(
+            store.paths().config_file(),
+            toml::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
+
+        let error = store.load_or_default().unwrap_err().to_string();
+
+        assert!(error.contains("forbids inline provider bearer_token"));
+    }
+
+    #[test]
+    fn renaming_provider_moves_credential_and_deletes_old_account() {
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let store = ConfigStore::with_credential_store(
+            ConfigPaths::from_home(temp_home("rename-provider")),
+            credentials.clone(),
+        );
+        let config = config_with_provider_secret("deepseek", "secret");
+        store.save(&config).unwrap();
+
+        let renamed = config_with_provider_secret("renamed", "new-secret");
+        store.save(&renamed).unwrap();
+
+        assert_eq!(credentials.load("deepseek").unwrap(), None);
+        assert_eq!(
+            credentials.load("renamed").unwrap().as_deref(),
+            Some("new-secret")
+        );
+    }
+
+    #[test]
+    fn credential_readback_failure_rolls_back_current_provider() {
+        let credentials = Arc::new(ReadbackFailingCredentialStore::default());
+        let store = ConfigStore::with_credential_store(
+            ConfigPaths::from_home(temp_home("credential-readback-failure")),
+            credentials.clone(),
+        );
+        let config = config_with_provider_secret("deepseek", "new-secret");
+        credentials.arm_failure();
+
+        let error = store.save(&config).unwrap_err().to_string();
+
+        assert!(error.contains("readback failure"));
+        assert_eq!(credentials.values.lock().unwrap().get("deepseek"), None);
+        assert!(!store.paths().config_file().exists());
+    }
+
+    #[test]
+    fn independent_stores_do_not_share_in_memory_credentials() {
+        let paths = ConfigPaths::from_home(temp_home("isolated-stores"));
+        let first = ConfigStore::new(paths.clone());
+        let second = ConfigStore::new(paths);
+        first
+            .save(&config_with_provider_secret("deepseek", "first-secret"))
             .unwrap();
+
+        let loaded = second.load().unwrap();
+
         assert_eq!(
-            additional.transport,
-            pl_model::ModelTransportProfile::chat_completions_http()
-        );
-        assert_eq!(store.load().unwrap(), config);
-        assert!(
-            fs::read_to_string(store.paths().config_file())
+            loaded
+                .models
+                .providers
+                .values()
+                .next()
                 .unwrap()
-                .starts_with("schema_version = 13")
+                .bearer_token,
+            None
         );
     }
 
     #[test]
-    fn schema_12_custom_models_inherit_provider_transport_and_roundtrip() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-custom")));
+    fn save_refuses_to_overwrite_invalid_existing_config() {
+        let store = test_store("invalid-existing-config");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), CUSTOM_RESPONSES_V12).unwrap();
+        fs::write(store.paths().config_file(), "not-toml").unwrap();
 
-        let config = store.load_or_default().unwrap();
+        let error = store
+            .save(&config_with_provider_secret("deepseek", "secret"))
+            .unwrap_err()
+            .to_string();
 
-        let provider = &config.models.providers[&ProviderId::new("proxy").unwrap()];
-        assert!(provider.preset_id().is_none());
-        assert_eq!(provider.bearer_token.as_deref(), Some("preserved-secret"));
+        assert!(error.contains("failed to parse Studio config"));
         assert_eq!(
-            provider.http_headers.as_ref().unwrap().get("x-test"),
-            Some(&"preserved".to_string())
+            fs::read_to_string(store.paths().config_file()).unwrap(),
+            "not-toml"
         );
-        let model = provider.declared_models().unwrap().remove(0);
-        assert_eq!(
-            model.transport.protocol,
-            pl_model::ProviderWireProtocol::Responses
-        );
-        assert_eq!(
-            model.transport.supported_connection_modes,
-            vec![
-                pl_model::ProviderConnectionMode::WebSocket,
-                pl_model::ProviderConnectionMode::Http,
-            ]
-        );
-        assert_eq!(
-            model.transport.default_connection_mode,
-            pl_model::ProviderConnectionMode::Http
-        );
-        assert_eq!(store.load().unwrap(), config);
     }
 
     #[test]
-    fn schema_12_openai_http_selection_becomes_per_model_overrides() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-openai-http")));
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), OPENAI_HTTP_V12).unwrap();
+    fn atomic_config_write_failure_rolls_back_credentials() {
+        let paths = ConfigPaths::from_home(temp_home("atomic-write-failure"));
+        let credentials = Arc::new(TargetBlockingCredentialStore {
+            target: paths.config_file().to_path_buf(),
+            values: Mutex::new(BTreeMap::new()),
+        });
+        let store = ConfigStore::with_credential_store(paths, credentials.clone());
 
-        let config = store.load_or_default().unwrap();
+        let error = store
+            .save(&config_with_provider_secret("deepseek", "secret"))
+            .unwrap_err()
+            .to_string();
 
-        let provider = &config.models.providers[&ProviderId::new("openai").unwrap()];
-        for model in provider.effective_models().unwrap() {
-            assert_eq!(
-                model.transport.protocol,
-                pl_model::ProviderWireProtocol::Responses
-            );
-            assert_eq!(
-                model.transport.default_connection_mode,
-                pl_model::ProviderConnectionMode::Http,
-                "{} should preserve the schema 12 HTTP selection",
-                model.slug
-            );
+        assert!(!error.is_empty());
+        assert_eq!(credentials.load("deepseek").unwrap(), None);
+        assert!(store.paths().config_file().is_dir());
+    }
+
+    fn config_with_provider_secret(provider_id: &str, secret: &str) -> StudioConfig {
+        let mut config = StudioConfig::default_config();
+        let (_, mut provider) = config.models.providers.pop_first().unwrap();
+        provider.bearer_token = Some(secret.to_string());
+        let provider_id = super::super::ProviderId::new(provider_id).unwrap();
+        for route in config.models.routes.values_mut() {
+            route.provider = provider_id.clone();
         }
-        assert_eq!(provider.connection_overrides().len(), 6);
+        config.models.providers.insert(provider_id, provider);
+        config
     }
 
-    #[test]
-    fn schema_12_chat_websocket_falls_back_to_http_with_a_diagnostic() {
-        let invalid = CUSTOM_RESPONSES_V12
-            .replace(
-                "protocol = \"responses\"",
-                "protocol = \"chat_completions\"",
-            )
-            .replace(
-                "connection_mode = \"http\"",
-                "connection_mode = \"web_socket\"",
-            );
+    #[derive(Default)]
+    struct ReadbackFailingCredentialStore {
+        values: Mutex<BTreeMap<String, String>>,
+        reads_until_failure: Mutex<Option<usize>>,
+    }
 
-        let migration = super::super::migration::migrate_v12(&invalid).unwrap();
+    impl ReadbackFailingCredentialStore {
+        fn arm_failure(&self) {
+            self.reads_until_failure.lock().unwrap().replace(1);
+        }
+    }
 
-        assert!(!migration.diagnostics.is_empty());
-        let provider = &migration.config.models.providers[&ProviderId::new("proxy").unwrap()];
-        let model = provider.declared_models().unwrap().remove(0);
-        assert_eq!(
-            model.transport,
-            pl_model::ModelTransportProfile::chat_completions_http()
-        );
+    impl CredentialStore for ReadbackFailingCredentialStore {
+        fn load(&self, provider_id: &str) -> Result<Option<String>> {
+            let mut reads_until_failure = self.reads_until_failure.lock().unwrap();
+            if let Some(remaining) = reads_until_failure.as_mut() {
+                if *remaining == 0 {
+                    *reads_until_failure = None;
+                    return Err(PureError::ConfigError("readback failure".to_string()));
+                }
+                *remaining -= 1;
+            }
+            Ok(self.values.lock().unwrap().get(provider_id).cloned())
+        }
+
+        fn save(&self, provider_id: &str, secret: &str) -> Result<()> {
+            self.values
+                .lock()
+                .unwrap()
+                .insert(provider_id.to_string(), secret.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, provider_id: &str) -> Result<()> {
+            self.values.lock().unwrap().remove(provider_id);
+            Ok(())
+        }
+    }
+
+    struct TargetBlockingCredentialStore {
+        target: PathBuf,
+        values: Mutex<BTreeMap<String, String>>,
+    }
+
+    impl CredentialStore for TargetBlockingCredentialStore {
+        fn load(&self, provider_id: &str) -> Result<Option<String>> {
+            Ok(self.values.lock().unwrap().get(provider_id).cloned())
+        }
+
+        fn save(&self, provider_id: &str, secret: &str) -> Result<()> {
+            self.values
+                .lock()
+                .unwrap()
+                .insert(provider_id.to_string(), secret.to_string());
+            fs::create_dir_all(&self.target)?;
+            Ok(())
+        }
+
+        fn delete(&self, provider_id: &str) -> Result<()> {
+            self.values.lock().unwrap().remove(provider_id);
+            Ok(())
+        }
     }
 }

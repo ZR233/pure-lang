@@ -71,7 +71,8 @@ Flutter 桌面端的安全边界集中在本地工具策略、配置凭据和 Fl
 
 ## 4.6 数据切换安全
 
-Studio 运行期只读写 `studio.sqlite` schema v2，配置继续使用 `config.toml` schema 12。
+Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 14，provider API token
+保存在系统凭据库。
 数据库版本、结构 fingerprint 或完整性不兼容时，不迁移、不归档、不导入：关闭检查连接后只
 删除精确 canonical 数据库及其 `-wal/-shm`，再创建空库。删除或重建失败必须停止启动；不得
 扫描、删除或修改 Project、attachments、worktree、branch 或其他 legacy 数据库。完整合同见
