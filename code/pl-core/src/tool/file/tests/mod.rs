@@ -30,7 +30,7 @@ async fn context(root: &Path) -> ToolContext {
         lsp_runtime: None,
         parent_session: std::sync::Arc::new(crate::AgentSession::new()),
         working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::TurnToolCacheHandle::default(),
+        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
     }
 }
 

@@ -10,11 +10,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::turn::ToolEffect;
 
+use super::cache::ToolCachePolicy;
 use super::contract::*;
-use super::{
-    Tool, ToolCachePolicy, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
-    ToolRuntimeLockPolicy,
-};
+use super::{Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
 
 type CachePolicyResolver = Arc<dyn Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync>;
 type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send + Sync>;

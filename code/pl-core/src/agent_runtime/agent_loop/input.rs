@@ -82,7 +82,7 @@ where
         }
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
-        self.commit_transition(next, Vec::new(), |snapshot| {
+        self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
             AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
                 snapshot,
@@ -120,7 +120,7 @@ where
             return Ok(());
         }
         next.refresh_mailbox_snapshot();
-        self.commit_transition(next, Vec::new(), |snapshot| {
+        self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
             AgentRuntimeEventKind::StateChanged { snapshot }
         })
         .await
@@ -256,16 +256,15 @@ where
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
         let interaction = request.interaction;
-        self.commit_transition_with_thread_facts(
-            next,
-            Vec::new(),
-            vec![crate::ThreadNotificationFact::durable(
-                interaction.updated_at,
-                pl_protocol::ThreadNotification::InteractionChanged {
-                    interaction: Box::new(interaction),
-                },
-            )],
-            None,
+        self.commit_transition(
+            super::persist::TransitionCommit::new(next).with_thread_facts(vec![
+                crate::ThreadNotificationFact::durable(
+                    interaction.updated_at,
+                    pl_protocol::ThreadNotification::InteractionChanged {
+                        interaction: Box::new(interaction),
+                    },
+                ),
+            ]),
             |snapshot| AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
                 snapshot,

@@ -6,15 +6,15 @@ use pl_protocol::{
     ThreadNotification, ToolCallHistoryMetadata, ToolResultMetadata,
 };
 
-use super::super::host::{AgentCommitObserver, ThreadProjectionCommit, ThreadRepository};
+use super::super::host::ThreadProjectionCommit;
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentCommittedEvent, AgentLifecycleState, AgentRuntimeHost, AgentRuntimeResult,
-    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
-    ConversationRecoveryTarget, DurableCommitFacts, ThreadCommit, ThreadCommitOutcome,
-    ThreadContextMutation, ThreadMutation,
+    AgentLifecycleState, AgentRuntimeHost, AgentRuntimeResult, ConversationRecoveryPreview,
+    ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
+    DurableCommitFacts, ThreadContextMutation, ThreadMutation,
 };
 use super::AgentLoop;
+use super::commit::{CommitPublication, PendingCommit};
 use crate::thread_event::{ThreadNotificationFact, project_thread_facts};
 use crate::{
     CONVERSATION_RECOVERY_SECTION_ID, CURRENT_TODO_SECTION_ID, canonical_content_hash,
@@ -164,63 +164,35 @@ where
             .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?,
         );
 
-        let expected_revision = actual.expected_runtime_revision;
         let committed_notifications = projection
             .as_ref()
             .map_or_else(Vec::new, |projection| projection.notifications.clone());
-        let outcome = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    Vec::new(),
-                    Vec::new(),
-                    projection,
-                    Some(ThreadContextMutation::Replace {
-                        items: retained_items,
-                    }),
-                ),
-                mutation: ThreadMutation::ReplaceThread {
-                    thread_id: next.snapshot.identity.id.clone(),
+        let thread_id = next.snapshot.identity.id.clone();
+        let durable_facts = DurableCommitFacts::from_state(
+            &next,
+            Vec::new(),
+            Vec::new(),
+            projection,
+            Some(ThreadContextMutation::Replace {
+                items: retained_items,
+            }),
+        );
+        self.commit_and_publish(
+            PendingCommit::new(
+                next,
+                durable_facts,
+                ThreadMutation::ReplaceThread {
+                    thread_id: thread_id.clone(),
                 },
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match outcome {
-            ThreadCommitOutcome::Applied => {
-                self.state = next;
-                self.runtime
-                    .directory
-                    .store_snapshot(self.state.snapshot.clone());
-                self.runtime
-                    .thread_events
-                    .publish_batch(committed_notifications.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id: self.state.snapshot.identity.id.clone(),
-                        thread_id: Some(self.state.snapshot.identity.id.clone()),
-                        turn_id: None,
-                        runtime_events: Vec::new(),
-                        trace_events: Vec::new(),
-                        thread_notifications: committed_notifications,
-                    })
-                    .await;
-                Ok(result_from_record(&record))
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
-        }
+            )
+            .publish(
+                CommitPublication::new(Some(thread_id), None)
+                    .store_directory_snapshot()
+                    .with_thread_notifications(committed_notifications),
+            ),
+        )
+        .await?;
+        Ok(result_from_record(&record))
     }
 
     fn validate_recovery_gate(&self) -> AgentRuntimeResult<()> {

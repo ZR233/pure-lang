@@ -43,9 +43,17 @@ struct SkillsListInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SkillViewInput {
     /// Skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Optional support file under references/, templates/, scripts/, or assets/.
     file_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SkillTargetInput {
+    /// Project skill name.
+    name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -62,8 +70,8 @@ enum SkillManageInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateSkillInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Full SKILL.md content.
     content: String,
     /// Optional category path.
@@ -73,8 +81,8 @@ struct CreateSkillInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PatchSkillInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Exact existing text to replace.
     old_string: String,
     /// Replacement text.
@@ -86,8 +94,8 @@ struct PatchSkillInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EditSkillInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Complete replacement SKILL.md content.
     content: String,
 }
@@ -95,8 +103,8 @@ struct EditSkillInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeleteSkillInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Optional note identifying where its knowledge was absorbed.
     absorbed_into: Option<String>,
 }
@@ -104,8 +112,8 @@ struct DeleteSkillInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WriteSkillFileInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Support file under references/, templates/, scripts/, or assets/.
     file_path: String,
     /// Complete support file content.
@@ -115,8 +123,8 @@ struct WriteSkillFileInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RemoveSkillFileInput {
-    /// Project skill name.
-    name: String,
+    #[serde(flatten)]
+    target: SkillTargetInput,
     /// Existing support file path.
     file_path: String,
 }
@@ -151,18 +159,16 @@ struct SkillViewOutput<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillPathOutput<'a> {
-    success: bool,
-    action: &'static str,
-    name: &'a str,
+    #[serde(flatten)]
+    action: SkillActionOutput<'a>,
     path: &'a Path,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillPatchOutput<'a> {
-    success: bool,
-    action: &'static str,
-    name: &'a str,
+    #[serde(flatten)]
+    action: SkillActionOutput<'a>,
     replacements: usize,
     path: &'a Path,
 }
@@ -170,18 +176,24 @@ struct SkillPatchOutput<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SkillDeleteOutput<'a> {
-    success: bool,
-    action: &'static str,
-    name: &'a str,
+    #[serde(flatten)]
+    action: SkillActionOutput<'a>,
     absorbed_into: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SkillFileOutput<'a> {
+struct SkillActionOutput<'a> {
     success: bool,
     action: &'static str,
     name: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillFileOutput<'a> {
+    #[serde(flatten)]
+    action: SkillActionOutput<'a>,
     file_path: &'a str,
 }
 
@@ -282,8 +294,8 @@ impl Tool for SkillViewTool {
             let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
-            let skill = catalog.find(&input.name).ok_or_else(|| {
-                let name = &input.name;
+            let skill = catalog.find(&input.target.name).ok_or_else(|| {
+                let name = &input.target.name;
                 tool_error(self.name(), format!("skill not found: {name}"))
             })?;
             let read = read_skill_file(skill, input.file_path.as_deref())

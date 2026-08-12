@@ -10,7 +10,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::TurnEngine;
 use crate::config::EffectiveMcpServerConfig;
-use crate::tool::{RegisteredTool, ToolCachePolicy, ToolDisplayMetadata, ToolRuntimeLockPolicy};
+use crate::tool::cache::ToolCachePolicy;
+use crate::tool::{RegisteredTool, ToolDisplayMetadata, ToolRuntimeLockPolicy};
 use crate::turn::ToolEffect;
 
 use super::connector::McpConnector;

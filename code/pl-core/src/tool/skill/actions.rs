@@ -8,8 +8,8 @@ use crate::skill::*;
 
 use super::{
     CreateSkillInput, DeleteSkillInput, EditSkillInput, PatchSkillInput, RemoveSkillFileInput,
-    ReplaceMode, SkillDeleteOutput, SkillFileOutput, SkillPatchOutput, SkillPathOutput,
-    WriteSkillFileInput, json_output, tool_error,
+    ReplaceMode, SkillActionOutput, SkillDeleteOutput, SkillFileOutput, SkillPatchOutput,
+    SkillPathOutput, WriteSkillFileInput, json_output, tool_error,
 };
 use crate::tool::ToolOutput;
 use crate::tool::text_escape::decode_json_escaped_fragment_once;
@@ -19,15 +19,15 @@ pub(super) fn create_skill(
     catalog: &SkillCatalog,
     input: CreateSkillInput,
 ) -> Result<ToolOutput, PureError> {
-    if catalog.project_skill(&input.name).is_some() {
-        let name = &input.name;
+    if catalog.project_skill(&input.target.name).is_some() {
+        let name = &input.target.name;
         return Err(tool_error(
             tool,
             format!("project skill already exists: {name}"),
         ));
     }
     let content = input.content;
-    let metadata = validate_skill_document(&content, Some(&input.name))
+    let metadata = validate_skill_document(&content, Some(&input.target.name))
         .map_err(|error| tool_error(tool, error))?;
     let category = input.category.as_deref().or(metadata.category.as_deref());
     let skill_dir = project_skill_dir_for_create(&catalog.project_dir, &metadata.name, category)
@@ -61,9 +61,11 @@ pub(super) fn create_skill(
     mark_project_skill_created(&catalog.project_dir, &skill_dir)
         .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPathOutput {
-        success: true,
-        action: "create",
-        name: &metadata.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "create",
+            name: &metadata.name,
+        },
         path: &skill_dir,
     })
 }
@@ -73,9 +75,9 @@ pub(super) fn edit_skill(
     catalog: &SkillCatalog,
     input: EditSkillInput,
 ) -> Result<ToolOutput, PureError> {
-    let skill = writable_project_skill(tool, catalog, &input.name)?;
+    let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let content = input.content;
-    let metadata = validate_skill_document(&content, Some(&input.name))
+    let metadata = validate_skill_document(&content, Some(&input.target.name))
         .map_err(|error| tool_error(tool, error))?;
     let skill_file = skill.path.join("SKILL.md");
     ensure_project_path(
@@ -89,9 +91,11 @@ pub(super) fn edit_skill(
     bump_project_patch(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPathOutput {
-        success: true,
-        action: "edit",
-        name: &metadata.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "edit",
+            name: &metadata.name,
+        },
         path: &skill.path,
     })
 }
@@ -101,7 +105,7 @@ pub(super) fn patch_skill(
     catalog: &SkillCatalog,
     input: PatchSkillInput,
 ) -> Result<ToolOutput, PureError> {
-    let skill = writable_project_skill(tool, catalog, &input.name)?;
+    let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     ensure_project_path(
         &catalog.project_dir,
         &skill.path,
@@ -141,16 +145,18 @@ pub(super) fn patch_skill(
         ReplaceMode::One => content.replacen(&needle, &new_string, 1),
         ReplaceMode::All => content.replace(&needle, &new_string),
     };
-    validate_skill_document(&updated, Some(&input.name))
+    validate_skill_document(&updated, Some(&input.target.name))
         .map_err(|error| tool_error(tool, error))?;
     fs::write(&path, updated)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
     bump_project_patch(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPatchOutput {
-        success: true,
-        action: "patch",
-        name: &skill.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "patch",
+            name: &skill.name,
+        },
         replacements: match replace_mode {
             ReplaceMode::One => 1,
             ReplaceMode::All => matches,
@@ -175,7 +181,7 @@ pub(super) fn delete_skill(
     catalog: &SkillCatalog,
     input: DeleteSkillInput,
 ) -> Result<ToolOutput, PureError> {
-    let skill = writable_project_skill(tool, catalog, &input.name)?;
+    let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     ensure_project_path(
         &catalog.project_dir,
         &skill.path,
@@ -185,9 +191,11 @@ pub(super) fn delete_skill(
     remove_dir_all_no_follow(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, format!("failed to delete skill: {error}")))?;
     json_output(SkillDeleteOutput {
-        success: true,
-        action: "delete",
-        name: &skill.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "delete",
+            name: &skill.name,
+        },
         absorbed_into: input.absorbed_into,
     })
 }
@@ -197,7 +205,7 @@ pub(super) fn write_support_file(
     catalog: &SkillCatalog,
     input: WriteSkillFileInput,
 ) -> Result<ToolOutput, PureError> {
-    let skill = writable_project_skill(tool, catalog, &input.name)?;
+    let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let file_path = input.file_path;
     let file_content = input.file_content;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
@@ -221,9 +229,11 @@ pub(super) fn write_support_file(
     bump_project_patch(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, error))?;
     json_output(SkillFileOutput {
-        success: true,
-        action: "writeFile",
-        name: &skill.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "writeFile",
+            name: &skill.name,
+        },
         file_path: &file_path,
     })
 }
@@ -233,7 +243,7 @@ pub(super) fn remove_support_file(
     catalog: &SkillCatalog,
     input: RemoveSkillFileInput,
 ) -> Result<ToolOutput, PureError> {
-    let skill = writable_project_skill(tool, catalog, &input.name)?;
+    let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let file_path = input.file_path;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
     let path = skill.path.join(relative);
@@ -254,9 +264,11 @@ pub(super) fn remove_support_file(
     bump_project_patch(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, error))?;
     json_output(SkillFileOutput {
-        success: true,
-        action: "removeFile",
-        name: &skill.name,
+        action: SkillActionOutput {
+            success: true,
+            action: "removeFile",
+            name: &skill.name,
+        },
         file_path: &file_path,
     })
 }

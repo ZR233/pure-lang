@@ -83,14 +83,15 @@ where
         next.refresh_mailbox_snapshot();
         next.snapshot.active_turn_id = Some(input.turn_id.clone());
         let committed = self
-            .commit_transition(next, Vec::new(), |snapshot| {
-                AgentRuntimeEventKind::TurnStarted {
+            .commit_transition(
+                super::super::persist::TransitionCommit::new(next),
+                |snapshot| AgentRuntimeEventKind::TurnStarted {
                     turn_id: input.turn_id.clone(),
                     thread_id: input.thread_id.clone(),
                     claimed_inputs: leading_inputs.clone(),
                     snapshot,
-                }
-            })
+                },
+            )
             .await;
         if let Err(error) = committed {
             // The durable state still owns the queued input, but the in-memory
@@ -206,9 +207,10 @@ where
         active.cancelling = true;
         active.cancellation.cancel();
         let next = self.state.clone();
-        self.commit_transition(next, Vec::new(), |snapshot| {
-            AgentRuntimeEventKind::StateChanged { snapshot }
-        })
+        self.commit_transition(
+            super::super::persist::TransitionCommit::new(next),
+            |snapshot| AgentRuntimeEventKind::StateChanged { snapshot },
+        )
         .await?;
 
         let active = self
@@ -249,13 +251,14 @@ where
         next.refresh_mailbox_snapshot();
         next.snapshot.active_turn_id = None;
         next.snapshot.last_turn = Some(outcome.clone());
-        self.commit_transition(next, Vec::new(), |snapshot| {
-            AgentRuntimeEventKind::TurnFinished {
+        self.commit_transition(
+            super::super::persist::TransitionCommit::new(next),
+            |snapshot| AgentRuntimeEventKind::TurnFinished {
                 outcome,
                 snapshot,
                 finalized_with_tool: None,
-            }
-        })
+            },
+        )
         .await?;
         if self.dispatch_enabled && self.state.has_triggering_input() {
             self.begin_next_turn().await;

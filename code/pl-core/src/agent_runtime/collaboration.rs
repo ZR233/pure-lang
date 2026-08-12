@@ -557,9 +557,9 @@ fn compact_agent(snapshot: &AgentSnapshot, all: &[AgentSnapshot]) -> Value {
 fn compact_wait_message(message: &AgentDirectoryWaitMessage, all: &[AgentSnapshot]) -> Value {
     let progress = message.message.as_ref().map(|progress| {
         json!({
-            "stage": progress.stage,
-            "summary": progress.summary,
-            "nextStep": progress.next_step,
+            "stage": progress.report.stage,
+            "summary": progress.report.summary,
+            "nextStep": progress.report.next_step,
         })
     });
     json!({
@@ -711,10 +711,12 @@ mod tests {
             lifecycle: AgentLifecycleState::Active,
             activity: AgentActivityState::Active(ActiveKind::Running),
             message: Some(super::super::AgentProgressCheckpoint {
-                stage: AgentProgressStage::Verifying,
-                summary: "验证完成".to_string(),
-                next_step: "等待审查".to_string(),
-                revision: 3,
+                report: super::super::AgentProgressReport {
+                    stage: AgentProgressStage::Verifying,
+                    summary: "验证完成".to_string(),
+                    next_step: "等待审查".to_string(),
+                    revision: 3,
+                },
                 updated_at: 123,
             }),
             turn_outcome: None,

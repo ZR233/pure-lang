@@ -1,5 +1,6 @@
 use super::*;
-use crate::tool::{ToolBudgetTiming, ToolCachePolicy, ToolRuntimeLockPolicy};
+use crate::tool::cache::ToolCachePolicy;
+use crate::tool::{ToolBudgetTiming, ToolRuntimeLockPolicy};
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -502,7 +503,7 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -571,7 +572,7 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -650,7 +651,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -688,7 +689,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -745,7 +746,7 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -820,7 +821,7 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -872,7 +873,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -914,7 +915,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1007,7 +1008,7 @@ async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1073,7 +1074,7 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1118,7 +1119,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1153,7 +1154,7 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1195,7 +1196,7 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1233,7 +1234,7 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1305,7 +1306,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1400,7 +1401,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -1490,7 +1491,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await

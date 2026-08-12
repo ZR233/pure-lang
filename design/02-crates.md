@@ -52,6 +52,21 @@ journal 和双库 projection 不再是公共或内部架构边界。
 `pl-core` 不依赖 SeaORM，不知道 Studio 路径、schema 或 Task 表；`TurnFactory` 直接返回可执行
 的 engine、request 和 policy，不保留只做转发的 kernel façade。
 
+`pl-core` 内部按变化原因拆分编排职责。ThreadActor 的 durable 变更可以在各领域步骤中准备
+不同 facts 和 mutation，但 repository CAS、内存状态替换以及提交后事件发布必须经过同一条
+commit pipeline，保持“先持久化、后更新内存与广播”的原子边界。Turn 编排入口只保留主流程，
+instruction 准备、checkpoint/mailbox 协调、工具结果投影等支线下沉到职责明确的子模块。
+Instruction 领域进一步分离 wire/领域类型、宿主 profile、指令组装和模型上下文投影；工具缓存
+分离执行编排、single-flight 状态、缓存条目投影、键与 mutation epoch、区间读取和确定性失败。
+这些目录入口只导出最终公共类型，内部子模块不作为兼容路径暴露。
+工具输出的 secret 遮蔽、生命周期投影和 artifact 捕获是相互独立的职责，由
+`tool::output_format` 的对应子模块直接承载，不增加旧名字、别名或转发 façade，也不把产品层
+持久化类型引入核心实现。
+
+多个领域结构共享三个及以上稳定字段时，提取具名组合类型并让调用方直接访问该组合；需要保持
+既有 JSON 键平铺的 serde 类型使用 `#[serde(flatten)]`。组合只复用同一领域语义，不因字段名
+偶然相同而合并；重构后的旧字段和旧调用入口直接删除，不保留 alias 或兼容转发层。
+
 ## 2.5 pl-studio-runtime
 
 `pl-studio-runtime` 是 Studio 产品宿主，拥有：

@@ -40,14 +40,53 @@ pub struct AgentTurnOutcome {
     pub finished_at: i64,
 }
 
-/// agent 最新的显式进度 checkpoint。
+/// checkpoint 与 durable submission 共享的进度内容。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentProgressCheckpoint {
+pub struct AgentProgressReport {
     pub stage: AgentProgressStage,
     pub summary: String,
     pub next_step: String,
     pub revision: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn progress_checkpoint_flattens_shared_report_fields() {
+        let checkpoint = AgentProgressCheckpoint {
+            report: AgentProgressReport {
+                stage: AgentProgressStage::Verifying,
+                summary: "tests passed".to_string(),
+                next_step: "ship".to_string(),
+                revision: 3,
+            },
+            updated_at: 42,
+        };
+
+        assert_eq!(
+            serde_json::to_value(checkpoint).unwrap(),
+            json!({
+                "stage": "verifying",
+                "summary": "tests passed",
+                "nextStep": "ship",
+                "revision": 3,
+                "updatedAt": 42,
+            })
+        );
+    }
+}
+
+/// agent 最新的显式进度 checkpoint。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProgressCheckpoint {
+    #[serde(flatten)]
+    pub report: AgentProgressReport,
     pub updated_at: i64,
 }
 
@@ -59,12 +98,10 @@ pub struct AgentProgressCheckpoint {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSubmissionRecord {
-    pub stage: AgentProgressStage,
-    pub summary: String,
-    pub next_step: String,
+    #[serde(flatten)]
+    pub report: AgentProgressReport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-    pub revision: u64,
     pub created_at: i64,
 }
 
@@ -82,22 +119,16 @@ pub struct AgentSubmissionPage {
 /// 一次 commit 中需要原子追加到 durable 提交日志的 typed 载荷。
 #[derive(Debug, Clone)]
 pub struct ProgressSubmissionCommit {
-    pub stage: AgentProgressStage,
-    pub summary: String,
-    pub next_step: String,
+    pub report: AgentProgressReport,
     pub detail: Option<String>,
-    pub revision: u64,
     pub created_at: i64,
 }
 
 impl ProgressSubmissionCommit {
     pub fn to_record(&self) -> AgentSubmissionRecord {
         AgentSubmissionRecord {
-            stage: self.stage,
-            summary: self.summary.clone(),
-            next_step: self.next_step.clone(),
+            report: self.report.clone(),
             detail: self.detail.clone(),
-            revision: self.revision,
             created_at: self.created_at,
         }
     }

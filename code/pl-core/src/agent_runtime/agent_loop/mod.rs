@@ -12,6 +12,7 @@ use running_turn::{RunningTurn, turn_outcome};
 
 mod checkpoint;
 mod command;
+mod commit;
 mod completion;
 mod input;
 mod lifecycle;
@@ -309,7 +310,7 @@ where
         }
         let event_reason = reason.clone();
         if self
-            .commit_transition(next, Vec::new(), move |snapshot| {
+            .commit_transition(persist::TransitionCommit::new(next), move |snapshot| {
                 AgentRuntimeEventKind::Faulted {
                     reason: event_reason,
                     snapshot,

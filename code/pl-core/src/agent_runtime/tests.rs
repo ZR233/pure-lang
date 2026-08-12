@@ -678,12 +678,12 @@ async fn report_progress_appends_durable_submission_with_detail() {
         .unwrap();
     assert_eq!(page.total, 2);
     assert_eq!(page.items.len(), 2);
-    assert_eq!(page.items[0].stage, AgentProgressStage::Implementing);
+    assert_eq!(page.items[0].report.stage, AgentProgressStage::Implementing);
     assert_eq!(
         page.items[0].detail.as_deref(),
         Some("replaced ephemeral progress with thread_submissions append")
     );
-    assert_eq!(page.items[1].stage, AgentProgressStage::Verifying);
+    assert_eq!(page.items[1].report.stage, AgentProgressStage::Verifying);
 
     // 分页：第二页为空，has_more 反映总数。
     let next = handle

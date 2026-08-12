@@ -95,7 +95,7 @@ pub struct ToolContext {
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::AgentSession>,
     pub working_set: crate::TurnWorkingSetHandle,
-    pub tool_cache: crate::TurnToolCacheHandle,
+    pub tool_cache: crate::tool::cache::TurnToolCacheHandle,
 }
 
 /// 单次工具调用的路径访问策略。

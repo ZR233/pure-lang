@@ -93,7 +93,7 @@ where
         next.refresh_mailbox_snapshot();
         next.snapshot.last_turn = Some(outcome.clone());
         let committed = self
-            .commit_transition(next, Vec::new(), |snapshot| {
+            .commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
                 AgentRuntimeEventKind::TurnFinished {
                     outcome: outcome.clone(),
                     snapshot,

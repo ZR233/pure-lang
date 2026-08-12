@@ -11,9 +11,10 @@ use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::AgentSession;
+use crate::tool::cache::{ToolCachePolicy, TurnToolCacheHandle};
 use crate::tool::{
-    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolCachePolicy, ToolContext, ToolInput,
-    ToolRuntimeEvent, ToolRuntimeLockPolicy, WorkspaceAccess,
+    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
+    ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -94,7 +95,7 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) active_subagent: Option<SubagentContext>,
     pub(super) parent_session: Arc<AgentSession>,
     pub(super) working_set: crate::TurnWorkingSetHandle,
-    pub(super) tool_cache: crate::TurnToolCacheHandle,
+    pub(super) tool_cache: TurnToolCacheHandle,
 }
 
 #[cfg(test)]

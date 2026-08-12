@@ -1,0 +1,108 @@
+use super::read_file::{ReadFileRange, ReadFileRequest};
+use crate::tool::{ToolOutput, ToolRuntimeEvent, model_visible_tool_output};
+
+#[derive(Debug, Clone)]
+pub(super) struct ToolCacheEntry {
+    pub(super) tool_name: String,
+    call_id: String,
+    output: ToolOutput,
+    result_hash: String,
+    total_bytes: u64,
+    pub(super) read_file_range: Option<ReadFileRange>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum CacheReuseKind {
+    Exact,
+    CoveredReadRange,
+}
+
+pub(super) fn cache_entry(
+    tool_name: &str,
+    call_id: String,
+    output: &ToolOutput,
+    read_file_request: Option<&ReadFileRequest>,
+) -> ToolCacheEntry {
+    let total_bytes = output.description.len() as u64;
+    let result_hash = output
+        .runtime_events
+        .iter()
+        .find_map(|event| match event {
+            ToolRuntimeEvent::OutputMetrics { result_hash, .. } => Some(result_hash.clone()),
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
+            | ToolRuntimeEvent::EndTurn => None,
+        })
+        .unwrap_or_else(|| {
+            crate::working_set::canonical_content_hash(output.description.as_bytes())
+        });
+    ToolCacheEntry {
+        tool_name: tool_name.to_string(),
+        call_id,
+        output: output.clone(),
+        result_hash,
+        total_bytes,
+        read_file_range: read_file_request
+            .and_then(|request| ReadFileRange::from_output(request, output)),
+    }
+}
+
+pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKind) -> ToolOutput {
+    let summary = model_visible_tool_output(&entry.output.description);
+    let summary = summary.chars().take(512).collect::<String>();
+    let description = serde_json::json!({
+        "cacheHit": true,
+        "reusedFromCallId": entry.call_id,
+        "resultHash": entry.result_hash,
+        "totalBytes": entry.total_bytes,
+        "reuseKind": match reuse_kind {
+            CacheReuseKind::Exact => "exact",
+            CacheReuseKind::CoveredReadRange => "coveredReadRange",
+        },
+        "summary": summary,
+    })
+    .to_string();
+    let mut output = entry.output.clone();
+    output.description = description;
+    let (artifact_bytes, result_hash) = output
+        .runtime_events
+        .iter()
+        .find_map(|event| match event {
+            ToolRuntimeEvent::OutputMetrics {
+                artifact_bytes,
+                result_hash,
+                ..
+            } => Some((*artifact_bytes, result_hash.clone())),
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
+            | ToolRuntimeEvent::EndTurn => None,
+        })
+        .unwrap_or((0, entry.result_hash.clone()));
+    output
+        .runtime_events
+        .retain(|event| !matches!(event, ToolRuntimeEvent::OutputMetrics { .. }));
+    output.runtime_events.push(ToolRuntimeEvent::CacheHit {
+        reused_from_call_id: entry.call_id.clone(),
+        result_hash: entry.result_hash.clone(),
+        total_bytes: entry.total_bytes,
+    });
+    output.runtime_events.push(ToolRuntimeEvent::OutputMetrics {
+        raw_bytes: entry.total_bytes,
+        model_visible_bytes: output.description.len() as u64,
+        artifact_bytes,
+        result_hash,
+    });
+    output
+}

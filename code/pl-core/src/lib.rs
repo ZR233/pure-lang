@@ -4,7 +4,7 @@ pub mod config;
 mod context_assembler;
 mod context_compaction;
 mod core;
-mod instruction;
+pub mod instruction;
 mod interaction;
 pub mod mcp;
 mod message;
@@ -14,7 +14,7 @@ mod permission;
 mod process;
 mod prompt_cache;
 pub mod runtime_usage;
-mod session;
+pub mod session;
 pub mod skill;
 mod thread_event;
 pub mod tool;
@@ -46,11 +46,6 @@ pub use core::{
     TurnEngine, TurnEngineBuilder, WorkspaceProfile, shared_tool_names, shared_tool_schemas,
     stream_history_completion_message_text, stream_session_completion_message_text,
     stream_session_completion_response,
-};
-pub use instruction::{
-    ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
-    InstructionBlock, InstructionBundle, InstructionProfile, InstructionSnapshot,
-    InstructionSource, InstructionSourceKind,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
@@ -102,10 +97,7 @@ pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
 };
 pub use runtime_usage::ModelTokenUsageSnapshot;
-pub use session::{
-    AgentSession, AgentSessionForkPolicy, repair_incomplete_tool_history,
-    tool_call_history_message, tool_result_history_message,
-};
+pub use session::{AgentSession, AgentSessionForkPolicy};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use thread_event::{
     ThreadEventBus, ThreadEventBusHandle, ThreadEventError, ThreadEventOptions,

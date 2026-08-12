@@ -2,10 +2,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
+use pl_core::instruction::{
+    ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
+    InstructionSnapshot,
+};
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
-    CoreRuntimeProfile, ExecutionInstructionProfile, InstructionAssembler,
-    InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
+    CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
     ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
     plan_web_search,
 };
@@ -349,7 +352,7 @@ fn instruction_snapshot(
     workspace_root: &Path,
     workspace_instructions: &str,
     subagent_constraint: Option<&str>,
-) -> Result<pl_core::InstructionSnapshot> {
+) -> Result<InstructionSnapshot> {
     InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&config.instructions),
         skills: Some(&config.skills),

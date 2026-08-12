@@ -234,7 +234,10 @@ async fn rmcp_schema_and_structured_result_survive_registered_tool() {
     assert_eq!(tool.effect(), None, "remote annotation is not trusted");
     assert!(!tool.supports_parallel_tool_calls());
     assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Exclusive);
-    assert_eq!(tool.cache_policy(&json!({})), ToolCachePolicy::Never);
+    assert_eq!(
+        tool.cache_policy(&json!({})),
+        crate::tool::cache::ToolCachePolicy::Never
+    );
     let display = tool.display_metadata().expect("MCP display metadata");
     assert_eq!(
         display
@@ -292,7 +295,10 @@ async fn trusted_read_effect_enables_shared_parallel_registered_tool() {
     assert_eq!(tool.effect(), Some(ToolEffect::Read));
     assert!(tool.supports_parallel_tool_calls());
     assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
-    assert_eq!(tool.cache_policy(&json!({})), ToolCachePolicy::Never);
+    assert_eq!(
+        tool.cache_policy(&json!({})),
+        crate::tool::cache::ToolCachePolicy::Never
+    );
     drop(lease);
     runtime.shutdown().await;
     wait_for_closed(&closed).await;
@@ -443,7 +449,7 @@ fn test_context() -> ToolContext {
         lsp_runtime: None,
         parent_session: Arc::new(crate::AgentSession::new()),
         working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::TurnToolCacheHandle::default(),
+        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
     }
 }
 

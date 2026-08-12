@@ -9,8 +9,9 @@ use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
     AgentSession, StudioMode, StudioRecoveryIssueAction, StudioRecoveryIssueCategory, StudioStore,
-    TurnOptions, TurnToolCacheHandle, TurnWorkingSetHandle,
+    TurnOptions, TurnWorkingSetHandle,
 };
+use pl_core::tool::cache::TurnToolCacheHandle;
 
 #[tokio::test]
 async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
@@ -242,13 +243,13 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
         .await
         .unwrap();
     let history = AgentSession::from_messages(vec![
-        crate::tool_result_history_message(
+        pl_core::session::tool_history::tool_result_history_message(
             "call-search".to_string(),
             "exec".to_string(),
             r#"{"command":"rg --files design"}"#.to_string(),
             r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string(),
         ),
-        crate::tool_result_history_message(
+        pl_core::session::tool_history::tool_result_history_message(
             "call-read".to_string(),
             "read_file".to_string(),
             r#"{"path":"design/guide.md"}"#.to_string(),

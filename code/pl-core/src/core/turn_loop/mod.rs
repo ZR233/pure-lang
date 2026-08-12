@@ -1,13 +1,18 @@
-use pl_model::{
-    CompletionRequest, EffectivePromptCachePolicy, ModelProvider, ReasoningConfig, ReasoningSummary,
-};
-use pl_protocol::{ErrorSeverity, Result, TokenUsageSnapshot, ToolResultReceipt};
-use pl_trace::{AgentEvent, TracePartStatus};
+use pl_model::{CompletionRequest, ModelProvider};
+use pl_protocol::{ErrorSeverity, Result};
+use pl_trace::TracePartStatus;
 use std::sync::Arc;
 
 mod attachments;
+mod checkpoint;
+mod completion;
 pub(super) mod enabled_tools;
+mod inference;
+mod orchestration;
 mod plan_exit;
+mod prompt_cache;
+mod tool_results;
+mod turn_setup;
 
 use attachments::materialize_context_items;
 use enabled_tools::record_enabled_tools;
@@ -18,28 +23,17 @@ use crate::context_compaction::{
     CompactionOutcome, ContextCompactionPhase, ContextCompactionRequest,
     ensure_provider_can_consume_session, maybe_compact_session,
 };
-use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
-use crate::runtime_usage::{
-    InferenceBillingInput, agent_runtime_delta, identity_for_subagent, inference_billing_record,
-    token_usage_snapshot,
-};
+use crate::runtime_usage::{InferenceBillingInput, inference_billing_record, token_usage_snapshot};
 use crate::session::AgentSession;
 use crate::trace::TraceRecorder;
-use crate::turn::{
-    BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
-};
-use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle, canonical_content_hash};
-use crate::{
-    AgentInferenceCommit, PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context,
-    stable_tool_schemas,
-};
+use crate::turn::{BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult};
+use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle};
+use crate::{PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
 
 use super::TurnEngine;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::tool_dispatch::{
-    ToolExecutionContext, ToolExecutionError, ToolExecutionRecord, execute_tool_call_batch,
-};
+use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_call_batch};
 use super::turn_result::{
     budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
     interrupted_turn_result, is_cancelled, looks_like_unexecuted_tool_call_text,
@@ -67,7 +61,7 @@ pub(super) async fn run_turn_with_trace(
     let cancellation_token = options.cancellation_token.clone();
     let model_capabilities = provider.effective_model_capabilities(&model);
     let orchestration_options =
-        tool_orchestration_options(provider.info(), &model_info, &model_capabilities);
+        orchestration::options(provider.info(), &model_info, &model_capabilities);
     let tool_schemas = stable_tool_schemas(match options.execution_policy.as_ref() {
         Some(policy) => core
             .tools
@@ -91,7 +85,7 @@ pub(super) async fn run_turn_with_trace(
     }
     session.push_user_content(request.user_content.clone());
     let working_set = TurnWorkingSetHandle::from_session(session)?;
-    let tool_cache = crate::TurnToolCacheHandle::default();
+    let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
     record_enabled_tools(recorder, &turn_id, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
@@ -112,52 +106,26 @@ pub(super) async fn run_turn_with_trace(
     let mut inference_count = 0_u64;
 
     let prompt_cache_policy = provider.info().effective_prompt_cache_policy(&model_info);
-    let instruction_snapshot = match request.instruction_snapshot.clone() {
-        Some(snapshot) => snapshot,
-        None => {
-            let assembly_request = InstructionAssemblyRequest {
-                instructions: None,
-                skills: core.skills.as_ref(),
-                execution_profile: None,
-                model: &model_info,
-                workspace_root: &workspace_root,
-                current_dir: &workspace_root,
-                workspace_instructions: request.workspace_instructions.as_deref(),
-                subagent_constraint: None,
-            };
-            match core.instruction_profile.as_ref() {
-                Some(profile) => {
-                    InstructionAssembler::assemble_with_profile(assembly_request, profile)?
-                }
-                None => InstructionAssembler::assemble(assembly_request)?,
-            }
-        }
-    };
+    let instruction_snapshot =
+        turn_setup::instruction_snapshot(core, &request, &model_info, &workspace_root)?;
     let turn_instruction_snapshot = instruction_snapshot.clone();
-    let reasoning = effort.as_ref().map(|effort| ReasoningConfig {
-        effort: Some(effort.as_str().to_string()),
-        summary: Some(if effort.is_none() {
-            ReasoningSummary::Disabled
-        } else {
-            ReasoningSummary::Enabled
-        }),
-    });
+    let reasoning = turn_setup::reasoning(effort.as_ref());
 
     let mut provider_prompt_tokens_for_compaction = None;
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
     let mut terminal_checkpointed = false;
     let mut ended_for_interaction = false;
-    persist_mailbox_checkpoint_if_needed(&options, session).await?;
+    checkpoint::persist_pending_mail(&options, session).await?;
     let mut turn_context =
         TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
     loop {
-        if drain_mailbox_inputs(&options, session, recorder, &turn_id).await? {
+        if checkpoint::drain_mailbox(&options, session, recorder, &turn_id).await? {
             safe_message_count = session.len();
             session_message_count = safe_message_count;
         }
         if working_set.sync_session(session)? {
-            persist_checkpoint(
+            checkpoint::persist(
                 &options,
                 session,
                 crate::TurnCheckpointReason::WorkingSetChanged,
@@ -210,7 +178,7 @@ pub(super) async fn run_turn_with_trace(
         )?
         .is_some()
         {
-            persist_checkpoint(
+            checkpoint::persist(
                 &options,
                 session,
                 crate::TurnCheckpointReason::WorkingSetChanged,
@@ -219,7 +187,7 @@ pub(super) async fn run_turn_with_trace(
             safe_message_count = session.len();
             session_message_count = safe_message_count;
         }
-        sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
+        prompt_cache::sync(session, &options, prompt_cache_policy)?;
         let mut assembled_context = ContextAssembler::assemble_turn(
             &instruction_bundle.instructions,
             &instruction_bundle.prelude_messages,
@@ -285,17 +253,11 @@ pub(super) async fn run_turn_with_trace(
                             usage: &usage,
                             model_info: &model_info,
                             prompt_cache_policy,
-                            prompt: current_prompt_snapshot(session, &options.prompt_scope),
+                            prompt: prompt_cache::current(session, &options.prompt_scope),
                             orchestration: Default::default(),
                             recorded_at,
                         });
-                        AgentInferenceCommit {
-                            runtime_delta: agent_runtime_delta(
-                                identity_for_subagent(active_subagent.as_ref()),
-                                &billing,
-                            ),
-                            billing,
-                        }
+                        inference::from_billing(active_subagent.as_ref(), billing)
                     });
                     context_compactions.push(snapshot);
                     working_set.sync_session(session)?;
@@ -322,7 +284,7 @@ pub(super) async fn run_turn_with_trace(
                             updated_at: unix_seconds(),
                         },
                     )?;
-                    sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
+                    prompt_cache::sync(session, &options, prompt_cache_policy)?;
                     turn_context.rebase(session.items());
                     assembled_context = ContextAssembler::assemble_turn(
                         &instruction_bundle.instructions,
@@ -331,10 +293,9 @@ pub(super) async fn run_turn_with_trace(
                         &turn_context,
                     )?;
                     if let Some(inference) = compaction_inference {
-                        commit_and_publish_inference(&options, session, recorder, inference)
-                            .await?;
+                        inference::record(&options, session, recorder, inference).await?;
                     } else {
-                        persist_checkpoint(
+                        checkpoint::persist(
                             &options,
                             session,
                             crate::TurnCheckpointReason::ContextCompacted,
@@ -365,7 +326,7 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
         budget_tracker.record_model_step();
-        persist_checkpoint(
+        checkpoint::persist(
             &options,
             session,
             crate::TurnCheckpointReason::BeforeInference,
@@ -503,7 +464,7 @@ pub(super) async fn run_turn_with_trace(
             usage: &response.usage,
             model_info: &model_info,
             prompt_cache_policy,
-            prompt: current_prompt_snapshot(session, &options.prompt_scope),
+            prompt: prompt_cache::current(session, &options.prompt_scope),
             orchestration: response.orchestration.clone(),
             recorded_at,
         });
@@ -539,11 +500,11 @@ pub(super) async fn run_turn_with_trace(
         if tool_calls.is_empty() {
             progress.milestone("模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
-                commit_and_publish_inference(
+                inference::record(
                     &options,
                     session,
                     recorder,
-                    inference_commit(active_subagent.as_ref(), billing),
+                    inference::from_billing(active_subagent.as_ref(), billing),
                 )
                 .await?;
                 return Ok(failed_turn_result(
@@ -567,14 +528,14 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
             session_message_count = session.len();
             safe_message_count = session_message_count;
-            commit_and_publish_inference(
+            inference::record(
                 &options,
                 session,
                 recorder,
-                inference_commit(active_subagent.as_ref(), billing),
+                inference::from_billing(active_subagent.as_ref(), billing),
             )
             .await?;
-            if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
+            if checkpoint::finish_mailbox_window(&options, session, recorder, &turn_id).await? {
                 safe_message_count = session.len();
                 session_message_count = safe_message_count;
                 iteration = iteration.saturating_add(1);
@@ -649,11 +610,11 @@ pub(super) async fn run_turn_with_trace(
             }
             Err(ToolExecutionError::RespondToModel(error)) => {
                 session.truncate_messages(safe_message_count);
-                commit_and_publish_inference(
+                inference::record(
                     &options,
                     session,
                     recorder,
-                    inference_commit(active_subagent.as_ref(), billing),
+                    inference::from_billing(active_subagent.as_ref(), billing),
                 )
                 .await?;
                 return Ok(failed_turn_result_with_abort_reason(
@@ -674,7 +635,7 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
         };
-        merge_tool_batch_metrics(&mut billing.orchestration, &tool_batch.orchestration);
+        billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
         progress.tool_detail("工具执行完成，准备回写结果。");
         record_plan_exit_items(recorder, &turn_id, &tool_results);
@@ -696,8 +657,8 @@ pub(super) async fn run_turn_with_trace(
             .resolved_auto_compact_limit()
             .or_else(|| model_info.resolved_context_window())
             .map(|limit| limit.saturating_sub(response_total_tokens));
-        apply_model_tool_output_batch_budget(&mut tool_results, remaining_context_tokens);
-        normalize_programmatic_tool_results(&mut tool_results, &tool_calls);
+        tool_results::apply_batch_budget(&mut tool_results, remaining_context_tokens);
+        tool_results::normalize_programmatic_results(&mut tool_results, &tool_calls);
         billing.orchestration.tool_result_estimated_tokens =
             crate::tool::estimate_tool_result_tokens(
                 tool_results
@@ -707,7 +668,7 @@ pub(super) async fn run_turn_with_trace(
         let tool_results = tool_results
             .into_iter()
             .map(|tool_result| {
-                let receipt = tool_result_receipt(&tool_result);
+                let receipt = tool_results::receipt(&tool_result);
                 (tool_result, receipt)
             })
             .collect::<Vec<_>>();
@@ -726,18 +687,18 @@ pub(super) async fn run_turn_with_trace(
                 tool_call.caller.clone(),
             );
         }
-        commit_and_publish_inference(
+        inference::record(
             &options,
             session,
             recorder,
-            inference_commit(active_subagent.as_ref(), billing),
+            inference::from_billing(active_subagent.as_ref(), billing),
         )
         .await?;
         for (_, receipt) in tool_results {
             working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt))?;
         }
         if working_set.sync_session(session)? {
-            persist_checkpoint(
+            checkpoint::persist(
                 &options,
                 session,
                 crate::TurnCheckpointReason::WorkingSetChanged,
@@ -761,7 +722,7 @@ pub(super) async fn run_turn_with_trace(
         session_message_count = session.len();
         safe_message_count = session_message_count;
         if should_end_turn {
-            if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
+            if checkpoint::finish_mailbox_window(&options, session, recorder, &turn_id).await? {
                 safe_message_count = session.len();
                 session_message_count = safe_message_count;
                 iteration = iteration.saturating_add(1);
@@ -806,617 +767,23 @@ pub(super) async fn run_turn_with_trace(
         ));
     }
 
-    recorder.ensure_assistant_text_item(&turn_id, &last_content);
-    let mut completed_turn_item = recorder.turn_item(&turn_id, TracePartStatus::Completed);
-    completed_turn_item.content = last_content.clone();
-    completed_turn_item.usage = Some(TokenUsageSnapshot {
-        prompt_tokens: total_usage.prompt_tokens,
-        completion_tokens: total_usage.completion_tokens,
-        cached_prompt_tokens: total_usage.cached_prompt_tokens,
-        cache_write_tokens: total_usage.cache_write_tokens,
-        cache_miss_tokens: total_usage.prompt_tokens.saturating_sub(
-            total_usage
-                .cached_prompt_tokens
-                .min(total_usage.prompt_tokens),
-        ),
-        reasoning_tokens: total_usage.reasoning_tokens,
-        inference_count,
-        total_tokens: total_usage.total_tokens,
-    });
-    recorder.complete_item(completed_turn_item);
     progress.milestone("本轮已完成。");
     if !terminal_checkpointed {
-        persist_checkpoint(&options, session, crate::TurnCheckpointReason::Terminal).await?;
+        checkpoint::persist(&options, session, crate::TurnCheckpointReason::Terminal).await?;
     }
-    recorder.broadcast(AgentEvent::Done);
-
-    Ok(TurnResult {
-        content: last_content,
-        reasoning_content: last_reasoning_content,
-        model: last_model,
-        usage: total_usage,
-        last_context_tokens,
-        context_compactions,
-        session_message_count,
-        status: TurnResultStatus::Completed,
-        ended_for_interaction,
-        abort_reason: None,
-        error: None,
-        failure: None,
-        budget_limit_kind: None,
-        budget_usage: None,
-        rollover_compacted: false,
-        rollover_compaction_error: None,
-        trace_events: recorder.drain(),
-    })
-}
-
-fn tool_orchestration_options(
-    provider: &pl_model::ProviderInfo,
-    model: &pl_model::ModelInfo,
-    capabilities: &pl_model::ModelCapabilities,
-) -> crate::tool::ToolOrchestrationOptions {
-    let responses_tools = &provider.service_capabilities.responses_tools;
-    let uses_responses = model.transport.protocol == pl_model::ProviderWireProtocol::Responses;
-    crate::tool::ToolOrchestrationOptions {
-        tool_search: uses_responses
-            && responses_tools.tool_search
-            && capabilities.supports_tool_search()
-            && model.request_profile.responses_tool_search,
-        programmatic_tool_calling: uses_responses
-            && responses_tools.programmatic_tool_calling
-            && capabilities.supports_programmatic_tool_calling()
-            && model.request_profile.responses_programmatic_tool_calling,
-    }
-}
-
-fn apply_model_tool_output_batch_budget(
-    tool_results: &mut [ToolExecutionRecord],
-    remaining_context_tokens: Option<u64>,
-) {
-    if tool_results.len() <= 1 {
-        return;
-    }
-    let token_budget = crate::tool::model_tool_output_batch_token_budget(
-        tool_results.len(),
-        remaining_context_tokens,
-    );
-    let original_results = tool_results
-        .iter()
-        .map(|tool_result| tool_result.result.clone())
-        .collect::<Vec<_>>();
-    let projected_results =
-        crate::tool::model_visible_tool_output_batch_with_tokens(&original_results, token_budget);
-    let original_bytes = original_results.iter().map(String::len).sum::<usize>();
-    let projected_bytes = projected_results.iter().map(String::len).sum::<usize>();
-
-    for ((tool_result, original_result), projected_result) in tool_results
-        .iter_mut()
-        .zip(original_results)
-        .zip(projected_results)
-    {
-        if projected_result == original_result {
-            continue;
-        }
-        let visible_bytes = projected_result.len() as u64;
-        let mut metrics_updated = false;
-        for event in &mut tool_result.runtime_events {
-            if let crate::tool::ToolRuntimeEvent::OutputMetrics {
-                model_visible_bytes,
-                ..
-            } = event
-            {
-                *model_visible_bytes = visible_bytes;
-                metrics_updated = true;
-                break;
-            }
-        }
-        if !metrics_updated {
-            tool_result
-                .runtime_events
-                .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
-                    raw_bytes: original_result.len() as u64,
-                    model_visible_bytes: visible_bytes,
-                    artifact_bytes: 0,
-                    result_hash: canonical_content_hash(original_result.as_bytes()),
-                });
-        }
-        tool_result.result = projected_result;
-    }
-
-    if projected_bytes < original_bytes {
-        tracing::info!(
-            target: "pl_core::tool_metrics",
-            tool_count = tool_results.len(),
-            token_budget,
-            original_bytes,
-            projected_bytes,
-            "applied model-visible tool output batch budget"
-        );
-    }
-}
-
-fn normalize_programmatic_tool_results(
-    tool_results: &mut [ToolExecutionRecord],
-    tool_calls: &[pl_model::ToolCall],
-) {
-    for (tool_result, tool_call) in tool_results.iter_mut().zip(tool_calls) {
-        if tool_call.caller.is_none() {
-            continue;
-        }
-        tool_result.result = match serde_json::from_str::<serde_json::Value>(&tool_result.result) {
-            Ok(serde_json::Value::Object(_)) => tool_result.result.clone(),
-            Ok(value) => serde_json::json!({ "content": value }).to_string(),
-            Err(_) => serde_json::json!({ "content": tool_result.result }).to_string(),
-        };
-    }
-}
-
-fn merge_tool_batch_metrics(
-    orchestration: &mut pl_protocol::InferenceOrchestrationMetrics,
-    batch: &pl_protocol::InferenceOrchestrationMetrics,
-) {
-    orchestration.merge(batch);
-}
-
-fn inference_commit(
-    active_subagent: Option<&crate::tool::SubagentContext>,
-    billing: pl_protocol::InferenceBillingRecord,
-) -> AgentInferenceCommit {
-    AgentInferenceCommit {
-        runtime_delta: agent_runtime_delta(identity_for_subagent(active_subagent), &billing),
-        billing,
-    }
-}
-
-fn sync_prompt_cache_key(
-    session: &mut AgentSession,
-    options: &TurnOptions,
-    policy: EffectivePromptCachePolicy,
-) -> Result<()> {
-    if options.prompt_cache_key.is_some() {
-        return Ok(());
-    }
-    let key = match (
-        policy.uses_prompt_cache_key(),
-        options.prompt_cache_namespace.as_deref(),
-    ) {
-        (true, Some(namespace)) => current_prompt_snapshot(session, &options.prompt_scope)
-            .map(|prompt| derive_prompt_cache_key(namespace, prompt))
-            .transpose()?,
-        _ => None,
-    };
-    session.replace_prompt_cache_key(key);
-    Ok(())
-}
-
-fn current_prompt_snapshot<'a>(
-    session: &'a AgentSession,
-    scope: &str,
-) -> Option<&'a pl_protocol::ThreadPromptSnapshot> {
-    session.prompt_metadata().slots.get(scope)
-}
-
-async fn persist_checkpoint(
-    options: &TurnOptions,
-    session: &AgentSession,
-    reason: crate::TurnCheckpointReason,
-) -> Result<()> {
-    let Some(checkpoint) = &options.checkpoint else {
-        return Ok(());
-    };
-    let consumed_mail_ids = match &options.mailbox {
-        Some(mailbox) => mailbox.pending_acknowledgements().await,
-        None => Vec::new(),
-    };
-    checkpoint
-        .checkpoint_mailbox(session.clone(), reason, consumed_mail_ids.clone())
-        .await
-        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
-    if let Some(mailbox) = &options.mailbox {
-        mailbox.acknowledge(&consumed_mail_ids).await;
-    }
-    Ok(())
-}
-
-async fn commit_and_publish_inference(
-    options: &TurnOptions,
-    session: &AgentSession,
-    recorder: &mut TraceRecorder,
-    inference: AgentInferenceCommit,
-) -> Result<()> {
-    let Some(checkpoint) = &options.checkpoint else {
-        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
-            delta: inference.runtime_delta,
-        });
-        return Ok(());
-    };
-    let consumed_mail_ids = match &options.mailbox {
-        Some(mailbox) => mailbox.pending_acknowledgements().await,
-        None => Vec::new(),
-    };
-    checkpoint
-        .checkpoint_inference_mailbox(session.clone(), inference, consumed_mail_ids.clone())
-        .await
-        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
-    if let Some(mailbox) = &options.mailbox {
-        mailbox.acknowledge(&consumed_mail_ids).await;
-    }
-    Ok(())
-}
-
-async fn persist_mailbox_checkpoint_if_needed(
-    options: &TurnOptions,
-    session: &AgentSession,
-) -> Result<()> {
-    let Some(mailbox) = &options.mailbox else {
-        return Ok(());
-    };
-    if mailbox.pending_acknowledgements().await.is_empty() {
-        return Ok(());
-    }
-    persist_checkpoint(
-        options,
-        session,
-        crate::TurnCheckpointReason::MailboxInputConsumed,
-    )
-    .await
-}
-
-async fn drain_mailbox_inputs(
-    options: &TurnOptions,
-    session: &mut AgentSession,
-    recorder: &mut TraceRecorder,
-    turn_id: &str,
-) -> Result<bool> {
-    let Some(mailbox) = &options.mailbox else {
-        return Ok(false);
-    };
-    let inputs = mailbox.drain().await;
-    if inputs.is_empty() {
-        return Ok(false);
-    }
-    for input in inputs {
-        session.push_user_prompt(input.message.clone());
-        recorder.user_text_item_with_id(
-            turn_id,
-            format!("{turn_id}-mail-{}", input.mail_id),
-            input.message,
-            Vec::new(),
-        );
-    }
-    persist_checkpoint(
-        options,
-        session,
-        crate::TurnCheckpointReason::MailboxInputConsumed,
-    )
-    .await?;
-    Ok(true)
-}
-
-async fn finish_mailbox_window(
-    options: &TurnOptions,
-    session: &mut AgentSession,
-    recorder: &mut TraceRecorder,
-    turn_id: &str,
-) -> Result<bool> {
-    if drain_mailbox_inputs(options, session, recorder, turn_id).await? {
-        return Ok(true);
-    }
-    persist_checkpoint(options, session, crate::TurnCheckpointReason::Terminal).await?;
-    drain_mailbox_inputs(options, session, recorder, turn_id).await
-}
-
-fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> ToolResultReceipt {
-    let artifacts = result
-        .runtime_events
-        .iter()
-        .filter_map(|event| match event {
-            crate::tool::ToolRuntimeEvent::OutputArtifacts { artifacts } => {
-                Some(artifacts.as_slice())
-            }
-            crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-            | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-            | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-            | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-            | crate::tool::ToolRuntimeEvent::ExecutionFailed
-            | crate::tool::ToolRuntimeEvent::CacheHit { .. }
-            | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
-            | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-            | crate::tool::ToolRuntimeEvent::EndTurn => None,
-        })
-        .flatten()
-        .map(compact_artifact_reference)
-        .collect::<Vec<_>>();
-    let cache_hit = result.runtime_events.iter().find_map(|event| match event {
-        crate::tool::ToolRuntimeEvent::CacheHit {
-            reused_from_call_id,
-            result_hash,
-            total_bytes,
-        } => Some((reused_from_call_id, result_hash, *total_bytes)),
-        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
-        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-        | crate::tool::ToolRuntimeEvent::ExecutionFailed
-        | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
-        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn => None,
-    });
-    let metrics = result.runtime_events.iter().find_map(|event| match event {
-        crate::tool::ToolRuntimeEvent::OutputMetrics {
-            raw_bytes,
-            model_visible_bytes,
-            artifact_bytes: _,
-            result_hash,
-        } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
-        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
-        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-        | crate::tool::ToolRuntimeEvent::ExecutionFailed
-        | crate::tool::ToolRuntimeEvent::CacheHit { .. }
-        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn => None,
-    });
-    ToolResultReceipt {
-        call_id: result.call_id.clone().unwrap_or_else(|| result.id.clone()),
-        tool_name: result.name.clone(),
-        arguments_hash: serde_json::from_str(&result.arguments).map_or_else(
-            |_| canonical_content_hash(result.arguments.as_bytes()),
-            |value| crate::canonical_json_hash(&value),
-        ),
-        result_hash: cache_hit.map_or_else(
-            || {
-                metrics.map_or_else(
-                    || canonical_content_hash(result.result.as_bytes()),
-                    |(_, _, hash)| hash.clone(),
-                )
-            },
-            |(_, hash, _)| hash.clone(),
-        ),
-        total_bytes: cache_hit.map_or_else(
-            || metrics.map_or(result.result.len() as u64, |(raw, _, _)| raw),
-            |(_, _, bytes)| bytes,
-        ),
-        visible_bytes: metrics.map_or(result.result.len() as u64, |(_, visible, _)| visible),
-        truncated: cache_hit.is_some()
-            || metrics.is_some_and(|(raw, visible, _)| raw > visible)
-            || result.result.len() >= crate::tool::MAX_MODEL_TOOL_OUTPUT_BYTES,
-        artifacts,
-        continuation: tool_result_continuation(&result.result),
-        reused_from_call_id: cache_hit.map(|(call_id, _, _)| call_id.clone()),
-    }
-}
-
-fn compact_artifact_reference(artifact: &serde_json::Value) -> serde_json::Value {
-    const REFERENCE_FIELDS: [&str; 20] = [
-        "artifactId",
-        "artifact_id",
-        "callId",
-        "call_id",
-        "contentHash",
-        "content_hash",
-        "id",
-        "kind",
-        "mediaType",
-        "media_type",
-        "mimeType",
-        "mime_type",
-        "name",
-        "path",
-        "sha256",
-        "size",
-        "sizeBytes",
-        "size_bytes",
-        "stream",
-        "uri",
-    ];
-    let serialized = serde_json::to_vec(artifact).unwrap_or_default();
-    let mut reference = serde_json::Map::new();
-    if let Some(object) = artifact.as_object() {
-        for field in REFERENCE_FIELDS {
-            if let Some(value) = object.get(field)
-                && matches!(
-                    value,
-                    serde_json::Value::Null
-                        | serde_json::Value::Bool(_)
-                        | serde_json::Value::Number(_)
-                        | serde_json::Value::String(_)
-                )
-            {
-                reference.insert(field.to_string(), value.clone());
-            }
-        }
-    }
-    reference.insert(
-        "receiptHash".to_string(),
-        serde_json::Value::String(canonical_content_hash(&serialized)),
-    );
-    reference.insert(
-        "receiptBytes".to_string(),
-        serde_json::Value::from(serialized.len() as u64),
-    );
-    serde_json::Value::Object(reference)
-}
-
-fn tool_result_continuation(output: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
-    ["nextStartLine", "nextStartByte", "nextCursor", "nextOffset"]
-        .into_iter()
-        .find_map(|key| {
-            value
-                .get(key)
-                .filter(|value| !value.is_null())
-                .map(|value| serde_json::json!({ "field": key, "value": value }).to_string())
-        })
-}
-
-#[cfg(test)]
-mod receipt_tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn compatible_responses_proxy_uses_eager_direct_tools() {
-        let model = pl_model::default_models()
-            .into_iter()
-            .find(|model| model.slug == "gpt-5.6-sol")
-            .unwrap();
-        let capabilities = model.capabilities.clone();
-        let provider =
-            pl_model::ProviderInfo::openai(Some("https://responses-proxy.example/v1".to_string()));
-
-        let options = tool_orchestration_options(&provider, &model, &capabilities);
-
-        assert!(!options.tool_search);
-        assert!(!options.programmatic_tool_calling);
-    }
-
-    #[test]
-    fn official_openai_responses_endpoint_uses_hosted_tools() {
-        let model = pl_model::default_models()
-            .into_iter()
-            .find(|model| model.slug == "gpt-5.6-sol")
-            .unwrap();
-        let capabilities = model.capabilities.clone();
-        let provider = pl_model::ProviderInfo::openai(None);
-
-        let options = tool_orchestration_options(&provider, &model, &capabilities);
-
-        assert!(options.tool_search);
-        assert!(options.programmatic_tool_calling);
-    }
-
-    fn tool_result(id: &str, result: String) -> ToolExecutionRecord {
-        ToolExecutionRecord {
-            id: id.to_string(),
-            call_id: Some(format!("call-{id}")),
-            name: "read_file".to_string(),
-            kind: pl_protocol::ToolCallKind::Function,
-            display_result: result.clone(),
-            result,
-            arguments: "{}".to_string(),
-            status: pl_trace::TracePartStatus::Completed,
-            exit_code: Some(0),
-            timed_out: false,
-            revision: None,
-            runtime_events: Vec::new(),
-            execution_millis: 0,
-        }
-    }
-
-    #[test]
-    fn artifact_receipt_keeps_identity_but_not_large_payload() {
-        let artifact = serde_json::json!({
-            "kind": "webSearch",
-            "id": "artifact-1",
-            "results": "x".repeat(64 * 1024),
-        });
-
-        let reference = compact_artifact_reference(&artifact);
-
-        assert_eq!(reference["kind"], "webSearch");
-        assert_eq!(reference["id"], "artifact-1");
-        assert_eq!(reference.get("results"), None);
-        assert!(reference["receiptBytes"].as_u64().unwrap() > 64 * 1024);
-        assert!(
-            reference["receiptHash"]
-                .as_str()
-                .unwrap()
-                .starts_with("sha256:")
-        );
-    }
-
-    #[test]
-    fn audit_metadata_does_not_become_an_artifact_receipt() {
-        let mut result = tool_result("mcp", r#"{"answer":42}"#.to_string());
-        result
-            .runtime_events
-            .push(crate::tool::ToolRuntimeEvent::AuditMetadata {
-                metadata: serde_json::json!({
-                    "kind": "mcpCallToolResult",
-                    "result": { "structuredContent": { "answer": 42 } },
-                }),
-            });
-
-        assert!(tool_result_receipt(&result).artifacts.is_empty());
-    }
-
-    #[test]
-    fn batch_budget_updates_receipts_without_changing_display_results() {
-        let first_result = "a".repeat(2_000);
-        let second_result = "b".repeat(2_000);
-        let mut results = vec![
-            tool_result("first", first_result.clone()),
-            tool_result("second", second_result.clone()),
-        ];
-        results[0]
-            .runtime_events
-            .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
-                raw_bytes: 5_000,
-                model_visible_bytes: first_result.len() as u64,
-                artifact_bytes: 7,
-                result_hash: "sha256:original".to_string(),
-            });
-
-        apply_model_tool_output_batch_budget(&mut results, Some(100));
-
-        assert_eq!(results[0].display_result, first_result);
-        assert_eq!(results[1].display_result, second_result);
-        assert!(
-            results
-                .iter()
-                .map(|result| result.result.len())
-                .sum::<usize>()
-                <= 256 * 4
-        );
-
-        let first_receipt = tool_result_receipt(&results[0]);
-        assert_eq!(first_receipt.total_bytes, 5_000);
-        assert_eq!(first_receipt.result_hash, "sha256:original");
-        assert_eq!(first_receipt.visible_bytes, results[0].result.len() as u64);
-        assert!(first_receipt.truncated);
-
-        let second_receipt = tool_result_receipt(&results[1]);
-        assert_eq!(second_receipt.total_bytes, 2_000);
-        assert_eq!(second_receipt.visible_bytes, results[1].result.len() as u64);
-        assert!(second_receipt.truncated);
-    }
-
-    #[test]
-    fn programmatic_tool_results_are_json_objects() {
-        let mut results = vec![
-            tool_result("programmatic", "plain text".to_string()),
-            tool_result("direct", "plain text".to_string()),
-        ];
-        let calls = vec![
-            pl_model::ToolCall::function(
-                "programmatic",
-                "read_file",
-                serde_json::json!({}),
-                Some("call-programmatic".to_string()),
-            )
-            .with_caller(Some(pl_protocol::ToolCallCaller::Program {
-                caller_id: "program-1".to_string(),
-            })),
-            pl_model::ToolCall::function(
-                "direct",
-                "read_file",
-                serde_json::json!({}),
-                Some("call-direct".to_string()),
-            ),
-        ];
-
-        normalize_programmatic_tool_results(&mut results, &calls);
-
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&results[0].result).unwrap(),
-            serde_json::json!({"content": "plain text"})
-        );
-        assert_eq!(results[1].result, "plain text");
-    }
+    Ok(completion::finish(
+        recorder,
+        &turn_id,
+        completion::CompletedTurn {
+            content: last_content,
+            reasoning_content: last_reasoning_content,
+            model: last_model,
+            usage: total_usage,
+            last_context_tokens,
+            context_compactions,
+            session_message_count,
+            ended_for_interaction,
+            inference_count,
+        },
+    ))
 }

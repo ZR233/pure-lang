@@ -10,9 +10,8 @@ use serde::de::DeserializeOwned;
 
 use crate::turn::ToolEffect;
 
-use super::{
-    ToolCachePolicy, ToolContext, ToolDisplayMetadata, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
-};
+use super::cache::ToolCachePolicy;
+use super::{ToolContext, ToolDisplayMetadata, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
 
 /// 便捷类型别名：boxed future。
 pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

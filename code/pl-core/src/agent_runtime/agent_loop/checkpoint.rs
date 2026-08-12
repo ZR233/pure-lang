@@ -1,16 +1,15 @@
 use std::collections::BTreeSet;
 
-use super::super::host::{
-    AgentCommitObserver, ThreadProjectionCommit, ThreadRepository, transcript_mutation,
-};
+use super::super::host::{ThreadProjectionCommit, transcript_mutation};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    ActiveKind, AgentCommittedEvent, AgentInferenceCommit, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
-    AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState,
-    ThreadCommit, ThreadCommitOutcome, ThreadId, ThreadMutation, TurnId,
+    ActiveKind, AgentInferenceCommit, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressReport, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
+    AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState, ThreadId,
+    ThreadMutation, TurnId,
 };
 use super::AgentLoop;
+use super::commit::{CommitPublication, PendingCommit};
 use crate::{
     ThreadNotificationFact,
     thread_event::{TurnObservation, project_observation, project_thread_facts},
@@ -38,14 +37,15 @@ where
         let thread_id = active.thread_id.clone();
         active.kind = kind;
         let result = self
-            .commit_transition(self.state.clone(), Vec::new(), |snapshot| {
-                AgentRuntimeEventKind::TurnActivityChanged {
+            .commit_transition(
+                super::persist::TransitionCommit::new(self.state.clone()),
+                |snapshot| AgentRuntimeEventKind::TurnActivityChanged {
                     turn_id: turn_id.clone(),
                     thread_id,
                     kind,
                     snapshot,
-                }
-            })
+                },
+            )
             .await;
         if result.is_err()
             && let Some(active) = self.active.as_mut()
@@ -149,68 +149,39 @@ where
         } else {
             None
         };
-        let mut facts = DurableCommitFacts::from_state(
-            &next,
-            Vec::new(),
-            Vec::new(),
-            projection.clone(),
-            context,
-        );
+        let publication = projection.as_ref().map(|projection| {
+            CommitPublication::new(
+                Some(checkpoint.thread_id.clone()),
+                Some(checkpoint.turn_id.clone()),
+            )
+            .with_thread_notifications(projection.notifications.clone())
+        });
+        let mut facts =
+            DurableCommitFacts::from_state(&next, Vec::new(), Vec::new(), projection, context);
         facts.inference = checkpoint.inference.clone();
-        let result = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts,
-                mutation: ThreadMutation::ReplaceThread {
-                    thread_id: checkpoint.thread_id.clone(),
-                },
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match result {
-            ThreadCommitOutcome::Applied => {
-                tracing::trace!(
-                    agent_id = %next.snapshot.identity.id,
-                    turn_id = %checkpoint.turn_id,
-                    sequence = checkpoint.sequence,
-                    reason = ?checkpoint.reason,
-                    "agent turn checkpoint committed"
-                );
-                self.state = next;
-                if let Some(active) = &mut self.active {
-                    active.checkpoint_sequence = checkpoint.sequence;
-                }
-                if let Some(projection) = projection {
-                    self.runtime
-                        .thread_events
-                        .publish_batch(projection.notifications.clone())
-                        .await
-                        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                    self.host
-                        .observer()
-                        .publish(AgentCommittedEvent {
-                            agent_id: self.state.snapshot.identity.id.clone(),
-                            thread_id: Some(checkpoint.thread_id),
-                            turn_id: Some(checkpoint.turn_id),
-                            runtime_events: Vec::new(),
-                            trace_events: Vec::new(),
-                            thread_notifications: projection.notifications,
-                        })
-                        .await;
-                }
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
+        let pending = PendingCommit::new(
+            next,
+            facts,
+            ThreadMutation::ReplaceThread {
+                thread_id: checkpoint.thread_id.clone(),
+            },
+        );
+        let pending = match publication {
+            Some(publication) => pending.publish(publication),
+            None => pending,
+        };
+        self.commit_and_publish(pending).await?;
+        tracing::trace!(
+            agent_id = %self.state.snapshot.identity.id,
+            turn_id = %checkpoint.turn_id,
+            sequence = checkpoint.sequence,
+            reason = ?checkpoint.reason,
+            "agent turn checkpoint committed"
+        );
+        if let Some(active) = &mut self.active {
+            active.checkpoint_sequence = checkpoint.sequence;
         }
+        Ok(())
     }
 
     pub(super) async fn record_thread_facts(
@@ -251,55 +222,22 @@ where
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.thread_revision = projected.through_revision;
-        let outcome = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    Vec::new(),
-                    Vec::new(),
-                    Some(projection),
-                    None,
-                ),
-                mutation: ThreadMutation::AppendThreadNotifications {
+        let durable_facts =
+            DurableCommitFacts::from_state(&next, Vec::new(), Vec::new(), Some(projection), None);
+        self.commit_and_publish(
+            PendingCommit::new(
+                next,
+                durable_facts,
+                ThreadMutation::AppendThreadNotifications {
                     thread_id: thread_id.clone(),
                 },
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match outcome {
-            ThreadCommitOutcome::Applied => {
-                let agent_id = next.snapshot.identity.id.clone();
-                self.state = next;
-                self.runtime
-                    .thread_events
-                    .publish_batch(projected.notifications.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id,
-                        thread_id: Some(thread_id),
-                        turn_id: None,
-                        runtime_events: Vec::new(),
-                        trace_events: Vec::new(),
-                        thread_notifications: projected.notifications,
-                    })
-                    .await;
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
-        }
+            )
+            .publish(
+                CommitPublication::new(Some(thread_id), None)
+                    .with_thread_notifications(projected.notifications),
+            ),
+        )
+        .await
     }
 
     pub(super) async fn report_progress(
@@ -320,9 +258,9 @@ where
                 .progress
                 .as_ref()
                 .is_some_and(|current| {
-                    current.stage == stage
-                        && current.summary == summary
-                        && current.next_step == next_step
+                    current.report.stage == stage
+                        && current.report.summary == summary
+                        && current.report.next_step == next_step
                 });
         if unchanged {
             return Ok(self.state.snapshot.progress.clone().expect("checked above"));
@@ -332,28 +270,29 @@ where
             .snapshot
             .progress
             .as_ref()
-            .map_or(1, |progress| progress.revision.saturating_add(1));
+            .map_or(1, |progress| progress.report.revision.saturating_add(1));
         let created_at = unix_timestamp();
-        let checkpoint = AgentProgressCheckpoint {
-            stage,
-            summary: summary.clone(),
-            next_step: next_step.clone(),
-            revision,
-            updated_at: created_at,
-        };
-        let submission = super::super::ProgressSubmissionCommit {
+        let report = AgentProgressReport {
             stage,
             summary,
             next_step,
-            detail,
             revision,
+        };
+        let checkpoint = AgentProgressCheckpoint {
+            report: report.clone(),
+            updated_at: created_at,
+        };
+        let submission = super::super::ProgressSubmissionCommit {
+            report,
+            detail,
             created_at,
         };
         let mut next = self.state.clone();
         next.snapshot.progress = Some(checkpoint.clone());
-        self.commit_progress_transition(next, submission, |snapshot| {
-            AgentRuntimeEventKind::StateChanged { snapshot }
-        })
+        self.commit_transition(
+            super::persist::TransitionCommit::new(next).with_submission(submission),
+            |snapshot| AgentRuntimeEventKind::StateChanged { snapshot },
+        )
         .await?;
         Ok(checkpoint)
     }

@@ -426,10 +426,10 @@ impl StudioAgentEventProjector {
                 .progress
                 .as_ref()
                 .map(|progress| StudioAgentProgressRuntime {
-                    stage: progress_stage_label(progress.stage).to_string(),
-                    summary: progress.summary.clone(),
-                    next_step: progress.next_step.clone(),
-                    revision: progress.revision,
+                    stage: progress_stage_label(progress.report.stage).to_string(),
+                    summary: progress.report.summary.clone(),
+                    next_step: progress.report.next_step.clone(),
+                    revision: progress.report.revision,
                     updated_at: progress.updated_at,
                 });
             let summary_age_seconds = u64::try_from(
@@ -464,7 +464,7 @@ impl StudioAgentEventProjector {
                     summary: snapshot
                         .progress
                         .as_ref()
-                        .map(|progress| progress.summary.clone()),
+                        .map(|progress| progress.report.summary.clone()),
                     depth: snapshot.identity.depth,
                     error: snapshot_error,
                     reason: snapshot

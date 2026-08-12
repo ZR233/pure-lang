@@ -34,7 +34,7 @@ fn tool_context(workspace_root: PathBuf) -> ToolContext {
         lsp_runtime: None,
         parent_session: Arc::new(AgentSession::new()),
         working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::TurnToolCacheHandle::default(),
+        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
     }
 }
 
@@ -96,7 +96,9 @@ fn create_writes_project_skill() {
         warnings: Vec::new(),
     };
     let input = CreateSkillInput {
-        name: "local-flow".to_string(),
+        target: SkillTargetInput {
+            name: "local-flow".to_string(),
+        },
         content: skill_content("local-flow", "Local flow"),
         category: None,
     };
@@ -105,6 +107,40 @@ fn create_writes_project_skill() {
 
     assert!(workspace.join("skills/local-flow/SKILL.md").exists());
     fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn skill_inputs_and_outputs_flatten_shared_fields() {
+    let input = serde_json::from_value::<SkillManageInput>(serde_json::json!({
+        "action": "create",
+        "name": "local-flow",
+        "content": "body",
+        "category": null,
+    }))
+    .unwrap();
+    let SkillManageInput::Create(input) = input else {
+        panic!("expected create action");
+    };
+    assert_eq!(input.target.name, "local-flow");
+
+    let output = serde_json::to_value(SkillPathOutput {
+        action: SkillActionOutput {
+            success: true,
+            action: "create",
+            name: "local-flow",
+        },
+        path: Path::new("skills/local-flow"),
+    })
+    .unwrap();
+    assert_eq!(
+        output,
+        serde_json::json!({
+            "success": true,
+            "action": "create",
+            "name": "local-flow",
+            "path": "skills/local-flow",
+        })
+    );
 }
 
 #[test]
@@ -130,7 +166,9 @@ fn patch_accepts_json_escaped_markdown_old_string() {
         warnings: Vec::new(),
     };
     let input = PatchSkillInput {
-        name: "local-flow".to_string(),
+        target: SkillTargetInput {
+            name: "local-flow".to_string(),
+        },
         old_string: r#"Snippet: `\"unknown\\nusage\"`"#.to_string(),
         new_string: "Snippet: `\"known\\nusage\"`".to_string(),
         replace_mode: None,

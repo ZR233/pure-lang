@@ -43,7 +43,7 @@ where
 
         let mut next = self.state.clone();
         next.snapshot.identity.role = role;
-        self.commit_transition(next, Vec::new(), |snapshot| {
+        self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
             AgentRuntimeEventKind::StateChanged { snapshot }
         })
         .await?;
@@ -91,7 +91,7 @@ where
         closing.snapshot.active_turn_id = None;
         closing.active_input = None;
         if let Err(error) = self
-            .commit_transition(closing, Vec::new(), |snapshot| {
+            .commit_transition(super::persist::TransitionCommit::new(closing), |snapshot| {
                 AgentRuntimeEventKind::StateChanged { snapshot }
             })
             .await
@@ -125,7 +125,7 @@ where
         closed.snapshot.active_turn_id = None;
         closed.snapshot.pending_inputs = 0;
         if let Err(error) = self
-            .commit_transition(closed, Vec::new(), |snapshot| {
+            .commit_transition(super::persist::TransitionCommit::new(closed), |snapshot| {
                 AgentRuntimeEventKind::StateChanged { snapshot }
             })
             .await
@@ -158,12 +158,15 @@ where
         };
         let event_compensation = compensation;
         if let Err(error) = self
-            .commit_transition(next, Vec::new(), move |snapshot| match event_compensation {
-                CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged { snapshot },
-                CloseCompensation::Faulted { reason } => {
-                    AgentRuntimeEventKind::Faulted { reason, snapshot }
-                }
-            })
+            .commit_transition(
+                super::persist::TransitionCommit::new(next),
+                move |snapshot| match event_compensation {
+                    CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged { snapshot },
+                    CloseCompensation::Faulted { reason } => {
+                        AgentRuntimeEventKind::Faulted { reason, snapshot }
+                    }
+                },
+            )
             .await
         {
             self.fault(error.to_string()).await;

@@ -321,11 +321,13 @@ async fn list_thread_submissions(
         .into_iter()
         .map(|row| -> Result<AgentSubmissionRecord, PureError> {
             Ok(AgentSubmissionRecord {
-                stage: crate::studio::agent_host::events::progress_stage_from_label(&row.stage),
-                summary: row.summary,
-                next_step: row.next_step,
+                report: pl_core::AgentProgressReport {
+                    stage: crate::studio::agent_host::events::progress_stage_from_label(&row.stage),
+                    summary: row.summary,
+                    next_step: row.next_step,
+                    revision: u64_from_i64(row.revision)?,
+                },
                 detail: row.detail,
-                revision: u64_from_i64(row.revision)?,
                 created_at: row.created_at,
             })
         })
@@ -411,17 +413,17 @@ async fn persist_submission(
     };
     let thread_id = commit.agent_id.to_string();
     let next_ordinal = next_submission_ordinal(tx, &thread_id).await?;
-    let stage =
-        crate::studio::agent_host::events::progress_stage_label(submission.stage).to_string();
+    let stage = crate::studio::agent_host::events::progress_stage_label(submission.report.stage)
+        .to_string();
     let active = thread_submission::ActiveModel {
         id: Set(crate::studio::ids::new_id("thread_submission")),
         thread_id: Set(thread_id),
         ordinal: Set(next_ordinal),
         stage: Set(stage),
-        summary: Set(submission.summary.clone()),
-        next_step: Set(submission.next_step.clone()),
+        summary: Set(submission.report.summary.clone()),
+        next_step: Set(submission.report.next_step.clone()),
         detail: Set(submission.detail.clone()),
-        revision: Set(i64_from_u64(submission.revision)?),
+        revision: Set(i64_from_u64(submission.report.revision)?),
         created_at: Set(submission.created_at),
     };
     active.insert(tx).await.map_err(store_error)?;

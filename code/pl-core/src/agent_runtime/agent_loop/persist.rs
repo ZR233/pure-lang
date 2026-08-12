@@ -1,15 +1,43 @@
 use pl_trace::TraceEvent;
 
-use super::super::host::{
-    AgentCommitObserver, ThreadProjectionCommit, ThreadRepository, transcript_mutation,
-};
+use super::super::host::{ThreadProjectionCommit, transcript_mutation};
 use super::super::state::{ActiveTurnActivity, AgentRuntimeError, derive_activity, unix_timestamp};
 use super::super::*;
+use super::commit::{CommitPublication, PendingCommit};
 use super::{AgentLoop, notification_turn_id};
 use crate::thread_event::{
     ObservedTurnEvent, ThreadNotificationFact, TurnObservation, project_observation,
     project_runtime_event, project_thread_facts, project_trace_events, runtime_event_thread_id,
 };
+
+pub(super) struct TransitionCommit {
+    next_state: ThreadActorState,
+    thread_facts: Vec<ThreadNotificationFact>,
+    submission: Option<super::super::ProgressSubmissionCommit>,
+}
+
+impl TransitionCommit {
+    pub(super) fn new(next_state: ThreadActorState) -> Self {
+        Self {
+            next_state,
+            thread_facts: Vec::new(),
+            submission: None,
+        }
+    }
+
+    pub(super) fn with_thread_facts(mut self, thread_facts: Vec<ThreadNotificationFact>) -> Self {
+        self.thread_facts = thread_facts;
+        self
+    }
+
+    pub(super) fn with_submission(
+        mut self,
+        submission: super::super::ProgressSubmissionCommit,
+    ) -> Self {
+        self.submission = Some(submission);
+        self
+    }
+}
 
 impl<H> AgentLoop<H>
 where
@@ -70,57 +98,23 @@ where
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.thread_revision = projected.through_revision;
-        let outcome = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    Vec::new(),
-                    Vec::new(),
-                    Some(projection),
-                    None,
-                ),
-                mutation: ThreadMutation::AppendThreadNotifications {
+        let facts =
+            DurableCommitFacts::from_state(&next, Vec::new(), Vec::new(), Some(projection), None);
+        self.commit_and_publish(
+            PendingCommit::new(
+                next,
+                facts,
+                ThreadMutation::AppendThreadNotifications {
                     thread_id: thread_id.clone(),
                 },
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match outcome {
-            ThreadCommitOutcome::Applied => {
-                self.state = next;
-                self.runtime
-                    .directory
-                    .store_snapshot(self.state.snapshot.clone());
-                self.runtime
-                    .thread_events
-                    .publish_batch(projected.notifications.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id: self.state.snapshot.identity.id.clone(),
-                        thread_id: Some(thread_id),
-                        turn_id: Some(turn_id),
-                        runtime_events: Vec::new(),
-                        trace_events: Vec::new(),
-                        thread_notifications: projected.notifications,
-                    })
-                    .await;
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
-        }
+            )
+            .publish(
+                CommitPublication::new(Some(thread_id), Some(turn_id))
+                    .store_directory_snapshot()
+                    .with_thread_notifications(projected.notifications),
+            ),
+        )
+        .await
     }
 
     pub(super) async fn persist_trace_batch(
@@ -180,106 +174,39 @@ where
         next.session.thread_revision = projected.through_revision;
         let committed_trace_events = trace_events.clone();
         let committed_thread_events = projected.notifications.clone();
-        let result = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    Vec::new(),
-                    trace_events,
-                    session_projection,
-                    None,
-                ),
-                mutation: ThreadMutation::AppendTrace,
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match result {
-            ThreadCommitOutcome::Applied => {
-                let agent_id = next.snapshot.identity.id.clone();
-                self.state = next;
-                self.runtime
-                    .directory
-                    .store_snapshot(self.state.snapshot.clone());
-                self.runtime
-                    .thread_events
-                    .publish_batch(committed_thread_events.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id,
-                        thread_id: Some(thread_id),
-                        turn_id: Some(turn_id),
-                        runtime_events: Vec::new(),
-                        trace_events: committed_trace_events,
-                        thread_notifications: committed_thread_events,
-                    })
-                    .await;
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
-        }
-    }
-
-    pub(super) async fn commit_transition<F>(
-        &mut self,
-        next: ThreadActorState,
-        trace_events: Vec<TraceEvent>,
-        event_kind: F,
-    ) -> AgentRuntimeResult<()>
-    where
-        F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
-    {
-        self.commit_transition_with_thread_facts(next, trace_events, Vec::new(), None, event_kind)
-            .await
-    }
-
-    /// 与 [`commit_transition`] 相同，但同时把一次阶段提交原子追加到
-    /// `thread_submissions`（同一事务）。
-    pub(super) async fn commit_progress_transition<F>(
-        &mut self,
-        next: ThreadActorState,
-        submission: super::super::ProgressSubmissionCommit,
-        event_kind: F,
-    ) -> AgentRuntimeResult<()>
-    where
-        F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
-    {
-        self.commit_transition_with_thread_facts(
-            next,
+        let facts = DurableCommitFacts::from_state(
+            &next,
             Vec::new(),
-            Vec::new(),
-            Some(submission),
-            event_kind,
+            trace_events,
+            session_projection,
+            None,
+        );
+        self.commit_and_publish(
+            PendingCommit::new(next, facts, ThreadMutation::AppendTrace).publish(
+                CommitPublication::new(Some(thread_id), Some(turn_id))
+                    .store_directory_snapshot()
+                    .with_trace_events(committed_trace_events)
+                    .with_thread_notifications(committed_thread_events),
+            ),
         )
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn commit_transition_with_thread_facts<F>(
+    pub(super) async fn commit_transition<F>(
         &mut self,
-        mut next: ThreadActorState,
-        trace_events: Vec<TraceEvent>,
-        thread_facts: Vec<ThreadNotificationFact>,
-        submission: Option<super::super::ProgressSubmissionCommit>,
+        transition: TransitionCommit,
         event_kind: F,
     ) -> AgentRuntimeResult<()>
     where
         F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
     {
+        let TransitionCommit {
+            mut next_state,
+            thread_facts,
+            submission,
+        } = transition;
         let expected_revision = self.state.snapshot.revision;
-        let active = next.snapshot.active_turn_id.as_ref().map(|_| {
+        let active = next_state.snapshot.active_turn_id.as_ref().map(|_| {
             self.active.as_ref().map_or(
                 ActiveTurnActivity {
                     kind: ActiveKind::Running,
@@ -291,20 +218,23 @@ where
                 },
             )
         });
-        next.snapshot.activity =
-            derive_activity(next.snapshot.lifecycle, active, next.has_triggering_input());
+        next_state.snapshot.activity = derive_activity(
+            next_state.snapshot.lifecycle,
+            active,
+            next_state.has_triggering_input(),
+        );
         let context = transcript_mutation(
             self.state.session.session.items(),
-            next.session.session.items(),
+            next_state.session.session.items(),
         );
-        next.snapshot.revision = expected_revision.saturating_add(1);
-        next.snapshot.event_sequence = self.state.snapshot.event_sequence.saturating_add(1);
-        next.snapshot.updated_at = unix_timestamp();
+        next_state.snapshot.revision = expected_revision.saturating_add(1);
+        next_state.snapshot.event_sequence = self.state.snapshot.event_sequence.saturating_add(1);
+        next_state.snapshot.updated_at = unix_timestamp();
         let event = AgentRuntimeEvent {
-            agent_id: next.snapshot.identity.id.clone(),
-            sequence: next.snapshot.event_sequence,
-            created_at: next.snapshot.updated_at,
-            kind: event_kind(next.snapshot.clone()),
+            agent_id: next_state.snapshot.identity.id.clone(),
+            sequence: next_state.snapshot.event_sequence,
+            created_at: next_state.snapshot.updated_at,
+            kind: event_kind(next_state.snapshot.clone()),
         };
         let thread_id = runtime_event_thread_id(&event).map(str::to_string);
         let current_thread = match thread_id.as_deref() {
@@ -360,69 +290,37 @@ where
         if let Some(thread_id) = thread_id.as_ref() {
             let thread_id = ThreadId::new(thread_id.clone())
                 .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-            if next.snapshot.identity.id != thread_id {
+            if next_state.snapshot.identity.id != thread_id {
                 return Err(AgentRuntimeError::ThreadMismatch {
-                    agent_id: next.snapshot.identity.id.clone(),
-                    expected: next.snapshot.identity.id.clone(),
+                    agent_id: next_state.snapshot.identity.id.clone(),
+                    expected: next_state.snapshot.identity.id.clone(),
                     actual: thread_id,
                 });
             }
-            next.session.thread_revision = projected.through_revision;
+            next_state.session.thread_revision = projected.through_revision;
         }
-        let committed_trace_events = trace_events.clone();
         let committed_thread_events = projected.notifications.clone();
         let mut facts = DurableCommitFacts::from_state(
-            &next,
+            &next_state,
             vec![event.clone()],
-            trace_events,
+            Vec::new(),
             thread_projection,
             context,
         );
         facts.submission = submission;
-        let result = self
-            .host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: next.snapshot.identity.id.clone(),
-                expected_revision: Some(expected_revision),
-                next_state: next.clone(),
-                facts,
-                mutation: ThreadMutation::SnapshotAndQueue,
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match result {
-            ThreadCommitOutcome::Applied => {
-                self.state = next;
-                self.runtime.directory.publish_runtime_event(&event);
-                self.runtime
-                    .thread_events
-                    .publish_batch(committed_thread_events.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id: event.agent_id.clone(),
-                        thread_id: thread_id.and_then(|value| ThreadId::new(value).ok()),
-                        turn_id: projected
-                            .notifications
-                            .first()
-                            .and_then(notification_turn_id)
-                            .and_then(|value| TurnId::new(value.to_string()).ok()),
-                        runtime_events: vec![event],
-                        trace_events: committed_trace_events,
-                        thread_notifications: committed_thread_events,
-                    })
-                    .await;
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
-            }
-        }
+        let published_thread_id = thread_id.and_then(|value| ThreadId::new(value).ok());
+        let published_turn_id = projected
+            .notifications
+            .first()
+            .and_then(notification_turn_id)
+            .and_then(|value| TurnId::new(value.to_string()).ok());
+        self.commit_and_publish(
+            PendingCommit::new(next_state, facts, ThreadMutation::SnapshotAndQueue).publish(
+                CommitPublication::new(published_thread_id, published_turn_id)
+                    .with_runtime_event(event)
+                    .with_thread_notifications(committed_thread_events),
+            ),
+        )
+        .await
     }
 }

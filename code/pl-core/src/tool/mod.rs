@@ -1,5 +1,5 @@
 mod ask_user;
-mod cache;
+pub mod cache;
 mod command;
 mod container;
 mod context;
@@ -10,7 +10,7 @@ mod git;
 mod lsp;
 mod model_output;
 mod orchestration;
-mod output_format;
+pub mod output_format;
 mod path_policy;
 mod plan;
 mod registered;
@@ -27,7 +27,6 @@ mod web_search;
 mod workspace_file;
 
 pub use ask_user::*;
-pub use cache::*;
 pub use command::*;
 pub use container::*;
 pub use context::*;
@@ -38,7 +37,6 @@ pub use git::*;
 pub use lsp::*;
 pub use model_output::*;
 pub use orchestration::*;
-pub use output_format::*;
 pub use path_policy::*;
 pub use plan::*;
 pub use registered::*;
@@ -458,7 +456,7 @@ mod tests {
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
                     working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::TurnToolCacheHandle::default(),
+                    tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
                 },
             )
             .await;
@@ -511,7 +509,7 @@ mod tests {
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
                     working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::TurnToolCacheHandle::default(),
+                    tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
                 },
             )
             .await;
@@ -616,7 +614,7 @@ mod tests {
             "nested": { "api_key": "secret-key", "normal": "visible" },
             "payload": "YWJj".repeat(90),
         });
-        let preview = trace_preview_value(&value, 1_000);
+        let preview = output_format::redaction::trace_preview_value(&value, 1_000);
 
         assert!(preview.contains("<redacted>"));
         assert!(preview.contains("visible"));
@@ -627,7 +625,8 @@ mod tests {
 
     #[test]
     fn explicit_secret_redaction_handles_text_and_json() {
-        let redaction = SecretRedaction::new(["secret", "secret-token", ""]);
+        let redaction =
+            output_format::redaction::SecretRedaction::new(["secret", "secret-token", ""]);
 
         assert_eq!(
             redaction.redact_str("secret-token and secret"),
@@ -704,7 +703,7 @@ mod tests {
             lsp_runtime: None,
             parent_session: Arc::new(crate::session::AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         };
         let first_guard = context.workspace_write_lock().await;
         let second_context = context.clone();

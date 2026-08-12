@@ -68,7 +68,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -122,7 +122,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -175,7 +175,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -254,7 +254,7 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
     .await
