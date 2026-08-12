@@ -563,6 +563,7 @@ async fn full_access_allows_working_directory_outside_workspace() {
 }
 
 #[tokio::test]
+#[ignore = "requires ripgrep on the host"]
 async fn exec_allows_search_read_and_write_in_read_only_workspace() {
     let (tool, root) = test_tool_with_root();
     tokio::fs::write(root.join("read-only-source.txt"), "read-only fixture\n")

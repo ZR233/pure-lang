@@ -141,14 +141,18 @@ jobs:
 
       - name: Verify deterministic Task workflow with Flutter Driver
         shell: pwsh
-        run: >-
-          & code/pure-studio/tool/task_driver_harness.ps1
-          -Scripted
-          -DriverHome (Join-Path $env:RUNNER_TEMP 'pure-studio-task-driver')
-          -GuiStartupTimeoutSeconds 1200
-          -PlanTimeoutSeconds 180
-          -TaskTimeoutSeconds 1200
-          -StallTimeoutSeconds 180
+        run: |
+          if (-not (Get-Command rg -ErrorAction SilentlyContinue)) {
+            Write-Warning 'Ignored: deterministic Task Driver requires ripgrep on the host.'
+            exit 0
+          }
+          & code/pure-studio/tool/task_driver_harness.ps1 `
+            -Scripted `
+            -DriverHome (Join-Path $env:RUNNER_TEMP 'pure-studio-task-driver') `
+            -GuiStartupTimeoutSeconds 1200 `
+            -PlanTimeoutSeconds 180 `
+            -TaskTimeoutSeconds 1200 `
+            -StallTimeoutSeconds 180
 
       - name: Verify live model Task workflow when configured
         if: env.PURE_STUDIO_LIVE_CONFIG_TOML != ''
