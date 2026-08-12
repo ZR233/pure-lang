@@ -31,10 +31,16 @@ Web Search 的候选发现、优先级和模型门控统一由 `pl-core::plan_we
 `AgentModelConfig`、当前 `ResolvedModelRoute` 和用户配置，再把 `WebSearchPlan` 安装到
 `TurnEngine`；Studio、Mai 和后续宿主不得各自实现 resolver。
 
-MCP 执行环境通过 `McpRuntimeHost` 扩展。PL 拥有配置 fingerprint、增量 reconcile、工具发现、
-命名冲突、健康状态和 generation 生命周期；产品 Host 只连接具体 session。Studio 使用
-`LocalMcpRuntimeHost`，容器产品实现自己的 container Host。turn 只持有固定 generation 的
-`McpTurnLease`，配置更新不得改变正在执行 turn 的 schema 或 backend。
+MCP 只通过 `rmcp` 的 typed client 扩展，PL 不维护第二套 MCP wire、client 或 transport。
+产品边界是薄 `McpConnector`：它根据解析后的配置构造 rmcp stdio、Streamable HTTP 或容器
+transport，启动 `RunningService`，并返回同时持有 `Peer` 和唯一关闭 owner 的 `ConnectedMcp`。
+容器宿主可为 transport 附加自己的进程树 owner，但不得重新实现 MCP 协议。
+
+PL 拥有配置 fingerprint、跨 server 增量 reconcile、模型可见命名、健康状态、可信 effect 与
+generation lease；rmcp 拥有协议发现、分页、typed request/result、response cache、MRTR、取消、
+OAuth、SSE 和连接关闭。turn 只持有固定 generation 的 `McpTurnLease`，配置更新不得改变正在
+执行 turn 的工具集合或连接 owner。MCP 工具与 resource façade 都构造成普通
+`RegisteredTool` 并进入同一个 `ToolRegistry`，不为 MCP 保留独立 backend 或 dispatch 体系。
 
 ## 5.2 核心流程扩展
 

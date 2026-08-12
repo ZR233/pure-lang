@@ -1,18 +1,11 @@
-mod client;
-mod contract;
+mod connector;
 mod health;
-mod local_host;
 mod naming;
+mod output;
 mod runtime;
-mod tool_adapter;
-mod transport;
-mod wire;
 
-pub use contract::{
-    McpCallRequest, McpConnectRequest, McpRuntimeHost, McpSession, McpToolDefinition,
-};
+pub use connector::{ConnectedMcp, McpConnectRequest, McpConnector};
 pub use health::{McpAvailabilityKind, McpAvailabilitySnapshot};
-pub use local_host::{LocalMcpRuntimeHost, LocalMcpSession};
 pub use runtime::{
     McpGeneration, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor, McpTurnLease,
 };
@@ -25,3 +18,5 @@ pub(crate) fn is_mcp_tool_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::McpTestHarness;

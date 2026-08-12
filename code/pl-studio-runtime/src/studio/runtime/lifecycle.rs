@@ -15,7 +15,7 @@ use crate::studio::{
     StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRuntimeSnapshot,
     StudioRuntimeState, StudioRuntimeStatus, StudioStore,
 };
-use crate::{LocalMcpRuntimeHost, McpRuntime, McpRuntimeHandle};
+use crate::{McpConnector, McpRuntime, McpRuntimeHandle};
 
 use super::StudioRuntime;
 
@@ -47,7 +47,7 @@ impl StudioRuntime {
             store,
             config_store,
             external_runtimes: super::StudioExternalRuntimes {
-                mcp: McpRuntime::new(LocalMcpRuntimeHost).handle(),
+                mcp: McpRuntime::new(McpConnector::default()).handle(),
                 mcp_health_watcher: Default::default(),
                 lsp: pl_lsp::LspRuntimeRegistry::new(),
             },

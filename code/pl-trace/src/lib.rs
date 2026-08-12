@@ -200,6 +200,8 @@ pub struct TraceToolPart {
     pub timed_out: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output_artifacts: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit_metadata: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_metrics: Option<TraceToolOutputMetrics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -836,6 +836,127 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
 }
 
 #[tokio::test]
+async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline() {
+    let mut core = TurnEngine::default_provider().unwrap();
+    let harness = crate::mcp::McpTestHarness::install_read_tool(&mut core).await;
+    let calls = [
+        ToolCall::function(
+            "mcp-item-1",
+            "mcp__docs__lookup",
+            serde_json::json!({ "query": "first" }),
+            Some("mcp-call-1".to_string()),
+        ),
+        ToolCall::function(
+            "mcp-item-2",
+            "mcp__docs__lookup",
+            serde_json::json!({ "query": "second" }),
+            Some("mcp-call-2".to_string()),
+        ),
+    ];
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let mut denied_recorder = TraceRecorder::new("session-mcp-denied".to_string(), event_tx, 0);
+    let mut denied_budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let denied = execute_tool_call_batch(
+        &calls[..1],
+        &mut denied_budget,
+        &mut denied_recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default()
+                .with_execution_policy(crate::AgentExecutionPolicy::default()),
+            session_id: "turn-mcp-denied",
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(denied.records[0].status, TracePartStatus::Denied);
+
+    let approvals = std::sync::Arc::new(AtomicUsize::new(0));
+    let callback_approvals = approvals.clone();
+    let options = TurnOptions::default()
+        .with_execution_policy(crate::AgentExecutionPolicy {
+            visible_tools: crate::ToolVisibilitySet::from_tool_names(["mcp__docs__lookup"]),
+            allowed_effects: crate::ToolEffectSet::from_effects([crate::ToolEffect::Read]),
+            ..Default::default()
+        })
+        .with_interaction_callback(std::sync::Arc::new(move |_interaction| {
+            let callback_approvals = callback_approvals.clone();
+            Box::pin(async move {
+                callback_approvals.fetch_add(1, Ordering::SeqCst);
+                pl_protocol::InteractionResolution::ToolApproval {
+                    decision: pl_protocol::ToolApprovalResolution::Approved,
+                    reason: None,
+                }
+            })
+        }));
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let mut recorder = TraceRecorder::new("session-mcp".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let batch = execute_tool_call_batch(
+        &calls,
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &options,
+            session_id: "turn-mcp",
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        batch
+            .records
+            .iter()
+            .all(|record| record.status == TracePartStatus::Completed)
+    );
+    assert_eq!(batch.orchestration.parallel_candidates, 2);
+    assert_eq!(batch.orchestration.actual_parallel_calls, 2);
+    assert_eq!(approvals.load(Ordering::SeqCst), 0);
+    let completed = recorder
+        .drain()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Tool => {
+                Some(item)
+            }
+            TraceEventKind::TracePartStarted { .. }
+            | TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartCompleted { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(completed.len(), 2);
+    assert!(completed.iter().all(|item| {
+        let tool = item.tool.as_ref().expect("MCP trace tool part");
+        tool.output_artifacts.is_empty() && !tool.audit_metadata.is_empty()
+    }));
+
+    drop(core);
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
     let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(crate::tool::RegisteredTool::new(

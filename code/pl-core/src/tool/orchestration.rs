@@ -23,7 +23,14 @@ pub(super) fn orchestrate_tool_schemas(
 
     for (mut schema, effect) in tools {
         if options.programmatic_tool_calling && programmatic_eligible(&schema, effect) {
-            schema = schema.allow_programmatic(generic_object_output_schema());
+            let output_schema = match &schema {
+                ToolSchema::Function {
+                    output_schema: Some(output_schema),
+                    ..
+                } => output_schema.clone(),
+                _ => generic_object_output_schema(),
+            };
+            schema = schema.allow_programmatic(output_schema);
             has_programmatic = true;
         }
 

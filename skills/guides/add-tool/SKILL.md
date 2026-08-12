@@ -170,7 +170,7 @@ workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；�
 
 - `ToolSetBuilder::from_capabilities()` 使用本地 backend；`host_provided()` 只使用宿主显式注入的 backend。
 - LSP 在 registry 可用时由 `register_lsp_languages()` 同步语言工具；工具名采用 `lsp_query_<language_id>`。
-- MCP schema 和 backend 由 `ToolSetBuilder::with_mcp_tools()` 注入；租约或服务变化时更新当前 schema 集合，不为旧 MCP runtime 保留平行入口。
+- MCP 工具和 resource façade 由 `McpTurnLease` 直接构造 `RegisteredTool` 并注册到唯一 `ToolRegistry`；租约或服务变化时更新当前工具集合，不保留 MCP 专用 backend 或平行入口。
 - `ToolVisibilitySet` 决定本轮模型可见工具，`AgentExecutionPolicy` 再按 tool name 和 `ToolEffect` 收紧执行权限。可见性与执行授权必须同时满足。
 
 ## 测试模式

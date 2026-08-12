@@ -17,6 +17,18 @@ use super::{
 type CachePolicyResolver = Arc<dyn Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync>;
 type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send + Sync>;
 
+/// 与执行授权隔离的工具展示元数据。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDisplayMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icons: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ToolRuntimeEvent {
@@ -33,6 +45,12 @@ pub enum ToolRuntimeEvent {
     OutputArtifacts {
         artifacts: Vec<serde_json::Value>,
     },
+    /// 与模型可见文本分离的 typed 审计数据。
+    AuditMetadata {
+        metadata: serde_json::Value,
+    },
+    /// handler 已产生完整输出，但该输出表示一次模型可恢复的工具失败。
+    ExecutionFailed,
     CacheHit {
         reused_from_call_id: String,
         result_hash: String,
@@ -64,6 +82,8 @@ pub struct RegisteredTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
+    output_schema: Option<serde_json::Value>,
+    display_metadata: Option<ToolDisplayMetadata>,
     supports_parallel_tool_calls: bool,
     runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
     effect: Option<ToolEffect>,
@@ -103,6 +123,8 @@ impl RegisteredTool {
             name,
             description: description.into(),
             input_schema,
+            output_schema: None,
+            display_metadata: None,
             supports_parallel_tool_calls: false,
             runtime_lock_policy: None,
             effect: None,
@@ -282,6 +304,12 @@ impl RegisteredTool {
         self
     }
 
+    /// 保留 provider 可见的工具输出 JSON Schema。
+    pub fn with_output_schema(mut self, output_schema: Option<serde_json::Value>) -> Self {
+        self.output_schema = output_schema;
+        self
+    }
+
     pub fn with_runtime_lock_policy(mut self, policy: ToolRuntimeLockPolicy) -> Self {
         self.runtime_lock_policy = Some(policy);
         self
@@ -289,6 +317,11 @@ impl RegisteredTool {
 
     pub fn with_effect(mut self, effect: ToolEffect) -> Self {
         self.effect = Some(effect);
+        self
+    }
+
+    pub fn with_display_metadata(mut self, metadata: ToolDisplayMetadata) -> Self {
+        self.display_metadata = Some(metadata);
         self
     }
 
@@ -333,6 +366,10 @@ impl Tool for RegisteredTool {
         self.input_schema.clone()
     }
 
+    fn display_metadata(&self) -> Option<&ToolDisplayMetadata> {
+        self.display_metadata.as_ref()
+    }
+
     fn supports_parallel_tool_calls(&self) -> bool {
         self.supports_parallel_tool_calls
     }
@@ -369,5 +406,16 @@ impl Tool for RegisteredTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         (self.handler)(input, context)
+    }
+
+    fn to_schema(&self) -> ToolSchema {
+        ToolSchema::Function {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            input_schema: self.input_schema.clone(),
+            defer_loading: false,
+            allowed_callers: Vec::new(),
+            output_schema: self.output_schema.clone(),
+        }
     }
 }

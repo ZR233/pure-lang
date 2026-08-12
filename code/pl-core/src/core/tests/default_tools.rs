@@ -9,7 +9,6 @@ fn shared_tool_schemas_describe_host_independent_workspace_surface() {
         workspace_files: true,
         ask_user: true,
         git: true,
-        mcp_resources: false,
         todo: true,
         plan_exit: false,
     })
@@ -92,30 +91,6 @@ fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
             .map(|schema| schema.name().to_string())
             .collect::<Vec<_>>(),
         vec!["github_api_request".to_string()]
-    );
-}
-
-#[test]
-fn shared_tool_schemas_can_include_mcp_resource_tools() {
-    let names = shared_tool_schemas(SharedToolSchemaOptions {
-        mcp_resources: true,
-        ..Default::default()
-    })
-    .into_iter()
-    .map(|schema| schema.name().to_string())
-    .collect::<Vec<_>>();
-
-    assert_eq!(
-        names,
-        vec![
-            "read_session_note",
-            "search_session_note",
-            "write_session_note",
-            "apply_session_note_patch",
-            "list_mcp_resources",
-            "list_mcp_resource_templates",
-            "read_mcp_resource",
-        ]
     );
 }
 
@@ -450,156 +425,6 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(core.tools.get("list_files").is_some());
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
-}
-
-#[derive(Debug, Clone, Default)]
-struct FakeMcpResourceBackend;
-
-impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
-    type Error = crate::PureError;
-
-    async fn list_resources(
-        &self,
-        _request: crate::tool::McpListResourcesRequest,
-    ) -> std::result::Result<serde_json::Value, Self::Error> {
-        Ok(serde_json::json!({ "resources": [] }))
-    }
-
-    async fn list_resource_templates(
-        &self,
-        _request: crate::tool::McpListResourceTemplatesRequest,
-    ) -> std::result::Result<serde_json::Value, Self::Error> {
-        Ok(serde_json::json!({ "resourceTemplates": [] }))
-    }
-
-    async fn read_resource(
-        &self,
-        request: crate::tool::McpReadResourceRequest,
-    ) -> std::result::Result<serde_json::Value, Self::Error> {
-        Ok(serde_json::json!({
-            "server": request.server,
-            "uri": request.uri,
-        }))
-    }
-}
-
-#[derive(Debug)]
-struct FakeMcpToolBackend;
-
-impl crate::tool::McpToolBackend for FakeMcpToolBackend {
-    type Error = crate::PureError;
-
-    async fn call_tool(
-        &self,
-        request: crate::tool::McpToolRequest,
-    ) -> std::result::Result<serde_json::Value, Self::Error> {
-        Ok(serde_json::json!({
-            "tool": request.name,
-            "arguments": request.arguments,
-        }))
-    }
-}
-
-#[tokio::test]
-async fn tool_set_builder_registers_mcp_resource_backend() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        mcp: true,
-        ..Default::default()
-    };
-    let mut core = TurnEngine::default_provider().unwrap();
-
-    ToolSetBuilder::from_capabilities(capabilities.clone())
-        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    assert!(core.tools.get("list_mcp_resources").is_none());
-    assert!(core.tools.get("read_mcp_resource").is_none());
-
-    let mut core = TurnEngine::default_provider().unwrap();
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
-        .with_mcp_resource_tools(std::sync::Arc::new(FakeMcpResourceBackend))
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    assert!(core.tools.get("list_mcp_resources").is_some());
-    assert!(core.tools.get("list_mcp_resource_templates").is_none());
-    assert!(core.tools.get("read_mcp_resource").is_some());
-}
-
-#[tokio::test]
-async fn tool_set_builder_registers_host_mcp_tools() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        mcp: true,
-        ..Default::default()
-    };
-    let mut core = TurnEngine::default_provider().unwrap();
-    let schema = pl_model::ToolSchema::function(
-        "mcp__docs__lookup",
-        "Lookup docs.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string" }
-            },
-            "required": ["query"]
-        }),
-    );
-
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_allowed_tools(["mcp__docs__lookup"])
-        .with_mcp_tools(
-            vec![schema.clone()],
-            std::sync::Arc::new(FakeMcpToolBackend),
-        )
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    let schemas = core.tools.schemas();
-    assert_eq!(schemas.len(), 1);
-    assert_eq!(schemas[0].name(), schema.name());
-    assert_eq!(schemas[0].description(), schema.description());
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let output = core
-        .tools
-        .get("mcp__docs__lookup")
-        .expect("mcp tool")
-        .execute(
-            crate::tool::ToolInput {
-                arguments: serde_json::json!({ "query": "turn engine" }),
-                session_id: "session_mcp".to_string(),
-                tool_id: "call_mcp".to_string(),
-                revision_base: 0,
-            },
-            test_tool_context(event_tx),
-        )
-        .await
-        .expect("execute mcp tool");
-
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&output.description).expect("json output"),
-        serde_json::json!({
-            "tool": "mcp__docs__lookup",
-            "arguments": { "query": "turn engine" },
-        })
-    );
-
-    let workspace_root = std::env::temp_dir();
-    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-        .unwrap()
-        .with_runtime_profile(CoreRuntimeProfile::host_provided(workspace_root.clone()))
-        .build();
-    ToolSetBuilder::from_capabilities(crate::config::ToolCapabilityConfig {
-        mcp: true,
-        ..Default::default()
-    })
-    .with_allowed_tools(["mcp__docs__lookup"])
-    .with_mcp_tools(vec![schema], std::sync::Arc::new(FakeMcpToolBackend))
-    .register(&mut core, workspace_root, None)
-    .await;
-
-    assert!(core.has_tool("mcp__docs__lookup"));
 }
 
 #[tokio::test]

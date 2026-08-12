@@ -178,6 +178,11 @@ impl TurnEngine {
         self.tools.get(name).is_some()
     }
 
+    #[cfg(test)]
+    pub(crate) fn registered_tool(&self, name: &str) -> Option<&dyn crate::tool::Tool> {
+        self.tools.get(name)
+    }
+
     /// 注册默认工具集合。
     ///
     /// 当前包含 shell、异步 agent 协作工具和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。

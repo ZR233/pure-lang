@@ -8,8 +8,6 @@ mod exec;
 mod file;
 mod git;
 mod lsp;
-mod mcp_resource;
-mod mcp_tool;
 mod model_output;
 mod orchestration;
 mod output_format;
@@ -62,15 +60,6 @@ pub use git::{
     git_shell_credential_prelude, git_shell_retry_function,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
-pub use mcp_resource::{
-    McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
-    McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
-    TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
-};
-pub use mcp_tool::{
-    HostMcpToolSpec, McpTool, McpToolBackend, McpToolRequest, host_mcp_tool_schema,
-    host_mcp_tool_schemas,
-};
 pub use model_output::{
     DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
     MAX_MODEL_TOOL_OUTPUT_BYTES, MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS, TOKEN_ESTIMATE_BYTES,

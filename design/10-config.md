@@ -296,10 +296,11 @@ MCP server 配置保存在 `[mcp.servers.<server_id>]` 表。`server_id` 必须�
 - `bearer_token_env_var`（可选）
 - `headers`
 
-Pure 启动后由 `McpRuntime<LocalMcpRuntimeHost>` 在后台探测启用且凭据完整的 MCP server。PL 统一
-维护配置 fingerprint、增量 reconcile、工具命名、冲突检查、健康状态和 generation 原子替换；
-Studio 只负责组合配置与本地连接 Host。Simple executor 可以消费 available tools；Task planner、
-explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
+Pure 启动后由 `McpRuntime<McpConnector>` 在后台探测启用且凭据完整的 MCP server。`McpConnector`
+只负责通过 rmcp 建立连接并返回 `ConnectedMcp`；PL 统一维护配置 fingerprint、增量 reconcile、
+工具命名、冲突检查、健康状态和 generation 原子替换。Studio 只负责组合配置。Simple executor
+可以消费 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，
+未知 effect 默认拒绝。
 
 内置 Zhipu Coding Plan MCP server 固定为：
 

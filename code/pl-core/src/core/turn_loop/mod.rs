@@ -1118,6 +1118,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
             | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
             | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
+            | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
+            | crate::tool::ToolRuntimeEvent::ExecutionFailed
             | crate::tool::ToolRuntimeEvent::CacheHit { .. }
             | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
             | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
@@ -1136,6 +1138,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
         | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
+        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
+        | crate::tool::ToolRuntimeEvent::ExecutionFailed
         | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
         | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
         | crate::tool::ToolRuntimeEvent::EndTurn => None,
@@ -1151,6 +1155,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
         | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
+        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
+        | crate::tool::ToolRuntimeEvent::ExecutionFailed
         | crate::tool::ToolRuntimeEvent::CacheHit { .. }
         | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
         | crate::tool::ToolRuntimeEvent::EndTurn => None,
@@ -1326,6 +1332,21 @@ mod receipt_tests {
                 .unwrap()
                 .starts_with("sha256:")
         );
+    }
+
+    #[test]
+    fn audit_metadata_does_not_become_an_artifact_receipt() {
+        let mut result = tool_result("mcp", r#"{"answer":42}"#.to_string());
+        result
+            .runtime_events
+            .push(crate::tool::ToolRuntimeEvent::AuditMetadata {
+                metadata: serde_json::json!({
+                    "kind": "mcpCallToolResult",
+                    "result": { "structuredContent": { "answer": 42 } },
+                }),
+            });
+
+        assert!(tool_result_receipt(&result).artifacts.is_empty());
     }
 
     #[test]

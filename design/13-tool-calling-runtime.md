@@ -65,11 +65,27 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 本地 `list_files` / `search_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次搜索失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
 
-MCP tools 由 `McpRuntimeHandle` 的 turn lease 注册。`McpRuntime<H>` 的泛型 worker 持有具体
-`McpRuntimeHost`，产品和工具只持有非泛型 handle；`McpTurnLease` 固定 generation、tool schema、
-resource 入口和调用 backend。Simple executor 可以使用 available tools；Task planner、explorer、
-reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。内置 Zhipu 工具统一声明为
-`ToolEffect::Read`。
+MCP tools 由 `McpRuntimeHandle` 的 turn lease 构造为普通 `RegisteredTool` 并注册进同一个
+`ToolRegistry`。handler 捕获 generation lease、server id 和远端 raw tool name，因而与内置工具
+共享模式门控、权限与审批、runtime lock、批次、cache、trace、结果预算、Timeline 和历史配对。
+PL 不保留 `McpLeaseToolAdapter`、MCP 专用 tool backend 或第二套 dispatch。resource 的 list、
+template 和 read façade 同样由公共 `RegisteredTool` builder 注册，handler 直接调用 rmcp typed
+resource API。`McpTurnLease` 固定 generation、tool schema、resource 入口和 `ConnectedMcp`，配置
+更新不得改变活动 Turn 的连接或工具集合。
+
+rmcp 是唯一 MCP 协议实现，只启用 MCP `2026-07-28`。`McpConnector` 仅负责构造 rmcp stdio、
+Streamable HTTP 或宿主提供的容器 transport，并启动 `RunningService`；`ConnectedMcp` 持有可克隆
+`Peer` 与唯一关闭 owner。rmcp 负责协议发现、分页、typed request/result、response cache、MRTR、
+请求取消、OAuth、SSE 和连接关闭；PL 只负责跨 server reconcile、generation lease、health、可信
+effect 和 Turn 生命周期。最后一个 generation lease 释放后必须显式关闭 rmcp service，Drop 只做
+best-effort 兜底。
+
+远端 `ToolAnnotations`、icons 和 meta 只作为展示与审计信息保存，不能提升 PL 的可信
+`ToolEffect`、并行资格、programmatic eligibility、cache policy 或权限。动态 MCP 工具默认
+`ToolCachePolicy::Never` 且使用独占 runtime lock；只有 PL 配置明确把 effect 声明为 `Read` 时，
+才允许并行与 programmatic 调用。Simple executor 可以使用 available tools；Task planner、
+explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。内置 Zhipu
+工具统一声明为 `ToolEffect::Read`。
 
 模型请求的缓存 generation 必须覆盖本 Turn 实际可见的完整工具集合。工具按模型可见名称和
 canonical JSON Schema 确定性排序；MCP、Skill、Task 与 collaboration 工具任一 schema 变化都在
@@ -333,7 +349,15 @@ provider request、token 估算、附件物化或 compaction 输入。每个 tur
 `apply_session_note_patch` 复用 `pl-patch`，只接受虚拟路径 `session-note.md`，在内存副本完成
 全部 hunk 后一次提交，拒绝移动和其他路径，任何失败都不得留下部分更新。
 
-MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在产品 timeline 中展示失败原因。transport/protocol 错误只把对应 server 的 availability 标记为 `unavailable`，不得污染其他 server。新 turn 不再获得该 server 的工具，持有旧 lease 的 turn 仍按固定 generation 收尾。HTTP MCP 的 SSE 响应必须先按事件收集完整 `data` payload，再交给 JSON-RPC wire 类型反序列化，不能只解析第一行 `data`。MCP runtime 按 contract、worker、generation、tool adapter、local host 和 wire protocol 拆分；产品 Host 不实现 reconcile、命名或健康状态机。
+MCP tool 结果统一由一个 rmcp `CallToolResult` 转换器生成 `ToolOutput`。模型可见字符串按 MCP
+content 顺序合并；JSON 或非文本 content 序列化为紧凑 JSON。完整 content、
+`structuredContent`、`resultType`、`isError` 和 response meta 同时保留为 typed 审计 payload，
+不得在 adapter 中丢弃。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用
+`Tool execution error: {error}` 前缀写回模型上下文，同时在产品 timeline 中展示失败原因。
+transport/protocol 错误只把对应 server 的 availability 标记为 `unavailable`，不得污染其他
+server。新 turn 不再获得该 server 的工具，持有旧 lease 的 turn 仍按固定 generation 收尾。
+分页、SSE 与 JSON-RPC/MCP wire 细节全部由 rmcp 处理；PL MCP runtime 只按 connector、worker、
+generation、RegisteredTool builder 和结果转换器拆分。
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。
 

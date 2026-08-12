@@ -13,8 +13,8 @@ use super::{
     configured_tool_timeout, filter_tool_definitions, server_descriptor, server_fingerprint,
 };
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind};
-use crate::mcp::contract::{McpConnectRequest, McpRuntimeHost, McpSession};
 use crate::mcp::health::McpAvailabilityKind;
+use crate::mcp::{McpConnectRequest, McpConnector};
 
 pub(super) struct PendingReconcile {
     pub(super) servers: BTreeMap<String, EffectiveMcpServerConfig>,
@@ -22,14 +22,14 @@ pub(super) struct PendingReconcile {
     pub(super) reply: tokio::sync::oneshot::Sender<Result<()>>,
 }
 
-pub(super) struct ActivePreparation<S> {
-    pub(super) future: Pin<Box<dyn Future<Output = RuntimeGeneration<S>> + Send>>,
+pub(super) struct ActivePreparation {
+    pub(super) future: Pin<Box<dyn Future<Output = RuntimeGeneration> + Send>>,
     pub(super) reply: tokio::sync::oneshot::Sender<Result<()>>,
 }
 
-pub(super) async fn await_preparation<S>(
-    preparation: &mut Option<ActivePreparation<S>>,
-) -> RuntimeGeneration<S> {
+pub(super) async fn await_preparation(
+    preparation: &mut Option<ActivePreparation>,
+) -> RuntimeGeneration {
     preparation
         .as_mut()
         .expect("guarded MCP preparation must exist")
@@ -38,8 +38,8 @@ pub(super) async fn await_preparation<S>(
         .await
 }
 
-pub(super) fn reject_reconciles<S>(
-    preparation: Option<ActivePreparation<S>>,
+pub(super) fn reject_reconciles(
+    preparation: Option<ActivePreparation>,
     pending: &mut VecDeque<PendingReconcile>,
 ) {
     if let Some(preparation) = preparation {
@@ -57,15 +57,12 @@ fn runtime_stopping_error() -> PureError {
     }
 }
 
-pub(super) async fn prepare_generation<H>(
-    host: H,
+pub(super) async fn prepare_generation(
+    connector: McpConnector,
     generation_id: McpGeneration,
     servers: BTreeMap<String, EffectiveMcpServerConfig>,
-    mut reusable: BTreeMap<String, RuntimeServer<H::Session>>,
-) -> RuntimeGeneration<H::Session>
-where
-    H: McpRuntimeHost,
-{
+    mut reusable: BTreeMap<String, RuntimeServer>,
+) -> RuntimeGeneration {
     let mut next = RuntimeGeneration::empty(generation_id);
     let mut connecting = FuturesUnordered::new();
     for (server_id, config) in servers {
@@ -92,9 +89,9 @@ where
             next.servers.insert(server.descriptor.id.clone(), server);
             continue;
         }
-        let host = host.clone();
+        let connector = connector.clone();
         connecting.push(async move {
-            let server = connect_server(&host, server_id, config, fingerprint).await;
+            let server = connect_server(&connector, server_id, config, fingerprint).await;
             (server.descriptor.id.clone(), server)
         });
     }
@@ -105,22 +102,19 @@ where
     next
 }
 
-async fn connect_server<H>(
-    host: &H,
+async fn connect_server(
+    connector: &McpConnector,
     server_id: String,
     config: EffectiveMcpServerConfig,
     fingerprint: u64,
-) -> RuntimeServer<H::Session>
-where
-    H: McpRuntimeHost,
-{
+) -> RuntimeServer {
     let descriptor = server_descriptor(&config);
     let redactor = McpErrorRedactor::new(&config);
     let startup_timeout = configured_startup_timeout(config.config.startup_timeout_secs);
     let request_timeout = configured_tool_timeout(config.config.tool_timeout_secs);
     let connected = tokio::time::timeout(
         startup_timeout,
-        host.connect(McpConnectRequest {
+        connector.connect(McpConnectRequest {
             server_id,
             server: config.clone(),
         }),
@@ -159,12 +153,12 @@ where
             redactor,
         ),
         Ok(Err(error)) => {
-            session.shutdown().await;
+            session.close().await;
             let message = redactor.redact(error.to_string());
             RuntimeServer::unavailable(descriptor, fingerprint, message, redactor)
         }
         Err(_) => {
-            session.shutdown().await;
+            session.close().await;
             RuntimeServer::unavailable(
                 descriptor,
                 fingerprint,

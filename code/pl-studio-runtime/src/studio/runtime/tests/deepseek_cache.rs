@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -7,11 +9,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use pl_core::{AgentModelConfig, McpServerConfig, McpServerTransport, ProviderConfig};
 use pl_protocol::{ThreadItemContent, ThreadItemStatus, TurnBillingRecord};
+use rmcp::handler::server::ServerHandler;
+use rmcp::model::*;
+use rmcp::service::RequestContext;
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
+use rmcp::{ErrorData as McpError, RoleServer};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Notify};
+use tokio_util::sync::CancellationToken;
 
 use super::{StudioRuntime, StudioSubmitPromptOptions, StudioSubmitPromptRequest};
 use crate::config::{
@@ -789,89 +799,122 @@ fn final_action(content: &str) -> ChatAction {
     }
 }
 
+#[derive(Debug, Clone)]
+struct FixtureMcpHandler {
+    calls: Arc<AtomicUsize>,
+}
+
+#[expect(
+    clippy::manual_async_fn,
+    reason = "RPITIT keeps the required Send bound explicit"
+)]
+impl ServerHandler for FixtureMcpHandler {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
+            .with_server_info(Implementation::new("studio-cache-fixture", "1.0.0"))
+            .with_instructions("Use lookup for cache fixture evidence.")
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = std::result::Result<ListToolsResult, McpError>> + Send + '_ {
+        async {
+            let schema = json!({
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"],
+                "additionalProperties": false
+            })
+            .as_object()
+            .expect("fixture schema")
+            .clone();
+            Ok(ListToolsResult {
+                tools: vec![Tool::new(
+                    "lookup",
+                    "Look up deterministic fixture evidence.",
+                    Arc::new(schema),
+                )],
+                ..Default::default()
+            })
+        }
+    }
+
+    fn call_tool(
+        &self,
+        _request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = std::result::Result<CallToolResponse, McpError>> + Send + '_ {
+        async {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CallToolResult::success(vec![ContentBlock::text("cache fixture lookup ok")]).into())
+        }
+    }
+}
+
 pub(super) struct FixtureMcpServer {
     pub(super) url: String,
-    calls: Arc<Mutex<usize>>,
+    calls: Arc<AtomicUsize>,
+    cancellation: CancellationToken,
     handle: tokio::task::JoinHandle<Result<()>>,
 }
 
 impl FixtureMcpServer {
     pub(super) async fn start() -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let url = format!("http://{}", listener.local_addr()?);
-        let calls = Arc::new(Mutex::new(0));
-        let recorded_calls = calls.clone();
+        let url = format!("http://{}/mcp", listener.local_addr()?);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        let cancellation = CancellationToken::new();
+        let config = StreamableHttpServerConfig::default()
+            .with_json_response(true)
+            .with_sse_keep_alive(None)
+            .with_cancellation_token(cancellation.clone());
+        let service: StreamableHttpService<FixtureMcpHandler, LocalSessionManager> =
+            StreamableHttpService::new(
+                move || {
+                    Ok(FixtureMcpHandler {
+                        calls: server_calls.clone(),
+                    })
+                },
+                Default::default(),
+                config,
+            );
+        let router = axum::Router::new().nest_service("/mcp", service);
+        let shutdown = cancellation.clone();
         let handle = tokio::spawn(async move {
-            loop {
-                let (mut socket, _) = listener.accept().await?;
-                let request = read_http_json(&mut socket).await?;
-                let method = request["method"].as_str().unwrap_or_default();
-                let response = match method {
-                    "initialize" => Some(json!({
-                        "jsonrpc": "2.0",
-                        "id": request["id"],
-                        "result": {
-                            "protocolVersion": request["params"]["protocolVersion"],
-                            "capabilities": {"tools": {}},
-                            "serverInfo": {"name": "fixture", "version": "1"},
-                            "instructions": "Use lookup for cache fixture evidence."
-                        }
-                    })),
-                    "notifications/initialized" => None,
-                    "tools/list" => Some(json!({
-                        "jsonrpc": "2.0",
-                        "id": request["id"],
-                        "result": {"tools": [{
-                            "name": "lookup",
-                            "description": "Look up deterministic fixture evidence.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {"query": {"type": "string"}},
-                                "required": ["query"],
-                                "additionalProperties": false
-                            }
-                        }]}
-                    })),
-                    "tools/call" => {
-                        *recorded_calls.lock().await += 1;
-                        Some(json!({
-                            "jsonrpc": "2.0",
-                            "id": request["id"],
-                            "result": {
-                                "content": [{"type": "text", "text": "cache fixture lookup ok"}],
-                                "isError": false
-                            }
-                        }))
-                    }
-                    other => bail!("unexpected MCP method {other}"),
-                };
-                match response {
-                    Some(response) => {
-                        write_http_response(
-                            &mut socket,
-                            "application/json",
-                            &serde_json::to_string(&response)?,
-                        )
-                        .await?;
-                    }
-                    None => write_http_response(&mut socket, "application/json", "").await?,
-                }
-            }
+            axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+                .map_err(Into::into)
         });
-        Ok(Self { url, calls, handle })
+        Ok(Self {
+            url,
+            calls,
+            cancellation,
+            handle,
+        })
     }
 
     pub(super) async fn lookup_calls(&self) -> usize {
-        *self.calls.lock().await
+        self.calls.load(Ordering::SeqCst)
     }
 
     pub(super) fn stop(&self) {
+        self.cancellation.cancel();
         self.handle.abort();
     }
 }
 
 impl Drop for FixtureMcpServer {
     fn drop(&mut self) {
+        self.cancellation.cancel();
         self.handle.abort();
     }
 }

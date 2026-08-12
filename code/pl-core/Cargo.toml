@@ -7,7 +7,12 @@ license.workspace = true
 [features]
 default = []
 docker-tools = []
-live-tests = []
+live-tests = [
+    "dep:axum",
+    "rmcp/server",
+    "rmcp/transport-io",
+    "rmcp/transport-streamable-http-server",
+]
 
 [dependencies]
 pl-protocol = { workspace = true }
@@ -27,6 +32,14 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
+axum = { workspace = true, optional = true }
+rmcp = { workspace = true, features = [
+    "auth",
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+] }
+process-wrap = { workspace = true }
 base64 = { workspace = true }
 image = { workspace = true }
 which = { workspace = true }
@@ -36,8 +49,12 @@ grep-regex = { workspace = true }
 grep-matcher = { workspace = true }
 grep-searcher = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+rmcp = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
@@ -53,4 +70,14 @@ required-features = ["live-tests"]
 [[test]]
 name = "trace_live"
 path = "tests/trace_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "mcp_transports_live"
+path = "tests/mcp_transports_live.rs"
+required-features = ["live-tests"]
+
+[[bin]]
+name = "pl-mcp-test-server"
+path = "tests/fixtures/rmcp_test_server.rs"
 required-features = ["live-tests"]

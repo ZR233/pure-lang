@@ -395,6 +395,8 @@ fn cache_entry(
             | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,
@@ -443,6 +445,8 @@ fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKind) -> Tool
             | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::EndTurn => None,

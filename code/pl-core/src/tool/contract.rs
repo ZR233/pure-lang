@@ -8,7 +8,9 @@ use pl_protocol::PureError;
 
 use crate::turn::ToolEffect;
 
-use super::{ToolCachePolicy, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
+use super::{
+    ToolCachePolicy, ToolContext, ToolDisplayMetadata, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
+};
 
 /// 便捷类型别名：boxed future。
 pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -143,6 +145,12 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> serde_json::Value;
+    /// 返回仅用于展示和审计的工具元数据。
+    ///
+    /// 调度器不得用这些远端声明提升 effect、权限、并行或缓存能力。
+    fn display_metadata(&self) -> Option<&ToolDisplayMetadata> {
+        None
+    }
     fn supports_parallel_tool_calls(&self) -> bool {
         false
     }
@@ -198,6 +206,10 @@ where
 
     fn input_schema(&self) -> serde_json::Value {
         (**self).input_schema()
+    }
+
+    fn display_metadata(&self) -> Option<&ToolDisplayMetadata> {
+        (**self).display_metadata()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {

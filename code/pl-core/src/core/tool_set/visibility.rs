@@ -11,7 +11,6 @@ pub struct SharedToolSchemaOptions {
     pub workspace_files: bool,
     pub ask_user: bool,
     pub git: bool,
-    pub mcp_resources: bool,
     pub todo: bool,
     pub plan_exit: bool,
 }
@@ -23,7 +22,6 @@ impl SharedToolSchemaOptions {
             workspace_files: capabilities.workspace_files,
             ask_user: capabilities.ask_user,
             git: capabilities.git,
-            mcp_resources: capabilities.mcp,
             todo: true,
             plan_exit: true,
         }

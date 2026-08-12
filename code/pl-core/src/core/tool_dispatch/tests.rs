@@ -80,7 +80,7 @@ fn progress_messages_describe_plan_and_subagent_lifecycle() {
 }
 
 #[test]
-fn finalize_tool_item_carries_output_artifacts() {
+fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = crate::TraceRecorder::new("session".to_string(), event_tx, 0);
     let item = recorder.tool_item(
@@ -107,6 +107,14 @@ fn finalize_tool_item_carries_output_artifacts() {
             model_visible_bytes: 12_000,
             artifact_bytes: 8_000,
             result_hash: "result-hash".to_string(),
+        });
+    record
+        .runtime_events
+        .push(crate::tool::ToolRuntimeEvent::AuditMetadata {
+            metadata: serde_json::json!({
+                "kind": "mcpCallToolResult",
+                "result": { "structuredContent": { "answer": 42 } },
+            }),
         });
     record
         .runtime_events
@@ -137,6 +145,13 @@ fn finalize_tool_item_carries_output_artifacts() {
         vec![serde_json::json!({
             "id": "artifact-1",
             "stream": "stdout",
+        })]
+    );
+    assert_eq!(
+        completed.tool.as_ref().unwrap().audit_metadata,
+        vec![serde_json::json!({
+            "kind": "mcpCallToolResult",
+            "result": { "structuredContent": { "answer": 42 } },
         })]
     );
     assert_eq!(
