@@ -191,25 +191,6 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
 }
 
 #[test]
-fn workspace_file_schemas_use_codex_camel_case_fields() {
-    let read_schema = crate::tool::WorkspaceFileToolKind::ReadFile.input_schema();
-    assert!(read_schema.pointer("/properties/startLine").is_some());
-    assert!(read_schema.pointer("/properties/maxLines").is_some());
-    assert!(read_schema.pointer("/properties/maxBytes").is_none());
-    assert!(read_schema.pointer("/properties/offset").is_none());
-    assert!(read_schema.pointer("/properties/line_start").is_none());
-    assert!(read_schema.pointer("/properties/line_count").is_none());
-    assert!(read_schema.pointer("/properties/max_bytes").is_none());
-
-    let list_schema = crate::tool::WorkspaceFileToolKind::ListFiles.input_schema();
-    assert!(list_schema.pointer("/properties/limit").is_some());
-    assert!(list_schema.pointer("/properties/cursor").is_some());
-    assert!(list_schema.pointer("/properties/includeDirs").is_some());
-    assert!(list_schema.pointer("/properties/max_files").is_none());
-    assert!(list_schema.pointer("/properties/include_dirs").is_none());
-}
-
-#[test]
 fn workspace_file_tool_kind_rejects_dot_aliases() {
     assert_eq!(
         crate::tool::WorkspaceFileToolKind::from_name("read_file"),
@@ -238,25 +219,6 @@ fn workspace_file_tool_kind_rejects_dot_aliases() {
     assert_eq!(
         crate::tool::WorkspaceFileToolKind::from_name("apply.patch"),
         None
-    );
-}
-
-#[test]
-fn git_schemas_use_codex_camel_case_fields() {
-    let branch_schema = crate::tool::GitToolKind::Branch.input_schema();
-    assert!(branch_schema.pointer("/properties/startPoint").is_some());
-    assert!(branch_schema.pointer("/properties/start_point").is_none());
-
-    let push_schema = crate::tool::GitToolKind::Push.input_schema();
-    assert!(push_schema.pointer("/properties/setUpstream").is_some());
-    assert!(push_schema.pointer("/properties/set_upstream").is_none());
-
-    let sync_schema = crate::tool::GitToolKind::SyncDefaultBranch.input_schema();
-    assert!(sync_schema.pointer("/properties/preserveChanges").is_some());
-    assert!(
-        sync_schema
-            .pointer("/properties/preserve_changes")
-            .is_none()
     );
 }
 

@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::super::{
     ReviewDesignReference, ReviewFinding, ReviewScope, ReviewVerdict, TaskCoordinator,
 };
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::turn::ToolEffect;
 
 const DEFAULT_FINDING_OFFSET: usize = 0;
@@ -16,13 +15,17 @@ const DEFAULT_FINDING_LIMIT: usize = 10;
 const MAX_FINDING_LIMIT: usize = 50;
 const MAX_REVIEW_ROUND_OUTPUT_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadReviewRoundInput {
+    /// Review round id from task_status.
     round_id: String,
+    /// Zero-based finding offset.
     #[serde(default)]
     offset: Option<usize>,
+    /// Maximum findings to return.
     #[serde(default)]
+    #[schemars(range(min = 1, max = 50))]
     limit: Option<usize>,
 }
 
@@ -49,24 +52,11 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<ReadReviewRoundInput>::new(
             "read_review_round",
             "Read the full findings (including recommendations) of one review round, paginated and not truncated.",
-            strict_tool_input_schema([
-                ToolInputSchemaField::required(
-                    "roundId",
-                    serde_json::json!({"type":"string"}),
-                ),
-                ToolInputSchemaField::optional(
-                    "offset",
-                    serde_json::json!({"type":"integer","minimum":0,"default":0}),
-                ),
-                ToolInputSchemaField::optional(
-                    "limit",
-                    serde_json::json!({"type":"integer","minimum":1,"maximum":50,"default":10}),
-                ),
-            ]),
-            move |input: ReadReviewRoundInput, _| {
+        )
+        .registered(move |input: ReadReviewRoundInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 async move {
@@ -119,8 +109,7 @@ impl TaskCoordinator {
                     )
                     .map_err(anyhow::Error::from)
                 }
-            },
-        )
+            })
         .with_effect(ToolEffect::Read)
     }
 }

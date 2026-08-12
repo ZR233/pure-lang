@@ -1,21 +1,92 @@
 use std::fmt;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use pl_model::ToolSchema;
 use pl_protocol::{InteractionRequest, PureError, SkillActivation};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::turn::ToolEffect;
 
-use super::contract::{BoxFuture, RegisteredToolFuture, RegisteredToolHandler};
+use super::contract::*;
 use super::{
-    RegisteredToolSchemaError, Tool, ToolCachePolicy, ToolContext, ToolExecutionResult, ToolInput,
-    ToolOutput, ToolRuntimeLockPolicy,
+    Tool, ToolCachePolicy, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
+    ToolRuntimeLockPolicy,
 };
 
 type CachePolicyResolver = Arc<dyn Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync>;
 type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send + Sync>;
+
+/// 静态 function tool 的 typed definition。
+///
+/// `Input` 是参数反序列化和模型可见 JSON Schema 的唯一事实源。定义最终生成普通
+/// [`RegisteredTool`]，因此继续使用统一 registry、权限、审批、缓存和事件链。
+#[derive(Debug, Clone)]
+pub struct FunctionToolDefinition<Input> {
+    name: String,
+    description: String,
+    marker: PhantomData<fn() -> Input>,
+}
+
+impl<Input> FunctionToolDefinition<Input>
+where
+    Input: JsonSchema,
+{
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            marker: PhantomData,
+        }
+    }
+
+    pub fn input_schema(&self) -> serde_json::Value {
+        typed_tool_input_schema::<Input>()
+    }
+}
+
+impl<Input> FunctionToolDefinition<Input>
+where
+    Input: DeserializeOwned + JsonSchema + Send + 'static,
+{
+    pub fn registered<F, Fut, Artifact, Error>(self, handler: F) -> RegisteredTool
+    where
+        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Serialize + Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let tool_name = self.name.clone();
+        RegisteredTool::new(
+            self.name,
+            self.description,
+            typed_tool_input_schema::<Input>(),
+            move |input, context| {
+                let arguments = deserialize_tool_input::<Input>(&tool_name, input.arguments);
+                let tool_name = tool_name.clone();
+                match arguments {
+                    Ok(arguments) => {
+                        let future = handler(arguments, context);
+                        Box::pin(async move {
+                            future
+                                .await
+                                .map(ToolExecutionResult::into_tool_output)
+                                .map_err(|error| PureError::ToolExecutionFailed {
+                                    tool: tool_name,
+                                    error: error.to_string(),
+                                })
+                        }) as RegisteredToolFuture
+                    }
+                    Err(error) => Box::pin(async move { Err(error) }) as RegisteredToolFuture,
+                }
+            },
+        )
+    }
+}
 
 /// 与执行授权隔离的工具展示元数据。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,106 +267,6 @@ impl RegisteredTool {
                         error: error.to_string(),
                     })
             }
-        })
-    }
-
-    /// 从模型可见 function schema 注册带强类型输入的产品工具。
-    ///
-    /// 产品层只需传入自己已经声明的 `ToolSchema` 和业务 handler；pl-core 统一
-    /// 解包 function schema 的 name/description/input schema，并复用 typed
-    /// 输入解析、错误映射和 `ToolExecutionResult` 输出投影。
-    pub fn from_schema_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
-        schema: ToolSchema,
-        handler: F,
-    ) -> std::result::Result<Self, RegisteredToolSchemaError>
-    where
-        Input: DeserializeOwned + Send + 'static,
-        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
-            + Send
-            + 'static,
-        Artifact: Serialize + Send + 'static,
-        Error: fmt::Display + Send + 'static,
-    {
-        match schema {
-            ToolSchema::Function {
-                name,
-                description,
-                input_schema,
-                ..
-            } => Ok(Self::from_typed_fallible_execution_result(
-                name,
-                description,
-                input_schema,
-                handler,
-            )),
-            ToolSchema::Custom {
-                name,
-                description,
-                format,
-                ..
-            } => {
-                let _ = (description, format);
-                Err(RegisteredToolSchemaError { name })
-            }
-            ToolSchema::Namespace { name, .. } => Err(RegisteredToolSchemaError { name }),
-            ToolSchema::ToolSearch => Err(RegisteredToolSchemaError {
-                name: "tool_search".to_string(),
-            }),
-            ToolSchema::ProgrammaticToolCalling => Err(RegisteredToolSchemaError {
-                name: "programmatic_tool_calling".to_string(),
-            }),
-            ToolSchema::WebSearch { .. } => Err(RegisteredToolSchemaError {
-                name: "web_search".to_string(),
-            }),
-        }
-    }
-
-    /// 注册带强类型输入的产品工具。
-    ///
-    /// 宿主只提供产品输入类型和业务 handler；`pl-core` 负责把模型传入的
-    /// JSON arguments 反序列化为该类型，并把输入解析错误、业务错误和
-    /// `ToolExecutionResult` 统一映射成 canonical `ToolOutput`。
-    pub fn from_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: serde_json::Value,
-        handler: F,
-    ) -> Self
-    where
-        Input: DeserializeOwned + Send + 'static,
-        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
-            + Send
-            + 'static,
-        Artifact: Serialize + Send + 'static,
-        Error: fmt::Display + Send + 'static,
-    {
-        let name = name.into();
-        let tool_name = name.clone();
-        Self::new(name, description, input_schema, move |input, context| {
-            let tool_name = tool_name.clone();
-            let arguments = match serde_json::from_value::<Input>(input.arguments) {
-                Ok(arguments) => arguments,
-                Err(error) => {
-                    return Box::pin(async move {
-                        Err(PureError::ToolExecutionFailed {
-                            tool: tool_name,
-                            error: format!("invalid input: {error}"),
-                        })
-                    }) as RegisteredToolFuture;
-                }
-            };
-            let future = handler(arguments, context);
-            Box::pin(async move {
-                future
-                    .await
-                    .map(ToolExecutionResult::into_tool_output)
-                    .map_err(|error| PureError::ToolExecutionFailed {
-                        tool: tool_name,
-                        error: error.to_string(),
-                    })
-            }) as RegisteredToolFuture
         })
     }
 

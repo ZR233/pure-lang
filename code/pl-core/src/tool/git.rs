@@ -7,33 +7,19 @@ use std::time::Duration;
 use pl_protocol::PureError;
 use serde_json::{Value, json};
 
-use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
+use super::{
+    BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, deserialize_tool_input,
+};
 
 mod credential;
 mod execution;
 mod policy;
 mod schema;
 
-pub use credential::{
-    GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
-    GitCredentialRequest, GitShellCommandRequest, GitShellCredential, NoGitCredentialProvider,
-    git_askpass_script, git_shell_command, git_shell_credential_prelude, git_shell_retry_function,
-};
-pub use execution::{
-    ExecutionBackend, ExecutionOutput, ExecutionRequest, LocalExecutionBackend,
-    LocalExecutionFailure,
-};
+pub use credential::*;
+pub use execution::*;
 pub use policy::GitPolicy;
-pub use schema::{
-    GitToolKind, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
-    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
-};
-
-use credential::write_askpass_script;
-use schema::{
-    GitBranchInput, GitCommitInput, GitDiffInput, GitFetchInput, GitPushInput,
-    GitSyncDefaultBranchInput,
-};
+pub use schema::*;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -110,13 +96,19 @@ where
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let outcome = match self.kind {
-                GitToolKind::Status => self.run_plain(vec!["status", "--short", "--branch"]).await,
+                GitToolKind::Status => {
+                    deserialize_tool_input::<GitEmptyInput>(self.name(), input.arguments)?;
+                    self.run_plain(vec!["status", "--short", "--branch"]).await
+                }
                 GitToolKind::Diff => self.run_diff(input.arguments).await,
                 GitToolKind::Branch => self.run_branch(input.arguments).await,
                 GitToolKind::Fetch => self.run_fetch(input.arguments).await,
                 GitToolKind::Commit => self.run_commit(input.arguments).await,
                 GitToolKind::Push => self.run_push(input.arguments).await,
-                GitToolKind::WorkspaceInfo => self.workspace_info(),
+                GitToolKind::WorkspaceInfo => {
+                    deserialize_tool_input::<GitEmptyInput>(self.name(), input.arguments)?;
+                    self.workspace_info()
+                }
                 GitToolKind::SyncDefaultBranch => {
                     self.run_sync_default_branch(input.arguments).await
                 }
@@ -139,7 +131,7 @@ where
     P: GitCredentialProvider,
 {
     async fn run_diff(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitDiffInput = parse_input(self.name(), arguments)?;
+        let input: GitDiffInput = deserialize_tool_input(self.name(), arguments)?;
         let path = non_empty(input.path);
         if let Some(path) = path.as_deref() {
             self.config.policy.validate_path(path)?;
@@ -153,15 +145,15 @@ where
     }
 
     async fn run_branch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitBranchInput = parse_input(self.name(), arguments)?;
-        match input.action.as_deref().unwrap_or("list") {
-            "list" => self.run_plain(vec!["branch", "--list", "--all"]).await,
-            "switch" => {
+        let input: GitBranchInput = deserialize_tool_input(self.name(), arguments)?;
+        match input.action.unwrap_or(GitBranchAction::List) {
+            GitBranchAction::List => self.run_plain(vec!["branch", "--list", "--all"]).await,
+            GitBranchAction::Switch => {
                 let name = required_text(self.name(), input.name, "name")?;
                 self.config.policy.validate_branch(&name)?;
                 self.run_plain(vec!["switch", &name]).await
             }
-            "create" => {
+            GitBranchAction::Create => {
                 let name = required_text(self.name(), input.name, "name")?;
                 self.config.policy.validate_branch(&name)?;
                 if let Some(start_point) = non_empty(input.start_point) {
@@ -172,16 +164,12 @@ where
                     self.run_plain(vec!["switch", "-c", &name]).await
                 }
             }
-            other => Err(tool_error(
-                self.name(),
-                format!("unsupported git branch action `{other}`"),
-            )),
         }
     }
 
     async fn run_fetch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitFetchInput = parse_input(self.name(), arguments)?;
-        let remote = non_empty(input.remote).unwrap_or_else(|| "origin".to_string());
+        let input: GitFetchInput = deserialize_tool_input(self.name(), arguments)?;
+        let remote = non_empty(input.remote()).unwrap_or_else(|| "origin".to_string());
         self.config.policy.validate_remote(&remote)?;
         let refspec = non_empty(input.refspec);
         self.config
@@ -200,7 +188,7 @@ where
     }
 
     async fn run_commit(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitCommitInput = parse_input(self.name(), arguments)?;
+        let input: GitCommitInput = deserialize_tool_input(self.name(), arguments)?;
         let message = required_text(self.name(), Some(input.message), "message")?;
         if input.all {
             self.run_plain(vec!["commit", "--no-verify", "-am", &message])
@@ -212,8 +200,8 @@ where
     }
 
     async fn run_push(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitPushInput = parse_input(self.name(), arguments)?;
-        let remote = non_empty(input.remote).unwrap_or_else(|| "origin".to_string());
+        let input: GitPushInput = deserialize_tool_input(self.name(), arguments)?;
+        let remote = non_empty(input.remote()).unwrap_or_else(|| "origin".to_string());
         self.config.policy.validate_remote(&remote)?;
         let branch = non_empty(input.branch)
             .or_else(|| self.config.default_push_branch.clone())
@@ -241,7 +229,7 @@ where
     }
 
     async fn run_sync_default_branch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
-        let input: GitSyncDefaultBranchInput = parse_input(self.name(), arguments)?;
+        let input: GitSyncDefaultBranchInput = deserialize_tool_input(self.name(), arguments)?;
         if input.force && input.preserve_changes {
             return Err(tool_error(
                 self.name(),
@@ -420,14 +408,6 @@ impl GitToolOutcome {
 fn json_description(tool: &str, value: Value) -> Result<String, PureError> {
     serde_json::to_string(&value)
         .map_err(|error| tool_error(tool, format!("failed to serialize git output: {error}")))
-}
-
-fn parse_input<T>(tool: &str, arguments: Value) -> Result<T, PureError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_value(arguments)
-        .map_err(|error| tool_error(tool, format!("invalid git tool input: {error}")))
 }
 
 fn required_text(tool: &str, value: Option<String>, field: &str) -> Result<String, PureError> {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -8,9 +9,7 @@ use super::{
     TaskExecutorVerificationCommandV1, normalize_scope_hints,
 };
 use crate::studio::task_coordinator::{AllocateExecutor, TaskCoordinator};
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
     TurnId,
@@ -19,19 +18,29 @@ use crate::{
 const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
 const MAX_EXECUTOR_VERIFICATION_BYTES: usize = 16 * 1024;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskSpawnExecutorInput {
+    /// Stable task name for the new executor assignment.
+    #[schemars(length(min = 1))]
     task_name: String,
+    /// Complete executor assignment.
+    #[schemars(length(min = 1))]
     message: String,
+    /// Repository-relative focus paths; they do not restrict writes.
     #[serde(default)]
     scope_hints: Vec<String>,
+    /// Acceptance criteria for the assignment.
     #[serde(default)]
     acceptance_criteria: Vec<String>,
+    /// Structured dependencies known to the planner.
     #[serde(default)]
     dependencies: Vec<TaskExecutorDependencyV1>,
+    /// Stable repository evidence already collected.
     #[serde(default)]
     evidence: Vec<TaskExecutorEvidenceV1>,
+    /// Commands the executor must use to verify its work.
+    #[schemars(length(min = 1))]
     verification_commands: Vec<TaskExecutorVerificationCommandV1>,
 }
 
@@ -53,94 +62,11 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let thread_id = thread_id.into();
         let coordinator = Arc::clone(self);
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<TaskSpawnExecutorInput>::new(
             "task_spawn_executor",
             "Spawn one Task executor with a fresh session and optional repository-relative scope hints.",
-            strict_tool_input_schema([
-                ToolInputSchemaField::required(
-                    "taskName",
-                    serde_json::json!({ "type": "string", "minLength": 1 }),
-                ),
-                ToolInputSchemaField::required(
-                    "message",
-                    serde_json::json!({ "type": "string", "minLength": 1 }),
-                ),
-                ToolInputSchemaField::optional(
-                    "scopeHints",
-                    serde_json::json!({
-                        "type": "array",
-                        "description": "Optional repository-relative path prefixes used only for task decomposition, review focus, and potential-conflict hints. They do not restrict workspace writes; directories do not require `/**`.",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "A normalized repository-relative path prefix."
-                        }
-                    }),
-                ),
-                ToolInputSchemaField::optional(
-                    "acceptanceCriteria",
-                    serde_json::json!({
-                        "type": "array",
-                        "items": { "type": "string", "minLength": 1 }
-                    }),
-                ),
-                ToolInputSchemaField::optional(
-                    "dependencies",
-                    serde_json::json!({
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["kind", "id"],
-                            "properties": {
-                                "kind": { "type": "string", "minLength": 1 },
-                                "id": { "type": "string", "minLength": 1 },
-                                "note": { "type": "string" }
-                            }
-                        }
-                    }),
-                ),
-                ToolInputSchemaField::optional(
-                    "evidence",
-                    serde_json::json!({
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["path"],
-                            "properties": {
-                                "path": { "type": "string", "minLength": 1 },
-                                "line": { "type": "integer", "minimum": 1 },
-                                "symbol": { "type": "string" },
-                                "contentHash": { "type": "string" },
-                                "note": { "type": "string" }
-                            }
-                        }
-                    }),
-                ),
-                ToolInputSchemaField::required(
-                    "verificationCommands",
-                    serde_json::json!({
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["command", "cwd", "purpose"],
-                            "properties": {
-                                "command": { "type": "string", "minLength": 1 },
-                                "cwd": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "description": "Repository-relative working directory, or `.` for the repository root."
-                                },
-                                "purpose": { "type": "string", "minLength": 1 }
-                            }
-                        }
-                    }),
-                ),
-            ]),
-            move |arguments: TaskSpawnExecutorInput, context| {
+        )
+        .registered(move |arguments: TaskSpawnExecutorInput, context| {
                 let runtime = runtime.clone();
                 let thread_id = thread_id.clone();
                 let coordinator = Arc::clone(&coordinator);
@@ -236,8 +162,7 @@ impl TaskCoordinator {
                     })
                     .map_err(anyhow::Error::from)
                 }
-            },
-        )
+            })
         .with_effect(ToolEffect::BranchControl)
     }
 }

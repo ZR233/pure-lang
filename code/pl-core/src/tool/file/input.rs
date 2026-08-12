@@ -1,14 +1,18 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WriteFileInput {
+    /// Workspace-relative or permitted absolute destination path.
     pub path: String,
+    /// UTF-8 text content.
     pub content: String,
+    /// Create, replace, or append behavior.
     pub mode: WriteMode,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum WriteMode {
     Create,
@@ -16,16 +20,19 @@ pub(super) enum WriteMode {
     Append,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct PathInput {
+    /// Workspace-relative or permitted absolute path.
     pub path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct DeletePathInput {
+    /// Workspace-relative or permitted absolute path.
     pub path: String,
+    /// Explicit file or directory deletion mode.
     pub mode: DeleteMode,
 }
 
@@ -35,7 +42,7 @@ impl DeletePathInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum DeleteMode {
     File,
@@ -43,11 +50,14 @@ pub(super) enum DeleteMode {
     RecursiveDirectory,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CopyMoveInput {
+    /// Existing source path.
     pub from: String,
+    /// Destination path.
     pub to: String,
+    /// Behavior when the destination already exists.
     pub collision: PathCollision,
 }
 
@@ -57,36 +67,9 @@ impl CopyMoveInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum PathCollision {
     FailIfExists,
     Overwrite,
-}
-
-pub(super) fn path_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "path": { "type": "string" }
-        },
-        "required": ["path"],
-        "additionalProperties": false
-    })
-}
-
-pub(super) fn copy_move_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "from": { "type": "string" },
-            "to": { "type": "string" },
-            "collision": {
-                "type": "string",
-                "enum": ["failIfExists", "overwrite"]
-            }
-        },
-        "required": ["from", "to", "collision"],
-        "additionalProperties": false
-    })
 }

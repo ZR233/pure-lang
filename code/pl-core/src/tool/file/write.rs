@@ -2,13 +2,13 @@ use pl_protocol::PureError;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use super::helpers::{ensure_overwrite, parse_input, text_output, tool_error, workspace};
-use super::input::{
-    CopyMoveInput, DeleteMode, DeletePathInput, PathCollision, PathInput, WriteFileInput,
-    WriteMode, copy_move_schema, path_schema,
-};
+use super::helpers::*;
+use super::input::*;
 use crate::path_safety::remove_dir_all_no_follow_async;
-use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use crate::tool::{
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    deserialize_tool_input,
+};
 
 #[derive(Debug)]
 pub struct WriteFileTool;
@@ -35,16 +35,8 @@ impl Tool for WriteFileTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "content": { "type": "string" },
-                "mode": { "type": "string", "enum": ["create", "overwrite", "append"] }
-            },
-            "required": ["path", "content", "mode"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<WriteFileInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn execute<'a>(
@@ -55,7 +47,7 @@ impl Tool for WriteFileTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
-            let input: WriteFileInput = parse_input(input.arguments, self.name())?;
+            let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             if let Some(parent) = path.parent() {
@@ -103,7 +95,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        path_schema()
+        FunctionToolDefinition::<PathInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -114,7 +106,7 @@ impl Tool for CreateDirectoryTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
-            let input: PathInput = parse_input(input.arguments, self.name())?;
+            let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             tokio::fs::create_dir_all(&path).await?;
@@ -136,18 +128,8 @@ impl Tool for DeletePathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string" },
-                "mode": {
-                    "type": "string",
-                    "enum": ["file", "emptyDirectory", "recursiveDirectory"]
-                }
-            },
-            "required": ["path", "mode"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<DeletePathInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn execute<'a>(
@@ -158,7 +140,7 @@ impl Tool for DeletePathTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
-            let input: DeletePathInput = parse_input(input.arguments, self.name())?;
+            let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_existing(&input.path).await?;
             let metadata = tokio::fs::metadata(&path).await?;
@@ -202,7 +184,7 @@ impl Tool for CopyPathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        copy_move_schema()
+        FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -213,7 +195,7 @@ impl Tool for CopyPathTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
-            let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
+            let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
@@ -247,7 +229,7 @@ impl Tool for MovePathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        copy_move_schema()
+        FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -258,7 +240,7 @@ impl Tool for MovePathTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
-            let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
+            let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;

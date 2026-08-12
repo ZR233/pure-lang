@@ -14,7 +14,8 @@ platforms: ["windows", "linux", "macos"]
 0. **搜索现有实现**：在提案前，先搜索代码库确认同名 tool 是否已存在。在 `pl-core/src/tool/` 目录和 `register_default_tools()` 中搜索工具名。避免为本已实现的工具重复提案。
 
 1. **确定工具名**：snake_case，全局唯一（`ToolRegistry::register()` 同名断言防止重复）。
-2. **确定输入 schema**：参数通过 `serde_json::Value` 传递；结构化输入类型放在工具文件内。
+2. **确定 typed 输入**：静态 function tool 使用 `Deserialize + JsonSchema` 的 Rust struct/enum；
+   `serde_json::Value` 只保留在 provider、MCP 和其他运行时动态边界。
 3. **确定并行与缓存语义**：`supports_parallel_tool_calls()` 默认 `false`；只读工具按需声明 `ToolCachePolicy`，写入或进程工具必须正确声明 cache invalidation。
 4. **确定工具类型**：绝大多数工具是 `ToolSchema::Function`（JSON Schema 参数）；`apply_patch` 是唯一的 `ToolSchema::Custom`（Lark grammar）。
 5. **确定 effect 与权限边界**：为工具声明 `ToolEffect`；涉及路径或 cwd 时同步更新统一的路径提取和风险说明；写工具是否需要 `workspace_write_lock`？
@@ -29,20 +30,20 @@ platforms: ["windows", "linux", "macos"]
 
 ```rust
 use pl_protocol::PureError;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::tool::{
-    BoxFuture, Tool, ToolContext, ToolInput, ToolInputSchemaField, ToolOutput,
-    strict_tool_input_schema,
-};
+use crate::tool::*;
 
 #[derive(Debug, Default)]
 pub struct MyNewTool;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MyNewToolInput {
+    /// What to search for.
     query: String,
+    /// Optional predefined choices.
     options: Option<Vec<String>>,
 }
 
@@ -56,23 +57,8 @@ impl Tool for MyNewTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        strict_tool_input_schema([
-            ToolInputSchemaField::required(
-                "query",
-                serde_json::json!({
-                    "type": "string",
-                    "description": "What to search for"
-                }),
-            ),
-            ToolInputSchemaField::optional(
-                "options",
-                serde_json::json!({
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Optional predefined choices"
-                }),
-            ),
-        ])
+        FunctionToolDefinition::<MyNewToolInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -85,13 +71,7 @@ impl Tool for MyNewTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: MyNewToolInput =
-                serde_json::from_value(input.arguments).map_err(|error| {
-                    PureError::ToolExecutionFailed {
-                        tool: self.name().to_string(),
-                        error: format!("invalid input: {error}"),
-                    }
-                })?;
+            let args = deserialize_tool_input::<MyNewToolInput>(self.name(), input.arguments)?;
             let result = run_query(
                 &context.workspace_root,
                 &args.query,
@@ -107,10 +87,30 @@ impl Tool for MyNewTool {
 }
 ```
 
+产品专用静态工具不需要实现 `Tool` 时，直接使用 typed builder：
+
+```rust
+let tool = FunctionToolDefinition::<MyNewToolInput>::new(
+    "my_new_tool",
+    "Description shown to LLM.",
+)
+.registered(|input, context| async move {
+    run_product_tool(input, context).await
+})
+.with_effect(ToolEffect::Read)
+.with_parallel_tool_calls();
+```
+
+同一工具族中完全同义的字段组应抽为命名 struct，并在顶层用 `#[serde(flatten)]` 组合；不要复制
+字段，也不要建立包含大量无关 `Option` 的万能参数类型。flatten 字段名不得重叠，未知顶层字段由
+`deserialize_tool_input` 统一拒绝。
+
 ### 2. `pl-core/src/tool/mod.rs` — 模块声明 + 导出
 
 - 添加 `mod <new_tool>;`
-- 添加 `pub use <new_tool>::MyNewTool;`（如果需要，同时也 `pub use` 输入类型）
+- 在明确的工具族聚合边界添加 `pub use <new_tool>::*;`，不要增加只改名的 re-export 薄层。
+- glob 会导出该模块中所有 `pub` item；输入类型和实现细节默认保持私有或 `pub(crate)`，只有稳定
+  API 才声明为 `pub`。跨领域且需要筛选的边界继续显式导出。
 
 ### 3. `pl-core/src/core/tool_set.rs` — 进入唯一共享注册链
 
@@ -149,7 +149,9 @@ workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；�
 
 ### 7. `pl-core/src/lib.rs` — 稳定边界导出
 
-只有上层 crate 确实需要直接构造该工具时，才在 `pub use tool::` 块导出；内部实现和输入类型默认保持私有。
+crate 根通过 `pub use tool::*;` 聚合工具公共 API。只有上层 crate 确实需要直接构造的类型才在
+工具模块中声明为 `pub`；内部实现和输入类型默认保持私有或 `pub(crate)`，不要依赖逐项 re-export
+隐藏不应公开的 item。
 
 ## 现有工具参考
 
@@ -176,7 +178,9 @@ workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；�
 ## 测试模式
 
 - **保留关键节点**：测试输入业务校验、workspace 越界、写锁、取消、backend 错误映射、运行时事件和注册/权限边界。
-- **不测外部库本身**：不为 serde 正常 round-trip、JSON Schema 字符串拼装、常量 getter 或简单工具名映射重复写测试。
+- **不测外部库本身**：不为 serde 正常 round-trip、逐工具 JSON Schema `properties`/`required`
+  形状、常量 getter 或简单工具名映射重复写测试；Schema 形状只在统一 typed 生成器和真实 wire
+  边界集中验证。
 - **注册测试**：通过 `TurnEngine::default_provider()` 与 `register_default_tools()` 验证工具是否进入唯一注册链及 capability 关闭行为。
 - **交互测试**：使用 typed `InteractionCallback` 验证请求、回答、取消和结束回合语义，不测试旧事件兼容形状。
 

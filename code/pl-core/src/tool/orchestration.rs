@@ -96,12 +96,12 @@ pub(super) fn orchestrate_tool_schemas(
     eager
 }
 
-pub fn estimate_tool_schema_tokens(schemas: &[ToolSchema]) -> u64 {
+pub(crate) fn estimate_tool_schema_tokens(schemas: &[ToolSchema]) -> u64 {
     let bytes = serde_json::to_vec(schemas).map_or(0, |value| value.len() as u64);
     bytes.saturating_add(3) / 4
 }
 
-pub fn estimate_tool_result_tokens<'a>(results: impl IntoIterator<Item = &'a str>) -> u64 {
+pub(crate) fn estimate_tool_result_tokens<'a>(results: impl IntoIterator<Item = &'a str>) -> u64 {
     let bytes = results.into_iter().fold(0_u64, |total, result| {
         total.saturating_add(result.len() as u64)
     });

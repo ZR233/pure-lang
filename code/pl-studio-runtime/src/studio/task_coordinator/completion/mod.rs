@@ -1,24 +1,24 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
     ReviewScope, ReviewVerdict, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
     TaskStopReason, ThreadExecutionStatus, WorkUnitStatus,
 };
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentLifecycleState, AgentRuntimeHandle, ToolEffect};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CompleteTaskInput {}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StopTaskInput {
+    /// Human-readable reason for stopping the task.
     reason: String,
 }
 
@@ -64,27 +64,26 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<CompleteTaskInput>::new(
             "task_complete",
             "Complete a fully merged, design-consistent and reviewer-approved task.",
-            strict_tool_input_schema([]),
-            move |_: CompleteTaskInput, _context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                async move {
-                    let outcome = coordinator.complete_task(&thread_id).await?;
-                    let output = serde_json::to_string(&outcome)?;
-                    Ok::<ToolExecutionResult<serde_json::Value>, anyhow::Error>(match outcome {
-                        TaskCompleteOutcome::Completed(_) => {
-                            ToolExecutionResult::<serde_json::Value>::success(output).ending_turn()
-                        }
-                        TaskCompleteOutcome::Rejected { .. } => {
-                            ToolExecutionResult::<serde_json::Value>::failure(output)
-                        }
-                    })
-                }
-            },
         )
+        .registered(move |_: CompleteTaskInput, _context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            async move {
+                let outcome = coordinator.complete_task(&thread_id).await?;
+                let output = serde_json::to_string(&outcome)?;
+                Ok::<ToolExecutionResult<serde_json::Value>, anyhow::Error>(match outcome {
+                    TaskCompleteOutcome::Completed(_) => {
+                        ToolExecutionResult::<serde_json::Value>::success(output).ending_turn()
+                    }
+                    TaskCompleteOutcome::Rejected { .. } => {
+                        ToolExecutionResult::<serde_json::Value>::failure(output)
+                    }
+                })
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 
@@ -95,35 +94,31 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<StopTaskInput>::new(
             "task_stop",
             "Stop the current task after safely settling agents and branch state.",
-            strict_tool_input_schema([ToolInputSchemaField::required(
-                "reason",
-                serde_json::json!({"type":"string"}),
-            )]),
-            move |input: StopTaskInput, _context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    let Some(reason) = TaskStopReason::new(input.reason) else {
-                        bail!("task_stop reason must not be empty");
-                    };
-                    let output = coordinator
-                        .stop_task(
-                            &thread_id,
-                            &runtime,
-                            TaskStopOrigin::PlannerDecision,
-                            reason,
-                        )
-                        .await?;
-                    ToolExecutionResult::<serde_json::Value>::json(output)
-                        .map(ToolExecutionResult::ending_turn)
-                        .map_err(anyhow::Error::from)
-                }
-            },
         )
+        .registered(move |input: StopTaskInput, _context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
+            async move {
+                let Some(reason) = TaskStopReason::new(input.reason) else {
+                    bail!("task_stop reason must not be empty");
+                };
+                let output = coordinator
+                    .stop_task(
+                        &thread_id,
+                        &runtime,
+                        TaskStopOrigin::PlannerDecision,
+                        reason,
+                    )
+                    .await?;
+                ToolExecutionResult::<serde_json::Value>::json(output)
+                    .map(ToolExecutionResult::ending_turn)
+                    .map_err(anyhow::Error::from)
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 

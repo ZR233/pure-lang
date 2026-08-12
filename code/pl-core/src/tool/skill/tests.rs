@@ -2,6 +2,8 @@ use std::fs;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde_json::json;
+
 use super::*;
 use crate::session::AgentSession;
 use crate::turn::TurnOptions;
@@ -93,17 +95,10 @@ fn create_writes_project_skill() {
         skills: Vec::new(),
         warnings: Vec::new(),
     };
-    let input = SkillManageInput {
-        action: SkillManageAction::Create,
+    let input = CreateSkillInput {
         name: "local-flow".to_string(),
-        content: Some(skill_content("local-flow", "Local flow")),
+        content: skill_content("local-flow", "Local flow"),
         category: None,
-        file_path: None,
-        file_content: None,
-        old_string: None,
-        new_string: None,
-        replace_mode: None,
-        absorbed_into: None,
     };
 
     create_skill("skill_manage", &catalog, input).unwrap();
@@ -134,17 +129,11 @@ fn patch_accepts_json_escaped_markdown_old_string() {
         }],
         warnings: Vec::new(),
     };
-    let input = SkillManageInput {
-        action: SkillManageAction::Patch,
+    let input = PatchSkillInput {
         name: "local-flow".to_string(),
-        content: None,
-        category: None,
-        file_path: None,
-        file_content: None,
-        old_string: Some(r#"Snippet: `\"unknown\\nusage\"`"#.to_string()),
-        new_string: Some("Snippet: `\"known\\nusage\"`".to_string()),
+        old_string: r#"Snippet: `\"unknown\\nusage\"`"#.to_string(),
+        new_string: "Snippet: `\"known\\nusage\"`".to_string(),
         replace_mode: None,
-        absorbed_into: None,
     };
 
     patch_skill("skill_manage", &catalog, input).unwrap();

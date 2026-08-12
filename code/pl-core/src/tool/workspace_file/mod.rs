@@ -15,16 +15,12 @@ use serde_json::Value;
 
 use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 
-pub use backend::{
-    WorkspaceFileBackend, WorkspaceFileListEntry, WorkspaceFileListRequest,
-    WorkspaceFileListResult, WorkspaceFileReadRequest, WorkspaceFileRemoveRequest,
-    WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
-};
+pub use backend::*;
 pub use container::ContainerWorkspaceFileBackend;
 pub use local::LocalWorkspaceFileBackend;
 pub use ops::{WorkspaceFileToolExecution, execute_workspace_file_tool};
 pub use patch::apply_patch_to_backend;
-pub use schema::{TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, WorkspaceFileToolKind};
+pub use schema::*;
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceFileTool<B> {

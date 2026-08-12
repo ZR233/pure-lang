@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::cleanup::cleanup_accepted_delivery;
@@ -11,19 +12,24 @@ use crate::studio::task_coordinator::{
     AgentDelivery, BranchLeaseRecord, MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator,
     TaskMergeScope, TaskRunPhase, TaskRunRecord, WorkCompletionRecord, WorkUnitRecord,
 };
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, ToolEffect};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TaskRecordMergeInput {
+    /// Executor agent whose accepted completion was integrated.
     pub(crate) executor_agent_id: String,
+    /// Accepted completion revision.
+    #[schemars(range(min = 1))]
     pub(crate) completion_revision: u32,
+    /// Durable Task head before integration.
     pub(crate) expected_previous_head: String,
+    /// Task head after integration.
     pub(crate) resulting_head: String,
+    /// Git integration method used by the planner.
     pub(crate) method: MergeMethod,
+    /// Concise integration summary.
     pub(crate) summary: String,
 }
 
@@ -35,51 +41,24 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<TaskRecordMergeInput>::new(
             "task_record_merge",
             "Validate and record Git integration already performed by the current Task planner.",
-            strict_tool_input_schema([
-                ToolInputSchemaField::required(
-                    "executorAgentId",
-                    serde_json::json!({"type": "string"}),
-                ),
-                ToolInputSchemaField::required(
-                    "completionRevision",
-                    serde_json::json!({"type": "integer", "minimum": 1}),
-                ),
-                ToolInputSchemaField::required(
-                    "expectedPreviousHead",
-                    serde_json::json!({"type": "string"}),
-                ),
-                ToolInputSchemaField::required(
-                    "resultingHead",
-                    serde_json::json!({"type": "string"}),
-                ),
-                ToolInputSchemaField::required(
-                    "method",
-                    serde_json::json!({
-                        "type": "string",
-                        "enum": ["merge", "cherryPick", "squash", "rebase", "manual"]
-                    }),
-                ),
-                ToolInputSchemaField::required("summary", serde_json::json!({"type": "string"})),
-            ]),
-            move |input: TaskRecordMergeInput, context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    if context.active_subagent.is_some() {
-                        bail!("task_record_merge may only be called by the Task planner");
-                    }
-                    let record = coordinator
-                        .record_planner_merge(&thread_id, input, Some(&runtime))
-                        .await?;
-                    ToolExecutionResult::<serde_json::Value>::json(record)
-                        .map_err(anyhow::Error::from)
-                }
-            },
         )
+        .registered(move |input: TaskRecordMergeInput, context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
+            async move {
+                if context.active_subagent.is_some() {
+                    bail!("task_record_merge may only be called by the Task planner");
+                }
+                let record = coordinator
+                    .record_planner_merge(&thread_id, input, Some(&runtime))
+                    .await?;
+                ToolExecutionResult::<serde_json::Value>::json(record).map_err(anyhow::Error::from)
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 

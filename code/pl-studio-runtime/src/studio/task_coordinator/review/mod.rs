@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::design::design_commit_is_current;
@@ -16,26 +17,25 @@ use super::{
     WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
 };
 
 const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、scopeHints、验证摘要和受影响代码。scopeHints 只用于聚焦，不是文件授权边界；delivery scope 的 verdict 与 findings 必须覆盖完整 completion diff。其他 WorkUnit 仅是延后集成的上下文，不得把尚未合并的 sibling 文件、跨 WorkUnit 交互或任务整体完整性归责给当前 executor，这些内容由 integrated review 审查。在读取 design 正文前必须先调用 list_files，或通过 exec 运行 rg/rg --files 定位文档，再用 read_file 阅读。所有相对路径都基于当前 reviewer workspace。exec/write_stdin 虽然可用，但只允许执行读取和搜索命令；禁止通过 shell 修改 workspace、Git 或任何现场。每条 finding 必须给出可执行的 recommendation：写清「改成什么、为什么」，必要时给内联代码片段或精确到函数/行号的最小改法；只描述问题、不给出改法的 finding 不可接受。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供带 recommendation 的具体 finding。禁止修改、派生代理、修复、合并或宣布 Task 完成。";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RequestDeliveryReviewInput {
+    /// Executor whose latest completion should be reviewed.
     executor_agent_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RequestIntegratedReviewInput {}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TaskStatusInput {}
 
@@ -169,32 +169,28 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<RequestDeliveryReviewInput>::new(
             "task_request_delivery_review",
             "Start one fresh read-only reviewer for the latest completion of an executor.",
-            strict_tool_input_schema([ToolInputSchemaField::required(
-                "executorAgentId",
-                serde_json::json!({"type": "string"}),
-            )]),
-            move |input: RequestDeliveryReviewInput, context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    let call_id = provider_call_id(
-                        context.provider_call_id.as_deref(),
-                        "task_request_delivery_review",
-                    )?;
-                    let round = coordinator
-                        .store
-                        .begin_delivery_review(&thread_id, input.executor_agent_id.trim(), &call_id)
-                        .await?;
-                    coordinator
-                        .spawn_reviewer(&thread_id, round, &call_id, &runtime)
-                        .await
-                }
-            },
         )
+        .registered(move |input: RequestDeliveryReviewInput, context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
+            async move {
+                let call_id = provider_call_id(
+                    context.provider_call_id.as_deref(),
+                    "task_request_delivery_review",
+                )?;
+                let round = coordinator
+                    .store
+                    .begin_delivery_review(&thread_id, input.executor_agent_id.trim(), &call_id)
+                    .await?;
+                coordinator
+                    .spawn_reviewer(&thread_id, round, &call_id, &runtime)
+                    .await
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 
@@ -205,35 +201,34 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<RequestIntegratedReviewInput>::new(
             "task_request_integrated_review",
             "Start one fresh read-only integrated review for the current Task HEAD.",
-            strict_tool_input_schema([]),
-            move |_: RequestIntegratedReviewInput, context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    let call_id = provider_call_id(
-                        context.provider_call_id.as_deref(),
-                        "task_request_integrated_review",
-                    )?;
-                    let guard = coordinator.lock_branch_mutation().await;
-                    let run = coordinator
-                        .preflight_integrated_review_locked(&thread_id, &guard)
-                        .await?;
-                    let round = coordinator
-                        .store
-                        .begin_integrated_review(&thread_id, &call_id)
-                        .await?;
-                    drop(guard);
-                    debug_assert_eq!(round.reviewed_head, run.expected_head);
-                    coordinator
-                        .spawn_reviewer(&thread_id, round, &call_id, &runtime)
-                        .await
-                }
-            },
         )
+        .registered(move |_: RequestIntegratedReviewInput, context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
+            async move {
+                let call_id = provider_call_id(
+                    context.provider_call_id.as_deref(),
+                    "task_request_integrated_review",
+                )?;
+                let guard = coordinator.lock_branch_mutation().await;
+                let run = coordinator
+                    .preflight_integrated_review_locked(&thread_id, &guard)
+                    .await?;
+                let round = coordinator
+                    .store
+                    .begin_integrated_review(&thread_id, &call_id)
+                    .await?;
+                drop(guard);
+                debug_assert_eq!(round.reviewed_head, run.expected_head);
+                coordinator
+                    .spawn_reviewer(&thread_id, round, &call_id, &runtime)
+                    .await
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 
@@ -244,11 +239,11 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<TaskStatusInput>::new(
             "task_status",
             "Read the canonical durable Task state, merge candidates, completions, reviews, merges, and findings.",
-            strict_tool_input_schema([]),
-            move |_: TaskStatusInput, _| {
+        )
+        .registered(move |_: TaskStatusInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
@@ -299,8 +294,7 @@ impl TaskCoordinator {
                     )
                     .map_err(anyhow::Error::from)
                 }
-            },
-        )
+            })
         .with_effect(ToolEffect::Read)
     }
 

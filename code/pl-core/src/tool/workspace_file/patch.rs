@@ -4,12 +4,9 @@ use std::path::Path;
 use pl_protocol::{PureError, Result};
 use serde::Serialize;
 
-use crate::tool::file::apply_patch::{apply_chunks, parse_patch};
+use crate::tool::file::apply_patch::{CodexPatchHunk, apply_chunks, parse_codex_patch};
 
-use super::backend::{
-    WorkspaceFileBackend, WorkspaceFileReadRequest, WorkspaceFileRemoveRequest,
-    WorkspaceFileWriteRequest,
-};
+use super::backend::*;
 use super::ops::tool_error;
 use super::schema::TOOL_APPLY_PATCH;
 
@@ -139,7 +136,7 @@ pub async fn apply_patch_to_backend<B>(
 where
     B: WorkspaceFileBackend,
 {
-    let hunks = parse_patch(patch)?;
+    let hunks = parse_codex_patch(patch)?;
     let mut progress = PatchProgress::default();
     for hunk in hunks {
         if let Err(error) = apply_hunk(backend, &cwd, hunk, &mut progress).await {
@@ -156,14 +153,14 @@ where
 async fn apply_hunk<B>(
     backend: &B,
     cwd: &str,
-    hunk: crate::tool::file::apply_patch::Hunk,
+    hunk: CodexPatchHunk,
     progress: &mut PatchProgress,
 ) -> Result<()>
 where
     B: WorkspaceFileBackend,
 {
     match hunk {
-        crate::tool::file::apply_patch::Hunk::Add { path, content } => {
+        CodexPatchHunk::Add { path, content } => {
             progress.begin_change(format!("A {path}"));
             backend
                 .write_text(WorkspaceFileWriteRequest {
@@ -175,7 +172,7 @@ where
             progress.complete_change();
             progress.added.push(path);
         }
-        crate::tool::file::apply_patch::Hunk::Delete { path } => {
+        CodexPatchHunk::Delete { path } => {
             backend
                 .read_text(WorkspaceFileReadRequest {
                     path: path.clone(),
@@ -192,7 +189,7 @@ where
             progress.complete_change();
             progress.deleted.push(path);
         }
-        crate::tool::file::apply_patch::Hunk::Update {
+        CodexPatchHunk::Update {
             path,
             move_path,
             chunks,

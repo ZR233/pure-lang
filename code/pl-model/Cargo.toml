@@ -13,6 +13,7 @@ pl-protocol = { workspace = true }
 pl-trace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 bitflags = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }

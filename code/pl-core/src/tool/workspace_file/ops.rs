@@ -1,21 +1,18 @@
 use base64::Engine;
 use pl_protocol::{PureError, Result};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::tool::OutputTruncation;
-use crate::tool::model_visible_tool_output;
 use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
 };
+use crate::tool::{OutputTruncation, deserialize_tool_input, model_visible_tool_output};
 
-use super::backend::{
-    WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileReadRequest,
-    WorkspaceFileStatRequest,
-};
+use super::backend::*;
 use super::patch::apply_patch_to_backend;
-use super::schema::{TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, WorkspaceFileToolKind};
+use super::schema::*;
 
 const DEFAULT_READ_FILE_LINES: usize = 200;
 const MAX_READ_FILE_LINES: usize = 500;
@@ -71,12 +68,18 @@ where
     Ok(Some(WorkspaceFileToolExecution::json(value)?))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReadFileInput {
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ReadFileInput {
+    /// UTF-8 file path to read.
     path: String,
-    cwd: Option<String>,
+    #[serde(flatten)]
+    working_directory: WorkingDirectoryInput,
+    /// 1-based first source line; defaults to 1.
+    #[schemars(range(min = 1))]
     start_line: Option<usize>,
+    /// Maximum source lines; defaults to 200.
+    #[schemars(range(min = 1, max = 500))]
     max_lines: Option<usize>,
 }
 
@@ -84,7 +87,7 @@ async fn read_file<B>(backend: &B, arguments: Value) -> Result<Value>
 where
     B: WorkspaceFileBackend,
 {
-    let input: ReadFileInput = parse_input(arguments, TOOL_READ_FILE)?;
+    let input: ReadFileInput = deserialize_tool_input(TOOL_READ_FILE, arguments)?;
     let start_line = input.start_line.unwrap_or(1);
     if start_line == 0 {
         return Err(tool_error(TOOL_READ_FILE, "startLine is 1-based"));
@@ -98,7 +101,7 @@ where
     }
     let stat_request = WorkspaceFileStatRequest {
         path: input.path.clone(),
-        cwd: input.cwd.clone(),
+        cwd: input.working_directory.cwd.clone(),
     };
     let stat = match backend.stat(stat_request).await {
         Ok(stat) => stat,
@@ -115,7 +118,7 @@ where
     let content = backend
         .read_text(WorkspaceFileReadRequest {
             path: input.path.clone(),
-            cwd: input.cwd.clone(),
+            cwd: input.working_directory.cwd.clone(),
         })
         .await?;
     let start = line_start_byte_offset(&content, start_line)
@@ -191,14 +194,18 @@ fn path_file_name(path: &str) -> Option<&str> {
         .find(|component| !component.is_empty())
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ListFilesInput {
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ListFilesInput {
+    /// Directory to list; defaults to the current working directory.
     path: Option<String>,
-    cwd: Option<String>,
+    #[serde(flatten)]
+    working_directory: WorkingDirectoryInput,
+    /// Optional file glob; omitted or blank uses `*`.
     glob: Option<String>,
-    limit: Option<usize>,
-    cursor: Option<String>,
+    #[serde(flatten)]
+    pagination: PaginationInput,
+    /// Include directory entries in addition to files.
     include_dirs: Option<bool>,
 }
 
@@ -206,14 +213,14 @@ async fn list_files<B>(backend: &B, arguments: Value, workspace_epoch: u64) -> R
 where
     B: WorkspaceFileBackend,
 {
-    let input: ListFilesInput = parse_input(arguments, TOOL_LIST_FILES)?;
+    let input: ListFilesInput = deserialize_tool_input(TOOL_LIST_FILES, arguments)?;
     let path = path_or_current(input.path);
     let glob = input
         .glob
         .filter(|glob| !glob.trim().is_empty())
         .unwrap_or_else(|| "*".to_string());
     let include_dirs = input.include_dirs.unwrap_or(false);
-    let limit = input.limit.unwrap_or(DEFAULT_LIST_FILES_LIMIT);
+    let limit = input.pagination.limit.unwrap_or(DEFAULT_LIST_FILES_LIMIT);
     if !(1..=MAX_LIST_FILES_LIMIT).contains(&limit) {
         return Err(tool_error(
             TOOL_LIST_FILES,
@@ -222,17 +229,21 @@ where
     }
     let cursor_key = cursor_key(&json!({
         "path": path,
-        "cwd": input.cwd,
+        "cwd": input.working_directory.cwd,
         "glob": glob,
         "includeDirs": include_dirs,
         "workspaceEpoch": workspace_epoch,
     }));
-    let cursor = decode_cursor(input.cursor.as_deref(), CursorKind::List, &cursor_key)?;
+    let cursor = decode_cursor(
+        input.pagination.cursor.as_deref(),
+        CursorKind::List,
+        &cursor_key,
+    )?;
     let offset = cursor.offset;
     let result = backend
         .list(WorkspaceFileListRequest {
             path: path.clone(),
-            cwd: input.cwd,
+            cwd: input.working_directory.cwd,
             glob: glob.clone(),
             max_files: offset.saturating_add(limit).saturating_add(1),
             include_dirs,
@@ -326,19 +337,21 @@ fn decode_cursor(
     })
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ApplyPatchInput {
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ApplyPatchInput {
+    /// Complete Codex-style patch text.
     input: String,
-    cwd: Option<String>,
+    #[serde(flatten)]
+    working_directory: WorkingDirectoryInput,
 }
 
 async fn apply_patch<B>(backend: &B, arguments: Value) -> Result<Value>
 where
     B: WorkspaceFileBackend,
 {
-    let input: ApplyPatchInput = parse_input(arguments, TOOL_APPLY_PATCH)?;
-    let cwd = match input.cwd {
+    let input: ApplyPatchInput = deserialize_tool_input(TOOL_APPLY_PATCH, arguments)?;
+    let cwd = match input.working_directory.cwd {
         Some(cwd) => cwd,
         None => backend.default_cwd().await?,
     };
@@ -351,24 +364,21 @@ where
     })
 }
 
-fn parse_input<T: serde::de::DeserializeOwned>(arguments: Value, tool: &str) -> Result<T> {
-    serde_json::from_value(arguments).map_err(|error| {
-        tool_error(
-            tool,
-            format!("invalid input: {error}. {}", input_guidance(tool)),
-        )
-    })
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkingDirectoryInput {
+    /// Optional working directory used to resolve relative paths.
+    cwd: Option<String>,
 }
 
-fn input_guidance(tool: &str) -> &'static str {
-    match tool {
-        TOOL_READ_FILE => "Allowed fields: path, cwd, startLine, maxLines",
-        TOOL_LIST_FILES => "Allowed fields: path, cwd, glob, limit, cursor, includeDirs",
-        TOOL_APPLY_PATCH => {
-            "Allowed fields: input, cwd. Re-read changed files and generate a smaller patch after a context conflict"
-        }
-        _ => "Check the tool schema and remove unknown fields",
-    }
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct PaginationInput {
+    /// Maximum results in this page.
+    #[schemars(range(min = 1, max = 200))]
+    limit: Option<usize>,
+    /// Exact nextCursor from the corresponding previous page; omit on the first page.
+    cursor: Option<String>,
 }
 
 fn path_or_current(path: Option<String>) -> String {

@@ -3,6 +3,7 @@ use std::path::{Component, Path};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::super::{
@@ -12,18 +13,27 @@ use super::super::{
 use super::trace::validate_review_trace;
 use super::validate_review_repository;
 use crate::AgentRuntimeHandle;
-use crate::tool::{
-    RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::turn::ToolEffect;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReviewExitInput {
-    verdict: ReviewVerdict,
+    verdict: ReviewExitVerdict,
+    /// Concise overall review summary.
     summary: String,
+    /// Actual design sections read during the review.
     design_references: Vec<ReviewDesignReference>,
+    /// Actionable unresolved findings; empty only for pass.
     findings: Vec<ReviewFinding>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+enum ReviewExitVerdict {
+    Pass,
+    ChangesRequired,
+    Blocked,
 }
 
 impl TaskCoordinator {
@@ -34,69 +44,67 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<ReviewExitInput>::new(
             "review_exit",
             "Submit trace-validated read-only review findings and end the reviewer turn.",
-            review_exit_schema(),
-            move |input: ReviewExitInput, context| {
-                let coordinator = coordinator.clone();
-                let thread_id = thread_id.clone();
-                let runtime = runtime.clone();
-                async move {
-                    let root_agent_id = crate::studio::agent_host::root_agent_id(&thread_id);
-                    let reviewer = context
-                        .active_subagent
-                        .as_ref()
-                        .filter(|agent| {
-                            agent.role == "reviewer"
-                                && agent.depth == 1
-                                && agent.parent_id.as_deref() == Some(root_agent_id.as_str())
-                        })
-                        .context("review_exit requires the harness-owned depth-1 reviewer")?;
-                    let trace =
-                        validate_review_trace(&context.parent_session, context.workspace.root())
-                            .await?;
-                    let review = validate_review_exit(input, &trace.read_design)?;
-                    let run = coordinator
-                        .store
-                        .read_active_task_run_for_root_thread(&thread_id)
-                        .await?;
-                    validate_review_repository(&run).await?;
-                    let round = coordinator
-                        .store
-                        .complete_task_review(&thread_id, &reviewer.id, review)
-                        .await?;
-                    if let Some(runtime) = runtime {
-                        let wake = TaskPlannerWakeRequest {
-                            task_run_id: round.task_run_id.clone(),
-                            root_thread_id: thread_id.clone(),
-                            source: TaskPlannerWakeSource::Review {
-                                review_round_id: round.id.clone(),
-                                scope: round.scope,
-                            },
-                        };
-                        if let Err(error) =
-                            crate::studio::agent_host::materialize_task_planner_wake(
-                                &runtime,
-                                &coordinator.store,
-                                &wake,
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                review_round_id = %round.id,
-                                error_bytes = error.to_string().len(),
-                                "Task review committed; Planner wake remains pending"
-                            );
-                        }
-                    }
-                    let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
-                        .map_err(anyhow::Error::from)?;
-                    output.ends_turn = true;
-                    Ok::<_, anyhow::Error>(output)
-                }
-            },
         )
+        .registered(move |input: ReviewExitInput, context| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
+            async move {
+                let root_agent_id = crate::studio::agent_host::root_agent_id(&thread_id);
+                let reviewer = context
+                    .active_subagent
+                    .as_ref()
+                    .filter(|agent| {
+                        agent.role == "reviewer"
+                            && agent.depth == 1
+                            && agent.parent_id.as_deref() == Some(root_agent_id.as_str())
+                    })
+                    .context("review_exit requires the harness-owned depth-1 reviewer")?;
+                let trace =
+                    validate_review_trace(&context.parent_session, context.workspace.root())
+                        .await?;
+                let review = validate_review_exit(input, &trace.read_design)?;
+                let run = coordinator
+                    .store
+                    .read_active_task_run_for_root_thread(&thread_id)
+                    .await?;
+                validate_review_repository(&run).await?;
+                let round = coordinator
+                    .store
+                    .complete_task_review(&thread_id, &reviewer.id, review)
+                    .await?;
+                if let Some(runtime) = runtime {
+                    let wake = TaskPlannerWakeRequest {
+                        task_run_id: round.task_run_id.clone(),
+                        root_thread_id: thread_id.clone(),
+                        source: TaskPlannerWakeSource::Review {
+                            review_round_id: round.id.clone(),
+                            scope: round.scope,
+                        },
+                    };
+                    if let Err(error) = crate::studio::agent_host::materialize_task_planner_wake(
+                        &runtime,
+                        &coordinator.store,
+                        &wake,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            review_round_id = %round.id,
+                            error_bytes = error.to_string().len(),
+                            "Task review committed; Planner wake remains pending"
+                        );
+                    }
+                }
+                let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
+                    .map_err(anyhow::Error::from)?;
+                output.ends_turn = true;
+                Ok::<_, anyhow::Error>(output)
+            }
+        })
         .with_effect(ToolEffect::Read)
     }
 }
@@ -105,17 +113,16 @@ fn validate_review_exit(
     input: ReviewExitInput,
     read_design: &BTreeMap<String, String>,
 ) -> Result<AgentReview> {
+    let verdict = match input.verdict {
+        ReviewExitVerdict::Pass => ReviewVerdict::Pass,
+        ReviewExitVerdict::ChangesRequired => ReviewVerdict::ChangesRequired,
+        ReviewExitVerdict::Blocked => ReviewVerdict::Blocked,
+    };
     let summary = input.summary.trim().to_string();
     if summary.is_empty() {
         bail!("review summary must not be empty");
     }
-    if matches!(
-        input.verdict,
-        ReviewVerdict::Pending | ReviewVerdict::Failed
-    ) {
-        bail!("reviewer may only select pass, changesRequired, or blocked");
-    }
-    match input.verdict {
+    match verdict {
         ReviewVerdict::Pass if !input.findings.is_empty() => {
             bail!("pass requires no unresolved findings")
         }
@@ -158,7 +165,7 @@ fn validate_review_exit(
         }
     }
     Ok(AgentReview {
-        verdict: input.verdict,
+        verdict,
         summary,
         design_references: input.design_references,
         findings: input.findings,
@@ -193,49 +200,6 @@ fn validate_reference(
     Ok(())
 }
 
-fn review_exit_schema() -> serde_json::Value {
-    let reference = serde_json::json!({
-        "type":"object",
-        "properties": {
-            "path":{"type":"string"},
-            "section":{"type":"string"}
-        },
-        "required":["path","section"],
-        "additionalProperties":false
-    });
-    strict_tool_input_schema([
-        ToolInputSchemaField::required(
-            "verdict",
-            serde_json::json!({"type":"string","enum":["pass","changesRequired","blocked"]}),
-        ),
-        ToolInputSchemaField::required("summary", serde_json::json!({"type":"string"})),
-        ToolInputSchemaField::required(
-            "designReferences",
-            serde_json::json!({"type":"array","items":reference.clone()}),
-        ),
-        ToolInputSchemaField::required(
-            "findings",
-            serde_json::json!({
-                "type":"array",
-                "items":{
-                    "type":"object",
-                    "properties":{
-                        "severity":{"type":"string"},
-                        "title":{"type":"string"},
-                        "body":{"type":"string"},
-                        "recommendation":{"type":"string","description":"Concrete, executable fix: what to change, why, and an inline snippet when useful. Reviewer is read-only and does not apply patches."},
-                        "path":{"type":["string","null"]},
-                        "line":{"type":["integer","null"]},
-                        "designReferences":{"type":"array","items":reference}
-                    },
-                    "required":["severity","title","body","recommendation","path","line","designReferences"],
-                    "additionalProperties":false
-                }
-            }),
-        ),
-    ])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,7 +232,7 @@ mod tests {
         };
         let pass_error = validate_review_exit(
             ReviewExitInput {
-                verdict: ReviewVerdict::Pass,
+                verdict: ReviewExitVerdict::Pass,
                 summary: "reviewed".to_string(),
                 design_references: vec![reference("Review design")],
                 findings: vec![finding.clone()],
@@ -278,7 +242,7 @@ mod tests {
         .unwrap_err();
         let changes_error = validate_review_exit(
             ReviewExitInput {
-                verdict: ReviewVerdict::ChangesRequired,
+                verdict: ReviewExitVerdict::ChangesRequired,
                 summary: "reviewed".to_string(),
                 design_references: vec![reference("Review design")],
                 findings: Vec::new(),
@@ -304,7 +268,7 @@ mod tests {
         };
         let error = validate_review_exit(
             ReviewExitInput {
-                verdict: ReviewVerdict::ChangesRequired,
+                verdict: ReviewExitVerdict::ChangesRequired,
                 summary: "reviewed".to_string(),
                 design_references: vec![reference("Review design")],
                 findings: vec![finding],

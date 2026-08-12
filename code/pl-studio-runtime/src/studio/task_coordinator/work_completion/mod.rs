@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
@@ -10,14 +11,11 @@ use super::{
     ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
-use crate::tool::{
-    RegisteredTool, SubagentContext, ToolExecutionResult, ToolInputSchemaField,
-    strict_tool_input_schema,
-};
+use crate::tool::{FunctionToolDefinition, RegisteredTool, SubagentContext, ToolExecutionResult};
 use crate::turn::ToolEffect;
 use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -26,17 +24,21 @@ use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
 )]
 enum CompletionResultInput {
     Delivery {
+        /// Full Git commit id or an unambiguous abbreviation of at least 7 hex characters.
         head_commit: String,
+        /// Commands run and their outcomes.
         verification_summary: String,
     },
     NoDelivery {
+        /// Evidence that no repository delivery was required.
         verification_summary: String,
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ReportCompletionInput {
+    /// Delivery or explicit no-delivery result.
     result: CompletionResultInput,
 }
 
@@ -93,39 +95,11 @@ impl TaskCoordinator {
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        RegisteredTool::from_typed_fallible_execution_result(
+        FunctionToolDefinition::<ReportCompletionInput>::new(
             "report_completion",
             "Report a clean executor result for mandatory delivery review and end the current turn.",
-            strict_tool_input_schema([ToolInputSchemaField::required(
-                "result",
-                serde_json::json!({
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["kind", "headCommit", "verificationSummary"],
-                            "properties": {
-                                "kind": { "const": "delivery" },
-                                "headCommit": {
-                                    "type": "string",
-                                    "description": "Full Git commit id or an unambiguous hexadecimal abbreviation of at least 7 characters."
-                                },
-                                "verificationSummary": { "type": "string" }
-                            }
-                        },
-                        {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["kind", "verificationSummary"],
-                            "properties": {
-                                "kind": { "const": "noDelivery" },
-                                "verificationSummary": { "type": "string" }
-                            }
-                        }
-                    ]
-                }),
-            )]),
-            move |input: ReportCompletionInput, context| {
+        )
+        .registered(move |input: ReportCompletionInput, context| {
                 let coordinator = coordinator.clone();
                 let runtime = runtime.clone();
                 async move {
@@ -163,8 +137,7 @@ impl TaskCoordinator {
                     output.ends_turn = true;
                     Ok::<_, anyhow::Error>(output)
                 }
-            },
-        )
+            })
         .with_effect(ToolEffect::BranchControl)
     }
 

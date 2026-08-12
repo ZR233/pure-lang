@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::super::{TaskRunRecord, WorkUnitRecord};
@@ -7,7 +8,7 @@ pub(crate) const TASK_EXECUTOR_HANDOFF_SECTION_ID: &str = "studio.task_executor_
 const TASK_EXECUTOR_HANDOFF_VERSION: u32 = 1;
 
 /// Planner 可以随 executor allocation 一起提交的结构化依赖。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TaskExecutorDependencyV1 {
     pub(crate) kind: String,
@@ -17,7 +18,7 @@ pub(crate) struct TaskExecutorDependencyV1 {
 }
 
 /// 已完成探索的稳定定位证据；正文留在原文件或 child transcript。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TaskExecutorEvidenceV1 {
     pub(crate) path: String,
@@ -32,7 +33,7 @@ pub(crate) struct TaskExecutorEvidenceV1 {
 }
 
 /// Planner 在 allocation 前核对的单条项目验证命令。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TaskExecutorVerificationCommandV1 {
     pub(crate) command: String,

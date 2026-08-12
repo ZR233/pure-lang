@@ -1,6 +1,9 @@
 use pl_model::ToolSchema;
+use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+
+use crate::tool::FunctionToolDefinition;
 
 pub const TOOL_GIT_STATUS: &str = "git_status";
 pub const TOOL_GIT_DIFF: &str = "git_diff";
@@ -82,52 +85,35 @@ impl GitToolKind {
 
     pub fn input_schema(self) -> Value {
         match self {
-            Self::Status | Self::WorkspaceInfo => object_schema(vec![]),
-            Self::Diff => object_schema(vec![
-                ("staged", json!({ "type": "boolean" }), false),
-                ("path", json!({ "type": "string" }), false),
-            ]),
-            Self::Branch => object_schema(vec![
-                (
-                    "action",
-                    json!({ "type": "string", "enum": ["list", "switch", "create"] }),
-                    false,
-                ),
-                ("name", json!({ "type": "string" }), false),
-                ("startPoint", json!({ "type": "string" }), false),
-            ]),
-            Self::Fetch => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("refspec", json!({ "type": "string" }), false),
-                ("prune", json!({ "type": "boolean" }), false),
-            ]),
-            Self::Commit => object_schema(vec![
-                ("message", json!({ "type": "string" }), true),
-                ("all", json!({ "type": "boolean" }), false),
-            ]),
-            Self::Push => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("branch", json!({ "type": "string" }), false),
-                ("setUpstream", json!({ "type": "boolean" }), false),
-            ]),
-            Self::SyncDefaultBranch => object_schema(vec![
-                (
-                    "force",
-                    json!({
-                        "type": "boolean",
-                        "description": "Discard uncommitted workspace changes while syncing."
-                    }),
-                    false,
-                ),
-                (
-                    "preserveChanges",
-                    json!({
-                        "type": "boolean",
-                        "description": "Stash uncommitted workspace changes before syncing and restore them afterwards."
-                    }),
-                    false,
-                ),
-            ]),
+            Self::Status | Self::WorkspaceInfo => {
+                FunctionToolDefinition::<GitEmptyInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Diff => {
+                FunctionToolDefinition::<GitDiffInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Branch => {
+                FunctionToolDefinition::<GitBranchInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Fetch => {
+                FunctionToolDefinition::<GitFetchInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Commit => {
+                FunctionToolDefinition::<GitCommitInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Push => {
+                FunctionToolDefinition::<GitPushInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::SyncDefaultBranch => FunctionToolDefinition::<GitSyncDefaultBranchInput>::new(
+                self.name(),
+                self.description(),
+            )
+            .input_schema(),
         }
     }
 
@@ -136,72 +122,101 @@ impl GitToolKind {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GitEmptyInput {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct GitDiffInput {
+    /// Show staged changes instead of unstaged changes.
     #[serde(default)]
     pub(super) staged: bool,
+    /// Optional repository-relative path to limit the diff.
     pub(super) path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct GitBranchInput {
-    pub(super) action: Option<String>,
+    /// Branch action; defaults to list.
+    pub(super) action: Option<GitBranchAction>,
+    /// Branch name used by switch and create.
     pub(super) name: Option<String>,
+    /// Optional starting revision for create.
     pub(super) start_point: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum GitBranchAction {
+    List,
+    Switch,
+    Create,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct GitRemoteInput {
+    /// Remote name; defaults to origin.
+    remote: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct GitFetchInput {
-    pub(super) remote: Option<String>,
+    #[serde(flatten)]
+    remote: GitRemoteInput,
+    /// Optional fetch refspec.
     pub(super) refspec: Option<String>,
+    /// Whether to prune stale remote-tracking refs.
     #[serde(default = "default_true")]
     pub(super) prune: bool,
 }
 
-#[derive(Debug, Deserialize)]
+impl GitFetchInput {
+    pub(super) fn remote(&self) -> Option<String> {
+        self.remote.remote.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct GitCommitInput {
+    /// Commit message.
     pub(super) message: String,
+    /// Commit all tracked modified and deleted files.
     #[serde(default)]
     pub(super) all: bool,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct GitPushInput {
-    pub(super) remote: Option<String>,
+    #[serde(flatten)]
+    remote: GitRemoteInput,
+    /// Destination branch; defaults to the configured push branch.
     pub(super) branch: Option<String>,
+    /// Set the upstream branch while pushing.
     #[serde(default)]
     pub(super) set_upstream: bool,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct GitSyncDefaultBranchInput {
-    #[serde(default)]
-    pub(super) force: bool,
-    #[serde(default)]
-    pub(super) preserve_changes: bool,
+impl GitPushInput {
+    pub(super) fn remote(&self) -> Option<String> {
+        self.remote.remote.clone()
+    }
 }
 
-fn object_schema(properties: Vec<(&'static str, Value, bool)>) -> Value {
-    let mut props = serde_json::Map::new();
-    let mut required = Vec::new();
-    for (name, schema, is_required) in properties {
-        props.insert(name.to_string(), schema);
-        if is_required {
-            required.push(Value::String(name.to_string()));
-        }
-    }
-    json!({
-        "type": "object",
-        "properties": props,
-        "required": required,
-        "additionalProperties": false,
-    })
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct GitSyncDefaultBranchInput {
+    /// Discard uncommitted workspace changes while syncing.
+    #[serde(default)]
+    pub(super) force: bool,
+    /// Stash uncommitted changes before syncing and restore them afterwards.
+    #[serde(default)]
+    pub(super) preserve_changes: bool,
 }
 
 fn default_true() -> bool {

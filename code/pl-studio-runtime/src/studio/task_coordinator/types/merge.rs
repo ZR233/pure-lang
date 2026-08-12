@@ -1,4 +1,5 @@
 use super::*;
+use schemars::JsonSchema;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,7 +20,7 @@ pub(crate) struct MergeRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum MergeMethod {
     Merge,

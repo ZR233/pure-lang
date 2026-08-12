@@ -1,17 +1,22 @@
 use std::path::PathBuf;
 
 use pl_protocol::PureError;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
-use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use super::{
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    deserialize_tool_input,
+};
 
 #[derive(Debug, Default)]
 pub struct PlanExitTool;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlanExitInput {
+    /// The complete final plan in Markdown.
     content: String,
 }
 
@@ -33,17 +38,7 @@ impl Tool for PlanExitTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The complete final plan in Markdown."
-                }
-            },
-            "required": ["content"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<PlanExitInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -52,12 +47,7 @@ impl Tool for PlanExitTool {
         _context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: PlanExitInput = serde_json::from_value(input.arguments).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("invalid input: {error}"),
-                }
-            })?;
+            let args = deserialize_tool_input::<PlanExitInput>(self.name(), input.arguments)?;
             if args.content.trim().is_empty() {
                 return Err(PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),

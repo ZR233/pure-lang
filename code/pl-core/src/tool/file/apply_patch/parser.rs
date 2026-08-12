@@ -16,7 +16,7 @@ const VALID_HUNK_HEADERS: &str = "valid hunk headers are '*** Add File: {path}',
 pub(crate) const PATCH_RETRY_GUIDANCE: &str = "Recovery: read the target file again, then retry with a smaller Codex-style patch built from the current file contents. Do not repeat the same failed patch.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Hunk {
+pub enum CodexPatchHunk {
     Add {
         path: String,
         content: String,
@@ -39,7 +39,7 @@ pub struct UpdateChunk {
     pub eof: bool,
 }
 
-pub fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
+pub fn parse_codex_patch(patch: &str) -> Result<Vec<CodexPatchHunk>, PureError> {
     let patch = normalize_patch_input(patch)?;
     let lines: Vec<&str> = patch.trim().lines().collect();
     match (
@@ -88,12 +88,12 @@ pub fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
                 content.push('\n');
                 index += 1;
             }
-            hunks.push(Hunk::Add {
+            hunks.push(CodexPatchHunk::Add {
                 path: path.to_string(),
                 content,
             });
         } else if let Some(path) = line.strip_prefix(DELETE_FILE) {
-            hunks.push(Hunk::Delete {
+            hunks.push(CodexPatchHunk::Delete {
                 path: path.to_string(),
             });
             index += 1;
@@ -124,7 +124,7 @@ pub fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
             if chunks.is_empty() && move_path.is_none() {
                 return Err(tool_error(format!("update hunk for '{path}' is empty")));
             }
-            hunks.push(Hunk::Update {
+            hunks.push(CodexPatchHunk::Update {
                 path: path.to_string(),
                 move_path,
                 chunks,

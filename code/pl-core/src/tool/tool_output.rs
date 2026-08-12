@@ -215,7 +215,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
 }
 
 /// 汇总 artifact 描述符声明的完整输出字节数。
-pub fn tool_output_artifact_bytes(artifacts: &[serde_json::Value]) -> u64 {
+pub(crate) fn tool_output_artifact_bytes(artifacts: &[serde_json::Value]) -> u64 {
     artifacts
         .iter()
         .filter_map(|artifact| {

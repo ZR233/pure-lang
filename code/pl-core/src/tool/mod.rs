@@ -26,83 +26,31 @@ mod truncation;
 mod web_search;
 mod workspace_file;
 
-pub use ask_user::AskUserTool;
-pub use cache::{ToolCachePolicy, TurnToolCacheHandle};
-pub use command::process_manager::{
-    CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
-    CommandStartRequest, CommandWriteRequest,
-};
-pub use command::{
-    CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
-    LocalCommandBackend, command_output_model_path,
-};
-#[cfg(feature = "docker-tools")]
-pub use container::DockerCliContainerBackend;
-pub use container::{
-    ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
-    ContainerExecRequest, NoContainerBackend,
-};
+pub use ask_user::*;
+pub use cache::*;
+pub use command::*;
+pub use container::*;
 pub use context::*;
 pub use contract::*;
-pub use exec::{ExecInput, ExecTool, TOOL_EXEC, TOOL_WRITE_STDIN, WriteStdinTool};
-pub(crate) use exec::{command_tool_pair, local_command_tool_pair};
-pub use file::apply_patch::{Hunk as CodexPatchHunk, parse_patch as parse_codex_patch};
-pub use file::{
-    CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, StatPathTool, WriteFileTool,
-};
-pub use git::{
-    ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
-    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy,
-    GitShellCommandRequest, GitShellCredential, GitTool, GitToolKind, GitWorkspaceConfig,
-    LocalExecutionBackend, LocalExecutionFailure, NoGitCredentialProvider, TOOL_GIT_BRANCH,
-    TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS,
-    TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO, git_askpass_script, git_shell_command,
-    git_shell_credential_prelude, git_shell_retry_function,
-};
-pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
-pub use model_output::{
-    DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
-    MAX_MODEL_TOOL_OUTPUT_BYTES, MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS, TOKEN_ESTIMATE_BYTES,
-    enforce_model_output_limit, enforce_model_output_limit_with_cap,
-    model_tool_output_batch_token_budget, model_visible_tool_output,
-    model_visible_tool_output_batch_with_tokens, model_visible_tool_output_with_budget,
-    model_visible_tool_output_with_bytes, model_visible_tool_output_with_tokens,
-};
-pub use orchestration::{
-    ToolOrchestrationOptions, estimate_tool_result_tokens, estimate_tool_schema_tokens,
-};
-pub use output_format::{
-    MAX_TOOL_UI_PREVIEW_BYTES, SECRET_REDACTION_REPLACEMENT, SecretRedaction,
-    ToolHistoryProjection, ToolLifecyclePhase, ToolLifecycleProjection,
-    ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
-    ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
-    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
-    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
-    trace_preview_value,
-};
-pub use path_policy::{PathAccess, ToolPathPolicy};
-pub use plan::PlanExitTool;
+pub use exec::*;
+pub use file::*;
+pub use git::*;
+pub use lsp::*;
+pub use model_output::*;
+pub use orchestration::*;
+pub use output_format::*;
+pub use path_policy::*;
+pub use plan::*;
 pub use registered::*;
 pub use registry::*;
-pub use session_note::{
-    SessionNoteTool, SessionNoteToolKind, TOOL_APPLY_SESSION_NOTE_PATCH, TOOL_READ_SESSION_NOTE,
-    TOOL_SEARCH_SESSION_NOTE, TOOL_WRITE_SESSION_NOTE,
-};
-pub use shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_word};
-pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
-pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
+pub use session_note::*;
+pub use shell::*;
+pub use skill::*;
+pub use todo::*;
 pub use tool_output::*;
-pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
-pub use web_search::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchTool};
-pub use workspace_file::apply_patch_to_backend;
-pub use workspace_file::{
-    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
-    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, WorkspaceFileBackend,
-    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
-    WorkspaceFileWriteRequest, execute_workspace_file_tool,
-};
+pub use truncation::*;
+pub use web_search::*;
+pub use workspace_file::*;
 
 #[cfg(test)]
 mod tests {
@@ -113,9 +61,9 @@ mod tests {
     use super::contract::BoxFuture;
     use super::*;
     use crate::turn::{ToolEffect, TurnOptions};
-    use pl_model::ToolSchema;
     use pl_protocol::PureError;
     use pretty_assertions::assert_eq;
+    use schemars::JsonSchema;
     use serde::Deserialize;
 
     fn empty_truncation() -> OutputTruncation {
@@ -410,41 +358,61 @@ mod tests {
     }
 
     #[test]
-    fn function_tool_schema_builds_strict_object_input_schema() {
-        let schema = function_tool_schema(
-            "save_task_plan",
-            "Save a task plan.",
-            [
-                ToolInputSchemaField::required("title", serde_json::json!({ "type": "string" })),
-                ToolInputSchemaField::required("markdown", serde_json::json!({ "type": "string" })),
-                ToolInputSchemaField::optional("metadata", serde_json::json!({ "type": "object" })),
-            ],
-        );
+    fn typed_function_tool_definition_flattens_components_and_rejects_unknown_fields() {
+        #[derive(Debug, Deserialize, JsonSchema)]
+        struct EmptyInput {}
 
-        let ToolSchema::Function {
-            name,
-            description,
-            input_schema,
-            ..
-        } = schema
-        else {
-            panic!("function tool schema");
-        };
-        assert_eq!(name, "save_task_plan");
-        assert_eq!(description, "Save a task plan.");
-        assert_eq!(
-            input_schema,
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string" },
-                    "markdown": { "type": "string" },
-                    "metadata": { "type": "object" }
-                },
-                "required": ["title", "markdown"],
-                "additionalProperties": false
-            })
-        );
+        #[derive(Debug, Deserialize, JsonSchema)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct PaginationInput {
+            limit: Option<usize>,
+            cursor: Option<String>,
+        }
+
+        #[derive(Debug, Deserialize, JsonSchema)]
+        #[serde(rename_all = "camelCase")]
+        struct SearchInput {
+            query: String,
+            #[serde(flatten)]
+            pagination: PaginationInput,
+        }
+
+        let definition =
+            FunctionToolDefinition::<SearchInput>::new("search_product", "Search product records.");
+        let input_schema = definition.input_schema();
+
+        assert_eq!(input_schema["type"], "object");
+        assert_eq!(input_schema["additionalProperties"], false);
+        assert!(input_schema.get("$schema").is_none());
+        assert!(input_schema.get("title").is_none());
+        for field in ["query", "limit", "cursor"] {
+            assert!(input_schema["properties"].get(field).is_some());
+        }
+
+        let input = deserialize_tool_input::<SearchInput>(
+            "search_product",
+            serde_json::json!({"query": "rust", "limit": 20}),
+        )
+        .expect("flattened input");
+        assert_eq!(input.query, "rust");
+        assert_eq!(input.pagination.limit, Some(20));
+        assert_eq!(input.pagination.cursor, None);
+
+        let error = deserialize_tool_input::<SearchInput>(
+            "search_product",
+            serde_json::json!({"query": "rust", "page": 2}),
+        )
+        .expect_err("unknown flattened field");
+        assert!(error.to_string().contains("unknown field `page`"));
+
+        let empty_schema = typed_tool_input_schema::<EmptyInput>();
+        assert_eq!(empty_schema["additionalProperties"], false);
+        let error = deserialize_tool_input::<EmptyInput>(
+            "empty_product",
+            serde_json::json!({"unexpected": true}),
+        )
+        .expect_err("unknown field on empty input");
+        assert!(error.to_string().contains("expected no fields"));
     }
 
     #[tokio::test]
@@ -552,169 +520,6 @@ mod tests {
             result,
             Err(PureError::ToolExecutionFailed { tool, error })
                 if tool == "product_tool" && error == "boom"
-        ));
-    }
-
-    #[tokio::test]
-    async fn registered_tool_from_typed_fallible_execution_result_deserializes_input() {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct ProductInput {
-            item_id: String,
-        }
-
-        let tool = RegisteredTool::from_typed_fallible_execution_result(
-            "product_tool",
-            "Product tool",
-            serde_json::json!({ "type": "object" }),
-            |input: ProductInput, _context| async move {
-                Ok::<_, &'static str>(
-                    ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
-                        "itemId": input.item_id
-                    }))
-                    .expect("json output"),
-                )
-            },
-        );
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let output = tool
-            .execute(
-                ToolInput {
-                    arguments: serde_json::json!({ "itemId": "task-1" }),
-                    session_id: "session".to_string(),
-                    tool_id: "tool-call".to_string(),
-                    revision_base: 0,
-                },
-                ToolContext {
-                    event_tx,
-                    options: TurnOptions::default(),
-                    workspace_access: WorkspaceAccess::WorkspaceOnly,
-                    workspace: AgentWorkspace::local(PathBuf::new()),
-                    workspace_instructions: None,
-                    instruction_snapshot: None,
-                    provider_call_id: None,
-                    active_subagent: None,
-                    lsp_runtime: None,
-                    parent_session: Arc::new(crate::session::AgentSession::new()),
-                    working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::TurnToolCacheHandle::default(),
-                },
-            )
-            .await
-            .expect("typed product tool output");
-
-        assert_eq!(output.description, "{\"itemId\":\"task-1\"}");
-    }
-
-    #[test]
-    fn registered_tool_from_schema_uses_function_schema_metadata() {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct ProductInput {
-            _item_id: String,
-        }
-
-        let schema = function_tool_schema(
-            "product_tool",
-            "Product tool",
-            [ToolInputSchemaField::required(
-                "itemId",
-                serde_json::json!({ "type": "string" }),
-            )],
-        );
-
-        let tool = RegisteredTool::from_schema_typed_fallible_execution_result(
-            schema,
-            |_input: ProductInput, _context| async move {
-                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
-            },
-        )
-        .expect("function schema");
-
-        assert_eq!(tool.name(), "product_tool");
-        assert_eq!(tool.description(), "Product tool");
-        assert_eq!(
-            tool.input_schema(),
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "itemId": { "type": "string" }
-                },
-                "required": ["itemId"],
-                "additionalProperties": false,
-            })
-        );
-    }
-
-    #[test]
-    fn registered_tool_from_schema_rejects_custom_schema() {
-        #[derive(Debug, Deserialize)]
-        struct ProductInput;
-
-        let result = RegisteredTool::from_schema_typed_fallible_execution_result(
-            ToolSchema::custom_grammar("custom_tool", "Custom tool", "lark", "start: /x/"),
-            |_input: ProductInput, _context| async move {
-                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
-            },
-        );
-
-        assert_eq!(
-            result
-                .expect_err("custom schema must be rejected")
-                .to_string(),
-            "registered tool `custom_tool` must use a function schema"
-        );
-    }
-
-    #[tokio::test]
-    async fn registered_tool_from_typed_fallible_execution_result_rejects_invalid_input() {
-        #[derive(Debug, Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct ProductInput {
-            #[serde(rename = "itemId")]
-            _item_id: String,
-        }
-
-        let tool = RegisteredTool::from_typed_fallible_execution_result(
-            "product_tool",
-            "Product tool",
-            serde_json::json!({ "type": "object" }),
-            |_input: ProductInput, _context| async move {
-                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
-            },
-        );
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let result = tool
-            .execute(
-                ToolInput {
-                    arguments: serde_json::json!({ "item_id": "task-1" }),
-                    session_id: "session".to_string(),
-                    tool_id: "tool-call".to_string(),
-                    revision_base: 0,
-                },
-                ToolContext {
-                    event_tx,
-                    options: TurnOptions::default(),
-                    workspace_access: WorkspaceAccess::WorkspaceOnly,
-                    workspace: AgentWorkspace::local(PathBuf::new()),
-                    workspace_instructions: None,
-                    instruction_snapshot: None,
-                    provider_call_id: None,
-                    active_subagent: None,
-                    lsp_runtime: None,
-                    parent_session: Arc::new(crate::session::AgentSession::new()),
-                    working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::TurnToolCacheHandle::default(),
-                },
-            )
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(PureError::ToolExecutionFailed { tool, error })
-                if tool == "product_tool"
-                    && error.contains("invalid input")
-                    && error.contains("itemId")
         ));
     }
 

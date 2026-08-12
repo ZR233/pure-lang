@@ -4,15 +4,16 @@ use std::time::Duration;
 
 use pl_protocol::PureError;
 use pl_trace::{AgentEvent, TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::command::process_manager::{
-    CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
-    CommandStartRequest, CommandWriteRequest,
-};
+use super::command::process_manager::*;
 use super::command::{CommandBackend, LocalCommandBackend};
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
+use super::{
+    FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    deserialize_tool_input,
+};
 
 pub const TOOL_EXEC: &str = "exec";
 pub const TOOL_WRITE_STDIN: &str = "write_stdin";
@@ -44,30 +45,42 @@ where
 }
 
 /// `exec` 的结构化输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecInput {
+    /// The shell command to execute.
     pub command: String,
+    /// Optional working directory relative to the agent workspace.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
+    /// Optional total timeout in seconds (default: 60).
     #[serde(default)]
+    #[schemars(range(min = 1))]
     pub timeout_seconds: Option<u64>,
+    /// How long to wait before returning a running process id.
     #[serde(default)]
     pub yield_time_ms: Option<u64>,
+    /// Maximum stdout/stderr characters returned to the model.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     pub max_output_chars: Option<usize>,
 }
 
 /// `write_stdin` 的结构化输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WriteStdinInput {
+struct WriteStdinInput {
+    /// Process id returned by a running exec result.
     pub process_id: String,
+    /// Text to write; omit or pass an empty string to only wait or poll.
     #[serde(default)]
     pub chars: Option<String>,
+    /// How long to wait for process exit; zero returns an immediate snapshot.
     #[serde(default)]
     pub yield_time_ms: Option<u64>,
+    /// Maximum stdout/stderr characters returned to the model.
     #[serde(default)]
+    #[schemars(range(min = 1))]
     pub max_output_chars: Option<usize>,
 }
 
@@ -113,13 +126,6 @@ where
     pub(crate) fn with_process_manager(mut self, manager: CommandProcessManager<B>) -> Self {
         self.process_manager = manager;
         self
-    }
-
-    fn parse_input(arguments: serde_json::Value, tool_name: &str) -> Result<ExecInput, PureError> {
-        serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-            tool: tool_name.to_string(),
-            error: format!("invalid input: {error}"),
-        })
     }
 
     fn default_max_output_chars(&self) -> usize {
@@ -191,16 +197,6 @@ where
     pub(crate) fn new(process_manager: CommandProcessManager<B>) -> Self {
         Self { process_manager }
     }
-
-    fn parse_input(
-        arguments: serde_json::Value,
-        tool_name: &str,
-    ) -> Result<WriteStdinInput, PureError> {
-        serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-            tool: tool_name.to_string(),
-            error: format!("invalid input: {error}"),
-        })
-    }
 }
 
 impl<B> Tool for ExecTool<B>
@@ -216,36 +212,7 @@ where
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Optional working directory relative to the agent workspace"
-                },
-                "timeoutSeconds": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Optional total timeout in seconds (default: 60)"
-                },
-                "yieldTimeMs": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "How long to wait before returning a running processId (default: 10000, clamped 250..30000 when non-zero)"
-                },
-                "maxOutputChars": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum stdout/stderr chars in the JSON result; full output remains in outputFile"
-                }
-            },
-            "required": ["command"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<ExecInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -254,7 +221,7 @@ where
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let exec_input = Self::parse_input(input.arguments, self.name())?;
+            let exec_input: ExecInput = deserialize_tool_input(self.name(), input.arguments)?;
             let timeout = exec_input
                 .timeout_seconds
                 .map(Duration::from_secs)
@@ -307,31 +274,8 @@ where
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "processId": {
-                    "type": "string",
-                    "description": "processId returned by a running exec result"
-                },
-                "chars": {
-                    "type": "string",
-                    "description": "Text to write to stdin. Omit or pass an empty string to only wait/poll."
-                },
-                "yieldTimeMs": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "How long to wait for process exit. Empty-input polls default to 10000 and clamp positive values to 10000..30000; stdin writes clamp positive values to 250..30000. Zero returns an immediate snapshot."
-                },
-                "maxOutputChars": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum stdout/stderr chars in the JSON result; full output remains in outputFile"
-                }
-            },
-            "required": ["processId"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<WriteStdinInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn execute<'a>(
@@ -340,7 +284,8 @@ where
         _context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let stdin_input = Self::parse_input(input.arguments, self.name())?;
+            let stdin_input: WriteStdinInput =
+                deserialize_tool_input(self.name(), input.arguments)?;
             let chars = stdin_input.chars.unwrap_or_default();
             let yield_time = if chars.is_empty() {
                 poll_yield_duration(stdin_input.yield_time_ms)

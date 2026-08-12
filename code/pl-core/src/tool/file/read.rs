@@ -2,9 +2,12 @@ use std::time::UNIX_EPOCH;
 
 use pl_protocol::PureError;
 
-use super::helpers::{parse_input, path_type, text_output, tool_error, workspace};
-use super::input::{PathInput, path_schema};
-use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use super::helpers::*;
+use super::input::PathInput;
+use crate::tool::{
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    deserialize_tool_input,
+};
 
 #[derive(Debug)]
 pub struct StatPathTool;
@@ -19,7 +22,7 @@ impl Tool for StatPathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        path_schema()
+        FunctionToolDefinition::<PathInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -32,7 +35,7 @@ impl Tool for StatPathTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let input: PathInput = parse_input(input.arguments, self.name())?;
+            let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_existing_or_parent(&input.path).await?;
             let metadata = match tokio::fs::metadata(&path).await {

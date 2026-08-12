@@ -1,25 +1,21 @@
 use std::path::{Path, PathBuf};
 
 use pl_protocol::{PureError, SkillActivation};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::config::SkillsConfig;
-use crate::skill::{
-    SkillCatalog, SkillMetadata, SkillSourceKind, bump_project_view, list_support_files,
-    read_skill_file,
-};
+use crate::skill::*;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
-use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
+use super::{
+    FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    deserialize_tool_input,
+};
 
 mod actions;
 
-#[cfg(test)]
-use actions::writable_project_skill;
-use actions::{
-    create_skill, delete_skill, edit_skill, patch_skill, remove_support_file, write_support_file,
-};
+use actions::*;
 
 #[derive(Debug, Clone)]
 pub struct SkillsListTool {
@@ -36,46 +32,96 @@ pub struct SkillManageTool {
     config: SkillsConfig,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SkillsListInput {
+    /// Optional category filter.
     category: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SkillViewInput {
+    /// Skill name.
     name: String,
+    /// Optional support file under references/, templates/, scripts/, or assets/.
     file_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SkillManageInput {
-    action: SkillManageAction,
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", tag = "action")]
+enum SkillManageInput {
+    Create(CreateSkillInput),
+    Patch(PatchSkillInput),
+    Edit(EditSkillInput),
+    Delete(DeleteSkillInput),
+    WriteFile(WriteSkillFileInput),
+    RemoveFile(RemoveSkillFileInput),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateSkillInput {
+    /// Project skill name.
     name: String,
-    content: Option<String>,
+    /// Full SKILL.md content.
+    content: String,
+    /// Optional category path.
     category: Option<String>,
-    file_path: Option<String>,
-    file_content: Option<String>,
-    old_string: Option<String>,
-    new_string: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PatchSkillInput {
+    /// Project skill name.
+    name: String,
+    /// Exact existing text to replace.
+    old_string: String,
+    /// Replacement text.
+    new_string: String,
+    /// Replace one occurrence or all occurrences.
     replace_mode: Option<ReplaceMode>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditSkillInput {
+    /// Project skill name.
+    name: String,
+    /// Complete replacement SKILL.md content.
+    content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeleteSkillInput {
+    /// Project skill name.
+    name: String,
+    /// Optional note identifying where its knowledge was absorbed.
     absorbed_into: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum SkillManageAction {
-    Create,
-    Patch,
-    Edit,
-    Delete,
-    WriteFile,
-    RemoveFile,
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WriteSkillFileInput {
+    /// Project skill name.
+    name: String,
+    /// Support file under references/, templates/, scripts/, or assets/.
+    file_path: String,
+    /// Complete support file content.
+    file_content: String,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveSkillFileInput {
+    /// Project skill name.
+    name: String,
+    /// Existing support file path.
+    file_path: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 enum ReplaceMode {
     One,
@@ -167,13 +213,8 @@ impl Tool for SkillsListTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "category": { "type": "string" }
-            },
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<SkillsListInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -186,7 +227,7 @@ impl Tool for SkillsListTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let input: SkillsListInput = parse_input(input.arguments, self.name())?;
+            let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             let skills = catalog
@@ -222,18 +263,8 @@ impl Tool for SkillViewTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" },
-                "filePath": {
-                    "type": "string",
-                    "description": "Optional support file path under references/, templates/, scripts/, or assets/."
-                }
-            },
-            "required": ["name"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<SkillViewInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -248,7 +279,7 @@ impl Tool for SkillViewTool {
         Box::pin(async move {
             let turn_id = input.session_id.clone();
             let tool_id = input.tool_id.clone();
-            let input: SkillViewInput = parse_input(input.arguments, self.name())?;
+            let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             let skill = catalog.find(&input.name).ok_or_else(|| {
@@ -289,38 +320,8 @@ impl Tool for SkillManageTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["create", "patch", "edit", "delete", "writeFile", "removeFile"]
-                },
-                "name": { "type": "string" },
-                "content": {
-                    "type": "string",
-                    "description": "Full SKILL.md content for create/edit."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Optional category path for create."
-                },
-                "filePath": {
-                    "type": "string",
-                    "description": "Support file path under references/, templates/, scripts/, or assets/."
-                },
-                "fileContent": { "type": "string" },
-                "oldString": { "type": "string" },
-                "newString": { "type": "string" },
-                "replaceMode": { "type": "string", "enum": ["one", "all"] },
-                "absorbedInto": {
-                    "type": "string",
-                    "description": "Optional note when deleting a project skill after absorbing it elsewhere."
-                }
-            },
-            "required": ["action", "name"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<SkillManageInput>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn execute<'a>(
@@ -330,33 +331,23 @@ impl Tool for SkillManageTool {
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
-            let input: SkillManageInput = parse_input(input.arguments, self.name())?;
+            let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
-            match input.action {
-                SkillManageAction::Create => create_skill(self.name(), &catalog, input),
-                SkillManageAction::Patch => patch_skill(self.name(), &catalog, input),
-                SkillManageAction::Edit => edit_skill(self.name(), &catalog, input),
-                SkillManageAction::Delete => delete_skill(self.name(), &catalog, input),
-                SkillManageAction::WriteFile => write_support_file(self.name(), &catalog, input),
-                SkillManageAction::RemoveFile => remove_support_file(self.name(), &catalog, input),
+            match input {
+                SkillManageInput::Create(input) => create_skill(self.name(), &catalog, input),
+                SkillManageInput::Patch(input) => patch_skill(self.name(), &catalog, input),
+                SkillManageInput::Edit(input) => edit_skill(self.name(), &catalog, input),
+                SkillManageInput::Delete(input) => delete_skill(self.name(), &catalog, input),
+                SkillManageInput::WriteFile(input) => {
+                    write_support_file(self.name(), &catalog, input)
+                }
+                SkillManageInput::RemoveFile(input) => {
+                    remove_support_file(self.name(), &catalog, input)
+                }
             }
         })
     }
-}
-
-fn parse_input<T: serde::de::DeserializeOwned>(
-    arguments: serde_json::Value,
-    tool: &str,
-) -> Result<T, PureError> {
-    serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: format!("invalid input: {error}"),
-    })
-}
-
-fn required(value: Option<String>, tool: &str, field: &str) -> Result<String, PureError> {
-    value.ok_or_else(|| tool_error(tool, format!("{field} is required")))
 }
 
 fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {

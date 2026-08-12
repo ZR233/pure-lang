@@ -3,17 +3,13 @@ use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
 
-use crate::path_safety::{
-    is_lexically_within, remove_dir_all_no_follow, validate_existing_path, validate_path_for_write,
-};
-use crate::skill::{
-    SkillCatalog, SkillMetadata, SkillSourceKind, bump_project_patch, mark_project_skill_created,
-    project_skill_dir_for_create, support_file_path, validate_skill_document,
-};
+use crate::path_safety::*;
+use crate::skill::*;
 
 use super::{
-    ReplaceMode, SkillDeleteOutput, SkillFileOutput, SkillManageInput, SkillPatchOutput,
-    SkillPathOutput, json_output, required, tool_error,
+    CreateSkillInput, DeleteSkillInput, EditSkillInput, PatchSkillInput, RemoveSkillFileInput,
+    ReplaceMode, SkillDeleteOutput, SkillFileOutput, SkillPatchOutput, SkillPathOutput,
+    WriteSkillFileInput, json_output, tool_error,
 };
 use crate::tool::ToolOutput;
 use crate::tool::text_escape::decode_json_escaped_fragment_once;
@@ -21,7 +17,7 @@ use crate::tool::text_escape::decode_json_escaped_fragment_once;
 pub(super) fn create_skill(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: CreateSkillInput,
 ) -> Result<ToolOutput, PureError> {
     if catalog.project_skill(&input.name).is_some() {
         let name = &input.name;
@@ -30,7 +26,7 @@ pub(super) fn create_skill(
             format!("project skill already exists: {name}"),
         ));
     }
-    let content = required(input.content, tool, "content")?;
+    let content = input.content;
     let metadata = validate_skill_document(&content, Some(&input.name))
         .map_err(|error| tool_error(tool, error))?;
     let category = input.category.as_deref().or(metadata.category.as_deref());
@@ -75,10 +71,10 @@ pub(super) fn create_skill(
 pub(super) fn edit_skill(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: EditSkillInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
-    let content = required(input.content, tool, "content")?;
+    let content = input.content;
     let metadata = validate_skill_document(&content, Some(&input.name))
         .map_err(|error| tool_error(tool, error))?;
     let skill_file = skill.path.join("SKILL.md");
@@ -103,7 +99,7 @@ pub(super) fn edit_skill(
 pub(super) fn patch_skill(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: PatchSkillInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
     ensure_project_path(
@@ -112,11 +108,11 @@ pub(super) fn patch_skill(
         ProjectPathRequirement::MustExist,
         tool,
     )?;
-    let old_string = required(input.old_string, tool, "oldString")?;
+    let old_string = input.old_string;
     if old_string.is_empty() {
         return Err(tool_error(tool, "oldString must not be empty"));
     }
-    let new_string = required(input.new_string, tool, "newString")?;
+    let new_string = input.new_string;
     let path = skill.path.join("SKILL.md");
     ensure_project_path(
         &catalog.project_dir,
@@ -177,7 +173,7 @@ fn patch_needle(content: &str, old_string: &str) -> Option<(String, usize)> {
 pub(super) fn delete_skill(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: DeleteSkillInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
     ensure_project_path(
@@ -199,11 +195,11 @@ pub(super) fn delete_skill(
 pub(super) fn write_support_file(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: WriteSkillFileInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
-    let file_path = required(input.file_path, tool, "filePath")?;
-    let file_content = required(input.file_content, tool, "fileContent")?;
+    let file_path = input.file_path;
+    let file_content = input.file_content;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
     let path = skill.path.join(relative);
     ensure_project_path(
@@ -235,10 +231,10 @@ pub(super) fn write_support_file(
 pub(super) fn remove_support_file(
     tool: &str,
     catalog: &SkillCatalog,
-    input: SkillManageInput,
+    input: RemoveSkillFileInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
-    let file_path = required(input.file_path, tool, "filePath")?;
+    let file_path = input.file_path;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
     let path = skill.path.join(relative);
     ensure_project_path(

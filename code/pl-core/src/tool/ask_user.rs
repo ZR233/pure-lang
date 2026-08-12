@@ -4,21 +4,76 @@ use std::path::PathBuf;
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
     InteractionScope, InteractionStatus, PureError, UserInputRequest, UserInputResponse,
-    UserQuestion,
+    UserQuestion, UserQuestionOption,
 };
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::truncation::OutputTruncation;
-use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
+use super::{
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    deserialize_tool_input,
+};
 use crate::turn::UserInputMode;
 
 #[derive(Debug, Default)]
 pub struct AskUserTool;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AskUserInput {
-    questions: Vec<UserQuestion>,
+    /// Structured questions shown to the user.
+    #[schemars(length(min = 1))]
+    questions: Vec<UserQuestionInput>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserQuestionInput {
+    /// Stable snake_case id used as the answer map key.
+    id: String,
+    /// Short label for the question.
+    header: String,
+    /// Question shown to the user.
+    question: String,
+    /// Whether a free-form custom answer should be accepted.
+    #[serde(default)]
+    is_other: bool,
+    /// Whether the answer is sensitive and should be hidden in UI logs.
+    #[serde(default)]
+    is_secret: bool,
+    /// Optional predefined choices.
+    options: Option<Vec<UserQuestionOptionInput>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserQuestionOptionInput {
+    /// Choice label shown to the user.
+    label: String,
+    /// Short explanation of the choice.
+    description: String,
+}
+
+impl From<UserQuestionInput> for UserQuestion {
+    fn from(question: UserQuestionInput) -> Self {
+        Self {
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            is_other: question.is_other,
+            is_secret: question.is_secret,
+            options: question.options.map(|options| {
+                options
+                    .into_iter()
+                    .map(|option| UserQuestionOption {
+                        label: option.label,
+                        description: option.description,
+                    })
+                    .collect()
+            }),
+        }
+    }
 }
 
 impl Tool for AskUserTool {
@@ -32,56 +87,7 @@ impl Tool for AskUserTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "questions": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {
-                                "type": "string",
-                                "description": "Stable snake_case id used as the answer map key."
-                            },
-                            "header": {
-                                "type": "string",
-                                "description": "Short label for the question."
-                            },
-                            "question": {
-                                "type": "string",
-                                "description": "Question shown to the user."
-                            },
-                            "isOther": {
-                                "type": "boolean",
-                                "description": "Whether a free-form custom answer should be accepted."
-                            },
-                            "isSecret": {
-                                "type": "boolean",
-                                "description": "Whether the answer is sensitive and should be hidden in UI logs."
-                            },
-                            "options": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "label": { "type": "string" },
-                                        "description": { "type": "string" }
-                                    },
-                                    "required": ["label", "description"],
-                                    "additionalProperties": false
-                                }
-                            }
-                        },
-                        "required": ["id", "header", "question"],
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "required": ["questions"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<AskUserInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -90,18 +96,18 @@ impl Tool for AskUserTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: AskUserInput = serde_json::from_value(input.arguments).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("invalid input: {error}"),
-                }
-            })?;
-            validate_questions(&args.questions)?;
+            let args = deserialize_tool_input::<AskUserInput>(self.name(), input.arguments)?;
+            let questions = args
+                .questions
+                .into_iter()
+                .map(UserQuestion::from)
+                .collect::<Vec<_>>();
+            validate_questions(&questions)?;
             let request_id = namespaced_request_id(&input.session_id, &input.tool_id);
             let request = UserInputRequest {
                 request_id,
                 tool_id: input.tool_id,
-                questions: args.questions,
+                questions,
             };
             let interaction = user_input_interaction(&input.session_id, &request, &context);
             let (response, runtime_events) = match context.options.user_input_mode {

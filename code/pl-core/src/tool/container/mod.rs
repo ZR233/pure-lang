@@ -6,9 +6,6 @@ pub(crate) mod helpers;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{
-    ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
-    ContainerExecRequest, NoContainerBackend,
-};
+pub use backend::*;
 #[cfg(feature = "docker-tools")]
-pub use docker::DockerCliContainerBackend;
+pub use docker::*;

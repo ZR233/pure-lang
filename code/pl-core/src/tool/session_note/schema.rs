@@ -1,4 +1,8 @@
-use serde_json::{Value, json};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::tool::FunctionToolDefinition;
 
 pub const TOOL_READ_SESSION_NOTE: &str = "read_session_note";
 pub const TOOL_SEARCH_SESSION_NOTE: &str = "search_session_note";
@@ -46,54 +50,20 @@ impl SessionNoteToolKind {
 
     pub fn input_schema(self) -> Value {
         match self {
-            Self::Read => object_schema(
-                [
-                    ("startLine", json!({"type": "integer", "minimum": 1})),
-                    (
-                        "maxLines",
-                        json!({"type": "integer", "minimum": 1, "maximum": 500}),
-                    ),
-                    ("expectedRevision", json!({"type": "integer", "minimum": 0})),
-                ],
-                &[],
-            ),
-            Self::Search => object_schema(
-                [
-                    ("query", json!({"type": "string", "maxLength": 4096})),
-                    ("caseSensitive", json!({"type": "boolean"})),
-                    ("literal", json!({"type": "boolean"})),
-                    (
-                        "contextLines",
-                        json!({"type": "integer", "minimum": 0, "maximum": 20}),
-                    ),
-                    (
-                        "limit",
-                        json!({"type": "integer", "minimum": 1, "maximum": 200}),
-                    ),
-                    (
-                        "cursor",
-                        json!({
-                            "type": "string",
-                            "description": "Omit on the first page. For later pages, pass the exact nextCursor returned by the previous search; page numbers and offsets are invalid."
-                        }),
-                    ),
-                ],
-                &["query"],
-            ),
-            Self::Write => object_schema(
-                [
-                    ("content", json!({"type": "string"})),
-                    ("expectedRevision", json!({"type": "integer", "minimum": 0})),
-                ],
-                &["content", "expectedRevision"],
-            ),
-            Self::ApplyPatch => object_schema(
-                [
-                    ("patch", json!({"type": "string"})),
-                    ("expectedRevision", json!({"type": "integer", "minimum": 0})),
-                ],
-                &["patch", "expectedRevision"],
-            ),
+            Self::Read => FunctionToolDefinition::<ReadInput>::new(self.name(), self.description())
+                .input_schema(),
+            Self::Search => {
+                FunctionToolDefinition::<SearchInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::Write => {
+                FunctionToolDefinition::<WriteInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
+            Self::ApplyPatch => {
+                FunctionToolDefinition::<ApplyPatchInput>::new(self.name(), self.description())
+                    .input_schema()
+            }
         }
     }
 
@@ -102,15 +72,72 @@ impl SessionNoteToolKind {
     }
 }
 
-fn object_schema<const N: usize>(fields: [(&str, Value); N], required: &[&str]) -> Value {
-    let properties = fields
-        .into_iter()
-        .map(|(name, schema)| (name.to_string(), schema))
-        .collect::<serde_json::Map<_, _>>();
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false,
-    })
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ReadInput {
+    /// 1-based first line to return; defaults to 1.
+    #[schemars(range(min = 1))]
+    pub(super) start_line: Option<usize>,
+    /// Maximum lines to return; defaults to 200.
+    #[schemars(range(min = 1, max = 500))]
+    pub(super) max_lines: Option<usize>,
+    /// Optional revision guard.
+    pub(super) expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SearchInput {
+    /// Literal text or regular expression to find.
+    #[schemars(length(max = 4096))]
+    pub(super) query: String,
+    /// Whether matching is case-sensitive; defaults to true.
+    pub(super) case_sensitive: Option<bool>,
+    /// Treat query as literal text instead of a regular expression.
+    pub(super) literal: Option<bool>,
+    /// Context lines around each match.
+    #[schemars(range(max = 20))]
+    pub(super) context_lines: Option<usize>,
+    /// Maximum matches in this page.
+    #[schemars(range(min = 1, max = 200))]
+    pub(super) limit: Option<usize>,
+    /// Omit on the first page; later pass the exact returned nextCursor.
+    pub(super) cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ExpectedRevisionInput {
+    /// Revision that must still be current when the mutation is applied.
+    expected_revision: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WriteInput {
+    /// Complete replacement note content.
+    pub(super) content: String,
+    #[serde(flatten)]
+    revision: ExpectedRevisionInput,
+}
+
+impl WriteInput {
+    pub(super) fn expected_revision(&self) -> u64 {
+        self.revision.expected_revision
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ApplyPatchInput {
+    /// Codex-style patch targeting session-note.md.
+    pub(super) patch: String,
+    #[serde(flatten)]
+    revision: ExpectedRevisionInput,
+}
+
+impl ApplyPatchInput {
+    pub(super) fn expected_revision(&self) -> u64 {
+        self.revision.expected_revision
+    }
 }

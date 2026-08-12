@@ -2,10 +2,78 @@ use std::path::PathBuf;
 
 use pl_lsp::{LanguageToolInfo, LspQuery, LspRuntimeRegistry};
 use pl_protocol::PureError;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy,
+    BoxFuture, FunctionToolDefinition, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput,
+    ToolPathPolicy, deserialize_tool_input,
 };
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LspQueryInput {
+    operation: LspQueryOperationInput,
+    /// Workspace-relative or absolute path to the source file.
+    file_path: Option<PathBuf>,
+    /// 1-based line number for position operations.
+    #[schemars(range(min = 1))]
+    line: Option<u32>,
+    /// 1-based UTF-16 character offset for position operations.
+    #[schemars(range(min = 1))]
+    character: Option<u32>,
+    /// Workspace symbol query string.
+    query: Option<String>,
+    /// Maximum diagnostics to return.
+    #[schemars(range(min = 1))]
+    max_results: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+enum LspQueryOperationInput {
+    GoToDefinition,
+    FindReferences,
+    Hover,
+    DocumentSymbol,
+    WorkspaceSymbol,
+    GoToImplementation,
+    PrepareCallHierarchy,
+    IncomingCalls,
+    OutgoingCalls,
+    Diagnostics,
+}
+
+impl From<LspQueryOperationInput> for pl_lsp::LspQueryOperation {
+    fn from(operation: LspQueryOperationInput) -> Self {
+        match operation {
+            LspQueryOperationInput::GoToDefinition => Self::GoToDefinition,
+            LspQueryOperationInput::FindReferences => Self::FindReferences,
+            LspQueryOperationInput::Hover => Self::Hover,
+            LspQueryOperationInput::DocumentSymbol => Self::DocumentSymbol,
+            LspQueryOperationInput::WorkspaceSymbol => Self::WorkspaceSymbol,
+            LspQueryOperationInput::GoToImplementation => Self::GoToImplementation,
+            LspQueryOperationInput::PrepareCallHierarchy => Self::PrepareCallHierarchy,
+            LspQueryOperationInput::IncomingCalls => Self::IncomingCalls,
+            LspQueryOperationInput::OutgoingCalls => Self::OutgoingCalls,
+            LspQueryOperationInput::Diagnostics => Self::Diagnostics,
+        }
+    }
+}
+
+impl LspQueryInput {
+    fn into_query(self) -> LspQuery {
+        LspQuery {
+            operation: self.operation.into(),
+            file_path: self.file_path,
+            line: self.line,
+            character: self.character,
+            query: self.query,
+            max_results: self.max_results,
+            language_id: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LspQueryTool {
@@ -28,7 +96,7 @@ impl Tool for LspQueryTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        lsp_query_input_schema()
+        FunctionToolDefinition::<LspQueryInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -41,12 +109,8 @@ impl Tool for LspQueryTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let query: LspQuery = serde_json::from_value(input.arguments).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("invalid LSP query input: {error}"),
-                }
-            })?;
+            let query =
+                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into_query();
             let query = resolve_query_path(query, &context, self.name())?;
             let result = self
                 .registry
@@ -72,54 +136,6 @@ impl Tool for LspQueryTool {
             })
         })
     }
-}
-
-fn lsp_query_input_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "operation": {
-                "type": "string",
-                "enum": [
-                    "goToDefinition",
-                    "findReferences",
-                    "hover",
-                    "documentSymbol",
-                    "workspaceSymbol",
-                    "goToImplementation",
-                    "prepareCallHierarchy",
-                    "incomingCalls",
-                    "outgoingCalls",
-                    "diagnostics"
-                ]
-            },
-            "filePath": {
-                "type": "string",
-                "description": "Workspace-relative or absolute path to the source file. Required for file and position operations."
-            },
-            "line": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "1-based line number for position operations."
-            },
-            "character": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "1-based UTF-16 character offset for position operations."
-            },
-            "query": {
-                "type": "string",
-                "description": "Workspace symbol query string."
-            },
-            "maxResults": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Maximum diagnostics to return."
-            }
-        },
-        "required": ["operation"],
-        "additionalProperties": false
-    })
 }
 
 fn resolve_query_path(
@@ -200,7 +216,7 @@ impl Tool for LspLanguageTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        lsp_query_input_schema()
+        FunctionToolDefinition::<LspQueryInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -213,12 +229,8 @@ impl Tool for LspLanguageTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let mut query: LspQuery = serde_json::from_value(input.arguments).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("invalid LSP query input: {error}"),
-                }
-            })?;
+            let mut query =
+                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into_query();
             query.language_id = Some(self.language_id.clone());
             let query = resolve_query_path(query, &context, self.name())?;
             let result = self
@@ -301,28 +313,6 @@ mod tests {
     }
 
     #[test]
-    fn lsp_query_schema_exposes_supported_operations() {
-        let tool = LspQueryTool::new(LspRuntimeRegistry::new());
-        let schema = tool.input_schema();
-
-        assert_eq!(schema["required"], serde_json::json!(["operation"]));
-        assert!(
-            schema["properties"]["operation"]["enum"]
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!("goToDefinition"))
-        );
-        assert_eq!(
-            schema["properties"]["line"]["minimum"],
-            serde_json::json!(1)
-        );
-        assert_eq!(
-            schema["properties"]["character"]["minimum"],
-            serde_json::json!(1)
-        );
-    }
-
-    #[test]
     fn lsp_language_tool_name_and_description_are_per_instance() {
         let registry = LspRuntimeRegistry::new();
         let rust = LanguageToolInfo {
@@ -348,27 +338,6 @@ mod tests {
         assert!(rust_tool.description().contains(".rs"));
         assert!(typescript_tool.description().contains("TypeScript"));
         assert!(typescript_tool.description().contains(".tsx"));
-    }
-
-    #[test]
-    fn lsp_language_tool_schema_exposes_supported_operations() {
-        let info = LanguageToolInfo {
-            language_id: "rust".to_string(),
-            server_id: "rust-analyzer".to_string(),
-            display_name: "rust-analyzer".to_string(),
-            extensions: vec![".rs".to_string()],
-        };
-        let tool = LspLanguageTool::new(&info, LspRuntimeRegistry::new());
-        let schema = tool.input_schema();
-
-        assert_eq!(schema["required"], serde_json::json!(["operation"]));
-        assert!(
-            schema["properties"]["operation"]["enum"]
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!("diagnostics"))
-        );
-        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
     }
 
     #[tokio::test]

@@ -2,29 +2,56 @@ use std::path::PathBuf;
 
 use pl_protocol::{PureError, TodoItem, TodoListSnapshot, TodoStatus};
 use pl_trace::AgentEvent;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
-use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use super::{
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    deserialize_tool_input,
+};
 
 pub const TOOL_UPDATE_TODO_LIST: &str = "update_todo_list";
 
 #[derive(Debug, Default)]
 pub struct TodoListTool;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TodoListInput {
+    /// Optional short title or explanation for this todo list update.
     #[serde(default)]
     explanation: Option<String>,
+    /// The complete todo list snapshot.
+    #[schemars(length(min = 1))]
     items: Vec<TodoListInputItem>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TodoListInputItem {
+    /// Task step text.
     step: String,
-    status: TodoStatus,
+    /// Step status.
+    status: TodoListInputStatus,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+enum TodoListInputStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+impl From<TodoListInputStatus> for TodoStatus {
+    fn from(status: TodoListInputStatus) -> Self {
+        match status {
+            TodoListInputStatus::Pending => Self::Pending,
+            TodoListInputStatus::InProgress => Self::InProgress,
+            TodoListInputStatus::Completed => Self::Completed,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,38 +70,7 @@ impl Tool for TodoListTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "explanation": {
-                    "type": "string",
-                    "description": "Optional short title or explanation for this todo list update."
-                },
-                "items": {
-                    "type": "array",
-                    "minItems": 1,
-                    "description": "The complete todo list snapshot.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "step": {
-                                "type": "string",
-                                "description": "Task step text."
-                            },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "inProgress", "completed"],
-                                "description": "Step status."
-                            }
-                        },
-                        "required": ["step", "status"],
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "required": ["items"],
-            "additionalProperties": false
-        })
+        FunctionToolDefinition::<TodoListInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn execute<'a>(
@@ -83,12 +79,7 @@ impl Tool for TodoListTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: TodoListInput = serde_json::from_value(input.arguments).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("invalid input: {error}"),
-                }
-            })?;
+            let args = deserialize_tool_input::<TodoListInput>(self.name(), input.arguments)?;
             let snapshot = todo_list_snapshot(input.tool_id, args, &context)?;
             context
                 .working_set
@@ -126,13 +117,11 @@ fn todo_list_snapshot(
         if step.is_empty() {
             return Err(invalid_todo_list("item step must not be empty"));
         }
-        if item.status == TodoStatus::InProgress {
+        let status = TodoStatus::from(item.status);
+        if status == TodoStatus::InProgress {
             in_progress_count += 1;
         }
-        items.push(TodoItem {
-            step,
-            status: item.status,
-        });
+        items.push(TodoItem { step, status });
     }
     if in_progress_count > 1 {
         return Err(invalid_todo_list("at most one item can be inProgress"));

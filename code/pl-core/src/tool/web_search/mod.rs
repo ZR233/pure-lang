@@ -11,8 +11,8 @@ use crate::turn::ToolEffect;
 
 use self::input::parse_commands;
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
-    run_tool_backend_with_cancellation,
+    BoxFuture, FunctionToolDefinition, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput,
+    ToolRuntimeEvent, run_tool_backend_with_cancellation,
 };
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
@@ -54,7 +54,8 @@ impl Tool for WebSearchTool {
     }
 
     fn input_schema(&self) -> Value {
-        commands_schema()
+        FunctionToolDefinition::<SearchCommands>::new(self.name(), self.description())
+            .input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -269,69 +270,6 @@ fn literal_url(value: &str) -> Option<String> {
     (value.starts_with("http://") || value.starts_with("https://")).then(|| value.to_string())
 }
 
-fn commands_schema() -> Value {
-    let string = || json!({ "type": "string" });
-    let optional_string = || json!({ "type": "string" });
-    let object_array = |properties: Value, required: Vec<&str>| {
-        json!({
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-                "additionalProperties": false
-            }
-        })
-    };
-    let query = object_array(
-        json!({
-            "q": string(),
-            "recency": { "type": "integer", "minimum": 0 },
-            "domains": { "type": "array", "items": string() }
-        }),
-        vec!["q"],
-    );
-    json!({
-        "type": "object",
-        "properties": {
-            "search_query": query.clone(),
-            "image_query": query,
-            "open": object_array(json!({
-                "ref_id": string(), "lineno": { "type": "integer", "minimum": 0 }
-            }), vec!["ref_id"]),
-            "click": object_array(json!({
-                "ref_id": string(), "id": { "type": "integer", "minimum": 0 }
-            }), vec!["ref_id", "id"]),
-            "find": object_array(json!({
-                "ref_id": string(), "pattern": string()
-            }), vec!["ref_id", "pattern"]),
-            "screenshot": object_array(json!({
-                "ref_id": string(), "pageno": { "type": "integer", "minimum": 0 }
-            }), vec!["ref_id", "pageno"]),
-            "finance": object_array(json!({
-                "ticker": string(),
-                "type": { "type": "string", "enum": ["equity", "fund", "crypto", "index"] },
-                "market": optional_string()
-            }), vec!["ticker", "type"]),
-            "weather": object_array(json!({
-                "location": string(), "start": optional_string(),
-                "duration": { "type": "integer", "minimum": 0 }
-            }), vec!["location"]),
-            "sports": object_array(json!({
-                "tool": { "type": "string", "enum": ["sports"] },
-                "fn": { "type": "string", "enum": ["schedule", "standings"] },
-                "league": { "type": "string", "enum": ["nba", "wnba", "nfl", "nhl", "mlb", "epl", "ncaamb", "ncaawb", "ipl"] },
-                "team": optional_string(), "opponent": optional_string(),
-                "date_from": optional_string(), "date_to": optional_string(),
-                "num_games": { "type": "integer", "minimum": 0 }, "locale": optional_string()
-            }), vec!["fn", "league"]),
-            "time": object_array(json!({ "utc_offset": string() }), vec!["utc_offset"]),
-            "response_length": { "type": "string", "enum": ["short", "medium", "long"] }
-        },
-        "additionalProperties": false
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use pl_protocol::{Message, MessageContent};
@@ -391,33 +329,6 @@ mod tests {
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[1]["role"], "assistant");
         assert_eq!(input[2]["role"], "user");
-    }
-
-    #[test]
-    fn standalone_schema_exposes_every_supported_search_command() {
-        let schema = commands_schema();
-        let properties = schema["properties"].as_object().expect("properties");
-
-        for name in [
-            "search_query",
-            "image_query",
-            "open",
-            "click",
-            "find",
-            "screenshot",
-            "finance",
-            "weather",
-            "sports",
-            "time",
-            "response_length",
-        ] {
-            assert!(properties.contains_key(name), "missing command {name}");
-        }
-        assert_eq!(properties.len(), 11);
-        assert_eq!(
-            properties["response_length"]["enum"],
-            json!(["short", "medium", "long"])
-        );
     }
 
     #[test]

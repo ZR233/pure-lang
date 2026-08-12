@@ -42,6 +42,12 @@ OAuth、SSE 和连接关闭。turn 只持有固定 generation 的 `McpTurnLease`
 执行 turn 的工具集合或连接 owner。MCP 工具与 resource façade 都构造成普通
 `RegisteredTool` 并进入同一个 `ToolRegistry`，不为 MCP 保留独立 backend 或 dispatch 体系。
 
+rmcp 只位于 MCP 协议与连接边界，不作为 PL 内建工具或产品工具的 authoring framework。
+静态 function tool 使用 PL 自有的 `FunctionToolDefinition<Input>`：输入由 Rust struct/enum、
+Serde 与 Schemars 共同定义，生成的 `RegisteredTool` 仍进入统一 registry，并继续使用 PL 的
+effect、权限、审批、并行、缓存、trace、Timeline 与历史机制。不得用 rmcp `ToolRouter` 或
+`#[tool]` 为静态工具建立第二套注册和执行链。
+
 ## 5.2 核心流程扩展
 
 需要影响 turn、session、store 或编译阶段时扩展 `pl-core`。

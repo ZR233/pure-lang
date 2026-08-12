@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use pl_model::ToolSchema;
 use pl_protocol::PureError;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 
 use crate::turn::ToolEffect;
 
@@ -28,87 +30,104 @@ pub enum ToolBudgetTiming {
     PauseWhenOnlyScheduledTool,
 }
 
-/// 严格 object 输入 schema 中的字段。
+/// 从静态 Rust 输入类型生成严格的 function tool 输入 schema。
 ///
-/// 产品层和共享工具都应通过 `required` / `optional` 命名构造器声明字段，
-/// 避免在不同仓库里重复维护 `required` 数组和 `additionalProperties` 形状。
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolInputSchemaField {
-    name: String,
-    schema: serde_json::Value,
-    required: bool,
+/// 字段名、必填性、枚举与说明由 Serde/Schemars typed definition 提供；这里仅统一
+/// 移除不属于 provider tool contract 的 root 元数据，并关闭未知顶层字段。
+pub fn typed_tool_input_schema<Input>() -> serde_json::Value
+where
+    Input: JsonSchema,
+{
+    let mut schema = schemars::schema_for!(Input).to_value();
+    let Some(object) = schema.as_object_mut() else {
+        return schema;
+    };
+
+    object.remove("$schema");
+    object.remove("title");
+    let is_object = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value == "object")
+        || object.contains_key("properties");
+    if is_object {
+        object
+            .entry("type")
+            .or_insert_with(|| serde_json::Value::String("object".to_string()));
+        object.insert(
+            "additionalProperties".to_string(),
+            serde_json::Value::Bool(false),
+        );
+    }
+    schema
 }
 
-impl ToolInputSchemaField {
-    pub fn required(name: impl Into<String>, schema: serde_json::Value) -> Self {
-        Self {
-            name: name.into(),
-            schema,
-            required: true,
-        }
-    }
-
-    pub fn optional(name: impl Into<String>, schema: serde_json::Value) -> Self {
-        Self {
-            name: name.into(),
-            schema,
-            required: false,
-        }
-    }
-}
-
-/// 构造工具统一使用的严格 object 输入 schema。
-pub fn strict_tool_input_schema(
-    fields: impl IntoIterator<Item = ToolInputSchemaField>,
-) -> serde_json::Value {
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
-    for field in fields {
-        if field.required {
-            required.push(serde_json::Value::String(field.name.clone()));
-        }
-        properties.insert(field.name, field.schema);
-    }
-    serde_json::json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false,
+/// 将模型 arguments 解析为静态工具输入，并统一拒绝未知顶层字段。
+///
+/// 对普通输入，Serde 的 `deny_unknown_fields` 仍是类型本身的约束；额外的 root
+/// properties 检查覆盖 `#[serde(flatten)]` 组合输入无法同时使用该属性的场景。
+pub fn deserialize_tool_input<Input>(
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<Input, PureError>
+where
+    Input: DeserializeOwned + JsonSchema,
+{
+    reject_unknown_tool_input_fields::<Input>(tool_name, &arguments)?;
+    serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
+        tool: tool_name.to_string(),
+        error: format!("invalid input: {error}"),
     })
 }
 
-/// 构造 function tool schema，并统一使用严格 object 输入 schema。
-pub fn function_tool_schema(
-    name: impl Into<String>,
-    description: impl Into<String>,
-    fields: impl IntoIterator<Item = ToolInputSchemaField>,
-) -> ToolSchema {
-    ToolSchema::function(name, description, strict_tool_input_schema(fields))
-}
-
-/// 动态注册工具 schema 不符合 pl-core typed handler 入口时的错误。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegisteredToolSchemaError {
-    pub(super) name: String,
-}
-
-impl RegisteredToolSchemaError {
-    pub fn name(&self) -> &str {
-        &self.name
+fn reject_unknown_tool_input_fields<Input>(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Result<(), PureError>
+where
+    Input: JsonSchema,
+{
+    let Some(arguments) = arguments.as_object() else {
+        return Ok(());
+    };
+    let schema = typed_tool_input_schema::<Input>();
+    let Some(schema) = schema.as_object() else {
+        return Ok(());
+    };
+    let is_object = schema
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value == "object")
+        || schema.contains_key("properties");
+    if !is_object {
+        return Ok(());
     }
-}
+    let properties = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object);
+    let Some(unknown) = arguments
+        .keys()
+        .find(|key| !properties.is_some_and(|properties| properties.contains_key(*key)))
+    else {
+        return Ok(());
+    };
 
-impl fmt::Display for RegisteredToolSchemaError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "registered tool `{}` must use a function schema",
-            self.name
-        )
-    }
+    let mut expected = properties
+        .into_iter()
+        .flat_map(serde_json::Map::keys)
+        .cloned()
+        .collect::<Vec<_>>();
+    expected.sort();
+    let expected = if expected.is_empty() {
+        "no fields".to_string()
+    } else {
+        format!("one of {}", expected.join(", "))
+    };
+    Err(PureError::ToolExecutionFailed {
+        tool: tool_name.to_string(),
+        error: format!("invalid input: unknown field `{unknown}`, expected {expected}"),
+    })
 }
-
-impl std::error::Error for RegisteredToolSchemaError {}
 
 /// 等待宿主工具后端 future，并统一响应 turn cancellation。
 ///

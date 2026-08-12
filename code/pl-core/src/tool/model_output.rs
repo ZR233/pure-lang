@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-pub const TOKEN_ESTIMATE_BYTES: usize = 4;
+pub(crate) const TOKEN_ESTIMATE_BYTES: usize = 4;
 
 pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 3_000;
 pub const DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS: usize = DEFAULT_MODEL_TOOL_OUTPUT_TOKENS * 2;

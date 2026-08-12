@@ -4,18 +4,17 @@ mod search;
 
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, Result};
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
 };
-use crate::tool::{BoxFuture, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput};
-
-pub use schema::{
-    SessionNoteToolKind, TOOL_APPLY_SESSION_NOTE_PATCH, TOOL_READ_SESSION_NOTE,
-    TOOL_SEARCH_SESSION_NOTE, TOOL_WRITE_SESSION_NOTE,
+use crate::tool::{
+    BoxFuture, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
+    deserialize_tool_input,
 };
+
+pub use schema::*;
 
 const DEFAULT_READ_LINES: usize = 200;
 const MAX_READ_LINES: usize = 500;
@@ -74,16 +73,8 @@ impl Tool for SessionNoteTool {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReadInput {
-    start_line: Option<usize>,
-    max_lines: Option<usize>,
-    expected_revision: Option<u64>,
-}
-
 fn read_note(arguments: Value, context: &ToolContext) -> Result<Value> {
-    let input: ReadInput = parse_input(arguments, TOOL_READ_SESSION_NOTE)?;
+    let input: ReadInput = deserialize_tool_input(TOOL_READ_SESSION_NOTE, arguments)?;
     let start_line = input.start_line.unwrap_or(1);
     if start_line == 0 {
         return Err(tool_error(TOOL_READ_SESSION_NOTE, "startLine is 1-based"));
@@ -128,19 +119,8 @@ fn read_note(arguments: Value, context: &ToolContext) -> Result<Value> {
     }))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SearchInput {
-    query: String,
-    case_sensitive: Option<bool>,
-    literal: Option<bool>,
-    context_lines: Option<usize>,
-    limit: Option<usize>,
-    cursor: Option<String>,
-}
-
 fn search_note(arguments: Value, context: &ToolContext) -> Result<Value> {
-    let input: SearchInput = parse_input(arguments, TOOL_SEARCH_SESSION_NOTE)?;
+    let input: SearchInput = deserialize_tool_input(TOOL_SEARCH_SESSION_NOTE, arguments)?;
     let context_lines = input.context_lines.unwrap_or(0);
     if context_lines > MAX_CONTEXT_LINES {
         return Err(tool_error(
@@ -178,35 +158,23 @@ fn search_note(arguments: Value, context: &ToolContext) -> Result<Value> {
     }))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WriteInput {
-    content: String,
-    expected_revision: u64,
-}
-
 fn write_note(arguments: Value, context: &ToolContext) -> Result<Value> {
-    let input: WriteInput = parse_input(arguments, TOOL_WRITE_SESSION_NOTE)?;
+    let input: WriteInput = deserialize_tool_input(TOOL_WRITE_SESSION_NOTE, arguments)?;
+    let expected_revision = input.expected_revision();
     let note = context
         .working_set
-        .replace_session_note(input.expected_revision, input.content)
+        .replace_session_note(expected_revision, input.content)
         .map_err(|error| tool_error(TOOL_WRITE_SESSION_NOTE, error))?;
     Ok(note_result("written", &note))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ApplyPatchInput {
-    patch: String,
-    expected_revision: u64,
-}
-
 async fn apply_note_patch(arguments: Value, context: &ToolContext) -> Result<Value> {
-    let input: ApplyPatchInput = parse_input(arguments, TOOL_APPLY_SESSION_NOTE_PATCH)?;
+    let input: ApplyPatchInput = deserialize_tool_input(TOOL_APPLY_SESSION_NOTE_PATCH, arguments)?;
+    let expected_revision = input.expected_revision();
     let current = context.working_set.session_note();
     validate_expected_revision(
         TOOL_APPLY_SESSION_NOTE_PATCH,
-        Some(input.expected_revision),
+        Some(expected_revision),
         current.revision,
     )?;
     let staged = patch::apply(
@@ -216,7 +184,7 @@ async fn apply_note_patch(arguments: Value, context: &ToolContext) -> Result<Val
     .await?;
     let note = context
         .working_set
-        .replace_session_note(input.expected_revision, staged)
+        .replace_session_note(expected_revision, staged)
         .map_err(|error| tool_error(TOOL_APPLY_SESSION_NOTE_PATCH, error))?;
     Ok(note_result("patched", &note))
 }
@@ -241,16 +209,6 @@ fn validate_expected_revision(tool: &str, expected: Option<u64>, current: u64) -
         ));
     }
     Ok(())
-}
-
-fn parse_input<T>(arguments: Value, tool: &str) -> Result<T>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: format!("invalid input: {error}"),
-    })
 }
 
 fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {

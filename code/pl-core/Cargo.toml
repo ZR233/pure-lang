@@ -25,6 +25,7 @@ pl-skill-core = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 secrecy = { workspace = true }
 include_dir = { workspace = true }
 tokio = { workspace = true }

@@ -243,6 +243,34 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 
 `Tool` trait 为了支持运行时注册表和 MCP 动态工具，暂时保留 dyn-compatible `BoxFuture` 返回值。这是 trait object 边界的例外，不引入 `#[async_trait]`，也不扩散到新增业务 trait。
 
+## 静态 function tool 定义
+
+内建工具和产品静态工具的参数类型、反序列化规则与模型可见 JSON Schema 必须来自同一个
+Rust typed definition。输入类型使用 `Deserialize + JsonSchema`，字段名和枚举 wire 值由 Serde
+属性声明，模型可见说明由 rustdoc 或 Schemars 属性声明；`FunctionToolDefinition<Input>` 统一生成
+并规范化 function schema、拒绝未知顶层字段、反序列化 arguments，并把 handler 注册为普通
+`RegisteredTool`。静态工具不得手写 `properties`、`required` 或 `additionalProperties`，也不得
+在各工具内遍历或修补生成后的 JSON Schema。
+
+同一工具族中语义、字段名、约束和描述都一致的字段组应抽成小型 typed component；顶层输入可用
+`#[serde(flatten)]` 组合这些组件以保持既有扁平 camelCase wire。共享类型默认限制在工具族模块内，
+不得仅因字段类型相同就复用，也不得用包含大量无关 `Option` 的万能输入类型。flattened component
+只能使用无重名字段的命名 struct；其未知顶层字段拒绝由统一 typed adapter 根据生成后的 root
+properties 执行，不能散落手写 JSON key 校验。
+
+`serde_json::Value` 只保留在确实运行时动态的边界：provider wire、模型返回的原始 arguments、
+远端 MCP schema、动态 `RegisteredTool::new`、运行时 role/target enum，以及 Custom、Namespace、
+Tool Search、Programmatic Tool Calling 和 Hosted Web Search 协议类型。MCP schema 由 rmcp 提供，
+PL 只做保证可注册所需的最小 normalize，不得把第三方动态 schema 强制改成 PL 静态 strict schema。
+
+测试应覆盖 typed 输入的必填字段、未知字段、enum、范围和业务校验，以及注册、权限、缓存、取消、
+事件和 backend 错误映射。逐工具检查 `properties`/`required`/`additionalProperties` 的 JSON 树测试
+应删除；Schema 形状只在统一生成器契约、动态 MCP 转换和 provider wire 边界集中验证。
+
+工具族内部的聚合模块对数量较多的同领域 `use` / `pub use` 使用 `::*`，不保留只转发或只改名的
+函数、re-export 薄层。glob 出口以 item visibility 为公共 API 边界：实现细节和输入类型保持私有或
+`pub(crate)`；跨领域且具有筛选含义的稳定出口继续显式列出。
+
 ## 结果回传
 
 工具结果进入模型上下文时仍使用字符串内容。失败结果必须包含稳定前缀和原始错误文本：

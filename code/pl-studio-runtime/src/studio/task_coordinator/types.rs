@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 mod merge;
@@ -670,15 +671,17 @@ pub(crate) struct WorkCompletionRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReviewDesignReference {
+    /// Normalized design/** path that was actually read.
     pub(crate) path: String,
+    /// Section text present in the referenced design file.
     pub(crate) section: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReviewFinding {
     pub(crate) severity: String,
     pub(crate) title: String,
@@ -687,7 +690,9 @@ pub(crate) struct ReviewFinding {
     /// 审查者只读，不直接打补丁；executor 据此 rework。
     #[serde(default)]
     pub(crate) recommendation: String,
+    #[schemars(required)]
     pub(crate) path: Option<String>,
+    #[schemars(required)]
     pub(crate) line: Option<u32>,
     #[serde(default)]
     pub(crate) design_references: Vec<ReviewDesignReference>,

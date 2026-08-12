@@ -2,14 +2,13 @@ use pl_model::SearchCommands;
 use pl_protocol::PureError;
 use serde_json::{Value, json};
 
+use crate::tool::deserialize_tool_input;
+
 use super::TOOL_WEB_SEARCH;
 
 pub(super) fn parse_commands(mut arguments: Value) -> Result<SearchCommands, PureError> {
     normalize_command_arguments(&mut arguments);
-    serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-        tool: TOOL_WEB_SEARCH.to_string(),
-        error: format!("invalid input: {error}"),
-    })
+    deserialize_tool_input(TOOL_WEB_SEARCH, arguments)
 }
 
 fn normalize_command_arguments(arguments: &mut Value) {

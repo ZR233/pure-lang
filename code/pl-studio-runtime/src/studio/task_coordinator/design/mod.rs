@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use self::git::*;
@@ -15,8 +16,8 @@ use super::git::inspect_repository;
 use super::{BranchLeaseRecord, DesignUpdateOutput, TaskCoordinator, TaskRunPhase, TaskRunRecord};
 use crate::ToolEffect;
 use crate::tool::{
-    LocalWorkspaceFileBackend, RegisteredTool, ToolExecutionResult, ToolInputSchemaField,
-    apply_patch_to_backend, strict_tool_input_schema,
+    FunctionToolDefinition, LocalWorkspaceFileBackend, RegisteredTool, ToolExecutionResult,
+    apply_patch_to_backend,
 };
 
 #[cfg(test)]
@@ -44,9 +45,10 @@ impl DesignCommitTestBarrier {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TaskUpdateDesignInput {
+    /// Exactly one complete Codex patch block for design/**.
     patch: String,
 }
 
@@ -90,26 +92,18 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let root_thread_id = root_thread_id.into();
-        RegisteredTool::from_fallible_execution_result(
+        FunctionToolDefinition::<TaskUpdateDesignInput>::new(
             "task_update_design",
             "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. Every Update hunk line starts with a control prefix: space for context, `-` for deletion, or `+` for addition. Preserve a leading `-` or `+` in the file content after that prefix; for example, replace Markdown `- old` with `-- old` and `+- new`. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
-            strict_tool_input_schema([ToolInputSchemaField::required(
-                "patch",
-                serde_json::json!({
-                    "type": "string",
-                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt. In an Update hunk, prefix each line with space (context), `-` (deletion), or `+` (addition). Keep any leading `-` or `+` from the file content after that control prefix; replacing Markdown `- old` with `- new` requires `-- old` and `+- new`."
-                }),
-            )]),
-            move |input, context| {
+        )
+        .registered(move |arguments: TaskUpdateDesignInput, context| {
                 let coordinator = coordinator.clone();
                 let root_thread_id = root_thread_id.clone();
                 async move {
-                    let arguments: TaskUpdateDesignInput = serde_json::from_value(input.arguments)
-                        .context("invalid task_update_design input")?;
                     let output = coordinator
                         .update_design(
                             &root_thread_id,
-                                    context.workspace.root(),
+                            context.workspace.root(),
                             &arguments.patch,
                         )
                         .await
@@ -117,8 +111,7 @@ impl TaskCoordinator {
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
                 }
-            },
-        )
+            })
         .with_effect(ToolEffect::BranchControl)
     }
 

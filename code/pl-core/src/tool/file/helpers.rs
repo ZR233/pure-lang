@@ -1,20 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use pl_protocol::PureError;
-
 use super::path::WorkspacePaths;
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput};
 use crate::tool::{ToolContext, ToolOutput};
-
-pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
-    arguments: serde_json::Value,
-    tool: &str,
-) -> Result<T, PureError> {
-    serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: format!("invalid input: {error}. Check the tool schema and remove unknown fields"),
-    })
-}
+use pl_protocol::PureError;
 
 pub(super) fn text_output(description: String) -> ToolOutput {
     let stdout = TruncatedOutput {

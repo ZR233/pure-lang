@@ -8,5 +8,6 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-pub use read::StatPathTool;
-pub use write::{CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, WriteFileTool};
+pub use apply_patch::*;
+pub use read::*;
+pub use write::*;
