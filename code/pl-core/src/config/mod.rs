@@ -7,7 +7,7 @@ mod mcp;
 mod runtime;
 
 pub use crate::model_config::ReasoningEffort;
-pub use instruction::{DEFAULT_PROJECT_DOC_MAX_BYTES, InstructionsConfig};
+pub use instruction::*;
 pub use mcp::{
     BuiltinMcpServerState, EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy,
     McpServerSourceKind, McpServerStatusKind, McpServerTransport, active_mcp_server_names,
@@ -15,4 +15,4 @@ pub use mcp::{
     normalize_builtin_mcp_server_states, validate_builtin_mcp_server_states,
     validate_mcp_identifier, validate_mcp_servers, zhipu_coding_plan_token,
 };
-pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig, ToolCapabilityConfig};
+pub use runtime::*;

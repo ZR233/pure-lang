@@ -1258,10 +1258,7 @@ fn tool_result_continuation(output: &str) -> Option<String> {
 mod receipt_tests {
     use pretty_assertions::assert_eq;
 
-    use super::{
-        ToolExecutionRecord, apply_model_tool_output_batch_budget, compact_artifact_reference,
-        normalize_programmatic_tool_results, tool_orchestration_options, tool_result_receipt,
-    };
+    use super::*;
 
     #[test]
     fn compatible_responses_proxy_uses_eager_direct_tools() {

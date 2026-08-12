@@ -7,6 +7,6 @@ mod manifest;
 mod types;
 
 pub use client::StudioUpdater;
-pub use error::{StudioUpdateError, StudioUpdateErrorCode};
+pub use error::*;
 pub use install::StudioUpdateCancellation;
-pub use types::{StudioUpdate, StudioUpdateAsset, StudioUpdateCheck, StudioUpdateEvent};
+pub use types::*;
