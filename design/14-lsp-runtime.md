@@ -16,11 +16,17 @@ v1 只内置 `rust-analyzer`：
 `pl-lsp` 负责 LSP 协议和运行时：
 
 - 使用 `lsp-server::Message` 实现 stdio JSON-RPC framing 与 typed message 边界；两个专用阻塞
-  I/O 线程通过有界 Tokio channel 桥接异步 runtime。
+  I/O 线程通过有界 Tokio channel 桥接异步 runtime。阻塞线程包装 Tokio child stdio 时必须携带
+  创建端的 runtime handle，不得在线程内重新获取 runtime context。
 - 维护语言服务器进程、异步 request id/pending response、notification handler。
 - 维护 server 快照、打开文档版本、diagnostics 缓存。
 - 提供 `LspRuntimeRegistry` 给 `pl-core` 和 Studio 复用。
-- 关闭 runtime 时先走 LSP `shutdown` / `exit`，再显式等待子进程退出；超时后按进程树强制终止，Drop 只作为兜底清理。
+- registry shutdown 是终止态：必须先阻止新的 workspace reconcile 和 client 启动，
+  等待已在进行的 server 探测/reconcile 离开共享生命周期门，再与已在进行的
+  client 启动串行化并取走全部 server owner。不得在 shutdown 快照之后重新发布
+  语言服务器进程。
+- 关闭 runtime 时先走 LSP `shutdown` / `exit`，再显式等待完整子进程树退出；
+  超时后按进程树强制终止并等待，最后关闭 stdio transport。Drop 只作为兜底清理。
 
 `pl-core` 负责把 LSP 能力接入通用 turn engine，`pl-studio-runtime` 负责产品生命周期：
 
@@ -75,6 +81,7 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 - `diagnostics`
 
 位置类输入使用 1-based `line` / `character`，内部转换为 LSP 0-based UTF-16 position。输出为结构化 JSON 文本，包含 `success`、`operation`、`serverId`、`result`、`resultCount`、`fileCount`。
+`findReferences` 默认包含目标符号的声明位置，确保定义与所有调用点组成完整引用集合。
 
 当 `lsp_query_rust`（或其他语言对应的 LSP 工具）可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配或配置搜索回退到 `exec` + `rg`，文件名搜索回退到 `exec` + `rg --files`；非支持语言、LSP 未激活或 LSP 返回不可用错误时使用相同回退，当前平台没有 ripgrep 时再使用等价的平台命令。
 
@@ -87,6 +94,10 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 `pl-lsp` 只接受已解析的绝对路径来生成 LSP file URI，不依赖 `std::env::current_dir()` 兜底。Windows 下 `std::fs::canonicalize` 可能返回 `\\?\` 或 `\\?\UNC\` verbatim path；runtime 生成 LSP file URI 前必须转回普通 drive/UNC 路径，避免向语言服务器发送包含 `%3F` 的无效 URI。
 
 `rust-analyzer` 可能在索引期间返回 `ContentModified` 错误 `-32801`，runtime 对该错误做最多 3 次指数退避重试。
+位置类语义查询若在语言服务器仍处于启动活动时返回空结果，runtime 会有界等待已观察到的
+后台活动结束并在短暂启动窗口内退避重试；客户端初始的默认 `Idle` 不代表启动活动已经完成。
+重试次数和总等待时间都有严格上限，重复查询不会为内容未变化的已打开文档发送伪造的
+`didChange`。最终空结果仍按合法查询结果返回。
 
 ## 非目标
 

@@ -89,9 +89,12 @@ impl LspClientStatus {
     }
 
     pub fn clear_progress(&mut self) -> bool {
-        let changed = !self.progress.is_empty() || !self.registered_progress_tokens.is_empty();
+        let changed = !self.progress.is_empty()
+            || !self.registered_progress_tokens.is_empty()
+            || self.next_progress_sequence != 0;
         self.registered_progress_tokens.clear();
         self.progress.clear();
+        self.next_progress_sequence = 0;
         changed
     }
 
@@ -117,6 +120,10 @@ impl LspClientStatus {
             last_error: self.last_error.clone(),
             last_error_at: self.last_error_at,
         }
+    }
+
+    pub fn is_idle_after_observed_activity(&self) -> bool {
+        self.next_progress_sequence > 0 && self.progress.is_empty()
     }
 }
 
@@ -224,6 +231,15 @@ mod tests {
             )),
         }));
         assert_eq!(status.runtime_status().activity_kind, LspActivityKind::Idle);
+        assert!(status.is_idle_after_observed_activity());
+    }
+
+    #[test]
+    fn initial_idle_is_not_treated_as_completed_activity() {
+        let status = LspClientStatus::default();
+
+        assert_eq!(status.runtime_status().activity_kind, LspActivityKind::Idle);
+        assert!(!status.is_idle_after_observed_activity());
     }
 
     #[test]

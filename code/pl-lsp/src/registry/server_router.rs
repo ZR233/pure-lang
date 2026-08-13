@@ -18,6 +18,11 @@ impl LspRuntimeRegistry {
             .server_id_for_query_in_workspace(workspace_root, query)
             .await?;
         let mut state = self.state.lock().await;
+        if state.closed {
+            return Err(LspRuntimeError::Unavailable(
+                "LSP runtime is shutting down".to_string(),
+            ));
+        }
         let workspace = state.workspaces.get_mut(workspace_root).ok_or_else(|| {
             LspRuntimeError::Unavailable(format!(
                 "LSP workspace is not configured: {}",

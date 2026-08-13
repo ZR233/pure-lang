@@ -11,6 +11,7 @@ use serde_json::Value;
 use tokio::io::BufReader;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::client_config::{initialize_params, watched_file_event_params};
 use crate::client_retry::is_content_modified_error;
@@ -38,9 +39,12 @@ pub(crate) struct LspClient {
     transport: Mutex<Option<LspTransport>>,
     rpc: RwLock<Option<RpcClient>>,
     opened_files: Mutex<HashMap<PathBuf, OpenDocument>>,
+    document_sync: Mutex<()>,
     initialized: Arc<AtomicBool>,
     connection_generation: Arc<AtomicU64>,
-    start_lock: Mutex<()>,
+    lifecycle_lock: Mutex<()>,
+    shutdown_requested: CancellationToken,
+    closed: AtomicBool,
     diagnostics: DiagnosticSink,
     status: Arc<Mutex<LspClientStatus>>,
 }
@@ -59,6 +63,7 @@ impl std::fmt::Debug for LspClient {
 struct OpenDocument {
     uri: String,
     version: i32,
+    content: String,
 }
 
 impl LspClient {
@@ -69,9 +74,12 @@ impl LspClient {
             transport: Mutex::new(None),
             rpc: RwLock::new(None),
             opened_files: Mutex::new(HashMap::new()),
+            document_sync: Mutex::new(()),
             initialized: Arc::new(AtomicBool::new(false)),
             connection_generation: Arc::new(AtomicU64::new(0)),
-            start_lock: Mutex::new(()),
+            lifecycle_lock: Mutex::new(()),
+            shutdown_requested: CancellationToken::new(),
+            closed: AtomicBool::new(false),
             diagnostics,
             status: Arc::new(Mutex::new(LspClientStatus::default())),
         }
@@ -99,32 +107,59 @@ impl LspClient {
         if file_size > MAX_FILE_SIZE_BYTES {
             return Ok(());
         }
-        let text = content;
-        let language_id = self.definition.language_for_path(path).unwrap_or("text");
-        self.notify(
-            "textDocument/didOpen",
-            serde_json::json!({
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": language_id,
-                    "version": 1,
-                    "text": text,
-                }
-            }),
-        )
-        .await?;
-        self.opened_files.lock().await.insert(
-            path.to_path_buf(),
-            OpenDocument {
-                uri: uri.to_string(),
-                version: 1,
-            },
-        );
+        let _sync = self.document_sync.lock().await;
+        let document = self.opened_files.lock().await.get(path).cloned();
+        if let Some(document) = document {
+            if document.content == content {
+                return Ok(());
+            }
+            let next_version = document.version + 1;
+            self.notify(
+                "textDocument/didChange",
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": document.uri,
+                        "version": next_version,
+                    },
+                    "contentChanges": [{
+                        "text": content.clone(),
+                    }],
+                }),
+            )
+            .await?;
+            if let Some(document) = self.opened_files.lock().await.get_mut(path) {
+                document.version = next_version;
+                document.content = content;
+            }
+        } else {
+            let language_id = self.definition.language_for_path(path).unwrap_or("text");
+            self.notify(
+                "textDocument/didOpen",
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": language_id,
+                        "version": 1,
+                        "text": content.clone(),
+                    }
+                }),
+            )
+            .await?;
+            self.opened_files.lock().await.insert(
+                path.to_path_buf(),
+                OpenDocument {
+                    uri: uri.to_string(),
+                    version: 1,
+                    content,
+                },
+            );
+        }
         Ok(())
     }
 
     pub async fn close_document(&self, path: &Path) -> LspResult<()> {
-        let document = self.opened_files.lock().await.remove(path);
+        let _sync = self.document_sync.lock().await;
+        let document = self.opened_files.lock().await.get(path).cloned();
         if let Some(document) = document {
             self.notify(
                 "textDocument/didClose",
@@ -135,28 +170,37 @@ impl LspClient {
                 }),
             )
             .await?;
+            self.opened_files.lock().await.remove(path);
         }
         Ok(())
     }
 
     pub async fn change_document(&self, path: &Path) -> LspResult<()> {
-        let mut opened_files = self.opened_files.lock().await;
-        if let Some(document) = opened_files.get_mut(path) {
-            document.version += 1;
-            let content = tokio::fs::read_to_string(path).await?;
+        let content = tokio::fs::read_to_string(path).await?;
+        let _sync = self.document_sync.lock().await;
+        let document = self.opened_files.lock().await.get(path).cloned();
+        if let Some(document) = document {
+            if document.content == content {
+                return Ok(());
+            }
+            let next_version = document.version + 1;
             self.notify(
                 "textDocument/didChange",
                 serde_json::json!({
                     "textDocument": {
                         "uri": document.uri,
-                        "version": document.version,
+                        "version": next_version,
                     },
                     "contentChanges": [{
-                        "text": content,
+                        "text": content.clone(),
                     }],
                 }),
             )
             .await?;
+            if let Some(document) = self.opened_files.lock().await.get_mut(path) {
+                document.version = next_version;
+                document.content = content;
+            }
         }
         Ok(())
     }
@@ -172,21 +216,32 @@ impl LspClient {
     }
 
     pub async fn shutdown(&self) {
-        if self.initialized.swap(false, Ordering::Relaxed)
-            && let Ok(rpc) = self.rpc()
-        {
+        self.closed.store(true, Ordering::Release);
+        self.shutdown_requested.cancel();
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        self.shutdown_connection_locked().await;
+    }
+
+    async fn shutdown_connection_locked(&self) {
+        let was_initialized = self.initialized.swap(false, Ordering::Relaxed);
+        if was_initialized && let Ok(rpc) = self.rpc() {
             let _ = rpc
                 .request("shutdown", Value::Null, Duration::from_secs(3))
                 .await;
             let _ = rpc.notify("exit", Value::Null).await;
         }
         if let Some(mut child) = self.child.lock().await.take() {
-            match tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait()).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(_)) | Err(_) => {
-                    let kill = child.kill();
-                    let _ = std::pin::Pin::from(kill).await;
+            if was_initialized {
+                match tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) | Err(_) => {
+                        let kill = child.kill();
+                        let _ = std::pin::Pin::from(kill).await;
+                    }
                 }
+            } else if !child.try_wait().is_ok_and(|status| status.is_some()) {
+                let kill = child.kill();
+                let _ = std::pin::Pin::from(kill).await;
             }
         }
         self.connection_generation.fetch_add(1, Ordering::Relaxed);
@@ -204,6 +259,31 @@ impl LspClient {
         self.status.lock().await.runtime_status()
     }
 
+    #[cfg(test)]
+    pub async fn child_id_for_test(&self) -> Option<u32> {
+        self.child
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|child| child.id())
+    }
+
+    pub async fn wait_until_idle(&self, timeout: Duration) {
+        let mut updates = self.diagnostics.updates.subscribe();
+        let wait = async {
+            loop {
+                if self.status.lock().await.is_idle_after_observed_activity() {
+                    return;
+                }
+                match updates.recv().await {
+                    Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        };
+        let _ = tokio::time::timeout(timeout, wait).await;
+    }
+
     async fn notify_watched_file_event(&self, path: &Path, typ: FileChangeType) -> LspResult<()> {
         if !self.initialized.load(Ordering::Relaxed) {
             return Ok(());
@@ -217,14 +297,24 @@ impl LspClient {
     }
 
     async fn ensure_started(&self) -> LspResult<()> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(LspRuntimeError::Unavailable(
+                "LSP client is shutting down".to_string(),
+            ));
+        }
         if self.initialized.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let _guard = self.start_lock.lock().await;
+        let _guard = self.lifecycle_lock.lock().await;
+        if self.closed.load(Ordering::Acquire) {
+            return Err(LspRuntimeError::Unavailable(
+                "LSP client is shutting down".to_string(),
+            ));
+        }
         if self.initialized.load(Ordering::Relaxed) {
             return Ok(());
         }
-        self.stop_stale_connection().await;
+        self.stop_stale_connection_locked().await;
 
         let mut command = Command::new(&self.definition.command);
         command.args(&self.definition.args);
@@ -282,21 +372,34 @@ impl LspClient {
             });
         }
 
-        let initialize = rpc
-            .request(
+        let initialize = tokio::select! {
+            biased;
+            _ = self.shutdown_requested.cancelled() => {
+                self.shutdown_connection_locked().await;
+                return Err(LspRuntimeError::Unavailable(
+                    "LSP client is shutting down".to_string(),
+                ));
+            }
+            initialize = rpc.request(
                 "initialize",
                 initialize_params(&self.definition),
                 STARTUP_TIMEOUT,
-            )
-            .await;
+            ) => initialize,
+        };
         if let Err(error) = initialize {
             self.record_last_error(error.to_string()).await;
-            self.shutdown().await;
+            self.shutdown_connection_locked().await;
             return Err(error);
+        }
+        if self.closed.load(Ordering::Acquire) {
+            self.shutdown_connection_locked().await;
+            return Err(LspRuntimeError::Unavailable(
+                "LSP client is shutting down".to_string(),
+            ));
         }
         if let Err(error) = rpc.notify("initialized", serde_json::json!({})).await {
             self.record_last_error(error.to_string()).await;
-            self.shutdown().await;
+            self.shutdown_connection_locked().await;
             return Err(error);
         }
         self.initialized.store(true, Ordering::Relaxed);
@@ -386,14 +489,14 @@ impl LspClient {
             .ok_or_else(|| LspRuntimeError::Unavailable("LSP transport unavailable".to_string()))
     }
 
-    async fn stop_stale_connection(&self) {
+    async fn stop_stale_connection_locked(&self) {
         if self.child.lock().await.is_none()
             && self.transport.lock().await.is_none()
             && self.rpc.read().is_ok_and(|rpc| rpc.is_none())
         {
             return;
         }
-        self.shutdown().await;
+        self.shutdown_connection_locked().await;
     }
 
     async fn record_last_error(&self, message: String) {
@@ -416,4 +519,67 @@ fn generation_is_current(current: &AtomicU64, generation: u64) -> bool {
 fn is_error_stderr_line(line: &str) -> bool {
     let line = line.to_ascii_lowercase();
     line.contains("warn") || line.contains("error")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::process::Stdio;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_in_flight_start_before_taking_child() {
+        let client = Arc::new(test_client());
+        let lifecycle_guard = client.lifecycle_lock.lock().await;
+        let shutting_down = client.clone();
+        let shutdown = tokio::spawn(async move { shutting_down.shutdown().await });
+        while !client.closed.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command.arg("--list");
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::null());
+        command.stderr(Stdio::null());
+        let child = command.spawn().expect("spawn short-lived test child");
+        client.child.lock().await.replace(Box::new(child));
+        drop(lifecycle_guard);
+
+        tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .expect("shutdown must finish")
+            .expect("shutdown task must not panic");
+        assert!(client.child.lock().await.is_none());
+        assert!(
+            matches!(
+                client.ensure_started().await,
+                Err(LspRuntimeError::Unavailable(message))
+                    if message == "LSP client is shutting down"
+            ),
+            "a terminally closed client must not start another child"
+        );
+    }
+
+    fn test_client() -> LspClient {
+        let (updates, _) = tokio::sync::broadcast::channel(4);
+        let workspace_root = std::env::current_dir().expect("current test directory");
+        let definition = LspServerDefinition {
+            id: "test-lsp".to_string(),
+            display_name: "Test LSP".to_string(),
+            command: "unused-test-command".to_string(),
+            args: Vec::new(),
+            extensions: vec![".rs".to_string()],
+            language_ids: vec!["rust".to_string()],
+            workspace_root: workspace_root.clone(),
+        };
+        let diagnostics = DiagnosticSink::new(
+            definition.id.clone(),
+            workspace_root,
+            Arc::new(Mutex::new(HashMap::new())),
+            updates,
+        );
+        LspClient::new(definition, diagnostics)
+    }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,7 +28,7 @@ class PureStudioApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _StudioLifecycleCoordinator(
+    return StudioLifecycleCoordinator(
       child: _EagerInitialization(
         child: MaterialApp.router(
           onGenerateTitle: (context) => context.l10n.appTitle,
@@ -44,20 +45,24 @@ class PureStudioApp extends StatelessWidget {
   }
 }
 
-class _StudioLifecycleCoordinator extends StatefulWidget {
-  const _StudioLifecycleCoordinator({required this.child});
+class StudioLifecycleCoordinator extends StatefulWidget {
+  const StudioLifecycleCoordinator({
+    required this.child,
+    this.shutdown,
+    super.key,
+  });
 
   final Widget child;
+  final Future<void> Function()? shutdown;
 
   @override
-  State<_StudioLifecycleCoordinator> createState() =>
+  State<StudioLifecycleCoordinator> createState() =>
       _StudioLifecycleCoordinatorState();
 }
 
-class _StudioLifecycleCoordinatorState
-    extends State<_StudioLifecycleCoordinator>
+class _StudioLifecycleCoordinatorState extends State<StudioLifecycleCoordinator>
     with WidgetsBindingObserver {
-  bool _shutdownRequested = false;
+  Future<void>? _shutdownFuture;
 
   @override
   void initState() {
@@ -68,23 +73,26 @@ class _StudioLifecycleCoordinatorState
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
-      _shutdown();
+      unawaited(_shutdown());
     }
+  }
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await _shutdown();
+    return AppExitResponse.exit;
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _shutdown();
+    unawaited(_shutdown());
     super.dispose();
   }
 
-  void _shutdown() {
-    if (_shutdownRequested) {
-      return;
-    }
-    _shutdownRequested = true;
-    unawaited(FrbStudioApi.shutdownAndDispose());
+  Future<void> _shutdown() {
+    return _shutdownFuture ??=
+        (widget.shutdown ?? FrbStudioApi.shutdownAndDispose)();
   }
 
   @override

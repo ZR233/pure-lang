@@ -15,10 +15,11 @@ tokio = { workspace = true }
 url = { workspace = true }
 process-wrap = { workspace = true }
 lsp-server = { workspace = true }
-tokio-util = { workspace = true, features = ["io-util"] }
+tokio-util = { workspace = true, features = ["io-util", "rt"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

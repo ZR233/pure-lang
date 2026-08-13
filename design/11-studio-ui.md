@@ -14,6 +14,11 @@ Flutter 分层保持简单：
 Controller 负责命令和订阅生命周期，不承担 timeline 投影。Widget 只读取 view model，不直接
 订阅 bridge 或拼接多个事实表。
 
+桌面窗口的可取消关闭请求必须等待 typed bridge `shutdownRuntime` 完成后才允许引擎
+销毁。`detached` 和 widget `dispose` 只是不可等待的兜底信号，它们复用同一个幂等
+shutdown future。该 future 顺序关闭 Agent、MCP 和 LSP，并等待所有后台子进程树退出；
+不得用未等待的 Dart callback 作为正常 GUI 退出路径。
+
 ## 11.2 Canonical state
 
 Flutter canonical state 只有：

@@ -82,6 +82,7 @@ abstract class StudioApi {
 
 class FrbStudioApi implements StudioApi {
   static Future<void>? _initFuture;
+  static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
   static bool _rustInitialized = false;
   ProviderCatalogView? _providerCatalogCache;
@@ -93,10 +94,16 @@ class FrbStudioApi implements StudioApi {
     Future<void> Function()? initialization,
   ) {
     _initFuture = null;
+    _shutdownFuture = null;
     _initializationOverrideForTesting = initialization;
   }
 
   static Future<void> _ensureReady() {
+    if (_shutdownFuture != null) {
+      return Future<void>.error(
+        _studioFailure(StateError('Studio runtime is shutting down')),
+      );
+    }
     final existing = _initFuture;
     if (existing != null) {
       return existing;
@@ -124,21 +131,28 @@ class FrbStudioApi implements StudioApi {
     return attempt;
   }
 
-  static Future<void> shutdownAndDispose() async {
-    if (!_rustInitialized) {
-      return;
-    }
-    try {
-      final initialization = _initFuture;
-      if (initialization != null) {
+  static Future<void> shutdownAndDispose() {
+    return _shutdownFuture ??= _shutdownAndDispose();
+  }
+
+  static Future<void> _shutdownAndDispose() async {
+    final initialization = _initFuture;
+    if (initialization != null) {
+      try {
         await initialization;
+      } on Object {
+        // A partial initialization may still own the native runtime.
       }
+    }
+    if (!_rustInitialized) return;
+    try {
       await frb.shutdownRuntime();
     } on Object {
       // Process teardown is best effort; Rust diagnostics retain the cause.
     } finally {
       RustLib.dispose();
       _rustInitialized = false;
+      _initFuture = null;
     }
   }
 

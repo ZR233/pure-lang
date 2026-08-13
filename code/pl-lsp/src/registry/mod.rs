@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast};
 
 use crate::client::LspClient;
 use crate::formatting::{format_diagnostics, format_lsp_result};
@@ -30,6 +30,7 @@ use crate::server_definition::RUST_ANALYZER_ID;
 #[derive(Clone)]
 pub struct LspRuntimeRegistry {
     state: Arc<Mutex<LspRuntimeState>>,
+    lifecycle: Arc<RwLock<()>>,
     updates: broadcast::Sender<()>,
 }
 
@@ -50,6 +51,7 @@ impl LspRuntimeRegistry {
         let (updates, _) = broadcast::channel(64);
         Self {
             state: Arc::new(Mutex::new(LspRuntimeState::default())),
+            lifecycle: Arc::new(RwLock::new(())),
             updates,
         }
     }
@@ -253,6 +255,8 @@ impl LspRuntimeRegistry {
     }
 
     pub async fn shutdown(&self) {
+        self.state.lock().await.closed = true;
+        let _lifecycle_guard = self.lifecycle.write().await;
         let clients = {
             let mut state = self.state.lock().await;
             let clients = state
@@ -272,6 +276,13 @@ impl LspRuntimeRegistry {
 
     async fn reconcile_workspace_with_command(&self, workspace_root: &Path, command: &str) {
         let workspace_root = canonical_workspace_root(workspace_root);
+        if self.state.lock().await.closed {
+            return;
+        }
+        let _lifecycle_guard = self.lifecycle.read().await;
+        if self.state.lock().await.closed {
+            return;
+        }
 
         let definition = rust_analyzer_definition(&workspace_root, command);
         let mut next = if !workspace_root.join("Cargo.toml").exists() {
@@ -311,6 +322,9 @@ impl LspRuntimeRegistry {
         };
         {
             let mut state = self.state.lock().await;
+            if state.closed {
+                return;
+            }
             let workspace = state.workspaces.entry(workspace_root).or_default();
             next.client = workspace
                 .servers
@@ -423,6 +437,7 @@ fn canonical_workspace_root(workspace_root: &Path) -> PathBuf {
 #[derive(Default)]
 struct LspRuntimeState {
     workspaces: BTreeMap<PathBuf, LspWorkspaceState>,
+    closed: bool,
 }
 
 #[derive(Default)]
@@ -539,16 +554,76 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires rust-analyzer component and starts the language server"]
-    async fn live_rust_analyzer_document_symbol_query() {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(Path::parent)
-            .expect("workspace root")
-            .to_path_buf();
+    async fn live_rust_analyzer_queries_unique_cargo_demo() {
+        let workspace = tempfile::tempdir().expect("temporary Cargo demo");
+        let workspace_root = workspace.path().to_path_buf();
+        let source_root = workspace_root.join("src");
+        fs::create_dir_all(&source_root).expect("create demo source directory");
+        fs::write(
+            workspace_root.join("Cargo.toml"),
+            "[package]\nname='pure_lsp_live_demo'\nversion='0.1.0'\nedition='2024'\n",
+        )
+        .expect("write demo manifest");
+        let library = source_root.join("lib.rs");
+        fs::write(&library, "pub fn answer() -> i32 {\n    42\n}\n").expect("write demo library");
+        let binary = source_root.join("main.rs");
+        fs::write(
+            &binary,
+            "use pure_lsp_live_demo::answer;\n\nfn main() {\n    println!(\"{}\", answer());\n}\n",
+        )
+        .expect("write demo binary");
         let registry = LspRuntimeRegistry::new();
 
         registry.reconcile_workspace(&workspace_root).await;
         let snapshots = registry.snapshots().await;
+        let outcome = async {
+            let document_symbols = registry
+                .query(live_query(
+                    LspQueryOperation::DocumentSymbol,
+                    &library,
+                    None,
+                ))
+                .await?;
+            let hover = registry
+                .query(live_query(LspQueryOperation::Hover, &library, Some((1, 8))))
+                .await?;
+            let definition = registry
+                .query(live_query(
+                    LspQueryOperation::GoToDefinition,
+                    &binary,
+                    Some((4, 20)),
+                ))
+                .await?;
+            let references = registry
+                .query(live_query(
+                    LspQueryOperation::FindReferences,
+                    &binary,
+                    Some((4, 20)),
+                ))
+                .await?;
+            Ok::<_, LspRuntimeError>((document_symbols, hover, definition, references))
+        }
+        .await;
+        let process_id = registry
+            .client_for_query_in_workspace(
+                &canonical_workspace_root(&workspace_root),
+                &live_query(LspQueryOperation::DocumentSymbol, &library, None),
+            )
+            .await
+            .expect("live rust-analyzer client")
+            .2
+            .child_id_for_test()
+            .await
+            .expect("live rust-analyzer process id");
+        registry.shutdown().await;
+
+        #[cfg(windows)]
+        assert!(
+            !windows_process_is_running(process_id),
+            "rust-analyzer process {process_id} survived registry shutdown"
+        );
+        #[cfg(not(windows))]
+        let _ = process_id;
 
         assert_eq!(snapshots.len(), 1);
         assert_eq!(
@@ -557,28 +632,62 @@ mod tests {
             "{}",
             snapshots[0].availability_message.as_deref().unwrap_or("")
         );
-
-        let result = registry
-            .query(LspQuery {
-                operation: LspQueryOperation::DocumentSymbol,
-                file_path: Some(workspace_root.join("code/pl-lsp/src/registry.rs")),
-                line: None,
-                character: None,
-                query: None,
-                max_results: None,
-                language_id: None,
-            })
-            .await
-            .expect("document symbol query");
-
-        assert!(result.success);
-        assert_eq!(result.server_id.as_deref(), Some(RUST_ANALYZER_ID));
+        let (document_symbols, hover, definition, references) =
+            outcome.expect("live rust-analyzer queries");
+        eprintln!("document symbols:\n{}", document_symbols.result);
+        eprintln!("hover:\n{}", hover.result);
+        eprintln!("definition:\n{}", definition.result);
+        eprintln!("references:\n{}", references.result);
+        for result in [&document_symbols, &hover, &definition, &references] {
+            assert!(result.success);
+            assert_eq!(result.server_id.as_deref(), Some(RUST_ANALYZER_ID));
+        }
+        assert!(document_symbols.result.contains("answer"));
+        assert!(hover.result.contains("answer"), "{}", hover.result);
         assert!(
-            result.result.contains("LspRuntimeRegistry"),
+            definition.result.replace('\\', "/").contains("src/lib.rs"),
             "{}",
-            result.result
+            definition.result
         );
-        registry.shutdown().await;
+        assert!(references.result_count.is_some_and(|count| count >= 2));
+        let reference_paths = references.result.replace('\\', "/");
+        assert!(reference_paths.contains("src/lib.rs"), "{reference_paths}");
+        assert!(reference_paths.contains("src/main.rs"), "{reference_paths}");
+    }
+
+    fn live_query(
+        operation: LspQueryOperation,
+        file_path: &Path,
+        position: Option<(u32, u32)>,
+    ) -> LspQuery {
+        LspQuery {
+            operation,
+            file_path: Some(file_path.to_path_buf()),
+            line: position.map(|(line, _)| line),
+            character: position.map(|(_, character)| character),
+            query: None,
+            max_results: None,
+            language_id: Some("rust".to_string()),
+        }
+    }
+
+    #[cfg(windows)]
+    fn windows_process_is_running(process_id: u32) -> bool {
+        use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        let Ok(process) =
+            (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
+        else {
+            return false;
+        };
+        let mut exit_code = 0;
+        let running = unsafe { GetExitCodeProcess(process, &mut exit_code) }.is_ok()
+            && exit_code == STILL_ACTIVE.0 as u32;
+        let _ = unsafe { CloseHandle(process) };
+        running
     }
 
     #[tokio::test]
@@ -586,6 +695,50 @@ mod tests {
         let registry = LspRuntimeRegistry::new();
         let languages = registry.available_languages().await;
         assert!(languages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_is_terminal_and_reconcile_cannot_publish_a_workspace() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[package]\nname='closed_registry'\nversion='0.1.0'\n",
+        )
+        .expect("write manifest");
+        let registry = LspRuntimeRegistry::new();
+
+        registry.shutdown().await;
+        registry
+            .reconcile_workspace_with_command(
+                workspace.path(),
+                "command-must-not-run-after-lsp-shutdown",
+            )
+            .await;
+
+        let state = registry.state.lock().await;
+        assert!(state.closed);
+        assert!(state.workspaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_in_flight_reconcile_section() {
+        let registry = LspRuntimeRegistry::new();
+        let reconcile_guard = registry.lifecycle.read().await;
+        let shutting_down = registry.clone();
+        let shutdown = tokio::spawn(async move { shutting_down.shutdown().await });
+        loop {
+            if registry.state.lock().await.closed {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        assert!(!shutdown.is_finished());
+        drop(reconcile_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(5), shutdown)
+            .await
+            .expect("shutdown must finish after reconcile releases its lease")
+            .expect("shutdown task must not panic");
     }
 
     #[tokio::test]
