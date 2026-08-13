@@ -293,10 +293,7 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
 
   @override
   Future<void> waitForNoPendingFrame({Duration? timeout}) {
-    return _driver.waitForCondition(
-      const NoPendingFrame(),
-      timeout: timeout,
-    );
+    return _driver.waitForCondition(const NoPendingFrame(), timeout: timeout);
   }
 
   @override
