@@ -425,13 +425,7 @@ impl StudioAgentEventProjector {
             let progress = snapshot
                 .progress
                 .as_ref()
-                .map(|progress| StudioAgentProgressRuntime {
-                    stage: progress_stage_label(progress.report.stage).to_string(),
-                    summary: progress.report.summary.clone(),
-                    next_step: progress.report.next_step.clone(),
-                    revision: progress.report.revision,
-                    updated_at: progress.updated_at,
-                });
+                .map(StudioAgentProgressRuntime::from);
             let summary_age_seconds = u64::try_from(
                 crate::studio::ids::unix_seconds()
                     .saturating_sub(
@@ -700,6 +694,18 @@ pub(crate) const fn progress_stage_label(stage: AgentProgressStage) -> &'static 
         AgentProgressStage::Blocked => "blocked",
         AgentProgressStage::ReadyForCompletion => "readyForCompletion",
         AgentProgressStage::ReadyForReview => "readyForReview",
+    }
+}
+
+impl From<&pl_core::AgentProgressCheckpoint> for StudioAgentProgressRuntime {
+    fn from(progress: &pl_core::AgentProgressCheckpoint) -> Self {
+        Self {
+            stage: progress_stage_label(progress.report.stage).to_string(),
+            summary: progress.report.summary.clone(),
+            next_step: progress.report.next_step.clone(),
+            revision: progress.report.revision,
+            updated_at: progress.updated_at,
+        }
     }
 }
 

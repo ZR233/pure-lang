@@ -51,7 +51,7 @@ where
             .as_ref()
             && record.recovery_id == request.recovery_id
         {
-            return Ok(result_from_record(record));
+            return Ok(record.into());
         }
 
         self.validate_recovery_gate()?;
@@ -192,7 +192,7 @@ where
             ),
         )
         .await?;
-        Ok(result_from_record(&record))
+        Ok(record.into())
     }
 
     fn validate_recovery_gate(&self) -> AgentRuntimeResult<()> {
@@ -425,22 +425,6 @@ fn recovery_context(record: &ConversationRecoveryRecord) -> String {
         "对话上下文已恢复（mode={:?}, revision={}）。被回退对话不再是有效模型上下文。Task、WorkUnit、文件、Git commit、工具副作用和其他外部状态均未回滚；继续前必须读取 canonical Task 状态并检查当前工作区，以它们作为事实源。",
         record.mode, record.revision
     )
-}
-
-fn result_from_record(record: &ConversationRecoveryRecord) -> ConversationRecoveryResult {
-    ConversationRecoveryResult {
-        recovery_id: record.recovery_id.clone(),
-        mode: record.mode,
-        facts: super::super::ConversationRecoveryFacts {
-            recovery_revision: record.revision,
-            before_transcript_hash: record.before_transcript_hash.clone(),
-            after_transcript_hash: record.after_transcript_hash.clone(),
-        },
-        runtime_revision: record.runtime_revision,
-        thread_revision: record.thread_revision,
-        removed_item_count: record.removed_item_count,
-        removed_input_count: record.removed_input_count,
-    }
 }
 
 #[cfg(test)]

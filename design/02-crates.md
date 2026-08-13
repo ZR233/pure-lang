@@ -70,6 +70,9 @@ Instruction 领域进一步分离 wire/领域类型、宿主 profile、指令组
 修改时分离；`Arc` 不进入 protocol、repository 或 durable checkpoint，持久化边界始终物化为
 owned snapshot。单一所有者的大字段或大 enum 变体使用 `Box` 降低父类型的栈内尺寸；`Vec`、
 `String`、map 等自身已持有堆数据的容器不重复装箱。
+无失败、上下文无关的一对一领域转换使用 `From`；持久化行恢复为领域类型时，如果需要解析、
+范围检查或兼容校验，使用 `TryFrom` 并保留 repository 错误语义。依赖多来源上下文、会丢弃信息
+或携带业务默认的映射继续使用具名构造/投影函数，不为追求 `.into()` 形式而隐藏规则。
 
 ## 2.5 pl-studio-runtime
 

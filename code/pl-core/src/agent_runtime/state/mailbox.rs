@@ -1,4 +1,4 @@
-use pl_protocol::{ConversationRecoveryMode, InteractionRequest};
+use pl_protocol::{ConversationRecoveryMode, ConversationRecoveryRecord, InteractionRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::agent_runtime::{ThreadId, TurnId};
@@ -167,6 +167,42 @@ pub struct ConversationRecoveryResult {
     pub thread_revision: u64,
     pub removed_item_count: u64,
     pub removed_input_count: u64,
+}
+
+impl From<ConversationRecoveryRecord> for ConversationRecoveryResult {
+    fn from(record: ConversationRecoveryRecord) -> Self {
+        Self {
+            recovery_id: record.recovery_id,
+            mode: record.mode,
+            facts: ConversationRecoveryFacts {
+                recovery_revision: record.revision,
+                before_transcript_hash: record.before_transcript_hash,
+                after_transcript_hash: record.after_transcript_hash,
+            },
+            runtime_revision: record.runtime_revision,
+            thread_revision: record.thread_revision,
+            removed_item_count: record.removed_item_count,
+            removed_input_count: record.removed_input_count,
+        }
+    }
+}
+
+impl From<&ConversationRecoveryRecord> for ConversationRecoveryResult {
+    fn from(record: &ConversationRecoveryRecord) -> Self {
+        Self {
+            recovery_id: record.recovery_id.clone(),
+            mode: record.mode,
+            facts: ConversationRecoveryFacts {
+                recovery_revision: record.revision,
+                before_transcript_hash: record.before_transcript_hash.clone(),
+                after_transcript_hash: record.after_transcript_hash.clone(),
+            },
+            runtime_revision: record.runtime_revision,
+            thread_revision: record.thread_revision,
+            removed_item_count: record.removed_item_count,
+            removed_input_count: record.removed_input_count,
+        }
+    }
 }
 
 impl AgentSubmitRequest {

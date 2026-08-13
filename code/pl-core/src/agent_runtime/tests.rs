@@ -195,7 +195,7 @@ impl ThreadRepository for TestRepository {
                 .unwrap()
                 .entry(commit.agent_id.clone())
                 .or_default()
-                .push(submission.to_record());
+                .push(submission.into());
         }
         states.insert(commit.agent_id, commit.next_state);
         Ok(ThreadCommitOutcome::Applied)

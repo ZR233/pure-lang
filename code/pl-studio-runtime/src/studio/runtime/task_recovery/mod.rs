@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 use pl_core::{
     AgentActivityState, AgentId, AgentLifecycleState, AgentSubmitRequest, AgentTurnSubmitPolicy,
-    ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
-    MailboxPresentation,
+    ConversationRecoveryRequest, ConversationRecoveryTarget, MailboxPresentation,
 };
 use pl_protocol::{ConversationRecoveryMode, ThreadItemContent, ThreadToolCall, TurnState};
 
@@ -93,19 +92,7 @@ impl StudioRuntime {
         .await?;
         let target_agent_id = AgentId::new(request.target_thread_id.clone())?;
         let recovery = if let Some(record) = existing_recovery {
-            ConversationRecoveryResult {
-                recovery_id: record.recovery_id,
-                mode: record.mode,
-                facts: pl_core::ConversationRecoveryFacts {
-                    recovery_revision: record.revision,
-                    before_transcript_hash: record.before_transcript_hash,
-                    after_transcript_hash: record.after_transcript_hash,
-                },
-                runtime_revision: record.runtime_revision,
-                thread_revision: record.thread_revision,
-                removed_item_count: record.removed_item_count,
-                removed_input_count: record.removed_input_count,
-            }
+            record.into()
         } else {
             let preview = runtime
                 .preview_conversation_recovery(
