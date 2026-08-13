@@ -255,8 +255,10 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
 }
 
 fn ensure_frb_codegen_version() -> Result<()> {
-    let output = Command::new("flutter_rust_bridge_codegen")
-        .arg("--version")
+    let mut command = Command::new("flutter_rust_bridge_codegen");
+    command.arg("--version");
+    process::configure_background_command(&mut command);
+    let output = command
         .output()
         .context("failed to execute flutter_rust_bridge_codegen --version")?;
     if !output.status.success() {

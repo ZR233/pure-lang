@@ -66,6 +66,18 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 
 当前版本不承诺独立沙箱。工具系统必须由明确 `PermissionMode`、execution policy 和工具访问分类控制；默认模式为 `request-approval`，不保留独立审批策略。
 
+## 9.8 后台进程约定
+
+- GUI 运行时派生 shell、git、MCP server、LSP 等后台子进程时，Windows 必须使用
+  `CREATE_NO_WINDOW`，禁止弹出新的命令行窗口；Unix 使用独立进程组便于整树回收。
+- 进程配置的唯一工厂是 `pl_core::process`（`configure_background_command` /
+  `configure_background_std_command`），其他 crate 不得复制实现；`pl-lsp` 因依赖
+  方向（pl-core → pl-lsp）保留自己的 `spawn_background` 统一入口，语义与
+  pl-core 工厂等价；`pl-xtask` 在自身 process 模块内统一配置，所有子进程
+  创建入口必须经过它。
+- 启动路径的慢能力（MCP 探测、LSP probe）一律后台异步执行，结果经产品事件
+  流推送，不阻塞主界面骨架。
+
 ## 9.7 配置约定
 
 - 配置文件固定为 `~/.pure/config.toml`。

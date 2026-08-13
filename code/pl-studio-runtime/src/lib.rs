@@ -10,7 +10,6 @@ pub mod agent;
 pub mod config;
 mod config_editor;
 mod first_run;
-mod process;
 mod protocol;
 mod provider_usage;
 mod studio;

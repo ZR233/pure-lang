@@ -7,7 +7,30 @@ use std::process::{Command, ExitStatus, Stdio};
 #[cfg(windows)]
 mod windows;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// 统一为 xtask 派生的子进程应用平台配置。
+///
+/// Windows 上设置 `CREATE_NO_WINDOW`：xtask 从非控制台环境（IDE Run 按钮、
+/// 快捷方式、任务计划程序）启动时，`cmd /c flutter ...` 等控制台子进程
+/// 不得弹出新的命令行窗口。所有进程创建入口（`path_command` 与各
+/// `run_*_checked`）都必须经过本配置，调用点不得自行拼装 flags。
+pub(crate) fn configure_background_command(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
+    configure_background_command(command);
     print_command_context(command, display);
     let status = command
         .status()
@@ -16,6 +39,7 @@ pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
 }
 
 pub(crate) fn run_resident_checked(command: &mut Command, display: &str) -> Result<()> {
+    configure_background_command(command);
     print_command_context(command, display);
     #[cfg(windows)]
     windows::own_current_process_tree()
@@ -49,6 +73,7 @@ pub(crate) fn run_checked_with_stdin(
     display: &str,
     input: &[u8],
 ) -> Result<()> {
+    configure_background_command(command);
     print_command_context(command, display);
     command.stdin(Stdio::piped());
     let mut child = command
@@ -88,7 +113,7 @@ fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
 }
 
 pub(crate) fn path_command(program: &'static str, args: &[OsString]) -> Command {
-    if cfg!(windows) && matches!(program, "flutter" | "dart") {
+    let mut command = if cfg!(windows) && matches!(program, "flutter" | "dart") {
         let mut command = Command::new("cmd");
         command.arg("/c").arg(program);
         command.args(args);
@@ -97,7 +122,9 @@ pub(crate) fn path_command(program: &'static str, args: &[OsString]) -> Command 
         let mut command = Command::new(program);
         command.args(args);
         command
-    }
+    };
+    configure_background_command(&mut command);
+    command
 }
 
 pub(crate) fn display_command(program: &str, args: &[OsString]) -> String {

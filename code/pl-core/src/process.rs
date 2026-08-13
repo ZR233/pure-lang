@@ -7,7 +7,16 @@ use tokio::process::Command as TokioCommand;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-pub(crate) fn configure_background_command(command: &mut TokioCommand) {
+/// 后台子进程的统一配置工厂（全仓唯一来源）。
+///
+/// GUI 运行时派生 shell、git、MCP server、LSP 等后台子进程时必须通过这里的
+/// 配置函数收尾，禁止在调用点自行拼装 flags 或在其他 crate 复制本实现：
+/// Windows 上统一使用 `CREATE_NO_WINDOW`，保证 GUI 进程派生的控制台子进程
+/// 不弹出新的命令行窗口；Unix 上统一使用独立进程组，便于整树回收。
+///
+/// 调用约定：先构建 `Command`（program、args、cwd、env、stdio），再调用对应
+/// 配置函数，最后 `spawn`/`status`。`tokio` 版本额外启用 `kill_on_drop`。
+pub fn configure_background_command(command: &mut TokioCommand) {
     command.kill_on_drop(true);
     #[cfg(windows)]
     {
@@ -19,7 +28,7 @@ pub(crate) fn configure_background_command(command: &mut TokioCommand) {
     }
 }
 
-pub(crate) fn configure_background_std_command(command: &mut std::process::Command) {
+pub fn configure_background_std_command(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

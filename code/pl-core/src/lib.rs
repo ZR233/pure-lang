@@ -12,7 +12,7 @@ mod message;
 mod model_config;
 pub mod path_safety;
 mod permission;
-mod process;
+pub mod process;
 mod prompt_cache;
 pub mod runtime_usage;
 pub mod session;
