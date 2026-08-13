@@ -1,13 +1,12 @@
 use async_openai::types::stream::StreamResponse;
-use futures::Stream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use pl_protocol::{
     InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
     Result, ToolCallCaller,
 };
 use pl_trace::{AgentEventSender, TraceTextChannel};
 use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
 use std::time::Duration;
 
 pub(crate) mod event;
@@ -34,9 +33,8 @@ pub use event::{
     ToolInputDeltaPayload, ToolInputPayloadKind,
 };
 
-pub type CompletionEventStream = Pin<Box<dyn Stream<Item = Result<CompletionStreamEvent>> + Send>>;
-pub(crate) type OpenAiRawEventStream =
-    Pin<Box<dyn Stream<Item = Result<sse::SseStreamEvent>> + Send>>;
+pub type CompletionEventStream = BoxStream<'static, Result<CompletionStreamEvent>>;
+pub(crate) type OpenAiRawEventStream = BoxStream<'static, Result<sse::SseStreamEvent>>;
 const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub type CompletionStreamAccumulator = StreamCompletionAccumulator;
@@ -48,7 +46,7 @@ pub(crate) fn decode_provider_stream(
     let stream = stream.map(|event| {
         event.map_err(|error| PureError::LlmError(format!("provider stream error: {error}")))
     });
-    decode_openai_event_stream(Box::pin(stream), protocol)
+    decode_openai_event_stream(stream.boxed(), protocol)
 }
 
 pub(crate) fn decode_openai_event_stream(
@@ -62,7 +60,7 @@ pub(crate) fn decode_openai_event_stream(
         pending: VecDeque::new(),
     };
 
-    Box::pin(futures::stream::unfold(state, |mut state| async move {
+    futures::stream::unfold(state, |mut state| async move {
         loop {
             if let Some(event) = state.pending.pop_front() {
                 return Some((Ok(event), state));
@@ -83,7 +81,8 @@ pub(crate) fn decode_openai_event_stream(
                     .extend(state.visible_output.decode(stream_event));
             }
         }
-    }))
+    })
+    .boxed()
 }
 
 struct ProviderStreamDecodeState {

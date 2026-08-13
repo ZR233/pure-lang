@@ -2,6 +2,7 @@ use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
 use crate::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionScope, InteractionStatus,
 };
+use futures::FutureExt;
 use pl_core::{AgentLifecycleState, AgentRuntimeHandle, ThreadId};
 use pl_protocol::ThreadNotification;
 use pl_trace::TracePart;
@@ -106,7 +107,7 @@ impl StudioPlanConfirmationProjector {
             let runtime = runtime.clone();
             let thread_id = thread_id.clone();
             let agent_path = agent_path.clone();
-            Box::pin(async move {
+            async move {
                 let runtime = wait_for_runtime(runtime).await?;
                 let target_agent = pl_core::AgentId::new(agent_path.clone())?;
                 let target_thread = ThreadId::new(thread_id)?;
@@ -123,7 +124,8 @@ impl StudioPlanConfirmationProjector {
                     )
                     .await?;
                 Ok(())
-            })
+            }
+            .boxed()
         });
         self.interactions.create(interaction, emitter).await?;
         Ok(true)

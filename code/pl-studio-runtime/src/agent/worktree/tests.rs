@@ -1,9 +1,7 @@
 //! Studio worktree 生命周期测试。
 
 use std::fs;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
@@ -15,6 +13,7 @@ use super::{
     set_after_registration_remove_barrier,
 };
 use super::{WorktreeCreateSpec, WorktreeManager};
+use futures::FutureExt;
 
 /// 临时仓库目录序号，避免并发测试因时间戳碰撞命中同一目录。
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -291,8 +290,8 @@ impl WorktreeBackend for RemoveReportsFailureAfterDeletingLeaf {
         _branch: &'a str,
         _target_path: &'a Path,
         _base_commit: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeCreateFailure>> + Send + 'a>> {
-        Box::pin(async { Ok(()) })
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeCreateFailure>> {
+        async { Ok(()) }.boxed()
     }
 
     fn remove<'a>(
@@ -300,22 +299,23 @@ impl WorktreeBackend for RemoveReportsFailureAfterDeletingLeaf {
         _repo_root: &'a Path,
         target_path: &'a Path,
         _force: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
-        Box::pin(async move {
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+        async move {
             tokio::fs::remove_dir_all(target_path).await.unwrap();
             Err(WorktreeError::GitCommand {
                 args: "worktree remove --force".to_string(),
                 stderr: "Filename too long".to_string(),
             })
-        })
+        }
+        .boxed()
     }
 
     fn delete_branch<'a>(
         &'a self,
         _repo_root: &'a Path,
         _branch: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
-        Box::pin(async { Ok(()) })
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+        async { Ok(()) }.boxed()
     }
 }
 

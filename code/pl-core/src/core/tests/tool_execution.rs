@@ -1,6 +1,7 @@
 use super::*;
 use crate::tool::cache::ToolCachePolicy;
 use crate::tool::{ToolBudgetTiming, ToolRuntimeLockPolicy};
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -35,7 +36,7 @@ impl Tool for ProviderCallIdEchoTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             Ok(ToolOutput {
                 description: context.provider_call_id.unwrap_or_default(),
                 truncated: OutputTruncation::empty(),
@@ -44,7 +45,8 @@ impl Tool for ProviderCallIdEchoTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -120,13 +122,14 @@ impl Tool for FailingApplyPatchTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Err(PureError::ToolExecutionFailed {
                 tool: "apply_patch".to_string(),
                 error: "failed to find expected lines".to_string(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -168,7 +171,7 @@ impl Tool for CountingSpawnAgentTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             let execution = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(ToolOutput {
                 description: serde_json::json!({
@@ -182,7 +185,8 @@ impl Tool for CountingSpawnAgentTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -218,7 +222,7 @@ impl Tool for CountingExecTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolOutput {
                 description: serde_json::json!({
@@ -232,7 +236,8 @@ impl Tool for CountingExecTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -271,7 +276,7 @@ impl Tool for CountingCacheableTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolOutput {
                 description: serde_json::json!({
@@ -285,7 +290,8 @@ impl Tool for CountingCacheableTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -328,7 +334,7 @@ impl Tool for BatchFailingReadTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if context.provider_call_id.as_deref() == Some("read-call-1") {
                 self.first_started.notify_one();
@@ -338,7 +344,8 @@ impl Tool for BatchFailingReadTool {
                 tool: "read_file".to_string(),
                 error: "startLine exceeds file length".to_string(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -378,7 +385,7 @@ impl Tool for BatchEpochProcessTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             self.first_started.notified().await;
             context
                 .tool_cache
@@ -392,7 +399,8 @@ impl Tool for BatchEpochProcessTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -428,7 +436,7 @@ impl Tool for BudgetPausedWaitTool {
                 + 'a,
         >,
     > {
-        Box::pin(async {
+        async {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
             Ok(ToolOutput {
                 description: "progress".to_string(),
@@ -438,7 +446,8 @@ impl Tool for BudgetPausedWaitTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -890,13 +899,14 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         })
         .with_interaction_callback(std::sync::Arc::new(move |_interaction| {
             let callback_approvals = callback_approvals.clone();
-            Box::pin(async move {
+            async move {
                 callback_approvals.fetch_add(1, Ordering::SeqCst);
                 pl_protocol::InteractionResolution::ToolApproval {
                     decision: pl_protocol::ToolApprovalResolution::Approved,
                     reason: None,
                 }
-            })
+            }
+            .boxed()
         }));
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-mcp".to_string(), event_tx, 0);

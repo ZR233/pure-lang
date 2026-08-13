@@ -9,6 +9,7 @@ mod schema;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use pl_model::ToolSchema;
 use pl_protocol::Result;
 use serde_json::Value;
@@ -59,7 +60,7 @@ where
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
-        Box::pin(async move {
+        async move {
             let execution = execute_workspace_file_tool(
                 self.backend.as_ref(),
                 self.kind.name(),
@@ -70,7 +71,8 @@ where
             .await?
             .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
-        })
+        }
+        .boxed()
     }
 
     fn to_schema(&self) -> ToolSchema {
@@ -117,7 +119,7 @@ impl Tool for LocalWorkspaceFileTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
-        Box::pin(async move {
+        async move {
             if matches!(self.kind, WorkspaceFileToolKind::ApplyPatch) {
                 context.ensure_workspace_writable()?;
             }
@@ -137,7 +139,8 @@ impl Tool for LocalWorkspaceFileTool {
             .await?
             .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
-        })
+        }
+        .boxed()
     }
 
     fn to_schema(&self) -> ToolSchema {

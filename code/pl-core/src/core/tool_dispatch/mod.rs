@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
@@ -170,13 +171,14 @@ pub(super) async fn execute_tool_call_batch(
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
-                future: Box::pin(ready_tool_execution_record(
+                future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(message),
                     TracePartStatus::Failed,
                     None,
                     false,
-                )),
+                )
+                .boxed(),
                 budget_timing: ToolBudgetTiming::Count,
                 parallel_candidate: false,
                 duplicate_suppressed: false,
@@ -203,13 +205,14 @@ pub(super) async fn execute_tool_call_batch(
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
-                future: Box::pin(ready_tool_execution_record(
+                future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(message),
                     TracePartStatus::Denied,
                     None,
                     false,
-                )),
+                )
+                .boxed(),
                 budget_timing: ToolBudgetTiming::Count,
                 parallel_candidate: false,
                 duplicate_suppressed: false,
@@ -228,13 +231,14 @@ pub(super) async fn execute_tool_call_batch(
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
-                future: Box::pin(ready_tool_execution_record(
+                future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(format!("Unknown tool: {name}")),
                     TracePartStatus::Failed,
                     None,
                     false,
-                )),
+                )
+                .boxed(),
                 budget_timing: ToolBudgetTiming::Count,
                 parallel_candidate: false,
                 duplicate_suppressed: false,
@@ -333,13 +337,14 @@ pub(super) async fn execute_tool_call_batch(
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
-                future: Box::pin(ready_tool_execution_record(
+                future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
                     TracePartStatus::Interrupted,
                     None,
                     false,
-                )),
+                )
+                .boxed(),
                 budget_timing: ToolBudgetTiming::Count,
                 parallel_candidate: false,
                 duplicate_suppressed: false,
@@ -409,13 +414,14 @@ pub(super) async fn execute_tool_call_batch(
                         scheduled.push(ScheduledToolExecution {
                             tool_call: tool_call.clone(),
                             item,
-                            future: Box::pin(ready_tool_execution_record(
+                            future: ready_tool_execution_record(
                                 tool_call.clone(),
                                 ToolExecutionError::RespondToModel(receipt),
                                 TracePartStatus::Completed,
                                 Some(0),
                                 false,
-                            )),
+                            )
+                            .boxed(),
                             budget_timing,
                             parallel_candidate: false,
                             duplicate_suppressed: true,
@@ -427,7 +433,7 @@ pub(super) async fn execute_tool_call_batch(
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
-                    future: Box::pin(async move {
+                    future: async move {
                         let execute = || {
                             cache_snapshot.execute_or_reuse(
                                 &tool_name,
@@ -465,7 +471,8 @@ pub(super) async fn execute_tool_call_batch(
                             tool_execution_record(tool_call_for_task, tool_name, result)?;
                         record.execution_millis = execution_elapsed.as_millis() as u64;
                         Ok(record)
-                    }),
+                    }
+                    .boxed(),
                     budget_timing,
                     parallel_candidate,
                     duplicate_suppressed: false,
@@ -479,7 +486,7 @@ pub(super) async fn execute_tool_call_batch(
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
-                    future: Box::pin(ready_tool_execution_record(
+                    future: ready_tool_execution_record(
                         tool_call.clone(),
                         ToolExecutionError::RespondToModel(format!(
                             "Tool execution denied: {reason}"
@@ -487,7 +494,8 @@ pub(super) async fn execute_tool_call_batch(
                         TracePartStatus::Denied,
                         None,
                         false,
-                    )),
+                    )
+                    .boxed(),
                     budget_timing: ToolBudgetTiming::Count,
                     parallel_candidate: false,
                     duplicate_suppressed: false,

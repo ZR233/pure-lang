@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use futures::FutureExt;
 use pl_protocol::{PureError, SkillActivation};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -238,7 +239,7 @@ impl Tool for SkillsListTool {
         input: ToolInput,
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
@@ -261,7 +262,8 @@ impl Tool for SkillsListTool {
                 skills,
                 warnings: catalog.warnings,
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -288,7 +290,7 @@ impl Tool for SkillViewTool {
         input: ToolInput,
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let turn_id = input.session_id.clone();
             let tool_id = input.tool_id.clone();
             let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -318,7 +320,8 @@ impl Tool for SkillViewTool {
                 },
                 vec![ToolRuntimeEvent::SkillActivated { activation }],
             )
-        })
+        }
+        .boxed()
     }
 }
 
@@ -341,7 +344,7 @@ impl Tool for SkillManageTool {
         input: ToolInput,
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
@@ -358,7 +361,8 @@ impl Tool for SkillManageTool {
                     remove_support_file(self.name(), &catalog, input)
                 }
             }
-        })
+        }
+        .boxed()
     }
 }
 

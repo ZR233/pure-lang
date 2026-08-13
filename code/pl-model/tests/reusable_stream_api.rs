@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use pl_model::{
     CompletionBlockContent, CompletionBlockKind, CompletionEventStream,
     CompletionStreamAccumulator, CompletionStreamEvent, FinishReason, TokenUsage,
@@ -136,5 +137,5 @@ fn public_stream_events_accumulate_completion_response() {
 fn completion_event_stream_is_public_api_type() {
     let stream = futures::stream::empty::<pl_protocol::Result<CompletionStreamEvent>>();
 
-    assert_public_event_stream_type(Box::pin(stream));
+    assert_public_event_stream_type(stream.boxed());
 }

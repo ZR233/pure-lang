@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use futures::FutureExt;
 use pl_protocol::PureError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ impl Tool for PlanExitTool {
         input: ToolInput,
         _context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let args = deserialize_tool_input::<PlanExitInput>(self.name(), input.arguments)?;
             if args.content.trim().is_empty() {
                 return Err(PureError::ToolExecutionFailed {
@@ -67,7 +68,7 @@ impl Tool for PlanExitTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }.boxed()
     }
 }
 

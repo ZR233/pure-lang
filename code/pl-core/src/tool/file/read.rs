@@ -1,5 +1,6 @@
 use std::time::UNIX_EPOCH;
 
+use futures::FutureExt;
 use pl_protocol::PureError;
 
 use super::helpers::*;
@@ -34,7 +35,7 @@ impl Tool for StatPathTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_existing_or_parent(&input.path).await?;
@@ -72,6 +73,7 @@ impl Tool for StatPathTool {
                 })
                 .to_string(),
             ))
-        })
+        }
+        .boxed()
     }
 }

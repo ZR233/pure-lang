@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use pl_protocol::PureError;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -44,7 +45,7 @@ impl Tool for WriteFileTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -81,7 +82,8 @@ impl Tool for WriteFileTool {
                 "Wrote {}",
                 paths.display_relative(&path)
             )))
-        })
+        }
+        .boxed()
     }
 }
 
@@ -103,7 +105,7 @@ impl Tool for CreateDirectoryTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -114,7 +116,8 @@ impl Tool for CreateDirectoryTool {
                 "Created directory {}",
                 paths.display_relative(&path)
             )))
-        })
+        }
+        .boxed()
     }
 }
 
@@ -137,7 +140,7 @@ impl Tool for DeletePathTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -170,7 +173,8 @@ impl Tool for DeletePathTool {
                 "Deleted {}",
                 paths.display_relative(&path)
             )))
-        })
+        }
+        .boxed()
     }
 }
 
@@ -192,7 +196,7 @@ impl Tool for CopyPathTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -215,7 +219,8 @@ impl Tool for CopyPathTool {
                 paths.display_relative(&from),
                 paths.display_relative(&to)
             )))
-        })
+        }
+        .boxed()
     }
 }
 
@@ -237,7 +242,7 @@ impl Tool for MovePathTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
@@ -261,7 +266,8 @@ impl Tool for MovePathTool {
                 paths.display_relative(&from),
                 paths.display_relative(&to)
             )))
-        })
+        }
+        .boxed()
     }
 }
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use futures::StreamExt;
 use pl_protocol::{PureError, Result};
 use serde_json::{Map, Value};
 use tokio::sync::OwnedMutexGuard;
@@ -104,20 +105,18 @@ pub(super) async fn stream_responses(
         full_request: body,
         transport_session,
     };
-    Ok(Box::pin(futures::stream::unfold(
-        state,
-        |mut state| async move {
-            if state.terminal_failure {
-                return None;
-            }
-            if let Some(event) = state.completed_event.take() {
-                state.finish_completed_response(&event);
-                return None;
-            }
-            let event = state.next_event().await;
-            Some((event, state))
-        },
-    )))
+    Ok(futures::stream::unfold(state, |mut state| async move {
+        if state.terminal_failure {
+            return None;
+        }
+        if let Some(event) = state.completed_event.take() {
+            state.finish_completed_response(&event);
+            return None;
+        }
+        let event = state.next_event().await;
+        Some((event, state))
+    })
+    .boxed())
 }
 
 fn normalize_websocket_request_body(body: &mut Map<String, Value>) {

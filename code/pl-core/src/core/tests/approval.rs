@@ -1,4 +1,5 @@
 use super::*;
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -36,7 +37,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
     let options =
         TurnOptions::default().with_interaction_callback(std::sync::Arc::new(move |interaction| {
             let seen_interaction = seen_interaction_for_callback.clone();
-            Box::pin(async move {
+            async move {
                 match &interaction.payload {
                     InteractionPayload::ToolApproval { name, .. } => {
                         assert_eq!(name, "read_file")
@@ -48,7 +49,8 @@ async fn request_approval_allows_external_path_after_user_approval() {
                     decision: ToolApprovalResolution::Approved,
                     reason: None,
                 }
-            })
+            }
+            .boxed()
         }));
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);

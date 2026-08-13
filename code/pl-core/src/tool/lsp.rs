@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use futures::FutureExt;
 use pl_lsp::{LanguageToolInfo, LspQuery, LspRuntimeRegistry};
 use pl_protocol::PureError;
 use schemars::JsonSchema;
@@ -108,7 +109,7 @@ impl Tool for LspQueryTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let query: LspQuery =
                 deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into();
             let query = resolve_query_path(query, &context, self.name())?;
@@ -134,7 +135,8 @@ impl Tool for LspQueryTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -228,7 +230,7 @@ impl Tool for LspLanguageTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let mut query: LspQuery =
                 deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?.into();
             query.language_id = Some(self.language_id.clone());
@@ -255,7 +257,8 @@ impl Tool for LspLanguageTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 

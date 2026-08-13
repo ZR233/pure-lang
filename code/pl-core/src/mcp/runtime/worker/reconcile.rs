@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_protocol::{PureError, Result};
 
@@ -23,7 +22,7 @@ pub(super) struct PendingReconcile {
 }
 
 pub(super) struct ActivePreparation {
-    pub(super) future: Pin<Box<dyn Future<Output = RuntimeGeneration> + Send>>,
+    pub(super) future: BoxFuture<'static, RuntimeGeneration>,
     pub(super) reply: tokio::sync::oneshot::Sender<Result<()>>,
 }
 

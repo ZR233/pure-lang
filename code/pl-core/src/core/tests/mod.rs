@@ -2,6 +2,7 @@ use super::*;
 use crate::ContextCompactionTrigger;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
 use crate::turn::PermissionMode;
+use futures::FutureExt;
 use pl_model::{OpenAiCompactionMode, ToolCall};
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
@@ -364,7 +365,7 @@ impl Tool for SleepingTool {
                 + 'a,
         >,
     > {
-        Box::pin(async {
+        async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             Ok(ToolOutput {
                 description: "done".to_string(),
@@ -374,7 +375,8 @@ impl Tool for SleepingTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -409,7 +411,7 @@ impl Tool for DeltaEchoTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             let now = crate::core::turn_result::unix_seconds();
             let event = pl_trace::TracePartDeltaEvent {
                 turn_id: input.session_id.clone(),
@@ -433,6 +435,7 @@ impl Tool for DeltaEchoTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }

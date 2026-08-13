@@ -3,6 +3,8 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use pl_model::ToolSchema;
 use pl_protocol::{InteractionRequest, PureError, SkillActivation};
 use schemars::JsonSchema;
@@ -69,7 +71,7 @@ where
                 match arguments {
                     Ok(arguments) => {
                         let future = handler(arguments, context);
-                        Box::pin(async move {
+                        async move {
                             future
                                 .await
                                 .map(ToolExecutionResult::into_tool_output)
@@ -77,9 +79,10 @@ where
                                     tool: tool_name,
                                     error: error.to_string(),
                                 })
-                        }) as RegisteredToolFuture
+                        }
+                        .boxed()
                     }
-                    Err(error) => Box::pin(async move { Err(error) }) as RegisteredToolFuture,
+                    Err(error) => async move { Err(error) }.boxed(),
                 }
             },
         )
@@ -208,14 +211,15 @@ impl RegisteredTool {
                     .is_some_and(|token| token.is_cancelled())
                 {
                     let tool = tool_name.clone();
-                    return Box::pin(async move {
+                    return async move {
                         Err(PureError::ToolExecutionFailed {
                             tool,
                             error: "tool execution cancelled".to_string(),
                         })
-                    }) as RegisteredToolFuture;
+                    }
+                    .boxed();
                 }
-                Box::pin(handler(input, context)) as RegisteredToolFuture
+                handler(input, context).boxed()
             }),
         }
     }

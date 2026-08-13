@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
@@ -8,6 +6,7 @@ use crate::{
     PlanConfirmationResolution, ToolApprovalResolution,
 };
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use tokio::sync::{Mutex, oneshot};
 
 use crate::InteractionCallback;
@@ -29,7 +28,7 @@ impl InteractionCancelScope {
     }
 }
 
-pub type InteractionEmitterFuture = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+pub type InteractionEmitterFuture = futures::future::BoxFuture<'static, Result<()>>;
 pub type InteractionEmitter =
     Arc<dyn Fn(InteractionRequest) -> InteractionEmitterFuture + Send + Sync>;
 
@@ -57,7 +56,7 @@ impl InteractionRuntime {
             let runtime = runtime.clone();
             let emitter = emitter.clone();
             let thread_id = thread_id.clone();
-            Box::pin(async move { runtime.ask(thread_id, request, emitter).await })
+            async move { runtime.ask(thread_id, request, emitter).await }.boxed()
         })
     }
 
@@ -310,13 +309,14 @@ mod tests {
         Arc::new(move |interaction| {
             let store = store.clone();
             let events = events.clone();
-            Box::pin(async move {
+            async move {
                 // 生产 emitter 由 ThreadActor/ThreadRepository 作为 canonical writer；
                 // 这个 unit-test emitter 只模拟该提交边界。
                 store.upsert_interaction(&interaction).await?;
                 events.lock().await.push(interaction);
                 Ok(())
-            })
+            }
+            .boxed()
         })
     }
 

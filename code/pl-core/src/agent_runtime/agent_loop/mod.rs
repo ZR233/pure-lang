@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use futures::FutureExt;
 use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope};
 use pl_trace::TraceEvent;
 use tokio::sync::mpsc;
@@ -91,7 +92,7 @@ where
             && self.state.snapshot.lifecycle == AgentLifecycleState::Active
             && self.state.has_triggering_input()
         {
-            Box::pin(self.begin_next_turn()).await;
+            self.begin_next_turn().boxed().await;
         }
         loop {
             tokio::select! {
@@ -101,9 +102,9 @@ where
                     };
                     match command {
                         AgentLoopCommand::Submit { request, reply } => {
-                            // Box::pin：把命令处理状态机放堆上，避免 debug 构建下
+                            // `.boxed()`：把命令处理状态机放堆上，避免 debug 构建下
                             // 全部命令分支内联进 run 的 select! 状态机导致超大栈帧。
-                            let result = Box::pin(self.submit(request)).await;
+                            let result = self.submit(request).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SubmitCurrentSession {
@@ -112,7 +113,7 @@ where
                             reply,
                         } => {
                             let result =
-                                Box::pin(self.submit_current_session(root_agent_id, request)).await;
+                                self.submit_current_session(root_agent_id, request).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SubmitInteractionContinuation {
@@ -120,10 +121,10 @@ where
                             request,
                             reply,
                         } => {
-                            let result = Box::pin(
-                                self.submit_interaction_continuation(root_agent_id, *request),
-                            )
-                            .await;
+                            let result = self
+                                .submit_interaction_continuation(root_agent_id, *request)
+                                .boxed()
+                                .await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
@@ -134,11 +135,11 @@ where
                             let _ = reply.send(self.preview_conversation_recovery(target));
                         }
                         AgentLoopCommand::RecoverConversation { request, reply } => {
-                            let result = Box::pin(self.recover_conversation(request)).await;
+                            let result = self.recover_conversation(request).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::CancelTurn { turn_id, reply } => {
-                            let result = Box::pin(self.cancel_turn(turn_id)).await;
+                            let result = self.cancel_turn(turn_id).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SetActivity {
@@ -146,13 +147,13 @@ where
                             kind,
                             reply,
                         } => {
-                            let result = Box::pin(self.set_activity(turn_id, kind)).await;
+                            let result = self.set_activity(turn_id, kind).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::Checkpoint { checkpoint, reply } => {
-                            let result = Box::pin(self.checkpoint(*checkpoint)).await;
+                            let result = self.checkpoint(*checkpoint).boxed().await;
                             if let Err(error) = &result {
-                                Box::pin(self.fault(error.to_string())).await;
+                                self.fault(error.to_string()).boxed().await;
                             }
                             let _ = reply.send(result);
                         }
@@ -161,9 +162,9 @@ where
                             facts,
                             reply,
                         } => {
-                            let result = Box::pin(self.record_thread_facts(thread_id, facts)).await;
+                            let result = self.record_thread_facts(thread_id, facts).boxed().await;
                             if let Err(error) = &result {
-                                Box::pin(self.fault(error.to_string())).await;
+                                self.fault(error.to_string()).boxed().await;
                             }
                             let _ = reply.send(result);
                         }
@@ -178,7 +179,7 @@ where
                             reply,
                         } => {
                             let result =
-                                Box::pin(self.report_progress(stage, summary, next_step, detail)).await;
+                                self.report_progress(stage, summary, next_step, detail).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReadSession { reply } => {
@@ -189,23 +190,23 @@ where
                             limit,
                             reply,
                         } => {
-                            let result = Box::pin(self.read_submissions(offset, limit)).await;
+                            let result = self.read_submissions(offset, limit).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::StartPendingInputs { reply } => {
                             self.dispatch_enabled = true;
-                            Box::pin(self.begin_next_turn()).await;
+                            self.begin_next_turn().boxed().await;
                             let _ = reply.send(Ok(()));
                         }
                         AgentLoopCommand::Close { reply } => {
-                            let result = Box::pin(self.close()).await;
+                            let result = self.close().boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::TurnFinished(completion) => {
-                            Box::pin(self.finish_turn(*completion)).await;
+                            self.finish_turn(*completion).boxed().await;
                         }
                         AgentLoopCommand::Shutdown { reply } => {
-                            let result = Box::pin(self.shutdown()).await;
+                            let result = self.shutdown().boxed().await;
                             let _ = reply.send(result);
                             break;
                         }
@@ -215,16 +216,16 @@ where
                     let Some(trace) = trace else {
                         continue;
                     };
-                    if let Err(error) = Box::pin(self.persist_trace_batch(vec![trace])).await {
-                        Box::pin(self.fault(error.to_string())).await;
+                    if let Err(error) = self.persist_trace_batch(vec![trace]).boxed().await {
+                        self.fault(error.to_string()).boxed().await;
                     }
                 }
                 observation = self.channels.observation_receiver.recv() => {
                     let Some(observation) = observation else {
                         continue;
                     };
-                    if let Err(error) = Box::pin(self.persist_observation(observation)).await {
-                        Box::pin(self.fault(error.to_string())).await;
+                    if let Err(error) = self.persist_observation(observation).boxed().await {
+                        self.fault(error.to_string()).boxed().await;
                     }
                 }
             }

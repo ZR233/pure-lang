@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
+use futures::FutureExt;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
@@ -403,7 +404,7 @@ fn interaction_emitter(
         let runtime = runtime.clone();
         let thread_id = thread_id.clone();
         let agent_path = agent_path.clone();
-        Box::pin(async move {
+        async move {
             let emitted_at = interaction.updated_at;
             runtime
                 .record_thread_facts(
@@ -418,7 +419,8 @@ fn interaction_emitter(
                 )
                 .await?;
             Ok(())
-        })
+        }
+        .boxed()
     })
 }
 

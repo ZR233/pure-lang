@@ -33,6 +33,7 @@ pub use context::*;
 pub use contract::*;
 pub use exec::*;
 pub use file::*;
+pub use futures::future::BoxFuture;
 pub use git::*;
 pub use lsp::*;
 pub use model_output::*;
@@ -56,9 +57,10 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use super::contract::BoxFuture;
     use super::*;
     use crate::turn::{ToolEffect, TurnOptions};
+    use futures::FutureExt;
+    use futures::future::BoxFuture;
     use pl_protocol::PureError;
     use pretty_assertions::assert_eq;
     use schemars::JsonSchema;
@@ -92,7 +94,7 @@ mod tests {
             _input: ToolInput,
             _context: ToolContext,
         ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-            Box::pin(async {
+            async {
                 Ok(ToolOutput {
                     description: "ok".to_string(),
                     truncated: empty_truncation(),
@@ -101,7 +103,8 @@ mod tests {
                     timed_out: false,
                     runtime_events: Vec::new(),
                 })
-            })
+            }
+            .boxed()
         }
     }
 
