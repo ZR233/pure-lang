@@ -10,6 +10,10 @@ v1 只内置 `rust-analyzer`：
 - 使用 `rust-analyzer` 命令和 stdio transport。
 - 默认不安装任意语言服务器；缺失时记录不可用状态并给 UI/工具返回可读提示。`rust-analyzer` 作为内置 Rust LSP 例外：当 PATH 上存在 rustup，且探测明确返回 rustup 的 `Unknown binary 'rust-analyzer'` 缺失组件错误时，runtime 自动运行 `rustup component add rust-analyzer`，成功后重试探测；rustup 不可用、安装失败或其他启动失败仍只记录不可用状态。
 - Windows 下探测和启动语言服务器必须作为后台子进程静默运行，不显示额外终端窗口。
+- 启动 bootstrap 不等待语言服务器探测：probe 在后台执行（首次可能触发 rustup 组件
+  安装），snapshot 立即返回；探测结果在 turn 构建时再次 reconcile，并随
+  `ThreadRuntimeUpdated` 携带的 active LSP 列表填充状态栏。项目打开（`openProject`）
+  等用户主动操作路径仍同步等待 reconcile。
 
 ## 架构边界
 

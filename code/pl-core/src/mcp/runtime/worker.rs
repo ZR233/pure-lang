@@ -8,7 +8,7 @@ use pl_protocol::{
 };
 use rmcp::model::{CallToolResult, Tool};
 use serde_json::{Map, Value};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc};
 
 use crate::config::{EffectiveMcpServerConfig, McpServerConfig, McpServerSourceKind};
 use crate::turn::ToolEffect;
@@ -23,6 +23,13 @@ use crate::mcp::{ConnectedMcp, McpConnector};
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// `AcquireLease` 等待进行中 MCP preparation 完成的有界上限。
+///
+/// 启动路径的 MCP reconcile 已在后台执行，turn 开始时若探测尚未完成，
+/// lease 请求最多等待该时长以拿到包含新工具的 generation；超时后回落
+/// 当前 generation，避免首个 turn 被慢 server 无限阻塞。
+const LEASE_ACQUIRE_WAIT: Duration = Duration::from_secs(20);
 
 type ResourceSession = (String, Arc<ConnectedMcp>, Duration, McpErrorRedactor);
 
@@ -53,6 +60,8 @@ struct RuntimeWorker {
     generations: BTreeMap<McpGeneration, RuntimeGeneration>,
     current: McpGeneration,
     next_generation: u64,
+    /// preparation 完成信号，用于 `AcquireLease` 的有界等待。
+    preparation_notify: Arc<Notify>,
 }
 
 impl RuntimeWorker {
@@ -73,6 +82,7 @@ impl RuntimeWorker {
                 .collect(),
             current,
             next_generation: 1,
+            preparation_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -91,6 +101,7 @@ impl RuntimeWorker {
                         .take()
                         .expect("completed MCP preparation must exist");
                     self.activate_generation(generation).await;
+                    self.preparation_notify.notify_waiters();
                     let _ = active.reply.send(Ok(()));
                 }
                 command = self.receiver.recv() => {
@@ -111,6 +122,20 @@ impl RuntimeWorker {
                     });
                 }
                 RuntimeCommand::AcquireLease { reply } => {
+                    if preparation.is_some() || !pending.is_empty() {
+                        let notify = self.preparation_notify.clone();
+                        let commands = self.commands.clone();
+                        tokio::spawn(async move {
+                            let _ =
+                                tokio::time::timeout(LEASE_ACQUIRE_WAIT, notify.notified()).await;
+                            let _ =
+                                commands.send(RuntimeCommand::AcquireLeaseImmediate { reply });
+                        });
+                    } else {
+                        let _ = reply.send(self.acquire_lease());
+                    }
+                }
+                RuntimeCommand::AcquireLeaseImmediate { reply } => {
                     let _ = reply.send(self.acquire_lease());
                 }
                 RuntimeCommand::ReleaseLease { generation } => {

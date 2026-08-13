@@ -148,7 +148,25 @@ typed recovery issue：健康内容继续可用，故障项显示错误与安全
 清理必须 preview → 用户确认 → 执行时重新验证。UI 展示 path、branch、dirty、ahead、变更
 数量和 expected revision；不得在确认前写入，也不得允许清理用户主工作区。
 
-## 11.8 设置与视觉
+## 11.8 启动时序
+
+启动只等待主界面骨架的必要内容，慢的后台能力一律异步就绪：
+
+- 关键路径（bridge `initializeRuntime` + `bootstrapStudio`）：SQLite 打开与 schema 检查、
+  会话/任务恢复检查、project/thread 目录与 settings snapshot（本地读取，毫秒级）。
+  主界面骨架（sidebar、header、chrome）只依赖该 snapshot。
+- 非关键路径全部后台执行，结果经既有事件流推送：
+  - MCP：`startRuntime` 不再同步等待 server 探测。后台 reconcile 完成后经
+    `McpHealthChanged` 推送 health；失败只记日志并补发一次 health 快照，不改变
+    runtime 生命周期状态。首个 turn 的 `AcquireLease` 对进行中的探测有界等待
+    （约 20s），超时回落到当前 generation，慢 server 不阻塞 turn 也不阻塞启动。
+  - LSP：bootstrap snapshot 不等待语言服务器探测（首次可能触发 rustup 组件
+    安装）。探测结果在 turn 构建时再次 reconcile，并随 `ThreadRuntimeUpdated`
+    携带的 active LSP 列表填充状态栏。
+- 用户主动操作（`openProject` 等）仍同步等待各自路径的 LSP/MCP 就绪，交互路径
+  可等待。
+
+## 11.9 设置与视觉
 
 Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、Security、General。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
@@ -177,7 +195,7 @@ Item error 或 Turn failure message。recoverable failure 使用警告视觉与�
 冗余结果详情。任何 UI 投影都不得显示 API Key 原文；Bridge 已提供的 agent error/reason 在
 directory 增量更新和 selected agent 重建时必须保留。
 
-## 11.9 验收
+## 11.10 验收
 
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；

@@ -399,6 +399,12 @@ pub(super) enum RuntimeCommand {
     AcquireLease {
         reply: oneshot::Sender<Result<LeaseSnapshot>>,
     },
+    /// 立即获取当前 generation 的 lease，不等待进行中的 preparation。
+    ///
+    /// 由 `AcquireLease` 的有界等待任务在超时后发送，避免二次等待形成循环。
+    AcquireLeaseImmediate {
+        reply: oneshot::Sender<Result<LeaseSnapshot>>,
+    },
     ReleaseLease {
         generation: McpGeneration,
     },

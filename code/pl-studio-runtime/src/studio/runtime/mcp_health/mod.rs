@@ -23,6 +23,24 @@ impl StudioRuntime {
         self.refresh_mcp_runtime(McpRuntimeRefresh::Recheck).await
     }
 
+    /// 后台执行一次 MCP reconcile，不阻塞调用方（用于启动路径）。
+    ///
+    /// 探测全部启用 server 可能耗时数秒到数十秒（每个 server 有界超时），
+    /// 启动时不应等待；结果通过 `McpHealthChanged` 产品事件推送。失败只记录
+    /// 日志并补发一次 health 快照，不改变 runtime 生命周期状态。
+    pub(super) fn spawn_background_mcp_reconcile(&self) {
+        let runtime = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = runtime.reconcile_mcp_runtime().await {
+                tracing::warn!(
+                    error_bytes = error.to_string().len(),
+                    "background MCP reconcile failed"
+                );
+                let _ = runtime.emit_mcp_health_snapshot().await;
+            }
+        });
+    }
+
     pub(super) async fn start_mcp_health_watcher(&self) {
         let mut watcher = self.external_runtimes.mcp_health_watcher.lock().await;
         if watcher.as_ref().is_some_and(|handle| !handle.is_finished()) {

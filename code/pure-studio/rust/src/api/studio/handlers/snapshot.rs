@@ -54,10 +54,19 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     let mut selected_thread_id = None;
 
     if let Some(project) = selected_project {
-        bridge
-            .studio
-            .reconcile_lsp_runtime_for_project(&project.id)
-            .await?;
+        // LSP probe 在后台执行：启动 snapshot 不等待语言服务器探测（首次可能
+        // 触发 rustup 组件安装），探测结果会在 turn 构建时再次 reconcile 并
+        // 随 ThreadRuntimeUpdated 推送；失败只记录日志。
+        let studio = bridge.studio.clone();
+        let project_id = project.id.clone();
+        tokio::spawn(async move {
+            if let Err(error) = studio.reconcile_lsp_runtime_for_project(&project_id).await {
+                tracing::warn!(
+                    error_bytes = error.to_string().len(),
+                    "background LSP reconcile failed for project {project_id}"
+                );
+            }
+        });
         let roots = bridge.studio.ensure_project_threads(&project.id).await?;
         threads = bridge.studio.store().list_threads(&project.id).await?;
         selected_thread_id = requested_thread_id

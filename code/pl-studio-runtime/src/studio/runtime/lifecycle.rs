@@ -242,13 +242,9 @@ impl StudioRuntime {
             let _ = self.initialize_runtime().await?;
         }
         self.start_mcp_health_watcher().await;
-        if let Err(error) = self.reconcile_mcp_runtime().await {
-            let message = format!("{error:#}");
-            let _ = self
-                .runtime_state
-                .transition(StudioRuntimeStatus::Failed, Some(message));
-            return Err(error);
-        }
+        // MCP reconcile 在后台执行：启动不等待 server 探测完成，状态经
+        // McpHealthChanged 事件推送（见 spawn_background_mcp_reconcile）。
+        self.spawn_background_mcp_reconcile();
         self.runtime_snapshot().await
     }
 
