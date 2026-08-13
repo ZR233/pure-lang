@@ -5,17 +5,21 @@ use crate::{MessageRole, ToolResultMetadata};
 use anyhow::{Context, Result, bail};
 use pl_core::path_safety::validate_existing_path_async;
 
+use super::super::ReviewExitViolation;
+
 #[derive(Debug)]
 pub(super) struct ReviewTrace {
     pub(super) read_design: BTreeMap<String, String>,
+    pub(super) violations: Vec<ReviewExitViolation>,
 }
 
-pub(super) async fn validate_review_trace(
+pub(super) async fn inspect_review_trace(
     session: &crate::AgentSession,
     workspace: &Path,
 ) -> Result<ReviewTrace> {
     let mut locator_seen = false;
     let mut read_design = BTreeMap::<String, String>::new();
+    let mut violations = Vec::new();
     for message in session.messages() {
         if message.role != MessageRole::Tool {
             continue;
@@ -63,14 +67,34 @@ pub(super) async fn validate_review_trace(
             .and_then(serde_json::Value::as_str)
             .is_some_and(|cwd| !matches!(cwd, "" | "."))
         {
-            bail!("reviewer design read must use workspace-root relative paths");
+            violations.push(ReviewExitViolation {
+                code: "designReadCwdInvalid".to_string(),
+                message: "design read 必须使用 workspace 根目录相对路径".to_string(),
+                location: Some(path.to_string()),
+            });
+            continue;
         }
-        let normalized = validate_design_read_path(workspace, path).await?;
+        let normalized = match validate_design_read_path(workspace, path).await {
+            Ok(normalized) => normalized,
+            Err(error) => {
+                violations.push(ReviewExitViolation {
+                    code: "designReadPathInvalid".to_string(),
+                    message: error.to_string(),
+                    location: Some(path.to_string()),
+                });
+                continue;
+            }
+        };
         let returned: serde_json::Value = serde_json::from_str(&output)?;
         let text = returned.get("text").and_then(serde_json::Value::as_str);
         if returned.get("path").and_then(serde_json::Value::as_str) != Some(path) || text.is_none()
         {
-            bail!("read_file history does not contain a successful matching design result");
+            violations.push(ReviewExitViolation {
+                code: "designReadResultMismatch".to_string(),
+                message: "read_file 历史没有与请求匹配的成功 design 结果".to_string(),
+                location: Some(path.to_string()),
+            });
+            continue;
         }
         read_design
             .entry(normalized)
@@ -78,12 +102,24 @@ pub(super) async fn validate_review_trace(
             .push_str(text.unwrap_or_default());
     }
     if !locator_seen {
-        bail!("reviewer must use list_files or exec with rg/rg --files before review_exit");
+        violations.push(ReviewExitViolation {
+            code: "locatorMissing".to_string(),
+            message: "review_exit 前必须使用 list_files 或 exec 执行 rg/rg --files 定位文件"
+                .to_string(),
+            location: None,
+        });
     }
     if read_design.is_empty() {
-        bail!("reviewer must successfully read at least one relevant design document");
+        violations.push(ReviewExitViolation {
+            code: "designReadMissing".to_string(),
+            message: "必须成功读取至少一个相关 design 文档".to_string(),
+            location: None,
+        });
     }
-    Ok(ReviewTrace { read_design })
+    Ok(ReviewTrace {
+        read_design,
+        violations,
+    })
 }
 
 fn is_design_read_candidate(path: &str) -> bool {

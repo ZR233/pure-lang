@@ -237,6 +237,39 @@ impl TaskCoordinator {
                 "latest integrated review must pass for the current task HEAD",
             ));
         }
+        let pending_interactions = self
+            .store
+            .list_pending_interactions_for_root_thread(thread_id)
+            .await?;
+        if !pending_interactions.is_empty() {
+            const PREVIEW_LIMIT: usize = 8;
+            let total = pending_interactions.len();
+            let preview = pending_interactions
+                .iter()
+                .take(PREVIEW_LIMIT)
+                .map(|interaction| {
+                    format!(
+                        "{}/{} ({})",
+                        interaction.scope.thread_id,
+                        interaction.interaction_id,
+                        interaction.kind.as_str()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let remaining = total.saturating_sub(PREVIEW_LIMIT);
+            let suffix = if remaining == 0 {
+                String::new()
+            } else {
+                format!("，另有 {remaining} 条")
+            };
+            return Ok(TaskCompleteOutcome::rejected(
+                "pendingInteraction",
+                format!(
+                    "Task Thread 树仍有 {total} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete"
+                ),
+            ));
+        }
         if let Err(error) = self.ensure_process_lease_owned(&run) {
             return Ok(TaskCompleteOutcome::rejected(
                 "repositoryDrift",
@@ -256,6 +289,14 @@ impl TaskCoordinator {
         let completed = match completed {
             Ok(completed) => completed,
             Err(error) => {
+                if let Some(pending) =
+                    error.downcast_ref::<crate::studio::store::PendingTaskInteractions>()
+                {
+                    return Ok(TaskCompleteOutcome::rejected(
+                        "pendingInteraction",
+                        pending.user_message(),
+                    ));
+                }
                 return Ok(TaskCompleteOutcome::rejected(
                     "repositoryDrift",
                     format!("task completion state changed before commit: {error}"),

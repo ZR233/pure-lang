@@ -282,6 +282,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             &config,
             &route.model,
             mode,
+            &context.snapshot.identity,
             &workspace_root,
             &workspace_instructions,
             context
@@ -349,6 +350,7 @@ fn instruction_snapshot(
     config: &crate::config::StudioConfig,
     model: &pl_model::ModelInfo,
     mode: StudioMode,
+    identity: &AgentIdentity,
     workspace_root: &Path,
     workspace_instructions: &str,
     subagent_constraint: Option<&str>,
@@ -358,7 +360,8 @@ fn instruction_snapshot(
         skills: Some(&config.skills),
         execution_profile: Some(ExecutionInstructionProfile {
             label: mode.label(),
-            instructions: mode.instructions(),
+            instructions: mode
+                .instructions_for(identity.role.as_str(), identity.parent_id.is_none()),
         }),
         model,
         workspace_root,

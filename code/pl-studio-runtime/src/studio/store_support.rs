@@ -9,7 +9,7 @@ use crate::studio::entity;
 
 /// 最低可迁移版本；低于此版本的库会被直接重建。
 pub(super) const MIN_MIGRATABLE_STUDIO_DATABASE_SCHEMA_VERSION: i64 = 4;
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 6;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 7;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
@@ -58,8 +58,21 @@ pub(super) async fn migrate_studio_schema(
     if from_version < 6 {
         create_thread_submissions_schema(db).await?;
     }
+    // v6 -> v7: ReviewRound 持久化冻结的逐文件审查状态与最近一次拒绝诊断。
+    // nullable 保留旧 round 的 unknown 语义，不能把历史记录伪装成已覆盖。
+    if from_version < 7 {
+        migrate_review_file_coverage(db).await?;
+    }
 
-    set_schema_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    Ok(())
+}
+
+async fn migrate_review_file_coverage(db: &DatabaseConnection) -> Result<()> {
+    let tx = db.begin().await?;
+    tx.execute_unprepared("ALTER TABLE \"review_rounds\" ADD COLUMN \"file_reviews_json\" varchar")
+        .await?;
+    set_schema_version(&tx, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    tx.commit().await?;
     Ok(())
 }
 

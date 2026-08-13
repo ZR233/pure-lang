@@ -12,6 +12,29 @@ use crate::studio::task_coordinator::{
     TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
+#[derive(Debug, thiserror::Error)]
+#[error("task thread tree still has {total} pending interactions")]
+pub(in crate::studio) struct PendingTaskInteractions {
+    total: usize,
+    preview: Vec<String>,
+}
+
+impl PendingTaskInteractions {
+    pub(in crate::studio) fn user_message(&self) -> String {
+        let preview = self.preview.join(", ");
+        let remaining = self.total.saturating_sub(self.preview.len());
+        let suffix = if remaining == 0 {
+            String::new()
+        } else {
+            format!("，另有 {remaining} 条")
+        };
+        format!(
+            "Task Thread 树仍有 {} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete",
+            self.total
+        )
+    }
+}
+
 impl StudioStore {
     pub(crate) async fn request_task_stop(
         &self,
@@ -208,6 +231,7 @@ impl StudioStore {
             }
             validate_lease(&tx, &run, expected_head).await?;
             validate_completion_children(&tx, &run).await?;
+            validate_no_pending_interactions(&tx, &run.root_thread_id).await?;
             let completed =
                 super::write_task_terminal_fact(&tx, run, TaskRunPhase::Completed, None, None)
                     .await?;
@@ -346,6 +370,46 @@ impl StudioStore {
         .await;
         finish_transaction(tx, result).await
     }
+}
+
+async fn validate_no_pending_interactions(
+    tx: &sea_orm::DatabaseTransaction,
+    root_thread_id: &str,
+) -> Result<()> {
+    const PREVIEW_LIMIT: usize = 8;
+    let thread_ids = entities::thread::Entity::find()
+        .filter(entities::thread::Column::RootThreadId.eq(root_thread_id.to_string()))
+        .all(tx)
+        .await?
+        .into_iter()
+        .map(|thread| thread.id)
+        .collect::<Vec<_>>();
+    if thread_ids.is_empty() {
+        return Ok(());
+    }
+    let pending = entities::interaction::Entity::find()
+        .filter(entities::interaction::Column::ThreadId.is_in(thread_ids))
+        .filter(entities::interaction::Column::Status.eq("pending"))
+        .order_by_asc(entities::interaction::Column::ThreadId)
+        .order_by_asc(entities::interaction::Column::CreatedAt)
+        .order_by_asc(entities::interaction::Column::Id)
+        .all(tx)
+        .await?;
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let total = pending.len();
+    let preview = pending
+        .into_iter()
+        .take(PREVIEW_LIMIT)
+        .map(|interaction| {
+            format!(
+                "{}/{} ({})",
+                interaction.thread_id, interaction.id, interaction.kind
+            )
+        })
+        .collect();
+    Err(PendingTaskInteractions { total, preview }.into())
 }
 
 async fn validate_completion_children(

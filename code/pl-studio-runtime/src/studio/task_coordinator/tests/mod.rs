@@ -8,8 +8,9 @@ use super::spawn::TaskExecutorVerificationCommandV1;
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
-    AgentSession, StudioMode, StudioRecoveryIssueAction, StudioRecoveryIssueCategory, StudioStore,
-    TurnOptions, TurnWorkingSetHandle,
+    AgentSession, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
+    InteractionStatus, StudioMode, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
+    StudioStore, TurnOptions, TurnWorkingSetHandle,
 };
 use pl_core::tool::cache::TurnToolCacheHandle;
 
@@ -88,11 +89,7 @@ async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
 #[tokio::test]
 async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
     let fixture = ReviewFixture::new("review-harness-authorization").await;
-    let round = fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-review")
-        .await
-        .unwrap();
+    let round = fixture.begin_integrated_review("call-review").await;
     let request = StudioTaskSpawnRequest {
         agent_id: "agent-reviewer".to_string(),
         root_thread_id: fixture.root_thread_id.clone(),
@@ -152,10 +149,8 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
 async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() {
     let fixture = ReviewFixture::new("reviewer-terminal-without-exit").await;
     fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-review-terminal")
-        .await
-        .unwrap();
+        .begin_integrated_review("call-review-terminal")
+        .await;
     let round = fixture
         .store
         .authorize_reviewer_spawn(
@@ -210,11 +205,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
             scope: ReviewScope::Integrated,
         } if review_round_id == &round.id
     ));
-    let retry = fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-review-retry")
-        .await
-        .unwrap();
+    let retry = fixture.begin_integrated_review("call-review-retry").await;
     assert_eq!(retry.round, 2);
     assert_eq!(retry.reviewed_head, round.reviewed_head);
     fixture.cleanup();
@@ -223,11 +214,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
 #[tokio::test]
 async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     let fixture = ReviewFixture::new("review-exit-trace").await;
-    fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-review-exit")
-        .await
-        .unwrap();
+    fixture.begin_integrated_review("call-review-exit").await;
     let round = fixture
         .store
         .authorize_reviewer_spawn(
@@ -267,7 +254,8 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
                     "verdict":"pass",
                     "summary":"implementation matches the reviewed design",
                     "designReferences":[{"path":"design/guide.md","section":"Review design"}],
-                    "findings":[]
+                    "findings":[],
+                    "fileReviews":[]
                 }),
                 session_id: "reviewer-turn".to_string(),
                 tool_id: "call-review-exit".to_string(),
@@ -313,6 +301,199 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
 }
 
 #[tokio::test]
+async fn rejected_review_exit_can_page_diagnostics_and_retry_in_the_same_turn() {
+    let fixture = ReviewFixture::new("review-exit-retry").await;
+    let expected_files = (0..25)
+        .map(|index| format!("src/file_{index:02}.rs"))
+        .collect::<Vec<_>>();
+    fixture
+        .begin_integrated_review_with_files("call-review-exit-retry", expected_files.clone())
+        .await;
+    let round = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.root_thread_id,
+            "call-review-exit-retry",
+            "agent-reviewer-retry",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .activate_reviewer(&round.id, "agent-reviewer-retry")
+        .await
+        .unwrap();
+    let tool = fixture
+        .coordinator
+        .review_exit_tool(fixture.root_thread_id.clone(), None);
+    let rejected = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "verdict":"pass",
+                    "summary":"先提交不完整覆盖以验证可恢复门禁",
+                    "designReferences":[{"path":"design/guide.md","section":"Review design"}],
+                    "findings":[],
+                    "fileReviews":[]
+                }),
+                session_id: "reviewer-turn-retry".to_string(),
+                tool_id: "call-review-exit-rejected".to_string(),
+                revision_base: 0,
+            },
+            review_tool_context(&fixture, "call-review-exit-rejected"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(rejected.exit_code, Some(1));
+    assert!(!rejected.ends_turn());
+    let rejected_json: serde_json::Value =
+        serde_json::from_str(&rejected.into_model_output()).unwrap();
+    assert_eq!(rejected_json["status"], "rejected");
+    assert_eq!(rejected_json["recoverable"], true);
+    assert_eq!(rejected_json["diagnosticsRevision"], 1);
+    assert_eq!(rejected_json["coverage"]["missingFiles"]["total"], 25);
+    assert_eq!(
+        rejected_json["coverage"]["missingFiles"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        20
+    );
+    assert_eq!(rejected_json["coverage"]["missingFiles"]["hasMore"], true);
+    let persisted_rejection = fixture
+        .store
+        .list_review_rounds(&fixture.run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(persisted_rejection.verdict, ReviewVerdict::Pending);
+    assert_eq!(
+        persisted_rejection.reviewer_status,
+        ThreadExecutionStatus::Running
+    );
+    assert_eq!(persisted_rejection.summary, None);
+    assert!(persisted_rejection.findings.is_empty());
+    assert_eq!(
+        fixture
+            .store
+            .read_task_run(&fixture.run_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        TaskRunPhase::Reviewing
+    );
+    assert!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let coverage_tool = fixture
+        .coordinator
+        .read_review_file_coverage_tool(fixture.root_thread_id.clone());
+    let stale = coverage_tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "roundId": round.id.clone(),
+                    "diagnosticsRevision": 0,
+                    "category": "missing",
+                    "offset": 0,
+                    "limit": 10
+                }),
+                session_id: "reviewer-turn-retry".to_string(),
+                tool_id: "call-read-stale-coverage".to_string(),
+                revision_base: 0,
+            },
+            review_tool_context(&fixture, "call-read-stale-coverage"),
+        )
+        .await
+        .unwrap_err();
+    assert!(stale.to_string().contains("revision is stale"));
+    let page = coverage_tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "roundId": round.id,
+                    "diagnosticsRevision": 1,
+                    "category": "missing",
+                    "offset": 20,
+                    "limit": 10
+                }),
+                session_id: "reviewer-turn-retry".to_string(),
+                tool_id: "call-read-coverage-page".to_string(),
+                revision_base: 0,
+            },
+            review_tool_context(&fixture, "call-read-coverage-page"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.exit_code, Some(0));
+    let page_json: serde_json::Value = serde_json::from_str(&page.into_model_output()).unwrap();
+    assert_eq!(page_json["total"], 25);
+    assert_eq!(page_json["offset"], 20);
+    assert_eq!(page_json["limit"], 10);
+    assert_eq!(page_json["hasMore"], false);
+    assert_eq!(page_json["items"].as_array().unwrap().len(), 5);
+
+    let file_reviews = expected_files
+        .iter()
+        .map(|path| serde_json::json!({"path": path, "reviewed": true}))
+        .collect::<Vec<_>>();
+    let accepted = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "verdict":"pass",
+                    "summary":"已补审冻结清单中的全部文件",
+                    "designReferences":[{"path":"design/guide.md","section":"Review design"}],
+                    "findings":[],
+                    "fileReviews":file_reviews
+                }),
+                session_id: "reviewer-turn-retry".to_string(),
+                tool_id: "call-review-exit-accepted".to_string(),
+                revision_base: 0,
+            },
+            review_tool_context(&fixture, "call-review-exit-accepted"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.exit_code, Some(0));
+    assert!(accepted.ends_turn());
+    let accepted_json: serde_json::Value =
+        serde_json::from_str(&accepted.into_model_output()).unwrap();
+    assert_eq!(accepted_json["status"], "accepted");
+    assert_eq!(accepted_json["coverage"]["expectedCount"], 25);
+    assert_eq!(accepted_json["coverage"]["reviewedCount"], 25);
+    assert_eq!(accepted_json["coverage"]["complete"], true);
+    let final_round = fixture
+        .store
+        .list_review_rounds(&fixture.run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(final_round.verdict, ReviewVerdict::Pass);
+    assert!(final_round.file_reviews.as_ref().unwrap().is_complete());
+    assert_eq!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn completion_requires_current_design_and_pass_then_atomically_releases_lease() {
     let fixture = ReviewFixture::new("task-completion-gate").await;
     let run = fixture
@@ -333,10 +514,8 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .await
         .unwrap();
     fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-complete-review")
-        .await
-        .unwrap();
+        .begin_integrated_review("call-complete-review")
+        .await;
     let round = fixture
         .store
         .authorize_reviewer_spawn(
@@ -365,9 +544,60 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
                 }],
                 findings: Vec::new(),
             },
+            round.file_reviews.as_ref().unwrap().accepted_attempt(),
         )
         .await
         .unwrap();
+
+    let child_id = "completion-gate-child".to_string();
+    fixture
+        .store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: child_id.clone(),
+            parent_thread_id: fixture.root_thread_id.clone(),
+            agent_path: child_id.clone(),
+            role: "explorer".to_string(),
+            title: "Completion gate explorer".to_string(),
+        })
+        .await
+        .unwrap();
+    let mut pending = InteractionRequest {
+        interaction_id: "completion-gate-pending".to_string(),
+        kind: InteractionKind::UserInput,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            thread_id: child_id.clone(),
+            turn_id: "completion-gate-turn".to_string(),
+            item_id: Some("completion-gate-item".to_string()),
+            tool_id: None,
+            agent_path: Some(child_id),
+        },
+        payload: InteractionPayload::UserInput {
+            questions: Vec::new(),
+        },
+        created_at: 1,
+        updated_at: 1,
+        resolved_at: None,
+        resolution: None,
+    };
+    fixture.store.upsert_interaction(&pending).await.unwrap();
+    let pending_error = fixture
+        .store
+        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
+        .await
+        .unwrap_err();
+    let pending_error = pending_error
+        .downcast_ref::<crate::studio::store::PendingTaskInteractions>()
+        .expect("pending interaction must be a typed completion rejection");
+    assert!(
+        pending_error
+            .user_message()
+            .contains("completion-gate-pending")
+    );
+    pending.status = InteractionStatus::Cancelled;
+    pending.updated_at = 2;
+    pending.resolved_at = Some(2);
+    fixture.store.upsert_interaction(&pending).await.unwrap();
 
     let completed = fixture
         .store
@@ -389,7 +619,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 }
 
 #[tokio::test]
-async fn task_complete_does_not_run_project_checks_for_flutter_changes() {
+async fn task_complete_blocks_on_descendant_interaction_without_running_project_checks() {
     let fixture = DeliveryFixture::new(
         "task-completion-with-flutter-changes",
         vec!["code/pure-studio"],
@@ -443,11 +673,13 @@ async fn task_complete_does_not_run_project_checks_for_flutter_changes() {
             .unwrap()
     );
 
-    let round = fixture
-        .store
-        .begin_integrated_review(&fixture.root_thread_id, "call-final-review")
-        .await
-        .unwrap();
+    let round = begin_integrated_review_for_fixture(
+        &fixture.store,
+        &fixture.root_thread_id,
+        &fixture.task_run_id,
+        "call-final-review",
+    )
+    .await;
     fixture
         .store
         .authorize_reviewer_spawn(
@@ -484,9 +716,75 @@ async fn task_complete_does_not_run_project_checks_for_flutter_changes() {
                 }],
                 findings: Vec::new(),
             },
+            round.file_reviews.as_ref().unwrap().accepted_attempt(),
         )
         .await
         .unwrap();
+
+    let mut pending = InteractionRequest {
+        interaction_id: "pending-child-plan".to_string(),
+        kind: InteractionKind::PlanConfirmation,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            thread_id: fixture.subagent.id.clone(),
+            turn_id: "turn-child-plan".to_string(),
+            item_id: Some("item-child-plan".to_string()),
+            tool_id: None,
+            agent_path: Some(fixture.subagent.id.clone()),
+        },
+        payload: InteractionPayload::PlanConfirmation {
+            plan_id: "item-child-plan".to_string(),
+            content: "child must not submit plans".to_string(),
+        },
+        created_at: 1,
+        updated_at: 1,
+        resolved_at: None,
+        resolution: None,
+    };
+    fixture.store.upsert_interaction(&pending).await.unwrap();
+
+    let (pending_ends_turn, pending_json) =
+        call_task_complete(&fixture, "call-complete-pending-interaction").await;
+    assert!(!pending_ends_turn);
+    assert_eq!(pending_json["status"], "rejected");
+    assert_eq!(pending_json["code"], "pendingInteraction");
+    assert!(
+        pending_json["message"]
+            .as_str()
+            .unwrap()
+            .contains("pending-child-plan")
+    );
+    assert_eq!(
+        fixture
+            .store
+            .read_task_run(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        TaskRunPhase::Reviewing
+    );
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_pending_interactions_for_root_thread(&fixture.root_thread_id)
+            .await
+            .unwrap(),
+        vec![pending.clone()]
+    );
+
+    pending.status = InteractionStatus::Cancelled;
+    pending.updated_at = 2;
+    pending.resolved_at = Some(2);
+    fixture.store.upsert_interaction(&pending).await.unwrap();
 
     let (ends_turn, json) = call_task_complete(&fixture, "call-complete").await;
     assert!(ends_turn);
@@ -1105,10 +1403,113 @@ impl ReviewFixture {
         }
     }
 
+    async fn begin_integrated_review(&self, call_id: &str) -> ReviewRoundRecord {
+        begin_integrated_review_for_fixture(
+            &self.store,
+            &self.root_thread_id,
+            &self.run_id,
+            call_id,
+        )
+        .await
+    }
+
+    async fn begin_integrated_review_with_files(
+        &self,
+        call_id: &str,
+        changed_files: Vec<String>,
+    ) -> ReviewRoundRecord {
+        let run = self
+            .store
+            .read_task_run(&self.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        self.store
+            .begin_integrated_review(
+                &self.root_thread_id,
+                BeginIntegratedReview {
+                    requested_by_call_id: call_id.to_string(),
+                    reviewed_head: run.expected_head,
+                    changed_files,
+                },
+            )
+            .await
+            .unwrap()
+    }
+
     fn cleanup(self) {
         self.coordinator.suspend();
         remove_repository(self.repository);
     }
+}
+
+fn review_tool_context(fixture: &ReviewFixture, provider_call_id: &str) -> ToolContext {
+    let history = AgentSession::from_messages(vec![
+        pl_core::session::tool_history::tool_result_history_message(
+            "call-search".to_string(),
+            "exec".to_string(),
+            r#"{"command":"rg --files design"}"#.to_string(),
+            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string(),
+        ),
+        pl_core::session::tool_history::tool_result_history_message(
+            "call-read".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"design/guide.md"}"#.to_string(),
+            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string(),
+        ),
+    ]);
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    ToolContext {
+        event_tx,
+        options: TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        workspace: pl_core::AgentWorkspace::local(fixture.repository.clone()),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: Some(provider_call_id.to_string()),
+        active_subagent: Some(SubagentContext {
+            id: "agent-reviewer-retry".to_string(),
+            parent_id: Some(
+                crate::studio::agent_host::root_agent_id(&fixture.root_thread_id).to_string(),
+            ),
+            agent_path: Some("/root/review_round_1".to_string()),
+            role: "reviewer".to_string(),
+            task: "review".to_string(),
+            depth: 1,
+        }),
+        lsp_runtime: None,
+        parent_session: Arc::new(history),
+        working_set: TurnWorkingSetHandle::default(),
+        tool_cache: TurnToolCacheHandle::default(),
+    }
+}
+
+async fn begin_integrated_review_for_fixture(
+    store: &StudioStore,
+    root_thread_id: &str,
+    task_run_id: &str,
+    call_id: &str,
+) -> ReviewRoundRecord {
+    let run = store.read_task_run(task_run_id).await.unwrap().unwrap();
+    let changed_files = super::git::changed_files_between_selected(
+        &run.workspace_root,
+        &run.base_commit,
+        &run.expected_head,
+        super::git::GitDiffSelection::ExcludeDesign,
+    )
+    .await
+    .unwrap();
+    store
+        .begin_integrated_review(
+            root_thread_id,
+            BeginIntegratedReview {
+                requested_by_call_id: call_id.to_string(),
+                reviewed_head: run.expected_head,
+                changed_files,
+            },
+        )
+        .await
+        .unwrap()
 }
 
 impl DeliveryFixture {
@@ -1384,6 +1785,11 @@ async fn approve_delivery(
                 design_references: Vec::new(),
                 findings: Vec::new(),
             },
+            reviewer_round
+                .file_reviews
+                .as_ref()
+                .unwrap()
+                .accepted_attempt(),
         )
         .await?;
     store

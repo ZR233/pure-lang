@@ -9,6 +9,8 @@ mod review;
 mod work_completion;
 mod work_unit;
 
+pub(in crate::studio) use completion::PendingTaskInteractions;
+
 use anyhow::{Context, Result, bail};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,

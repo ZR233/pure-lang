@@ -1,17 +1,21 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 use serde::Serialize;
 
+use super::super::git::{GitDiffSelection, diff_between};
 use super::super::{
     ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnitRecord, WorkUnitStatus,
 };
 use super::{ModelCompletion, ModelWorkUnit};
 
-#[derive(Serialize)]
+const COMMON_TEMPLATE: &str = include_str!("../../../prompts/review/common.md");
+const DELIVERY_TEMPLATE: &str = include_str!("../../../prompts/review/delivery.md");
+const INTEGRATED_TEMPLATE: &str = include_str!("../../../prompts/review/integrated.md");
+
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewFocus {
     work_unit_id: String,
@@ -31,7 +35,12 @@ pub(crate) async fn build_review_prompt(
         .context("review task run not found")?;
     let prior_reviews = coordinator.store.list_review_rounds(&run.id).await?;
     let design_index = design_index(Path::new(&run.workspace_root))?;
-    let target = match round.scope {
+    let coverage = round
+        .file_reviews
+        .as_ref()
+        .context("review round has no frozen changed-files snapshot")?;
+    let changed_files = coverage.expected_paths();
+    let scope_block = match round.scope {
         ReviewScope::Delivery => {
             let completion_id = round
                 .completion_id
@@ -57,30 +66,45 @@ pub(crate) async fn build_review_prompt(
                 .collect::<Vec<_>>();
             let diff = match completion.head_commit.as_deref() {
                 Some(head) => {
-                    git_diff(
+                    diff_between(
                         &completion.worktree_path,
                         &completion.base_commit,
                         head,
-                        false,
+                        GitDiffSelection::All,
                     )
                     .await?
                 }
                 None => String::new(),
             };
-            format!(
-                "## Scope\nDelivery\n\n## Delivery review boundary\nReview the complete exact Completion diff. scopeHints are planning and review-focus hints only; files outside them remain in scope. Sibling WorkUnits are deferred integration context only: do not report their unmerged or missing files, cross-WorkUnit integration, or task-wide completeness as delivery findings. Those concerns belong to the integrated review after merge.\n\n## Target WorkUnit focus\n```json\n{}\n```\n\n## Sibling WorkUnit focus (deferred integration context only)\n```json\n{}\n```\n\n## Completion\n```json\n{}\n```\n\n## Exact completion diff\n```diff\n{}\n```",
-                serde_json::to_string_pretty(&target_focus)?,
-                serde_json::to_string_pretty(&sibling_focus)?,
-                serde_json::to_string_pretty(&ModelCompletion::new(&run, &completion))?,
-                diff
-            )
+            render_template(
+                DELIVERY_TEMPLATE,
+                [
+                    (
+                        "TARGET_FOCUS_JSON",
+                        serde_json::to_string_pretty(&target_focus)?,
+                    ),
+                    (
+                        "SIBLING_FOCUS_JSON",
+                        serde_json::to_string_pretty(&sibling_focus)?,
+                    ),
+                    (
+                        "COMPLETION_JSON",
+                        serde_json::to_string_pretty(&ModelCompletion::new(&run, &completion))?,
+                    ),
+                    (
+                        "CHANGED_FILES_JSON",
+                        serde_json::to_string_pretty(&changed_files)?,
+                    ),
+                    ("DIFF", diff),
+                ],
+            )?
         }
         ReviewScope::Integrated => {
-            let diff = git_diff(
+            let diff = diff_between(
                 &run.workspace_root,
                 &run.base_commit,
                 &run.expected_head,
-                true,
+                GitDiffSelection::ExcludeDesign,
             )
             .await?;
             let completions = coordinator
@@ -97,26 +121,85 @@ pub(crate) async fn build_review_prompt(
                 .iter()
                 .map(|work_unit| ModelWorkUnit::new(&run, work_unit))
                 .collect::<Vec<_>>();
-            format!(
-                "## Scope\nIntegrated\n\n## Task HEAD\n{}\n\n## Integrated diff\n```diff\n{}\n```\n\n## Work completions\n```json\n{}\n```\n\n## WorkUnit execution state\n```json\n{}\n```",
-                run.expected_head,
-                diff,
-                serde_json::to_string_pretty(&completions)?,
-                serde_json::to_string_pretty(&work_units)?
-            )
+            render_template(
+                INTEGRATED_TEMPLATE,
+                [
+                    ("TASK_HEAD", run.expected_head.clone()),
+                    (
+                        "CHANGED_FILES_JSON",
+                        serde_json::to_string_pretty(&changed_files)?,
+                    ),
+                    ("DIFF", diff),
+                    (
+                        "COMPLETIONS_JSON",
+                        serde_json::to_string_pretty(&completions)?,
+                    ),
+                    (
+                        "WORK_UNITS_JSON",
+                        serde_json::to_string_pretty(&work_units)?,
+                    ),
+                ],
+            )?
         }
     };
-    Ok(format!(
-        "# 审查任务\n\n## 用户确认的完整 plan\n{}\n\n{}\n\n## finding 输出契约\n每条 finding 必须给出可执行的 `recommendation`：写清「改成什么、为什么」，必要时给内联代码片段或精确到函数/行号的最小改法，让 executor 能据此直接 rework。只描述问题而不给出改法的 finding 会被拒绝。\n示例：`recommendation`: \"将 `Config::load` 中的 `unwrap()` 改为传播错误：`let bytes = std::fs::read(&path)?;`，因为配置缺失时应让上层决定回退而非 panic。\"\n\n## 既往审查\n```json\n{}\n```\n\n## design 文件索引\n{}\n",
-        run.plan,
-        target,
-        serde_json::to_string_pretty(&prior_reviews)?,
-        design_index
-            .iter()
-            .map(|path| format!("- {path}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    ))
+    render_template(
+        COMMON_TEMPLATE,
+        [
+            ("PLAN", run.plan),
+            ("SCOPE_BLOCK", scope_block),
+            (
+                "PRIOR_REVIEWS_JSON",
+                serde_json::to_string_pretty(&prior_reviews)?,
+            ),
+            (
+                "DESIGN_INDEX",
+                design_index
+                    .iter()
+                    .map(|path| format!("- {path}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+        ],
+    )
+}
+
+fn render_template<const N: usize>(
+    template: &str,
+    replacements: [(&str, String); N],
+) -> Result<String> {
+    let mut values = BTreeMap::new();
+    for (name, value) in replacements {
+        if values.insert(format!("{{{{{name}}}}}"), value).is_some() {
+            bail!("duplicate review prompt replacement `{name}`");
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut rendered = Vec::new();
+    for line in template.lines() {
+        if line.contains("{{") || line.contains("}}") {
+            let value = values
+                .get(line)
+                .with_context(|| format!("unknown or non-exclusive prompt placeholder `{line}`"))?;
+            if !seen.insert(line.to_string()) {
+                bail!("duplicate review prompt placeholder `{line}`");
+            }
+            rendered.push(value.clone());
+        } else {
+            rendered.push(line.to_string());
+        }
+    }
+    let missing = values
+        .keys()
+        .filter(|placeholder| !seen.contains(*placeholder))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!(
+            "review prompt template is missing placeholders: {}",
+            missing.join(", ")
+        );
+    }
+    Ok(rendered.join("\n"))
 }
 
 impl From<&WorkUnitRecord> for ReviewFocus {
@@ -128,36 +211,6 @@ impl From<&WorkUnitRecord> for ReviewFocus {
             scope_hints: work_unit.scope_hints.clone(),
         }
     }
-}
-
-async fn git_diff(workspace: &str, base: &str, head: &str, exclude_design: bool) -> Result<String> {
-    let mut command = tokio::process::Command::new("git");
-    command.arg("-C").arg(workspace).args([
-        "diff",
-        "--find-renames",
-        "--find-copies",
-        &format!("{base}..{head}"),
-        "--",
-        ".",
-    ]);
-    if exclude_design {
-        command.arg(":(exclude)design/**");
-    }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    crate::process::configure_background_command(&mut command);
-    let output = tokio::time::timeout(Duration::from_secs(120), command.output())
-        .await
-        .context("review diff command timed out")??;
-    if !output.status.success() {
-        bail!(
-            "failed to build review diff: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    String::from_utf8(output.stdout).context("review diff is not UTF-8")
 }
 
 fn design_index(workspace: &Path) -> Result<Vec<String>> {
@@ -196,4 +249,67 @@ fn relative_path(workspace: &Path, path: PathBuf) -> Result<String> {
         .context("design index path escaped workspace")?
         .to_string_lossy()
         .replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_requires_each_placeholder_on_one_exclusive_line() {
+        let rendered =
+            render_template("before\n{{VALUE}}\nafter", [("VALUE", "内容".to_string())]).unwrap();
+        assert_eq!(rendered, "before\n内容\nafter");
+
+        assert!(render_template("before {{VALUE}}", [("VALUE", "内容".to_string())]).is_err());
+        assert!(render_template("before", [("VALUE", "内容".to_string())]).is_err());
+        assert!(render_template("{{VALUE}}\n{{VALUE}}", [("VALUE", "内容".to_string())]).is_err());
+        assert!(render_template("{{UNKNOWN}}", [("VALUE", "内容".to_string())]).is_err());
+    }
+
+    #[test]
+    fn markdown_templates_require_complete_chinese_review_and_all_placeholders() {
+        for required in [
+            "冻结 changed-files 清单中的每个文件都必须审查",
+            "调用点、测试、错误路径、边界输入以及跨文件交互",
+            "发现第一个问题后必须继续检查",
+            "最终一次提交所有合格 finding",
+            "排除推测、既有问题、刻意的需求变化和不影响正确性的纯风格 nit",
+            "每个 finding 必须给出",
+            "read_review_file_coverage",
+            "同一 Turn 重试",
+        ] {
+            assert!(COMMON_TEMPLATE.contains(required), "missing `{required}`");
+        }
+        assert!(DELIVERY_TEMPLATE.contains("精确 Completion diff"));
+        assert!(INTEGRATED_TEMPLATE.contains("跨 WorkUnit 交互"));
+        assert!(INTEGRATED_TEMPLATE.contains("`design/**` 已由独立设计门禁负责"));
+
+        let delivery = render_template(
+            DELIVERY_TEMPLATE,
+            [
+                ("TARGET_FOCUS_JSON", "target".to_string()),
+                ("SIBLING_FOCUS_JSON", "siblings".to_string()),
+                ("COMPLETION_JSON", "completion".to_string()),
+                ("CHANGED_FILES_JSON", "files".to_string()),
+                ("DIFF", "diff".to_string()),
+            ],
+        )
+        .unwrap();
+        let rendered = render_template(
+            COMMON_TEMPLATE,
+            [
+                ("PLAN", "plan".to_string()),
+                ("SCOPE_BLOCK", delivery),
+                ("PRIOR_REVIEWS_JSON", "reviews".to_string()),
+                ("DESIGN_INDEX", "design/index.md".to_string()),
+            ],
+        )
+        .unwrap();
+        assert!(rendered.contains("plan"));
+        assert!(rendered.contains("files"));
+        assert!(rendered.contains("diff"));
+        assert!(!rendered.contains("{{"));
+        assert!(!rendered.contains("}}"));
+    }
 }

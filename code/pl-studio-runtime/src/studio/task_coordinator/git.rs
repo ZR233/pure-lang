@@ -23,6 +23,12 @@ pub(super) struct WorktreeChangeInspection {
     pub(super) changed_file_count: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GitDiffSelection {
+    All,
+    ExcludeDesign,
+}
+
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
 const MINIMUM_ABBREVIATED_COMMIT_LENGTH: usize = 7;
 pub(super) const STUDIO_GIT_NAME_CONFIG: &str = "user.name=Pure Studio";
@@ -80,6 +86,15 @@ pub(super) async fn changed_files_between(
     base_commit: &str,
     head_commit: &str,
 ) -> Result<Vec<String>> {
+    changed_files_between_selected(path, base_commit, head_commit, GitDiffSelection::All).await
+}
+
+pub(super) async fn changed_files_between_selected(
+    path: impl AsRef<Path>,
+    base_commit: &str,
+    head_commit: &str,
+    selection: GitDiffSelection,
+) -> Result<Vec<String>> {
     let path = path.as_ref().to_path_buf();
     let base_commit = base_commit.to_string();
     let head_commit = head_commit.to_string();
@@ -95,8 +110,8 @@ pub(super) async fn changed_files_between(
             "--diff-filter=ACDMRTUXB",
             &base_commit,
             &head_commit,
-            "--",
         ]);
+        append_diff_pathspec(&mut command, selection);
         crate::process::configure_background_std_command(&mut command);
         let output = command
             .output()
@@ -133,6 +148,45 @@ pub(super) async fn changed_files_between(
     })
     .await
     .context("git changed-file inspection task failed")?
+}
+
+pub(super) async fn diff_between(
+    path: impl AsRef<Path>,
+    base_commit: &str,
+    head_commit: &str,
+    selection: GitDiffSelection,
+) -> Result<String> {
+    let path = path.as_ref().to_path_buf();
+    let base_commit = base_commit.to_string();
+    let head_commit = head_commit.to_string();
+    tokio::task::spawn_blocking(move || {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(&path).args([
+            "diff",
+            "--find-renames",
+            "--find-copies",
+            "--find-copies-harder",
+            &base_commit,
+            &head_commit,
+        ]);
+        append_diff_pathspec(&mut command, selection);
+        crate::process::configure_background_std_command(&mut command);
+        let output = command.output().context("failed to run git diff")?;
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            bail!("git diff failed: {error}");
+        }
+        String::from_utf8(output.stdout).context("review diff is not UTF-8")
+    })
+    .await
+    .context("git review diff task failed")?
+}
+
+fn append_diff_pathspec(command: &mut Command, selection: GitDiffSelection) {
+    command.arg("--").arg(".");
+    if selection == GitDiffSelection::ExcludeDesign {
+        command.arg(":(exclude)design/**");
+    }
 }
 
 pub(super) async fn is_ancestor(
@@ -659,6 +713,90 @@ mod tests {
             fingerprint_repository_blocking(&repository, &snapshot.head, &snapshot.head).unwrap();
 
         assert_eq!(fingerprint.operation, "merge");
+        std::fs::remove_dir_all(repository).unwrap();
+    }
+
+    #[tokio::test]
+    async fn review_diff_selection_preserves_all_git_change_kinds_and_excludes_design_together() {
+        let repository = temporary_repository("review-diff-selection");
+        std::fs::create_dir_all(repository.join("src")).unwrap();
+        std::fs::create_dir_all(repository.join("design")).unwrap();
+        prepare_repository_for_task_blocking(&repository).unwrap();
+        std::fs::write(
+            repository.join("src/rename_old.rs"),
+            "pub fn renamed() -> &'static str { \"rename source with enough unique content\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repository.join("src/copy_source.rs"),
+            "pub fn copied() -> &'static str { \"copy source with enough unique content\" }\n",
+        )
+        .unwrap();
+        std::fs::write(repository.join("src/delete.rs"), "pub fn deleted() {}\n").unwrap();
+        std::fs::write(repository.join("src/binary.bin"), [0, 1, 2, 3, 0, 4]).unwrap();
+        std::fs::write(repository.join("design/review.md"), "# Baseline\n").unwrap();
+        git_output(&repository, &["add", "--all", "--", "."]).unwrap();
+        git_output(&repository, &["commit", "-m", "test: add review baseline"]).unwrap();
+        let base = git_output(&repository, &["rev-parse", "HEAD"]).unwrap();
+
+        std::fs::rename(
+            repository.join("src/rename_old.rs"),
+            repository.join("src/rename_new.rs"),
+        )
+        .unwrap();
+        std::fs::copy(
+            repository.join("src/copy_source.rs"),
+            repository.join("src/copy_new.rs"),
+        )
+        .unwrap();
+        std::fs::remove_file(repository.join("src/delete.rs")).unwrap();
+        std::fs::write(repository.join("src/binary.bin"), [0, 9, 8, 7, 0, 6]).unwrap();
+        std::fs::write(repository.join("design/review.md"), "# Updated\n").unwrap();
+        git_output(&repository, &["add", "--all", "--", "."]).unwrap();
+        git_output(
+            &repository,
+            &["commit", "-m", "test: update review fixture"],
+        )
+        .unwrap();
+        let head = git_output(&repository, &["rev-parse", "HEAD"]).unwrap();
+
+        let all = changed_files_between_selected(&repository, &base, &head, GitDiffSelection::All)
+            .await
+            .unwrap();
+        for path in [
+            "design/review.md",
+            "src/binary.bin",
+            "src/copy_new.rs",
+            "src/copy_source.rs",
+            "src/delete.rs",
+            "src/rename_new.rs",
+            "src/rename_old.rs",
+        ] {
+            assert!(
+                all.contains(&path.to_string()),
+                "missing `{path}` from {all:?}"
+            );
+        }
+
+        let integrated = changed_files_between_selected(
+            &repository,
+            &base,
+            &head,
+            GitDiffSelection::ExcludeDesign,
+        )
+        .await
+        .unwrap();
+        assert!(!integrated.iter().any(|path| path.starts_with("design/")));
+        assert_eq!(integrated, all[1..]);
+        let integrated_diff =
+            diff_between(&repository, &base, &head, GitDiffSelection::ExcludeDesign)
+                .await
+                .unwrap();
+        assert!(!integrated_diff.contains("design/review.md"));
+        assert!(integrated_diff.contains("src/binary.bin"));
+        assert!(integrated_diff.contains("src/delete.rs"));
+        assert!(integrated_diff.contains("src/rename_new.rs"));
+
         std::fs::remove_dir_all(repository).unwrap();
     }
 }

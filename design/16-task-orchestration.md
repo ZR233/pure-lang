@@ -41,14 +41,20 @@ planning → pendingConfirmation → designUpdating → implementing → merging
 
 WorkUnit 直接保存 executorThreadId、requestedByCallId、attempt、scopeHints、baseCommit、
 worktree、branch、状态、summary/error 和 cleanup disposition。ReviewRound 直接保存
-reviewerThreadId、scope、目标 completion/HEAD、verdict 和 findings。
+reviewerThreadId、scope、目标 completion/HEAD、冻结的 changed-files、逐文件审查状态、verdict 和
+findings。Delivery round 的文件清单直接复制不可变 WorkCompletion；Integrated round 在 branch
+mutation lock 内按 Task baseCommit 到 expectedHead 计算，并与审查 diff 使用同一 pathspec、排除
+`design/**`。Rename/Copy 的旧、新路径都属于审查目标；删除、二进制、生成文件、lockfile 和
+migration 不因文件类型被过滤。
 
 每条 `ReviewFinding` 必须给出可执行的 `recommendation`：写清改成什么、为什么，必要时附内联
 片段或精确到函数/行号的最小改法，让 executor 据此直接 rework；`review_exit` 校验会拒绝
 `changesRequired/blocked` 下缺失 `recommendation` 的 finding。`task_status` 的 reviews 只投影
-概览（verdict/summary/findings_count/has_recommendations），省略 findings 明细；planner 用
+概览（verdict/summary/findings_count/has_recommendations 和文件覆盖计数），省略 findings 与路径
+明细；planner 用
 `read_review_round(roundId, offset, limit)` 分页读取单轮完整 findings（含 recommendation），
-保证不被默认输出预算截断。
+用 `read_review_file_coverage(roundId, diagnosticsRevision, category, offset, limit)` 分页读取冻结
+文件、覆盖状态和最近一次拒绝诊断，保证不被默认输出预算截断。
 
 WorkUnit 状态为 Pending、Running、AwaitingCompletion、ReadyForReview、Reviewing、
 ChangesRequested、Approved、Merged、NoDelivery、NeedsAttention、Failed、Cancelled。
@@ -60,8 +66,11 @@ Thread runtime snapshot，Thread 状态也不缓存进 Task 表。
 
 Task 生命周期工具只在 Turn 准备时已经解析到 active TaskRun 时安装。规划确认前的 Task root
 没有 TaskRun，因此不暴露 `task_status`、executor/review/merge/complete 等 TaskService 工具，只保留
-通用能力和规划阶段的 `plan_exit`。创建 TaskRun 后启动的 fresh Turn 根据 active run 与最新 phase
-获得相应工具集合；已经开始的 Turn 持有固定工具 lease，不在运行中动态增删工具。
+通用能力和规划阶段的 `plan_exit`。`plan_exit` 只属于 Task root planner；所有 child Agent 无论角色、
+阶段或模型判断都不得看见或调用该工具。root planner 与 child 使用角色隔离的 execution profile：
+explorer 只读探索并向父 Agent 汇报，不创建、提交或确认 Task 计划，也不调用 Task 生命周期工具。
+创建 TaskRun 后启动的 fresh Turn 根据 active run 与最新 phase 获得相应工具集合；已经开始的 Turn
+持有固定工具 lease，不在运行中动态增删工具。
 
 Studio 的 Simple root、Task planner、explorer、reviewer 和 executor 在所有 Task 阶段都允许
 `ToolEffect::Process`，因此 `exec` / `write_stdin` 始终可见。workspace mutability 不限制 shell，
@@ -71,7 +80,10 @@ runtime 也不分析命令正文是否写入；Planner、Explorer、Reviewer 是
 ## 16.4 Planner 与等待
 
 Task root 只允许 planner 创建 explorer；executor 通过 `task_spawn_executor` 创建，reviewer
-通过 delivery/integrated review 工具创建。executor/reviewer depth 固定为 1。
+通过 delivery/integrated review 工具创建。executor/reviewer depth 固定为 1。只有 root Thread 中
+role、agent identity 与持久化 Thread 记录一致的 planner Plan trace 才能投影为 PlanConfirmation；
+child 或身份不匹配的 Plan trace 仅保留为 trace，不创建 Interaction。PlanConfirmation 的 scope
+必须持久化产生它的 agent identity，恢复扫描复用同一资格校验，不能把历史 child trace 补投为确认。
 
 `wait_agents` 订阅 Thread directory watch 后读取 snapshot，只因 progress、interaction 或
 terminal 变化返回，并以 `messages` 返回本次最新增量；planner 直接消费该结果，不在 wait
@@ -189,7 +201,10 @@ UserInput 的 fresh-turn 边界不扩大上述预算续轮范围。普通 Planne
 
 WorkUnit 在 ReadyForReview 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
 事务固定最新 Completion revision，reviewer canonical workspace 直接绑定同一 worktree，不接受
-模型提供路径。findings 使 WorkUnit 进入 ChangesRequested；
+模型提供路径。Reviewer 必须在 `review_exit.fileReviews` 中为冻结清单的每个规范仓库相对路径提交
+`reviewed: true`；服务端精确拒绝缺失、false、重复、额外、绝对或非规范路径。该标记声明 Reviewer
+已经结合 prompt 中完整 diff 审查该文件，不要求每个文件都有独立 `read_file` trace。findings 使
+WorkUnit 进入 ChangesRequested；
 planner 把具体 finding 发回原 executor Thread，新的 completion revision 重新审查。pass 后
 WorkUnit 进入 Approved 或 NoDelivery。executor 在普通结束或失败时若没有形成新的
 Completion，WorkUnit 保留可 follow-up 的 durable terminal execution 状态，并生成一次 Planner
@@ -198,7 +213,19 @@ wake；review changes-requested 后的 rework failure 也走同一路径，不�
 
 Reviewer 在产品语义上仍是只读角色，不得通过 shell 修改 workspace、Git 或其他现场。审查前可以
 使用 `list_files`，或通过 `exec` 运行 `rg` / `rg --files` 定位设计和代码；定位之后仍必须用
-`read_file` 阅读至少一个相关 `design/**` 文档，才能提交 `review_exit`。
+`read_file` 阅读至少一个相关 `design/**` 文档，才能提交 `review_exit`。Reviewer 的中文审查规则
+保存在独立 Markdown prompt 模板中；模板要求检查所有 changed files、调用点、测试、错误路径和
+跨文件交互，发现第一个问题后继续并一次提交所有确定、离散、可执行的 finding，同时排除推测、
+既有问题、刻意变更和纯风格 nit。
+
+`review_exit` 返回 tagged outcome。文件覆盖或其他可修正输入门禁失败时返回
+`rejected { code, recoverable, message, diagnosticsRevision, coverage, violations }`，工具失败但不结束
+Reviewer Turn；一次诊断聚合 missing、unreviewed、duplicate、extra、invalid path 及其他输入问题，
+小集合直接完整返回，大集合提供总数、稳定预览和分页 revision。拒绝只更新 ReviewRound 的最近
+覆盖尝试与诊断，保持 Pending，不推进 WorkUnit/Task phase，也不产生 Planner wake。只有覆盖完整且
+其他门禁通过时返回 `accepted`，在同一事务提交全部文件标记、verdict、summary 与 findings，随后
+物化一次幂等 Planner wake 并结束 Turn。旧数据库中的历史 round 若没有覆盖字段，明确投影为
+coverage unknown，不推断为已审查。
 
 每个 Agent Turn 结束时，Studio 从结构化 `TurnFailure` 派生独立的
 `TaskFailureDisposition`。capacity、transport、408/409/425/429、5xx 和普通验证失败为
@@ -230,7 +257,9 @@ Git 已变化但记账失败时保留现场并 scoped block，不 reset。
 
 所有 WorkUnit 均有 MergeRecord 或 NoDelivery、design 已与当前 HEAD 一致后，创建 fresh integrated
 reviewer，其 canonical workspace 是 TaskRun 主 workspace。findings 进入 reworking，由新 executor
-修复；pass 才允许 `task_complete`。
+修复；pass 才允许 `task_complete`。合并后的 Integrated review 是独立的任务级门禁，不因各 Delivery
+round 已 pass 而省略；相同不可变 Task HEAD 仍受 pending review 与 provider call 幂等键约束，不重复
+创建 round。
 
 ## 16.7 设计门禁
 
@@ -317,10 +346,16 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 - 最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
 - 当前分支、workspace、TaskRun 和 BranchLease expectedHead 精确一致；
 - 不存在 StopRequested。
+- Task root Thread 及全部后代 Thread 不存在 pending Interaction。
+
+pending Interaction 是可恢复的用户或工具边界，`task_complete` 不自动取消；它以
+`pendingInteraction` 拒绝完成，并返回总数及稳定 Thread/Interaction 预览。用户或 Agent 解决这些
+Interaction 后可在同一 Reviewing phase 重试。完成事务必须在写入 terminal fact 与删除 lease 前
+原子重验该不变量，不能只依赖事务外 preflight，否则并发创建的 Interaction 可能穿透终态门禁。
 
 工具返回 tagged `TaskCompleteOutcome`：`completed { run }` 或
 `rejected { code, recoverable, message }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
-repositoryDrift、reviewMissing、deliveriesIncomplete）和用户可读说明。rejected 通过普通 tool
+repositoryDrift、reviewMissing、deliveriesIncomplete、pendingInteraction）和用户可读说明。rejected 通过普通 tool
 failure JSON 同时进入 Planner 上下文、SQLite Item 与 GUI；Task 保持 Reviewing，lease/review
 不变，且 Planner Turn 只有成功完成时才结束。
 

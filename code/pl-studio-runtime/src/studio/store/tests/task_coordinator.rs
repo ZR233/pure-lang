@@ -643,6 +643,150 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
 }
 
 #[tokio::test]
+async fn rejected_review_persists_partial_coverage_without_advancing_or_waking() {
+    let fixture = ExecutorFixture::new("review-rejection-coverage").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("1222222")),
+            "verification passed",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.root_thread_id,
+            &fixture.agent_id,
+            "review-call-rejected",
+        )
+        .await
+        .unwrap();
+    let round = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.root_thread_id,
+            "review-call-rejected",
+            "reviewer-rejected",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .activate_reviewer(&round.id, "reviewer-rejected")
+        .await
+        .unwrap();
+    let mut rejected_coverage = round.file_reviews.clone().unwrap();
+    rejected_coverage.last_diagnostics = Some(ReviewExitDiagnostics {
+        submitted_count: 0,
+        missing_files: vec!["src/lib.rs".to_string()],
+        unreviewed_files: Vec::new(),
+        duplicate_files: Vec::new(),
+        extra_files: Vec::new(),
+        invalid_paths: Vec::new(),
+        violations: Vec::new(),
+    });
+
+    let rejected = fixture
+        .store
+        .record_review_rejection(
+            &fixture.run.root_thread_id,
+            "reviewer-rejected",
+            rejected_coverage,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(rejected.verdict, ReviewVerdict::Pending);
+    assert_eq!(rejected.reviewer_status, ThreadExecutionStatus::Running);
+    assert_eq!(rejected.summary, None);
+    assert!(rejected.findings.is_empty());
+    let persisted_coverage = rejected.file_reviews.as_ref().unwrap();
+    assert_eq!(persisted_coverage.diagnostics_revision, 1);
+    assert_eq!(
+        persisted_coverage
+            .last_diagnostics
+            .as_ref()
+            .unwrap()
+            .missing_files,
+        vec!["src/lib.rs"]
+    );
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Reviewing);
+    assert_eq!(
+        fixture
+            .store
+            .read_task_run(&fixture.run.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        TaskRunPhase::Implementing
+    );
+    assert!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let accepted = fixture
+        .store
+        .complete_task_review(
+            &fixture.run.root_thread_id,
+            "reviewer-rejected",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "all files reviewed".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+            persisted_coverage.accepted_attempt(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted.verdict, ReviewVerdict::Pass);
+    assert!(accepted.file_reviews.as_ref().unwrap().is_complete());
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+    let wakes = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(wakes.len(), 1);
+
+    assert!(
+        fixture
+            .store
+            .complete_task_review(
+                &fixture.run.root_thread_id,
+                "reviewer-rejected",
+                AgentReview {
+                    verdict: ReviewVerdict::Pass,
+                    summary: "duplicate".to_string(),
+                    design_references: Vec::new(),
+                    findings: Vec::new(),
+                },
+                accepted.file_reviews.as_ref().unwrap().accepted_attempt(),
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_executor() {
     let fixture = ExecutorFixture::new("failed-rework-planner-wake").await;
     fixture
@@ -1185,7 +1329,12 @@ impl ExecutorFixture {
             .await
             .unwrap();
         self.store
-            .complete_task_review(&self.run.root_thread_id, reviewer_agent_id, review)
+            .complete_task_review(
+                &self.run.root_thread_id,
+                reviewer_agent_id,
+                review,
+                reviewer.file_reviews.as_ref().unwrap().accepted_attempt(),
+            )
             .await
             .unwrap()
     }

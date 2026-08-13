@@ -8,8 +8,9 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentReview, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunPhase,
-    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus, WorkUnitStatus,
+    AgentReview, BeginIntegratedReview, ReviewExitDiagnostics, ReviewFileCoverage,
+    ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunPhase, ThreadExecutionStatus,
+    WorkCompletionKind, WorkCompletionStatus, WorkUnitStatus,
 };
 use pl_core::TurnOutcomeKind;
 
@@ -48,6 +49,7 @@ impl StudioStore {
             {
                 bail!("latest completion is not ready for review");
             }
+            let changed_files = serde_json::from_str(&completion.changed_files_json)?;
             ensure_no_pending_delivery_review(&tx, &run.id, &work_unit.id).await?;
             let round = insert_review_round(
                 &tx,
@@ -63,6 +65,7 @@ impl StudioStore {
                             .unwrap_or(work_unit.base_commit.as_str()),
                     },
                     requested_by_call_id,
+                    changed_files,
                 },
             )
             .await?;
@@ -79,12 +82,15 @@ impl StudioStore {
     pub(crate) async fn begin_integrated_review(
         &self,
         thread_id: &str,
-        requested_by_call_id: &str,
+        request: BeginIntegratedReview,
     ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_implementation_run(&tx, thread_id).await?;
-            ensure_review_call_unused(&tx, &run.id, requested_by_call_id).await?;
+            if run.expected_head != request.reviewed_head {
+                bail!("integrated review target changed before round creation");
+            }
+            ensure_review_call_unused(&tx, &run.id, &request.requested_by_call_id).await?;
             let work_units = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
                 .all(&tx)
@@ -103,9 +109,10 @@ impl StudioStore {
                 NewReviewRound {
                     task_run_id: &run.id,
                     target: NewReviewTarget::Integrated {
-                        reviewed_head: &run.expected_head,
+                        reviewed_head: &request.reviewed_head,
                     },
-                    requested_by_call_id,
+                    requested_by_call_id: &request.requested_by_call_id,
+                    changed_files: request.changed_files,
                 },
             )
             .await?;
@@ -230,29 +237,19 @@ impl StudioStore {
         thread_id: &str,
         reviewer_agent_id: &str,
         review: AgentReview,
+        file_reviews: ReviewFileCoverage,
     ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_nonterminal_run(&tx, thread_id).await?;
-            let rounds = entities::review_round::Entity::find()
-                .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-                .filter(
-                    entities::review_round::Column::ReviewerThreadId
-                        .eq(reviewer_agent_id.to_string()),
-                )
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
-                .all(&tx)
-                .await?;
-            let round = match rounds.as_slice() {
-                [round] => round.clone(),
-                [] => bail!("pending review not found for reviewer"),
-                _ => bail!("reviewer owns multiple pending reviews"),
-            };
+            let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
             if round.reviewer_status != ThreadExecutionStatus::Running.as_str()
                 || round.reviewer_thread_id.as_deref() != Some(reviewer_agent_id)
             {
                 bail!("reviewer Thread does not match the pending review");
             }
+            let file_reviews_json =
+                prepare_file_reviews(&round, file_reviews, ReviewCoverageSubmission::Accepted)?;
             let now = unix_seconds();
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
                 ReviewScope::Delivery => {
@@ -320,6 +317,10 @@ impl StudioStore {
                     entities::review_round::Column::FindingsJson,
                     Expr::value(serde_json::to_string(&review.findings)?),
                 )
+                .col_expr(
+                    entities::review_round::Column::FileReviewsJson,
+                    Expr::value(Some(file_reviews_json)),
+                )
                 .col_expr(entities::review_round::Column::UpdatedAt, Expr::value(now))
                 .filter(entities::review_round::Column::Id.eq(round.id.clone()))
                 .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
@@ -332,6 +333,51 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("completed review round disappeared")?;
+            review_round_record(round)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
+    pub(crate) async fn record_review_rejection(
+        &self,
+        thread_id: &str,
+        reviewer_agent_id: &str,
+        file_reviews: ReviewFileCoverage,
+    ) -> Result<ReviewRoundRecord> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = active_nonterminal_run(&tx, thread_id).await?;
+            let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
+            if round.reviewer_status != ThreadExecutionStatus::Running.as_str() {
+                bail!("reviewer Thread does not match the pending review");
+            }
+            let file_reviews_json =
+                prepare_file_reviews(&round, file_reviews, ReviewCoverageSubmission::Rejected)?;
+            let updated = entities::review_round::Entity::update_many()
+                .col_expr(
+                    entities::review_round::Column::FileReviewsJson,
+                    Expr::value(Some(file_reviews_json)),
+                )
+                .col_expr(
+                    entities::review_round::Column::UpdatedAt,
+                    Expr::value(unix_seconds()),
+                )
+                .filter(entities::review_round::Column::Id.eq(round.id.clone()))
+                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+                .filter(
+                    entities::review_round::Column::ReviewerStatus
+                        .eq(ThreadExecutionStatus::Running.as_str()),
+                )
+                .exec(&tx)
+                .await?;
+            if updated.rows_affected != 1 {
+                bail!("review rejection is stale or was already settled");
+            }
+            let round = entities::review_round::Entity::find_by_id(round.id)
+                .one(&tx)
+                .await?
+                .context("rejected review round disappeared")?;
             review_round_record(round)
         }
         .await;
@@ -586,6 +632,7 @@ struct NewReviewRound<'a> {
     task_run_id: &'a str,
     target: NewReviewTarget<'a>,
     requested_by_call_id: &'a str,
+    changed_files: Vec<String>,
 }
 
 enum NewReviewTarget<'a> {
@@ -627,6 +674,7 @@ async fn insert_review_round(
             }
         };
     let now = unix_seconds();
+    let file_reviews = ReviewFileCoverage::pending(request.changed_files);
     review_round_record(
         entities::review_round::ActiveModel {
             id: Set(new_id("review")),
@@ -645,6 +693,7 @@ async fn insert_review_round(
             summary: Set(None),
             design_references_json: Set("[]".to_string()),
             findings_json: Set("[]".to_string()),
+            file_reviews_json: Set(Some(serde_json::to_string(&file_reviews)?)),
             created_at: Set(now),
             updated_at: Set(now),
         }
@@ -681,9 +730,80 @@ pub(super) fn review_round_record(
         summary: model.summary,
         design_references: serde_json::from_str(&model.design_references_json)?,
         findings: serde_json::from_str(&model.findings_json)?,
+        file_reviews: model
+            .file_reviews_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+#[derive(Clone, Copy)]
+enum ReviewCoverageSubmission {
+    Rejected,
+    Accepted,
+}
+
+async fn pending_review_for_reviewer(
+    tx: &sea_orm::DatabaseTransaction,
+    task_run_id: &str,
+    reviewer_agent_id: &str,
+) -> Result<entities::review_round::Model> {
+    let rounds = entities::review_round::Entity::find()
+        .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
+        .filter(entities::review_round::Column::ReviewerThreadId.eq(reviewer_agent_id.to_string()))
+        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .all(tx)
+        .await?;
+    match rounds.as_slice() {
+        [round] => Ok(round.clone()),
+        [] => bail!("pending review not found for reviewer"),
+        _ => bail!("reviewer owns multiple pending reviews"),
+    }
+}
+
+fn prepare_file_reviews(
+    round: &entities::review_round::Model,
+    mut submitted: ReviewFileCoverage,
+    outcome: ReviewCoverageSubmission,
+) -> Result<String> {
+    let stored: ReviewFileCoverage = serde_json::from_str(
+        round
+            .file_reviews_json
+            .as_deref()
+            .context("review round has no file coverage snapshot")?,
+    )?;
+    if submitted.version != stored.version || submitted.expected_paths() != stored.expected_paths()
+    {
+        bail!("review file coverage no longer matches the frozen round target");
+    }
+    match outcome {
+        ReviewCoverageSubmission::Rejected
+            if submitted
+                .last_diagnostics
+                .as_ref()
+                .is_none_or(ReviewExitDiagnostics::is_empty) =>
+        {
+            bail!("rejected review coverage must contain diagnostics");
+        }
+        ReviewCoverageSubmission::Accepted
+            if !submitted.is_complete()
+                || submitted
+                    .last_diagnostics
+                    .as_ref()
+                    .is_some_and(|diagnostics| !diagnostics.is_empty()) =>
+        {
+            bail!("accepted review coverage must be complete and have no diagnostics");
+        }
+        ReviewCoverageSubmission::Rejected | ReviewCoverageSubmission::Accepted => {}
+    }
+    submitted.diagnostics_revision = stored
+        .diagnostics_revision
+        .checked_add(1)
+        .context("review diagnostics revision overflow")?;
+    serde_json::to_string(&submitted).map_err(Into::into)
 }
 
 async fn active_implementation_run(

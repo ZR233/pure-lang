@@ -1,3 +1,4 @@
+mod coverage;
 mod exit;
 pub(crate) mod prompt;
 mod read;
@@ -11,10 +12,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::design::design_commit_is_current;
+use super::git::{GitDiffSelection, changed_files_between_selected};
 use super::{
-    MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, StudioSpawnIntent,
-    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskWorktreeDisposition, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
+    BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
+    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskRunPhase, TaskRunRecord,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord,
+    WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -22,7 +25,7 @@ use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
 };
 
-const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、scopeHints、验证摘要和受影响代码。scopeHints 只用于聚焦，不是文件授权边界；delivery scope 的 verdict 与 findings 必须覆盖完整 completion diff。其他 WorkUnit 仅是延后集成的上下文，不得把尚未合并的 sibling 文件、跨 WorkUnit 交互或任务整体完整性归责给当前 executor，这些内容由 integrated review 审查。在读取 design 正文前必须先调用 list_files，或通过 exec 运行 rg/rg --files 定位文档，再用 read_file 阅读。所有相对路径都基于当前 reviewer workspace。exec/write_stdin 虽然可用，但只允许执行读取和搜索命令；禁止通过 shell 修改 workspace、Git 或任何现场。每条 finding 必须给出可执行的 recommendation：写清「改成什么、为什么」，必要时给内联代码片段或精确到函数/行号的最小改法；只描述问题、不给出改法的 finding 不可接受。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供带 recommendation 的具体 finding。禁止修改、派生代理、修复、合并或宣布 Task 完成。";
+const REVIEWER_CONSTRAINT: &str = include_str!("../../../prompts/review/constraint.md");
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -81,6 +84,11 @@ struct ModelReviewOverview {
     summary: Option<String>,
     findings_count: usize,
     has_recommendations: bool,
+    coverage_known: bool,
+    expected_file_count: usize,
+    reviewed_file_count: usize,
+    coverage_complete: bool,
+    diagnostics_revision: Option<u64>,
     created_at: i64,
     updated_at: i64,
 }
@@ -92,6 +100,23 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             .iter()
             .any(|finding| !finding.recommendation.trim().is_empty());
         let findings_count = record.findings.len();
+        let coverage_known = record.file_reviews.is_some();
+        let expected_file_count = record
+            .file_reviews
+            .as_ref()
+            .map_or(0, |coverage| coverage.files.len());
+        let reviewed_file_count = record
+            .file_reviews
+            .as_ref()
+            .map_or(0, super::ReviewFileCoverage::reviewed_count);
+        let coverage_complete = record
+            .file_reviews
+            .as_ref()
+            .is_some_and(super::ReviewFileCoverage::is_complete);
+        let diagnostics_revision = record
+            .file_reviews
+            .as_ref()
+            .map(|coverage| coverage.diagnostics_revision);
         Self {
             id: record.id,
             round: record.round,
@@ -107,6 +132,11 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             summary: record.summary,
             findings_count,
             has_recommendations,
+            coverage_known,
+            expected_file_count,
+            reviewed_file_count,
+            coverage_complete,
+            diagnostics_revision,
             created_at: record.created_at,
             updated_at: record.updated_at,
         }
@@ -218,9 +248,23 @@ impl TaskCoordinator {
                 let run = coordinator
                     .preflight_integrated_review_locked(&thread_id, &guard)
                     .await?;
+                let changed_files = changed_files_between_selected(
+                    &run.workspace_root,
+                    &run.base_commit,
+                    &run.expected_head,
+                    GitDiffSelection::ExcludeDesign,
+                )
+                .await?;
                 let round = coordinator
                     .store
-                    .begin_integrated_review(&thread_id, &call_id)
+                    .begin_integrated_review(
+                        &thread_id,
+                        BeginIntegratedReview {
+                            requested_by_call_id: call_id.clone(),
+                            reviewed_head: run.expected_head.clone(),
+                            changed_files,
+                        },
+                    )
                     .await?;
                 drop(guard);
                 debug_assert_eq!(round.reviewed_head, run.expected_head);

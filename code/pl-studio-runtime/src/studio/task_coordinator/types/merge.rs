@@ -111,8 +111,130 @@ pub(crate) struct ReviewRoundRecord {
     pub(crate) summary: Option<String>,
     pub(crate) design_references: Vec<ReviewDesignReference>,
     pub(crate) findings: Vec<ReviewFinding>,
+    #[serde(skip_serializing)]
+    pub(crate) file_reviews: Option<ReviewFileCoverage>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+}
+
+pub(crate) const REVIEW_FILE_COVERAGE_VERSION: u32 = 1;
+
+/// ReviewRound 创建时冻结的文件审查状态及最近一次提交诊断。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewFileCoverage {
+    pub(crate) version: u32,
+    pub(crate) diagnostics_revision: u64,
+    pub(crate) files: Vec<ReviewFileReview>,
+    pub(crate) last_diagnostics: Option<ReviewExitDiagnostics>,
+}
+
+impl ReviewFileCoverage {
+    pub(crate) fn pending(mut paths: Vec<String>) -> Self {
+        paths.sort();
+        paths.dedup();
+        Self {
+            version: REVIEW_FILE_COVERAGE_VERSION,
+            diagnostics_revision: 0,
+            files: paths
+                .into_iter()
+                .map(|path| ReviewFileReview {
+                    path,
+                    reviewed: false,
+                })
+                .collect(),
+            last_diagnostics: None,
+        }
+    }
+
+    pub(crate) fn expected_paths(&self) -> Vec<String> {
+        self.files.iter().map(|file| file.path.clone()).collect()
+    }
+
+    pub(crate) fn reviewed_count(&self) -> usize {
+        self.files.iter().filter(|file| file.reviewed).count()
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.files.iter().all(|file| file.reviewed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accepted_attempt(&self) -> Self {
+        Self {
+            version: self.version,
+            diagnostics_revision: self.diagnostics_revision,
+            files: self
+                .files
+                .iter()
+                .map(|file| ReviewFileReview {
+                    path: file.path.clone(),
+                    reviewed: true,
+                })
+                .collect(),
+            last_diagnostics: Some(ReviewExitDiagnostics {
+                submitted_count: self.files.len(),
+                missing_files: Vec::new(),
+                unreviewed_files: Vec::new(),
+                duplicate_files: Vec::new(),
+                extra_files: Vec::new(),
+                invalid_paths: Vec::new(),
+                violations: Vec::new(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewFileReview {
+    pub(crate) path: String,
+    pub(crate) reviewed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewExitDiagnostics {
+    pub(crate) submitted_count: usize,
+    pub(crate) missing_files: Vec<String>,
+    pub(crate) unreviewed_files: Vec<String>,
+    pub(crate) duplicate_files: Vec<String>,
+    pub(crate) extra_files: Vec<String>,
+    pub(crate) invalid_paths: Vec<ReviewInvalidPath>,
+    pub(crate) violations: Vec<ReviewExitViolation>,
+}
+
+impl ReviewExitDiagnostics {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.missing_files.is_empty()
+            && self.unreviewed_files.is_empty()
+            && self.duplicate_files.is_empty()
+            && self.extra_files.is_empty()
+            && self.invalid_paths.is_empty()
+            && self.violations.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewInvalidPath {
+    pub(crate) path: String,
+    pub(crate) reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReviewExitViolation {
+    pub(crate) code: String,
+    pub(crate) message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) location: Option<String>,
+}
+
+pub(crate) struct BeginIntegratedReview {
+    pub(crate) requested_by_call_id: String,
+    pub(crate) reviewed_head: String,
+    pub(crate) changed_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

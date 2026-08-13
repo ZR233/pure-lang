@@ -18,6 +18,7 @@ pub struct StudioStore {
 
 pub(in crate::studio) use agent_framework::RecoverablePlan;
 pub use error::StudioDatabaseError;
+pub(in crate::studio) use task::PendingTaskInteractions;
 pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {

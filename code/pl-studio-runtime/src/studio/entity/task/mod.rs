@@ -196,6 +196,8 @@ pub mod review_round {
         pub findings_json: String,
         pub created_at: i64,
         pub updated_at: i64,
+        // Keep this field last so fresh v7 DDL matches SQLite's v6 -> v7 ALTER TABLE result.
+        pub file_reviews_json: Option<String>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

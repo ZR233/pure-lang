@@ -6,11 +6,11 @@ use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, St
 
 use super::*;
 use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
-use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
+use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, migrate_studio_schema};
 
 #[tokio::test]
-async fn creates_canonical_schema_v6_with_thread_submissions() {
-    let root = unique_test_root("schema-v6");
+async fn creates_canonical_schema_v7_with_review_file_coverage() {
+    let root = unique_test_root("schema-v7");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -65,6 +65,8 @@ async fn creates_canonical_schema_v6_with_thread_submissions() {
     assert!(!work_unit_columns.contains(&"owned_paths_json".to_string()));
     let item_columns = table_columns(store.database(), "items").await;
     assert!(!item_columns.contains(&"provider_private_payload".to_string()));
+    let review_round_columns = table_columns(store.database(), "review_rounds").await;
+    assert!(review_round_columns.contains(&"file_reviews_json".to_string()));
     let task_run_columns = table_columns(store.database(), "task_runs").await;
     assert!(task_run_columns.contains(&"terminal_failure_id".to_string()));
     let task_failure_columns = table_columns(store.database(), "task_failures").await;
@@ -152,7 +154,8 @@ async fn migrates_schema_v4_waiting_interaction_turns_without_rebuild() {
     store
         .database()
         .execute_unprepared(
-            "INSERT INTO projects \
+            "ALTER TABLE review_rounds DROP COLUMN file_reviews_json; \
+             INSERT INTO projects \
              (id, name, path, created_at, updated_at, last_opened_at, closed) \
              VALUES ('project-1', 'Project', 'C:/project', 1, 1, 1, 0); \
              INSERT INTO threads \
@@ -208,7 +211,8 @@ async fn migrates_schema_v5_adds_thread_submissions_without_rebuild() {
     store
         .database()
         .execute_unprepared(
-            "DROP INDEX IF EXISTS idx_thread_submissions_ordinal; \
+            "ALTER TABLE review_rounds DROP COLUMN file_reviews_json; \
+             DROP INDEX IF EXISTS idx_thread_submissions_ordinal; \
              DROP TABLE IF EXISTS thread_submissions; \
              INSERT INTO projects \
              (id, name, path, created_at, updated_at, last_opened_at, closed) \
@@ -233,6 +237,83 @@ async fn migrates_schema_v5_adds_thread_submissions_without_rebuild() {
 
     drop(migrated);
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn migrates_schema_v6_review_rounds_without_faking_historical_coverage() {
+    let root = unique_test_root("schema-v6-review-file-coverage");
+    let database_path = root.join("studio.sqlite");
+    let store = StudioStore::open(&database_path).await.unwrap();
+    store
+        .database()
+        .execute_unprepared(
+            "ALTER TABLE review_rounds DROP COLUMN file_reviews_json; \
+             PRAGMA foreign_keys = OFF; \
+             INSERT INTO review_rounds \
+             (id, task_run_id, round, scope, work_unit_id, completion_id, completion_revision, \
+              reviewed_head, status, requested_by_call_id, reviewer_thread_id, reviewer_status, \
+              reviewer_error, summary, design_references_json, findings_json, created_at, updated_at) \
+             VALUES ('review-v6', 'missing-task', 1, 'integrated', NULL, NULL, NULL, 'head', \
+                     'pass', 'call-v6', NULL, 'completed', NULL, 'historical pass', '[]', '[]', 1, 1); \
+             PRAGMA foreign_keys = ON; \
+             PRAGMA user_version = 6;",
+        )
+        .await
+        .unwrap();
+    drop(store);
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    let columns = table_columns(migrated.database(), "review_rounds").await;
+    assert_eq!(
+        columns.last().map(String::as_str),
+        Some("file_reviews_json")
+    );
+    let row = migrated
+        .database()
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT summary, file_reviews_json FROM review_rounds WHERE id = 'review-v6'"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.try_get::<Option<String>>("", "summary")
+            .unwrap()
+            .as_deref(),
+        Some("historical pass")
+    );
+    assert_eq!(
+        row.try_get::<Option<String>>("", "file_reviews_json")
+            .unwrap(),
+        None
+    );
+
+    drop(migrated);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn failed_v6_to_v7_migration_does_not_advance_schema_version() {
+    let database = Database::connect("sqlite::memory:").await.unwrap();
+    super::super::super::store_support::initialize_studio_schema(&database)
+        .await
+        .unwrap();
+    database
+        .execute_unprepared("PRAGMA user_version = 6")
+        .await
+        .unwrap();
+
+    let error = migrate_studio_schema(&database, 6).await.unwrap_err();
+
+    assert!(error.to_string().contains("duplicate column name"));
+    assert_eq!(schema_version(&database).await, 6);
+    database.close().await.unwrap();
 }
 
 #[tokio::test]

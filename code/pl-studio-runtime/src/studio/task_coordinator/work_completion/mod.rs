@@ -74,6 +74,7 @@ impl TaskCoordinator {
             );
             core.register_tool(self.task_status_tool(thread_id, Some(runtime.clone())));
             core.register_tool(self.read_review_round_tool(thread_id));
+            core.register_tool(self.read_review_file_coverage_tool(thread_id));
             core.register_tool(self.task_complete_tool(thread_id));
             core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
             return;
@@ -83,6 +84,7 @@ impl TaskCoordinator {
                 core.register_tool(self.report_completion_tool(runtime));
             }
             "reviewer" => {
+                core.register_tool(self.read_review_file_coverage_tool(thread_id));
                 core.register_tool(self.review_exit_tool(thread_id, Some(runtime)));
             }
             "explorer" | "planner" => {}

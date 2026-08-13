@@ -57,6 +57,15 @@ impl StudioPlanConfirmationProjector {
         plan_id: &str,
         content: &str,
     ) -> anyhow::Result<bool> {
+        if !self.is_task_root_planner(agent_id, thread_id).await? {
+            tracing::debug!(
+                agent_id,
+                thread_id,
+                plan_id,
+                "ignored plan trace from non-root Task planner"
+            );
+            return Ok(false);
+        }
         if content.trim().is_empty() {
             return Ok(false);
         }
@@ -79,7 +88,7 @@ impl StudioPlanConfirmationProjector {
                 turn_id: turn_id.to_string(),
                 item_id: Some(plan_id.to_string()),
                 tool_id: None,
-                agent_path: None,
+                agent_path: Some(agent_id.to_string()),
             },
             payload: InteractionPayload::PlanConfirmation {
                 plan_id: plan_id.to_string(),
@@ -118,6 +127,18 @@ impl StudioPlanConfirmationProjector {
         });
         self.interactions.create(interaction, emitter).await?;
         Ok(true)
+    }
+
+    async fn is_task_root_planner(&self, agent_id: &str, thread_id: &str) -> anyhow::Result<bool> {
+        let Some(thread) = self.store.read_thread(thread_id).await? else {
+            return Ok(false);
+        };
+        Ok(thread.mode == "task"
+            && thread.parent_thread_id.is_none()
+            && thread.id == thread.root_thread_id
+            && thread.id == thread_id
+            && thread.role == "planner"
+            && thread.agent_path == agent_id)
     }
 
     pub(super) async fn recover_missing(&self) -> anyhow::Result<()> {
@@ -206,11 +227,68 @@ mod tests {
 
     use crate::StudioMode;
     use crate::config::{ConfigPaths, ConfigStore};
-    use crate::studio::{StudioRuntime, StudioStore};
+    use crate::studio::{
+        ChildThreadSpec, InteractionRuntime, StudioProductEventRuntime, StudioRuntime, StudioStore,
+    };
     use pl_protocol::{ThreadItem, ThreadItemContent, ThreadItemStatus, ThreadNotification};
 
     use super::*;
     use crate::studio::agent_host::root_agent_id;
+
+    #[tokio::test]
+    async fn child_plan_trace_never_creates_plan_confirmation() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/child-plan").await.unwrap();
+        let session = store
+            .create_thread(&project.id, "Child plan", StudioMode::Task)
+            .await
+            .unwrap();
+        let child_id = "agent-child-explorer".to_string();
+        store
+            .create_child_thread(ChildThreadSpec {
+                id: child_id.clone(),
+                parent_thread_id: session.id.clone(),
+                agent_path: child_id.clone(),
+                role: "explorer".to_string(),
+                title: "Explore".to_string(),
+            })
+            .await
+            .unwrap();
+        let (_runtime_tx, runtime_rx) = watch::channel(None);
+        let projector = StudioPlanConfirmationProjector::new(
+            store.clone(),
+            InteractionRuntime::new(store.clone()),
+            StudioProductEventRuntime::new(store.clone()),
+            runtime_rx,
+        );
+
+        assert!(
+            !projector
+                .project_plan(
+                    &child_id,
+                    &child_id,
+                    "turn-child-plan",
+                    "child-plan-item",
+                    "# 子代理错误计划",
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .read_interaction("plan-confirmation-child-plan-item")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .list_pending_interactions(&child_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[tokio::test]
     async fn recovers_latest_ephemeral_task_plan_without_duplicate_confirmation() {
@@ -308,6 +386,10 @@ mod tests {
             .expect("missing plan confirmation should be recovered");
         assert_eq!(interaction.kind, InteractionKind::PlanConfirmation);
         assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(
+            interaction.scope.agent_path.as_deref(),
+            Some(agent_id.as_str())
+        );
         assert_eq!(
             interaction.payload,
             InteractionPayload::PlanConfirmation {
