@@ -119,7 +119,7 @@ Zhipu Coding Plan 是 catalog preset，默认使用 `https://open.bigmodel.cn/ap
 Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协议由模型的
 `ModelTransportProfile.protocol` 声明，不再由 provider 实例统一决定。内置 OpenAI preset 的所有模型
 使用 Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 `/responses` 并消费 SSE，
-绝不切换到 Chat Completions。DeepSeek flash 使用 Responses HTTP；DeepSeek pro、MiMo、Zhipu
+绝不切换到 Chat Completions。DeepSeek 内建模型（Flash 与 Pro）使用 Responses HTTP；MiMo、Zhipu
 使用 Chat Completions HTTP。同一 provider 实例下的不同模型可以使用不同协议。
 
 `ModelTransportProfile` 是 `ModelInfo` 的必填字段，包含 `protocol`、
@@ -128,9 +128,9 @@ Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协�
 列表、默认模式不在支持列表，以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝。
 Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
-内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash 使用
-Responses/HTTP；DeepSeek V4 Pro、全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。同一 DeepSeek
-provider 实例可以同时路由 Flash 和 Pro，runtime 必须按当前模型选择不同 endpoint path。
+内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash 与 Pro 使用
+Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。runtime 必须按当前模型选择对应
+endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelTransportSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
@@ -199,7 +199,7 @@ retryable。Studio 另行从 typed failure 派生 Task disposition，任何层�
 
 `pl-model` 不读取 Studio 存储，也不解析附件路径。进入 provider adapter 前，`CompletionRequest` 中的图片必须已经 materialize 为 `InlineBase64`；如果 adapter 收到未 materialize 的附件引用，应返回本地协议错误。
 
-OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、DeepSeek、Zhipu/GLM 使用 content array 的 `text` 与 `image_url`。DeepSeek 或未声明视觉输入的模型在本地拒绝图片请求。
+OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、MiMo、Zhipu/GLM 使用 content array 的 `text` 与 `image_url`。DeepSeek 或未声明视觉输入的模型在本地拒绝图片请求。
 
 ## 7.7 自定义模型
 
@@ -344,7 +344,7 @@ model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升
 可见名称排序，JSON Schema 递归使用确定性字段顺序。MCP lease 与工具 schema 在 Turn 内冻结，
 不能为了复用缓存跨 Thread、worktree、Task policy 或权限边界共享。
 
-DeepSeek Chat 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。
+DeepSeek 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。
 内建 OpenAI Responses HTTP/WS 使用 `OpenAiPromptCacheKey` policy：core 用
 `ThreadId + prompt scope + generation` 的不可逆 hash 派生稳定 key，同一 generation 复用，
 generation 变化立即切换。手工 key override 优先于自动 key。当前实现跟随 Codex，仅发送 key，

@@ -220,7 +220,7 @@ async fn model_transport_matrix_selects_http_endpoint_per_model() {
     let pro = capture_model_http_request(
         ProviderInfo::deepseek(None),
         find_model("deepseek-v4-pro"),
-        chat_success_sse("pro ok"),
+        responses_success_sse("pro ok"),
     )
     .await;
     let mut gpt_model = find_model("gpt-5.6-sol");
@@ -234,7 +234,7 @@ async fn model_transport_matrix_selects_http_endpoint_per_model() {
 
     assert_eq!(glm.request_line, "POST /chat/completions HTTP/1.1");
     assert_eq!(flash.request_line, "POST /responses HTTP/1.1");
-    assert_eq!(pro.request_line, "POST /chat/completions HTTP/1.1");
+    assert_eq!(pro.request_line, "POST /responses HTTP/1.1");
     assert_eq!(gpt.request_line, "POST /responses HTTP/1.1");
 }
 

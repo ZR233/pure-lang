@@ -103,12 +103,9 @@ fn builtin_model_transport_matrix_is_explicit_for_every_supported_slug() {
     for model in &models {
         let expected = if model.slug.starts_with("gpt-") {
             ModelTransportProfile::responses_websocket()
-        } else if model.slug == "deepseek-v4-flash" {
+        } else if model.slug.starts_with("deepseek-") {
             ModelTransportProfile::responses_http()
-        } else if model.slug == "deepseek-v4-pro"
-            || model.slug.starts_with("glm-")
-            || model.slug.starts_with("mimo-")
-        {
+        } else if model.slug.starts_with("glm-") || model.slug.starts_with("mimo-") {
             ModelTransportProfile::chat_completions_http()
         } else {
             continue;
@@ -137,14 +134,10 @@ fn builtin_model_transport_matrix_is_explicit_for_every_supported_slug() {
 fn bundled_chat_models_opt_in_to_parallel_wire_only_when_supported() {
     let models = default_models();
 
-    for slug in deepseek_default_model_slugs()
-        .iter()
-        .chain(zhipu_default_model_slugs())
-    {
+    // DeepSeek 内建模型全部使用 Responses API，不再参与 Chat 的
+    // `parallel_tool_calls` wire 声明。
+    for slug in zhipu_default_model_slugs() {
         let model = models.iter().find(|model| model.slug == *slug).unwrap();
-        if model.transport.protocol != crate::ProviderWireProtocol::ChatCompletions {
-            continue;
-        }
         assert!(
             model.request_profile.chat_parallel_tool_calls,
             "{slug} should opt in to the Chat parallel_tool_calls field"
@@ -308,7 +301,7 @@ fn glm52_effort_wire_links_reasoning_effort_and_thinking() {
 
 #[test]
 fn deepseek_request_includes_base_body_thinking() {
-    let profile = deepseek_request_profile(false);
+    let profile = deepseek_request_profile();
     assert_eq!(
         profile.body["thinking"]["type"],
         serde_json::json!("enabled")

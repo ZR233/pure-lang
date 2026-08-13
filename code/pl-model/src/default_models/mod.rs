@@ -59,8 +59,8 @@ pub fn default_models() -> Vec<ModelInfo> {
     let openai = openai_family();
     let openai_gpt56 = openai_gpt56_family("medium");
     let openai_gpt56_sol = openai_gpt56_family("low");
-    let deepseek_flash = deepseek_family(ModelTransportProfile::responses_http(), false);
-    let deepseek_pro = deepseek_family(ModelTransportProfile::chat_completions_http(), true);
+    let deepseek_flash = deepseek_family(ModelTransportProfile::responses_http());
+    let deepseek_pro = deepseek_family(ModelTransportProfile::responses_http());
     let mimo_text = mimo_family(false);
     let mimo_vision = mimo_family(true);
     let zhipu_text = zhipu_text_family();
@@ -405,10 +405,8 @@ fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
     }
 }
 
-fn deepseek_family(
-    transport: ModelTransportProfile,
-    chat_parallel_tool_calls: bool,
-) -> ModelFamily {
+/// DeepSeek 内建模型共享的 family 元数据；当前 Flash 与 Pro 均路由到 Responses HTTP。
+fn deepseek_family(transport: ModelTransportProfile) -> ModelFamily {
     ModelFamily {
         id: "deepseek-reasoning",
         capabilities: deepseek_capabilities(),
@@ -416,7 +414,7 @@ fn deepseek_family(
         truncation_limit: 10_000,
         parameters: vec![deepseek_effort_parameter()],
         transport,
-        request_profile: deepseek_request_profile(chat_parallel_tool_calls),
+        request_profile: deepseek_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -477,14 +475,13 @@ fn zhipu_vision_family() -> ModelFamily {
 }
 
 /// DeepSeek 固定 base body：`thinking.type = enabled`（DeepSeek 模型始终开启 thinking）。
-fn deepseek_request_profile(chat_parallel_tool_calls: bool) -> ModelRequestProfile {
+fn deepseek_request_profile() -> ModelRequestProfile {
     let mut thinking = Map::new();
     thinking.insert("type".to_string(), Value::String("enabled".to_string()));
     let mut body = Map::new();
     body.insert("thinking".to_string(), Value::Object(thinking));
     ModelRequestProfile {
         body,
-        chat_parallel_tool_calls,
         ..ModelRequestProfile::default()
     }
 }

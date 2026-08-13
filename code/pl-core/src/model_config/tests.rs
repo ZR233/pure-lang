@@ -89,10 +89,7 @@ fn provider_runtime_info_is_created_only_after_route_selects_model() {
 
     assert_eq!(info.default_model, "deepseek-v4-pro");
     assert_eq!(flash.protocol, pl_model::ProviderWireProtocol::Responses);
-    assert_eq!(
-        info.protocol,
-        pl_model::ProviderWireProtocol::ChatCompletions
-    );
+    assert_eq!(info.protocol, pl_model::ProviderWireProtocol::Responses);
     assert_eq!(flash.connection_mode, ProviderConnectionMode::Http);
     assert_eq!(info.connection_mode, ProviderConnectionMode::Http);
 }

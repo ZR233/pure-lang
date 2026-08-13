@@ -427,9 +427,9 @@ fn assert_stable_append_only_requests(requests: &[Value]) -> Result<()> {
 }
 
 fn transcript_messages(request: &Value) -> Result<Vec<Value>> {
-    let messages = request["messages"]
+    let messages = request["input"]
         .as_array()
-        .context("request messages missing")?;
+        .context("request input missing")?;
     let tail_count = messages
         .iter()
         .filter(|message| is_working_context_tail(message))
@@ -444,11 +444,17 @@ fn transcript_messages(request: &Value) -> Result<Vec<Value>> {
         .collect())
 }
 
-fn is_working_context_tail(message: &Value) -> bool {
-    message["role"] == "system"
-        && message["content"]
-            .as_str()
-            .is_some_and(|content| content.starts_with("# Current working context"))
+fn is_working_context_tail(item: &Value) -> bool {
+    item["type"] == "message"
+        && item["role"] == "developer"
+        && item["content"].as_array().is_some_and(|parts| {
+            parts.iter().any(|part| {
+                part["type"] == "input_text"
+                    && part["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("# Current working context"))
+            })
+        })
 }
 
 fn tool_names(request: &Value) -> Vec<String> {
@@ -456,7 +462,7 @@ fn tool_names(request: &Value) -> Vec<String> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|tool| tool["function"]["name"].as_str())
+        .filter_map(|tool| tool["name"].as_str())
         .map(str::to_string)
         .collect()
 }
@@ -717,44 +723,100 @@ fn scripted_tool_failure_response(step: usize, _request: &Value) -> Result<Strin
     scripted_response(step, action)
 }
 
-fn scripted_response(step: usize, action: ChatAction) -> Result<String> {
-    let prompt_tokens = 100 + step as u64;
+fn scripted_response(step: usize, action: ScriptedAction) -> Result<String> {
+    let usage = responses_usage(step);
+    let response_id = format!("resp-{step}");
+    let mut events = Vec::new();
+    match &action {
+        ScriptedAction::ToolCall {
+            id,
+            name,
+            arguments,
+        } => {
+            events.push(json!({
+                "type": "response.output_item.added",
+                "item": {"type": "function_call", "id": id, "call_id": id, "name": name}
+            }));
+            events.push(json!({
+                "type": "response.function_call_arguments.delta",
+                "item_id": id,
+                "delta": arguments
+            }));
+            events.push(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": id,
+                    "call_id": id,
+                    "name": name,
+                    "arguments": arguments
+                }
+            }));
+        }
+        ScriptedAction::FinalText(text) => {
+            let message_id = format!("msg-{step}");
+            events.push(json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "message",
+                    "id": message_id,
+                    "role": "assistant",
+                    "phase": "final_answer"
+                }
+            }));
+            events.push(json!({
+                "type": "response.output_text.delta",
+                "item_id": message_id,
+                "delta": text
+            }));
+            events.push(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "message",
+                    "id": message_id,
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": text}]
+                }
+            }));
+        }
+    }
+    events.push(json!({
+        "type": "response.completed",
+        "response": {"id": response_id, "usage": usage}
+    }));
+    let body = events
+        .iter()
+        .map(|event| Ok(format!("data: {}\n\n", serde_json::to_string(event)?)))
+        .collect::<Result<String>>()?;
+    Ok(format!("{body}data: [DONE]\n\n"))
+}
+
+/// 覆盖三种 Responses usage 形状：`input_tokens_details.cached_tokens`、
+/// `prompt_tokens_details.cached_tokens` 与顶层 `prompt_cache_hit_tokens`。
+fn responses_usage(step: usize) -> Value {
+    let input_tokens = 100 + step as u64;
     let cached_tokens = if step == 0 { 0 } else { 20 + step as u64 };
-    let usage = match step % 3 {
+    match step % 3 {
         0 => json!({
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": 10,
-            "total_tokens": prompt_tokens + 10,
-            "prompt_cache_hit_tokens": cached_tokens
+            "input_tokens": input_tokens,
+            "output_tokens": 10,
+            "total_tokens": input_tokens + 10,
+            "input_tokens_details": {"cached_tokens": cached_tokens}
         }),
         1 => json!({
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": 10,
-            "total_tokens": prompt_tokens + 10,
-            "cached_prompt_tokens": cached_tokens
-        }),
-        _ => json!({
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": 10,
-            "total_tokens": prompt_tokens + 10,
+            "input_tokens": input_tokens,
+            "output_tokens": 10,
+            "total_tokens": input_tokens + 10,
             "prompt_tokens_details": {"cached_tokens": cached_tokens}
         }),
-    };
-    let chunk = json!({
-        "id": format!("chatcmpl-{step}"),
-        "object": "chat.completion.chunk",
-        "model": MODEL,
-        "choices": [{
-            "index": 0,
-            "delta": action.delta,
-            "finish_reason": action.finish_reason
-        }],
-        "usage": usage
-    });
-    Ok(format!(
-        "data: {}\n\ndata: [DONE]\n\n",
-        serde_json::to_string(&chunk)?
-    ))
+        _ => json!({
+            "input_tokens": input_tokens,
+            "output_tokens": 10,
+            "total_tokens": input_tokens + 10,
+            "prompt_cache_hit_tokens": cached_tokens
+        }),
+    }
 }
 
 fn assert_request_is_append_only(previous: &Value, current: &Value) -> Result<()> {
@@ -769,34 +831,25 @@ fn assert_request_is_append_only(previous: &Value, current: &Value) -> Result<()
     Ok(())
 }
 
-struct ChatAction {
-    delta: Value,
-    finish_reason: &'static str,
+enum ScriptedAction {
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+    FinalText(String),
 }
 
-fn tool_action(id: &str, name: &str, arguments: Value) -> ChatAction {
-    ChatAction {
-        delta: json!({
-            "role": "assistant",
-            "tool_calls": [{
-                "index": 0,
-                "id": id,
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "arguments": serde_json::to_string(&arguments).expect("tool arguments")
-                }
-            }]
-        }),
-        finish_reason: "tool_calls",
+fn tool_action(id: &str, name: &str, arguments: Value) -> ScriptedAction {
+    ScriptedAction::ToolCall {
+        id: id.to_string(),
+        name: name.to_string(),
+        arguments: serde_json::to_string(&arguments).expect("tool arguments"),
     }
 }
 
-fn final_action(content: &str) -> ChatAction {
-    ChatAction {
-        delta: json!({"role": "assistant", "content": content}),
-        finish_reason: "stop",
-    }
+fn final_action(content: &str) -> ScriptedAction {
+    ScriptedAction::FinalText(content.to_string())
 }
 
 #[derive(Debug, Clone)]
