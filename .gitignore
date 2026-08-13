@@ -18,6 +18,9 @@
 *.swp
 *.swo
 
+# AI agent workspace state
+/.reasonix/
+
 # OS
 .DS_Store
 Thumbs.db

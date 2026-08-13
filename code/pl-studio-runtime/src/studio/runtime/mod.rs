@@ -280,17 +280,18 @@ impl StudioRuntime {
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
-        let runtime = self.agent_framework().await?.handle();
+        // Box::pin：把 agent 关闭链的大 future 状态机放堆上，减小 studio
+        // runtime 侧 async 帧，避免与 agent loop 帧叠加触发线程栈耗尽。
+        let runtime = Box::pin(self.agent_framework()).await?.handle();
         let root_agent_ids = thread_ids
             .iter()
             .map(|thread_id| root_agent_id(thread_id))
             .collect::<BTreeSet<_>>();
         for root_agent_id in &root_agent_ids {
-            close_agent_if_present(&runtime, root_agent_id.clone()).await?;
+            Box::pin(close_agent_if_present(&runtime, root_agent_id.clone())).await?;
         }
 
-        let snapshots = runtime
-            .list()
+        let snapshots = Box::pin(runtime.list())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
         let parents = snapshots
@@ -313,7 +314,7 @@ impl StudioRuntime {
             .collect::<Vec<_>>();
         descendants.sort_by_key(|snapshot| snapshot.identity.depth);
         for descendant in descendants {
-            close_agent_if_present(&runtime, descendant.identity.id).await?;
+            Box::pin(close_agent_if_present(&runtime, descendant.identity.id)).await?;
         }
         Ok(())
     }
@@ -323,7 +324,7 @@ async fn close_agent_if_present(
     runtime: &pl_core::AgentRuntimeHandle,
     agent_id: pl_core::AgentId,
 ) -> Result<()> {
-    match runtime.close(agent_id).await {
+    match Box::pin(runtime.close(agent_id)).await {
         Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
         Err(error) => Err(anyhow::anyhow!(error)),
     }

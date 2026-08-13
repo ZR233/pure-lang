@@ -91,7 +91,7 @@ where
             && self.state.snapshot.lifecycle == AgentLifecycleState::Active
             && self.state.has_triggering_input()
         {
-            self.begin_next_turn().await;
+            Box::pin(self.begin_next_turn()).await;
         }
         loop {
             tokio::select! {
@@ -101,7 +101,9 @@ where
                     };
                     match command {
                         AgentLoopCommand::Submit { request, reply } => {
-                            let result = self.submit(request).await;
+                            // Box::pin：把命令处理状态机放堆上，避免 debug 构建下
+                            // 全部命令分支内联进 run 的 select! 状态机导致超大栈帧。
+                            let result = Box::pin(self.submit(request)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SubmitCurrentSession {
@@ -110,7 +112,7 @@ where
                             reply,
                         } => {
                             let result =
-                                self.submit_current_session(root_agent_id, request).await;
+                                Box::pin(self.submit_current_session(root_agent_id, request)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SubmitInteractionContinuation {
@@ -118,9 +120,10 @@ where
                             request,
                             reply,
                         } => {
-                            let result = self
-                                .submit_interaction_continuation(root_agent_id, *request)
-                                .await;
+                            let result = Box::pin(
+                                self.submit_interaction_continuation(root_agent_id, *request),
+                            )
+                            .await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
@@ -131,11 +134,11 @@ where
                             let _ = reply.send(self.preview_conversation_recovery(target));
                         }
                         AgentLoopCommand::RecoverConversation { request, reply } => {
-                            let result = self.recover_conversation(request).await;
+                            let result = Box::pin(self.recover_conversation(request)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::CancelTurn { turn_id, reply } => {
-                            let result = self.cancel_turn(turn_id).await;
+                            let result = Box::pin(self.cancel_turn(turn_id)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::SetActivity {
@@ -143,13 +146,13 @@ where
                             kind,
                             reply,
                         } => {
-                            let result = self.set_activity(turn_id, kind).await;
+                            let result = Box::pin(self.set_activity(turn_id, kind)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::Checkpoint { checkpoint, reply } => {
-                            let result = self.checkpoint(*checkpoint).await;
+                            let result = Box::pin(self.checkpoint(*checkpoint)).await;
                             if let Err(error) = &result {
-                                self.fault(error.to_string()).await;
+                                Box::pin(self.fault(error.to_string())).await;
                             }
                             let _ = reply.send(result);
                         }
@@ -158,9 +161,9 @@ where
                             facts,
                             reply,
                         } => {
-                            let result = self.record_thread_facts(thread_id, facts).await;
+                            let result = Box::pin(self.record_thread_facts(thread_id, facts)).await;
                             if let Err(error) = &result {
-                                self.fault(error.to_string()).await;
+                                Box::pin(self.fault(error.to_string())).await;
                             }
                             let _ = reply.send(result);
                         }
@@ -174,7 +177,8 @@ where
                             detail,
                             reply,
                         } => {
-                            let result = self.report_progress(stage, summary, next_step, detail).await;
+                            let result =
+                                Box::pin(self.report_progress(stage, summary, next_step, detail)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReadSession { reply } => {
@@ -185,23 +189,23 @@ where
                             limit,
                             reply,
                         } => {
-                            let result = self.read_submissions(offset, limit).await;
+                            let result = Box::pin(self.read_submissions(offset, limit)).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::StartPendingInputs { reply } => {
                             self.dispatch_enabled = true;
-                            self.begin_next_turn().await;
+                            Box::pin(self.begin_next_turn()).await;
                             let _ = reply.send(Ok(()));
                         }
                         AgentLoopCommand::Close { reply } => {
-                            let result = self.close().await;
+                            let result = Box::pin(self.close()).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::TurnFinished(completion) => {
-                            self.finish_turn(*completion).await;
+                            Box::pin(self.finish_turn(*completion)).await;
                         }
                         AgentLoopCommand::Shutdown { reply } => {
-                            let result = self.shutdown().await;
+                            let result = Box::pin(self.shutdown()).await;
                             let _ = reply.send(result);
                             break;
                         }
@@ -211,16 +215,16 @@ where
                     let Some(trace) = trace else {
                         continue;
                     };
-                    if let Err(error) = self.persist_trace_batch(vec![trace]).await {
-                        self.fault(error.to_string()).await;
+                    if let Err(error) = Box::pin(self.persist_trace_batch(vec![trace])).await {
+                        Box::pin(self.fault(error.to_string())).await;
                     }
                 }
                 observation = self.channels.observation_receiver.recv() => {
                     let Some(observation) = observation else {
                         continue;
                     };
-                    if let Err(error) = self.persist_observation(observation).await {
-                        self.fault(error.to_string()).await;
+                    if let Err(error) = Box::pin(self.persist_observation(observation)).await {
+                        Box::pin(self.fault(error.to_string())).await;
                     }
                 }
             }
