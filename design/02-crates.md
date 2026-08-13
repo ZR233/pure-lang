@@ -120,10 +120,16 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 
 `pl-xtask` 只提供开发、生成、构建和运行命令：
 
+- `cargo flutter <args...>`
+- `cargo dart <args...>`
 - `cargo xtask generate-gui`
 - `cargo xtask verify-gui`
 - `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
+
+`cargo flutter` 与 `cargo dart` 是仓库级透传入口：它们把后续参数原样交给对应工具，
+并把工作目录固定为 `code/pure-studio`。Windows GUI 构建和运行仍使用专用 xtask 命令，
+不通过通用透传入口执行。
 
 Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
 2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，

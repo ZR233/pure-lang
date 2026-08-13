@@ -20,6 +20,10 @@ struct Cli {
 
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub(crate) enum Command {
+    /// Run Flutter from the Pure Studio app directory.
+    Flutter(ToolOptions),
+    /// Run Dart from the Pure Studio app directory.
+    Dart(ToolOptions),
     /// Regenerate Riverpod, Freezed, l10n, and FRB bindings.
     GenerateGui,
     /// Generate, analyze, and test the Pure Studio desktop app.
@@ -41,6 +45,14 @@ pub(crate) enum Command {
 pub(crate) enum ParseOutcome {
     Run(Command),
     Display(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+#[command(trailing_var_arg = true, disable_help_flag = true)]
+pub(crate) struct ToolOptions {
+    /// Arguments forwarded to the tool.
+    #[arg(value_name = "ARGS", allow_hyphen_values = true)]
+    pub(crate) args: Vec<OsString>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
@@ -149,6 +161,11 @@ impl BridgeConfiguration {
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<ParseOutcome> {
+    let args = args.into_iter().collect::<Vec<_>>();
+    if let Some(command) = parse_studio_tool(&args) {
+        return Ok(ParseOutcome::Run(command));
+    }
+
     match Cli::try_parse_from(args) {
         Ok(cli) => Ok(ParseOutcome::Run(cli.command)),
         Err(error)
@@ -160,6 +177,19 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<ParseOut
             Ok(ParseOutcome::Display(error.to_string()))
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+fn parse_studio_tool(args: &[OsString]) -> Option<Command> {
+    let forwarded_args = || args.iter().skip(2).cloned().collect();
+    match args.get(1).and_then(|arg| arg.to_str()) {
+        Some("flutter") => Some(Command::Flutter(ToolOptions {
+            args: forwarded_args(),
+        })),
+        Some("dart") => Some(Command::Dart(ToolOptions {
+            args: forwarded_args(),
+        })),
+        _ => None,
     }
 }
 
@@ -188,6 +218,77 @@ mod tests {
                 demo: true,
                 driver: true,
                 log_level: Some(LogLevel::Trace),
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn flutter_arguments_reach_the_runtime_command_unchanged() -> Result<()> {
+        let outcome = parse(
+            [
+                "xtask",
+                "flutter",
+                "test",
+                "--dart-define=GREETING=你好 world",
+                "--",
+                "--name",
+                "focused test",
+            ]
+            .map(OsString::from),
+        )?;
+
+        assert_eq!(
+            outcome,
+            ParseOutcome::Run(Command::Flutter(ToolOptions {
+                args: [
+                    "test",
+                    "--dart-define=GREETING=你好 world",
+                    "--",
+                    "--name",
+                    "focused test",
+                ]
+                .map(OsString::from)
+                .into(),
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dart_accepts_empty_and_option_arguments() -> Result<()> {
+        let outcome = parse(
+            [
+                "xtask",
+                "dart",
+                "run",
+                "",
+                "--enable-asserts",
+                "--help",
+                "-h",
+            ]
+            .map(OsString::from),
+        )?;
+
+        assert_eq!(
+            outcome,
+            ParseOutcome::Run(Command::Dart(ToolOptions {
+                args: ["run", "", "--enable-asserts", "--help", "-h"]
+                    .map(OsString::from)
+                    .into(),
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn separator_immediately_after_tool_name_is_forwarded() -> Result<()> {
+        let outcome = parse(["xtask", "dart", "--", "--version"].map(OsString::from))?;
+
+        assert_eq!(
+            outcome,
+            ParseOutcome::Run(Command::Dart(ToolOptions {
+                args: ["--", "--version"].map(OsString::from).into(),
             }))
         );
         Ok(())

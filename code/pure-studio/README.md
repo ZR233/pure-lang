@@ -15,6 +15,10 @@ Windows-first Flutter desktop client for Pure Studio.
 ```powershell
 # Run from repository root. xtask invokes Flutter with
 # code/pure-studio as the working directory.
+cargo flutter pub get
+cargo flutter analyze
+cargo flutter test
+cargo dart format lib
 cargo xtask run-gui
 cargo xtask build-gui
 cargo xtask generate-gui
@@ -26,11 +30,8 @@ cargo xtask generate-gui
 cargo xtask run-gui --driver
 cargo xtask run-gui --demo --driver # deterministic demo data
 
-# Auxiliary commands may run from this Flutter project directory. Windows GUI
-# run/build must use xtask so CMake receives the prebuilt Rust bridge artifact.
-flutter pub get
-flutter analyze
-flutter test
+# Windows GUI run/build must use xtask so CMake receives the prebuilt Rust
+# bridge artifact. cargo flutter/dart are general passthrough commands only.
 ```
 
 FRB 生成必须从仓库根目录使用 `cargo xtask generate-gui`。xtask 会校验 codegen
