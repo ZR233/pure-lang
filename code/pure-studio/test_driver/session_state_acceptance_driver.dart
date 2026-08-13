@@ -211,6 +211,14 @@ Future<void> _submitCompletedTurn(
       'prompt read-back mismatch: expected ${prompt.length}, received ${entered.length}',
     );
   }
+  // The submit button is enabled only after the draft change is rebuilt into
+  // the widget tree; on slow or frame-throttled CI runners the tap could
+  // otherwise land on a still-disabled button and silently do nothing.
+  await _command(
+    session.waitForNoPendingFrame(timeout: const Duration(seconds: 15)),
+    'composer rebuild after prompt entry',
+    const Duration(seconds: 20),
+  );
   await _command(
     session.tap(find.byValueKey('composer-submit')),
     'submit normal turn',

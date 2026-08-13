@@ -722,6 +722,10 @@ mod tests {
         std::fs::create_dir_all(repository.join("src")).unwrap();
         std::fs::create_dir_all(repository.join("design")).unwrap();
         prepare_repository_for_task_blocking(&repository).unwrap();
+        // CI runners have no global Git identity; the test commits below must
+        // not depend on host configuration.
+        git_output(&repository, &["config", "user.name", "Pure Studio"]).unwrap();
+        git_output(&repository, &["config", "user.email", "pure-studio@local"]).unwrap();
         std::fs::write(
             repository.join("src/rename_old.rs"),
             "pub fn renamed() -> &'static str { \"rename source with enough unique content\" }\n",

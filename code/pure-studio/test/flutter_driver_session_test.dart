@@ -221,4 +221,7 @@ class _FakeDriverClient implements FlutterDriverClient {
 
   @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) async {}
+
+  @override
+  Future<void> waitForNoPendingFrame({Duration? timeout}) async {}
 }

@@ -26,6 +26,8 @@ abstract interface class FlutterDriverClient {
 
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout});
 
+  Future<void> waitForNoPendingFrame({Duration? timeout});
+
   Future<void> sendTextInputAction(TextInputAction action, {Duration? timeout});
 
   Future<String> renderTree();
@@ -178,6 +180,10 @@ class FlutterDriverSession {
     return _client.waitUntilNoTransientCallbacks(timeout: timeout);
   }
 
+  Future<void> waitForNoPendingFrame({Duration? timeout}) {
+    return _client.waitForNoPendingFrame(timeout: timeout);
+  }
+
   Future<void> sendTextInputAction(
     TextInputAction action, {
     Duration? timeout,
@@ -283,6 +289,14 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) {
     return _driver.waitUntilNoTransientCallbacks(timeout: timeout);
+  }
+
+  @override
+  Future<void> waitForNoPendingFrame({Duration? timeout}) {
+    return _driver.waitForCondition(
+      const NoPendingFrame(),
+      timeout: timeout,
+    );
   }
 
   @override

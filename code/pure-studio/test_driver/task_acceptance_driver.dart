@@ -399,6 +399,14 @@ Future<void> _submitPrompt(
     'prompt input settled',
     const Duration(seconds: 10),
   );
+  // Wait for the draft change to be rebuilt so the submit button is actually
+  // enabled before tapping; on slow CI runners the tap could otherwise land on
+  // a still-disabled button and silently do nothing.
+  await _driverCommand(
+    session.waitForNoPendingFrame(timeout: const Duration(seconds: 15)),
+    'prompt submit rebuild',
+    const Duration(seconds: 20),
+  );
   await _sideEffectOnce(
     session,
     snapshots,
