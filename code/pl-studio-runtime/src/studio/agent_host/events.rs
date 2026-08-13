@@ -203,13 +203,13 @@ impl StudioAgentEventProjector {
             | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
             | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
             | AgentRuntimeEventKind::Faulted { snapshot, .. } => {
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnQueued {
                 input: _, snapshot, ..
             } => {
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
@@ -228,7 +228,7 @@ impl StudioAgentEventProjector {
                         .await
                         .at("markExecutorTurnStarted")?;
                 }
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnFinished {
@@ -325,7 +325,7 @@ impl StudioAgentEventProjector {
                     .await
                     .at("projectPlanLifecycle")?;
                 }
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
                 if is_reviewer {
                     let runtime = wait_for_runtime(self.runtime.clone())

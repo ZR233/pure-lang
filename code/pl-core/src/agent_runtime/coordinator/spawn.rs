@@ -28,7 +28,7 @@ where
         sequence: state.snapshot.event_sequence,
         created_at: unix_timestamp(),
         kind: AgentRuntimeEventKind::Registered {
-            snapshot: state.snapshot.clone(),
+            snapshot: Box::new(state.snapshot.clone()),
         },
     };
     let outcome = host
@@ -121,9 +121,11 @@ where
             mail_id: format!("mail:{turn_id}"),
             turn_id: turn_id.clone(),
             thread_id: child_thread_id.clone(),
-            message,
-            presentation: super::super::MailboxPresentation::Hidden,
-            metadata: request.metadata,
+            payload: super::super::MailboxInputPayload {
+                message,
+                presentation: super::super::MailboxPresentation::Hidden,
+                metadata: request.metadata,
+            },
             queue_coalescing_key: None,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
@@ -162,7 +164,7 @@ where
         sequence: state.snapshot.event_sequence,
         created_at: unix_timestamp(),
         kind: AgentRuntimeEventKind::Registered {
-            snapshot: state.snapshot.clone(),
+            snapshot: Box::new(state.snapshot.clone()),
         },
     };
     let persisted = host
@@ -283,11 +285,11 @@ where
         created_at: state.snapshot.updated_at,
         kind: match compensation {
             SpawnCompensation::RolledBack => AgentRuntimeEventKind::StateChanged {
-                snapshot: state.snapshot.clone(),
+                snapshot: Box::new(state.snapshot.clone()),
             },
             SpawnCompensation::Faulted { reason } => AgentRuntimeEventKind::Faulted {
                 reason,
-                snapshot: state.snapshot.clone(),
+                snapshot: Box::new(state.snapshot.clone()),
             },
         },
     };

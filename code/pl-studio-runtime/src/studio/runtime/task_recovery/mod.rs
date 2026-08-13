@@ -96,11 +96,13 @@ impl StudioRuntime {
             ConversationRecoveryResult {
                 recovery_id: record.recovery_id,
                 mode: record.mode,
-                recovery_revision: record.revision,
+                facts: pl_core::ConversationRecoveryFacts {
+                    recovery_revision: record.revision,
+                    before_transcript_hash: record.before_transcript_hash,
+                    after_transcript_hash: record.after_transcript_hash,
+                },
                 runtime_revision: record.runtime_revision,
                 thread_revision: record.thread_revision,
-                before_transcript_hash: record.before_transcript_hash,
-                after_transcript_hash: record.after_transcript_hash,
                 removed_item_count: record.removed_item_count,
                 removed_input_count: record.removed_input_count,
             }
@@ -162,7 +164,7 @@ impl StudioRuntime {
         };
         let resume_mail_id = format!(
             "task-recovery:{}:{}",
-            request.preview.run_id, recovery.recovery_revision
+            request.preview.run_id, recovery.facts.recovery_revision
         );
         let resume_turn_id = runtime
             .submit(
@@ -185,11 +187,11 @@ impl StudioRuntime {
             root_thread_id: request.root_thread_id,
             target_thread_id: request.target_thread_id,
             mode: recovery.mode,
-            recovery_revision: recovery.recovery_revision,
+            recovery_revision: recovery.facts.recovery_revision,
             runtime_revision: recovery.runtime_revision,
             thread_revision: recovery.thread_revision,
-            before_transcript_hash: recovery.before_transcript_hash,
-            after_transcript_hash: recovery.after_transcript_hash,
+            before_transcript_hash: recovery.facts.before_transcript_hash,
+            after_transcript_hash: recovery.facts.after_transcript_hash,
             removed_item_count: recovery.removed_item_count,
             removed_input_count: recovery.removed_input_count,
             stop_cleared,

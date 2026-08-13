@@ -44,7 +44,9 @@ where
         let mut next = self.state.clone();
         next.snapshot.identity.role = role;
         self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
-            AgentRuntimeEventKind::StateChanged { snapshot }
+            AgentRuntimeEventKind::StateChanged {
+                snapshot: Box::new(snapshot),
+            }
         })
         .await?;
         Ok(self.state.snapshot.clone())
@@ -92,7 +94,9 @@ where
         closing.active_input = None;
         if let Err(error) = self
             .commit_transition(super::persist::TransitionCommit::new(closing), |snapshot| {
-                AgentRuntimeEventKind::StateChanged { snapshot }
+                AgentRuntimeEventKind::StateChanged {
+                    snapshot: Box::new(snapshot),
+                }
             })
             .await
         {
@@ -126,7 +130,9 @@ where
         closed.snapshot.pending_inputs = 0;
         if let Err(error) = self
             .commit_transition(super::persist::TransitionCommit::new(closed), |snapshot| {
-                AgentRuntimeEventKind::StateChanged { snapshot }
+                AgentRuntimeEventKind::StateChanged {
+                    snapshot: Box::new(snapshot),
+                }
             })
             .await
         {
@@ -161,10 +167,13 @@ where
             .commit_transition(
                 super::persist::TransitionCommit::new(next),
                 move |snapshot| match event_compensation {
-                    CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged { snapshot },
-                    CloseCompensation::Faulted { reason } => {
-                        AgentRuntimeEventKind::Faulted { reason, snapshot }
-                    }
+                    CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged {
+                        snapshot: Box::new(snapshot),
+                    },
+                    CloseCompensation::Faulted { reason } => AgentRuntimeEventKind::Faulted {
+                        reason,
+                        snapshot: Box::new(snapshot),
+                    },
                 },
             )
             .await

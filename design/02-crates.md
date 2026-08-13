@@ -66,6 +66,10 @@ Instruction 领域进一步分离 wire/领域类型、宿主 profile、指令组
 多个领域结构共享三个及以上稳定字段时，提取具名组合类型并让调用方直接访问该组合；需要保持
 既有 JSON 键平铺的 serde 类型使用 `#[serde(flatten)]`。组合只复用同一领域语义，不因字段名
 偶然相同而合并；重构后的旧字段和旧调用入口直接删除，不保留 alias 或兼容转发层。
+体量较大、克隆频繁且读多写少的进程内领域对象使用内部 `Arc` 写时复制，共享只读状态并在首次
+修改时分离；`Arc` 不进入 protocol、repository 或 durable checkpoint，持久化边界始终物化为
+owned snapshot。单一所有者的大字段或大 enum 变体使用 `Box` 降低父类型的栈内尺寸；`Vec`、
+`String`、map 等自身已持有堆数据的容器不重复装箱。
 
 ## 2.5 pl-studio-runtime
 

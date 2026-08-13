@@ -317,7 +317,7 @@ where
             .commit_transition(persist::TransitionCommit::new(next), move |snapshot| {
                 AgentRuntimeEventKind::Faulted {
                     reason: event_reason,
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                 }
             })
             .await

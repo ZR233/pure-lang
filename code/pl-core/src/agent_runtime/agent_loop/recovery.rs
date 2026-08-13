@@ -131,7 +131,7 @@ where
             });
 
         let mut recovery = next.session.session.conversation_recovery().clone();
-        recovery.revision = actual.recovery_revision;
+        recovery.revision = actual.facts.recovery_revision;
         if !actual.target.turn_ids.is_empty() {
             recovery
                 .rolled_back_turn_ranges
@@ -141,11 +141,11 @@ where
         }
         let record = ConversationRecoveryRecord {
             recovery_id: request.recovery_id.clone(),
-            revision: actual.recovery_revision,
+            revision: actual.facts.recovery_revision,
             mode: actual.target.mode,
             target_turn_ids: actual.target.turn_ids.clone(),
-            before_transcript_hash: actual.before_transcript_hash.clone(),
-            after_transcript_hash: actual.after_transcript_hash.clone(),
+            before_transcript_hash: actual.facts.before_transcript_hash.clone(),
+            after_transcript_hash: actual.facts.after_transcript_hash.clone(),
             removed_input_count: actual.removed_input_count,
             removed_item_count: actual.removed_item_count,
             runtime_revision: next.snapshot.revision,
@@ -157,7 +157,7 @@ where
         next.session.session.upsert_pinned_context(
             context_section(
                 CONVERSATION_RECOVERY_SECTION_ID,
-                actual.recovery_revision,
+                actual.facts.recovery_revision,
                 "Conversation Recovery",
                 recovery_context(&record),
             )
@@ -256,14 +256,16 @@ fn preview_for_state(
         target,
         expected_runtime_revision: state.snapshot.revision,
         expected_thread_revision: state.session.thread_revision,
-        recovery_revision: state
-            .session
-            .session
-            .conversation_recovery()
-            .revision
-            .saturating_add(1),
-        before_transcript_hash,
-        after_transcript_hash,
+        facts: super::super::ConversationRecoveryFacts {
+            recovery_revision: state
+                .session
+                .session
+                .conversation_recovery()
+                .revision
+                .saturating_add(1),
+            before_transcript_hash,
+            after_transcript_hash,
+        },
         retained_item_count: count_u64(retained)?,
         removed_item_count,
         removed_input_count,
@@ -429,11 +431,13 @@ fn result_from_record(record: &ConversationRecoveryRecord) -> ConversationRecove
     ConversationRecoveryResult {
         recovery_id: record.recovery_id.clone(),
         mode: record.mode,
-        recovery_revision: record.revision,
+        facts: super::super::ConversationRecoveryFacts {
+            recovery_revision: record.revision,
+            before_transcript_hash: record.before_transcript_hash.clone(),
+            after_transcript_hash: record.after_transcript_hash.clone(),
+        },
         runtime_revision: record.runtime_revision,
         thread_revision: record.thread_revision,
-        before_transcript_hash: record.before_transcript_hash.clone(),
-        after_transcript_hash: record.after_transcript_hash.clone(),
         removed_item_count: record.removed_item_count,
         removed_input_count: record.removed_input_count,
     }

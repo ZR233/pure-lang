@@ -435,6 +435,24 @@ fn compaction_preserves_note_and_child_forks_do_not_inherit_it() {
     assert_eq!(child.session_note(), None);
 }
 
+#[test]
+fn clone_shares_state_until_first_write() {
+    let mut original = AgentSession::from_messages(vec![text_message("shared")]);
+    let mut cloned = original.clone();
+
+    assert!(Arc::ptr_eq(&original.state, &cloned.state));
+
+    cloned.push_user_prompt("copy-on-write".to_string());
+
+    assert!(!Arc::ptr_eq(&original.state, &cloned.state));
+    assert_eq!(original.messages(), &[text_message("shared")]);
+    assert_eq!(cloned.messages().len(), 2);
+
+    original.set_prompt_cache_key("original-cache".to_string());
+    assert_eq!(original.prompt_cache_key(), Some("original-cache"));
+    assert_eq!(cloned.prompt_cache_key(), None);
+}
+
 fn session_note(revision: u64, content: &str) -> SessionNote {
     SessionNote {
         revision,

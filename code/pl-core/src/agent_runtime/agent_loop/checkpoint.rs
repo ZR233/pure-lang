@@ -43,7 +43,7 @@ where
                     turn_id: turn_id.clone(),
                     thread_id,
                     kind,
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                 },
             )
             .await;
@@ -291,7 +291,9 @@ where
         next.snapshot.progress = Some(checkpoint.clone());
         self.commit_transition(
             super::persist::TransitionCommit::new(next).with_submission(submission),
-            |snapshot| AgentRuntimeEventKind::StateChanged { snapshot },
+            |snapshot| AgentRuntimeEventKind::StateChanged {
+                snapshot: Box::new(snapshot),
+            },
         )
         .await?;
         Ok(checkpoint)

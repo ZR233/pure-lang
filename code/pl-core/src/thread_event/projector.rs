@@ -236,7 +236,7 @@ fn project_user_input(
     turn_id: &str,
     emitted_at: i64,
 ) {
-    if input.presentation != MailboxPresentation::User {
+    if input.payload.presentation != MailboxPresentation::User {
         return;
     }
     let item_id = if input.mail_id.is_empty() {
@@ -259,7 +259,7 @@ fn project_user_input(
                 completed_at: Some(input.queued_at),
                 error: None,
                 content: ThreadItemContent::UserMessage {
-                    text: input.message.clone(),
+                    text: input.payload.message.clone(),
                     attachments: Vec::new(),
                 },
                 usage: None,

@@ -70,9 +70,7 @@ where
             mail_id,
             turn_id: turn_id.clone(),
             thread_id: request.thread_id,
-            message: request.message,
-            presentation: request.presentation,
-            metadata: request.metadata,
+            payload: request.payload,
             queue_coalescing_key: request.queue_coalescing_key,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
@@ -85,7 +83,7 @@ where
         self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
             AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
-                snapshot,
+                snapshot: Box::new(snapshot),
             }
         })
         .await?;
@@ -121,7 +119,9 @@ where
         }
         next.refresh_mailbox_snapshot();
         self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
-            AgentRuntimeEventKind::StateChanged { snapshot }
+            AgentRuntimeEventKind::StateChanged {
+                snapshot: Box::new(snapshot),
+            }
         })
         .await
     }
@@ -143,9 +143,7 @@ where
         );
         self.submit(AgentSubmitRequest {
             thread_id: self.state.snapshot.identity.id.clone(),
-            message: request.message,
-            presentation: request.presentation,
-            metadata: request.metadata,
+            payload: request.payload,
             queue_coalescing_key: None,
             mail_id: request.mail_id,
             turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
@@ -245,9 +243,7 @@ where
             mail_id,
             turn_id: turn_id.clone(),
             thread_id: thread_id.clone(),
-            message: request.input.message,
-            presentation: request.input.presentation,
-            metadata: request.input.metadata,
+            payload: request.input.payload,
             queue_coalescing_key: None,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
@@ -267,7 +263,7 @@ where
             ]),
             |snapshot| AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
-                snapshot,
+                snapshot: Box::new(snapshot),
             },
         )
         .await?;

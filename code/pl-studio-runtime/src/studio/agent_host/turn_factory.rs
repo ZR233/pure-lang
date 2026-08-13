@@ -177,7 +177,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         } else {
             None
         };
-        let input_message = context.input.message.clone();
+        let input_message = context.input.payload.message.clone();
         let model_role = if context.snapshot.identity.parent_id.is_none() {
             match mode {
                 StudioMode::Simple => crate::config::StudioRole::Executor.id(),
@@ -255,6 +255,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
 
         let attachment_ids = context
             .input
+            .payload
             .metadata
             .get("attachmentIds")
             .and_then(serde_json::Value::as_array)
@@ -287,6 +288,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             &workspace_instructions,
             context
                 .input
+                .payload
                 .metadata
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
@@ -330,6 +332,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         }
         if context
             .input
+            .payload
             .metadata
             .get("historyPolicy")
             .and_then(serde_json::Value::as_str)

@@ -533,9 +533,9 @@ async fn upsert_input(
         thread_id: Set(thread_id.to_string()),
         mail_id: Set(input.mail_id.clone()),
         turn_id: Set(input.turn_id.to_string()),
-        content: Set(input.message.clone()),
+        content: Set(input.payload.message.clone()),
         metadata_json: Set(serialize_input_metadata(input)?),
-        presentation: Set(presentation_label(input.presentation.clone()).to_string()),
+        presentation: Set(presentation_label(input.payload.presentation.clone()).to_string()),
         state: Set(delivery_state.to_string()),
         claimed_turn_id: Set(claimed_turn_id),
         checkpoint_seq: Set(checkpoint_seq),
@@ -589,9 +589,11 @@ fn input_from_model(model: thread_input::Model) -> Result<DurableMailboxEnvelope
         mail_id: model.mail_id,
         turn_id: TurnId::new(model.turn_id)?,
         thread_id: ThreadId::new(model.thread_id)?,
-        message: model.content,
-        presentation: presentation_from_label(&model.presentation)?,
-        metadata,
+        payload: pl_core::MailboxInputPayload {
+            message: model.content,
+            presentation: presentation_from_label(&model.presentation)?,
+            metadata,
+        },
         queue_coalescing_key,
         delivery_state,
         queued_at: model.queued_at,
@@ -603,13 +605,13 @@ const INPUT_METADATA_PAYLOAD_KEY: &str = "payload";
 
 fn serialize_input_metadata(input: &DurableMailboxEnvelope) -> Result<String, PureError> {
     let Some(key) = input.queue_coalescing_key.as_deref() else {
-        return Ok(serde_json::to_string(&input.metadata)?);
+        return Ok(serde_json::to_string(&input.payload.metadata)?);
     };
     let value = serde_json::json!({
         RUNTIME_INPUT_METADATA_KEY: {
             "queueCoalescingKey": key,
         },
-        INPUT_METADATA_PAYLOAD_KEY: input.metadata,
+        INPUT_METADATA_PAYLOAD_KEY: input.payload.metadata,
     });
     Ok(serde_json::to_string(&value)?)
 }
@@ -668,7 +670,7 @@ async fn persist_state_turns(
                 budget_limit: None,
                 rollover_compacted: None,
                 rollover_compaction_error: None,
-                metadata: Some(&input.metadata),
+                metadata: Some(&input.payload.metadata),
                 started_at: None,
                 completed_at: None,
                 updated_at: input.queued_at,
@@ -1181,9 +1183,11 @@ mod outcome_tests {
             mail_id: "mail:wake".to_string(),
             turn_id: TurnId::new("turn-wake").unwrap(),
             thread_id: ThreadId::new("thread-wake").unwrap(),
-            message: "wake".to_string(),
-            presentation: MailboxPresentation::Hidden,
-            metadata: serde_json::json!({"kind": "taskWake"}),
+            payload: pl_core::MailboxInputPayload {
+                message: "wake".to_string(),
+                presentation: MailboxPresentation::Hidden,
+                metadata: serde_json::json!({"kind": "taskWake"}),
+            },
             queue_coalescing_key: Some("task-run:wakes".to_string()),
             delivery_state: MailboxDeliveryState::Pending,
             queued_at: 1,
@@ -1192,7 +1196,7 @@ mod outcome_tests {
         let stored = serialize_input_metadata(&input).unwrap();
         let (metadata, key) = deserialize_input_metadata(&stored).unwrap();
 
-        assert_eq!(metadata, input.metadata);
+        assert_eq!(metadata, input.payload.metadata);
         assert_eq!(key, input.queue_coalescing_key);
     }
 
