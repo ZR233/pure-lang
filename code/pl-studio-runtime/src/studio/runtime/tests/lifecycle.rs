@@ -57,6 +57,57 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
 }
 
 #[tokio::test]
+async fn start_runtime_registers_persisted_child_thread_identity() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-persisted-child-{unique}"));
+    let workspace = root.join("workspace");
+    let home = root.join("home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let root_thread = store
+        .create_thread(&project.id, "Root session", StudioMode::Task)
+        .await
+        .unwrap();
+    let child_id = format!("{}-child", root_thread.id);
+    let child = store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: child_id.clone(),
+            parent_thread_id: root_thread.id.clone(),
+            agent_path: child_id,
+            role: "executor".to_string(),
+            title: "Persisted child".to_string(),
+        })
+        .await
+        .unwrap();
+    let runtime = StudioRuntime::with_runtime_state(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    )
+    .unwrap();
+
+    let snapshot = runtime.start_runtime().await.unwrap();
+
+    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    let framework = runtime.agent_framework().await.unwrap();
+    let child_agent = framework
+        .handle()
+        .snapshot(pl_core::AgentId::new(child.id).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        child_agent.identity.parent_id,
+        Some(crate::studio::agent_host::root_agent_id(&root_thread.id))
+    );
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

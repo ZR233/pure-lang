@@ -75,6 +75,10 @@ Product lag 只调用 `readStudioState`；Thread lag 只重订阅并调用 `read
 启动 Thread framework；注册所有未归档 durable Thread；materialize pending wake；初始化 MCP
 owner；同步内置 system Skills；发布 ready。
 
+注册 durable child Thread 时，其运行时身份就是该 child 的 `ThreadId`；只校验它不等于所属
+`rootThreadId`，不能把 child 自己的合法 `ThreadId` 误判成 root 身份。历史 closed child 也必须能
+随目录恢复注册，旧版本持久化的合法 child Thread 不得让整个 Studio 启动失败。
+
 启动后 Flutter 读取 Studio 状态，在本地选择健康 Project/root Thread，再显式调用一次
 `activateProject(projectId)`。activate 验证 workspace、切换 LSP membership、执行初始 LSP
 probe 和 Skills discovery；不创建 Thread。相同 project/fingerprint 重复调用是 no-op。刷新、

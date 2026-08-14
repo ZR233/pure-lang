@@ -267,7 +267,7 @@ impl StudioRuntime {
             }
             ThreadKind::Agent => {
                 anyhow::ensure!(
-                    agent_id != root_agent_id(&thread_record.id),
+                    agent_id != root_agent_id(&thread_record.root_thread_id),
                     "child Studio Thread {} cannot use a root agent identity",
                     thread_record.id
                 );
