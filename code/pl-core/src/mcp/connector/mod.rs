@@ -4,11 +4,6 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use pl_protocol::{PureError, Result};
-#[cfg(windows)]
-use process_wrap::tokio::JobObject;
-#[cfg(unix)]
-use process_wrap::tokio::ProcessGroup;
-use process_wrap::tokio::{CommandWrap, KillOnDrop};
 use reqwest::header::{HeaderName, HeaderValue};
 use rmcp::model::*;
 use rmcp::service::{Peer, RunningService};
@@ -218,23 +213,11 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
         .envs(&config.env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true);
+        .stderr(Stdio::inherit());
     if let Some(cwd) = config.cwd.as_deref() {
         command.current_dir(cwd);
     }
-    let mut command = CommandWrap::from(command);
-    command.wrap(KillOnDrop);
-    #[cfg(windows)]
-    {
-        use process_wrap::tokio::CreationFlags;
-        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
-
-        command.wrap(CreationFlags(CREATE_NO_WINDOW));
-        command.wrap(JobObject);
-    }
-    #[cfg(unix)]
-    command.wrap(ProcessGroup::leader());
+    let command = crate::process::wrap_background_command(command);
 
     let transport = TokioChildProcess::new(command)
         .map_err(|error| connection_error(&request.server_id, error))?;

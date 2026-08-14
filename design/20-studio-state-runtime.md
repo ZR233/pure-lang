@@ -73,7 +73,10 @@ Product lag 只调用 `readStudioState`；Thread lag 只重订阅并调用 `read
 `startStudioRuntime` 是唯一启动 command，顺序固定为：打开并校验 SQLite；加载
 `ConfigRuntime`；加载 Usage/Updater last-known cache；执行启动恢复；修复 root Thread role；
 启动 Thread framework；注册所有未归档 durable Thread；materialize pending wake；初始化 MCP
-owner；同步内置 system Skills；发布 ready。
+owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 system Skills；发布 runtime
+ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
+或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
+降级为启动失败。
 
 注册 durable child Thread 时，其运行时身份就是该 child 的 `ThreadId`；只校验它不等于所属
 `rootThreadId`，不能把 child 自己的合法 `ThreadId` 误判成 root 身份。历史 closed child 也必须能
@@ -107,6 +110,11 @@ root Thread 的编辑器显示 Settings desired route；child Thread 和历史/c
 
 MCP owner 提供 `reconcileMcp(desiredConfig)`、`resetMcp(scope)`、`readMcpState()` 和
 `shutdownMcp()`。scope 是单 server 或 All。
+
+启动 reconcile 使用与显式 reconcile 相同的串行 command 边界，但只在前台完成 desired
+fingerprint 与 running snapshot 发布，候选 generation 的连接和 discovery 由 owner task 后台完成。
+shutdown 必须先取消并等待该启动 task，再关闭 generation，禁止迟到结果把 stopped snapshot
+覆盖回 ready/failed。
 
 reconcile 对无 secret effective config 计算 fingerprint；与 applied 相同必须完全 no-op。未变化且
 健康的连接复用，新增/删除/禁用/变化只影响对应 server。候选 generation 完成后原子发布；新

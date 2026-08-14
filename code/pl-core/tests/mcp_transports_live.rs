@@ -12,15 +12,25 @@ async fn rmcp_stdio_transport_calls_tool_and_cleans_process_tree() {
     let temp = fixture_temp_dir("stdio");
     tokio::fs::create_dir_all(&temp).await.unwrap();
     let pid_file = temp.join("server.pid");
+    let console_window_file = temp.join("console-window.txt");
+    let command_file = temp.join("stdio-server.cmd");
+    tokio::fs::write(
+        &command_file,
+        format!("@echo off\r\n\"{}\" %*\r\n", fixture_executable().display()),
+    )
+    .await
+    .unwrap();
     let request = connect_request(
         "stdio-fixture",
         McpServerConfig {
             transport: McpServerTransport::Stdio,
-            command: Some(fixture_executable().to_string_lossy().into_owned()),
+            command: Some(command_file.to_string_lossy().into_owned()),
             args: vec![
                 "--stdio".to_string(),
                 "--pid-file".to_string(),
                 pid_file.to_string_lossy().into_owned(),
+                "--console-window-file".to_string(),
+                console_window_file.to_string_lossy().into_owned(),
             ],
             ..McpServerConfig::default()
         },
@@ -29,6 +39,7 @@ async fn rmcp_stdio_transport_calls_tool_and_cleans_process_tree() {
     let connection = McpConnector::default().connect(request).await.unwrap();
     assert_real_call(&connection, "stdio").await;
     let pid = wait_for_pid(&pid_file).await;
+    assert_eq!(wait_for_file(&console_window_file).await, "none");
     assert!(
         process_exists(pid),
         "stdio fixture process should be running"
@@ -142,12 +153,16 @@ async fn wait_for_listener(address: std::net::SocketAddr) {
 }
 
 async fn wait_for_pid(path: &Path) -> u32 {
+    wait_for_file(path).await.parse().unwrap()
+}
+
+async fn wait_for_file(path: &Path) -> String {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Ok(value) = tokio::fs::read_to_string(path).await {
-            return value.trim().parse().unwrap();
+            return value.trim().to_string();
         }
-        assert!(Instant::now() < deadline, "fixture did not write its PID");
+        assert!(Instant::now() < deadline, "fixture did not write {path:?}");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }

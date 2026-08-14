@@ -53,6 +53,7 @@ impl StudioRuntime {
             external_runtimes: super::StudioExternalRuntimes {
                 mcp: McpRuntime::new(McpConnector::default()).handle(),
                 mcp_state,
+                mcp_startup_reconcile: Default::default(),
                 mcp_health_watcher: Default::default(),
                 lsp: pl_lsp::LspRuntimeRegistry::new(),
                 lsp_state,
@@ -375,7 +376,7 @@ impl StudioRuntime {
         }
         self.start_mcp_health_watcher().await;
         self.start_lsp_state_watcher().await;
-        self.reconcile_mcp_runtime().await?;
+        self.start_mcp_reconcile_background().await?;
         if settings.config.skills.system.enabled {
             let _ = pl_core::skill::install_system_skills(&settings.config.skills)?;
         }
@@ -421,6 +422,7 @@ impl StudioRuntime {
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
         self.shutdown_agent_framework().await?;
         self.task_coordinator.suspend();
+        self.stop_mcp_startup_reconcile().await;
         self.stop_mcp_health_watcher().await;
         self.stop_lsp_state_watcher().await;
         self.external_runtimes.mcp.shutdown().await;

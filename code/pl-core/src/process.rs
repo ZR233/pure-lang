@@ -2,6 +2,7 @@ use std::process::Stdio;
 #[cfg(unix)]
 use std::time::Duration;
 
+use process_wrap::tokio::{CommandWrap, KillOnDrop};
 use tokio::process::Command as TokioCommand;
 
 #[cfg(windows)]
@@ -39,6 +40,32 @@ pub fn configure_background_std_command(command: &mut std::process::Command) {
     {
         let _ = command;
     }
+}
+
+/// 把需要 Windows Job Object 或 Unix process group 的 Tokio command
+/// 收口为统一后台进程 owner。
+///
+/// `process-wrap` 的 Job Object 会重写 creation flags，因此调用方不能先在
+/// 原生 [`TokioCommand`] 上配置 flags；本工厂使用 wrapper shim 合并
+/// `CREATE_NO_WINDOW` 与 `CREATE_SUSPENDED`，并统一启用 drop 清理。
+pub fn wrap_background_command(command: TokioCommand) -> CommandWrap {
+    let mut command = CommandWrap::from(command);
+    command.wrap(KillOnDrop);
+    #[cfg(windows)]
+    {
+        use process_wrap::tokio::{CreationFlags, JobObject};
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW as WINDOWS_CREATE_NO_WINDOW;
+
+        command.wrap(CreationFlags(WINDOWS_CREATE_NO_WINDOW));
+        command.wrap(JobObject);
+    }
+    #[cfg(unix)]
+    {
+        use process_wrap::tokio::ProcessGroup;
+
+        command.wrap(ProcessGroup::leader());
+    }
+    command
 }
 
 pub(crate) async fn terminate_process_tree(pid: Option<u32>) {

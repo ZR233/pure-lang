@@ -21,6 +21,13 @@ pub(super) struct McpStateRuntime {
     applied_effective_fingerprint: Arc<RwLock<Option<String>>>,
 }
 
+struct McpReconcilePlan {
+    _command_guard: tokio::sync::OwnedMutexGuard<()>,
+    servers: BTreeMap<String, EffectiveMcpServerConfig>,
+    effective_fingerprint: String,
+    desired_public_fingerprint: String,
+}
+
 impl McpStateRuntime {
     pub(super) fn new() -> Self {
         Self {
@@ -47,11 +54,58 @@ impl McpStateRuntime {
 
 impl StudioRuntime {
     pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
+        let Some(plan) = self.prepare_mcp_reconcile().await? else {
+            return Ok(());
+        };
+        self.complete_mcp_reconcile(plan).await
+    }
+
+    pub(super) async fn start_mcp_reconcile_background(&self) -> Result<()> {
+        let mut task = self.external_runtimes.mcp_startup_reconcile.lock().await;
+        if task.as_ref().is_some_and(|handle| !handle.is_finished()) {
+            return Ok(());
+        }
+        let Some(plan) = self.prepare_mcp_reconcile().await? else {
+            task.take();
+            return Ok(());
+        };
+        let runtime = self.clone();
+        *task = Some(tokio::spawn(async move {
+            if let Err(error) = runtime.complete_mcp_reconcile(plan).await {
+                tracing::warn!(
+                    error_bytes = error.to_string().len(),
+                    "background MCP startup reconcile failed"
+                );
+            }
+        }));
+        Ok(())
+    }
+
+    pub(super) async fn stop_mcp_startup_reconcile(&self) {
+        let task = self
+            .external_runtimes
+            .mcp_startup_reconcile
+            .lock()
+            .await
+            .take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    async fn prepare_mcp_reconcile(&self) -> Result<Option<McpReconcilePlan>> {
         let config = self.config_runtime.read()?.config;
         let servers = effective_mcp_servers(&config);
         let effective_fingerprint = effective_mcp_fingerprint(&servers);
         let public_fingerprint = public_mcp_fingerprint(&servers);
-        let _command = self.external_runtimes.mcp_state.command_lock.lock().await;
+        let command_guard = self
+            .external_runtimes
+            .mcp_state
+            .command_lock
+            .clone()
+            .lock_owned()
+            .await;
         let previous = self.external_runtimes.mcp_state.read().await;
         let effective_unchanged = self
             .external_runtimes
@@ -62,7 +116,7 @@ impl StudioRuntime {
             .as_ref()
             == Some(&effective_fingerprint);
         if effective_unchanged && matches!(previous.meta.phase, ObservedStatePhase::Ready) {
-            return Ok(());
+            return Ok(None);
         }
         let desired_public_fingerprint = self
             .desired_mcp_fingerprint(&previous, &effective_fingerprint, public_fingerprint)
@@ -74,6 +128,21 @@ impl StudioRuntime {
             !effective_unchanged,
         )
         .await;
+        Ok(Some(McpReconcilePlan {
+            _command_guard: command_guard,
+            servers,
+            effective_fingerprint,
+            desired_public_fingerprint,
+        }))
+    }
+
+    async fn complete_mcp_reconcile(&self, plan: McpReconcilePlan) -> Result<()> {
+        let McpReconcilePlan {
+            _command_guard,
+            servers,
+            effective_fingerprint,
+            desired_public_fingerprint,
+        } = plan;
         match self.external_runtimes.mcp.reconcile(servers).await {
             Ok(()) => {
                 *self

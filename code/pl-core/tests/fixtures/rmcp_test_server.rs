@@ -84,6 +84,7 @@ impl ServerHandler for FixtureServer {
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     write_pid_file(pid_file(&arguments))?;
+    write_console_window_file(console_window_file(&arguments))?;
     match arguments.first().map(String::as_str) {
         Some("--stdio") => serve_stdio().await?,
         Some("--http") => {
@@ -148,6 +149,31 @@ fn write_pid_file(path: Option<PathBuf>) -> std::io::Result<()> {
         std::fs::write(path, std::process::id().to_string())?;
     }
     Ok(())
+}
+
+fn console_window_file(arguments: &[String]) -> Option<PathBuf> {
+    arguments
+        .iter()
+        .position(|argument| argument == "--console-window-file")
+        .and_then(|index| arguments.get(index + 1))
+        .map(PathBuf::from)
+}
+
+fn write_console_window_file(path: Option<PathBuf>) -> std::io::Result<()> {
+    let Some(path) = path else { return Ok(()) };
+    #[cfg(windows)]
+    let state = {
+        // SAFETY: GetConsoleWindow has no preconditions and only reads this process' console state.
+        let window = unsafe { windows::Win32::System::Console::GetConsoleWindow() };
+        if window.is_invalid() {
+            "none"
+        } else {
+            "attached"
+        }
+    };
+    #[cfg(not(windows))]
+    let state = "unsupported";
+    std::fs::write(path, state)
 }
 
 fn json_object(value: serde_json::Value) -> Map<String, serde_json::Value> {

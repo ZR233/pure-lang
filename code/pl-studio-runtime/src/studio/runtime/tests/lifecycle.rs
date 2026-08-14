@@ -1474,6 +1474,77 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
 }
 
 #[tokio::test]
+async fn start_runtime_returns_while_mcp_discovery_is_pending() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-mcp-background-home-{unique}"));
+    let (base_url, server, accepted, release) = serve_delayed_sse().await;
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    let mut config = StudioConfig::default_config();
+    config.mcp.servers.insert(
+        "slow-startup".to_string(),
+        crate::McpServerConfig {
+            transport: crate::McpServerTransport::StreamableHttp,
+            url: Some(format!("{base_url}/mcp")),
+            startup_timeout_secs: Some(TEST_RUNTIME_TIMEOUT.as_secs()),
+            ..crate::McpServerConfig::default()
+        },
+    );
+    config_store.save(&config).unwrap();
+    let runtime =
+        StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store).unwrap();
+    let mut events = runtime.product_events().subscribe();
+    let startup_runtime = runtime.clone();
+    let mut startup = tokio::spawn(async move { startup_runtime.start_runtime().await });
+
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted)
+        .await
+        .unwrap()
+        .unwrap();
+    let snapshot = tokio::time::timeout(std::time::Duration::from_secs(1), &mut startup)
+        .await
+        .expect("Studio startup must not wait for MCP discovery")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    let running = runtime.read_mcp_state().await.unwrap();
+    assert!(matches!(
+        running.meta.phase,
+        pl_protocol::ObservedStatePhase::Running {
+            operation: pl_protocol::StateOperation::Reconcile,
+            ..
+        }
+    ));
+
+    release.send(()).unwrap();
+    let ready = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if let StudioProductEventKind::McpStateChanged(state) = event.kind
+                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
+            {
+                break state;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        ready
+            .health
+            .mcp_servers
+            .iter()
+            .any(|server| server.id == "slow-startup")
+    );
+    server.await.unwrap();
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
 async fn start_runtime_emits_mcp_health_snapshot() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1525,6 +1596,7 @@ async fn unchanged_mcp_reconcile_is_noop_and_shutdown_snapshot_remains_readable(
     .unwrap();
 
     runtime.start_runtime().await.unwrap();
+    runtime.reconcile_mcp_runtime().await.unwrap();
     let ready = runtime.read_mcp_state().await.unwrap();
     runtime.reconcile_mcp_runtime().await.unwrap();
     let unchanged = runtime.read_mcp_state().await.unwrap();
