@@ -8,6 +8,26 @@ use tokio::process::Command as TokioCommand;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsBackgroundCreationFlags;
+
+#[cfg(windows)]
+impl process_wrap::tokio::CommandWrapper for WindowsBackgroundCreationFlags {
+    fn pre_spawn(
+        &mut self,
+        command: &mut TokioCommand,
+        _core: &CommandWrap,
+    ) -> std::io::Result<()> {
+        use windows::Win32::System::Threading::{
+            CREATE_NO_WINDOW as WINDOWS_CREATE_NO_WINDOW, CREATE_SUSPENDED,
+        };
+
+        command.creation_flags(WINDOWS_CREATE_NO_WINDOW.0 | CREATE_SUSPENDED.0);
+        Ok(())
+    }
+}
+
 /// 后台子进程的统一配置工厂（全仓唯一来源）。
 ///
 /// GUI 运行时派生 shell、git、MCP server、LSP 等后台子进程时必须通过这里的
@@ -53,11 +73,13 @@ pub fn wrap_background_command(command: TokioCommand) -> CommandWrap {
     command.wrap(KillOnDrop);
     #[cfg(windows)]
     {
-        use process_wrap::tokio::{CreationFlags, JobObject};
-        use windows::Win32::System::Threading::CREATE_NO_WINDOW as WINDOWS_CREATE_NO_WINDOW;
+        use process_wrap::tokio::JobObject;
 
-        command.wrap(CreationFlags(WINDOWS_CREATE_NO_WINDOW));
         command.wrap(JobObject);
+        // process-wrap 的 JobObject pre_spawn 会覆盖原始 creation flags；项目
+        // wrapper 必须最后写入完整 flags，且保留 CREATE_SUSPENDED 供 Job Object
+        // 在关联完成后恢复线程。不要改回库内置 CreationFlags + JobObject 顺序。
+        command.wrap(WindowsBackgroundCreationFlags);
     }
     #[cfg(unix)]
     {
@@ -146,5 +168,44 @@ pub(crate) fn terminate_process_tree_sync(pid: Option<u32>) {
             .stderr(Stdio::null());
         configure_background_std_command(&mut kill);
         let _ = kill.status();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::process::Stdio;
+
+    use super::*;
+
+    const NO_CONSOLE_CHILD: &str = "PURE_TEST_NO_CONSOLE_CHILD";
+    const NO_CONSOLE_CHILD_TEST: &str = "process::tests::background_child_has_no_console_window";
+
+    #[test]
+    fn background_child_has_no_console_window() {
+        if std::env::var_os(NO_CONSOLE_CHILD).is_none() {
+            return;
+        }
+
+        let console = unsafe { windows::Win32::System::Console::GetConsoleWindow() };
+        assert!(
+            console.is_invalid(),
+            "background child unexpectedly inherited or created a console: {console:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn wrapped_background_command_preserves_no_console_flag() {
+        let mut command = TokioCommand::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", NO_CONSOLE_CHILD_TEST, "--nocapture"])
+            .env(NO_CONSOLE_CHILD, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let mut command = wrap_background_command(command);
+        let mut child = command.spawn().unwrap();
+        let status = child.wait().await.unwrap();
+        assert!(status.success(), "no-console child failed: {status}");
     }
 }

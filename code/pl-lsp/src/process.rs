@@ -1,15 +1,25 @@
 use std::io;
 
+#[cfg(windows)]
+use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
-#[cfg(windows)]
-use process_wrap::tokio::{CreationFlags, JobObject};
 use tokio::process::Command;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: windows::Win32::System::Threading::PROCESS_CREATION_FLAGS =
-    windows::Win32::System::Threading::CREATE_NO_WINDOW;
+#[derive(Debug)]
+struct WindowsBackgroundCreationFlags;
+
+#[cfg(windows)]
+impl process_wrap::tokio::CommandWrapper for WindowsBackgroundCreationFlags {
+    fn pre_spawn(&mut self, command: &mut Command, _core: &CommandWrap) -> io::Result<()> {
+        use windows::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+
+        command.creation_flags(CREATE_NO_WINDOW.0 | CREATE_SUSPENDED.0);
+        Ok(())
+    }
+}
 
 pub(crate) type ManagedChild = Box<dyn ChildWrapper>;
 
@@ -25,8 +35,10 @@ pub(crate) fn spawn_background(command: Command) -> io::Result<ManagedChild> {
     command.wrap(KillOnDrop);
     #[cfg(windows)]
     {
-        command.wrap(CreationFlags(CREATE_NO_WINDOW));
         command.wrap(JobObject);
+        // 与 pl-core 进程工厂保持等价：JobObject 会覆盖 creation flags，
+        // 因此必须在最后写入完整的后台进程 flags。
+        command.wrap(WindowsBackgroundCreationFlags);
     }
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
