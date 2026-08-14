@@ -2,6 +2,7 @@ mod patch;
 mod schema;
 mod search;
 
+use futures::FutureExt;
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, Result};
 use serde_json::{Value, json};
@@ -55,7 +56,7 @@ impl Tool for SessionNoteTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
-        Box::pin(async move {
+        async move {
             let result = match self.kind {
                 SessionNoteToolKind::Read => read_note(input.arguments, &context)?,
                 SessionNoteToolKind::Search => search_note(input.arguments, &context)?,
@@ -65,7 +66,8 @@ impl Tool for SessionNoteTool {
                 }
             };
             ToolExecutionResult::<Value>::json(result).map(ToolExecutionResult::into_tool_output)
-        })
+        }
+        .boxed()
     }
 
     fn to_schema(&self) -> ToolSchema {

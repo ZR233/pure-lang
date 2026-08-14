@@ -192,6 +192,11 @@ cargo test --workspace
 ### Flutter 开发
 
 ```powershell
+# 从仓库根目录执行一般 Flutter/Dart 命令，参数原样透传
+cargo flutter analyze
+cargo flutter test
+cargo dart format lib
+
 # 从仓库根目录解析依赖、静态分析并运行非视觉测试
 cargo xtask verify-gui
 

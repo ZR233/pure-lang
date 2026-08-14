@@ -1,4 +1,5 @@
 use super::*;
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -864,7 +865,7 @@ impl Tool for HostedToolProbe {
                 + 'a,
         >,
     > {
-        Box::pin(async {
+        async {
             Ok(ToolOutput {
                 description: "clean".to_string(),
                 truncated: OutputTruncation::empty(),
@@ -873,7 +874,8 @@ impl Tool for HostedToolProbe {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -905,7 +907,7 @@ impl Tool for LargeArtifactTool {
                 + 'a,
         >,
     > {
-        Box::pin(async {
+        async {
             Ok(ToolOutput {
                 description: "large artifact ready".to_string(),
                 truncated: OutputTruncation::empty(),
@@ -919,7 +921,8 @@ impl Tool for LargeArtifactTool {
                     })],
                 }],
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -951,7 +954,7 @@ impl Tool for HistoryMarkerTool {
                 + 'a,
         >,
     > {
-        Box::pin(async {
+        async {
             Ok(ToolOutput {
                 description: "history marker".to_string(),
                 truncated: OutputTruncation::empty(),
@@ -960,7 +963,8 @@ impl Tool for HistoryMarkerTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -995,7 +999,7 @@ impl Tool for ParentHistoryProbeTool {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
+        async move {
             let marker_visible = context.parent_session.messages().iter().any(|message| {
                 pl_protocol::ToolResultMetadata::from_metadata(&message.metadata)
                     .ok()
@@ -1014,7 +1018,8 @@ impl Tool for ParentHistoryProbeTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 

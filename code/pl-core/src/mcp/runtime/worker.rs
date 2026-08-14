@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures::FutureExt;
 use pl_protocol::{
     McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor, PureError, Result,
 };
@@ -224,7 +225,7 @@ impl RuntimeWorker {
             reusable,
         );
         ActivePreparation {
-            future: Box::pin(future),
+            future: future.boxed(),
             reply: request.reply,
             reset_scope: request.reset_scope,
         }

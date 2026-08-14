@@ -195,7 +195,7 @@ impl ThreadRepository for TestRepository {
                 .unwrap()
                 .entry(commit.agent_id.clone())
                 .or_default()
-                .push(submission.to_record());
+                .push(submission.into());
         }
         states.insert(commit.agent_id, commit.next_state);
         Ok(ThreadCommitOutcome::Applied)
@@ -284,14 +284,14 @@ impl AgentTurnFactory for TestTurnFactory {
         let mut batch = context
             .leading_inputs
             .iter()
-            .map(|input| input.message.clone())
+            .map(|input| input.payload.message.clone())
             .collect::<Vec<_>>();
-        batch.push(context.input.message.clone());
+        batch.push(context.input.payload.message.clone());
         self.prepared_batches.lock().unwrap().push(batch);
         self.prepared_messages
             .lock()
             .unwrap()
-            .push(context.input.message);
+            .push(context.input.payload.message);
         match self.mode {
             FactoryMode::Fail => Err(TestError("prepared turn failed".to_string())),
             FactoryMode::Block => {
@@ -1216,7 +1216,7 @@ async fn interaction_continuation_starts_idle_fresh_turn_and_deduplicates_stable
     let active = repository.state(&agent_id);
     assert!(active.active_input.as_ref().is_some_and(|input| {
         input.mail_id == AgentInteractionContinuationRequest::stable_mail_id("ask-idle")
-            && input.presentation == MailboxPresentation::Hidden
+            && input.payload.presentation == MailboxPresentation::Hidden
     }));
 
     handle
@@ -1379,7 +1379,7 @@ async fn queued_inputs_with_the_same_key_share_the_latest_turn() {
         durable
             .active_input
             .as_ref()
-            .map(|input| input.message.as_str()),
+            .map(|input| input.payload.message.as_str()),
         Some("latest wake")
     );
     assert_eq!(durable.pending_inputs.len(), 2);
@@ -1639,7 +1639,7 @@ async fn turn_activity_change_commits_event_and_snapshot_atomically() {
                     kind,
                     snapshot,
                     ..
-                } if event_turn_id == &turn_id => Some((*kind, snapshot.clone())),
+                } if event_turn_id == &turn_id => Some((*kind, snapshot.as_ref().clone())),
                 _ => None,
             })
             .expect("activity change must publish a committed runtime event")
@@ -1694,10 +1694,8 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
             mail_id: format!("mail:turn-{index}"),
             turn_id: TurnId::new(format!("turn-{index}")).unwrap(),
             thread_id: session_id.clone(),
-            message: message.to_string(),
-            metadata: serde_json::Value::Null,
+            payload: MailboxInputPayload::user(message),
             queue_coalescing_key: None,
-            presentation: MailboxPresentation::User,
             delivery_state: Default::default(),
             queued_at: index as i64,
         });
@@ -1733,10 +1731,8 @@ async fn restored_inputs_wait_for_host_resource_activation() {
         mail_id: "mail:restored-turn".to_string(),
         turn_id: TurnId::new("restored-turn").unwrap(),
         thread_id: session_id,
-        message: "after-resources-ready".to_string(),
-        metadata: serde_json::Value::Null,
+        payload: MailboxInputPayload::user("after-resources-ready"),
         queue_coalescing_key: None,
-        presentation: MailboxPresentation::User,
         delivery_state: Default::default(),
         queued_at: 1,
     });

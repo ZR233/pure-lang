@@ -170,6 +170,6 @@ fn snapshot_for_event(kind: &AgentRuntimeEventKind) -> AgentSnapshot {
         | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
         | AgentRuntimeEventKind::TurnFinished { snapshot, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { snapshot, .. }
-        | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.clone(),
+        | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.as_ref().clone(),
     }
 }

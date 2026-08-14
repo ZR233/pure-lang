@@ -23,6 +23,9 @@
 - Rust crate 名称统一以 `pl-` 开头，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
 - Flutter app 的 Dart package 名称是 `pure_studio`，不按 Cargo crate 规则命名。
 - Flutter 项目根目录是 `code/pure-studio`；运行 Flutter 命令必须在该目录下执行，或由 `xtask` 显式切换目录。
+- 从仓库根目录执行一般 Flutter/Dart 命令时，使用 `cargo flutter <args...>` 或
+  `cargo dart <args...>`；工具名后的参数会原样透传，工作目录自动切换到 `code/pure-studio`。
+  例如：`cargo flutter analyze`、`cargo flutter test`、`cargo dart format lib`。
 - 桌面 GUI 入口使用：
   - `cargo xtask run-gui [--demo] [--driver]`
   - `cargo xtask build-gui [--demo] [--no-clean]`
@@ -1904,12 +1907,13 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p <crate>
-flutter analyze
-flutter test
+cargo flutter analyze
+cargo flutter test
 ```
 
-- `flutter analyze/test` 必须在 `code/pure-studio` 目录执行；Windows GUI build/run 必须从仓库
-  根目录通过 xtask 执行。
+- 一般 Flutter/Dart 命令优先从仓库根目录使用 `cargo flutter <args...>` / `cargo dart <args...>`；
+  直接执行 `flutter analyze/test` 时必须位于 `code/pure-studio`。Windows GUI build/run 必须从
+  仓库根目录通过专用 xtask 命令执行。
 - GUI smoke 优先使用 `cargo xtask run-gui --demo`；需要 Dart MCP 操作时使用
   `cargo xtask run-gui --demo --driver`，再结合 widget tree、窗口截图和日志验收。
 

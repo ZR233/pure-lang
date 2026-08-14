@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::InteractionRequest;
 use anyhow::Result;
+use futures::FutureExt;
 
 use crate::McpRuntimeHandle;
 use crate::config::ConfigRuntime;
@@ -316,7 +317,7 @@ impl StudioRuntime {
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
-        // Box::pin：把 agent 关闭链的大 future 状态机放堆上，减小 studio
+        // `.boxed()`：把 agent 关闭链的大 future 状态机放堆上，减小 studio
         // runtime 侧 async 帧，避免与 agent loop 帧叠加触发线程栈耗尽。
         let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
             return Ok(());
@@ -327,10 +328,14 @@ impl StudioRuntime {
             .map(|thread_id| root_agent_id(thread_id))
             .collect::<BTreeSet<_>>();
         for root_agent_id in &root_agent_ids {
-            Box::pin(close_agent_if_present(&runtime, root_agent_id.clone())).await?;
+            close_agent_if_present(&runtime, root_agent_id.clone())
+                .boxed()
+                .await?;
         }
 
-        let snapshots = Box::pin(runtime.list())
+        let snapshots = runtime
+            .list()
+            .boxed()
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
         let parents = snapshots
@@ -353,7 +358,9 @@ impl StudioRuntime {
             .collect::<Vec<_>>();
         descendants.sort_by_key(|snapshot| snapshot.identity.depth);
         for descendant in descendants {
-            Box::pin(close_agent_if_present(&runtime, descendant.identity.id)).await?;
+            close_agent_if_present(&runtime, descendant.identity.id)
+                .boxed()
+                .await?;
         }
         Ok(())
     }
@@ -363,7 +370,7 @@ async fn close_agent_if_present(
     runtime: &pl_core::AgentRuntimeHandle,
     agent_id: pl_core::AgentId,
 ) -> Result<()> {
-    match Box::pin(runtime.close(agent_id)).await {
+    match runtime.close(agent_id).boxed().await {
         Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
         Err(error) => Err(anyhow::anyhow!(error)),
     }

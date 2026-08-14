@@ -204,7 +204,7 @@ where
             created_at: agent.state.snapshot.updated_at,
             kind: AgentRuntimeEventKind::RecoveryCancelledTurn {
                 outcome,
-                snapshot: agent.state.snapshot.clone(),
+                snapshot: Box::new(agent.state.snapshot.clone()),
             },
         };
         let thread_id = runtime_event_thread_id(&event)

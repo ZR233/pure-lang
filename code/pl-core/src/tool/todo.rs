@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use futures::FutureExt;
 use pl_protocol::{PureError, TodoItem, TodoListSnapshot, TodoStatus};
 use pl_trace::AgentEvent;
 use schemars::JsonSchema;
@@ -78,7 +79,7 @@ impl Tool for TodoListTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let args = deserialize_tool_input::<TodoListInput>(self.name(), input.arguments)?;
             let snapshot = todo_list_snapshot(input.tool_id, args, &context)?;
             context
@@ -98,7 +99,8 @@ impl Tool for TodoListTool {
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 

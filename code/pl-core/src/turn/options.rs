@@ -1,12 +1,10 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-pub type InteractionFuture =
-    Pin<Box<dyn Future<Output = pl_protocol::InteractionResolution> + Send>>;
+pub type InteractionFuture = BoxFuture<'static, pl_protocol::InteractionResolution>;
 pub type InteractionCallback =
     Arc<dyn Fn(pl_protocol::InteractionRequest) -> InteractionFuture + Send + Sync>;
 

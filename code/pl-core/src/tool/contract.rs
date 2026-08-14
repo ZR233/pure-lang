@@ -1,6 +1,4 @@
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::ToolSchema;
@@ -13,10 +11,10 @@ use crate::turn::ToolEffect;
 use super::cache::ToolCachePolicy;
 use super::{ToolContext, ToolDisplayMetadata, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
 
-/// 便捷类型别名：boxed future。
-pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-pub(super) type RegisteredToolFuture =
-    Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send>>;
+/// 便捷类型别名：boxed future（来自 `futures` crate 的 `BoxFuture`）。
+/// `tool/mod.rs` 以 `pub use futures::future::BoxFuture` 对外暴露同名入口。
+type BoxFuture<'a, T> = futures::future::BoxFuture<'a, T>;
+pub(super) type RegisteredToolFuture = BoxFuture<'static, Result<ToolOutput, PureError>>;
 pub(super) type RegisteredToolHandler =
     dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
 
@@ -158,7 +156,7 @@ where
 ///
 /// `execute` 返回 `BoxFuture` 以支持 trait object。
 /// `ToolContext` 提供事件转发、审批策略和当前 subagent 运行边界。
-/// 具体实现中可用 `Box::pin(async move { ... })` 包裹异步逻辑。
+/// 具体实现中可用 `async move { ... }.boxed()` 包裹异步逻辑。
 pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;

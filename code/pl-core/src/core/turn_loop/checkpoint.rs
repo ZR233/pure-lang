@@ -58,11 +58,11 @@ pub(super) async fn drain_mailbox(
         return Ok(false);
     }
     for input in inputs {
-        session.push_user_prompt(input.message.clone());
+        session.push_user_prompt(input.payload.message.clone());
         recorder.user_text_item_with_id(
             turn_id,
             format!("{turn_id}-mail-{}", input.mail_id),
-            input.message,
+            input.payload.message,
             Vec::new(),
         );
     }

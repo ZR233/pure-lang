@@ -29,7 +29,7 @@ pub(super) async fn audit_session_snapshot(
         .ok_or_else(|| {
             SessionSnapshotAuditError::Corrupt(missing_working_state_error(thread_id))
         })?;
-    working_state_from_row(working_state_row).map_err(SessionSnapshotAuditError::Corrupt)?;
+    AgentWorkingState::try_from(working_state_row).map_err(SessionSnapshotAuditError::Corrupt)?;
     let rows = thread_context_segment::Entity::find()
         .filter(thread_context_segment::Column::ThreadId.eq(thread_id))
         .order_by_asc(thread_context_segment::Column::Ordinal)
@@ -94,26 +94,28 @@ async fn restore_working_state(
         .await
         .map_err(store_error)?
         .ok_or_else(|| missing_working_state_error(thread_id))?;
-    working_state_from_row(row)
+    row.try_into()
 }
 
 fn missing_working_state_error(thread_id: &str) -> PureError {
     store_error(format!("Thread {thread_id} session state is missing"))
 }
 
-fn working_state_from_row(
-    row: thread_session_state::Model,
-) -> Result<AgentWorkingState, PureError> {
-    let thread_id = row.thread_id.as_str();
-    verify_hash("session state", thread_id, &row.state_json, &row.state_hash)?;
-    let state = serde_json::from_str::<AgentWorkingState>(&row.state_json)?;
-    if i64_from_u64(state.revision)? != row.revision {
-        return Err(store_error(format!(
-            "Thread {thread_id} session state revision mismatch: row={}, payload={}",
-            row.revision, state.revision
-        )));
+impl TryFrom<thread_session_state::Model> for AgentWorkingState {
+    type Error = PureError;
+
+    fn try_from(row: thread_session_state::Model) -> Result<Self, Self::Error> {
+        let thread_id = row.thread_id.as_str();
+        verify_hash("session state", thread_id, &row.state_json, &row.state_hash)?;
+        let state = serde_json::from_str::<Self>(&row.state_json)?;
+        if i64_from_u64(state.revision)? != row.revision {
+            return Err(store_error(format!(
+                "Thread {thread_id} session state revision mismatch: row={}, payload={}",
+                row.revision, state.revision
+            )));
+        }
+        Ok(state)
     }
-    Ok(state)
 }
 
 async fn restore_transcript(

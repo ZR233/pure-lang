@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use pl_protocol::PureError;
 use pl_trace::{AgentEvent, TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
 use schemars::JsonSchema;
@@ -220,7 +221,7 @@ where
         input: ToolInput,
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let exec_input: ExecInput = deserialize_tool_input(self.name(), input.arguments)?;
             let timeout = exec_input
                 .timeout_seconds
@@ -257,7 +258,8 @@ where
                 .await?;
 
             tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
-        })
+        }
+        .boxed()
     }
 }
 
@@ -283,7 +285,7 @@ where
         input: ToolInput,
         _context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let stdin_input: WriteStdinInput =
                 deserialize_tool_input(self.name(), input.arguments)?;
             let chars = stdin_input.chars.unwrap_or_default();
@@ -308,7 +310,8 @@ where
                 .await?;
 
             tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
-        })
+        }
+        .boxed()
     }
 }
 

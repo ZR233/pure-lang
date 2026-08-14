@@ -96,7 +96,7 @@ where
             .commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
                 AgentRuntimeEventKind::TurnFinished {
                     outcome: outcome.clone(),
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                     finalized_with_tool: finalized_with_tool.clone(),
                 }
             })

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{InteractionKind, InteractionResolution, InteractionStatus, PlanLifecycleState};
 use anyhow::{Context, Result, bail};
+use futures::FutureExt;
 
 use crate::StudioMode;
 use crate::config::StudioRole;
@@ -421,7 +422,7 @@ impl StudioRuntime {
         Arc::new(move |interaction| {
             let runtime = runtime.clone();
             let thread_id = thread_id.clone();
-            Box::pin(async move {
+            async move {
                 runtime
                     .record_thread_facts(
                         &thread_id,
@@ -434,7 +435,8 @@ impl StudioRuntime {
                     )
                     .await?;
                 Ok(())
-            })
+            }
+            .boxed()
         })
     }
 

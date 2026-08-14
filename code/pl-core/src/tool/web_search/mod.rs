@@ -1,5 +1,6 @@
 mod input;
 
+use futures::FutureExt;
 use pl_model::{
     SearchCommands, SearchRequest, SearchSettings, ToolSchema, WebSearchAction, WebSearchClient,
     WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
@@ -71,7 +72,7 @@ impl Tool for WebSearchTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let commands = parse_commands(input.arguments)?;
             let action = command_action(&commands);
             let request = SearchRequest {
@@ -107,7 +108,8 @@ impl Tool for WebSearchTool {
                     artifacts: vec![artifact],
                 }],
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -166,12 +168,13 @@ impl Tool for HostedWebSearchTool {
         _input: ToolInput,
         _context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async {
+        async {
             Err(PureError::ToolExecutionFailed {
                 tool: TOOL_WEB_SEARCH.to_string(),
                 error: "hosted web search is executed by the model provider".to_string(),
             })
-        })
+        }
+        .boxed()
     }
 
     fn to_schema(&self) -> ToolSchema {

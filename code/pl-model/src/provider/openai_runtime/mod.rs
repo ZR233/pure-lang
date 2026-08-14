@@ -144,14 +144,16 @@ impl OpenAiProvider {
             let (result, retry_allowed) = match self.stream_events(attempt_request).await {
                 Ok(event_stream) => {
                     let stream_started = Arc::new(AtomicBool::new(false));
-                    let tracked_stream: CompletionEventStream = Box::pin(event_stream.inspect({
-                        let stream_started = Arc::clone(&stream_started);
-                        move |event| {
-                            if event.is_ok() {
-                                stream_started.store(true, Ordering::Release);
+                    let tracked_stream: CompletionEventStream = event_stream
+                        .inspect({
+                            let stream_started = Arc::clone(&stream_started);
+                            move |event| {
+                                if event.is_ok() {
+                                    stream_started.store(true, Ordering::Release);
+                                }
                             }
-                        }
-                    }));
+                        })
+                        .boxed();
                     let result =
                         collect_completion_event_stream(tracked_stream, &event_tx, trace).await;
                     let retry_allowed = transport == OpenAiTransport::ResponsesWebSocket

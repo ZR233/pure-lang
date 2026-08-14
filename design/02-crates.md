@@ -66,6 +66,13 @@ Instruction 领域进一步分离 wire/领域类型、宿主 profile、指令组
 多个领域结构共享三个及以上稳定字段时，提取具名组合类型并让调用方直接访问该组合；需要保持
 既有 JSON 键平铺的 serde 类型使用 `#[serde(flatten)]`。组合只复用同一领域语义，不因字段名
 偶然相同而合并；重构后的旧字段和旧调用入口直接删除，不保留 alias 或兼容转发层。
+体量较大、克隆频繁且读多写少的进程内领域对象使用内部 `Arc` 写时复制，共享只读状态并在首次
+修改时分离；`Arc` 不进入 protocol、repository 或 durable checkpoint，持久化边界始终物化为
+owned snapshot。单一所有者的大字段或大 enum 变体使用 `Box` 降低父类型的栈内尺寸；`Vec`、
+`String`、map 等自身已持有堆数据的容器不重复装箱。
+无失败、上下文无关的一对一领域转换使用 `From`；持久化行恢复为领域类型时，如果需要解析、
+范围检查或兼容校验，使用 `TryFrom` 并保留 repository 错误语义。依赖多来源上下文、会丢弃信息
+或携带业务默认的映射继续使用具名构造/投影函数，不为追求 `.into()` 形式而隐藏规则。
 
 ## 2.5 pl-studio-runtime
 
@@ -120,10 +127,16 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 
 `pl-xtask` 只提供开发、生成、构建和运行命令：
 
+- `cargo flutter <args...>`
+- `cargo dart <args...>`
 - `cargo xtask generate-gui`
 - `cargo xtask verify-gui`
 - `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
+
+`cargo flutter` 与 `cargo dart` 是仓库级透传入口：它们把后续参数原样交给对应工具，
+并把工作目录固定为 `code/pure-studio`。Windows GUI 构建和运行仍使用专用 xtask 命令，
+不通过通用透传入口执行。
 
 Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
 2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，

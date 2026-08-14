@@ -1,20 +1,16 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::time::Duration;
 
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use pl_core::tool::{
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GitPolicy, LocalExecutionBackend,
     LocalExecutionFailure,
 };
 
 use super::error::WorktreeError;
-
-/// `BoxFuture` 别名，用于让 [`WorktreeBackend`] 可作为 trait object 被产品
-/// lifecycle adapter 经 `Arc` 持有。
-pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// worktree create 失败是否可能拥有本次 spec 创建的资源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,7 +225,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
         target_path: &'a Path,
         base_commit: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeCreateFailure>> {
-        Box::pin(async move {
+        async move {
             self.policy.validate_branch(branch).map_err(|_| {
                 WorktreeCreateFailure::no_side_effects(WorktreeError::UnsafeBranch(
                     branch.to_string(),
@@ -248,7 +244,8 @@ impl WorktreeBackend for LocalWorktreeBackend {
             .map(|item| item.to_string())
             .collect();
             self.create_worktree(repo_root, &args).await
-        })
+        }
+        .boxed()
     }
 
     fn remove<'a>(
@@ -257,7 +254,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
         target_path: &'a Path,
         force: bool,
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
-        Box::pin(async move {
+        async move {
             let target = target_path.to_string_lossy().to_string();
             let mut args: Vec<String> = vec!["worktree".to_string(), "remove".to_string()];
             if force {
@@ -266,7 +263,8 @@ impl WorktreeBackend for LocalWorktreeBackend {
             args.push(target);
             self.run_git(repo_root, &args).await?;
             Ok(())
-        })
+        }
+        .boxed()
     }
 
     fn delete_branch<'a>(
@@ -274,7 +272,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
         repo_root: &'a Path,
         branch: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
-        Box::pin(async move {
+        async move {
             self.policy
                 .validate_branch(branch)
                 .map_err(|_| WorktreeError::UnsafeBranch(branch.to_string()))?;
@@ -282,6 +280,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
                 vec!["branch".to_string(), "-D".to_string(), branch.to_string()];
             self.run_git(repo_root, &args).await?;
             Ok(())
-        })
+        }
+        .boxed()
     }
 }

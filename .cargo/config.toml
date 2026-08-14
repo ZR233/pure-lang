@@ -6,3 +6,5 @@ RUST_TEST_THREADS = { value = "4", force = false }
 
 [alias]
 xtask = "run --target-dir target/xtask -p pl-xtask --"
+flutter = "run --target-dir target/xtask -p pl-xtask -- flutter"
+dart = "run --target-dir target/xtask -p pl-xtask -- dart"

@@ -89,7 +89,7 @@ where
                     turn_id: input.turn_id.clone(),
                     thread_id: input.thread_id.clone(),
                     claimed_inputs: leading_inputs.clone(),
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                 },
             )
             .await;
@@ -209,7 +209,9 @@ where
         let next = self.state.clone();
         self.commit_transition(
             super::super::persist::TransitionCommit::new(next),
-            |snapshot| AgentRuntimeEventKind::StateChanged { snapshot },
+            |snapshot| AgentRuntimeEventKind::StateChanged {
+                snapshot: Box::new(snapshot),
+            },
         )
         .await?;
 
@@ -255,7 +257,7 @@ where
             super::super::persist::TransitionCommit::new(next),
             |snapshot| AgentRuntimeEventKind::TurnFinished {
                 outcome,
-                snapshot,
+                snapshot: Box::new(snapshot),
                 finalized_with_tool: None,
             },
         )

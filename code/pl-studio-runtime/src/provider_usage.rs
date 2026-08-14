@@ -1,3 +1,5 @@
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use futures::future::join_all;
 use pl_model::{
     DeepSeekBalanceUsage, ZhipuCodingPlanUsage, query_deepseek_balance,
@@ -80,14 +82,12 @@ async fn provider_usage_record(
     }
 }
 
+type ProviderUsageQueryFuture = BoxFuture<'static, crate::Result<ProviderUsageData>>;
+
 async fn provider_usage_data(
     provider: ProviderConfig,
     selected_model: &str,
-    query: impl FnOnce(
-        pl_model::ProviderInfo,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::Result<ProviderUsageData>> + Send>,
-    >,
+    query: impl FnOnce(pl_model::ProviderInfo) -> ProviderUsageQueryFuture,
 ) -> ProviderUsageState {
     if provider
         .resolved_bearer_token()
@@ -106,24 +106,22 @@ async fn provider_usage_data(
     }
 }
 
-fn query_deepseek(
-    info: pl_model::ProviderInfo,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<ProviderUsageData>> + Send>> {
-    Box::pin(async move {
+fn query_deepseek(info: pl_model::ProviderInfo) -> ProviderUsageQueryFuture {
+    async move {
         query_deepseek_balance(&info)
             .await
             .map(ProviderUsageData::DeepSeekBalance)
-    })
+    }
+    .boxed()
 }
 
-fn query_zhipu(
-    info: pl_model::ProviderInfo,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<ProviderUsageData>> + Send>> {
-    Box::pin(async move {
+fn query_zhipu(info: pl_model::ProviderInfo) -> ProviderUsageQueryFuture {
+    async move {
         query_zhipu_coding_plan_usage(&info)
             .await
             .map(ProviderUsageData::ZhipuCodingPlan)
-    })
+    }
+    .boxed()
 }
 
 fn unix_seconds() -> i64 {

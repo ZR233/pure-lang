@@ -203,13 +203,13 @@ impl StudioAgentEventProjector {
             | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
             | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
             | AgentRuntimeEventKind::Faulted { snapshot, .. } => {
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnQueued {
                 input: _, snapshot, ..
             } => {
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
@@ -228,7 +228,7 @@ impl StudioAgentEventProjector {
                         .await
                         .at("markExecutorTurnStarted")?;
                 }
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnFinished {
@@ -325,7 +325,7 @@ impl StudioAgentEventProjector {
                     .await
                     .at("projectPlanLifecycle")?;
                 }
-                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
                 if is_reviewer {
                     let runtime = wait_for_runtime(self.runtime.clone())
@@ -425,13 +425,7 @@ impl StudioAgentEventProjector {
             let progress = snapshot
                 .progress
                 .as_ref()
-                .map(|progress| StudioAgentProgressRuntime {
-                    stage: progress_stage_label(progress.report.stage).to_string(),
-                    summary: progress.report.summary.clone(),
-                    next_step: progress.report.next_step.clone(),
-                    revision: progress.report.revision,
-                    updated_at: progress.updated_at,
-                });
+                .map(StudioAgentProgressRuntime::from);
             let summary_age_seconds = u64::try_from(
                 crate::studio::ids::unix_seconds()
                     .saturating_sub(
@@ -699,6 +693,18 @@ pub(crate) const fn progress_stage_label(stage: AgentProgressStage) -> &'static 
         AgentProgressStage::Blocked => "blocked",
         AgentProgressStage::ReadyForCompletion => "readyForCompletion",
         AgentProgressStage::ReadyForReview => "readyForReview",
+    }
+}
+
+impl From<&pl_core::AgentProgressCheckpoint> for StudioAgentProgressRuntime {
+    fn from(progress: &pl_core::AgentProgressCheckpoint) -> Self {
+        Self {
+            stage: progress_stage_label(progress.report.stage).to_string(),
+            summary: progress.report.summary.clone(),
+            next_step: progress.report.next_step.clone(),
+            revision: progress.report.revision,
+            updated_at: progress.updated_at,
+        }
     }
 }
 

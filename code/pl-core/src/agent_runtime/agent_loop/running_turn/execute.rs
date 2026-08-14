@@ -38,7 +38,9 @@ where
 {
     let leading_inputs = context.leading_inputs.clone();
     for input in &leading_inputs {
-        context.session.push_user_prompt(input.message.clone());
+        context
+            .session
+            .push_user_prompt(input.payload.message.clone());
     }
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
@@ -136,7 +138,7 @@ where
                     recorder.user_text_item_with_id(
                         turn_id.as_str(),
                         format!("{turn_id}-mail-{}", input.mail_id),
-                        input.message.clone(),
+                        input.payload.message.clone(),
                         Vec::new(),
                     );
                 }

@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
+use futures::FutureExt;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
@@ -182,7 +183,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         } else {
             None
         };
-        let input_message = context.input.message.clone();
+        let input_message = context.input.payload.message.clone();
         let model_role = if context.snapshot.identity.parent_id.is_none() {
             match mode {
                 StudioMode::Simple => crate::config::StudioRole::Executor.id(),
@@ -257,6 +258,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
 
         let attachment_ids = context
             .input
+            .payload
             .metadata
             .get("attachmentIds")
             .and_then(serde_json::Value::as_array)
@@ -290,6 +292,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             skill_catalog: &skill_catalog,
             subagent_constraint: context
                 .input
+                .payload
                 .metadata
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
@@ -333,6 +336,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         }
         if context
             .input
+            .payload
             .metadata
             .get("historyPolicy")
             .and_then(serde_json::Value::as_str)
@@ -409,7 +413,7 @@ fn interaction_emitter(
         let runtime = runtime.clone();
         let thread_id = thread_id.clone();
         let agent_path = agent_path.clone();
-        Box::pin(async move {
+        async move {
             let emitted_at = interaction.updated_at;
             runtime
                 .record_thread_facts(
@@ -424,7 +428,8 @@ fn interaction_emitter(
                 )
                 .await?;
             Ok(())
-        })
+        }
+        .boxed()
     })
 }
 

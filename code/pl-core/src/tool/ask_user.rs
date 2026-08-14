@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use futures::FutureExt;
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
     InteractionScope, InteractionStatus, PureError, UserInputRequest, UserInputResponse,
@@ -95,7 +96,7 @@ impl Tool for AskUserTool {
         input: ToolInput,
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let args = deserialize_tool_input::<AskUserInput>(self.name(), input.arguments)?;
             let questions = args
                 .questions
@@ -164,7 +165,8 @@ impl Tool for AskUserTool {
                 timed_out: false,
                 runtime_events,
             })
-        })
+        }
+        .boxed()
     }
 }
 
@@ -301,7 +303,7 @@ mod tests {
         let seen_interaction_for_callback = seen_interaction.clone();
         let callback: crate::InteractionCallback = Arc::new(move |interaction| {
             let seen_interaction = seen_interaction_for_callback.clone();
-            Box::pin(async move {
+            async move {
                 *seen_interaction.lock().unwrap() = Some(interaction);
                 InteractionResolution::UserInput {
                     answers: HashMap::from([(
@@ -311,7 +313,8 @@ mod tests {
                         },
                     )]),
                 }
-            })
+            }
+            .boxed()
         });
         let output = AskUserTool
             .execute(
@@ -368,12 +371,13 @@ mod tests {
     #[tokio::test]
     async fn request_user_input_returns_empty_answers_when_cancelled() {
         let callback: crate::InteractionCallback = Arc::new(|_interaction| {
-            Box::pin(async {
+            async {
                 std::future::pending::<()>().await;
                 InteractionResolution::UserInput {
                     answers: Default::default(),
                 }
-            })
+            }
+            .boxed()
         });
         let token = CancellationToken::new();
         token.cancel();

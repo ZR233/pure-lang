@@ -5,12 +5,8 @@ use pl_core::{
     AgentSubmissionPage, AgentSubmissionRecord, AgentTurnOutcome, DurableMailboxEnvelope,
     MailboxDeliveryState, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
     ThreadCommit, ThreadCommitOutcome, ThreadContextState, ThreadId, ThreadRepository, TurnId,
-    TurnOutcomeKind,
 };
-use pl_protocol::{
-    Thread as ThreadRecord, ThreadItem, ThreadItemContent, ThreadNotification, ThreadSnapshot,
-    Turn, TurnState,
-};
+use pl_protocol::{ThreadItem, ThreadItemContent, ThreadNotification, ThreadSnapshot, Turn};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
@@ -22,6 +18,7 @@ use crate::studio::entity::{interaction, item, thread, thread_input, thread_subm
 
 mod billing;
 mod context;
+mod conversion;
 mod labels;
 
 use billing::{
@@ -34,9 +31,8 @@ use context::{
 };
 use labels::{
     activity_phase, interaction_kind_label, interaction_status_label, item_kind_label,
-    item_status_label, lifecycle_from_status, outcome_columns, presentation_from_label,
-    presentation_label, thread_status_from_label, thread_status_label, turn_phase_from_label,
-    turn_state_columns,
+    item_status_label, lifecycle_from_status, outcome_columns, presentation_label,
+    thread_status_label, turn_state_columns,
 };
 
 /// Studio 单库对 canonical Thread 状态的 CAS repository。
@@ -77,7 +73,7 @@ impl StudioAgentRepository {
             return Ok(Some(ThreadSnapshot {
                 schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
                 revision: u64_from_i64(model.revision)?,
-                thread: thread_from_model(model)?,
+                thread: model.try_into()?,
                 active_turn: None,
                 items: Vec::new(),
                 interactions: Vec::new(),
@@ -147,8 +143,9 @@ impl StudioAgentRepository {
         let mut pending = VecDeque::new();
         let mut active = None;
         for row in rows {
-            let input = input_from_model(row.clone())?;
-            if row.state == "active" {
+            let is_active = row.state == "active";
+            let input = row.try_into()?;
+            if is_active {
                 if active.replace(input).is_some() {
                     return Err(store_error(format!(
                         "Thread {thread_id} has more than one active input"
@@ -208,7 +205,7 @@ impl StudioAgentRepository {
             .one(self.store.database())
             .await
             .map_err(store_error)?
-            .map(turn_from_model)
+            .map(Turn::try_from)
             .transpose()?;
         let interactions = interaction::Entity::find()
             .filter(interaction::Column::ThreadId.eq(thread_id.clone()))
@@ -227,7 +224,7 @@ impl StudioAgentRepository {
             snapshot: ThreadSnapshot {
                 schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
                 revision: u64_from_i64(model.revision)?,
-                thread: thread_from_model(model)?,
+                thread: model.try_into()?,
                 active_turn,
                 items,
                 interactions,
@@ -273,7 +270,7 @@ impl ThreadRepository for StudioAgentRepository {
             let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
             let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
                 .await?
-                .map(turn_outcome_from_model)
+                .map(AgentTurnOutcome::try_from)
                 .transpose()?;
             let snapshot = AgentSnapshot {
                 identity: AgentIdentity {
@@ -353,18 +350,7 @@ async fn list_thread_submissions(
         .map_err(store_error)?;
     let items = rows
         .into_iter()
-        .map(|row| -> Result<AgentSubmissionRecord, PureError> {
-            Ok(AgentSubmissionRecord {
-                report: pl_core::AgentProgressReport {
-                    stage: crate::studio::agent_host::events::progress_stage_from_label(&row.stage),
-                    summary: row.summary,
-                    next_step: row.next_step,
-                    revision: u64_from_i64(row.revision)?,
-                },
-                detail: row.detail,
-                created_at: row.created_at,
-            })
-        })
+        .map(AgentSubmissionRecord::try_from)
         .collect::<Result<Vec<_>, PureError>>()?;
     let returned = items.len();
     let total_usize = total as usize;
@@ -567,9 +553,9 @@ async fn upsert_input(
         thread_id: Set(thread_id.to_string()),
         mail_id: Set(input.mail_id.clone()),
         turn_id: Set(input.turn_id.to_string()),
-        content: Set(input.message.clone()),
+        content: Set(input.payload.message.clone()),
         metadata_json: Set(serialize_input_metadata(input)?),
-        presentation: Set(presentation_label(input.presentation.clone()).to_string()),
+        presentation: Set(presentation_label(input.payload.presentation.clone()).to_string()),
         state: Set(delivery_state.to_string()),
         claimed_turn_id: Set(claimed_turn_id),
         checkpoint_seq: Set(checkpoint_seq),
@@ -600,50 +586,18 @@ async fn next_input_ordinal(
         .map_or(0, |row| row.queue_ordinal.saturating_add(1)))
 }
 
-fn input_from_model(model: thread_input::Model) -> Result<DurableMailboxEnvelope, PureError> {
-    let delivery_state = match model.state.as_str() {
-        "queued" => MailboxDeliveryState::Pending,
-        "claimed" | "active" => MailboxDeliveryState::Claimed {
-            turn_id: TurnId::new(
-                model
-                    .claimed_turn_id
-                    .clone()
-                    .unwrap_or_else(|| model.turn_id.clone()),
-            )?,
-            checkpoint_seq: model
-                .checkpoint_seq
-                .map(u64_from_i64)
-                .transpose()?
-                .unwrap_or(0),
-        },
-        other => return Err(store_error(format!("cannot restore input state {other}"))),
-    };
-    let (metadata, queue_coalescing_key) = deserialize_input_metadata(&model.metadata_json)?;
-    Ok(DurableMailboxEnvelope {
-        mail_id: model.mail_id,
-        turn_id: TurnId::new(model.turn_id)?,
-        thread_id: ThreadId::new(model.thread_id)?,
-        message: model.content,
-        presentation: presentation_from_label(&model.presentation)?,
-        metadata,
-        queue_coalescing_key,
-        delivery_state,
-        queued_at: model.queued_at,
-    })
-}
-
 const RUNTIME_INPUT_METADATA_KEY: &str = "$plAgentRuntime";
 const INPUT_METADATA_PAYLOAD_KEY: &str = "payload";
 
 fn serialize_input_metadata(input: &DurableMailboxEnvelope) -> Result<String, PureError> {
     let Some(key) = input.queue_coalescing_key.as_deref() else {
-        return Ok(serde_json::to_string(&input.metadata)?);
+        return Ok(serde_json::to_string(&input.payload.metadata)?);
     };
     let value = serde_json::json!({
         RUNTIME_INPUT_METADATA_KEY: {
             "queueCoalescingKey": key,
         },
-        INPUT_METADATA_PAYLOAD_KEY: input.metadata,
+        INPUT_METADATA_PAYLOAD_KEY: input.payload.metadata,
     });
     Ok(serde_json::to_string(&value)?)
 }
@@ -702,7 +656,7 @@ async fn persist_state_turns(
                 budget_limit: None,
                 rollover_compacted: None,
                 rollover_compaction_error: None,
-                metadata: Some(&input.metadata),
+                metadata: Some(&input.payload.metadata),
                 started_at: None,
                 completed_at: None,
                 updated_at: input.queued_at,
@@ -1053,7 +1007,7 @@ fn restored_activity(
     }
     match active_turn {
         Some(turn) if turn.status == "queued" => AgentActivityState::Queued,
-        // 老数据兼容：waitingInteraction phase 的 Turn 在 turn_from_model 里已降级为
+        // 老数据兼容：waitingInteraction phase 的 Turn 在 TryFrom 实现里已降级为
         // completed，不会进入 active turn 查询；这里不再映射该 phase。
         Some(turn) => match turn.phase.as_deref() {
             Some("runningTool") => AgentActivityState::Active(ActiveKind::WaitingTool),
@@ -1062,93 +1016,6 @@ fn restored_activity(
         None if !pending.is_empty() => AgentActivityState::Queued,
         None => AgentActivityState::Idle,
     }
-}
-
-fn turn_outcome_from_model(model: turn::Model) -> Result<AgentTurnOutcome, PureError> {
-    let budget_limit = model
-        .budget_limit_json
-        .as_deref()
-        .map(serde_json::from_str)
-        .transpose()?;
-    let kind = match model.status.as_str() {
-        "completed" => TurnOutcomeKind::Completed,
-        "failed" => TurnOutcomeKind::Failed,
-        "interrupted" if budget_limit.is_some() => TurnOutcomeKind::BudgetLimited,
-        "interrupted" => TurnOutcomeKind::Cancelled,
-        other => return Err(store_error(format!("Turn {other} is not terminal"))),
-    };
-    Ok(AgentTurnOutcome {
-        turn_id: TurnId::new(model.id)?,
-        thread_id: ThreadId::new(model.thread_id)?,
-        kind,
-        reason: model.reason,
-        failure: model
-            .failure_json
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?,
-        budget_limit,
-        rollover_compacted: model.rollover_compacted != 0,
-        rollover_compaction_error: model.rollover_compaction_error,
-        usage: serde_json::from_str(&model.usage_json)?,
-        finished_at: model.completed_at.unwrap_or(model.updated_at),
-    })
-}
-
-fn thread_from_model(model: thread::Model) -> Result<ThreadRecord, PureError> {
-    Ok(ThreadRecord {
-        id: model.id,
-        project_id: model.project_id,
-        title: model.title,
-        mode: labels::thread_mode_from_label(&model.mode)?,
-        root_thread_id: model.root_thread_id,
-        parent_thread_id: model.parent_thread_id,
-        role: model.role,
-        agent_path: model.agent_path,
-        status: thread_status_from_label(&model.status)?,
-        created_at: model.created_at,
-        updated_at: model.updated_at,
-        archived: model.archived != 0,
-    })
-}
-
-fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
-    let failure = model
-        .failure_json
-        .as_deref()
-        .map(serde_json::from_str)
-        .transpose()?;
-    // 老数据兼容：schema v1 可能把等待交互的 Turn 存成
-    // status=inProgress + phase=waitingInteraction。新设计下这种 Turn 应是 completed
-    // （pending Interaction 是 completion boundary），读回时降级。
-    let state = if model.status.as_str() == "inProgress"
-        && model.phase.as_deref() == Some("waitingInteraction")
-    {
-        TurnState::Completed
-    } else {
-        match model.status.as_str() {
-            "queued" => TurnState::Queued,
-            "inProgress" => TurnState::InProgress {
-                phase: turn_phase_from_label(model.phase.as_deref().unwrap_or("preparing"))?,
-            },
-            "completed" => TurnState::Completed,
-            "failed" => TurnState::Failed {
-                reason: model.reason.clone().unwrap_or_default(),
-            },
-            "interrupted" => TurnState::Interrupted {
-                reason: model.reason.clone().unwrap_or_default(),
-            },
-            other => return Err(store_error(format!("unknown Turn status {other}"))),
-        }
-    };
-    Ok(Turn {
-        id: model.id,
-        thread_id: model.thread_id,
-        state,
-        failure,
-        started_at: model.started_at,
-        updated_at: model.updated_at,
-        completed_at: model.completed_at,
-    })
 }
 
 fn u64_from_i64(value: i64) -> Result<u64, PureError> {
@@ -1166,7 +1033,7 @@ fn store_error(error: impl std::fmt::Display) -> PureError {
 #[cfg(test)]
 mod outcome_tests {
     use super::*;
-    use pl_core::MailboxPresentation;
+    use pl_core::{MailboxPresentation, TurnOutcomeKind};
 
     #[test]
     fn budget_limited_turn_restores_typed_rollover_state() {
@@ -1179,7 +1046,7 @@ mod outcome_tests {
                 elapsed_ms: 1_800_000,
             },
         };
-        let outcome = turn_outcome_from_model(turn::Model {
+        let outcome = AgentTurnOutcome::try_from(turn::Model {
             id: "turn-budget".to_string(),
             thread_id: "thread-budget".to_string(),
             ordinal: 0,
@@ -1215,9 +1082,11 @@ mod outcome_tests {
             mail_id: "mail:wake".to_string(),
             turn_id: TurnId::new("turn-wake").unwrap(),
             thread_id: ThreadId::new("thread-wake").unwrap(),
-            message: "wake".to_string(),
-            presentation: MailboxPresentation::Hidden,
-            metadata: serde_json::json!({"kind": "taskWake"}),
+            payload: pl_core::MailboxInputPayload {
+                message: "wake".to_string(),
+                presentation: MailboxPresentation::Hidden,
+                metadata: serde_json::json!({"kind": "taskWake"}),
+            },
             queue_coalescing_key: Some("task-run:wakes".to_string()),
             delivery_state: MailboxDeliveryState::Pending,
             queued_at: 1,
@@ -1226,7 +1095,7 @@ mod outcome_tests {
         let stored = serialize_input_metadata(&input).unwrap();
         let (metadata, key) = deserialize_input_metadata(&stored).unwrap();
 
-        assert_eq!(metadata, input.metadata);
+        assert_eq!(metadata, input.payload.metadata);
         assert_eq!(key, input.queue_coalescing_key);
     }
 

@@ -51,7 +51,7 @@ where
             .as_ref()
             && record.recovery_id == request.recovery_id
         {
-            return Ok(result_from_record(record));
+            return Ok(record.into());
         }
 
         self.validate_recovery_gate()?;
@@ -131,7 +131,7 @@ where
             });
 
         let mut recovery = next.session.session.conversation_recovery().clone();
-        recovery.revision = actual.recovery_revision;
+        recovery.revision = actual.facts.recovery_revision;
         if !actual.target.turn_ids.is_empty() {
             recovery
                 .rolled_back_turn_ranges
@@ -141,11 +141,11 @@ where
         }
         let record = ConversationRecoveryRecord {
             recovery_id: request.recovery_id.clone(),
-            revision: actual.recovery_revision,
+            revision: actual.facts.recovery_revision,
             mode: actual.target.mode,
             target_turn_ids: actual.target.turn_ids.clone(),
-            before_transcript_hash: actual.before_transcript_hash.clone(),
-            after_transcript_hash: actual.after_transcript_hash.clone(),
+            before_transcript_hash: actual.facts.before_transcript_hash.clone(),
+            after_transcript_hash: actual.facts.after_transcript_hash.clone(),
             removed_input_count: actual.removed_input_count,
             removed_item_count: actual.removed_item_count,
             runtime_revision: next.snapshot.revision,
@@ -157,7 +157,7 @@ where
         next.session.session.upsert_pinned_context(
             context_section(
                 CONVERSATION_RECOVERY_SECTION_ID,
-                actual.recovery_revision,
+                actual.facts.recovery_revision,
                 "Conversation Recovery",
                 recovery_context(&record),
             )
@@ -192,7 +192,7 @@ where
             ),
         )
         .await?;
-        Ok(result_from_record(&record))
+        Ok(record.into())
     }
 
     fn validate_recovery_gate(&self) -> AgentRuntimeResult<()> {
@@ -256,14 +256,16 @@ fn preview_for_state(
         target,
         expected_runtime_revision: state.snapshot.revision,
         expected_thread_revision: state.session.thread_revision,
-        recovery_revision: state
-            .session
-            .session
-            .conversation_recovery()
-            .revision
-            .saturating_add(1),
-        before_transcript_hash,
-        after_transcript_hash,
+        facts: super::super::ConversationRecoveryFacts {
+            recovery_revision: state
+                .session
+                .session
+                .conversation_recovery()
+                .revision
+                .saturating_add(1),
+            before_transcript_hash,
+            after_transcript_hash,
+        },
         retained_item_count: count_u64(retained)?,
         removed_item_count,
         removed_input_count,
@@ -423,20 +425,6 @@ fn recovery_context(record: &ConversationRecoveryRecord) -> String {
         "对话上下文已恢复（mode={:?}, revision={}）。被回退对话不再是有效模型上下文。Task、WorkUnit、文件、Git commit、工具副作用和其他外部状态均未回滚；继续前必须读取 canonical Task 状态并检查当前工作区，以它们作为事实源。",
         record.mode, record.revision
     )
-}
-
-fn result_from_record(record: &ConversationRecoveryRecord) -> ConversationRecoveryResult {
-    ConversationRecoveryResult {
-        recovery_id: record.recovery_id.clone(),
-        mode: record.mode,
-        recovery_revision: record.revision,
-        runtime_revision: record.runtime_revision,
-        thread_revision: record.thread_revision,
-        before_transcript_hash: record.before_transcript_hash.clone(),
-        after_transcript_hash: record.after_transcript_hash.clone(),
-        removed_item_count: record.removed_item_count,
-        removed_input_count: record.removed_input_count,
-    }
 }
 
 #[cfg(test)]

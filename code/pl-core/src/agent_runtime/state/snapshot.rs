@@ -124,12 +124,12 @@ pub struct ProgressSubmissionCommit {
     pub created_at: i64,
 }
 
-impl ProgressSubmissionCommit {
-    pub fn to_record(&self) -> AgentSubmissionRecord {
-        AgentSubmissionRecord {
-            report: self.report.clone(),
-            detail: self.detail.clone(),
-            created_at: self.created_at,
+impl From<&ProgressSubmissionCommit> for AgentSubmissionRecord {
+    fn from(commit: &ProgressSubmissionCommit) -> Self {
+        Self {
+            report: commit.report.clone(),
+            detail: commit.detail.clone(),
+            created_at: commit.created_at,
         }
     }
 }

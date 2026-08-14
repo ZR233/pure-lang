@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures::FutureExt;
 use pl_core::{
     AgentSession, ToolCapabilityConfig, TurnBudget, TurnEngine, TurnEngineBuilder, TurnOptions,
     TurnRequest, TurnResultStatus,
@@ -62,7 +63,7 @@ fn allowed_tool(name: &str) -> bool {
 fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
     TurnOptions::default().with_interaction_callback(Arc::new(move |interaction| {
         let requested_tools = requested_tools.clone();
-        Box::pin(async move {
+        async move {
             let InteractionPayload::ToolApproval { name, .. } = interaction.payload else {
                 return InteractionResolution::ToolApproval {
                     decision: ToolApprovalResolution::Denied,
@@ -86,7 +87,8 @@ fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
                     reason: Some(format!("forbidden tool in live apply_patch test: {name}")),
                 }
             }
-        })
+        }
+        .boxed()
     }))
 }
 

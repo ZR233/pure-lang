@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
@@ -23,6 +24,11 @@ mod tests;
 /// 保存多轮 turn 之间的消息历史，供 `TurnEngine` 构造模型请求。
 #[derive(Debug, Clone, Default)]
 pub struct AgentSession {
+    state: Arc<AgentSessionState>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AgentSessionState {
     items: Vec<ModelContextItem>,
     messages: Vec<Message>,
     working_state: AgentWorkingState,
@@ -52,7 +58,7 @@ impl AgentSession {
     /// 工具调用与 tool result 不直接跨 agent 继承，避免在当前工具尚未返回时
     /// 复制出孤立 assistant tool call。
     pub fn fork(&self, policy: AgentSessionForkPolicy) -> Self {
-        let messages = fork::forkable_messages(&self.messages);
+        let messages = fork::forkable_messages(&self.state.messages);
         match policy {
             AgentSessionForkPolicy::Empty => Self::new(),
             AgentSessionForkPolicy::AllMessages => Self::from_messages(messages),
@@ -64,83 +70,84 @@ impl AgentSession {
 
     pub fn from_messages(messages: Vec<Message>) -> Self {
         Self {
-            items: messages
-                .iter()
-                .cloned()
-                .map(ModelContextItem::from)
-                .collect(),
-            messages,
-            working_state: AgentWorkingState::default(),
-            revision: 0,
-            prompt_cache_key: None,
-            transport_session: ModelTransportSession::default(),
+            state: Arc::new(AgentSessionState {
+                items: messages
+                    .iter()
+                    .cloned()
+                    .map(ModelContextItem::from)
+                    .collect(),
+                messages,
+                ..AgentSessionState::default()
+            }),
         }
     }
 
     pub fn from_items(items: Vec<ModelContextItem>) -> Self {
         let messages = tool_history::messages_from_items(&items);
         Self {
-            items,
-            messages,
-            working_state: AgentWorkingState::default(),
-            revision: 0,
-            prompt_cache_key: None,
-            transport_session: ModelTransportSession::default(),
+            state: Arc::new(AgentSessionState {
+                items,
+                messages,
+                ..AgentSessionState::default()
+            }),
         }
     }
 
     pub fn from_snapshot(snapshot: AgentSessionSnapshot) -> Self {
         let messages = tool_history::messages_from_items(&snapshot.transcript);
         Self {
-            items: snapshot.transcript,
-            messages,
-            working_state: snapshot.working_state,
-            revision: 0,
-            prompt_cache_key: None,
-            transport_session: ModelTransportSession::default(),
+            state: Arc::new(AgentSessionState {
+                items: snapshot.transcript,
+                messages,
+                working_state: snapshot.working_state,
+                ..AgentSessionState::default()
+            }),
         }
     }
 
     pub fn snapshot(&self) -> AgentSessionSnapshot {
         AgentSessionSnapshot {
-            transcript: self.items.clone(),
-            working_state: self.working_state.clone(),
+            transcript: self.state.items.clone(),
+            working_state: self.state.working_state.clone(),
         }
     }
 
     pub fn items(&self) -> &[ModelContextItem] {
-        &self.items
+        &self.state.items
     }
 
     pub fn messages(&self) -> &[Message] {
-        &self.messages
+        &self.state.messages
     }
 
     pub fn revision(&self) -> u64 {
-        self.revision
+        self.state.revision
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
-        self.items = messages
+        let state = Arc::make_mut(&mut self.state);
+        state.items = messages
             .iter()
             .cloned()
             .map(ModelContextItem::from)
             .collect();
-        self.messages = messages;
-        self.revision = self.revision.saturating_add(1);
+        state.messages = messages;
+        state.revision = state.revision.saturating_add(1);
     }
 
     pub fn replace_items(&mut self, items: Vec<ModelContextItem>) {
-        self.messages = tool_history::messages_from_items(&items);
-        self.items = items;
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.messages = tool_history::messages_from_items(&items);
+        state.items = items;
+        state.revision = state.revision.saturating_add(1);
     }
 
     /// 只替换可压缩的时间线，保留当前所有 pinned working context 和会话笔记。
     pub fn replace_compactable_items(&mut self, items: Vec<ModelContextItem>) {
-        self.items = items;
-        self.messages = tool_history::messages_from_items(&self.items);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.items = items;
+        state.messages = tool_history::messages_from_items(&state.items);
+        state.revision = state.revision.saturating_add(1);
     }
 
     /// 原子替换所有 pinned sections；返回 canonical session 是否发生变化。
@@ -149,13 +156,14 @@ impl AgentSession {
         mut sections: Vec<PinnedContextSection>,
     ) -> bool {
         sections.sort_by(|left, right| left.id.cmp(&right.id));
-        let current = self.working_state.sections.clone();
+        let current = self.state.working_state.sections.clone();
         if current == sections {
             return false;
         }
-        self.working_state.sections = sections;
-        self.working_state.revision = self.working_state.revision.saturating_add(1);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.sections = sections;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
         true
     }
 
@@ -170,12 +178,13 @@ impl AgentSession {
     }
 
     pub fn pinned_context_sections(&self) -> impl Iterator<Item = &PinnedContextSection> {
-        self.working_state.sections.iter()
+        self.state.working_state.sections.iter()
     }
 
     /// 移除一个可替换 pinned section；不存在时保持幂等。
     pub fn remove_pinned_context(&mut self, section_id: &str) -> bool {
         let sections = self
+            .state
             .working_state
             .sections
             .iter()
@@ -186,53 +195,57 @@ impl AgentSession {
     }
 
     pub fn conversation_recovery(&self) -> &ConversationRecoveryState {
-        &self.working_state.conversation_recovery
+        &self.state.working_state.conversation_recovery
     }
 
     /// 替换 typed conversation recovery 审计状态。
     pub fn replace_conversation_recovery(&mut self, recovery: ConversationRecoveryState) -> bool {
-        if self.working_state.conversation_recovery == recovery {
+        if self.state.working_state.conversation_recovery == recovery {
             return false;
         }
-        self.working_state.conversation_recovery = recovery;
-        self.working_state.revision = self.working_state.revision.saturating_add(1);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.conversation_recovery = recovery;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
         true
     }
 
     /// 将当前 prompt generation 标记为上下文恢复，并废弃 transport/cache continuation。
     pub fn mark_context_recovered(&mut self, updated_at: i64) {
-        let mut prompt = self.working_state.prompt.clone();
+        let mut prompt = self.state.working_state.prompt.clone();
         for snapshot in prompt.slots.values_mut() {
             snapshot.generation = snapshot.generation.saturating_add(1).max(1);
             snapshot.prefix_changed_reason = PromptPrefixChangedReason::ContextRecovered;
             snapshot.updated_at = updated_at;
         }
         let _ = self.replace_prompt_metadata(prompt);
-        self.prompt_cache_key = None;
-        self.transport_session = ModelTransportSession::default();
+        let state = Arc::make_mut(&mut self.state);
+        state.prompt_cache_key = None;
+        state.transport_session = ModelTransportSession::default();
     }
 
     pub fn session_note(&self) -> Option<&SessionNote> {
-        self.working_state.session_note.as_ref()
+        self.state.working_state.session_note.as_ref()
     }
 
     pub fn prompt_metadata(&self) -> &ThreadPromptMetadata {
-        &self.working_state.prompt
+        &self.state.working_state.prompt
     }
 
     pub fn replace_prompt_metadata(&mut self, prompt: ThreadPromptMetadata) -> bool {
-        if self.working_state.prompt == prompt {
+        if self.state.working_state.prompt == prompt {
             return false;
         }
-        self.working_state.prompt = prompt;
-        self.working_state.revision = self.working_state.revision.saturating_add(1);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.prompt = prompt;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
         true
     }
 
     pub fn working_context_snapshot(&self) -> ModelContextSnapshot {
         let mut sections = self
+            .state
             .working_state
             .sections
             .iter()
@@ -247,25 +260,27 @@ impl AgentSession {
         sections.sort_by(|left, right| left.id.cmp(&right.id));
         ModelContextSnapshot {
             sections,
-            session_note_available: self.working_state.session_note.is_some(),
+            session_note_available: self.state.working_state.session_note.is_some(),
         }
     }
 
     /// 原子替换隐藏会话笔记；返回 canonical session 是否发生变化。
     pub fn replace_session_note(&mut self, note: SessionNote) -> bool {
-        if self.working_state.session_note.as_ref() == Some(&note) {
+        if self.state.working_state.session_note.as_ref() == Some(&note) {
             return false;
         }
-        self.working_state.session_note = Some(note);
-        self.working_state.revision = self.working_state.revision.saturating_add(1);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.session_note = Some(note);
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
         true
     }
 
     pub(crate) fn truncate_messages(&mut self, len: usize) {
-        self.items.truncate(len);
-        self.messages = tool_history::messages_from_items(&self.items);
-        self.revision = self.revision.saturating_add(1);
+        let state = Arc::make_mut(&mut self.state);
+        state.items.truncate(len);
+        state.messages = tool_history::messages_from_items(&state.items);
+        state.revision = state.revision.saturating_add(1);
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
@@ -339,12 +354,13 @@ impl AgentSession {
         if items.is_empty() {
             return;
         }
-        self.items.extend(
+        let state = Arc::make_mut(&mut self.state);
+        state.items.extend(
             items
                 .into_iter()
                 .map(|item| ModelContextItem::Responses { item }),
         );
-        self.revision = self.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
     }
 
     /// 推入 tool result 消息。
@@ -433,15 +449,16 @@ impl AgentSession {
             reasoning_content: None,
             metadata,
         };
-        self.items.push(ModelContextItem::ToolResult {
+        let state = Arc::make_mut(&mut self.state);
+        state.items.push(ModelContextItem::ToolResult {
             message: message.clone(),
             receipt,
         });
-        self.messages.push(message);
+        state.messages.push(message);
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.state.items.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -449,23 +466,24 @@ impl AgentSession {
     }
 
     pub fn set_prompt_cache_key(&mut self, key: String) {
-        self.prompt_cache_key = Some(key);
+        Arc::make_mut(&mut self.state).prompt_cache_key = Some(key);
     }
 
     pub fn replace_prompt_cache_key(&mut self, key: Option<String>) {
-        self.prompt_cache_key = key;
+        Arc::make_mut(&mut self.state).prompt_cache_key = key;
     }
 
     pub fn prompt_cache_key(&self) -> Option<&str> {
-        self.prompt_cache_key.as_deref()
+        self.state.prompt_cache_key.as_deref()
     }
 
     pub fn transport_session(&self) -> ModelTransportSession {
-        self.transport_session.clone()
+        self.state.transport_session.clone()
     }
 
     fn push_message(&mut self, message: Message) {
-        self.items.push(ModelContextItem::from(message.clone()));
-        self.messages.push(message);
+        let state = Arc::make_mut(&mut self.state);
+        state.items.push(ModelContextItem::from(message.clone()));
+        state.messages.push(message);
     }
 }

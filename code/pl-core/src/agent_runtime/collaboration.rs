@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use futures::FutureExt;
 use pl_protocol::PureError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::state::unix_timestamp;
 use super::*;
-use crate::tool::ToolBudgetTiming;
+use crate::tool::{BoxFuture, ToolBudgetTiming};
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
@@ -212,10 +213,8 @@ impl Tool for CollaborationTool {
         &'a self,
         input: ToolInput,
         context: ToolContext,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ToolOutput, PureError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        async move {
             match self.kind {
                 CollaborationToolKind::Spawn => self.spawn(input, context).await,
                 CollaborationToolKind::ReportProgress => self.report_progress(input).await,
@@ -227,7 +226,8 @@ impl Tool for CollaborationTool {
                 CollaborationToolKind::ReadSubmissions => self.read_submissions(input).await,
                 CollaborationToolKind::Close => self.close(input).await,
             }
-        })
+        }
+        .boxed()
     }
 }
 

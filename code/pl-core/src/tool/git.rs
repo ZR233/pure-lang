@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use pl_protocol::PureError;
 use serde_json::{Value, json};
 
@@ -94,7 +95,7 @@ where
         input: ToolInput,
         _context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
+        async move {
             let outcome = match self.kind {
                 GitToolKind::Status => {
                     deserialize_tool_input::<GitEmptyInput>(self.name(), input.arguments)?;
@@ -121,7 +122,8 @@ where
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
-        })
+        }
+        .boxed()
     }
 }
 
