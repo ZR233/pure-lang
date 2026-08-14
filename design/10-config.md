@@ -243,7 +243,7 @@ Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/m
 
 `request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
 
-Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。
+Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。
 
 Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直接校验失败，不支持字段级覆盖。
 完全自定义 provider 用 `Explicit` 保存完整模型列表。角色引用的 model 必须存在于
@@ -422,7 +422,7 @@ Provider 标签页必须提供结构化编辑能力：
 - 允许追加用户自定义模型，冲突 slug 直接拒绝，Flutter 不自行实现合并规则。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、effort 候选值（`supported_efforts()`）、capabilities、输入模态和截断策略。
 - Provider 编辑页不提供 provider 级协议或连接方式控件。每个模型行展示协议、支持模式和当前模式；只有支持多个模式的模型提供 HTTP/WS 选择，并保存为该模型的 connection override。自定义模型编辑器必须显式选择协议、支持模式与默认模式，Chat + WS 在保存前拒绝。Responses 的 HTTP 仍调用 `/responses` 并消费 SSE，Chat Completions HTTP 调用 `/chat/completions`。Web 和 Flutter 的协议/模式/默认值必须来自 model descriptor，不得按 preset ID 分支。
-- Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
+- Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均作为 `reasoning_effort` 透传并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供禁用思考候选。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的 typed canonical settings snapshot 更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`。

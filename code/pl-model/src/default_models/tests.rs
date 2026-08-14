@@ -197,6 +197,7 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
     let models = default_models();
 
     for slug in [
+        "glm-5.3",
         "glm-5.2",
         "glm-5",
         "glm-5-turbo",
@@ -224,6 +225,8 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
         assert_eq!(model.currency, None);
         if slug == "glm-5.2" {
             assert_eq!(model.supported_efforts(), vec!["high", "max", "none"]);
+        } else if slug == "glm-5.3" {
+            assert_eq!(model.supported_efforts(), vec!["high", "low", "max"]);
         } else {
             assert!(
                 model
@@ -238,6 +241,19 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
     assert_eq!(glm_52.display_name, "GLM-5.2");
     assert_eq!(glm_52.context_window, Some(1_000_000));
     assert_eq!(glm_52.max_output_tokens, Some(128_000));
+
+    let glm_53 = models.iter().find(|model| model.slug == "glm-5.3").unwrap();
+    assert_eq!(glm_53.display_name, "GLM-5.3");
+    assert_eq!(glm_53.context_window, Some(1_000_000));
+    assert_eq!(glm_53.max_output_tokens, Some(128_000));
+    assert_eq!(glm_53.default_effort().as_deref(), Some("high"));
+    assert!(
+        glm_53
+            .capabilities
+            .input
+            .iter()
+            .all(|modality| *modality == ModelModality::Text)
+    );
 
     let glm_5v = models
         .iter()
@@ -259,6 +275,7 @@ fn zhipu_default_model_list_excludes_phasing_out_glm_45_flash() {
     assert_eq!(
         zhipu_default_model_slugs(),
         [
+            "glm-5.3",
             "glm-5.2",
             "glm-5",
             "glm-5-turbo",
@@ -297,6 +314,26 @@ fn glm52_effort_wire_links_reasoning_effort_and_thinking() {
     none.apply_to(&mut body);
     assert!(!body.contains_key("reasoning_effort"));
     assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
+}
+
+#[test]
+fn glm53_effort_wire_always_enables_thinking() {
+    let models = default_models();
+    let glm53 = models.iter().find(|model| model.slug == "glm-5.3").unwrap();
+    let param = glm53.effort_parameter().unwrap();
+
+    assert_eq!(param.candidates, vec!["high", "low", "max"]);
+    // GLM-5.3 不支持禁用思考：官方文档明确 disabled 会报错
+    assert!(param.wire_for("none").is_none());
+
+    for effort in ["high", "low", "max"] {
+        let wire = param.wire_for(effort).unwrap();
+        let mut body = serde_json::Map::new();
+        wire.apply_to(&mut body);
+        assert_eq!(body["reasoning_effort"], serde_json::json!(effort));
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+        assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+    }
 }
 
 #[test]

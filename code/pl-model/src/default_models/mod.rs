@@ -31,6 +31,7 @@ const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
 const MIMO_DEFAULT_MODEL_SLUGS: &[&str] =
     &["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
+    "glm-5.3",
     "glm-5.2",
     "glm-5",
     "glm-5-turbo",
@@ -64,6 +65,7 @@ pub fn default_models() -> Vec<ModelInfo> {
     let mimo_text = mimo_family(false);
     let mimo_vision = mimo_family(true);
     let zhipu_text = zhipu_text_family();
+    let zhipu_glm53 = zhipu_glm53_family();
     let zhipu_glm52 = zhipu_glm52_family();
     let zhipu_vision = zhipu_vision_family();
 
@@ -189,6 +191,16 @@ pub fn default_models() -> Vec<ModelInfo> {
             256_000,
             256_000,
             Some(32_768),
+            ModelPricing::default(),
+        ),
+        // Zhipu GLM-5.3（始终思考，effort 候选值 high/low/max，联动 reasoning_effort + thinking）
+        zhipu_glm53.instantiate(
+            "glm-5.3",
+            "GLM-5.3",
+            "Zhipu flagship model for complex coding and agent work with always-on thinking.",
+            1_000_000,
+            1_000_000,
+            Some(128_000),
             ModelPricing::default(),
         ),
         // Zhipu GLM-5.2（effort 候选值 high/max/none，联动 reasoning_effort + thinking）
@@ -461,6 +473,19 @@ fn zhipu_glm52_family() -> ModelFamily {
     }
 }
 
+fn zhipu_glm53_family() -> ModelFamily {
+    ModelFamily {
+        id: "zhipu-glm53",
+        capabilities: zhipu_capabilities(false),
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![zhipu_glm53_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
+        request_profile: chat_parallel_request_profile(),
+        base_instructions: String::new(),
+    }
+}
+
 fn zhipu_vision_family() -> ModelFamily {
     ModelFamily {
         id: "zhipu-vision",
@@ -590,8 +615,8 @@ fn zhipu_glm52_effort_parameter() -> ModelParameter {
         label: None,
         candidates: vec!["high".to_string(), "max".to_string(), "none".to_string()],
         wire: BTreeMap::from([
-            ("high".to_string(), glm52_enabled_wire("high")),
-            ("max".to_string(), glm52_enabled_wire("max")),
+            ("high".to_string(), glm_reasoning_effort_wire("high")),
+            ("max".to_string(), glm_reasoning_effort_wire("max")),
             (
                 "none".to_string(),
                 ParameterWire {
@@ -606,8 +631,22 @@ fn zhipu_glm52_effort_parameter() -> ModelParameter {
     }
 }
 
-/// GLM-5.2 high/max 共用 wire：设 reasoning_effort + 开启 thinking。
-fn glm52_enabled_wire(effort: &str) -> ParameterWire {
+/// GLM-5.3 effort：候选值 high/low/max，三档共用「始终思考」wire，仅切换 reasoning_effort。
+fn zhipu_glm53_effort_parameter() -> ModelParameter {
+    ModelParameter {
+        name: "effort".to_string(),
+        label: None,
+        candidates: vec!["high".to_string(), "low".to_string(), "max".to_string()],
+        wire: BTreeMap::from([
+            ("high".to_string(), glm_reasoning_effort_wire("high")),
+            ("low".to_string(), glm_reasoning_effort_wire("low")),
+            ("max".to_string(), glm_reasoning_effort_wire("max")),
+        ]),
+    }
+}
+
+/// GLM-5.2/GLM-5.3 共用 wire：设 reasoning_effort + 开启 thinking。
+fn glm_reasoning_effort_wire(effort: &str) -> ParameterWire {
     ParameterWire {
         set: vec![
             WireAssignment {

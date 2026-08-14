@@ -257,7 +257,7 @@ impl ParameterWire {
 
 `wire` 用 `BTreeMap<String, ParameterWire>` 而非动态 `Map<String, Value>`，避免运行时反序列化并保持 TOML 友好。`apply_to` 按 dot 路径逐层写入或移除嵌套 JSON 对象字段；移除不存在的字段静默忽略。
 
-四个供应商的 effort 声明形态：
+各供应商的 effort 声明形态：
 
 | 供应商 | candidates | wire.set（选中值 → 字段） | wire.remove |
 | --- | --- | --- | --- |
@@ -267,8 +267,10 @@ impl ParameterWire {
 | DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | Zhipu 普通 | `enabled` / `none` | `thinking.type` = 值 | — |
 | GLM-5.2 | `high` / `max` / `none` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
+| GLM-5.3 | `high` / `low` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
+| MiMo | `enabled` / `disabled` | `thinking.type` = 值 | — |
 
-GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 wire 的多条 `set` 与 `remove` 完整表达，无需协议层特判。
+GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 wire 的多条 `set` 与 `remove` 完整表达，无需协议层特判。GLM-5.3 始终启用思考，不提供禁用思考的 `none` 候选；effort 选择只改变 `reasoning_effort` 值。
 
 `ModelInfo` 提供 helper 避免调用点手动遍历参数列表，复用于配置校验、默认角色补齐和 GUI 渲染：
 
@@ -314,7 +316,7 @@ pub struct ModelPricing {
 }
 ```
 
-`pl-model` 内置四个预设：`openai_family`、`deepseek_family`、`zhipu_text_family`、`zhipu_vision_family`。原 `openai_capabilities` / `deepseek_capabilities` / `zhipu_capabilities` 三个能力构造函数的能力矩阵直接编入对应 family，消除重复。`zhipu_text_family` 与 `zhipu_vision_family` 的差异仅在 capabilities 的输入模态（是否含 `image`）和 effort 候选值域。
+`pl-model` 的内建 family 预设按供应商与模型线划分：`openai_family`、`openai_gpt56_family`、`deepseek_family`、`mimo_family`、`zhipu_text_family`、`zhipu_glm52_family`、`zhipu_glm53_family` 与 `zhipu_vision_family`。共享能力矩阵由 `openai_capabilities` / `deepseek_capabilities` / `mimo_capabilities` / `zhipu_capabilities` 构造并供各 family 复用；family 之间的差异集中在 effort 候选值域、request profile 与输入模态。GLM-5.3 与 GLM-5.2 复用同一条「启用思考」wire 组合，差异只在候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选。
 
 ## 7.10 Prompt 缓存
 
