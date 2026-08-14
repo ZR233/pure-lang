@@ -1161,6 +1161,188 @@ async fn fresh_task_run_turn_installs_task_status_and_process_tools() {
 }
 
 #[tokio::test]
+async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
+    let plan_content = "# 计划\n\n1. 更新 design/task.md。\n2. 启动 executor。";
+    let initial_plan_response = responses_function_tool_sse(
+        "implementation-plan",
+        "plan_exit",
+        serde_json::json!({ "content": plan_content }),
+    );
+    let initial_ack = responses_final_text_sse("implementation-plan-ack", "计划已提交确认");
+    let implementation_ack = responses_final_text_sse(
+        "implementation-fresh-turn",
+        "已在 fresh Task planner Turn 中继续。",
+    );
+    let (base_url, server, mut requests) = serve_http_sequence_recording(vec![
+        TestHttpResponse::sse(initial_plan_response),
+        TestHttpResponse::sse(initial_ack),
+        TestHttpResponse::sse(implementation_ack),
+    ])
+    .await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-plan-implementation-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "pure@example.com"],
+        vec!["config", "user.name", "Pure Test"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(workspace.join("README.md"), "fresh Task planner turn\n").unwrap();
+    for args in [vec!["add", "README.md"], vec!["commit", "-m", "init"]] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Fresh Task implementation")
+        .await
+        .unwrap();
+    runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+
+    let submitted = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "先制定计划，确认后再进入 Task 实施".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    let confirmation = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            if let Some(interaction) = store
+                .list_pending_interactions(&thread.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+            {
+                break interaction;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(confirmation.scope.turn_id, submitted.turn_id);
+
+    let response = runtime
+        .resolve_interaction(
+            confirmation.interaction_id.clone(),
+            crate::InteractionResolution::PlanConfirmation {
+                decision: crate::PlanConfirmationResolution::ImplementFreshContext,
+                content: None,
+                reason: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.interaction.status, InteractionStatus::Resolved);
+
+    assert_eq!(
+        tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
+            .await
+            .unwrap()
+            .unwrap(),
+        3
+    );
+    wait_for_no_active_turn(&runtime).await;
+
+    let planning_request = requests.recv().await.unwrap();
+    let planning_ack_request = requests.recv().await.unwrap();
+    let implementation_request = requests.recv().await.unwrap();
+    for request in [&planning_request, &planning_ack_request] {
+        let tool_names = response_tool_names(request);
+        assert!(!tool_names.contains(&"task_update_design"));
+        assert!(!tool_names.contains(&"task_spawn_executor"));
+    }
+    let implementation_tools = response_tool_names(&implementation_request);
+    for required in ["task_status", "task_update_design", "task_spawn_executor"] {
+        assert!(
+            implementation_tools.contains(&required),
+            "fresh Task request omitted {required}: {implementation_tools:?}"
+        );
+    }
+
+    let turns = turn::Entity::find()
+        .filter(turn::Column::ThreadId.eq(&thread.id))
+        .all(store.database())
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 2);
+    assert!(turns.iter().any(|turn| turn.id == submitted.turn_id));
+    let fresh_turn = turns
+        .iter()
+        .find(|turn| turn.id != submitted.turn_id)
+        .expect("implementation should use a fresh planner Turn");
+
+    let owner = crate::studio::agent_host::root_agent_id(&thread.id);
+    let mail_id =
+        pl_core::AgentInteractionContinuationRequest::stable_mail_id(&confirmation.interaction_id);
+    let input = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT turn_id, state, presentation, metadata_json FROM thread_inputs
+             WHERE thread_id = ? AND mail_id = ?",
+            [owner.to_string().into(), mail_id.clone().into()],
+        ))
+        .await
+        .unwrap()
+        .expect("plan implementation should be stored as a durable input");
+    assert_eq!(
+        input.try_get::<String>("", "turn_id").unwrap(),
+        fresh_turn.id
+    );
+    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "presentation").unwrap(),
+        "hidden"
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_str(&input.try_get::<String>("", "metadata_json").unwrap()).unwrap();
+    assert_eq!(
+        metadata["interactionResolutionId"],
+        confirmation.interaction_id
+    );
+    assert_eq!(metadata["mailId"], mail_id);
+    assert_eq!(metadata["planLifecycle"]["threadId"], thread.id);
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
     let original_plan = "# 原计划\n\n1. 使用英文提示词。";
     let revised_plan = "# 修订后的计划\n\n1. 所有提示词都使用中文。";

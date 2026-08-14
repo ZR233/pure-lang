@@ -15,15 +15,18 @@ platforms: [windows, linux, macos]
 cargo xtask build-gui            # 正常 release 构建
 cargo xtask build-gui --demo     # Demo 模式（无需 Rust 后端）
 cargo xtask build-gui --no-clean # 保留已存在的 release 输出目录
+cargo xtask build-gui --check-generated # CI/发布拒绝未提交的生成差异
 ```
 
 `pl-xtask` 自动检测当前 OS，并在 `code/pure-studio/` 目录下执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-release/`。
 `run-gui` 和 `build-gui` 会在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
 `pubspec.lock`、`pubspec_overrides.yaml` 和 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用
 Flutter `--no-pub` 热路径，不重复解析依赖或改写 lockfile。
-Windows 下 xtask 先在 workspace Cargo target 中构建 `pl-studio-bridge`，从 Cargo JSON
-定位 DLL/PDB，再交给 CMake 复制。CMake 不再启动 Cargo；直接执行 `flutter build/run windows`
-会因缺少预编译 artifact 明确失败。
+两者还通过 `.dart_tool/pure-xtask-codegen.sha256` 跟踪 Dart、Rust API、生成输出和生成配置；
+指纹变化时统一刷新 Riverpod、Freezed、l10n 和 FRB 文件，未变化时跳过耗时生成。
+Windows 下 xtask 先用普通前台 Cargo 命令在 workspace target 中构建 `pl-studio-bridge`，
+编译过程会实时显示在当前终端；完成后从对应 profile 目录定位 DLL/PDB，再交给 CMake 复制。
+CMake 不再启动 Cargo；直接执行 `flutter build/run windows` 会因缺少预编译 artifact 明确失败。
 
 ### 产物结构（Windows）
 
@@ -67,11 +70,13 @@ lib/src/rust/frb_generated.dart: error: The type 'BridgeEventPayload' is not
 
 **修复步骤**：
 ```powershell
-cd code/pure-studio
-flutter_rust_bridge_codegen generate
+cargo xtask generate-gui
+cargo xtask check-gui-generated
 ```
 
-> 当前项目使用 `flutter_rust_bridge = "=2.12.0"`（在 `Cargo.toml` 中锁定）。`flutter_rust_bridge_codegen` 版本必须与此匹配，否则生成代码可能与运行时库不兼容。
+> 生成文件不得手工修改，也不得直接调用单个生成器。当前项目使用
+> `flutter_rust_bridge = "=2.12.0"`（在 `Cargo.toml` 中锁定），xtask 会校验
+> `flutter_rust_bridge_codegen` 版本，避免生成代码与运行时库不兼容。
 
 **触发场景**：
 - 新增/修改/删除 `rust/src/api/` 中的 public 函数
@@ -85,7 +90,7 @@ flutter_rust_bridge_codegen generate
 构建中。如果 `cargo build -p pl-studio-bridge --release` 成功但 GUI 构建失败，重点检查：
 
 - 不同工作目录下的 `.cargo/config.toml` 生效范围
-- `PURE_STUDIO_BRIDGE_LIBRARY` 是否是 xtask 从 Cargo JSON 取得的绝对 DLL 路径
+- `PURE_STUDIO_BRIDGE_LIBRARY` 是否是 xtask 从 Cargo target/profile 定位的绝对 DLL 路径
 - `PURE_STUDIO_BRIDGE_DEBUG_SYMBOLS` 指向的可选 PDB 是否仍存在
 - 上游 workspace crate（`pl-core`、`pl-model`、`pl-protocol`）是否能在同一 target 中编译
 
@@ -113,7 +118,7 @@ Cargo 自身判断 artifact 是否 fresh，CMake 只执行 `copy_if_different`�
 
 ```yaml
 - name: build Pure Studio
-  run: cargo xtask build-gui
+  run: cargo xtask build-gui --check-generated
 ```
 
 ## 开发构建 vs Release 构建

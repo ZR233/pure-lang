@@ -15,31 +15,56 @@ use crate::tool::{FunctionToolDefinition, RegisteredTool, SubagentContext, ToolE
 use crate::turn::ToolEffect;
 use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind",
-    deny_unknown_fields
-)]
-enum CompletionResultInput {
+#[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum CompletionResultKindInput {
+    Delivery,
+    NoDelivery,
+}
+
+#[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompletionResultInput {
+    /// Selects delivery or noDelivery validation.
+    kind: CompletionResultKindInput,
+    /// Full Git commit id or an unambiguous abbreviation of at least 7 hex characters.
+    /// Required for delivery and forbidden for noDelivery.
+    head_commit: Option<String>,
+    /// Commands run and their outcomes, or evidence that no delivery was required.
+    verification_summary: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ValidatedCompletionResultInput {
     Delivery {
-        /// Full Git commit id or an unambiguous abbreviation of at least 7 hex characters.
         head_commit: String,
-        /// Commands run and their outcomes.
         verification_summary: String,
     },
     NoDelivery {
-        /// Evidence that no repository delivery was required.
         verification_summary: String,
     },
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ReportCompletionInput {
-    /// Delivery or explicit no-delivery result.
-    result: CompletionResultInput,
+impl TryFrom<CompletionResultInput> for ValidatedCompletionResultInput {
+    type Error = anyhow::Error;
+
+    fn try_from(input: CompletionResultInput) -> Result<Self> {
+        match (input.kind, input.head_commit) {
+            (CompletionResultKindInput::Delivery, Some(head_commit)) => Ok(Self::Delivery {
+                head_commit,
+                verification_summary: input.verification_summary,
+            }),
+            (CompletionResultKindInput::Delivery, None) => {
+                bail!("delivery requires headCommit")
+            }
+            (CompletionResultKindInput::NoDelivery, Some(_)) => {
+                bail!("noDelivery must not include headCommit")
+            }
+            (CompletionResultKindInput::NoDelivery, None) => Ok(Self::NoDelivery {
+                verification_summary: input.verification_summary,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -97,11 +122,11 @@ impl TaskCoordinator {
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        FunctionToolDefinition::<ReportCompletionInput>::new(
+        FunctionToolDefinition::<CompletionResultInput>::new(
             "report_completion",
-            "Report a clean executor result for mandatory delivery review and end the current turn.",
+            "Report a clean executor result with top-level kind, headCommit, and verificationSummary fields, then end the current turn for mandatory delivery review.",
         )
-        .registered(move |input: ReportCompletionInput, context| {
+        .registered(move |result: CompletionResultInput, context| {
                 let coordinator = coordinator.clone();
                 let runtime = runtime.clone();
                 async move {
@@ -110,7 +135,7 @@ impl TaskCoordinator {
                         .as_ref()
                         .context("report_completion requires an active executor")?;
                     let completion = coordinator
-                        .report_completion(subagent, context.workspace.root(), input.result)
+                        .report_completion(subagent, context.workspace.root(), result)
                         .await?;
                     if let Err(error) = runtime
                         .report_progress(
@@ -164,8 +189,8 @@ impl TaskCoordinator {
             .await?
             .context("active completion scope not found for this executor worktree")?;
         ensure_completion_scope_is_open(&scope)?;
-        match result {
-            CompletionResultInput::Delivery {
+        match ValidatedCompletionResultInput::try_from(result)? {
+            ValidatedCompletionResultInput::Delivery {
                 head_commit,
                 verification_summary,
             } => {
@@ -189,7 +214,7 @@ impl TaskCoordinator {
                     )
                     .await
             }
-            CompletionResultInput::NoDelivery {
+            ValidatedCompletionResultInput::NoDelivery {
                 verification_summary,
             } => {
                 let verification_summary = validate_common(
@@ -314,5 +339,94 @@ fn normalized_path(path: &Path) -> String {
         path.to_lowercase()
     } else {
         path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::deserialize_tool_input;
+
+    #[test]
+    fn completion_input_schema_is_a_flat_object() {
+        let schema =
+            FunctionToolDefinition::<CompletionResultInput>::new("report_completion", "test")
+                .input_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        let properties = schema["properties"].as_object().expect("input properties");
+        assert!(properties.contains_key("kind"));
+        assert!(properties.contains_key("headCommit"));
+        assert!(properties.contains_key("verificationSummary"));
+        assert!(!properties.contains_key("result"));
+        let required = schema["required"].as_array().expect("required fields");
+        assert!(required.iter().any(|field| field == "kind"));
+        assert!(required.iter().any(|field| field == "verificationSummary"));
+        assert!(!required.iter().any(|field| field == "headCommit"));
+    }
+
+    #[test]
+    fn completion_input_deserializes_top_level_scalar_fields() {
+        let delivery = deserialize_tool_input::<CompletionResultInput>(
+            "report_completion",
+            serde_json::json!({
+                "kind": "delivery",
+                "headCommit": "0123456789abcdef",
+                "verificationSummary": "tests passed"
+            }),
+        )
+        .expect("flat delivery input");
+        assert_eq!(
+            delivery,
+            CompletionResultInput {
+                kind: CompletionResultKindInput::Delivery,
+                head_commit: Some("0123456789abcdef".to_string()),
+                verification_summary: "tests passed".to_string(),
+            }
+        );
+
+        let no_delivery = deserialize_tool_input::<CompletionResultInput>(
+            "report_completion",
+            serde_json::json!({
+                "kind": "noDelivery",
+                "verificationSummary": "no repository change required"
+            }),
+        )
+        .expect("flat no-delivery input");
+        assert_eq!(
+            no_delivery,
+            CompletionResultInput {
+                kind: CompletionResultKindInput::NoDelivery,
+                head_commit: None,
+                verification_summary: "no repository change required".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn completion_input_rejects_invalid_head_commit_combinations() {
+        let missing_delivery_head =
+            ValidatedCompletionResultInput::try_from(CompletionResultInput {
+                kind: CompletionResultKindInput::Delivery,
+                head_commit: None,
+                verification_summary: "tests passed".to_string(),
+            })
+            .expect_err("delivery without headCommit must fail");
+        assert_eq!(
+            missing_delivery_head.to_string(),
+            "delivery requires headCommit"
+        );
+
+        let unexpected_no_delivery_head =
+            ValidatedCompletionResultInput::try_from(CompletionResultInput {
+                kind: CompletionResultKindInput::NoDelivery,
+                head_commit: Some("0123456789abcdef".to_string()),
+                verification_summary: "no repository change required".to_string(),
+            })
+            .expect_err("noDelivery with headCommit must fail");
+        assert_eq!(
+            unexpected_no_delivery_head.to_string(),
+            "noDelivery must not include headCommit"
+        );
     }
 }

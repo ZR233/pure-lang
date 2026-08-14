@@ -27,6 +27,90 @@ void main() {
     );
   });
 
+  test('task acceptance pins the selected project and Task thread', () {
+    final targetProjectSimpleThread = {
+      'project': {'id': 'project-target', 'path': r'C:\Temp\task-validation'},
+      'workspace': {
+        'projectId': 'project-target',
+        'threadId': 'thread-target',
+        'threadMode': 'simple',
+        'turn': null,
+      },
+      'task': null,
+      'planContent': null,
+    };
+    final staleTaskThread = {
+      'project': {'id': 'project-old', 'path': r'C:\Temp\old-project'},
+      'workspace': {
+        'projectId': 'project-old',
+        'threadId': 'thread-old',
+        'threadMode': 'task',
+        'turn': {'id': 'turn-old'},
+      },
+      'task': null,
+      'planContent': null,
+    };
+    final targetProjectTaskThread = {
+      ...targetProjectSimpleThread,
+      'workspace': {
+        'projectId': 'project-target',
+        'threadId': 'thread-target',
+        'threadMode': 'task',
+        'turn': {'id': 'turn-target'},
+      },
+      'task': {'runId': 'task-run-target', 'phase': 'implementing'},
+    };
+
+    expect(
+      isSelectedProjectWorkspace(staleTaskThread, r'C:\Temp\task-validation'),
+      isFalse,
+    );
+    expect(
+      isSelectedProjectWorkspace(
+        targetProjectSimpleThread,
+        r'c:/temp/task-validation/',
+      ),
+      isTrue,
+    );
+    expect(isTaskThread(targetProjectSimpleThread, 'thread-target'), isFalse);
+    expect(isTaskThread(staleTaskThread, 'thread-target'), isFalse);
+    expect(isTaskThread(targetProjectTaskThread, 'thread-target'), isTrue);
+    expect(
+      hasSubmittedTaskPromptOnThread(targetProjectTaskThread, 'thread-target'),
+      isTrue,
+    );
+    expect(
+      isTaskRunOnTarget(
+        targetProjectTaskThread,
+        projectId: 'project-target',
+        projectPath: r'C:\Temp\task-validation',
+        threadId: 'thread-target',
+        runId: 'task-run-target',
+      ),
+      isTrue,
+    );
+    expect(
+      isTaskRunOnTarget(
+        targetProjectTaskThread,
+        projectId: 'project-target',
+        projectPath: r'C:\Temp\task-validation',
+        threadId: 'thread-target',
+        runId: 'task-run-other',
+      ),
+      isFalse,
+    );
+    expect(
+      isTaskRunOnTarget(
+        staleTaskThread,
+        projectId: 'project-target',
+        projectPath: r'C:\Temp\task-validation',
+        threadId: 'thread-target',
+        runId: 'task-run-target',
+      ),
+      isFalse,
+    );
+  });
+
   test('snapshot reconnects after a closed observation connection', () async {
     final first = _FakeDriverClient(
       snapshotError: StateError('connection closed'),
@@ -215,6 +299,12 @@ class _FakeDriverClient implements FlutterDriverClient {
 
   @override
   Future<void> waitFor(
+    driver.SerializableFinder finder, {
+    Duration? timeout,
+  }) async {}
+
+  @override
+  Future<void> waitForAbsent(
     driver.SerializableFinder finder, {
     Duration? timeout,
   }) async {}

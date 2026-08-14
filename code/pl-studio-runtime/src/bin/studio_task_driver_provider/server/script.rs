@@ -445,11 +445,9 @@ fn executor_response(
                     "executor-completion",
                     "report_completion",
                     serde_json::json!({
-                        "result": {
-                            "kind": "delivery",
-                            "headCommit": head,
-                            "verificationSummary": "offline fixture content committed"
-                        }
+                        "kind": "delivery",
+                        "headCommit": head,
+                        "verificationSummary": "offline fixture content committed"
                     }),
                 ),
             )
@@ -486,7 +484,8 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
                     "verdict": "pass",
                     "summary": "Implementation matches the reviewed offline Task contract.",
                     "designReferences": [{"path": "design/task-flow.md", "section": "Offline Task Flow"}],
-                    "findings": []
+                    "findings": [],
+                    "fileReviews": [{"path": "src/feature.txt", "reviewed": true}]
                 }),
             ),
         ),

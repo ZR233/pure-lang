@@ -15,6 +15,7 @@ Future<void> main(List<String> arguments) async {
 
   FlutterDriverSession? session;
   var recoveryApplied = false;
+  late final _TaskObservationTarget taskTarget;
   try {
     session = await FlutterDriverSession.connect(
       vmServiceUrl: options.vmServiceUrl,
@@ -23,7 +24,7 @@ Future<void> main(List<String> arguments) async {
     switch (options.mode) {
       case AcceptanceDriverMode.newRun:
         final prompt = await File(options.promptFile!).readAsString();
-        await _startNewTask(session, options, snapshots, prompt);
+        taskTarget = await _startNewTask(session, options, snapshots, prompt);
       case AcceptanceDriverMode.observe:
         final observedSnapshot = await _waitForSnapshot(
           session,
@@ -47,11 +48,9 @@ Future<void> main(List<String> arguments) async {
         );
         return;
       case AcceptanceDriverMode.resume:
-        recoveryApplied = await _resumeTaskIfPaused(
-          session,
-          options,
-          snapshots,
-        );
+        final resume = await _resumeTaskIfPaused(session, options, snapshots);
+        recoveryApplied = resume.recoveryApplied;
+        taskTarget = resume.target;
         if (recoveryApplied) await progressState.resetAfterRecovery();
     }
 
@@ -59,6 +58,7 @@ Future<void> main(List<String> arguments) async {
       session,
       snapshots,
       progressState,
+      target: taskTarget,
       deadline: options.taskDeadline,
       stallTimeout: options.stallTimeout,
       options: options,
@@ -174,19 +174,27 @@ Future<void> _openFatalTaskFailureDetail(
   );
 }
 
-Future<void> _startNewTask(
+Future<_TaskObservationTarget> _startNewTask(
   FlutterDriverSession session,
   _DriverOptions options,
   File snapshots,
   String prompt,
 ) async {
-  await _openWorkspace(session, options.workspace!);
-  await _selectTaskMode(session, snapshots, options);
-  await _submitPrompt(session, snapshots, options, prompt);
+  final threadId = await _openWorkspace(
+    session,
+    snapshots,
+    options,
+    options.workspace!,
+  );
+  await _selectTaskMode(session, snapshots, options, threadId);
+  await _submitPrompt(session, snapshots, options, threadId, prompt);
   await _waitForSnapshot(
     session,
     'plan confirmation',
-    _hasPlanConfirmation,
+    (snapshot) =>
+        isSelectedProjectWorkspace(snapshot, options.workspace!) &&
+        isTaskThread(snapshot, threadId) &&
+        _hasPlanConfirmation(snapshot),
     deadline: _earlierDeadline(
       DateTime.now().add(options.planTimeout),
       options.taskDeadline,
@@ -202,17 +210,23 @@ Future<void> _startNewTask(
     'plan confirmation',
     const Duration(seconds: 30),
   );
-  await _sideEffectOnce(
+  final implementationSnapshot = await _sideEffectOnce(
     session,
     snapshots,
     options,
     description: 'implement plan tap',
     action: () => session.tap(find.byValueKey('plan-implement')),
-    postcondition: (snapshot) => !_hasPlanConfirmation(snapshot),
+    postcondition: (snapshot) =>
+        isSelectedProjectWorkspace(snapshot, options.workspace!) &&
+        isTaskThread(snapshot, threadId) &&
+        !_hasPlanConfirmation(snapshot) &&
+        snapshot['task'] is Map<String, dynamic>,
   );
+  return _TaskObservationTarget.fromSnapshot(implementationSnapshot);
 }
 
-Future<bool> _resumeTaskIfPaused(
+Future<({bool recoveryApplied, _TaskObservationTarget target})>
+_resumeTaskIfPaused(
   FlutterDriverSession session,
   _DriverOptions options,
   File snapshots,
@@ -226,7 +240,10 @@ Future<bool> _resumeTaskIfPaused(
     options: options,
   );
   final task = snapshot['task'] as Map<String, dynamic>;
-  if (task['phase'] == 'completed' || !_isTaskPaused(snapshot)) return false;
+  final target = _TaskObservationTarget.fromSnapshot(snapshot);
+  if (task['phase'] == 'completed' || !_isTaskPaused(snapshot)) {
+    return (recoveryApplied: false, target: target);
+  }
   if (options.recoveryCount >= 3) {
     throw StateError(
       'Task recovery loop limit reached before a fourth recovery',
@@ -262,7 +279,8 @@ Future<bool> _resumeTaskIfPaused(
     options,
     description: 'Task recovery apply',
     action: () => session.tap(find.byValueKey('task-recovery-apply')),
-    postcondition: (snapshot) => !_isTaskPaused(snapshot),
+    postcondition: (snapshot) =>
+        target.matches(snapshot) && !_isTaskPaused(snapshot),
     deadline: options.taskDeadline,
   );
   stdout.writeln(
@@ -274,7 +292,7 @@ Future<bool> _resumeTaskIfPaused(
       'task': recoverySnapshot['task'],
     }),
   );
-  return true;
+  return (recoveryApplied: true, target: target);
 }
 
 Future<void> _selectRecoveryMode(
@@ -299,8 +317,10 @@ Future<void> _selectRecoveryMode(
   );
 }
 
-Future<void> _openWorkspace(
+Future<String> _openWorkspace(
   FlutterDriverSession session,
+  File snapshots,
+  _DriverOptions options,
   String workspace,
 ) async {
   await _driverCommand(
@@ -338,6 +358,46 @@ Future<void> _openWorkspace(
     const Duration(seconds: 10),
   );
   await _driverCommand(
+    session.waitForAbsent(
+      find.byValueKey('project-path-dialog'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'project path dialog close',
+  );
+  final openedWorkspace = await _waitForSnapshot(
+    session,
+    'selected project workspace',
+    (snapshot) => isSelectedProjectWorkspace(snapshot, workspace),
+    deadline: DateTime.now().add(const Duration(minutes: 2)),
+    output: snapshots,
+    options: options,
+  );
+  final openedThreadId = _snapshotThreadId(openedWorkspace);
+  await _driverCommand(
+    session.waitFor(
+      find.byValueKey('sidebar-new-session'),
+      timeout: const Duration(minutes: 1),
+    ),
+    'new session after project open',
+    const Duration(minutes: 1),
+  );
+  final freshWorkspace = await _sideEffectOnce(
+    session,
+    snapshots,
+    options,
+    description: 'new session after project open',
+    action: () => session.tap(find.byValueKey('sidebar-new-session')),
+    postcondition: (snapshot) {
+      if (!isSelectedProjectWorkspace(snapshot, workspace)) return false;
+      final threadId = _snapshotThreadId(snapshot);
+      final workspaceState = snapshot['workspace'] as Map<String, dynamic>;
+      return threadId != openedThreadId &&
+          workspaceState['threadMode'] == 'simple' &&
+          workspaceState['turn'] == null;
+    },
+    deadline: DateTime.now().add(const Duration(minutes: 1)),
+  );
+  await _driverCommand(
     session.waitFor(
       find.byValueKey('composer-input'),
       timeout: const Duration(minutes: 1),
@@ -345,12 +405,14 @@ Future<void> _openWorkspace(
     'composer after project open',
     const Duration(minutes: 1),
   );
+  return _snapshotThreadId(freshWorkspace);
 }
 
 Future<void> _selectTaskMode(
   FlutterDriverSession session,
   File snapshots,
   _DriverOptions options,
+  String threadId,
 ) async {
   await _driverCommand(
     session.tap(find.byValueKey('session-mode-selector')),
@@ -366,11 +428,7 @@ Future<void> _selectTaskMode(
     options,
     description: 'Task mode option tap',
     action: () => session.tap(find.byValueKey('session-mode-task')),
-    postcondition: (snapshot) {
-      final workspace = snapshot['workspace'];
-      return workspace is Map<String, dynamic> &&
-          workspace['threadMode'] == 'task';
-    },
+    postcondition: (snapshot) => isTaskThread(snapshot, threadId),
   );
 }
 
@@ -378,8 +436,17 @@ Future<void> _submitPrompt(
   FlutterDriverSession session,
   File snapshots,
   _DriverOptions options,
+  String threadId,
   String prompt,
 ) async {
+  await _waitForSnapshot(
+    session,
+    'Task thread before prompt entry',
+    (snapshot) => isTaskThread(snapshot, threadId),
+    deadline: DateTime.now().add(const Duration(seconds: 30)),
+    output: snapshots,
+    options: options,
+  );
   final composerInput = find.byValueKey('composer-input');
   final expectedPrompt = prompt.trim();
   await _driverCommand(session.tap(composerInput), 'composer input tap');
@@ -407,6 +474,14 @@ Future<void> _submitPrompt(
     'prompt submit rebuild',
     const Duration(seconds: 20),
   );
+  await _waitForSnapshot(
+    session,
+    'Task thread before prompt submit',
+    (snapshot) => isTaskThread(snapshot, threadId),
+    deadline: DateTime.now().add(const Duration(seconds: 30)),
+    output: snapshots,
+    options: options,
+  );
   await _sideEffectOnce(
     session,
     snapshots,
@@ -425,7 +500,8 @@ Future<void> _submitPrompt(
         await session.disconnectObservationForAcceptance();
       }
     },
-    postcondition: hasSubmittedTaskPrompt,
+    postcondition: (snapshot) =>
+        hasSubmittedTaskPromptOnThread(snapshot, threadId),
   );
 }
 
@@ -469,10 +545,135 @@ bool hasSubmittedTaskPrompt(Map<String, dynamic> snapshot) {
       interaction['kind'] == 'planConfirmation';
 }
 
+bool hasSubmittedTaskPromptOnThread(
+  Map<String, dynamic> snapshot,
+  String threadId,
+) => isTaskThread(snapshot, threadId) && hasSubmittedTaskPrompt(snapshot);
+
+bool isSelectedProjectWorkspace(
+  Map<String, dynamic> snapshot,
+  String expectedPath,
+) {
+  final project = snapshot['project'];
+  final workspace = snapshot['workspace'];
+  if (project is! Map<String, dynamic> || workspace is! Map<String, dynamic>) {
+    return false;
+  }
+  final projectId = project['id'];
+  final projectPath = project['path'];
+  return projectId is String &&
+      projectPath is String &&
+      workspace['projectId'] == projectId &&
+      _normalizedPath(projectPath) == _normalizedPath(expectedPath);
+}
+
+bool isTaskThread(Map<String, dynamic> snapshot, String threadId) {
+  final workspace = snapshot['workspace'];
+  return workspace is Map<String, dynamic> &&
+      workspace['threadId'] == threadId &&
+      workspace['threadMode'] == 'task';
+}
+
+bool isTaskRunOnTarget(
+  Map<String, dynamic> snapshot, {
+  required String projectId,
+  required String projectPath,
+  required String threadId,
+  required String runId,
+}) {
+  final project = snapshot['project'];
+  final task = snapshot['task'];
+  return project is Map<String, dynamic> &&
+      project['id'] == projectId &&
+      isSelectedProjectWorkspace(snapshot, projectPath) &&
+      isTaskThread(snapshot, threadId) &&
+      task is Map<String, dynamic> &&
+      task['runId'] == runId;
+}
+
+class _TaskObservationTarget {
+  const _TaskObservationTarget({
+    required this.projectId,
+    required this.projectPath,
+    required this.threadId,
+    required this.runId,
+  });
+
+  factory _TaskObservationTarget.fromSnapshot(Map<String, dynamic> snapshot) {
+    final project = snapshot['project'];
+    final workspace = snapshot['workspace'];
+    final task = snapshot['task'];
+    final projectId = project is Map<String, dynamic> ? project['id'] : null;
+    final projectPath = project is Map<String, dynamic>
+        ? project['path']
+        : null;
+    final threadId = workspace is Map<String, dynamic>
+        ? workspace['threadId']
+        : null;
+    final runId = task is Map<String, dynamic> ? task['runId'] : null;
+    if (projectId is! String ||
+        projectId.isEmpty ||
+        projectPath is! String ||
+        projectPath.isEmpty ||
+        threadId is! String ||
+        threadId.isEmpty ||
+        runId is! String ||
+        runId.isEmpty ||
+        !isTaskRunOnTarget(
+          snapshot,
+          projectId: projectId,
+          projectPath: projectPath,
+          threadId: threadId,
+          runId: runId,
+        )) {
+      throw StateError(
+        'Flutter Driver snapshot does not identify one selected Task target',
+      );
+    }
+    return _TaskObservationTarget(
+      projectId: projectId,
+      projectPath: projectPath,
+      threadId: threadId,
+      runId: runId,
+    );
+  }
+
+  final String projectId;
+  final String projectPath;
+  final String threadId;
+  final String runId;
+
+  bool matches(Map<String, dynamic> snapshot) => isTaskRunOnTarget(
+    snapshot,
+    projectId: projectId,
+    projectPath: projectPath,
+    threadId: threadId,
+    runId: runId,
+  );
+}
+
+String _snapshotThreadId(Map<String, dynamic> snapshot) {
+  final workspace = snapshot['workspace'];
+  final threadId = workspace is Map<String, dynamic>
+      ? workspace['threadId']
+      : null;
+  if (threadId is String && threadId.isNotEmpty) return threadId;
+  throw StateError('Flutter Driver snapshot has no selected thread');
+}
+
+String _normalizedPath(String path) {
+  var normalized = File(path).absolute.path.replaceAll('\\', '/');
+  while (normalized.length > 1 && normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return Platform.isWindows ? normalized.toLowerCase() : normalized;
+}
+
 Future<Map<String, dynamic>> _waitForTaskCompletion(
   FlutterDriverSession session,
   File snapshots,
   _ProgressState progressState, {
+  required _TaskObservationTarget target,
   required DateTime deadline,
   required Duration stallTimeout,
   required _DriverOptions options,
@@ -480,6 +681,12 @@ Future<Map<String, dynamic>> _waitForTaskCompletion(
   final progress = await progressState.load();
   while (DateTime.now().isBefore(deadline)) {
     final snapshot = await _snapshot(session, snapshots, options);
+    if (!target.matches(snapshot)) {
+      throw StateError(
+        'Flutter Driver selection moved away from Task '
+        '${target.runId} on thread ${target.threadId}',
+      );
+    }
     final task = snapshot['task'];
     if (task is Map<String, dynamic>) {
       final phase = task['phase'] as String? ?? '';

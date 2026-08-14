@@ -31,8 +31,10 @@ SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-14；旧 schema、未知版本、无法解析或无法校验的配置直接报错，不迁移、不归档、不重建。配置
-写入使用同目录临时文件和原子替换。
+14；旧 schema、未知版本、无法解析或无法校验的配置不迁移、不归档、不导入，直接使用
+`StudioConfig::default_config()` 生成当前初始配置并原子替换原文件。替换不会从不兼容文件导入
+provider 凭据，也不会清理系统凭据库；替换后的初始配置只按自身 provider id 注入已有系统凭据。
+文件读取、系统凭据读取或原子写入失败不属于配置不兼容，必须 fail closed 并保留原文件。
 
 `pure-studio` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
 `SettingsStateSnapshot`，由 Flutter 原子替换 Settings 领域；不得返回 Studio 聚合状态，也不得
@@ -450,12 +452,14 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 Provider 的 API token 保存到操作系统凭据库，service 固定为 `pure-studio`，account 为 `provider:{provider_id}`；`~/.pure/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
 设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。旧 schema 不读取凭据，也不生成兼容备份。
+不兼容配置不得按旧 provider id 读取或迁移凭据；原子替换为初始配置前，只允许按初始配置的
+provider id 读取系统凭据。凭据读取失败时保留原配置文件。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
 
 ## 10.13 Web 搜索配置与凭据门控
 
-Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 的拒绝备份与重建合同处理，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
+Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 的初始配置替换合同处理，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
 
 配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
 

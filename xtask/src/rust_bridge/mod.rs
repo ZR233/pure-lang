@@ -2,12 +2,9 @@ use crate::cli::{BridgeConfiguration, BuildRustBridgeOptions};
 use crate::paths;
 use crate::process;
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 pub(crate) const BRIDGE_LIBRARY_ENV: &str = "PURE_STUDIO_BRIDGE_LIBRARY";
 pub(crate) const BRIDGE_DEBUG_SYMBOLS_ENV: &str = "PURE_STUDIO_BRIDGE_DEBUG_SYMBOLS";
@@ -80,42 +77,18 @@ fn build_artifacts(
     configuration: BridgeConfiguration,
     target_dir: Option<&Path>,
 ) -> Result<RustBridgeArtifacts> {
+    let artifact_target_dir = resolve_cargo_target_dir(
+        workspace_root,
+        target_dir,
+        std::env::var_os("CARGO_TARGET_DIR").as_deref(),
+    );
     let args = cargo_build_args(configuration, target_dir);
     let display = process::display_command("cargo", &args);
     let mut command = process::path_command("cargo", &args);
-    command
-        .current_dir(workspace_root)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+    command.current_dir(workspace_root);
+    process::run_checked(&mut command, &display)?;
 
-    println!("==> ({}) {display}", workspace_root.display());
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start command from PATH: {display}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .with_context(|| format!("failed to capture command stdout: {display}"))?;
-    let artifacts = match parse_cargo_messages(BufReader::new(stdout)) {
-        Ok(artifacts) => artifacts,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error).with_context(|| format!("failed to parse Cargo output: {display}"));
-        }
-    };
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for command: {display}"))?;
-    if !status.success() {
-        let code = status
-            .code()
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "terminated by signal".to_owned());
-        bail!("command failed with exit code {code}: {display}");
-    }
-
-    validate_artifacts(artifacts)
+    locate_built_artifacts(&artifact_target_dir, configuration)
 }
 
 fn cargo_build_args(
@@ -126,7 +99,6 @@ fn cargo_build_args(
         OsString::from("build"),
         OsString::from("-p"),
         OsString::from(BRIDGE_PACKAGE_NAME),
-        OsString::from("--message-format=json-render-diagnostics"),
     ];
     if configuration.uses_release_profile() {
         args.push(OsString::from("--release"));
@@ -138,78 +110,53 @@ fn cargo_build_args(
     args
 }
 
-fn parse_cargo_messages(reader: impl BufRead) -> Result<RustBridgeArtifacts> {
-    let mut artifacts = None;
-    for line in reader.lines() {
-        let line = line.context("failed to read Cargo JSON message")?;
-        let message: CargoMessage =
-            serde_json::from_str(&line).context("Cargo emitted an invalid JSON message")?;
-        if message.reason == "compiler-message" {
-            if let Some(rendered) = message.message.and_then(|message| message.rendered) {
-                eprint!("{rendered}");
-            }
-            continue;
-        }
-        if message.reason != "compiler-artifact" || !message.is_bridge_cdylib() {
-            continue;
-        }
-        if artifacts.is_some() {
-            bail!("Cargo emitted multiple compiler artifacts for {BRIDGE_TARGET_NAME}");
-        }
-        artifacts = Some(artifacts_from_filenames(message.filenames)?);
+fn resolve_cargo_target_dir(
+    workspace_root: &Path,
+    command_target_dir: Option<&Path>,
+    environment_target_dir: Option<&OsStr>,
+) -> PathBuf {
+    let configured_target_dir = command_target_dir
+        .map(Path::to_path_buf)
+        .or_else(|| environment_target_dir.map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("target"));
+    if configured_target_dir.is_absolute() {
+        configured_target_dir
+    } else {
+        workspace_root.join(configured_target_dir)
     }
-
-    artifacts.with_context(|| {
-        format!("Cargo did not emit a cdylib compiler artifact for {BRIDGE_TARGET_NAME}")
-    })
 }
 
-fn artifacts_from_filenames(filenames: Vec<PathBuf>) -> Result<RustBridgeArtifacts> {
-    let dynamic_library =
-        select_unique_extension(&filenames, dynamic_library_extension(), "dynamic library")?
-            .with_context(|| {
-                format!(
-                    "Cargo artifact for {BRIDGE_TARGET_NAME} did not include a .{} dynamic library",
-                    dynamic_library_extension()
-                )
-            })?;
-    let debug_symbols = debug_symbols_extension()
-        .map(|extension| select_unique_extension(&filenames, extension, "debug symbols"))
-        .transpose()?
-        .flatten();
-
+fn locate_built_artifacts(
+    target_dir: &Path,
+    configuration: BridgeConfiguration,
+) -> Result<RustBridgeArtifacts> {
+    let candidates = artifact_candidates(target_dir, configuration);
+    let dynamic_library = validate_artifact_path(&candidates.dynamic_library, "dynamic library")?;
+    let debug_symbols = candidates.debug_symbols.filter(|path| path.is_file());
     Ok(RustBridgeArtifacts {
         dynamic_library,
         debug_symbols,
     })
 }
 
-fn select_unique_extension(
-    filenames: &[PathBuf],
-    extension: &str,
-    artifact_kind: &str,
-) -> Result<Option<PathBuf>> {
-    let mut matches = filenames
-        .iter()
-        .filter(|path| path.extension() == Some(OsStr::new(extension)));
-    let selected = matches.next().cloned();
-    if matches.next().is_some() {
-        bail!("Cargo artifact for {BRIDGE_TARGET_NAME} included multiple {artifact_kind} files");
+fn artifact_candidates(
+    target_dir: &Path,
+    configuration: BridgeConfiguration,
+) -> RustBridgeArtifacts {
+    let profile_dir = if configuration.uses_release_profile() {
+        "release"
+    } else {
+        "debug"
+    };
+    let profile_dir = target_dir.join(profile_dir);
+    RustBridgeArtifacts {
+        dynamic_library: profile_dir.join(format!(
+            "{BRIDGE_TARGET_NAME}.{}",
+            dynamic_library_extension()
+        )),
+        debug_symbols: debug_symbols_extension()
+            .map(|extension| profile_dir.join(format!("{BRIDGE_TARGET_NAME}.{extension}"))),
     }
-    Ok(selected)
-}
-
-fn validate_artifacts(artifacts: RustBridgeArtifacts) -> Result<RustBridgeArtifacts> {
-    let dynamic_library = validate_artifact_path(&artifacts.dynamic_library, "dynamic library")?;
-    let debug_symbols = artifacts
-        .debug_symbols
-        .as_deref()
-        .map(|path| validate_artifact_path(path, "debug symbols"))
-        .transpose()?;
-    Ok(RustBridgeArtifacts {
-        dynamic_library,
-        debug_symbols,
-    })
 }
 
 fn validate_artifact_path(path: &Path, artifact_kind: &str) -> Result<PathBuf> {
@@ -275,50 +222,10 @@ fn debug_symbols_extension() -> Option<&'static str> {
     None
 }
 
-#[derive(Debug, Deserialize)]
-struct CargoMessage {
-    reason: String,
-    #[serde(default)]
-    target: Option<CargoTarget>,
-    #[serde(default)]
-    profile: Option<CargoProfile>,
-    #[serde(default)]
-    filenames: Vec<PathBuf>,
-    #[serde(default)]
-    message: Option<CargoCompilerMessage>,
-}
-
-impl CargoMessage {
-    fn is_bridge_cdylib(&self) -> bool {
-        self.target.as_ref().is_some_and(|target| {
-            target.name == BRIDGE_TARGET_NAME
-                && target.crate_types.iter().any(|kind| kind == "cdylib")
-        }) && self.profile.as_ref().is_some_and(|profile| !profile.test)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct CargoTarget {
-    name: String,
-    #[serde(default)]
-    crate_types: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CargoProfile {
-    test: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct CargoCompilerMessage {
-    rendered: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::io::Cursor;
 
     #[test]
     fn cargo_args_map_debug_and_release_profiles() {
@@ -328,7 +235,6 @@ mod tests {
                 OsString::from("build"),
                 OsString::from("-p"),
                 OsString::from(BRIDGE_PACKAGE_NAME),
-                OsString::from("--message-format=json-render-diagnostics"),
             ]
         );
         for configuration in [BridgeConfiguration::Profile, BridgeConfiguration::Release] {
@@ -338,7 +244,6 @@ mod tests {
                     OsString::from("build"),
                     OsString::from("-p"),
                     OsString::from(BRIDGE_PACKAGE_NAME),
-                    OsString::from("--message-format=json-render-diagnostics"),
                     OsString::from("--release"),
                     OsString::from("--target-dir"),
                     OsString::from("custom-target"),
@@ -348,111 +253,44 @@ mod tests {
     }
 
     #[test]
-    fn parses_fresh_bridge_artifact_and_ignores_unrelated_targets() -> Result<()> {
-        let library = format!(
-            "target/debug/pl_studio_bridge.{}",
-            dynamic_library_extension()
-        );
-        let debug_symbols = debug_symbols_extension()
-            .map(|extension| format!("target/debug/pl_studio_bridge.{extension}"));
-        let mut bridge_filenames = vec![library.as_str()];
-        if let Some(debug_symbols) = debug_symbols.as_deref() {
-            bridge_filenames.push(debug_symbols);
-        }
-        let input = format!(
-            "{}\n{}\n",
-            artifact_json("other_target", false, &[library.as_str()]),
-            artifact_json(BRIDGE_TARGET_NAME, false, &bridge_filenames)
-        );
-
-        let artifacts = parse_cargo_messages(Cursor::new(input))?;
-
+    fn cargo_target_dir_prefers_cli_then_environment_then_workspace_default() {
+        let workspace_root = Path::new("workspace");
         assert_eq!(
-            artifacts,
-            RustBridgeArtifacts {
-                dynamic_library: PathBuf::from(library),
-                debug_symbols: debug_symbols.map(PathBuf::from),
-            }
+            resolve_cargo_target_dir(
+                workspace_root,
+                Some(Path::new("cli-target")),
+                Some(OsStr::new("environment-target")),
+            ),
+            workspace_root.join("cli-target")
         );
-        Ok(())
-    }
-
-    #[test]
-    fn ignores_test_artifact_and_allows_missing_debug_symbols() -> Result<()> {
-        let library = format!(
-            "target/debug/pl_studio_bridge.{}",
-            dynamic_library_extension()
+        assert_eq!(
+            resolve_cargo_target_dir(workspace_root, None, Some(OsStr::new("environment-target")),),
+            workspace_root.join("environment-target")
         );
-        let input = format!(
-            "{}\n{}\n",
-            artifact_json(BRIDGE_TARGET_NAME, true, &[library.as_str()]),
-            artifact_json(BRIDGE_TARGET_NAME, false, &[library.as_str()])
-        );
-
-        let artifacts = parse_cargo_messages(Cursor::new(input))?;
-
-        assert_eq!(artifacts.debug_symbols, None);
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_missing_or_duplicate_dynamic_library() {
-        let missing = artifact_json(BRIDGE_TARGET_NAME, false, &["target/debug/bridge.rlib"]);
-        assert!(
-            parse_cargo_messages(Cursor::new(missing))
-                .expect_err("missing dynamic library must fail")
-                .to_string()
-                .contains("did not include")
-        );
-
-        let first = format!("target/debug/one.{}", dynamic_library_extension());
-        let second = format!("target/debug/two.{}", dynamic_library_extension());
-        let duplicate = artifact_json(
-            BRIDGE_TARGET_NAME,
-            false,
-            &[first.as_str(), second.as_str()],
-        );
-        assert!(
-            parse_cargo_messages(Cursor::new(duplicate))
-                .expect_err("duplicate dynamic libraries must fail")
-                .to_string()
-                .contains("multiple dynamic library")
+        assert_eq!(
+            resolve_cargo_target_dir(workspace_root, None, None),
+            workspace_root.join("target")
         );
     }
 
     #[test]
-    fn rejects_duplicate_compiler_artifact_and_invalid_json() {
-        let library = format!(
-            "target/debug/pl_studio_bridge.{}",
-            dynamic_library_extension()
+    fn artifact_candidates_follow_cargo_profile() {
+        let target_dir = Path::new("workspace-target");
+        let debug = artifact_candidates(target_dir, BridgeConfiguration::Debug);
+        assert_eq!(
+            debug.dynamic_library,
+            target_dir.join("debug").join(format!(
+                "{BRIDGE_TARGET_NAME}.{}",
+                dynamic_library_extension()
+            ))
         );
-        let artifact = artifact_json(BRIDGE_TARGET_NAME, false, &[library.as_str()]);
-        let duplicate = format!("{artifact}\n{artifact}\n");
-        assert!(
-            parse_cargo_messages(Cursor::new(duplicate))
-                .expect_err("duplicate compiler artifacts must fail")
-                .to_string()
-                .contains("multiple compiler artifacts")
+        let release = artifact_candidates(target_dir, BridgeConfiguration::Release);
+        assert_eq!(
+            release.dynamic_library,
+            target_dir.join("release").join(format!(
+                "{BRIDGE_TARGET_NAME}.{}",
+                dynamic_library_extension()
+            ))
         );
-        assert!(
-            parse_cargo_messages(Cursor::new("not json"))
-                .expect_err("invalid Cargo JSON must fail")
-                .to_string()
-                .contains("invalid JSON")
-        );
-    }
-
-    fn artifact_json(target_name: &str, test: bool, filenames: &[&str]) -> String {
-        serde_json::json!({
-            "reason": "compiler-artifact",
-            "target": {
-                "name": target_name,
-                "crate_types": ["cdylib", "rlib"]
-            },
-            "profile": { "test": test },
-            "filenames": filenames,
-            "fresh": true
-        })
-        .to_string()
     }
 }

@@ -76,8 +76,9 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
   `configure_background_std_command` 和 `wrap_background_command`），原生 Command 与
   `process-wrap`/Job Object 路径都必须从该工厂取得等价策略，其他 crate 不得复制实现；`pl-lsp` 因依赖
   方向（pl-core → pl-lsp）保留自己的 `spawn_background` 统一入口，语义与
-  pl-core 工厂等价；`pl-xtask` 在自身 process 模块内统一配置，所有子进程
-  创建入口必须经过它。Windows GUI 双击回归必须同时检查传统 `ConsoleWindowClass` 和现代终端
+  pl-core 工厂等价。`pl-xtask` 的同步构建、生成、签名等前台命令使用普通进程并继承终端
+  stdout/stderr，以便实时显示编译过程；只有驻留命令使用 xtask 自身 process 模块的后台配置和
+  进程树托管。Windows GUI 双击回归必须同时检查传统 `ConsoleWindowClass` 和现代终端
   使用的 `PseudoConsoleWindow`，不能只凭控制台启动或只检查传统窗口类判定无弹窗。
 - stdio MCP 配置保存跨平台命令名，不写入 `.cmd` 等平台后缀，也不统一套 `pwsh`/shell；
   connector 在 Windows 按 `PATHEXT` 解析 CreateProcess 可执行目标，并保持 `shell=false` 语义；
@@ -95,6 +96,24 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 - 单个 MCP 启动或探测失败必须归属到该 server 的运行时 health，投影为
   `unavailable` 和有界、脱敏的错误消息；配置启用态与运行时可用态不得混用，
   单个 MCP 失败也不得阻塞 Studio shell。
+
+## 9.9 Studio 生成文件约定
+
+- Riverpod、Freezed、Flutter l10n 和 FRB 输出只由 `cargo xtask generate-gui` 管理，
+  不得手工修改。生成流程必须覆盖依赖解析、所有生成器、生成文件规范化和格式化，
+  使本地手工改动由生成器恢复为 canonical 内容。当前锁定的 build_runner 会始终删除冲突
+  输出，不得继续传递已移除的 `--delete-conflicting-outputs` 参数。
+- `cargo xtask run-gui` 和 `cargo xtask build-gui` 在运行或构建前自动执行同一生成流程，
+  并以覆盖 Dart、Rust API、生成输出和生成配置的内容指纹跳过无变化的重复生成，确保 GUI
+  产物不会使用过期绑定，同时不拖慢连续运行。需要只检查生成一致性时使用
+  `cargo xtask check-gui-generated`；该命令重新生成后同时检查已跟踪差异和未跟踪输出。
+- CI 或发布流程直接构建 GUI 时使用 `cargo xtask build-gui --check-generated`，在同一次自动
+  刷新后拒绝未提交的生成差异，避免先检查再构建造成重复生成。
+- `cargo xtask verify-gui` 必须复用 `check-gui-generated`，PR、默认分支和正式发布 CI
+  只调用 xtask 入口，不在 workflow 中复制生成器命令。生成后存在 Git 差异时检查必须失败，
+  并提示提交生成器产生的结果，而不是指导开发者手工修补生成文件。
+- xtask 中的生成输出规则是 Git 一致性检查和生成文件规范化的共同事实来源。新增生成器或
+  输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。
 
 ## 9.7 配置约定
 

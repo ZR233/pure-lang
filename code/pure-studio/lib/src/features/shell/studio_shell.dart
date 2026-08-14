@@ -14,6 +14,7 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_driver_state.dart';
 import '../update/studio_update_controller.dart';
 import '../interaction/composer_dock.dart';
 import '../status/thread_status_bar.dart';
@@ -62,6 +63,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
       data: (chrome) {
         final sidebar = asyncSidebar.value;
         final header = asyncHeader.value;
+        StudioDriverState.publishProject(header?.selectedProject);
         if (sidebar == null || header == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),

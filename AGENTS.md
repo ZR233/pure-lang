@@ -28,7 +28,7 @@
   例如：`cargo flutter analyze`、`cargo flutter test`、`cargo dart format lib`。
 - 桌面 GUI 入口使用：
   - `cargo xtask run-gui [--demo] [--driver]`
-  - `cargo xtask build-gui [--demo] [--no-clean]`
+  - `cargo xtask build-gui [--demo] [--no-clean] [--check-generated]`
 - Windows GUI 构建和运行必须使用 xtask；不支持直接执行 `flutter build windows` 或
   `flutter run -d windows`。不再新增 PowerShell GUI wrapper。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver
@@ -80,7 +80,10 @@ pub trait Tool: Send + Sync {
 
 ### Flutter 与 Bridge
 
-- FRB 生成文件属于生成边界；改动 Rust DTO/handler surface 后优先运行 `flutter_rust_bridge_codegen generate`，并把生成 diff 与手写 diff 分开审查。
+- Riverpod、Freezed、l10n 和 FRB 文件属于生成边界，只能从仓库根目录运行
+  `cargo xtask generate-gui` 统一生成，不得手工修改或直接调用单个生成器。改动生成输入后，
+  使用 `cargo xtask check-gui-generated` 检查 canonical 输出，并把生成 diff 与手写 diff 分开审查；
+  `run-gui` 和 `build-gui` 会按内容指纹自动刷新过期输出。
 - Dart reducer 和 projection 优先消费 typed DTO/union，不新增 raw JSON 运行期兼容入口。
 - Settings/GUI 状态更新必须以 bridge 返回的 canonical snapshot 或事件流为准，不只改本地 draft。
 - 前端测试、浏览器验证或临时 dev server 不要占用 `1420` 端口，该端口保留给用户脚本。

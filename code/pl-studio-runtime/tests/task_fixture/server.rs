@@ -496,11 +496,9 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                     "executor-completion",
                     "report_completion",
                     serde_json::json!({
-                        "result": {
-                            "kind": "delivery",
-                            "headCommit": head,
-                            "verificationSummary": "offline fixture content committed"
-                        }
+                        "kind": "delivery",
+                        "headCommit": head,
+                        "verificationSummary": "offline fixture content committed"
                     }),
                 ),
             )
@@ -540,7 +538,11 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
                         "path": "design/task-flow.md",
                         "section": "Offline Task Flow"
                     }],
-                    "findings": []
+                    "findings": [],
+                    "fileReviews": [{
+                        "path": "src/feature.txt",
+                        "reviewed": true
+                    }]
                 }),
             ),
         ),

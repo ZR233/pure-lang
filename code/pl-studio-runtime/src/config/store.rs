@@ -21,6 +21,39 @@ pub struct ConfigStore {
     credentials: Arc<dyn CredentialStore>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ConfigIncompatibility {
+    Parse,
+    InlineCredential,
+    Validation,
+}
+
+impl ConfigIncompatibility {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Parse => "parse",
+            Self::InlineCredential => "inlineCredential",
+            Self::Validation => "validation",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct IncompatibleConfig {
+    kind: ConfigIncompatibility,
+    error: PureError,
+}
+
+impl IncompatibleConfig {
+    fn new(kind: ConfigIncompatibility, error: PureError) -> Self {
+        Self { kind, error }
+    }
+
+    fn into_error(self) -> PureError {
+        self.error
+    }
+}
+
 impl std::fmt::Debug for ConfigStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -87,14 +120,19 @@ impl ConfigStore {
             return Ok(config);
         }
         let content = fs::read_to_string(self.paths.config_file())?;
-        let mut config = parse_current_config(&content)?;
+        let mut config = match parse_current_config(&content) {
+            Ok(config) => config,
+            Err(incompatible) => {
+                return self.replace_incompatible_with_default(incompatible.kind);
+            }
+        };
         self.hydrate_credentials(&mut config)?;
         Ok(config)
     }
 
     pub fn load(&self) -> Result<StudioConfig> {
         let content = fs::read_to_string(self.paths.config_file())?;
-        let mut config = parse_current_config(&content)?;
+        let mut config = parse_current_config(&content).map_err(IncompatibleConfig::into_error)?;
         self.hydrate_credentials(&mut config)?;
         Ok(config)
     }
@@ -102,11 +140,7 @@ impl ConfigStore {
     pub fn save(&self, config: &StudioConfig) -> Result<()> {
         config.validate()?;
         let persisted_provider_ids = self.persisted_provider_ids()?;
-        let mut persisted = config.clone();
-        clear_inline_credentials(&mut persisted);
-        let content = toml::to_string_pretty(&persisted).map_err(|error| {
-            PureError::ConfigError(format!("failed to serialize Studio config: {error}"))
-        })?;
+        let content = serialize_persisted_config(config)?;
         fs::create_dir_all(self.paths.config_dir())?;
         let previous = self.apply_credentials(config, persisted_provider_ids)?;
         if let Err(error) = pl_core::atomic_file::write_file_atomically(
@@ -131,6 +165,24 @@ impl ConfigStore {
         Ok(config)
     }
 
+    fn replace_incompatible_with_default(
+        &self,
+        incompatibility: ConfigIncompatibility,
+    ) -> Result<StudioConfig> {
+        let mut config = StudioConfig::default_config();
+        config.validate()?;
+        self.hydrate_credentials(&mut config)?;
+        let content = serialize_persisted_config(&config)?;
+        fs::create_dir_all(self.paths.config_dir())?;
+        pl_core::atomic_file::write_file_atomically(self.paths.config_file(), content.as_bytes())?;
+        tracing::warn!(
+            config_path = %self.paths.config_file().display(),
+            incompatibility = incompatibility.as_str(),
+            "replaced incompatible Studio config with defaults"
+        );
+        Ok(config)
+    }
+
     fn hydrate_credentials(&self, config: &mut StudioConfig) -> Result<()> {
         for (provider_id, provider) in &mut config.models.providers {
             provider.bearer_token = self.credentials.load(provider_id.as_str())?;
@@ -143,7 +195,7 @@ impl ConfigStore {
             return Ok(BTreeSet::new());
         }
         let content = fs::read_to_string(self.paths.config_file())?;
-        let persisted = parse_current_config(&content)?;
+        let persisted = parse_current_config(&content).map_err(IncompatibleConfig::into_error)?;
         Ok(persisted
             .models
             .providers
@@ -210,9 +262,12 @@ impl ConfigStore {
     }
 }
 
-fn parse_current_config(content: &str) -> Result<StudioConfig> {
+fn parse_current_config(content: &str) -> std::result::Result<StudioConfig, IncompatibleConfig> {
     let config: StudioConfig = toml::from_str(content).map_err(|error| {
-        PureError::ConfigError(format!("failed to parse Studio config: {error}"))
+        IncompatibleConfig::new(
+            ConfigIncompatibility::Parse,
+            PureError::ConfigError(format!("failed to parse Studio config: {error}")),
+        )
     })?;
     if config
         .models
@@ -220,13 +275,26 @@ fn parse_current_config(content: &str) -> Result<StudioConfig> {
         .values()
         .any(|provider| provider.bearer_token.is_some())
     {
-        return Err(PureError::ConfigError(
-            "schema 14 forbids inline provider bearer_token; use the Studio credential store"
-                .to_string(),
+        return Err(IncompatibleConfig::new(
+            ConfigIncompatibility::InlineCredential,
+            PureError::ConfigError(
+                "schema 14 forbids inline provider bearer_token; use the Studio credential store"
+                    .to_string(),
+            ),
         ));
     }
-    config.validate()?;
+    config
+        .validate()
+        .map_err(|error| IncompatibleConfig::new(ConfigIncompatibility::Validation, error))?;
     Ok(config)
+}
+
+fn serialize_persisted_config(config: &StudioConfig) -> Result<String> {
+    let mut persisted = config.clone();
+    clear_inline_credentials(&mut persisted);
+    toml::to_string_pretty(&persisted).map_err(|error| {
+        PureError::ConfigError(format!("failed to serialize Studio config: {error}"))
+    })
 }
 
 fn clear_inline_credentials(config: &mut StudioConfig) {
@@ -291,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn old_schema_is_rejected_without_migration() {
+    fn old_schema_is_replaced_with_current_defaults() {
         let store = test_store("old-schema");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
@@ -299,15 +367,40 @@ mod tests {
             .replace("schema_version = 14", "schema_version = 13");
         fs::write(store.paths().config_file(), legacy).unwrap();
 
-        let error = store.load_or_default().unwrap_err().to_string();
+        let loaded = store.load_or_default().unwrap();
 
-        assert!(error.contains("schema version"));
+        assert_eq!(loaded, StudioConfig::default_config());
+        assert_eq!(store.load().unwrap(), StudioConfig::default_config());
     }
 
     #[test]
-    fn schema_14_rejects_inline_bearer_token() {
-        let store = test_store("inline-secret");
+    fn malformed_config_is_replaced_with_current_defaults() {
+        let store = test_store("malformed");
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(store.paths().config_file(), "not-toml").unwrap();
+
+        let loaded = store.load_or_default().unwrap();
+
+        assert_eq!(loaded, StudioConfig::default_config());
+        assert_eq!(store.load().unwrap(), StudioConfig::default_config());
+    }
+
+    #[test]
+    fn schema_14_inline_bearer_token_is_discarded_with_incompatible_config() {
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let store = ConfigStore::with_credential_store(
+            ConfigPaths::from_home(temp_home("inline-secret")),
+            credentials.clone(),
+        );
         let mut config = StudioConfig::default_config();
+        let provider_id = config
+            .models
+            .providers
+            .keys()
+            .next()
+            .unwrap()
+            .as_str()
+            .to_string();
         config
             .models
             .providers
@@ -322,9 +415,62 @@ mod tests {
         )
         .unwrap();
 
+        let loaded = store.load_or_default().unwrap();
+        let persisted = fs::read_to_string(store.paths().config_file()).unwrap();
+
+        assert_eq!(loaded, StudioConfig::default_config());
+        assert!(!persisted.contains("forbidden-secret"));
+        assert!(!persisted.contains("bearer_token ="));
+        assert_eq!(credentials.load(&provider_id).unwrap(), None);
+    }
+
+    #[test]
+    fn invalid_current_schema_config_is_replaced_with_defaults() {
+        let store = test_store("invalid-current-schema");
+        let mut invalid = StudioConfig::default_config();
+        invalid.models.providers.clear();
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(
+            store.paths().config_file(),
+            toml::to_string_pretty(&invalid).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = store.load_or_default().unwrap();
+
+        assert_eq!(loaded, StudioConfig::default_config());
+        assert_eq!(store.load().unwrap(), StudioConfig::default_config());
+    }
+
+    #[test]
+    fn config_read_failure_does_not_replace_existing_path() {
+        let store = test_store("config-read-failure");
+        fs::create_dir_all(store.paths().config_file()).unwrap();
+
+        let error = store.load_or_default().unwrap_err();
+
+        assert!(!error.to_string().is_empty());
+        assert!(store.paths().config_file().is_dir());
+    }
+
+    #[test]
+    fn credential_read_failure_preserves_incompatible_config() {
+        let credentials = Arc::new(ReadbackFailingCredentialStore::default());
+        let store = ConfigStore::with_credential_store(
+            ConfigPaths::from_home(temp_home("replacement-credential-failure")),
+            credentials.clone(),
+        );
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(store.paths().config_file(), "not-toml").unwrap();
+        credentials.reads_until_failure.lock().unwrap().replace(0);
+
         let error = store.load_or_default().unwrap_err().to_string();
 
-        assert!(error.contains("forbids inline provider bearer_token"));
+        assert!(error.contains("readback failure"));
+        assert_eq!(
+            fs::read_to_string(store.paths().config_file()).unwrap(),
+            "not-toml"
+        );
     }
 
     #[test]

@@ -125,8 +125,10 @@ ToolApproval 继续使用原有审批流程。PlanConfirmation 的 `ContinuePlan
 但回答中的调整
 要求必须与 resolved Interaction 在同一个 Thread repository 事务写入 hidden durable input，复用
 `interaction-resolution:{interactionId}`、StartOrQueue、no-steer、无 coalescing 的规则；fresh Planner
-Turn 必须再次调用 `plan_exit` 生成新的确认。`ImplementFreshContext` 与 `Dismiss` 保持既有 Task
-启动和忽略语义。
+Turn 必须再次调用 `plan_exit` 生成新的确认。`ImplementFreshContext` 同样必须把 resolved
+Interaction 与 hidden implementation input 作为 durable fresh-turn 边界提交；先建立 TaskRun，再由
+fresh Planner Turn 读取 active Task 并获得 `task_update_design` 等 Task 工具，绝不把实施输入 steer
+回提出计划的 origin Turn。`Dismiss` 保持既有忽略语义。
 
 Task planner/executor/reviewer 的 required finalization tool 只约束业务阶段完成，不约束 durable
 UserInput 边界。原 Turn 因 pending Interaction 结束时必须保存为 completed，不能因为尚未调用
@@ -163,10 +165,21 @@ executor 只能写自己的 worktree，并以以下工具结束可交付工作�
 
 ```text
 report_completion {
-  delivery { headCommit, verificationSummary }
-  | noDelivery { verificationSummary }
+  kind: delivery,
+  headCommit,
+  verificationSummary
+}
+| report_completion {
+  kind: noDelivery,
+  verificationSummary
 }
 ```
+
+完成结果使用顶层 tagged object；`kind`、`headCommit` 与 `verificationSummary` 都是工具的
+顶层字段，不再包在 `result` 对象中。对 provider 暴露的 JSON Schema 保持单一 object +
+properties 形状，不在根节点使用 `oneOf`；`headCommit` 在 schema 中可选，运行时再按 `kind`
+穷尽执行条件校验：delivery 必须提供，noDelivery 必须省略。这样既避免嵌套 union 被编码成
+JSON 字符串，也兼容不能稳定生成根 `oneOf` 参数的 provider，并继续拒绝未知字段。
 
 delivery 要求 worktree clean、HEAD 相对固定 base 推进、commit 身份一致，并记录完整
 base-to-HEAD changed files；worktree 内变更不受 scopeHints 限制。成功事务创建不可变

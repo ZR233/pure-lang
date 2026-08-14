@@ -25,6 +25,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
                 studio_tool::run(studio_tool::StudioTool::Dart, options.args)
             }
             cli::Command::GenerateGui => flutter::generate_gui(),
+            cli::Command::CheckGuiGenerated => flutter::check_gui_generated(),
             cli::Command::VerifyGui(options) => flutter::verify_gui(options),
             cli::Command::RunGui(options) => flutter::run_gui(options),
             cli::Command::BuildGui(options) => flutter::build_gui(options),

@@ -4,6 +4,7 @@ import '../domain/models/studio_models.dart';
 
 /// Read-only state exported through Flutter Driver in local acceptance builds.
 abstract final class StudioDriverState {
+  static StudioProject? _project;
   static TaskRuntimeView? _task;
   static AgentWorkspaceView? _workspace;
   static final Map<String, StudioTurnView> _lastTurnsByThread = {};
@@ -13,6 +14,10 @@ abstract final class StudioDriverState {
 
   static void publishTask(TaskRuntimeView? task) {
     _task = task;
+  }
+
+  static void publishProject(StudioProject? project) {
+    _project = project;
   }
 
   static void publishWorkspace(AgentWorkspaceView workspace) {
@@ -49,10 +54,14 @@ abstract final class StudioDriverState {
         : _lastTurnsByThread[workspace.threadId];
     return jsonEncode({
       'planContent': _planContent,
+      'project': _project == null
+          ? null
+          : {'id': _project!.id, 'path': _project!.path},
       'workspace': workspace == null
           ? null
           : {
               'threadId': workspace.thread.id,
+              'projectId': workspace.thread.projectId,
               'rootThreadId': workspace.rootThread.id,
               'threadMode': workspace.thread.mode.name,
               'threadStatus': workspace.thread.status,

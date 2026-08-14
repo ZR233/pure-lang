@@ -102,18 +102,21 @@ else()
         "${PURE_STUDIO_BRIDGE_DEBUG_SYMBOLS}" "${PURE_STUDIO_BRIDGE_PDB}")
   endif()
 
-  add_custom_command(
-    OUTPUT ${PURE_STUDIO_BRIDGE_OUTPUTS}
+  # Flutter can reuse its native build graph when only the external Rust
+  # workspace changed. Keep this target intentionally always out of date so
+  # every invoked Windows build rechecks the prebuilt bridge bytes; the
+  # copy_if_different commands avoid touching staged files unnecessarily.
+  add_custom_target(pl_studio_bridge_dll
     COMMAND "${CMAKE_COMMAND}" -E make_directory
       "${CMAKE_BINARY_DIR}/runner/$<CONFIG>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "${PURE_STUDIO_BRIDGE_LIBRARY}" "${PURE_STUDIO_BRIDGE_DLL}"
     ${PURE_STUDIO_BRIDGE_COPY_DEBUG_SYMBOLS}
     DEPENDS ${PURE_STUDIO_BRIDGE_DEPENDS}
+    BYPRODUCTS ${PURE_STUDIO_BRIDGE_OUTPUTS}
     COMMENT "Staging prebuilt Rust bridge artifacts"
     VERBATIM
   )
-  add_custom_target(pl_studio_bridge_dll DEPENDS ${PURE_STUDIO_BRIDGE_OUTPUTS})
   add_dependencies(${BINARY_NAME} pl_studio_bridge_dll)
 endif()
 

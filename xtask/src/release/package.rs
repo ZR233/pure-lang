@@ -19,6 +19,7 @@ pub(super) fn stage(workspace_root: &Path, release_dir: &Path, version: &Version
         BuildGuiOptions {
             demo: false,
             no_clean: false,
+            check_generated: true,
         },
         &version.to_string(),
     )?;

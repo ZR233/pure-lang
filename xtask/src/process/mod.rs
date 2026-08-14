@@ -10,12 +10,12 @@ mod windows;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// 统一为 xtask 派生的子进程应用平台配置。
+/// 为需要驻留和进程树托管的 xtask 子进程应用后台配置。
 ///
 /// Windows 上设置 `CREATE_NO_WINDOW`：xtask 从非控制台环境（IDE Run 按钮、
-/// 快捷方式、任务计划程序）启动时，`cmd /c flutter ...` 等控制台子进程
-/// 不得弹出新的命令行窗口。所有进程创建入口（`path_command` 与各
-/// `run_*_checked`）都必须经过本配置，调用点不得自行拼装 flags。
+/// 快捷方式、任务计划程序）启动驻留 GUI 时，`cmd /c flutter ...` 等控制台
+/// 子进程不得弹出新的命令行窗口。同步构建等前台命令不使用本配置，确保它们
+/// 继承当前终端并实时显示输出。
 pub(crate) fn configure_background_command(command: &mut Command) {
     #[cfg(windows)]
     {
@@ -30,7 +30,6 @@ pub(crate) fn configure_background_command(command: &mut Command) {
 }
 
 pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
-    configure_background_command(command);
     print_command_context(command, display);
     let status = command
         .status()
@@ -73,7 +72,6 @@ pub(crate) fn run_checked_with_stdin(
     display: &str,
     input: &[u8],
 ) -> Result<()> {
-    configure_background_command(command);
     print_command_context(command, display);
     command.stdin(Stdio::piped());
     let mut child = command
@@ -113,7 +111,7 @@ fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
 }
 
 pub(crate) fn path_command(program: &'static str, args: &[OsString]) -> Command {
-    let mut command = if cfg!(windows) && matches!(program, "flutter" | "dart") {
+    if cfg!(windows) && matches!(program, "flutter" | "dart") {
         let mut command = Command::new("cmd");
         command.arg("/c").arg(program);
         command.args(args);
@@ -122,9 +120,7 @@ pub(crate) fn path_command(program: &'static str, args: &[OsString]) -> Command 
         let mut command = Command::new(program);
         command.args(args);
         command
-    };
-    configure_background_command(&mut command);
-    command
+    }
 }
 
 pub(crate) fn display_command(program: &str, args: &[OsString]) -> String {

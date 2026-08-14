@@ -18,6 +18,8 @@ abstract interface class FlutterDriverClient {
 
   Future<void> waitFor(SerializableFinder finder, {Duration? timeout});
 
+  Future<void> waitForAbsent(SerializableFinder finder, {Duration? timeout});
+
   Future<void> tap(SerializableFinder finder);
 
   Future<void> enterText(String text);
@@ -170,6 +172,10 @@ class FlutterDriverSession {
     return _client.waitFor(finder, timeout: timeout);
   }
 
+  Future<void> waitForAbsent(SerializableFinder finder, {Duration? timeout}) {
+    return _client.waitForAbsent(finder, timeout: timeout);
+  }
+
   Future<void> tap(SerializableFinder finder) => _client.tap(finder);
 
   Future<void> enterText(String text) => _client.enterText(text);
@@ -275,6 +281,11 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   @override
   Future<void> waitFor(SerializableFinder finder, {Duration? timeout}) {
     return _driver.waitFor(finder, timeout: timeout);
+  }
+
+  @override
+  Future<void> waitForAbsent(SerializableFinder finder, {Duration? timeout}) {
+    return _driver.waitForAbsent(finder, timeout: timeout);
   }
 
   @override

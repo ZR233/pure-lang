@@ -26,6 +26,8 @@ pub(crate) enum Command {
     Dart(ToolOptions),
     /// Regenerate Riverpod, Freezed, l10n, and FRB bindings.
     GenerateGui,
+    /// Regenerate GUI sources and fail when generated files are not committed.
+    CheckGuiGenerated,
     /// Generate, analyze, and test the Pure Studio desktop app.
     VerifyGui(VerifyGuiOptions),
     /// Run the Pure Studio desktop app.
@@ -104,6 +106,9 @@ pub(crate) struct BuildGuiOptions {
     /// Keep existing files in dist/pure-studio-release.
     #[arg(long)]
     pub(crate) no_clean: bool,
+    /// Fail when refreshed generated GUI sources differ from Git.
+    #[arg(long)]
+    pub(crate) check_generated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
@@ -302,6 +307,15 @@ mod tests {
             anyhow::bail!("help was not rendered");
         };
         assert!(help.contains("Pure-Lang workspace development tasks"));
+        Ok(())
+    }
+
+    #[test]
+    fn generated_source_check_has_a_dedicated_command() -> Result<()> {
+        assert_eq!(
+            parse(["xtask", "check-gui-generated"].map(OsString::from))?,
+            ParseOutcome::Run(Command::CheckGuiGenerated)
+        );
         Ok(())
     }
 }

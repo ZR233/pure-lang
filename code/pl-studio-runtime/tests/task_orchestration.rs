@@ -39,7 +39,6 @@ async fn run_offline_task_flow() -> Result<()> {
         })
         .await?;
     let confirmation = fixture.wait_for_plan_confirmation().await?;
-    fixture.wait_for_no_active_turns().await?;
     assert_eq!(confirmation.status, InteractionStatus::Pending);
 
     let resolution = fixture

@@ -21,7 +21,9 @@ cargo flutter test
 cargo dart format lib
 cargo xtask run-gui
 cargo xtask build-gui
+cargo xtask build-gui --check-generated # CI/release: reject uncommitted generated changes
 cargo xtask generate-gui
+cargo xtask check-gui-generated
 
 # Run the native app through the dedicated test_driver entrypoint for Dart MCP
 # interaction and GUI acceptance. The driver command owns the resident process
@@ -34,7 +36,10 @@ cargo xtask run-gui --demo --driver # deterministic demo data
 # bridge artifact. cargo flutter/dart are general passthrough commands only.
 ```
 
-FRB 生成必须从仓库根目录使用 `cargo xtask generate-gui`。xtask 会校验 codegen
+Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
+`cargo xtask generate-gui`，不得手工修改生成文件。`run-gui` 和 `build-gui` 会在运行或
+构建前按内容指纹自动刷新这些文件；`cargo xtask check-gui-generated` 会强制重新生成并检查 Git 差异，
+适合提交前快速确认。完整检查仍使用 `cargo xtask verify-gui`。xtask 会校验 codegen
 版本，并在 Windows 上统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
 
 `tool/task_driver_harness.ps1` uses a separate `GuiStartupTimeoutSeconds`

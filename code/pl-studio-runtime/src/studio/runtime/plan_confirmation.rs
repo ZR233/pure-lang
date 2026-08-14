@@ -6,10 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 
-use super::{
-    StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest,
-};
+use super::{StudioResolveInteractionResponse, StudioRuntime};
 
 const IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current Thread. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 const CONTINUE_PLANNING_PREFIX: &str = "用户对当前计划提交了调整要求。请结合原计划继续规划，只修订计划，不要开始实施。完成调整后必须再次调用 plan_exit，生成新的待确认计划。";
@@ -72,17 +69,34 @@ impl StudioRuntime {
                     .start_confirmed_task(&thread_id, &plan_content, &project.path)
                     .await?;
                 let started = async {
+                    let continuation_resolution = InteractionResolution::PlanConfirmation {
+                        decision: PlanConfirmationResolution::ImplementFreshContext,
+                        content: resolution_content.clone(),
+                        reason: reason.clone(),
+                    };
+                    let prompt =
+                        format!("{IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX}\n\n{plan_content}");
+                    let mail_id = pl_core::AgentInteractionContinuationRequest::stable_mail_id(
+                        &interaction_id,
+                    );
                     let resolved = self
-                        .agent_facility
-                        .interactions
-                        .resolve(
-                            &interaction_id,
-                            InteractionResolution::PlanConfirmation {
-                                decision: PlanConfirmationResolution::ImplementFreshContext,
-                                content: resolution_content,
-                                reason: reason.clone(),
-                            },
-                            emitter,
+                        .submit_durable_interaction_continuation(
+                            &current,
+                            continuation_resolution,
+                            prompt,
+                            serde_json::json!({
+                                "interactionResolutionId": interaction_id,
+                                "interactionKind": "planConfirmation",
+                                "originTurnId": current.scope.turn_id,
+                                "planId": plan_id,
+                                "mailId": mail_id,
+                                "attachmentIds": [],
+                                "historyPolicy": "persist",
+                                "planLifecycle": {
+                                    "threadId": thread_id,
+                                    "planId": plan_id,
+                                },
+                            }),
                         )
                         .await?;
                     self.append_plan_lifecycle_event(
@@ -101,23 +115,6 @@ impl StudioRuntime {
                         None,
                     )
                     .await?;
-                    let prompt =
-                        format!("{IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX}\n\n{plan_content}");
-                    let _ = self
-                        .submit_prompt(StudioSubmitPromptRequest {
-                            thread_id: thread_id.clone(),
-                            prompt,
-                            attachment_ids: Vec::new(),
-                            options: StudioSubmitPromptOptions {
-                                presentation: pl_core::MailboxPresentation::Hidden,
-                                lifecycle: Some(StudioPlanImplementationLifecycle {
-                                    thread_id: thread_id.clone(),
-                                    plan_id: plan_id.clone(),
-                                }),
-                                ..StudioSubmitPromptOptions::default()
-                            },
-                        })
-                        .await?;
                     Ok::<_, anyhow::Error>(resolved)
                 }
                 .await;

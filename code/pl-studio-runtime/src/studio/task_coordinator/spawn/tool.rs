@@ -184,7 +184,9 @@ fn executor_constraint(scope_hints: &[String]) -> Result<String> {
 \n完成定位、开始实现、开始验证、遇到阻塞和准备提交完成报告时，调用 \
 report_progress 记录准确摘要与下一步；它不是心跳。准备提交时使用 readyForCompletion，\
 该 checkpoint 不表示已完成或可审查。完成后必须自行验证、提交所有变更，并调用 \
-report_completion 提交实际 HEAD 与验证摘要；只有该工具成功才产生 readyForReview，普通文本回复不算完成。\
+report_completion 提交实际 HEAD 与验证摘要；delivery 调用必须直接使用顶层 kind、headCommit、\
+verificationSummary 字段，不要把对象编码到 result 字符串中。只有该工具成功才产生 readyForReview，\
+普通文本回复不算完成。\
 \n不得派生代理、合并分支、切换/创建/删除分支、操作 planner 或用户工作区，\
 也不得自行把提交合入任务分支。"
     );
