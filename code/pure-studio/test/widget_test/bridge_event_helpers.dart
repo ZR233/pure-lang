@@ -43,12 +43,18 @@ ThreadNotificationFrame _threadTurnFrame({
   required int workspaceRevision,
   required StudioTurnState state,
   String turnId = 'turn-1',
+  StudioTurnFailureView? failure,
 }) {
   return ThreadNotificationFrame(
     threadId: threadId,
     revision: workspaceRevision,
     update: ThreadTurnUpdate(
-      _testTurn(threadId: threadId, state: state, turnId: turnId),
+      _testTurn(
+        threadId: threadId,
+        state: state,
+        turnId: turnId,
+        failure: failure,
+      ),
     ),
   );
 }

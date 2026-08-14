@@ -224,6 +224,11 @@ provider code、HTTP status、用户可读消息与 `RetryDisposition`；可重�
 作为模型可见 tool failure 返回，不能因为 Turn 使用了 required tool 就升级成 fatal tool runtime。
 只有工具 runtime invariant、join failure 或历史污染进入 fatal `TurnFailureCategory::Tool/Internal`。
 
+Turn 终态投影必须把同一份 typed failure 写入 durable Turn；failed、interrupted 和
+budget-limited Turn 的 terminal trace 同时生成带错误文本的 durable Timeline Item，作为没有
+assistant 正文时的用户可见回退。Flutter 不得只依赖进程内 terminal 通知或 Composer 临时状态，
+否则重启和历史加载会把已经持久化的失败表现为“输入没反应”。
+
 Responses WebSocket、Responses HTTP/SSE 与 Chat Completions HTTP 的限流、连接容量、
 `server_is_overloaded`、429、5xx、连接/超时，以及响应开始前的 connection reset、aborted、
 broken pipe 或 EOF 错误统一映射为可重试 provider
@@ -251,6 +256,12 @@ Rust typed definition。输入类型使用 `Deserialize + JsonSchema`，字段�
 并规范化 function schema、拒绝未知顶层字段、反序列化 arguments，并把 handler 注册为普通
 `RegisteredTool`。静态工具不得手写 `properties`、`required` 或 `additionalProperties`，也不得
 在各工具内遍历或修补生成后的 JSON Schema。
+
+所有静态 function tool 发送到 provider 的参数 schema 根必须显式为 `type: "object"`。普通
+struct 根继续统一关闭未知顶层字段；internally tagged enum 等由 `oneOf` / `anyOf` 表达且每个
+分支都是 object 的联合输入只在根补 `type: "object"`，不得在没有根 `properties` 时补
+`additionalProperties: false`。这类联合输入的未知字段由各 typed 变体的 Serde 约束拒绝，避免
+根层既无法列举字段又把所有合法 action 参数一并拒绝。
 
 同一工具族中语义、字段名、约束和描述都一致的字段组应抽成小型 typed component；顶层输入可用
 `#[serde(flatten)]` 组合这些组件以保持既有扁平 camelCase wire。共享类型默认限制在工具族模块内，

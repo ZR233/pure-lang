@@ -201,6 +201,63 @@ void registerControllerStreamTests() {
     );
   });
 
+  test(
+    'accepted Turn failure remains visible after TurnStarted cleared pending',
+    () async {
+      final initial = _emptyState();
+      final api = _FakeStudioApi(initial);
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await container.read(studioControllerProvider.future);
+      await pumpEventQueue();
+      controller.updateComposer('session-1', 'hello');
+      await controller.submitComposer('session-1');
+      api.emitThreadFrame(
+        _threadTurnFrame(
+          threadId: 'session-1',
+          workspaceRevision: 1,
+          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+          turnId: api.submitTurnId,
+        ),
+      );
+      await pumpEventQueue();
+      expect(
+        container.read(studioControllerProvider).requireValue.composer.phase,
+        ComposerSubmissionPhase.idle,
+      );
+
+      api.emitThreadFrame(
+        _threadTurnFrame(
+          threadId: 'session-1',
+          workspaceRevision: 2,
+          state: const StudioTurnState.failed('fallback reason'),
+          turnId: api.submitTurnId,
+          failure: const StudioTurnFailureView(
+            category: 'provider',
+            providerKind: 'openaiCompatible',
+            code: 'invalid_request_error',
+            httpStatus: 400,
+            message: 'Invalid schema for function skill_manage',
+            retryable: false,
+            retryAfterMs: null,
+          ),
+        ),
+      );
+      await pumpEventQueue();
+
+      final composer = container
+          .read(studioControllerProvider)
+          .requireValue
+          .composer;
+      expect(composer.phase, ComposerSubmissionPhase.idle);
+      expect(composer.error, 'Invalid schema for function skill_manage');
+    },
+  );
+
   test('interrupt uses the exact active Turn identity', () async {
     final initial = _emptyState();
     final workspace = initial.selectedWorkspace!.copyWith(

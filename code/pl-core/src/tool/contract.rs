@@ -30,7 +30,9 @@ pub enum ToolBudgetTiming {
 /// 从静态 Rust 输入类型生成严格的 function tool 输入 schema。
 ///
 /// 字段名、必填性、枚举与说明由 Serde/Schemars typed definition 提供；这里仅统一
-/// 移除不属于 provider tool contract 的 root 元数据，并关闭未知顶层字段。
+/// 移除不属于 provider tool contract 的 root 元数据，并把静态 function 输入规范为
+/// provider 要求的 object 根。普通 struct 同时关闭未知顶层字段；object union 的字段
+/// 约束保留在各 typed 分支，避免无 root properties 时拒绝所有合法字段。
 pub fn typed_tool_input_schema<Input>() -> serde_json::Value
 where
     Input: JsonSchema,
@@ -42,21 +44,45 @@ where
 
     object.remove("$schema");
     object.remove("title");
-    let is_object = object
+    let has_object_type = object
         .get("type")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|value| value == "object")
-        || object.contains_key("properties");
+        .is_some_and(|value| value == "object");
+    let has_properties = object.contains_key("properties");
+    let is_object_union = is_object_union_schema(object);
+    let is_object = has_object_type || has_properties || is_object_union;
     if is_object {
         object
             .entry("type")
             .or_insert_with(|| serde_json::Value::String("object".to_string()));
-        object.insert(
-            "additionalProperties".to_string(),
-            serde_json::Value::Bool(false),
-        );
+        if !is_object_union || has_properties {
+            object.insert(
+                "additionalProperties".to_string(),
+                serde_json::Value::Bool(false),
+            );
+        }
     }
     schema
+}
+
+fn is_object_schema(schema: &serde_json::Value) -> bool {
+    let Some(object) = schema.as_object() else {
+        return false;
+    };
+    object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value == "object")
+        || object.contains_key("properties")
+}
+
+fn is_object_union_schema(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    ["oneOf", "anyOf"].into_iter().any(|keyword| {
+        object
+            .get(keyword)
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|variants| !variants.is_empty() && variants.iter().all(is_object_schema))
+    })
 }
 
 /// 将模型 arguments 解析为静态工具输入，并统一拒绝未知顶层字段。
@@ -91,17 +117,12 @@ where
     let Some(schema) = schema.as_object() else {
         return Ok(());
     };
-    let is_object = schema
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|value| value == "object")
-        || schema.contains_key("properties");
-    if !is_object {
-        return Ok(());
-    }
     let properties = schema
         .get("properties")
         .and_then(serde_json::Value::as_object);
+    if properties.is_none() && is_object_union_schema(schema) {
+        return Ok(());
+    }
     let Some(unknown) = arguments
         .keys()
         .find(|key| !properties.is_some_and(|properties| properties.contains_key(*key)))

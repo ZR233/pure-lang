@@ -144,6 +144,38 @@ fn skill_inputs_and_outputs_flatten_shared_fields() {
 }
 
 #[test]
+fn skill_manage_schema_is_a_provider_object_union() {
+    let tool = SkillManageTool::new(SkillsConfig::default());
+    let schema = tool.input_schema();
+
+    assert_eq!(schema["type"], "object");
+    assert!(schema["oneOf"].is_array());
+    assert!(schema.get("additionalProperties").is_none());
+    let input = deserialize_tool_input::<SkillManageInput>(
+        tool.name(),
+        json!({
+            "action": "create",
+            "name": "local-flow",
+            "content": "body",
+        }),
+    )
+    .expect("valid skill_manage action");
+    assert!(matches!(input, SkillManageInput::Create(_)));
+
+    let error = deserialize_tool_input::<SkillManageInput>(
+        tool.name(),
+        json!({
+            "action": "create",
+            "name": "local-flow",
+            "content": "body",
+            "unexpected": true,
+        }),
+    )
+    .expect_err("unknown skill_manage field");
+    assert!(error.to_string().contains("unknown field `unexpected`"));
+}
+
+#[test]
 fn patch_accepts_json_escaped_markdown_old_string() {
     let workspace = temp_dir("patch-escaped-old-string");
     let skill_dir = workspace.join("skills/local-flow");

@@ -384,13 +384,12 @@ class StudioController extends _$StudioController {
       receipt,
       submissionRevision: submissionRevision,
     );
-    state = AsyncData(
-      _withWorkspaceUi(
-        latest,
-        threadId,
-        (ui) => ui.copyWith(composer: accepted),
-      ),
+    final next = _withWorkspaceUi(
+      latest,
+      threadId,
+      (ui) => ui.copyWith(composer: accepted),
     );
+    state = AsyncData(_reconcileComposer(next, threadId));
   }
 
   Future<void> stop(String threadId) async {
@@ -728,7 +727,17 @@ class StudioController extends _$StudioController {
           unawaited(_resyncThread(threadId, generation));
           return;
         }
-        state = AsyncData(_reconcileComposer(reduced.state, threadId));
+        final observedTurn = switch (update) {
+          ThreadTurnUpdate(:final turn) => turn,
+          _ => null,
+        };
+        state = AsyncData(
+          _reconcileComposer(
+            reduced.state,
+            threadId,
+            observedTurn: observedTurn,
+          ),
+        );
       case ThreadResyncRequiredFrame():
         unawaited(_resyncThread(threadId, generation));
     }
@@ -809,14 +818,19 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   return next;
 }
 
-StudioState _reconcileComposer(StudioState state, String threadId) {
+StudioState _reconcileComposer(
+  StudioState state,
+  String threadId, {
+  StudioTurnView? observedTurn,
+}) {
   final workspace = state.workspacesByThread[threadId];
   if (workspace == null) return state;
   return _withWorkspaceUi(
     state,
     threadId,
-    (ui) =>
-        ui.copyWith(composer: ui.composer.observeTurn(workspace.activeTurn)),
+    (ui) => ui.copyWith(
+      composer: ui.composer.observeTurn(observedTurn ?? workspace.activeTurn),
+    ),
   );
 }
 

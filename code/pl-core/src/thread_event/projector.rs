@@ -383,7 +383,14 @@ fn thread_item(thread_id: &str, item: &TracePart, failure: Option<&str>) -> Opti
         TracePartKind::Plan => ThreadItemContent::Plan {
             content: item.content.clone(),
         },
-        TracePartKind::Turn | TracePartKind::Inference => return None,
+        TracePartKind::Turn => {
+            failure?;
+            ThreadItemContent::AgentMessage {
+                channel: AgentMessageChannel::Final,
+                text: String::new(),
+            }
+        }
+        TracePartKind::Inference => return None,
     };
     Some(ThreadItem {
         id: item.item_id.clone(),
@@ -587,6 +594,55 @@ mod tests {
                 .notifications
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn failed_turn_trace_projects_a_durable_timeline_error() {
+        let trace = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 3,
+            timestamp: 7,
+            kind: TraceEventKind::TracePartFailed {
+                item: TracePart {
+                    turn_id: "turn-1".to_string(),
+                    item_id: "turn-1-turn".to_string(),
+                    started_sequence: 3,
+                    revision: 1,
+                    kind: TracePartKind::Turn,
+                    status: TracePartStatus::Failed,
+                    created_at: 6,
+                    updated_at: 7,
+                    source: pl_trace::TracePartSource::Model,
+                    text_channel: None,
+                    content: String::new(),
+                    attachments: Vec::new(),
+                    thinking_chunks: Vec::new(),
+                    reasoning_content_chunks: Vec::new(),
+                    tool: None,
+                    agent: None,
+                    inference: None,
+                    usage: None,
+                },
+                error: "provider rejected tool schema".to_string(),
+            },
+        };
+
+        let batch = project_trace_events("thread-1", &snapshot(), &[trace]);
+
+        assert_eq!(batch.notifications.len(), 1);
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.status == ThreadItemStatus::Failed
+                    && item.error.as_deref() == Some("provider rejected tool schema")
+                    && matches!(
+                        item.content,
+                        ThreadItemContent::AgentMessage {
+                            channel: AgentMessageChannel::Final,
+                            ref text,
+                        } if text.is_empty()
+                    )
+        ));
     }
 
     #[test]

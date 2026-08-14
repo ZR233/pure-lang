@@ -416,6 +416,54 @@ mod tests {
         assert!(error.to_string().contains("expected no fields"));
     }
 
+    #[test]
+    fn typed_function_tool_definition_normalizes_tagged_object_unions() {
+        #[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[serde(deny_unknown_fields)]
+        struct CreateInput {
+            name: String,
+        }
+
+        #[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[serde(deny_unknown_fields)]
+        struct DeleteInput {
+            name: String,
+        }
+
+        #[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+        #[serde(rename_all = "camelCase", tag = "action")]
+        enum ManageInput {
+            Create(CreateInput),
+            Delete(DeleteInput),
+        }
+
+        let schema = typed_tool_input_schema::<ManageInput>();
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema["oneOf"].is_array());
+        assert!(schema.get("additionalProperties").is_none());
+        assert_eq!(
+            deserialize_tool_input::<ManageInput>(
+                "manage_product",
+                serde_json::json!({"action": "create", "name": "local"}),
+            )
+            .expect("tagged object union input"),
+            ManageInput::Create(CreateInput {
+                name: "local".to_string(),
+            })
+        );
+        let error = deserialize_tool_input::<ManageInput>(
+            "manage_product",
+            serde_json::json!({
+                "action": "delete",
+                "name": "local",
+                "unexpected": true,
+            }),
+        )
+        .expect_err("unknown tagged variant field");
+        assert!(error.to_string().contains("unknown field `unexpected`"));
+    }
+
     #[tokio::test]
     async fn registered_tool_from_execution_result_honors_cancelled_context() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));

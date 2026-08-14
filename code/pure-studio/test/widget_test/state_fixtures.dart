@@ -219,11 +219,13 @@ StudioTurnView _testTurn({
   required StudioTurnState state,
   String turnId = 'turn-1',
   int updatedAt = 1,
+  StudioTurnFailureView? failure,
 }) {
   return StudioTurnView(
     turnId: turnId,
     threadId: threadId,
     state: state,
+    failure: failure,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedAt),
   );
 }

@@ -19,25 +19,27 @@ class ComposerThreadState {
     required this.draft,
     required this.phase,
     required this.submissionRevision,
-    this.pendingTurnId,
+    this.acceptedTurnId,
   }) : error = null;
 
-  const ComposerThreadState.idle({this.draft = '', this.submissionRevision = 0})
-    : phase = ComposerSubmissionPhase.idle,
-      pendingTurnId = null,
-      error = null;
+  const ComposerThreadState.idle({
+    this.draft = '',
+    this.submissionRevision = 0,
+    this.acceptedTurnId,
+  }) : phase = ComposerSubmissionPhase.idle,
+       error = null;
 
   const ComposerThreadState.failure({
     required this.error,
     this.draft = '',
     this.submissionRevision = 0,
   }) : phase = ComposerSubmissionPhase.idle,
-       pendingTurnId = null;
+       acceptedTurnId = null;
 
   final String draft;
   final ComposerSubmissionPhase phase;
   final int submissionRevision;
-  final String? pendingTurnId;
+  final String? acceptedTurnId;
   final String? error;
 
   bool get isSubmissionPending => phase != ComposerSubmissionPhase.idle;
@@ -49,6 +51,7 @@ class ComposerThreadState {
     return ComposerThreadState.idle(
       draft: value,
       submissionRevision: submissionRevision,
+      acceptedTurnId: acceptedTurnId,
     );
   }
 
@@ -71,6 +74,7 @@ class ComposerThreadState {
       draft: draft,
       phase: ComposerSubmissionPhase.submitting,
       submissionRevision: submissionRevision + 1,
+      acceptedTurnId: acceptedTurnId,
     );
   }
 
@@ -85,7 +89,7 @@ class ComposerThreadState {
       draft: '',
       phase: ComposerSubmissionPhase.pendingStart,
       submissionRevision: this.submissionRevision,
-      pendingTurnId: receipt.turnId,
+      acceptedTurnId: receipt.turnId,
     );
   }
 
@@ -101,11 +105,35 @@ class ComposerThreadState {
   }
 
   ComposerThreadState observeTurn(StudioTurnView? turn) {
-    if (phase != ComposerSubmissionPhase.pendingStart ||
-        turn?.turnId != pendingTurnId) {
+    if (turn == null || turn.turnId != acceptedTurnId) {
       return this;
     }
-    return ComposerThreadState.idle(submissionRevision: submissionRevision);
+    if (turn.state.status == StudioTurnStatus.failed) {
+      final message = turn.failure?.message.trim();
+      final reason = turn.state.reason?.trim();
+      return ComposerThreadState.failure(
+        draft: draft,
+        error: message?.isNotEmpty == true
+            ? message!
+            : reason?.isNotEmpty == true
+            ? reason!
+            : 'Turn failed',
+        submissionRevision: submissionRevision,
+      );
+    }
+    if (turn.state.isTerminal) {
+      return ComposerThreadState.idle(
+        draft: draft,
+        submissionRevision: submissionRevision,
+      );
+    }
+    if (phase != ComposerSubmissionPhase.pendingStart) {
+      return this;
+    }
+    return ComposerThreadState.idle(
+      submissionRevision: submissionRevision,
+      acceptedTurnId: acceptedTurnId,
+    );
   }
 
   bool _matchesSubmittingRevision(int revision) =>

@@ -103,6 +103,11 @@ Composer 状态按 Thread 保存：`idle | submitting | pendingStart`。提交�
 revision；只有同 Thread、同 revision 的响应能清空或恢复 draft。服务端 Turn receipt 与订阅中
 同一 Turn 对上后才解除 pending gate。
 
+receipt 已接受后，Composer 必须继续关联该 Turn，不能在首次 `TurnStarted` 时丢失 identity。
+对应 Turn 若随后 failed，Composer 解除 pending 并显示 typed failure message（缺失时回退到 Turn
+reason）；该规则也适用于 failure 晚于首次 in-progress 通知到达的情况。失败 Turn 的 terminal
+trace 还必须作为 durable Timeline error Item 投影，确保重启或历史加载后错误仍然可见。
+
 root Thread 可提交普通输入；child Thread 默认只读，但 pending interaction 与停止操作仍可用。
 footer 同时最多显示一个 pending interaction。优先级为 tool approval、user input、plan
 confirmation。计划正文在 timeline 的 plan Item 中，确认 dock 只承载实施、继续调整和忽略。

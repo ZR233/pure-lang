@@ -840,7 +840,7 @@ async fn persist_turn(
             phase,
             reason,
             usage: None,
-            failure: None,
+            failure: value.failure.as_ref(),
             budget_limit: None,
             rollover_compacted: None,
             rollover_compaction_error: None,
