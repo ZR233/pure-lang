@@ -317,7 +317,8 @@ Pure 启动后由 `McpRuntime<McpConnector>` owner 显式 reconcile 启用且凭
 - `zhipu_reader`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/web_reader/mcp`
 - `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
 - `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`；Windows 运行时从标准 npm 安装布局解析
-  `node.exe + npx-cli.js`，配置和状态中不写入 `.cmd`
+  `node.exe + npx-cli.js`，并让 npm 创建包级 launcher 时启用 `windowsHide`；配置和状态中不写入
+  `.cmd`
 
 这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时，未显式配置状态的内置 server 默认启用并进入后台探测，已被用户禁用的内置 server 保持禁用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 

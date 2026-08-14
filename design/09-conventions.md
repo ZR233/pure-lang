@@ -79,7 +79,9 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 - stdio MCP 配置保存跨平台命令名，不写入 `.cmd` 等平台后缀，也不统一套 `pwsh`/shell；
   connector 在 Windows 按 `PATHEXT` 解析 CreateProcess 可执行目标，并保持 `shell=false` 语义；
   标准 npm/npx launcher 必须直接展开为 `node.exe + npm CLI`，不得让长期运行的 MCP 连接
-  由 `.cmd` shim 持有。
+  由 `.cmd` shim 持有。由于 Windows creation flags 不会自动传递到后代，npm CLI 创建包级
+  launcher 时还必须显式启用 Node 的 `windowsHide`，禁止其再次通过可见的 `.cmd` 控制台启动
+  MCP server；该约束只作用于 npm launcher，不通过 `NODE_OPTIONS` 传播给 MCP server。
   stdin、stdout、stderr 必须全部管道化并消费，禁止继承启动 Studio 的终端；stderr 只允许以
   有界、凭证脱敏的形式补充启动错误。
 - MCP 客户端优先使用 `server/discover` 协商已知协议版本；仅当对端明确返回

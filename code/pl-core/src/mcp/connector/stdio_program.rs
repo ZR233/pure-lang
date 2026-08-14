@@ -7,6 +7,27 @@ use std::path::PathBuf;
 #[cfg(windows)]
 use serde::Deserialize;
 
+#[cfg(windows)]
+const NPM_CLI_WINDOWS_HIDE_CHILDREN: &str = r#"
+const childProcess = require('node:child_process');
+for (const method of ['spawn', 'spawnSync']) {
+  const original = childProcess[method];
+  childProcess[method] = function(command, args, options) {
+    if (!Array.isArray(args)) {
+      options = args;
+      args = [];
+    }
+    return original.call(
+      this,
+      command,
+      args,
+      Object.assign({}, options, { windowsHide: true }),
+    );
+  };
+}
+require(process.argv[1]);
+"#;
+
 /// CreateProcess target plus arguments required before the configured MCP arguments.
 pub(super) struct ResolvedStdioProgram {
     pub executable: PathBuf,
@@ -27,8 +48,9 @@ impl ResolvedStdioProgram {
 /// Config stays platform-neutral (`npx`, not `npx.cmd`). On Windows, bare names
 /// are resolved through PATH/PATHEXT while extensionless shell scripts such as
 /// npm's POSIX `npx` shim are skipped. Standard npm launchers are unwrapped to
-/// `node.exe + npx-cli.js`, so the long-lived MCP process is not owned by a
-/// visible `cmd.exe` shim.
+/// `node.exe + npx-cli.js`; the npm CLI is preloaded with `windowsHide` for its
+/// package launcher, so neither the long-lived MCP process nor its npm shim owns
+/// a visible console.
 #[cfg(windows)]
 pub(super) fn resolve(command: &str) -> io::Result<ResolvedStdioProgram> {
     resolve_windows(command)
@@ -97,7 +119,11 @@ fn resolve_standard_npm_cli(shim: &Path) -> Option<ResolvedStdioProgram> {
 
     Some(ResolvedStdioProgram {
         executable: node,
-        prefix_args: vec![cli.into_os_string()],
+        prefix_args: vec![
+            OsString::from("--eval"),
+            OsString::from(NPM_CLI_WINDOWS_HIDE_CHILDREN),
+            cli.into_os_string(),
+        ],
     })
 }
 
@@ -175,7 +201,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn standard_npx_shim_is_unwrapped_to_node_cli() {
+    fn standard_npx_shim_is_unwrapped_and_hides_package_launcher() {
         let temp = tempfile::tempdir().unwrap();
         let node = temp.path().join("node.exe");
         let shim = temp.path().join("npx.cmd");
@@ -193,6 +219,13 @@ mod tests {
 
         let resolved = resolve_standard_npm_cli(&shim).unwrap();
         assert_eq!(resolved.executable, node);
-        assert_eq!(resolved.prefix_args, vec![cli.into_os_string()]);
+        assert_eq!(
+            resolved.prefix_args,
+            vec![
+                OsString::from("--eval"),
+                OsString::from(NPM_CLI_WINDOWS_HIDE_CHILDREN),
+                cli.into_os_string(),
+            ]
+        );
     }
 }
