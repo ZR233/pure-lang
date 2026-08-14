@@ -52,6 +52,24 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
         issue.project_id.as_deref(),
         Some(healthy_project.id.as_str())
     );
+    let preview = runtime
+        .preview_recovery_issue_cleanup(&issue.id)
+        .await
+        .unwrap();
+    let cleaned = tokio::time::timeout(
+        TEST_RUNTIME_TIMEOUT,
+        runtime.cleanup_recovery_issue(&issue.id, &preview.expected_revision),
+    )
+    .await
+    .expect("RemoveProject recovery cleanup must not re-enter the lifecycle lock")
+    .unwrap();
+
+    assert_eq!(cleaned.status, StudioRuntimeStatus::Ready);
+    assert!(runtime.recovery_issues().is_empty());
+    assert_eq!(
+        runtime.list_projects().await.unwrap(),
+        vec![healthy_project]
+    );
     let _ = tokio::fs::remove_dir_all(healthy_workspace).await;
     let _ = tokio::fs::remove_dir_all(home).await;
 }

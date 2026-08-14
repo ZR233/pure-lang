@@ -298,6 +298,63 @@ void registerRecoveryIssueTests() {
     },
   );
 
+  testWidgets(
+    'project cleanup confirmation still runs while product state reloads',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _twoProjectState(selectedProjectId: 'project-a');
+      final api = _FakeStudioApi(state)
+        ..projectCleanupState = _twoProjectState(
+          selectedProjectId: 'project-b',
+          projects: const [
+            StudioProject(id: 'project-b', name: 'Project B', path: 'b'),
+          ],
+        );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('project-cleanup-project-a')));
+      await tester.pumpAndSettle();
+
+      final blockedReload = Completer<void>();
+      api.blockedStudioStateLoad = blockedReload;
+      container.invalidate(studioControllerProvider);
+      await tester.pump();
+      expect(container.read(studioControllerProvider).isLoading, isTrue);
+
+      await tester.tap(find.byKey(const ValueKey('project-cleanup-confirm')));
+      await tester.pump();
+
+      expect(api.cleanedProjectId, 'project-a');
+      expect(api.projectCleanupExpectedRevision, 'revision-project-a');
+
+      blockedReload.complete();
+      api.blockedStudioStateLoad = null;
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Remove project and clean up Pure worktrees?'),
+        findsNothing,
+      );
+      expect(find.text('Project A'), findsNothing);
+      expect(find.text('Project B'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('failed recovery cleanup can refresh stale preview and retry', (
     tester,
   ) async {

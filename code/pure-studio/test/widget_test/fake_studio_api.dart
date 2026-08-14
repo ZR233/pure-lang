@@ -18,6 +18,7 @@ class _FakeStudioApi implements StudioApi {
   final Map<String, StudioState> sessionStates = {};
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
+  Completer<void>? blockedStudioStateLoad;
   final List<String> loadedSessionIds = [];
   final List<String> threadSubscriptions = [];
   final List<({String threadId, String? cursor})> historyRequests = [];
@@ -117,6 +118,8 @@ class _FakeStudioApi implements StudioApi {
     if (bootstrapError case final error?) {
       throw error;
     }
+    final blocked = blockedStudioStateLoad;
+    if (blocked != null) await blocked.future;
     return _currentState;
   }
 

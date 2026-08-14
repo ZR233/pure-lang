@@ -1,4 +1,5 @@
 use super::*;
+use crate::StudioProductEventKind;
 use crate::studio::task_coordinator::{
     CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource, TaskRunPhase,
     WorkUnitStatus,
@@ -694,10 +695,44 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
         .unwrap();
 
     let preview = runtime.preview_project_cleanup(&project.id).await.unwrap();
+    let before_project_revision = runtime
+        .product_events()
+        .read_project_directory()
+        .await
+        .unwrap()
+        .meta
+        .revision;
+    let before_thread_revision = runtime
+        .product_events()
+        .read_thread_directory()
+        .await
+        .unwrap()
+        .meta
+        .revision;
+    let mut events = runtime.product_events().subscribe();
     runtime
         .cleanup_project(&project.id, &preview.expected_revision)
         .await
         .unwrap();
+    let (project_directory, thread_directory) = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        let project_directory = loop {
+            if let StudioProductEventKind::ProjectDirectoryChanged(state) =
+                events.recv().await.unwrap().kind
+            {
+                break state;
+            }
+        };
+        let thread_directory = loop {
+            if let StudioProductEventKind::ThreadDirectoryChanged(state) =
+                events.recv().await.unwrap().kind
+            {
+                break state;
+            }
+        };
+        (project_directory, thread_directory)
+    })
+    .await
+    .expect("project cleanup must publish fresh project and Thread directories");
     let framework = runtime.agent_framework().await.unwrap();
     let root = framework
         .handle()
@@ -708,6 +743,10 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     assert_eq!(root.lifecycle, crate::AgentLifecycleState::Closed);
     assert!(runtime.active_turns_for_test().await.is_empty());
     assert!(runtime.list_projects().await.unwrap().is_empty());
+    assert!(project_directory.projects.is_empty());
+    assert!(thread_directory.threads.is_empty());
+    assert!(project_directory.meta.revision > before_project_revision);
+    assert!(thread_directory.meta.revision > before_thread_revision);
     assert!(
         store
             .list_pending_interactions(&session.id)

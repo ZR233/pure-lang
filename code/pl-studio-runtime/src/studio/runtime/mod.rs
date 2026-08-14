@@ -206,11 +206,13 @@ impl StudioRuntime {
         project_id: &str,
         expected_revision: &str,
     ) -> Result<StudioRuntimeSnapshot> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
             .task_coordinator
             .project_cleanup_issue(project_id)
             .await?;
-        self.cleanup_project_issue(issue, expected_revision).await
+        self.cleanup_project_issue_locked(issue, expected_revision)
+            .await
     }
 
     pub async fn cleanup_recovery_issue(
@@ -224,7 +226,9 @@ impl StudioRuntime {
             .get(issue_id)
             .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
         if issue.action == StudioRecoveryIssueAction::RemoveProject {
-            return self.cleanup_project_issue(issue, expected_revision).await;
+            return self
+                .cleanup_project_issue_locked(issue, expected_revision)
+                .await;
         }
         if let Some(thread_id) = issue.thread_id.as_deref()
             && self.thread_is_busy(thread_id).await?
@@ -272,12 +276,11 @@ impl StudioRuntime {
         self.runtime_snapshot().await
     }
 
-    async fn cleanup_project_issue(
+    async fn cleanup_project_issue_locked(
         &self,
         issue: crate::StudioRecoveryIssue,
         expected_revision: &str,
     ) -> Result<StudioRuntimeSnapshot> {
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let project_id = issue
             .project_id
             .as_deref()
@@ -310,6 +313,14 @@ impl StudioRuntime {
             .resources
             .complete_cleanup_takeover(&root_thread_ids)
             .await;
+        self.agent_facility
+            .product_events
+            .emit_project_directory()
+            .await?;
+        self.agent_facility
+            .product_events
+            .emit_thread_directory()
+            .await?;
         let issues = self.recovery.remove_for_project(project_id);
         self.agent_facility
             .product_events

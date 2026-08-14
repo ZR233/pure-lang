@@ -133,15 +133,14 @@ class StudioController extends _$StudioController {
 
   Future<void> cleanupProject(String projectId, String expectedRevision) async {
     final current = state.value;
-    if (current == null) return;
     await _api.cleanupProject(projectId, expectedRevision);
     await _reloadProductState(
-      selectedProjectId: current.selectedProjectId == projectId
+      selectedProjectId: current?.selectedProjectId == projectId
           ? null
-          : current.selectedProjectId,
-      selectedThreadId: current.selectedProjectId == projectId
+          : current?.selectedProjectId,
+      selectedThreadId: current?.selectedProjectId == projectId
           ? null
-          : current.selectedThreadId,
+          : current?.selectedThreadId,
     );
   }
 
@@ -600,11 +599,10 @@ class StudioController extends _$StudioController {
     String expectedRevision,
   ) async {
     final current = state.value;
-    if (current == null) return;
     await _api.cleanupRecoveryIssue(issueId, expectedRevision);
     await _reloadProductState(
-      selectedProjectId: current.selectedProjectId,
-      selectedThreadId: current.selectedThreadId,
+      selectedProjectId: current?.selectedProjectId,
+      selectedThreadId: current?.selectedThreadId,
     );
   }
 

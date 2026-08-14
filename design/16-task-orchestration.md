@@ -347,6 +347,10 @@ pure-task-<runId>-<threadId>
 branch、存在状态、dirty、ahead、changed files 和 expected revision。执行只处理数据库证明归属
 且仍与预览一致的 `pure-task-*` 分支与 `.pure/worktrees/**`；绝不删除用户主工作区。
 
+项目清理成功后必须推进并发布 project/thread directory revision，再发布最新 recovery state；GUI
+只根据这些 canonical snapshot/event 移除项目、Thread 和失效选择，不维护本地删除镜像。由恢复问题
+触发的 `RemoveProject` 与直接项目清理共享同一 lifecycle 临界区；已经持锁的恢复路径不得重入该锁。
+
 不兼容 Studio 数据库直接删除并重建，不迁移或归档 ownership。数据库重建本身不扫描或删除磁盘
 worktree/branch；失去 durable owner 的资源继续保留现场。
 
