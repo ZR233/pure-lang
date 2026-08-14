@@ -108,9 +108,11 @@ URL。清单与签名下载最多跟随五次重定向，重定向目标仅允�
 
 ## 4. 更新状态机与安装
 
-`pl-studio-runtime` 的 updater 是独立边界：
+`pl-studio-runtime` 的 updater owner 保存带 `ObservedStateMeta` 的 last-known snapshot：
 
-- `StudioUpdater::check(current_version)` 返回 `UpToDate | Available`。
+- `readUpdateState()` 只读 owner cache，不访问网络。
+- `checkStudioUpdate()` 使用编译时当前版本并返回 `UpToDate | Available`，Flutter 不传
+  `currentVersion`。
 - `StudioUpdater::install(update, progress_sender)` 流式下载安装器与签名，校验声明长度和
   512 MiB 上限，计算 SHA-256，使用内置 Minisign 公钥验签，再启动 Inno Setup。
 
@@ -119,8 +121,9 @@ URL。清单与签名下载最多跟随五次重定向，重定向目标仅允�
 turn/task；若 runtime 已变忙则保留验证缓存并返回 `runtimeBusy`。空闲时安全关闭 runtime，
 再使用 Inno Setup 的 silent/close/restart 参数启动安装器。
 
-FRB 只公开 typed DTO 和事件：`checkStudioUpdate(currentVersion)`、
-`installStudioUpdate(update, eventSink)`，以及 `Started`、`Progress`、`Verifying`、
+检查结果持久化到现有 `app_settings` 键 `observed:studioUpdate:v1`。页面打开只显示 last-known/stale，
+不自动检查。FRB 只公开 typed DTO 和事件：`readUpdateState()`、`checkStudioUpdate()`、
+`installStudioUpdate(expectedRevision, version, eventSink)`，以及 `Started`、`Progress`、`Verifying`、
 `InstallerLaunched`、`Failed`。Dart 不接收或解析 raw manifest JSON。
 
 更新失败不得启动任何二进制。未签名、错误签名、内容篡改、超限、长度不符、URL 越界或

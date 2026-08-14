@@ -8,7 +8,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'types/error.dart';
 import 'types/event.dart';
+import 'types/response.dart';
 import 'types/runtime.dart';
+import 'types/settings.dart';
 import 'types/thread_stream.dart';
 part 'subscription.freezed.dart';
 

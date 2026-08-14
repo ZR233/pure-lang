@@ -7,7 +7,8 @@ mod runtime;
 pub use connector::{ConnectedMcp, McpConnectRequest, McpConnector};
 pub use health::{McpAvailabilityKind, McpAvailabilitySnapshot};
 pub use runtime::{
-    McpGeneration, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor, McpTurnLease,
+    McpGeneration, McpResetScope, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor,
+    McpTurnLease,
 };
 
 const MCP_TOOL_PREFIX: &str = "mcp__";

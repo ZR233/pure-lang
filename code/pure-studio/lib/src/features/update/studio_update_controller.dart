@@ -5,6 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../data/frb/studio_api.dart' show FrbStudioApi;
 import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
 
 part 'studio_update_controller.g.dart';
@@ -45,22 +46,16 @@ enum StudioUpdatePhase {
 
 class StudioUpdateInfo {
   const StudioUpdateInfo({
+    required this.revision,
     required this.version,
     required this.publishedAt,
     required this.notesUrl,
-    required this.installerUrl,
-    required this.installerSize,
-    required this.installerSha256,
-    required this.installerSignatureUrl,
   });
 
+  final int revision;
   final String version;
-  final int publishedAt;
+  final DateTime publishedAt;
   final String notesUrl;
-  final String installerUrl;
-  final int installerSize;
-  final String installerSha256;
-  final String installerSignatureUrl;
 }
 
 class StudioUpdateState {
@@ -91,20 +86,6 @@ class StudioUpdateState {
   }
 }
 
-sealed class StudioUpdateCheckResult {
-  const StudioUpdateCheckResult();
-}
-
-class StudioUpdateUpToDate extends StudioUpdateCheckResult {
-  const StudioUpdateUpToDate();
-}
-
-class StudioUpdateAvailable extends StudioUpdateCheckResult {
-  const StudioUpdateAvailable(this.update);
-
-  final StudioUpdateInfo update;
-}
-
 enum StudioUpdateInstallEventKind {
   started,
   progress,
@@ -130,9 +111,12 @@ class StudioUpdateInstallEvent {
 }
 
 abstract class StudioUpdateApi {
-  Future<StudioUpdateCheckResult> check(String currentVersion);
+  Future<UpdaterStateSnapshot> check();
 
-  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update);
+  Future<StudioUpdateOperation> startInstall({
+    required int expectedRevision,
+    required String version,
+  });
 
   Future<void> openReleaseNotes(String url);
 }
@@ -149,21 +133,32 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
   const FrbStudioUpdateApi();
 
   @override
-  Future<StudioUpdateCheckResult> check(String currentVersion) async {
+  Future<UpdaterStateSnapshot> check() async {
     await FrbStudioApi.ensureReady();
-    final result = await frb.checkStudioUpdate(currentVersion: currentVersion);
-    return switch (result) {
-      frb.BridgeStudioUpdateCheckDto_UpToDate() => const StudioUpdateUpToDate(),
-      frb.BridgeStudioUpdateCheckDto_Available(:final update) =>
-        StudioUpdateAvailable(_fromBridge(update)),
-    };
+    final snapshot = await frb.checkStudioUpdate();
+    return UpdaterStateSnapshot(
+      meta: _metaFromBridge(snapshot.meta),
+      version: snapshot.update?.version,
+      publishedAt: snapshot.update == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              snapshot.update!.publishedAt * 1000,
+            ),
+      notesUrl: snapshot.update?.notesUrl,
+    );
   }
 
   @override
-  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update) async {
+  Future<StudioUpdateOperation> startInstall({
+    required int expectedRevision,
+    required String version,
+  }) async {
     await FrbStudioApi.ensureReady();
     return _FrbStudioUpdateOperation(
-      await frb.installStudioUpdate(update: _toBridge(update)),
+      await frb.installStudioUpdate(
+        expectedRevision: BigInt.from(expectedRevision),
+        version: version,
+      ),
     );
   }
 
@@ -173,30 +168,6 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
       'url.dll,FileProtocolHandler',
       url,
     ], mode: ProcessStartMode.detached);
-  }
-
-  static StudioUpdateInfo _fromBridge(frb.BridgeStudioUpdateDto update) {
-    return StudioUpdateInfo(
-      version: update.version,
-      publishedAt: update.publishedAt,
-      notesUrl: update.notesUrl,
-      installerUrl: update.installerUrl,
-      installerSize: update.installerSize.toInt(),
-      installerSha256: update.installerSha256,
-      installerSignatureUrl: update.installerSignatureUrl,
-    );
-  }
-
-  static frb.BridgeStudioUpdateDto _toBridge(StudioUpdateInfo update) {
-    return frb.BridgeStudioUpdateDto(
-      version: update.version,
-      publishedAt: update.publishedAt,
-      notesUrl: update.notesUrl,
-      installerUrl: update.installerUrl,
-      installerSize: BigInt.from(update.installerSize),
-      installerSha256: update.installerSha256,
-      installerSignatureUrl: update.installerSignatureUrl,
-    );
   }
 
   static StudioUpdateInstallEvent _installEventFromBridge(
@@ -232,6 +203,25 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
           message: message,
         ),
     };
+  }
+
+  static ObservedStateMeta _metaFromBridge(frb.BridgeObservedStateMeta meta) {
+    final phase = meta.phase.when(
+      uninitialized: () => ObservedStatePhase.uninitialized,
+      ready: () => ObservedStatePhase.ready,
+      running: (_, _) => ObservedStatePhase.running,
+      failed: (_, _) => ObservedStatePhase.failed,
+      stopped: () => ObservedStatePhase.stopped,
+    );
+    return ObservedStateMeta(
+      revision: meta.revision.toInt(),
+      phase: phase,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(meta.updatedAt * 1000),
+      lastCheckedAt: meta.lastCheckedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(meta.lastCheckedAt! * 1000),
+      stale: meta.stale,
+    );
   }
 }
 
@@ -286,12 +276,25 @@ class StudioUpdateController extends _$StudioUpdateController {
     });
     final currentVersion = ref.watch(studioVersionProvider);
     final enabled = ref.watch(studioUpdateEnabledProvider);
-    if (enabled) {
-      Future<void>.microtask(check);
-    }
+    final observed = ref.watch(
+      studioControllerProvider.select((value) => value.value?.updaterState),
+    );
+    final available = enabled && observed?.version != null;
     return StudioUpdateState(
-      phase: enabled ? StudioUpdatePhase.idle : StudioUpdatePhase.disabled,
+      phase: !enabled
+          ? StudioUpdatePhase.disabled
+          : available
+          ? StudioUpdatePhase.available
+          : StudioUpdatePhase.idle,
       currentVersion: currentVersion,
+      update: available
+          ? StudioUpdateInfo(
+              revision: observed!.meta.revision,
+              version: observed.version!,
+              publishedAt: observed.publishedAt!,
+              notesUrl: observed.notesUrl!,
+            )
+          : null,
     );
   }
 
@@ -302,18 +305,23 @@ class StudioUpdateController extends _$StudioUpdateController {
       currentVersion: state.currentVersion,
     );
     try {
-      final result = await _api.check(state.currentVersion);
-      state = switch (result) {
-        StudioUpdateUpToDate() => StudioUpdateState(
-          phase: StudioUpdatePhase.upToDate,
-          currentVersion: state.currentVersion,
-        ),
-        StudioUpdateAvailable(:final update) => StudioUpdateState(
-          phase: StudioUpdatePhase.available,
-          currentVersion: state.currentVersion,
-          update: update,
-        ),
-      };
+      final result = await _api.check();
+      final version = result.version;
+      state = version == null
+          ? StudioUpdateState(
+              phase: StudioUpdatePhase.upToDate,
+              currentVersion: state.currentVersion,
+            )
+          : StudioUpdateState(
+              phase: StudioUpdatePhase.available,
+              currentVersion: state.currentVersion,
+              update: StudioUpdateInfo(
+                revision: result.meta.revision,
+                version: version,
+                publishedAt: result.publishedAt!,
+                notesUrl: result.notesUrl!,
+              ),
+            );
     } catch (error) {
       _fail('checkFailed', error.toString());
     }
@@ -330,10 +338,12 @@ class StudioUpdateController extends _$StudioUpdateController {
       phase: StudioUpdatePhase.downloading,
       currentVersion: state.currentVersion,
       update: update,
-      total: update.installerSize,
     );
     try {
-      final operation = await _api.startInstall(update);
+      final operation = await _api.startInstall(
+        expectedRevision: update.revision,
+        version: update.version,
+      );
       _activeOperation = operation;
       await for (final event in operation.events) {
         _applyInstallEvent(event);

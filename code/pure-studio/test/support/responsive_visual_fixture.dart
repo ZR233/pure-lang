@@ -313,8 +313,36 @@ StudioState responsiveVisualState() {
     ),
   ];
   return StudioState(
-    projects: const [project],
-    threads: [session, ...agentSessions],
+    projectDirectory: const ProjectDirectoryState(values: [project]),
+    threadDirectory: ThreadDirectoryState(values: [session, ...agentSessions]),
+    taskDirectory: const TaskDirectoryState(),
+    agentDirectory: const AgentDirectoryState(),
+    settingsState: const SettingsStateSnapshot(
+      providers: responsiveVisualProviders,
+      defaultProviderId: 'deepseek',
+      roles: [
+        RoleSettingsView(
+          key: 'executor',
+          providerId: 'deepseek',
+          model: 'deepseek-reasoner',
+          effort: 'high',
+        ),
+        RoleSettingsView(
+          key: 'planner',
+          providerId: 'deepseek',
+          model: 'deepseek-reasoner',
+          effort: 'high',
+        ),
+      ],
+    ),
+    recoveryState: const RecoveryStateSnapshot(),
+    mcpState: const McpStateSnapshot(),
+    lspState: const LspStateSnapshot(),
+    skillsByProject: const {},
+    providerUsageState: const ProviderUsageStateSnapshot(
+      usages: responsiveVisualProviderUsages,
+    ),
+    updaterState: const UpdaterStateSnapshot(),
     workspacesByThread: {
       session.id: ThreadWorkspace(
         thread: session,
@@ -339,27 +367,8 @@ StudioState responsiveVisualState() {
         syncState: AgentWorkspaceSyncState.ready,
       ),
     },
-    providers: responsiveVisualProviders,
-    defaultProviderId: 'deepseek',
-    providerUsages: responsiveVisualProviderUsages,
-    roles: const [
-      RoleSettingsView(
-        key: 'executor',
-        providerId: 'deepseek',
-        model: 'deepseek-reasoner',
-        effort: 'high',
-      ),
-      RoleSettingsView(
-        key: 'planner',
-        providerId: 'deepseek',
-        model: 'deepseek-reasoner',
-        effort: 'high',
-      ),
-    ],
-    mcpServers: const [],
     selectedProjectId: project.id,
     selectedThreadId: session.id,
-    permissionMode: PermissionMode.requestApproval,
   );
 }
 

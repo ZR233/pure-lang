@@ -13,7 +13,16 @@ abstract final class StudioDriverKeys {
   static const settingsPage = ValueKey<String>('settings-page');
   static const settingsBack = ValueKey<String>('settings-back');
   static const sessionMode = ValueKey<String>('session-mode-selector');
+  static const model = ValueKey<String>('model-selector');
   static const reasoningEffort = ValueKey<String>('reasoning-effort-selector');
+  static const providerUsageCheck = ValueKey<String>('provider-usage-check');
+  static const skillsDiscover = ValueKey<String>('skills-discover');
+  static const mcpRefresh = ValueKey<String>('mcp-refresh');
+  static const mcpResetAll = ValueKey<String>('mcp-reset-all');
+  static const mcpResetAllConfirm = ValueKey<String>('mcp-reset-all-confirm');
+  static const lspRefresh = ValueKey<String>('lsp-refresh');
+  static const lspProbe = ValueKey<String>('lsp-probe');
+  static const lspResetWorkspace = ValueKey<String>('lsp-reset-workspace');
   static const composerInput = ValueKey<String>('composer-input');
   static const composerSubmit = ValueKey<String>('composer-submit');
   static const composerStop = ValueKey<String>('composer-stop');
@@ -84,6 +93,21 @@ abstract final class StudioDriverKeys {
     String providerId,
     String model,
   ) => ValueKey<String>('settings-role-$role-model-$providerId-$model');
+
+  static ValueKey<String> modelOption(String providerId, String model) =>
+      ValueKey<String>('model-$providerId-$model');
+
+  static ValueKey<String> reasoningEffortOption(String effort) =>
+      ValueKey<String>('reasoning-effort-$effort');
+
+  static ValueKey<String> mcpResetServer(String serverId) =>
+      ValueKey<String>('mcp-reset-$serverId');
+
+  static ValueKey<String> lspRepairServer(String serverId) =>
+      ValueKey<String>('lsp-repair-$serverId');
+
+  static ValueKey<String> lspResetServer(String serverId) =>
+      ValueKey<String>('lsp-reset-$serverId');
 
   static ValueKey<String> settingsRoleEffort(String role) =>
       ValueKey<String>('settings-role-$role-effort');

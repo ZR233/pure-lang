@@ -132,7 +132,7 @@ StudioState _emptyState() {
     mode: StudioMode.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
-  return StudioState(
+  return _studioStateFixture(
     projects: const [project],
     threads: [session],
     workspacesByThread: {
@@ -149,26 +149,13 @@ StudioState _emptyState() {
         syncState: AgentWorkspaceSyncState.ready,
       ),
     },
-    providers: const [],
-    roles: const [],
-    mcpServers: const [],
     selectedProjectId: project.id,
     selectedThreadId: session.id,
-    permissionMode: PermissionMode.requestApproval,
   );
 }
 
 StudioState _noProjectState() {
-  return StudioState(
-    projects: [],
-    threads: [],
-    providers: [],
-    roles: [],
-    mcpServers: [],
-    selectedProjectId: null,
-    selectedThreadId: null,
-    permissionMode: PermissionMode.requestApproval,
-  );
+  return _studioStateFixture(selectedProjectId: null, selectedThreadId: null);
 }
 
 StudioState _twoProjectState({
@@ -201,8 +188,8 @@ StudioState _twoProjectState({
       ? 'session-b'
       : 'session-a';
   return _emptyState().copyWith(
-    projects: projects,
-    threads: threads,
+    projectDirectory: ProjectDirectoryState(values: projects),
+    threadDirectory: ThreadDirectoryState(values: threads),
     workspacesByThread: {
       for (final session in threads)
         session.id: ThreadWorkspace(
@@ -244,47 +231,49 @@ StudioTurnView _testTurn({
 StudioState _stateWithPlannerModels() {
   final state = _emptyState();
   return state.copyWith(
-    providers: const [
-      ProviderSettingsView(
-        id: 'deepseek',
-        name: 'DeepSeek',
-        baseUrl: 'https://api.deepseek.com',
-        defaultModel: 'deepseek-v4-flash',
-        models: [
-          ProviderModelView(
-            slug: 'deepseek-v4-flash',
-            displayName: 'DeepSeek V4 Flash',
-            reasoningEfforts: ['high', 'max'],
-            wireProtocol: 'responses',
-            supportedConnectionModes: ['http'],
-            defaultConnectionMode: 'http',
-            connectionMode: 'http',
-          ),
-          ProviderModelView(
-            slug: 'deepseek-reasoner',
-            displayName: 'DeepSeek Reasoner',
-            reasoningEfforts: ['high', 'max'],
-          ),
-        ],
-        status: 'ready',
-        usageLabel: '2 models',
-        promptCacheDialect: 'implicit_prefix',
-      ),
-    ],
-    roles: const [
-      RoleSettingsView(
-        key: 'executor',
-        providerId: 'deepseek',
-        model: 'deepseek-v4-flash',
-        effort: 'high',
-      ),
-      RoleSettingsView(
-        key: 'planner',
-        providerId: 'deepseek',
-        model: 'deepseek-v4-flash',
-        effort: 'high',
-      ),
-    ],
+    settingsState: SettingsStateSnapshot(
+      providers: const [
+        ProviderSettingsView(
+          id: 'deepseek',
+          name: 'DeepSeek',
+          baseUrl: 'https://api.deepseek.com',
+          defaultModel: 'deepseek-v4-flash',
+          models: [
+            ProviderModelView(
+              slug: 'deepseek-v4-flash',
+              displayName: 'DeepSeek V4 Flash',
+              reasoningEfforts: ['high', 'max'],
+              wireProtocol: 'responses',
+              supportedConnectionModes: ['http'],
+              defaultConnectionMode: 'http',
+              connectionMode: 'http',
+            ),
+            ProviderModelView(
+              slug: 'deepseek-reasoner',
+              displayName: 'DeepSeek Reasoner',
+              reasoningEfforts: ['high', 'max'],
+            ),
+          ],
+          status: 'ready',
+          usageLabel: '2 models',
+          promptCacheDialect: 'implicit_prefix',
+        ),
+      ],
+      roles: const [
+        RoleSettingsView(
+          key: 'executor',
+          providerId: 'deepseek',
+          model: 'deepseek-v4-flash',
+          effort: 'high',
+        ),
+        RoleSettingsView(
+          key: 'planner',
+          providerId: 'deepseek',
+          model: 'deepseek-v4-flash',
+          effort: 'high',
+        ),
+      ],
+    ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
         runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
@@ -292,6 +281,104 @@ StudioState _stateWithPlannerModels() {
     },
   );
 }
+
+StudioState _studioStateFixture({
+  List<StudioProject> projects = const [],
+  List<StudioThread> threads = const [],
+  Map<String, TaskRuntimeView> tasksByRootThread = const {},
+  List<StudioAgentView> agents = const [],
+  List<StudioRecoveryIssue> recoveryIssues = const [],
+  List<ProviderSettingsView> providers = const [],
+  String? defaultProviderId,
+  List<RoleSettingsView> roles = const [],
+  List<McpServerSettingsView> mcpServers = const [],
+  InstructionsSettingsView instructions = const InstructionsSettingsView(),
+  SkillsSettingsView skills = const SkillsSettingsView(),
+  GeneralSettingsView general = const GeneralSettingsView(),
+  WebSearchSettingsView webSearch = const WebSearchSettingsView(),
+  PermissionMode permissionMode = PermissionMode.requestApproval,
+  List<ProviderUsageView> providerUsages = const [],
+  Map<String, SkillsStateSnapshot> skillsByProject = const {},
+  Map<String, ThreadWorkspace> workspacesByThread = const {},
+  Map<String, WorkspaceUiState> workspaceUiByThread = const {},
+  ProviderCatalogView providerCatalog = const ProviderCatalogView.empty(),
+  String? selectedProjectId,
+  String? selectedThreadId,
+}) {
+  return StudioState(
+    projectDirectory: ProjectDirectoryState(values: projects),
+    threadDirectory: ThreadDirectoryState(values: threads),
+    taskDirectory: TaskDirectoryState(
+      values: [
+        for (final entry in tasksByRootThread.entries)
+          TaskDirectoryEntryView(rootThreadId: entry.key, task: entry.value),
+      ],
+    ),
+    agentDirectory: AgentDirectoryState(values: agents),
+    settingsState: SettingsStateSnapshot(
+      providers: providers,
+      defaultProviderId: defaultProviderId,
+      roles: roles,
+      mcpServers: mcpServers,
+      instructions: instructions,
+      skills: skills,
+      general: general,
+      webSearch: webSearch,
+      permissionMode: permissionMode,
+    ),
+    recoveryState: RecoveryStateSnapshot(values: recoveryIssues),
+    mcpState: const McpStateSnapshot(),
+    lspState: const LspStateSnapshot(),
+    skillsByProject: skillsByProject,
+    providerUsageState: ProviderUsageStateSnapshot(usages: providerUsages),
+    updaterState: const UpdaterStateSnapshot(),
+    workspacesByThread: workspacesByThread,
+    workspaceUiByThread: workspaceUiByThread,
+    providerCatalog: providerCatalog,
+    selectedProjectId: selectedProjectId,
+    selectedThreadId: selectedThreadId,
+  );
+}
+
+ObservedStateMeta _testObservedMeta(int revision) {
+  return ObservedStateMeta(
+    revision: revision,
+    phase: ObservedStatePhase.ready,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    stale: false,
+  );
+}
+
+StudioState _withSettingsFixture(
+  StudioState state, {
+  List<ProviderSettingsView>? providers,
+  Object? defaultProviderId = _fixtureUnset,
+  List<RoleSettingsView>? roles,
+  List<McpServerSettingsView>? mcpServers,
+  SkillsSettingsView? skills,
+  WebSearchSettingsView? webSearch,
+  PermissionMode? permissionMode,
+}) {
+  final current = state.settingsState;
+  return state.copyWith(
+    settingsState: SettingsStateSnapshot(
+      meta: current.meta,
+      providers: providers ?? current.providers,
+      defaultProviderId: identical(defaultProviderId, _fixtureUnset)
+          ? current.defaultProviderId
+          : defaultProviderId as String?,
+      roles: roles ?? current.roles,
+      mcpServers: mcpServers ?? current.mcpServers,
+      instructions: current.instructions,
+      skills: skills ?? current.skills,
+      general: current.general,
+      webSearch: webSearch ?? current.webSearch,
+      permissionMode: permissionMode ?? current.permissionMode,
+    ),
+  );
+}
+
+const _fixtureUnset = Object();
 
 ThreadRuntimeView _testRuntime() => const ThreadRuntimeView(
   model: '',

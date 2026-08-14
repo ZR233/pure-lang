@@ -58,7 +58,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
     ))?;
 
     let store = StudioStore::open(&database_path).await?;
-    let runtime = StudioRuntime::new(store.clone(), config_store.clone());
+    let runtime = StudioRuntime::new(store.clone(), config_store.clone())?;
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime
         .create_thread(&project.id, "OpenAI cache billing")
@@ -123,7 +123,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
     drop(store);
 
     let reopened_store = StudioStore::open(&database_path).await?;
-    let reopened_runtime = StudioRuntime::new(reopened_store.clone(), config_store);
+    let reopened_runtime = StudioRuntime::new(reopened_store.clone(), config_store)?;
     reopened_runtime.start_runtime().await?;
     let restored = reopened_runtime.thread_snapshot(&thread.id).await?;
     let restored_usage = &restored

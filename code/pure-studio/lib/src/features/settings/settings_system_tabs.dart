@@ -366,9 +366,10 @@ class _RoleModelOption {
 }
 
 class McpTab extends ConsumerStatefulWidget {
-  const McpTab({super.key, required this.servers});
+  const McpTab({super.key, required this.settingsServers, required this.state});
 
-  final List<McpServerSettingsView> servers;
+  final List<McpServerSettingsView> settingsServers;
+  final McpStateSnapshot state;
 
   @override
   ConsumerState<McpTab> createState() => McpTabState();
@@ -384,7 +385,7 @@ class McpTabState extends ConsumerState<McpTab> {
   void didUpdateWidget(covariant McpTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     final serversById = {
-      for (final server in widget.servers) server.id: server,
+      for (final server in widget.settingsServers) server.id: server,
     };
     _enabledByServer.removeWhere(
       (id, enabled) =>
@@ -409,15 +410,41 @@ class McpTabState extends ConsumerState<McpTab> {
         SettingsHeader(
           title: context.l10n.settingsMcpTitle,
           subtitle: context.l10n.settingsMcpSubtitle,
+          trailing: Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: StudioDriverKeys.mcpRefresh,
+                onPressed: () => unawaited(_run(_refresh)),
+                icon: const Icon(Icons.refresh),
+                label: Text(context.l10n.settingsMcpRefresh),
+              ),
+              FilledButton.tonalIcon(
+                key: StudioDriverKeys.mcpResetAll,
+                onPressed: widget.state.servers.isEmpty
+                    ? null
+                    : () => unawaited(_confirmResetAll()),
+                icon: const Icon(Icons.restart_alt),
+                label: Text(context.l10n.settingsMcpResetAll),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 16),
-        if (widget.servers.isNotEmpty)
+        if (widget.state.servers.isNotEmpty)
           SettingsGroup(
             children: [
-              for (final server in widget.servers)
+              for (final server in widget.state.servers)
                 _McpSettingsRow(
                   server: server,
                   enabled: _enabledByServer[server.id] ?? server.enabled,
+                  onReconnect: () => unawaited(
+                    _run(
+                      () => ref
+                          .read(studioControllerProvider.notifier)
+                          .resetMcpServer(server.id),
+                    ),
+                  ),
                   onEnabledChanged: (value) {
                     setState(() => _enabledByServer[server.id] = value);
                     unawaited(_save());
@@ -431,9 +458,54 @@ class McpTabState extends ConsumerState<McpTab> {
                 ),
             ],
           ),
+        if (widget.state.servers.isEmpty)
+          SettingsEmptyMessage(
+            icon: Icons.hub_outlined,
+            title: context.l10n.settingsMcpEmptyTitle,
+            body: context.l10n.settingsMcpEmptyMessage,
+          ),
         if (_error != null) SettingsInlineError(message: _error!),
       ],
     );
+  }
+
+  Future<void> _refresh() {
+    return ref.read(studioControllerProvider.notifier).refreshMcpState();
+  }
+
+  Future<void> _run(Future<void> Function() operation) async {
+    try {
+      setState(() => _error = null);
+      await operation();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _confirmResetAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.l10n.settingsMcpResetConfirmTitle),
+        content: Text(context.l10n.settingsMcpResetConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(context.l10n.settingsCancel),
+          ),
+          FilledButton(
+            key: StudioDriverKeys.mcpResetAllConfirm,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(context.l10n.settingsMcpResetConfirmAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _run(
+        () => ref.read(studioControllerProvider.notifier).resetAllMcp(),
+      );
+    }
   }
 
   void _scheduleSave() {
@@ -451,7 +523,7 @@ class McpTabState extends ConsumerState<McpTab> {
           .saveMcpSettings(
             McpSettingsCommand(
               servers: [
-                for (final server in widget.servers)
+                for (final server in widget.settingsServers)
                   McpServerCommand(
                     id: server.id,
                     enabled: _enabledByServer[server.id] ?? server.enabled,
@@ -477,12 +549,14 @@ class _McpSettingsRow extends StatelessWidget {
     required this.enabled,
     required this.onEnabledChanged,
     required this.onEndpointChanged,
+    required this.onReconnect,
   });
 
   final McpServerSettingsView server;
   final bool enabled;
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<String>? onEndpointChanged;
+  final VoidCallback onReconnect;
 
   @override
   Widget build(BuildContext context) {
@@ -505,6 +579,13 @@ class _McpSettingsRow extends StatelessWidget {
                 ),
               ),
               Switch(value: enabled, onChanged: onEnabledChanged),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                key: StudioDriverKeys.mcpResetServer(server.id),
+                onPressed: server.enabled ? onReconnect : null,
+                icon: const Icon(Icons.sync),
+                label: Text(context.l10n.settingsMcpReconnect),
+              ),
             ],
           ),
           Wrap(
@@ -534,6 +615,197 @@ class _McpSettingsRow extends StatelessWidget {
             ),
             onChanged: onEndpointChanged,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class LspTab extends ConsumerStatefulWidget {
+  const LspTab({super.key, required this.projectId, required this.state});
+
+  final String? projectId;
+  final LspStateSnapshot state;
+
+  @override
+  ConsumerState<LspTab> createState() => _LspTabState();
+}
+
+class _LspTabState extends ConsumerState<LspTab> {
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsPane(
+      children: [
+        SettingsHeader(
+          title: context.l10n.settingsLspTitle,
+          subtitle: context.l10n.settingsLspSubtitle,
+          trailing: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: StudioDriverKeys.lspRefresh,
+                onPressed: () => unawaited(_run(_refresh)),
+                icon: const Icon(Icons.refresh),
+                label: Text(context.l10n.settingsLspRefresh),
+              ),
+              FilledButton.tonalIcon(
+                key: StudioDriverKeys.lspProbe,
+                onPressed: widget.projectId == null
+                    ? null
+                    : () => unawaited(_run(_probe)),
+                icon: const Icon(Icons.monitor_heart_outlined),
+                label: Text(context.l10n.settingsLspProbe),
+              ),
+              OutlinedButton.icon(
+                key: StudioDriverKeys.lspResetWorkspace,
+                onPressed:
+                    widget.projectId == null || widget.state.servers.isEmpty
+                    ? null
+                    : () => unawaited(_run(_resetWorkspace)),
+                icon: const Icon(Icons.restart_alt),
+                label: Text(context.l10n.settingsLspResetWorkspace),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (widget.state.servers.isNotEmpty)
+          SettingsGroup(
+            children: [
+              for (final server in widget.state.servers)
+                _LspSettingsRow(
+                  server: server,
+                  onRepair: server.availability == 'missingRustupComponent'
+                      ? () => unawaited(_run(() => _repair(server.id)))
+                      : null,
+                  onReset: widget.projectId == null
+                      ? null
+                      : () => unawaited(_run(() => _resetServer(server.id))),
+                ),
+            ],
+          )
+        else
+          SettingsEmptyMessage(
+            icon: Icons.code_outlined,
+            title: context.l10n.settingsLspEmptyTitle,
+            body: context.l10n.settingsLspEmptyMessage,
+          ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          SettingsInlineError(message: _error!),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _refresh() {
+    return ref.read(studioControllerProvider.notifier).refreshLspState();
+  }
+
+  Future<void> _probe() {
+    return ref.read(studioControllerProvider.notifier).probeLspServer();
+  }
+
+  Future<void> _repair(String serverId) {
+    return ref
+        .read(studioControllerProvider.notifier)
+        .repairLspServer(serverId);
+  }
+
+  Future<void> _resetServer(String serverId) {
+    return ref.read(studioControllerProvider.notifier).resetLspServer(serverId);
+  }
+
+  Future<void> _resetWorkspace() {
+    return ref.read(studioControllerProvider.notifier).resetLspWorkspace();
+  }
+
+  Future<void> _run(Future<void> Function() operation) async {
+    try {
+      setState(() => _error = null);
+      await operation();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+}
+
+class _LspSettingsRow extends StatelessWidget {
+  const _LspSettingsRow({
+    required this.server,
+    required this.onRepair,
+    required this.onReset,
+  });
+
+  final LspServerStateView server;
+  final VoidCallback? onRepair;
+  final VoidCallback? onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  server.displayName,
+                  style: context.text.bodyMedium?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (onRepair != null)
+                FilledButton.tonalIcon(
+                  key: StudioDriverKeys.lspRepairServer(server.id),
+                  onPressed: onRepair,
+                  icon: const Icon(Icons.build_outlined),
+                  label: Text(context.l10n.settingsLspRepair),
+                ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                key: StudioDriverKeys.lspResetServer(server.id),
+                onPressed: onReset,
+                icon: const Icon(Icons.restart_alt),
+                label: Text(context.l10n.settingsLspReset),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              SettingsInfoPill(
+                icon: Icons.circle_outlined,
+                label: server.availability,
+              ),
+              SettingsInfoPill(
+                icon: Icons.rule_outlined,
+                label: server.diagnosticCount.toString(),
+              ),
+            ],
+          ),
+          if (server.message case final message?) ...[
+            const SizedBox(height: 8),
+            Text(message, style: context.text.bodySmall),
+          ],
+          if (server.lastError case final error?) ...[
+            const SizedBox(height: 8),
+            Text(
+              error,
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -20,6 +20,7 @@ pub(super) fn instruction_snapshot(
     let assembly_request = InstructionAssemblyRequest {
         instructions: None,
         skills: core.skills.as_ref(),
+        skill_catalog: core.skill_catalog.as_deref(),
         execution_profile: None,
         model,
         workspace_root,

@@ -5,8 +5,10 @@
 
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentActivity {
   idle,
@@ -188,18 +190,94 @@ enum BridgeConversationRecoveryMode { rewindTail, rebuildThread }
 
 class BridgeLspHealthDto {
   final List<String> activeLspServers;
+  final List<BridgeLspServerDto> lspServers;
 
-  const BridgeLspHealthDto({required this.activeLspServers});
+  const BridgeLspHealthDto({
+    required this.activeLspServers,
+    required this.lspServers,
+  });
 
   @override
-  int get hashCode => activeLspServers.hashCode;
+  int get hashCode => activeLspServers.hashCode ^ lspServers.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeLspHealthDto &&
           runtimeType == other.runtimeType &&
-          activeLspServers == other.activeLspServers;
+          activeLspServers == other.activeLspServers &&
+          lspServers == other.lspServers;
+}
+
+class BridgeLspServerDto {
+  final String id;
+  final String displayName;
+  final List<String> extensions;
+  final List<String> languageIds;
+  final String availabilityKind;
+  final String? availabilityMessage;
+  final PlatformInt64? lastCheckedAt;
+  final BigInt diagnosticCount;
+  final String activityKind;
+  final String? activityTitle;
+  final String? activityMessage;
+  final int? activityPercentage;
+  final String? lastError;
+  final PlatformInt64? lastErrorAt;
+
+  const BridgeLspServerDto({
+    required this.id,
+    required this.displayName,
+    required this.extensions,
+    required this.languageIds,
+    required this.availabilityKind,
+    this.availabilityMessage,
+    this.lastCheckedAt,
+    required this.diagnosticCount,
+    required this.activityKind,
+    this.activityTitle,
+    this.activityMessage,
+    this.activityPercentage,
+    this.lastError,
+    this.lastErrorAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      extensions.hashCode ^
+      languageIds.hashCode ^
+      availabilityKind.hashCode ^
+      availabilityMessage.hashCode ^
+      lastCheckedAt.hashCode ^
+      diagnosticCount.hashCode ^
+      activityKind.hashCode ^
+      activityTitle.hashCode ^
+      activityMessage.hashCode ^
+      activityPercentage.hashCode ^
+      lastError.hashCode ^
+      lastErrorAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeLspServerDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          extensions == other.extensions &&
+          languageIds == other.languageIds &&
+          availabilityKind == other.availabilityKind &&
+          availabilityMessage == other.availabilityMessage &&
+          lastCheckedAt == other.lastCheckedAt &&
+          diagnosticCount == other.diagnosticCount &&
+          activityKind == other.activityKind &&
+          activityTitle == other.activityTitle &&
+          activityMessage == other.activityMessage &&
+          activityPercentage == other.activityPercentage &&
+          lastError == other.lastError &&
+          lastErrorAt == other.lastErrorAt;
 }
 
 class BridgeMcpHealthDto {
@@ -227,25 +305,27 @@ class BridgeMcpServerDto {
   final String id;
   final bool enabled;
   final String transport;
-  final String? command;
-  final String? url;
   final String endpoint;
   final String sourceKind;
   final String statusKind;
   final String mutationPolicy;
   final String availabilityKind;
+  final String? availabilityMessage;
+  final PlatformInt64? lastCheckedAt;
+  final BigInt? toolCount;
 
   const BridgeMcpServerDto({
     required this.id,
     required this.enabled,
     required this.transport,
-    this.command,
-    this.url,
     required this.endpoint,
     required this.sourceKind,
     required this.statusKind,
     required this.mutationPolicy,
     required this.availabilityKind,
+    this.availabilityMessage,
+    this.lastCheckedAt,
+    this.toolCount,
   });
 
   @override
@@ -253,13 +333,14 @@ class BridgeMcpServerDto {
       id.hashCode ^
       enabled.hashCode ^
       transport.hashCode ^
-      command.hashCode ^
-      url.hashCode ^
       endpoint.hashCode ^
       sourceKind.hashCode ^
       statusKind.hashCode ^
       mutationPolicy.hashCode ^
-      availabilityKind.hashCode;
+      availabilityKind.hashCode ^
+      availabilityMessage.hashCode ^
+      lastCheckedAt.hashCode ^
+      toolCount.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -269,13 +350,69 @@ class BridgeMcpServerDto {
           id == other.id &&
           enabled == other.enabled &&
           transport == other.transport &&
-          command == other.command &&
-          url == other.url &&
           endpoint == other.endpoint &&
           sourceKind == other.sourceKind &&
           statusKind == other.statusKind &&
           mutationPolicy == other.mutationPolicy &&
-          availabilityKind == other.availabilityKind;
+          availabilityKind == other.availabilityKind &&
+          availabilityMessage == other.availabilityMessage &&
+          lastCheckedAt == other.lastCheckedAt &&
+          toolCount == other.toolCount;
+}
+
+class BridgeObservedStateMeta {
+  final BigInt revision;
+  final BridgeObservedStatePhase phase;
+  final PlatformInt64 updatedAt;
+  final PlatformInt64? lastCheckedAt;
+  final bool stale;
+
+  const BridgeObservedStateMeta({
+    required this.revision,
+    required this.phase,
+    required this.updatedAt,
+    this.lastCheckedAt,
+    required this.stale,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^
+      phase.hashCode ^
+      updatedAt.hashCode ^
+      lastCheckedAt.hashCode ^
+      stale.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeObservedStateMeta &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          phase == other.phase &&
+          updatedAt == other.updatedAt &&
+          lastCheckedAt == other.lastCheckedAt &&
+          stale == other.stale;
+}
+
+@freezed
+sealed class BridgeObservedStatePhase with _$BridgeObservedStatePhase {
+  const BridgeObservedStatePhase._();
+
+  const factory BridgeObservedStatePhase.uninitialized() =
+      BridgeObservedStatePhase_Uninitialized;
+  const factory BridgeObservedStatePhase.ready() =
+      BridgeObservedStatePhase_Ready;
+  const factory BridgeObservedStatePhase.running({
+    required BridgeStateOperation operation,
+    required String operationId,
+  }) = BridgeObservedStatePhase_Running;
+  const factory BridgeObservedStatePhase.failed({
+    required BridgeStateOperation operation,
+    required BridgeStateError error,
+  }) = BridgeObservedStatePhase_Failed;
+  const factory BridgeObservedStatePhase.stopped() =
+      BridgeObservedStatePhase_Stopped;
 }
 
 class BridgeRecoveryCleanupPreviewDto {
@@ -402,6 +539,43 @@ enum BridgeRuntimeStatus {
   shuttingDown,
   stopped,
   failed,
+}
+
+class BridgeStateError {
+  final String code;
+  final String message;
+  final bool retryable;
+
+  const BridgeStateError({
+    required this.code,
+    required this.message,
+    required this.retryable,
+  });
+
+  @override
+  int get hashCode => code.hashCode ^ message.hashCode ^ retryable.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStateError &&
+          runtimeType == other.runtimeType &&
+          code == other.code &&
+          message == other.message &&
+          retryable == other.retryable;
+}
+
+enum BridgeStateOperation {
+  initialize,
+  activate,
+  reload,
+  reconcile,
+  discover,
+  check,
+  probe,
+  repair,
+  reset,
+  shutdown,
 }
 
 class BridgeStudioRecoveryIssueDto {

@@ -27,8 +27,12 @@ pub enum BridgeThreadStreamEnvelope {
 
 #[derive(Debug, Clone)]
 pub enum BridgeProductStreamEnvelope {
-    Data { event: BridgeProductEventEnvelope },
-    Failure { error: BridgeError },
+    Data {
+        event: Box<BridgeProductEventEnvelope>,
+    },
+    Failure {
+        error: BridgeError,
+    },
     Closed,
 }
 
@@ -272,12 +276,21 @@ pub async fn create_product_subscription() -> Result<BridgeEventSubscription, Br
             let envelope = tokio::select! {
                 _ = producer_cancel.cancelled() => break,
                 event = events.recv() => match event {
-                    Ok(event) => BridgeProductStreamEnvelope::Data {
-                        event: bridge_product_event(event),
+                    Ok(event) => match bridge_product_event(event) {
+                        Ok(event) => BridgeProductStreamEnvelope::Data {
+                            event: Box::new(event),
+                        },
+                        Err(error) => {
+                            tracing::warn!(
+                                error_bytes = error.to_string().len(),
+                                "failed to convert Studio product event"
+                            );
+                            continue;
+                        }
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(events)) => {
                         BridgeProductStreamEnvelope::Data {
-                            event: BridgeProductEventEnvelope::stale(events),
+                            event: Box::new(BridgeProductEventEnvelope::stale(events)),
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

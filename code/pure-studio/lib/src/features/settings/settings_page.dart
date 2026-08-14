@@ -42,6 +42,7 @@ const _settingsTabs = [
   _SettingsTabInfo(Icons.extension_outlined, _SettingsTab.skills),
   _SettingsTabInfo(Icons.badge_outlined, _SettingsTab.roles),
   _SettingsTabInfo(Icons.hub_outlined, _SettingsTab.mcp),
+  _SettingsTabInfo(Icons.code_outlined, _SettingsTab.lsp),
   _SettingsTabInfo(Icons.security_outlined, _SettingsTab.security),
   _SettingsTabInfo(Icons.tune_outlined, _SettingsTab.general),
 ];
@@ -59,6 +60,7 @@ class _SettingsTabInfo {
       _SettingsTab.skills => context.l10n.settingsSkillsTab,
       _SettingsTab.roles => context.l10n.settingsRolesTab,
       _SettingsTab.mcp => context.l10n.settingsMcpTab,
+      _SettingsTab.lsp => context.l10n.settingsLspTab,
       _SettingsTab.security => context.l10n.settingsSecurityTab,
       _SettingsTab.general => context.l10n.settingsGeneralTab,
     };
@@ -71,6 +73,7 @@ enum _SettingsTab {
   skills,
   roles,
   mcp,
+  lsp,
   security,
   general,
 }
@@ -97,7 +100,8 @@ class _SettingsScaffold extends StatelessWidget {
         tabIndex: _SettingsTab.skills.index,
       ),
       RolesTab(providers: state.providers, roles: state.roles),
-      McpTab(servers: state.mcpServers),
+      McpTab(settingsServers: state.mcpServers, state: state.mcpState),
+      LspTab(projectId: state.selectedProjectId, state: state.lspState),
       SecurityTab(mode: state.permissionMode),
       GeneralTab(
         settings: state.general,
@@ -183,9 +187,9 @@ class _SettingsNav extends StatelessWidget {
               children: [
                 const _SettingsBackTile(compact: false),
                 _SettingsNavGroupLabel(context.l10n.settingsWorkspaceGroup),
-                ...navItems.take(5),
+                ...navItems.take(6),
                 _SettingsNavGroupLabel(context.l10n.settingsSystemGroup),
-                ...navItems.skip(5),
+                ...navItems.skip(6),
               ],
             ),
           ),

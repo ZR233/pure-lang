@@ -10,6 +10,7 @@ import 'thread_directory_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'studio_state.dart';
+import 'studio_state_snapshots.dart';
 
 part 'studio_projection_models.freezed.dart';
 
@@ -117,6 +118,8 @@ abstract class SettingsPageView with _$SettingsPageView {
     required List<String> activeSkills,
     required String? selectedProjectId,
     required List<McpServerSettingsView> mcpServers,
+    required McpStateSnapshot mcpState,
+    required LspStateSnapshot lspState,
     required PermissionMode permissionMode,
     required GeneralSettingsView general,
     required WebSearchSettingsView webSearch,
@@ -134,6 +137,8 @@ abstract class SettingsPageView with _$SettingsPageView {
       activeSkills: state.runtime.activeSkills,
       selectedProjectId: state.selectedProjectId,
       mcpServers: state.mcpServers,
+      mcpState: state.mcpState,
+      lspState: state.lspState,
       permissionMode: state.permissionMode,
       general: state.general,
       webSearch: state.webSearch,

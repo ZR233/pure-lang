@@ -54,29 +54,33 @@ void registerThreadStreamTests() {
     expect(state.selectedWorkspace!.items.single.text, 'authoritative');
   });
 
-  test('product directory update only replaces addressed project', () async {
+  test('authoritative empty Thread directory clears prior entries', () async {
     final now = DateTime.fromMillisecondsSinceEpoch(1000);
     final initial = _emptyState().copyWith(
-      projects: const [
-        StudioProject(id: 'project-1', name: 'one', path: 'one'),
-        StudioProject(id: 'project-2', name: 'two', path: 'two'),
-      ],
-      threads: [
-        StudioThread(
-          id: 'session-1',
-          projectId: 'project-1',
-          title: 'Thread 1',
-          mode: StudioMode.simple,
-          updatedAt: now,
-        ),
-        StudioThread(
-          id: 'session-2',
-          projectId: 'project-2',
-          title: 'Thread 2',
-          mode: StudioMode.task,
-          updatedAt: now,
-        ),
-      ],
+      projectDirectory: const ProjectDirectoryState(
+        values: [
+          StudioProject(id: 'project-1', name: 'one', path: 'one'),
+          StudioProject(id: 'project-2', name: 'two', path: 'two'),
+        ],
+      ),
+      threadDirectory: ThreadDirectoryState(
+        values: [
+          StudioThread(
+            id: 'session-1',
+            projectId: 'project-1',
+            title: 'Thread 1',
+            mode: StudioMode.simple,
+            updatedAt: now,
+          ),
+          StudioThread(
+            id: 'session-2',
+            projectId: 'project-2',
+            title: 'Thread 2',
+            mode: StudioMode.task,
+            updatedAt: now,
+          ),
+        ],
+      ),
     );
     final api = _FakeStudioApi(initial);
     final container = ProviderContainer(
@@ -96,7 +100,7 @@ void registerThreadStreamTests() {
           .requireValue
           .threads
           .map((thread) => thread.id),
-      ['session-2'],
+      isEmpty,
     );
   });
 

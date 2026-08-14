@@ -19,7 +19,8 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
     let runtime = StudioRuntime::new(
         store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
-    );
+    )
+    .unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = runtime
         .create_thread(&project.id, "Mode switch")
@@ -82,6 +83,47 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
 }
 
 #[tokio::test]
+async fn thread_snapshot_does_not_register_an_inactive_actor() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(workspace.path())),
+    )
+    .unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+    let thread = store
+        .list_root_threads(&project.id)
+        .await
+        .unwrap()
+        .remove(0);
+
+    let before = store
+        .read_thread_runtime_revision(&thread.id)
+        .await
+        .unwrap();
+    let first = runtime.thread_snapshot(&thread.id).await.unwrap();
+    let second = runtime.thread_snapshot(&thread.id).await.unwrap();
+
+    assert_eq!(before, 0);
+    assert_eq!(first, second);
+    assert_eq!(
+        store
+            .read_thread_runtime_revision(&thread.id)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        runtime
+            .try_get_thread_handle(&thread.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -93,7 +135,8 @@ async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     let runtime = StudioRuntime::new(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
-    );
+    )
+    .unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = runtime
         .create_thread(&project.id, "Legacy task root")
@@ -109,6 +152,7 @@ async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     active.role = Set("executor".to_string());
     active.update(store.database()).await.unwrap();
 
+    runtime.start_runtime().await.unwrap();
     let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
     let actor = framework
@@ -221,7 +265,9 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
     let runtime = StudioRuntime::new(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
-    );
+    )
+    .unwrap();
+    runtime.start_runtime().await.unwrap();
     runtime.thread_snapshot(&thread.id).await.unwrap();
     assert!(store.task_planner_wake_was_delivered(&wake).await.unwrap());
     let rows = crate::studio::entity::thread_input::Entity::find_by_id(wake.mail_id())
@@ -247,12 +293,14 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
     let runtime = StudioRuntime::new(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
-    );
+    )
+    .unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
-    let root = runtime
-        .create_thread(&project.id, "Archive root")
+    let root = store
+        .list_root_threads(&project.id)
         .await
-        .unwrap();
+        .unwrap()
+        .remove(0);
     let child_id = format!("{}-child", root.id);
     let child = store
         .create_child_thread(crate::studio::ChildThreadSpec {
@@ -279,14 +327,9 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
         .unwrap();
 
     assert_eq!(archived.id, root.id);
-    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
-    assert!(
-        store
-            .list_root_threads(&project.id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let roots = store.list_root_threads(&project.id).await.unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_ne!(roots[0].id, root.id);
     let _ = std::fs::remove_dir_all(workspace);
 }
 
@@ -335,7 +378,7 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
     );
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "Task runtime", StudioMode::Task)
@@ -388,12 +431,13 @@ async fn active_turn_prevents_thread_archival() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
-    let thread = runtime
-        .create_thread(&project.id, "Active archive")
+    let thread = store
+        .list_root_threads(&project.id)
         .await
-        .unwrap();
+        .unwrap()
+        .remove(0);
 
     runtime
         .submit_prompt(StudioSubmitPromptRequest {
@@ -438,7 +482,7 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "UI runtime", StudioMode::Simple)
@@ -513,7 +557,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "Paused Task", StudioMode::Task)
@@ -628,7 +672,7 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "Project cleanup", StudioMode::Simple)
@@ -710,7 +754,7 @@ async fn ui_submit_retries_http_overload_and_completes_session() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "UI overload retry", StudioMode::Simple)

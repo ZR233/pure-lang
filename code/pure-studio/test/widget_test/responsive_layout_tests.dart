@@ -359,7 +359,9 @@ StudioState _responsiveActivityStressState() {
         status: index.isEven ? 'running' : 'completed',
       ),
   ];
-  return state.copyWith(threads: [root, ...agentSessions]);
+  return state.copyWith(
+    threadDirectory: ThreadDirectoryState(values: [root, ...agentSessions]),
+  );
 }
 
 bool _rectFitsViewport(Rect rect, {double inset = 0}) {

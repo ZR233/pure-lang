@@ -207,41 +207,15 @@ pub struct StudioLspHealth {
     pub active_lsp_servers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioKeyValue {
-    pub key: String,
-    pub value: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioMcpServer {
     pub id: String,
     pub enabled: bool,
     pub transport: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: Vec<StudioKeyValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bearer_token_env_var: Option<String>,
-    #[serde(default)]
-    pub headers: Vec<StudioKeyValue>,
     pub endpoint: String,
     pub source_kind: String,
-    pub source_label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_detail: Option<String>,
     pub status_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_message: Option<String>,
     pub mutation_policy: String,
     pub availability_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

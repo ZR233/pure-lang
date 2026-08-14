@@ -27,6 +27,11 @@ class DemoStudioApi implements StudioApi {
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   int _turnSequence = 0;
   int _threadSequence = 0;
+  int _settingsRevision = 1;
+  int _skillsRevision = 1;
+  int _providerUsageRevision = 1;
+  int _mcpRevision = 0;
+  int _lspRevision = 0;
   String? _selectedThreadId;
 
   Duration get promptStartDelay => const Duration(milliseconds: 120);
@@ -46,7 +51,7 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> bootstrap() async {
+  Future<StudioState> readStudioState() async {
     final fixture = _ensureWorkspaceFixture();
     final project = fixture.project;
     final threads = fixture.threads;
@@ -69,19 +74,23 @@ class DemoStudioApi implements StudioApi {
               '';
     if (_archivedProjectIds.contains(project.id)) {
       return StudioState(
-        projects: const [],
-        threads: const [],
-        providers: _providers ?? [defaultProvider],
+        projectDirectory: const ProjectDirectoryState(),
+        threadDirectory: const ThreadDirectoryState(),
+        taskDirectory: const TaskDirectoryState(),
+        agentDirectory: const AgentDirectoryState(),
+        settingsState: _settingsSnapshot(
+          providers: _providers ?? [defaultProvider],
+          roles: _roles ?? const [],
+        ),
+        recoveryState: const RecoveryStateSnapshot(),
+        mcpState: const McpStateSnapshot(),
+        lspState: const LspStateSnapshot(),
+        skillsByProject: const {},
+        providerUsageState: const ProviderUsageStateSnapshot(),
+        updaterState: const UpdaterStateSnapshot(),
         providerCatalog: _providerCatalog,
-        roles: _roles ?? const [],
-        mcpServers: const [],
-        instructions: _instructions,
-        skills: _skills,
-        general: _general,
-        webSearch: _webSearch,
         selectedProjectId: null,
         selectedThreadId: null,
-        permissionMode: _permissionMode,
       );
     }
     final selectedThreadId =
@@ -91,8 +100,50 @@ class DemoStudioApi implements StudioApi {
             ?.id ??
         threads.firstOrNull?.id;
     return StudioState(
-      projects: [project],
-      threads: threads,
+      projectDirectory: ProjectDirectoryState(
+        meta: _demoMeta(1),
+        values: [project],
+      ),
+      threadDirectory: ThreadDirectoryState(
+        meta: _demoMeta(1),
+        values: threads,
+      ),
+      taskDirectory: const TaskDirectoryState(),
+      agentDirectory: const AgentDirectoryState(),
+      settingsState: _settingsSnapshot(
+        providers: _providers ?? [defaultProvider],
+        roles:
+            _roles ??
+            [
+              for (final key in const [
+                'planner',
+                'explorer',
+                'executor',
+                'reviewer',
+              ])
+                RoleSettingsView(
+                  key: key,
+                  providerId: defaultProvider.id,
+                  model: defaultProvider.defaultModel,
+                  effort: resolvedDefaultEffort,
+                ),
+            ],
+      ),
+      recoveryState: const RecoveryStateSnapshot(),
+      mcpState: const McpStateSnapshot(),
+      lspState: const LspStateSnapshot(),
+      skillsByProject: {
+        project.id: _demoSkillsState(project.id, _skillsRevision),
+      },
+      providerUsageState: ProviderUsageStateSnapshot(
+        meta: _demoMeta(_providerUsageRevision),
+        configFingerprint: 'demo',
+        usages: [
+          for (final provider in _providers ?? [defaultProvider])
+            _demoProviderUsage(provider),
+        ],
+      ),
+      updaterState: const UpdaterStateSnapshot(),
       workspacesByThread: Map.unmodifiable(_workspaces),
       workspaceUiByThread: {
         for (final thread in threads)
@@ -100,31 +151,25 @@ class DemoStudioApi implements StudioApi {
             syncState: AgentWorkspaceSyncState.ready,
           ),
       },
-      providers: _providers ?? [defaultProvider],
       providerCatalog: _providerCatalog,
-      roles:
-          _roles ??
-          [
-            for (final key in const [
-              'planner',
-              'explorer',
-              'executor',
-              'reviewer',
-            ])
-              RoleSettingsView(
-                key: key,
-                providerId: defaultProvider.id,
-                model: defaultProvider.defaultModel,
-                effort: resolvedDefaultEffort,
-              ),
-          ],
-      mcpServers: const [],
+      selectedProjectId: project.id,
+      selectedThreadId: selectedThreadId,
+    );
+  }
+
+  SettingsStateSnapshot _settingsSnapshot({
+    required List<ProviderSettingsView> providers,
+    required List<RoleSettingsView> roles,
+  }) {
+    return SettingsStateSnapshot(
+      meta: _demoMeta(_settingsRevision),
+      providers: providers,
+      defaultProviderId: providers.firstOrNull?.id,
+      roles: roles,
       instructions: _instructions,
       skills: _skills,
       general: _general,
       webSearch: _webSearch,
-      selectedProjectId: project.id,
-      selectedThreadId: selectedThreadId,
       permissionMode: _permissionMode,
     );
   }
@@ -351,17 +396,23 @@ class DemoStudioApi implements StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
 
   @override
-  Future<StudioState> openProject(String path) {
+  Future<StudioProject> openProject(String path) async {
     _archivedProjectIds.remove('project-local');
-    return bootstrap();
+    return (await readStudioState()).projects.first;
   }
 
   @override
-  Future<StudioState> selectProject(String projectId) => bootstrap();
+  Future<void> activateProject(String projectId) async {
+    if (!(await readStudioState()).projects.any(
+      (project) => project.id == projectId,
+    )) {
+      throw StateError('unknown demo project $projectId');
+    }
+  }
 
   @override
-  Future<StudioState> createThread(String projectId, {String? title}) async {
-    final current = await bootstrap();
+  Future<StudioThread> createThread(String projectId, {String? title}) async {
+    final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
       throw StateError('unknown demo project $projectId');
     }
@@ -377,15 +428,12 @@ class DemoStudioApi implements StudioApi {
     );
     _createdRootThreads.add(thread);
     _selectedThreadId = thread.id;
-    return bootstrap();
+    return thread;
   }
 
   @override
-  Future<StudioState> archiveThread(
-    String threadId, {
-    String? selectedThreadId,
-  }) async {
-    final current = await bootstrap();
+  Future<StudioThread> archiveThread(String threadId) async {
+    final current = await readStudioState();
     final thread = current.threads
         .where((candidate) => candidate.id == threadId)
         .firstOrNull;
@@ -397,17 +445,13 @@ class DemoStudioApi implements StudioApi {
       throw StateError('thread tree has an active turn or pending input');
     }
     _archivedThreadIds.add(threadId);
-    _selectedThreadId = selectedThreadId;
-    return bootstrap();
+    if (_selectedThreadId == threadId) _selectedThreadId = null;
+    return thread;
   }
 
   @override
-  Future<StudioState> archiveProject(
-    String projectId, {
-    String? selectedProjectId,
-  }) {
+  Future<void> archiveProject(String projectId) async {
     _archivedProjectIds.add(projectId);
-    return bootstrap();
   }
 
   @override
@@ -423,13 +467,8 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupProject(
-    String projectId,
-    String expectedRevision, {
-    String? selectedProjectId,
-  }) {
+  Future<void> cleanupProject(String projectId, String expectedRevision) async {
     _archivedProjectIds.add(projectId);
-    return bootstrap();
   }
 
   @override
@@ -446,29 +485,24 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupRecoveryIssue(
+  Future<void> cleanupRecoveryIssue(
     String issueId,
-    String expectedRevision, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) => bootstrap();
+    String expectedRevision,
+  ) async {}
 
   @override
-  Future<StudioState> retryRecoveryIssue(
-    String issueId, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) => bootstrap();
+  Future<void> retryRecoveryIssue(String issueId) async {}
 
   @override
-  Future<StudioState> setModelRole({
+  Future<SettingsStateSnapshot> setModelRole({
+    required int expectedSettingsRevision,
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedThreadId,
   }) async {
-    final current = await bootstrap();
+    _checkSettingsRevision(expectedSettingsRevision);
+    final current = await readStudioState();
     _roles = [
       for (final role in current.roles)
         role.key == roleKey
@@ -480,15 +514,16 @@ class DemoStudioApi implements StudioApi {
               )
             : role,
     ];
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> setThreadMode({
+  Future<void> setThreadMode({
     required String threadId,
     required StudioMode mode,
   }) async {
-    final current = await bootstrap();
+    final current = await readStudioState();
     final thread = current.threads
         .where((candidate) => candidate.id == threadId)
         .firstOrNull;
@@ -514,7 +549,6 @@ class DemoStudioApi implements StudioApi {
         ),
       );
     }
-    return bootstrap();
   }
 
   @override
@@ -522,7 +556,7 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Stream<ThreadStreamFrame> subscribeThread(String threadId) async* {
-    final snapshot = (await bootstrap()).workspacesByThread[threadId];
+    final snapshot = (await readStudioState()).workspacesByThread[threadId];
     if (snapshot == null) {
       throw StateError('unknown demo thread $threadId');
     }
@@ -535,6 +569,13 @@ class DemoStudioApi implements StudioApi {
         ThreadResyncRequiredFrame(threadId: final id) => id == threadId,
       },
     );
+  }
+
+  @override
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
+    final workspace = (await readStudioState()).workspacesByThread[threadId];
+    if (workspace == null) throw StateError('unknown demo thread $threadId');
+    return workspace;
   }
 
   @override
@@ -787,59 +828,86 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<SettingsStateSnapshot> saveRuntimePermissionMode(
+    int expectedSettingsRevision,
+    PermissionMode mode,
+  ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _permissionMode = mode;
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> saveProviderSettings(
+  Future<SettingsStateSnapshot> saveProviderSettings(
+    int expectedSettingsRevision,
     ProviderSettingsCommand command,
   ) async {
-    final current = await bootstrap();
+    _checkSettingsRevision(expectedSettingsRevision);
+    final current = await readStudioState();
     _providers = _providersFromSettingsCommand(
       command,
       previous: current.providers,
       catalog: _providerCatalog,
     );
     _roles = _rolesFromSettingsCommand(command);
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> saveInstructionsSettings(
+    int expectedSettingsRevision,
     InstructionsSettingsCommand command,
   ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _instructions = _instructionsFromSettingsCommand(command);
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
+  Future<SettingsStateSnapshot> saveSkillsSettings(
+    int expectedSettingsRevision,
+    SkillsSettingsCommand command,
+  ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _skills = _skillsFromSettingsCommand(command);
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> saveMcpSettings(McpSettingsCommand command) =>
-      bootstrap();
+  Future<SettingsStateSnapshot> saveMcpSettings(
+    int expectedSettingsRevision,
+    McpSettingsCommand command,
+  ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
+  }
 
   @override
-  Future<StudioState> saveGeneralSettings(
+  Future<SettingsStateSnapshot> saveGeneralSettings(
+    int expectedSettingsRevision,
     GeneralSettingsCommand command,
   ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _general = GeneralSettingsView(
       followSystemTheme: command.followSystemTheme,
       followActiveTurn: command.followActiveTurn,
       compactTimeline: command.compactTimeline,
     );
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<StudioState> saveWebSearchSettings(
+  Future<SettingsStateSnapshot> saveWebSearchSettings(
+    int expectedSettingsRevision,
     WebSearchSettingsCommand command,
   ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _webSearch = WebSearchSettingsView(
       configuredMode: command.mode,
       effectiveMode: command.mode,
@@ -853,22 +921,91 @@ class DemoStudioApi implements StudioApi {
       providerId: 'openai',
       model: 'gpt-5',
     );
-    return bootstrap();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<List<ProviderUsageView>> loadProviderUsages() async {
-    final current = await bootstrap();
-    return [
-      for (final provider in current.providers) _demoProviderUsage(provider),
-    ];
+  Future<ProviderUsageStateSnapshot> checkProviderUsage() async {
+    _providerUsageRevision += 1;
+    return (await readStudioState()).providerUsageState;
   }
 
   @override
-  Future<List<String>> listDiscoveredSkills(String projectId) async {
+  Future<SkillsStateSnapshot> readSkillsState(String projectId) async {
     return _archivedProjectIds.contains(projectId)
-        ? const []
-        : const ['flutter-ui-polish', 'runtime-review', 'studio-settings'];
+        ? _demoSkillsState(projectId, 0, skills: const [])
+        : _demoSkillsState(projectId, _skillsRevision);
+  }
+
+  @override
+  Future<SkillsStateSnapshot> discoverSkills(String projectId) async {
+    _skillsRevision += 1;
+    return readSkillsState(projectId);
+  }
+
+  @override
+  Future<McpStateSnapshot> readMcpState() async => _demoMcpState();
+
+  @override
+  Future<McpStateSnapshot> resetMcpServer(String serverId) async {
+    _mcpRevision += 1;
+    return _demoMcpState();
+  }
+
+  @override
+  Future<McpStateSnapshot> resetAllMcp() async {
+    _mcpRevision += 1;
+    return _demoMcpState();
+  }
+
+  @override
+  Future<LspStateSnapshot> readLspState() async => _demoLspState();
+
+  @override
+  Future<LspStateSnapshot> probeLspServer(String projectId) async {
+    _lspRevision += 1;
+    return _demoLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> repairLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    _lspRevision += 1;
+    return _demoLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    _lspRevision += 1;
+    return _demoLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspWorkspace(String projectId) async {
+    _lspRevision += 1;
+    return _demoLspState();
+  }
+
+  McpStateSnapshot _demoMcpState() {
+    return McpStateSnapshot(meta: _demoMeta(_mcpRevision));
+  }
+
+  LspStateSnapshot _demoLspState() {
+    return LspStateSnapshot(meta: _demoMeta(_lspRevision));
+  }
+
+  void _checkSettingsRevision(int expected) {
+    if (expected != _settingsRevision) {
+      throw StateError(
+        'settings revision conflict: expected $expected, actual $_settingsRevision',
+      );
+    }
   }
 
   void _emitThreadUpdate(String threadId, ThreadWorkspaceUpdate update) {
@@ -1005,8 +1142,8 @@ class DriverDemoStudioApi extends DemoStudioApi {
   Duration get promptToolDelay => const Duration(seconds: 3);
 
   @override
-  Future<StudioState> bootstrap() async {
-    final state = await super.bootstrap();
+  Future<StudioState> readStudioState() async {
+    final state = await super.readStudioState();
     const threadId = 'thread-main';
     final workspace = state.workspacesByThread[threadId];
     if (workspace == null) return state;
@@ -1096,4 +1233,32 @@ class DriverDemoStudioApi extends DemoStudioApi {
       },
     );
   }
+}
+
+ObservedStateMeta _demoMeta(int revision) {
+  return ObservedStateMeta(
+    revision: revision,
+    phase: ObservedStatePhase.ready,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(revision * 1000),
+    stale: false,
+  );
+}
+
+SkillsStateSnapshot _demoSkillsState(
+  String projectId,
+  int revision, {
+  List<String> skills = const [
+    'flutter-ui-polish',
+    'runtime-review',
+    'studio-settings',
+  ],
+}) {
+  return SkillsStateSnapshot(
+    meta: _demoMeta(revision),
+    projectId: projectId,
+    configFingerprint: 'demo',
+    catalogRevision: revision,
+    skills: skills,
+    warnings: const [],
+  );
 }

@@ -51,6 +51,7 @@ fn assembles_three_layers_in_stable_order() {
     let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&config),
         skills: None,
+        skill_catalog: None,
         execution_profile: Some(ExecutionInstructionProfile {
             label: "test",
             instructions: "mode instructions",
@@ -102,6 +103,7 @@ fn platform_block_is_after_mode_and_before_config_developer() {
     let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&config),
         skills: None,
+        skill_catalog: None,
         execution_profile: Some(ExecutionInstructionProfile {
             label: "test",
             instructions: "mode instructions",
@@ -166,6 +168,7 @@ fn filters_empty_blocks_and_uses_model_base() {
     let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: None,
         skills: None,
+        skill_catalog: None,
         execution_profile: None,
         model: &model,
         workspace_root: &dir,
@@ -194,6 +197,7 @@ fn profile_can_override_base_and_add_context_blocks() {
         InstructionAssemblyRequest {
             instructions: None,
             skills: None,
+            skill_catalog: None,
             execution_profile: None,
             model: &ModelInfo::fallback("test-model"),
             workspace_root: &dir,
@@ -321,6 +325,7 @@ fn config_base_override_replaces_model_base() {
     let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&config),
         skills: None,
+        skill_catalog: None,
         execution_profile: Some(ExecutionInstructionProfile {
             label: "test",
             instructions: "mode instructions",
@@ -349,6 +354,7 @@ fn built_in_base_requires_doc_first_and_final_review() {
     let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: None,
         skills: None,
+        skill_catalog: None,
         execution_profile: None,
         model: &ModelInfo::fallback("test-model"),
         workspace_root: &dir,

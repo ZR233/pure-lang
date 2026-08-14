@@ -76,9 +76,14 @@ void registerAgentWorkspaceTests() {
       role: 'planner',
       updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
     );
-    final current = base.copyWith(threads: [canonical]);
+    final current = base.copyWith(
+      threadDirectory: ThreadDirectoryState(values: [canonical]),
+    );
 
-    final next = applyThreadSnapshot(current, base.selectedWorkspace!);
+    final next = applyThreadSnapshot(
+      current,
+      base.selectedWorkspace!.copyWith(revision: 1),
+    );
 
     expect(next.selectedThread!.mode, StudioMode.task);
     expect(next.selectedThread!.role, 'planner');
@@ -186,7 +191,7 @@ StudioState _rootAndChildState() {
     ),
   );
   return base.copyWith(
-    threads: [root, child],
+    threadDirectory: ThreadDirectoryState(values: [root, child]),
     workspacesByThread: {root.id: rootWorkspace, child.id: childWorkspace},
     workspaceUiByThread: {
       root.id: const WorkspaceUiState(

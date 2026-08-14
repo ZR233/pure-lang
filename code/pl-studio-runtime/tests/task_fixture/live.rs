@@ -63,7 +63,7 @@ impl LiveTaskFixture {
         .await?;
 
         let store = StudioStore::open(root.path.join("studio.sqlite")).await?;
-        let runtime = StudioRuntime::new(store.clone(), installed_config.store.clone());
+        let runtime = StudioRuntime::new(store.clone(), installed_config.store.clone())?;
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
             .create_thread(&project.id, "Live headless shooter task")

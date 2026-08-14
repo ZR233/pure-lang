@@ -7,37 +7,25 @@ import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
-import '../types/settings.dart';
-import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `shutdown_runtime_for_update`
 
-Future<RuntimeSnapshot> initializeRuntime() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleInitializeRuntime();
-
-Future<RuntimeSnapshot> startRuntime() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleStartRuntime();
+Future<RuntimeSnapshot> startStudioRuntime() =>
+    RustLib.instance.api.crateApiStudioHandlersLifecycleStartStudioRuntime();
 
 Future<RuntimeSnapshot> shutdownRuntime() =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleShutdownRuntime();
 
-Future<BridgeStudioSnapshotResponse> bootstrapStudio() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleBootstrapStudio();
-
-Future<BridgeStudioSnapshotResponse> openProject({required String path}) =>
+Future<ProjectDto> openProject({required String path}) =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleOpenProject(path: path);
 
-Future<BridgeStudioSnapshotResponse> selectProject({
-  required String projectId,
-}) => RustLib.instance.api.crateApiStudioHandlersLifecycleSelectProject(
-  projectId: projectId,
-);
+Future<void> activateProject({required String projectId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersLifecycleActivateProject(projectId: projectId);
 
-Future<BridgeStudioSnapshotResponse> archiveProject({
-  required String projectId,
-  String? selectedProjectId,
-}) => RustLib.instance.api.crateApiStudioHandlersLifecycleArchiveProject(
-  projectId: projectId,
-  selectedProjectId: selectedProjectId,
-);
+Future<ProjectDto?> archiveProject({required String projectId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersLifecycleArchiveProject(projectId: projectId);

@@ -4,7 +4,7 @@ use std::path::Path;
 use pl_protocol::Result;
 
 use super::scanning::{find_skill_files, metadata_from_file};
-use super::system::install_system_skills;
+use super::system::system_skills_dir;
 use super::util::{expand_home, platform_matches};
 use super::{SkillCandidate, SkillCatalog, SkillMetadata, SkillSource, SkillSourceKind};
 use crate::config::SkillsConfig;
@@ -80,10 +80,12 @@ pub fn build_skills_prompt(workspace_root: &Path, config: &SkillsConfig) -> Resu
         return Ok(None);
     }
     let catalog = SkillCatalog::discover(workspace_root, config)?;
+    Ok(Some(build_skills_prompt_from_catalog(&catalog)))
+}
+
+pub fn build_skills_prompt_from_catalog(catalog: &SkillCatalog) -> String {
     if catalog.skills.is_empty() {
-        return Ok(Some(
-            "# Skills\n当前项目未发现可用 skills。完成可复用流程后，可用 `skill_manage` 写入项目 `skills/` 目录。".to_string(),
-        ));
+        return "# Skills\n当前项目未发现可用 skills。完成可复用流程后，可用 `skill_manage` 写入项目 `skills/` 目录。".to_string();
     }
 
     let mut prompt = String::from(
@@ -105,7 +107,7 @@ pub fn build_skills_prompt(workspace_root: &Path, config: &SkillsConfig) -> Resu
             prompt.push_str(&format!("- {warning}\n"));
         }
     }
-    Ok(Some(prompt))
+    prompt
 }
 
 fn skill_sources(
@@ -125,13 +127,13 @@ fn skill_sources(
         priority: 1,
     });
     if config.system.enabled {
-        match install_system_skills(config) {
+        match system_skills_dir(config) {
             Ok(root) => sources.push(SkillSource {
                 root,
                 kind: SkillSourceKind::System,
                 priority: 2,
             }),
-            Err(error) => warnings.push(format!("failed to install system skills: {error}")),
+            Err(error) => warnings.push(format!("failed to resolve system skills: {error}")),
         }
     }
     for external_dir in &config.external_dirs {

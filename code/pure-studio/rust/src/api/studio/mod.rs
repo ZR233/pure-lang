@@ -7,15 +7,18 @@ pub mod types;
 
 // Re-exports from submodules
 pub use self::handlers::{
-    BridgeStudioUpdateOperation, apply_task_recovery, archive_project, archive_thread,
-    bootstrap_studio, check_studio_update, cleanup_project, cleanup_recovery_issue, create_thread,
-    init_app, initialize_runtime, install_studio_update, interrupt_turn, list_discovered_skills,
-    list_thread_turns, list_threads, load_provider_catalog, load_provider_usages,
-    load_web_search_settings, open_project, preview_project_cleanup,
-    preview_recovery_issue_cleanup, preview_task_recovery, read_thread, respond_interaction,
-    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
-    save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
-    set_model_role, set_thread_mode, shutdown_runtime, start_runtime, start_turn, steer_turn,
+    BridgeStudioUpdateOperation, activate_project, apply_task_recovery, archive_project,
+    archive_thread, check_provider_usage, check_studio_update, cleanup_project,
+    cleanup_recovery_issue, create_thread, discover_skills, init_app, install_studio_update,
+    interrupt_turn, list_thread_turns, list_threads, load_provider_catalog, open_project,
+    preview_project_cleanup, preview_recovery_issue_cleanup, preview_task_recovery,
+    probe_lsp_server, read_lsp_state, read_mcp_state, read_provider_usage_state,
+    read_settings_state, read_skills_state, read_studio_state, read_thread,
+    read_web_search_settings, reload_settings_from_disk, repair_lsp_server, reset_lsp, reset_mcp,
+    respond_interaction, save_general_settings, save_instructions_settings, save_mcp_settings,
+    save_provider_settings, save_runtime_permission_mode, save_skills_settings,
+    save_web_search_settings, set_model_role, set_thread_mode, shutdown_runtime,
+    start_studio_runtime, start_turn, steer_turn,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -35,24 +38,25 @@ mod tests {
     fn bridge_product_event_uses_typed_payload() {
         let event = pl_studio_runtime::StudioProductEventEnvelope {
             event_id: "event-1".to_string(),
-            project_id: None,
             sequence: 7,
             created_at: 10,
-            kind: StudioProductEventKind::ThreadDirectoryChanged {
-                project_id: "project-1".to_string(),
-                threads: Vec::new(),
-            },
+            kind: StudioProductEventKind::ThreadDirectoryChanged(
+                pl_studio_runtime::StudioThreadDirectoryState {
+                    meta: pl_protocol::ObservedStateMeta::ready(3, 10),
+                    threads: Vec::new(),
+                },
+            ),
         };
 
-        let envelope = super::convert::event::bridge_product_event(event);
+        let envelope = super::convert::event::bridge_product_event(event).unwrap();
 
         assert_eq!(envelope.sequence, 7);
         assert_eq!(
             envelope.payload,
-            BridgeProductEventPayload::ThreadDirectoryChanged {
-                project_id: "project-1".to_string(),
+            BridgeProductEventPayload::ThreadDirectoryChanged(super::BridgeThreadDirectoryState {
+                meta: pl_protocol::ObservedStateMeta::ready(3, 10).into(),
                 threads: Vec::new(),
-            }
+            })
         );
     }
 

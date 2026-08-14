@@ -11,6 +11,7 @@ use crate::config::{InstructionsConfig, SkillsConfig};
 pub struct InstructionAssemblyRequest<'a> {
     pub instructions: Option<&'a InstructionsConfig>,
     pub skills: Option<&'a SkillsConfig>,
+    pub skill_catalog: Option<&'a crate::skill::SkillCatalog>,
     pub execution_profile: Option<ExecutionInstructionProfile<'a>>,
     pub model: &'a ModelInfo,
     pub workspace_root: &'a Path,

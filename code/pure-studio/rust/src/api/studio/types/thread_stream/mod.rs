@@ -62,6 +62,13 @@ pub struct BridgeThreadSnapshot {
     pub items: Vec<BridgeThreadItem>,
     pub interactions: Vec<BridgeInteractionRequest>,
     pub runtime: Option<BridgeThreadRuntimeSnapshot>,
+    pub runtime_availability: BridgeThreadRuntimeAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeThreadRuntimeAvailability {
+    Active,
+    Inactive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

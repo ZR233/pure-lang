@@ -51,10 +51,12 @@ void registerShellSettingsTests() {
       mode: StudioMode.simple,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
     );
-    final state = initial.copyWith(threads: [first, second]);
+    final state = initial.copyWith(
+      threadDirectory: ThreadDirectoryState(values: [first, second]),
+    );
     final api = _FakeStudioApi(state)
       ..archiveThreadState = state.copyWith(
-        threads: [second],
+        threadDirectory: ThreadDirectoryState(values: [second]),
         selectedThreadId: second.id,
       );
     await tester.pumpWidget(
@@ -69,7 +71,6 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(api.archivedThreadId, first.id);
-    expect(api.archiveSelectedThreadId, first.id);
     expect(find.byKey(StudioDriverKeys.threadRow(first.id)), findsNothing);
     expect(find.byKey(StudioDriverKeys.threadRow(second.id)), findsOneWidget);
     expect(api.threadSubscriptions.last, second.id);
@@ -502,7 +503,7 @@ void registerShellSettingsTests() {
     final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
     final api = _FakeStudioApi(
       state.copyWith(
-        threads: [thread],
+        threadDirectory: ThreadDirectoryState(values: [thread]),
         workspacesByThread: {
           thread.id: state.selectedWorkspace!.copyWith(
             thread: thread,
@@ -519,22 +520,27 @@ void registerShellSettingsTests() {
             ),
           ),
         },
-        tasksByRootThread: const {
-          'session-1': TaskRuntimeView(
-            runId: 'task-run-1',
-            phase: 'implementing',
-            branch: 'codex/task-mode',
-            expectedHead: '1234567890abcdef',
-            statusMessage: 'Executor delivery ready',
-            stopRequestedOrigin: null,
-            stopRequestedReason: null,
-            taskGeneration: 0,
-            workUnits: [],
-            completions: [],
-            merges: [],
-            reviews: [],
-          ),
-        },
+        taskDirectory: const TaskDirectoryState(
+          values: [
+            TaskDirectoryEntryView(
+              rootThreadId: 'session-1',
+              task: TaskRuntimeView(
+                runId: 'task-run-1',
+                phase: 'implementing',
+                branch: 'codex/task-mode',
+                expectedHead: '1234567890abcdef',
+                statusMessage: 'Executor delivery ready',
+                stopRequestedOrigin: null,
+                stopRequestedReason: null,
+                taskGeneration: 0,
+                workUnits: [],
+                completions: [],
+                merges: [],
+                reviews: [],
+              ),
+            ),
+          ],
+        ),
       ),
     );
     await tester.pumpWidget(
@@ -594,11 +600,15 @@ void registerShellSettingsTests() {
     final state = _stateWithPlannerModels();
     final taskThread = state.selectedThread!.copyWith(mode: StudioMode.task);
     final api = _FakeStudioApi(
-      state.copyWith(
-        threads: [taskThread],
-        workspacesByThread: {
-          taskThread.id: state.selectedWorkspace!.copyWith(thread: taskThread),
-        },
+      _withSettingsFixture(
+        state.copyWith(
+          threadDirectory: ThreadDirectoryState(values: [taskThread]),
+          workspacesByThread: {
+            taskThread.id: state.selectedWorkspace!.copyWith(
+              thread: taskThread,
+            ),
+          },
+        ),
         permissionMode: PermissionMode.fullAccess,
       ),
     );
@@ -671,6 +681,137 @@ void registerShellSettingsTests() {
       triggerTooltip: 'Permission mode',
       menuText: 'Full',
     );
+  });
+
+  testWidgets('status model and effort controls expose stable driver keys', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.model));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-reasoner')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-reasoner')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.roleUpdate?.model, 'deepseek-reasoner');
+
+    await tester.tap(find.byKey(StudioDriverKeys.reasoningEffort));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.reasoningEffortOption('max')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('MCP refresh is read-only and reset commands are explicit', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = McpServerSettingsView(
+      id: 'dart',
+      transport: 'stdio',
+      endpoint: 'dart mcp-server',
+      enabled: true,
+      status: 'ready',
+    );
+    final state =
+        _withSettingsFixture(
+          _emptyState(),
+          mcpServers: const [server],
+        ).copyWith(
+          mcpState: McpStateSnapshot(
+            meta: _testObservedMeta(1),
+            activeServers: const ['dart'],
+            servers: const [server],
+          ),
+        );
+    final api = _FakeStudioApi(state);
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('mcp')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.mcpRefresh));
+    await tester.pumpAndSettle();
+    expect(api.readMcpStateCount, 1);
+    expect(api.resetMcpServerId, isNull);
+    expect(api.resetAllMcpCount, 0);
+
+    await tester.tap(find.byKey(StudioDriverKeys.mcpResetServer('dart')));
+    await tester.pumpAndSettle();
+    expect(api.resetMcpServerId, 'dart');
+
+    await tester.tap(find.byKey(StudioDriverKeys.mcpResetAll));
+    await tester.pumpAndSettle();
+    expect(api.resetAllMcpCount, 0);
+    await tester.tap(find.byKey(StudioDriverKeys.mcpResetAllConfirm));
+    await tester.pumpAndSettle();
+    expect(api.resetAllMcpCount, 1);
+  });
+
+  testWidgets('LSP refresh, probe, repair and reset use typed commands', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = LspServerStateView(
+      id: 'rust-analyzer',
+      displayName: 'rust-analyzer',
+      availability: 'missingRustupComponent',
+      message: 'component missing',
+    );
+    final state = _emptyState().copyWith(
+      lspState: LspStateSnapshot(
+        meta: _testObservedMeta(1),
+        servers: const [server],
+      ),
+    );
+    final api = _FakeStudioApi(state);
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('lsp')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.lspRefresh));
+    await tester.pumpAndSettle();
+    expect(api.readLspStateCount, 1);
+    expect(api.probedLspProjectId, isNull);
+
+    await tester.tap(find.byKey(StudioDriverKeys.lspProbe));
+    await tester.pumpAndSettle();
+    expect(api.probedLspProjectId, 'project-1');
+
+    await tester.tap(
+      find.byKey(StudioDriverKeys.lspRepairServer('rust-analyzer')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.repairedLspServer?.projectId, 'project-1');
+    expect(api.repairedLspServer?.serverId, 'rust-analyzer');
+
+    await tester.tap(
+      find.byKey(StudioDriverKeys.lspResetServer('rust-analyzer')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.resetLspServerRequest?.projectId, 'project-1');
+    expect(api.resetLspServerRequest?.serverId, 'rust-analyzer');
+
+    await tester.tap(find.byKey(StudioDriverKeys.lspResetWorkspace));
+    await tester.pumpAndSettle();
+    expect(api.resetLspWorkspaceProjectId, 'project-1');
   });
 
   testWidgets('provider settings can add provider through typed save', (
@@ -1081,7 +1222,8 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
+      _withSettingsFixture(
+        _stateWithPlannerModels(),
         defaultProviderId: 'deepseek',
         providers: [
           ..._stateWithPlannerModels().providers,
@@ -1322,9 +1464,9 @@ void registerShellSettingsTests() {
     _configureSettingsTestView(tester);
     final staleUsage = _providerListUsages.last;
     final api = _FakeStudioApi(
-      _providerListState(
-        zhipuOnly: true,
-      ).copyWith(providerUsages: [staleUsage]),
+      _providerListState(zhipuOnly: true).copyWith(
+        providerUsageState: ProviderUsageStateSnapshot(usages: [staleUsage]),
+      ),
       providerUsages: [staleUsage],
     );
     final blocked = Completer<List<ProviderUsageView>>();
@@ -1389,30 +1531,37 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       final base = _stateWithPlannerModels();
-      final api = _FakeStudioApi(
+      final settingsState = _withSettingsFixture(
         _withSelectedRuntime(
           base,
           base.runtime.copyWith(
             activeSkills: ['flutter-ui-polish', 'rust-review'],
           ),
-        ).copyWith(
-          skills: const SkillsSettingsView(disabled: []),
-          mcpServers: const [
-            McpServerSettingsView(
-              id: 'local',
-              transport: 'stdio',
-              endpoint: 'npx',
-              enabled: true,
-              status: 'enabled',
-            ),
-            McpServerSettingsView(
-              id: 'remote',
-              transport: 'http',
-              endpoint: 'https://example.test/mcp',
-              enabled: false,
-              status: 'disabled',
-            ),
-          ],
+        ),
+        skills: const SkillsSettingsView(disabled: []),
+        mcpServers: const [
+          McpServerSettingsView(
+            id: 'local',
+            transport: 'stdio',
+            endpoint: 'npx',
+            enabled: true,
+            status: 'enabled',
+          ),
+          McpServerSettingsView(
+            id: 'remote',
+            transport: 'http',
+            endpoint: 'https://example.test/mcp',
+            enabled: false,
+            status: 'disabled',
+          ),
+        ],
+      );
+      final api = _FakeStudioApi(
+        settingsState.copyWith(
+          mcpState: McpStateSnapshot(
+            meta: _testObservedMeta(1),
+            servers: settingsState.mcpServers,
+          ),
         ),
       );
       await _pumpSettingsPage(tester, api);
@@ -1446,23 +1595,31 @@ void registerShellSettingsTests() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      final api = _FakeStudioApi(
+      final settingsState = _withSettingsFixture(
         _withSelectedRuntime(
           _stateWithPlannerModels(),
           _stateWithPlannerModels().runtime.copyWith(
             activeSkills: ['flutter-ui-polish'],
           ),
-        ).copyWith(
-          skills: const SkillsSettingsView(disabled: []),
-          mcpServers: const [
-            McpServerSettingsView(
-              id: 'local',
-              transport: 'stdio',
-              endpoint: 'npx',
-              enabled: true,
-              status: 'enabled',
-            ),
-          ],
+        ),
+        skills: const SkillsSettingsView(disabled: []),
+        mcpServers: const [
+          McpServerSettingsView(
+            id: 'local',
+            transport: 'stdio',
+            endpoint: 'npx',
+            enabled: true,
+            status: 'enabled',
+          ),
+        ],
+      );
+      final api = _FakeStudioApi(
+        settingsState.copyWith(
+          mcpState: McpStateSnapshot(
+            meta: _testObservedMeta(1),
+            activeServers: const ['local'],
+            servers: settingsState.mcpServers,
+          ),
         ),
       );
       await tester.pumpWidget(
@@ -1618,7 +1775,8 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
+      _withSettingsFixture(
+        _stateWithPlannerModels(),
         webSearch: const WebSearchSettingsView(
           configuredMode: 'cached',
           effectiveMode: 'disabled',
@@ -1744,7 +1902,11 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     modelCount: '1',
   );
   if (zhipuOnly) {
-    return base.copyWith(defaultProviderId: zhipu.id, providers: const [zhipu]);
+    return _withSettingsFixture(
+      base,
+      defaultProviderId: zhipu.id,
+      providers: const [zhipu],
+    );
   }
   final deepSeek = base.providers.single.copyWith(
     templateKind: 'deepseek',
@@ -1752,7 +1914,8 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     hasBearerToken: true,
     modelCount: '2',
   );
-  return base.copyWith(
+  return _withSettingsFixture(
+    base,
     defaultProviderId: deepSeek.id,
     providers: [deepSeek, zhipu],
   );

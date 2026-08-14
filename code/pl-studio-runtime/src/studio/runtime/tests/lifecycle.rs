@@ -27,7 +27,8 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
         store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
@@ -82,7 +83,8 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
@@ -154,7 +156,8 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
     let restarted_snapshot = restarted.initialize_runtime().await.unwrap();
     assert_eq!(restarted_snapshot.status, StudioRuntimeStatus::Ready);
     assert!(restarted.recovery_issues().is_empty());
@@ -270,7 +273,8 @@ async fn open_project_validates_path_before_persisting() {
     let runtime = StudioRuntime::new(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-    );
+    )
+    .unwrap();
 
     let missing_error = runtime.open_project(&missing_workspace).await.unwrap_err();
     let file_error = runtime.open_project(&file_path).await.unwrap_err();
@@ -326,7 +330,8 @@ async fn archive_project_refuses_a_durable_active_task() {
     let runtime = StudioRuntime::new(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-    );
+    )
+    .unwrap();
 
     let error = runtime.archive_project(&project.id).await.unwrap_err();
 
@@ -378,7 +383,8 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
         busy_store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&busy_home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
 
     assert!(
         busy_runtime
@@ -397,7 +403,8 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
         StudioStore::open_memory().await.unwrap(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&idle_home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
     idle_runtime.initialize_runtime().await.unwrap();
     let stopped = idle_runtime
         .shutdown_runtime_if_idle()
@@ -475,7 +482,8 @@ async fn assert_failed_task_preflight_keeps_confirmation_pending(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
 
     runtime
         .resolve_interaction(
@@ -553,7 +561,8 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    );
+    )
+    .unwrap();
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
@@ -600,7 +609,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
         .create_thread(&project.id, "Detached input", StudioMode::Simple)
@@ -766,12 +775,13 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = runtime
         .create_thread(&project.id, "User input Turn boundary")
         .await
         .unwrap();
+    runtime.start_runtime().await.unwrap();
     let mut subscription = runtime
         .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
             thread_id: thread.id.clone(),
@@ -911,7 +921,7 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = runtime
         .create_thread(&project.id, "Task user input boundary")
@@ -1055,7 +1065,7 @@ async fn fresh_task_run_turn_installs_task_status_and_process_tools() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = store
         .create_thread(&project.id, "Active Task tools", StudioMode::Task)
@@ -1133,7 +1143,7 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = runtime
         .create_thread(&project.id, "Plan adjustment continuation")
@@ -1327,7 +1337,7 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
-    let first = StudioRuntime::new(store.clone(), config_store.clone());
+    let first = StudioRuntime::new(store.clone(), config_store.clone()).unwrap();
     let project = first.open_project(&workspace).await.unwrap();
     let thread = first
         .create_thread(&project.id, "Restarted user input")
@@ -1352,7 +1362,7 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
         .unwrap();
     first.shutdown().await;
 
-    let restarted = StudioRuntime::new(store.clone(), config_store);
+    let restarted = StudioRuntime::new(store.clone(), config_store).unwrap();
     restarted.initialize_runtime().await.unwrap();
     let recovered = restarted.thread_snapshot(&thread.id).await.unwrap();
     assert!(recovered.interactions.iter().any(|candidate| {
@@ -1422,23 +1432,124 @@ async fn start_runtime_emits_mcp_health_snapshot() {
     let runtime = StudioRuntime::new(
         StudioStore::open_memory().await.unwrap(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-    );
+    )
+    .unwrap();
     let mut events = runtime.product_events().subscribe();
 
     runtime.start_runtime().await.unwrap();
 
-    let event = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, events.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let StudioProductEventKind::McpHealthChanged { health } = event.kind else {
-        panic!("expected McpHealthChanged event");
-    };
+    let state = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if let StudioProductEventKind::McpStateChanged(state) = event.kind
+                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
+            {
+                break state;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let health = state.health;
     assert!(health.active_mcp_servers.is_empty());
     assert!(health.mcp_servers.iter().any(|server| {
         server.source_kind == "builtIn" && server.availability_kind == "missingCredential"
     }));
 
     runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn unchanged_mcp_reconcile_is_noop_and_shutdown_snapshot_remains_readable() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-mcp-owner-home-{unique}"));
+    let runtime = StudioRuntime::new(
+        StudioStore::open_memory().await.unwrap(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+
+    runtime.start_runtime().await.unwrap();
+    let ready = runtime.read_mcp_state().await.unwrap();
+    runtime.reconcile_mcp_runtime().await.unwrap();
+    let unchanged = runtime.read_mcp_state().await.unwrap();
+    assert_eq!(unchanged, ready);
+
+    runtime.shutdown_runtime().await.unwrap();
+    let stopped = runtime.read_mcp_state().await.unwrap();
+    assert_eq!(stopped.meta.revision, ready.meta.revision + 1);
+    assert!(matches!(
+        stopped.meta.phase,
+        pl_protocol::ObservedStatePhase::Stopped
+    ));
+    assert_eq!(stopped.health, ready.health);
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn activate_project_is_idempotent_for_same_workspace_fingerprint() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-activation-owner-{unique}"));
+    let workspace = root.join("workspace");
+    let home = root.join("home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let runtime = StudioRuntime::new(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+
+    runtime.activate_project(&project.id).await.unwrap();
+    let first_lsp = runtime.read_lsp_state().await;
+    let first_skills = runtime.skill_catalog_runtime().read(&project.id).await;
+
+    runtime.activate_project(&project.id).await.unwrap();
+
+    assert_eq!(runtime.read_lsp_state().await, first_lsp);
+    assert_eq!(
+        runtime.skill_catalog_runtime().read(&project.id).await,
+        first_skills
+    );
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn external_state_reads_are_stable_and_lsp_stopped_snapshot_remains_readable() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-read-only-owner-home-{unique}"));
+    let runtime = StudioRuntime::new(
+        StudioStore::open_memory().await.unwrap(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+
+    let lsp = runtime.read_lsp_state().await;
+    assert_eq!(runtime.read_lsp_state().await, lsp);
+    let usage = runtime.read_provider_usage_state().await;
+    assert_eq!(runtime.read_provider_usage_state().await, usage);
+    let update = runtime.read_update_state().await;
+    assert_eq!(runtime.read_update_state().await, update);
+
+    runtime.shutdown_runtime().await.unwrap();
+    let stopped = runtime.read_lsp_state().await;
+    assert_eq!(stopped.meta.revision, lsp.meta.revision + 1);
+    assert!(matches!(
+        stopped.meta.phase,
+        pl_protocol::ObservedStatePhase::Stopped
+    ));
+    assert_eq!(stopped.health, lsp.health);
     let _ = tokio::fs::remove_dir_all(home).await;
 }

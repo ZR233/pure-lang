@@ -2,51 +2,33 @@ part of 'studio_api.dart';
 
 abstract class StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog();
-  Future<StudioState> bootstrap();
-  Future<StudioState> openProject(String path);
-  Future<StudioState> selectProject(String projectId);
-  Future<StudioState> createThread(String projectId, {String? title});
-  Future<StudioState> archiveThread(
-    String threadId, {
-    String? selectedThreadId,
-  });
-  Future<StudioState> archiveProject(
-    String projectId, {
-    String? selectedProjectId,
-  });
+  Future<StudioState> readStudioState();
+  Future<void> activateProject(String projectId);
+  Future<StudioProject> openProject(String path);
+  Future<StudioThread> createThread(String projectId, {String? title});
+  Future<StudioThread> archiveThread(String threadId);
+  Future<void> archiveProject(String projectId);
   Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId);
-  Future<StudioState> cleanupProject(
-    String projectId,
-    String expectedRevision, {
-    String? selectedProjectId,
-  });
+  Future<void> cleanupProject(String projectId, String expectedRevision);
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId);
-  Future<StudioState> cleanupRecoveryIssue(
-    String issueId,
-    String expectedRevision, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  });
-  Future<StudioState> retryRecoveryIssue(
-    String issueId, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  });
+  Future<void> cleanupRecoveryIssue(String issueId, String expectedRevision);
+  Future<void> retryRecoveryIssue(String issueId);
   Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId);
   Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request);
-  Future<StudioState> setModelRole({
+  Future<SettingsStateSnapshot> setModelRole({
+    required int expectedSettingsRevision,
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedThreadId,
   });
-  Future<StudioState> setThreadMode({
+  Future<void> setThreadMode({
     required String threadId,
     required StudioMode mode,
   });
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId);
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
     String? cursor,
@@ -67,17 +49,45 @@ abstract class StudioApi {
     String interactionId,
     InteractionResolutionCommand resolution,
   );
-  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode);
-  Future<StudioState> saveProviderSettings(ProviderSettingsCommand command);
-  Future<StudioState> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> saveRuntimePermissionMode(
+    int expectedSettingsRevision,
+    PermissionMode mode,
+  );
+  Future<SettingsStateSnapshot> saveProviderSettings(
+    int expectedSettingsRevision,
+    ProviderSettingsCommand command,
+  );
+  Future<SettingsStateSnapshot> saveInstructionsSettings(
+    int expectedSettingsRevision,
     InstructionsSettingsCommand command,
   );
-  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command);
-  Future<StudioState> saveMcpSettings(McpSettingsCommand command);
-  Future<StudioState> saveGeneralSettings(GeneralSettingsCommand command);
-  Future<StudioState> saveWebSearchSettings(WebSearchSettingsCommand command);
-  Future<List<ProviderUsageView>> loadProviderUsages();
-  Future<List<String>> listDiscoveredSkills(String projectId);
+  Future<SettingsStateSnapshot> saveSkillsSettings(
+    int expectedSettingsRevision,
+    SkillsSettingsCommand command,
+  );
+  Future<SettingsStateSnapshot> saveMcpSettings(
+    int expectedSettingsRevision,
+    McpSettingsCommand command,
+  );
+  Future<SettingsStateSnapshot> saveGeneralSettings(
+    int expectedSettingsRevision,
+    GeneralSettingsCommand command,
+  );
+  Future<SettingsStateSnapshot> saveWebSearchSettings(
+    int expectedSettingsRevision,
+    WebSearchSettingsCommand command,
+  );
+  Future<ProviderUsageStateSnapshot> checkProviderUsage();
+  Future<SkillsStateSnapshot> readSkillsState(String projectId);
+  Future<SkillsStateSnapshot> discoverSkills(String projectId);
+  Future<McpStateSnapshot> readMcpState();
+  Future<McpStateSnapshot> resetMcpServer(String serverId);
+  Future<McpStateSnapshot> resetAllMcp();
+  Future<LspStateSnapshot> readLspState();
+  Future<LspStateSnapshot> probeLspServer(String projectId);
+  Future<LspStateSnapshot> repairLspServer(String projectId, String serverId);
+  Future<LspStateSnapshot> resetLspServer(String projectId, String serverId);
+  Future<LspStateSnapshot> resetLspWorkspace(String projectId);
 }
 
 class FrbStudioApi implements StudioApi {
@@ -117,8 +127,7 @@ class FrbStudioApi implements StudioApi {
         } else {
           await RustLib.init();
           _rustInitialized = true;
-          await frb.initializeRuntime();
-          await frb.startRuntime();
+          await frb.startStudioRuntime();
         }
       } catch (error, stackTrace) {
         if (identical(_initFuture, attempt)) {
@@ -169,31 +178,29 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> bootstrap() async {
+  Future<StudioState> readStudioState() async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(await _bridgeCall(frb.bootstrapStudio));
+    return studioStateFromFrbSnapshot(await _bridgeCall(frb.readStudioState));
   }
 
   @override
-  Future<StudioState> openProject(String path) async {
+  Future<StudioProject> openProject(String path) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _projectFromFrb(
       await _bridgeCall(() => frb.openProject(path: path)),
     );
   }
 
   @override
-  Future<StudioState> selectProject(String projectId) async {
+  Future<void> activateProject(String projectId) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(() => frb.selectProject(projectId: projectId)),
-    );
+    await _bridgeCall(() => frb.activateProject(projectId: projectId));
   }
 
   @override
-  Future<StudioState> createThread(String projectId, {String? title}) async {
+  Future<StudioThread> createThread(String projectId, {String? title}) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _threadFromFrb(
       await _bridgeCall(
         () => frb.createThread(projectId: projectId, title: title),
       ),
@@ -201,35 +208,17 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> archiveThread(
-    String threadId, {
-    String? selectedThreadId,
-  }) async {
+  Future<StudioThread> archiveThread(String threadId) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.archiveThread(
-          threadId: threadId,
-          selectedThreadId: selectedThreadId,
-        ),
-      ),
+    return _threadFromFrb(
+      await _bridgeCall(() => frb.archiveThread(threadId: threadId)),
     );
   }
 
   @override
-  Future<StudioState> archiveProject(
-    String projectId, {
-    String? selectedProjectId,
-  }) async {
+  Future<void> archiveProject(String projectId) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.archiveProject(
-          projectId: projectId,
-          selectedProjectId: selectedProjectId,
-        ),
-      ),
-    );
+    await _bridgeCall(() => frb.archiveProject(projectId: projectId));
   }
 
   @override
@@ -241,19 +230,12 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupProject(
-    String projectId,
-    String expectedRevision, {
-    String? selectedProjectId,
-  }) async {
+  Future<void> cleanupProject(String projectId, String expectedRevision) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.cleanupProject(
-          projectId: projectId,
-          expectedRevision: expectedRevision,
-          selectedProjectId: selectedProjectId,
-        ),
+    await _bridgeCall(
+      () => frb.cleanupProject(
+        projectId: projectId,
+        expectedRevision: expectedRevision,
       ),
     );
   }
@@ -271,41 +253,23 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupRecoveryIssue(
+  Future<void> cleanupRecoveryIssue(
     String issueId,
-    String expectedRevision, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) async {
+    String expectedRevision,
+  ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.cleanupRecoveryIssue(
-          issueId: issueId,
-          expectedRevision: expectedRevision,
-          selectedProjectId: selectedProjectId,
-          selectedThreadId: selectedThreadId,
-        ),
+    await _bridgeCall(
+      () => frb.cleanupRecoveryIssue(
+        issueId: issueId,
+        expectedRevision: expectedRevision,
       ),
     );
   }
 
   @override
-  Future<StudioState> retryRecoveryIssue(
-    String issueId, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) async {
+  Future<void> retryRecoveryIssue(String issueId) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.retryRecoveryIssue(
-          issueId: issueId,
-          selectedProjectId: selectedProjectId,
-          selectedThreadId: selectedThreadId,
-        ),
-      ),
-    );
+    await _bridgeCall(() => frb.retryRecoveryIssue(issueId: issueId));
   }
 
   @override
@@ -332,43 +296,49 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setModelRole({
+  Future<SettingsStateSnapshot> setModelRole({
+    required int expectedSettingsRevision,
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedThreadId,
   }) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.setModelRole(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           roleKey: roleKey,
           providerId: providerId,
           model: model,
           effort: effort,
-          selectedThreadId: selectedThreadId,
         ),
       ),
     );
   }
 
   @override
-  Future<StudioState> setThreadMode({
+  Future<void> setThreadMode({
     required String threadId,
     required StudioMode mode,
   }) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.setThreadMode(
-          threadId: threadId,
-          mode: switch (mode) {
-            StudioMode.simple => frb.BridgeThreadMode.simple,
-            StudioMode.task => frb.BridgeThreadMode.task,
-          },
-        ),
+    await _bridgeCall(
+      () => frb.setThreadMode(
+        threadId: threadId,
+        mode: switch (mode) {
+          StudioMode.simple => frb.BridgeThreadMode.simple,
+          StudioMode.task => frb.BridgeThreadMode.task,
+        },
       ),
+    );
+  }
+
+  @override
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
+    await _ensureReady();
+    return _threadWorkspaceFromFrb(
+      await _bridgeCall(() => frb.readThread(threadId: threadId)),
     );
   }
 
@@ -577,23 +547,31 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<SettingsStateSnapshot> saveRuntimePermissionMode(
+    int expectedSettingsRevision,
+    PermissionMode mode,
+  ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
-        () => frb.saveRuntimePermissionMode(mode: _permissionModeLabel(mode)),
+        () => frb.saveRuntimePermissionMode(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          mode: _permissionModeLabel(mode),
+        ),
       ),
     );
   }
 
   @override
-  Future<StudioState> saveProviderSettings(
+  Future<SettingsStateSnapshot> saveProviderSettings(
+    int expectedSettingsRevision,
     ProviderSettingsCommand command,
   ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveProviderSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.ProviderSettingsInput(
             defaultProviderId: command.defaultProviderId,
             providers: [
@@ -660,13 +638,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> saveInstructionsSettings(
+    int expectedSettingsRevision,
     InstructionsSettingsCommand command,
   ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveInstructionsSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.InstructionsSettingsInput(
             baseOverride: command.baseOverride,
             developer: command.developer,
@@ -680,11 +660,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
+  Future<SettingsStateSnapshot> saveSkillsSettings(
+    int expectedSettingsRevision,
+    SkillsSettingsCommand command,
+  ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveSkillsSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.SkillsSettingsInput(
             enabled: command.enabled,
             autoLearn: command.autoLearn,
@@ -701,11 +685,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
+  Future<SettingsStateSnapshot> saveMcpSettings(
+    int expectedSettingsRevision,
+    McpSettingsCommand command,
+  ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveMcpSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.McpSettingsInput(
             servers: [
               for (final server in command.servers)
@@ -723,13 +711,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveGeneralSettings(
+  Future<SettingsStateSnapshot> saveGeneralSettings(
+    int expectedSettingsRevision,
     GeneralSettingsCommand command,
   ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveGeneralSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.GeneralSettingsInput(
             followSystemTheme: command.followSystemTheme,
             followActiveTurn: command.followActiveTurn,
@@ -741,13 +731,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveWebSearchSettings(
+  Future<SettingsStateSnapshot> saveWebSearchSettings(
+    int expectedSettingsRevision,
     WebSearchSettingsCommand command,
   ) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(
+    return _settingsStateFromFrb(
       await _bridgeCall(
         () => frb.saveWebSearchSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.WebSearchSettingsInput(
             mode: command.mode,
             contextSize: command.contextSize,
@@ -763,22 +755,109 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<List<ProviderUsageView>> loadProviderUsages() async {
+  Future<ProviderUsageStateSnapshot> checkProviderUsage() async {
     await _ensureReady();
-    final response = await _bridgeCall(frb.loadProviderUsages);
-    return response.usages.map(_providerUsageFromFrb).toList();
+    return _providerUsageStateFromFrb(
+      await _bridgeCall(frb.checkProviderUsage),
+    );
   }
 
   @override
-  Future<List<String>> listDiscoveredSkills(String projectId) async {
+  Future<SkillsStateSnapshot> readSkillsState(String projectId) async {
     await _ensureReady();
-    final response = await _bridgeCall(
-      () => frb.listDiscoveredSkills(projectId: projectId),
+    return _skillsStateFromFrb(
+      await _bridgeCall(() => frb.readSkillsState(projectId: projectId)),
     );
-    return response.skills
-        .map((skill) => skill.name)
-        .where((name) => name.isNotEmpty)
-        .toList()
-      ..sort();
+  }
+
+  @override
+  Future<SkillsStateSnapshot> discoverSkills(String projectId) async {
+    await _ensureReady();
+    return _skillsStateFromFrb(
+      await _bridgeCall(() => frb.discoverSkills(projectId: projectId)),
+    );
+  }
+
+  @override
+  Future<McpStateSnapshot> readMcpState() async {
+    await _ensureReady();
+    return _mcpStateFromFrb(await _bridgeCall(frb.readMcpState));
+  }
+
+  @override
+  Future<McpStateSnapshot> resetMcpServer(String serverId) async {
+    await _ensureReady();
+    return _mcpStateFromFrb(
+      await _bridgeCall(
+        () => frb.resetMcp(input: frb.McpResetInput.server(serverId: serverId)),
+      ),
+    );
+  }
+
+  @override
+  Future<McpStateSnapshot> resetAllMcp() async {
+    await _ensureReady();
+    return _mcpStateFromFrb(
+      await _bridgeCall(
+        () => frb.resetMcp(input: const frb.McpResetInput.all()),
+      ),
+    );
+  }
+
+  @override
+  Future<LspStateSnapshot> readLspState() async {
+    await _ensureReady();
+    return _lspStateFromFrb(await _bridgeCall(frb.readLspState));
+  }
+
+  @override
+  Future<LspStateSnapshot> probeLspServer(String projectId) async {
+    await _ensureReady();
+    return _lspStateFromFrb(
+      await _bridgeCall(() => frb.probeLspServer(projectId: projectId)),
+    );
+  }
+
+  @override
+  Future<LspStateSnapshot> repairLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    await _ensureReady();
+    return _lspStateFromFrb(
+      await _bridgeCall(
+        () => frb.repairLspServer(projectId: projectId, serverId: serverId),
+      ),
+    );
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    await _ensureReady();
+    return _lspStateFromFrb(
+      await _bridgeCall(
+        () => frb.resetLsp(
+          input: frb.LspScopeInput.server(
+            projectId: projectId,
+            serverId: serverId,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspWorkspace(String projectId) async {
+    await _ensureReady();
+    return _lspStateFromFrb(
+      await _bridgeCall(
+        () => frb.resetLsp(
+          input: frb.LspScopeInput.workspace(projectId: projectId),
+        ),
+      ),
+    );
   }
 }

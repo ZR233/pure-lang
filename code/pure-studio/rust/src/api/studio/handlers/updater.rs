@@ -1,12 +1,13 @@
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::types::{
-    BridgeError, BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto,
+    BridgeError, BridgeStudioUpdateEventDto, BridgeUpdaterStateSnapshot,
+    BridgeVerifiedUpdateSummary,
 };
 use crate::frb_generated::StreamSink;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use pl_studio_runtime::{
-    StudioUpdate, StudioUpdateCancellation, StudioUpdateCheck, StudioUpdateError,
-    StudioUpdateErrorCode, StudioUpdateEvent, StudioUpdater,
+    StudioUpdateCancellation, StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent,
+    StudioUpdateStateSnapshot,
 };
 use std::sync::{Arc, OnceLock, Weak};
 use tokio::sync::{Mutex, mpsc};
@@ -14,7 +15,6 @@ use tokio::task::JoinHandle;
 
 use super::lifecycle::shutdown_runtime_for_update;
 
-static UPDATER: OnceLock<StudioUpdater> = OnceLock::new();
 static UPDATE_OPERATIONS: OnceLock<Mutex<Vec<Weak<BridgeStudioUpdateOperationInner>>>> =
     OnceLock::new();
 
@@ -80,24 +80,18 @@ impl BridgeStudioUpdateOperationInner {
     }
 }
 
-pub async fn check_studio_update(
-    current_version: String,
-) -> Result<BridgeStudioUpdateCheckDto, BridgeError> {
-    let _bridge = active_bridge().await?;
-    let result = updater()?.check(&current_version).await?;
-    Ok(match result {
-        StudioUpdateCheck::UpToDate => BridgeStudioUpdateCheckDto::UpToDate,
-        StudioUpdateCheck::Available(update) => BridgeStudioUpdateCheckDto::Available {
-            update: bridge_update(update),
-        },
-    })
+pub async fn check_studio_update() -> Result<BridgeUpdaterStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    let state = bridge.studio.check_studio_update().await?;
+    Ok(bridge_update_state(state))
 }
 
 pub async fn install_studio_update(
-    update: BridgeStudioUpdateDto,
+    expected_revision: u64,
+    version: String,
 ) -> Result<BridgeStudioUpdateOperation, BridgeError> {
     let bridge = active_bridge().await?;
-    let updater = updater()?.clone();
+    let updater = bridge.studio.update_runtime().updater();
     if bridge.studio.is_busy_for_update().await? {
         return Err(StudioUpdateError::new(
             StudioUpdateErrorCode::RuntimeBusy,
@@ -105,7 +99,11 @@ pub async fn install_studio_update(
         )
         .into());
     }
-    let update = runtime_update(update);
+    let update = bridge
+        .studio
+        .update_runtime()
+        .verified_update(expected_revision, &version)
+        .await?;
     let cancellation = StudioUpdateCancellation::new();
     let (bridge_progress_tx, bridge_progress_rx) = mpsc::channel(64);
     let inner = Arc::new(BridgeStudioUpdateOperationInner {
@@ -167,38 +165,14 @@ fn update_operations() -> &'static Mutex<Vec<Weak<BridgeStudioUpdateOperationInn
     UPDATE_OPERATIONS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn updater() -> Result<&'static StudioUpdater> {
-    if let Some(updater) = UPDATER.get() {
-        return Ok(updater);
-    }
-    let candidate = StudioUpdater::new_default()?;
-    let _ = UPDATER.set(candidate);
-    UPDATER.get().context("Studio updater was not initialized")
-}
-
-fn bridge_update(update: StudioUpdate) -> BridgeStudioUpdateDto {
-    BridgeStudioUpdateDto {
-        version: update.version,
-        published_at: update.published_at,
-        notes_url: update.notes_url,
-        installer_url: update.installer.url,
-        installer_size: update.installer.size,
-        installer_sha256: update.installer.sha256,
-        installer_signature_url: update.installer.signature,
-    }
-}
-
-fn runtime_update(update: BridgeStudioUpdateDto) -> StudioUpdate {
-    StudioUpdate {
-        version: update.version,
-        published_at: update.published_at,
-        notes_url: update.notes_url,
-        installer: pl_studio_runtime::StudioUpdateAsset {
-            url: update.installer_url,
-            size: update.installer_size,
-            sha256: update.installer_sha256,
-            signature: update.installer_signature_url,
-        },
+fn bridge_update_state(state: StudioUpdateStateSnapshot) -> BridgeUpdaterStateSnapshot {
+    BridgeUpdaterStateSnapshot {
+        meta: state.meta.into(),
+        update: state.update.map(|update| BridgeVerifiedUpdateSummary {
+            version: update.version,
+            published_at: update.published_at,
+            notes_url: update.notes_url,
+        }),
     }
 }
 

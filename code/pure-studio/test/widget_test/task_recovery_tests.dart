@@ -101,7 +101,7 @@ void registerTaskRecoveryTests() {
         agents: const [],
       );
       final initial = base.copyWith(
-        threads: [root],
+        threadDirectory: ThreadDirectoryState(values: [root]),
         workspacesByThread: {
           root.id: base.selectedWorkspace!.copyWith(
             thread: root,

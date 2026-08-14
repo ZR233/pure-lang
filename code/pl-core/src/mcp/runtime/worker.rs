@@ -14,7 +14,7 @@ use crate::config::{EffectiveMcpServerConfig, McpServerConfig, McpServerSourceKi
 use crate::turn::ToolEffect;
 
 use super::{
-    LeaseSnapshot, McpGeneration, McpRuntimeToolDescriptor, ReconcilePolicy, ResourceOperation,
+    LeaseSnapshot, McpGeneration, McpResetScope, McpRuntimeToolDescriptor, ResourceOperation,
     RuntimeCommand,
 };
 use crate::mcp::health::{McpAvailabilityKind, McpAvailabilitySnapshot};
@@ -100,9 +100,20 @@ impl RuntimeWorker {
                     let active = preparation
                         .take()
                         .expect("completed MCP preparation must exist");
-                    self.activate_generation(generation).await;
+                    let result = if active.reset_scope.as_ref().is_some_and(|scope| {
+                        reset_failed(scope, &generation)
+                    }) {
+                        self.close_unpublished_generation(generation).await;
+                        Err(PureError::ToolExecutionFailed {
+                            tool: "mcp".to_string(),
+                            error: "MCP reset candidate failed; current generation was preserved".to_string(),
+                        })
+                    } else {
+                        self.activate_generation(generation).await;
+                        Ok(())
+                    };
                     self.preparation_notify.notify_waiters();
-                    let _ = active.reply.send(Ok(()));
+                    let _ = active.reply.send(result);
                 }
                 command = self.receiver.recv() => {
                     let Some(command) = command else {
@@ -112,12 +123,26 @@ impl RuntimeWorker {
                     match command {
                 RuntimeCommand::Reconcile {
                     servers,
-                    policy,
+                    reply,
+                } => {
+                    if self.configuration_matches(&servers) {
+                        let _ = reply.send(Ok(()));
+                        continue;
+                    }
+                    pending.push_back(PendingReconcile {
+                        servers,
+                        reset_scope: None,
+                        reply,
+                    });
+                }
+                RuntimeCommand::Reset {
+                    servers,
+                    scope,
                     reply,
                 } => {
                     pending.push_back(PendingReconcile {
                         servers,
-                        policy,
+                        reset_scope: Some(scope),
                         reply,
                     });
                 }
@@ -184,10 +209,14 @@ impl RuntimeWorker {
     fn start_preparation(&mut self, request: PendingReconcile) -> ActivePreparation {
         let generation_id = McpGeneration(self.next_generation);
         self.next_generation += 1;
-        let reusable = match request.policy {
-            ReconcilePolicy::Changed => self.current_generation().servers.clone(),
-            ReconcilePolicy::Force => BTreeMap::new(),
-        };
+        let mut reusable = self.current_generation().servers.clone();
+        match request.reset_scope.as_ref() {
+            Some(McpResetScope::Server { server_id }) => {
+                reusable.remove(server_id);
+            }
+            Some(McpResetScope::All) => reusable.clear(),
+            None => {}
+        }
         let future = prepare_generation(
             self.connector.clone(),
             generation_id,
@@ -197,7 +226,19 @@ impl RuntimeWorker {
         ActivePreparation {
             future: Box::pin(future),
             reply: request.reply,
+            reset_scope: request.reset_scope,
         }
+    }
+
+    fn configuration_matches(&self, servers: &BTreeMap<String, EffectiveMcpServerConfig>) -> bool {
+        let current = self.current_generation();
+        current.servers.len() == servers.len()
+            && servers.iter().all(|(server_id, config)| {
+                current
+                    .servers
+                    .get(server_id)
+                    .is_some_and(|server| server.fingerprint == server_fingerprint(config))
+            })
     }
 
     async fn activate_generation(&mut self, mut next: RuntimeGeneration) {
@@ -209,6 +250,21 @@ impl RuntimeWorker {
         self.generations.insert(next.id, next);
         self.cleanup_retired().await;
         self.emit_update();
+    }
+
+    async fn close_unpublished_generation(&self, generation: RuntimeGeneration) {
+        let current_sessions = self
+            .current_generation()
+            .servers
+            .values()
+            .filter_map(|server| server.session.as_ref())
+            .map(|session| Arc::as_ptr(session) as usize)
+            .collect::<BTreeSet<_>>();
+        for session in unique_sessions(generation.servers) {
+            if !current_sessions.contains(&(Arc::as_ptr(&session) as usize)) {
+                session.close().await;
+            }
+        }
     }
 
     fn propagate_pending_session_failures(&self, next: &mut RuntimeGeneration) {
@@ -528,6 +584,19 @@ impl RuntimeGeneration {
             leases: 0,
             retired: false,
         }
+    }
+}
+
+fn reset_failed(scope: &McpResetScope, generation: &RuntimeGeneration) -> bool {
+    match scope {
+        McpResetScope::Server { server_id } => generation
+            .servers
+            .get(server_id)
+            .is_none_or(|server| server.availability == McpAvailabilityKind::Unavailable),
+        McpResetScope::All => generation
+            .servers
+            .values()
+            .any(|server| server.availability == McpAvailabilityKind::Unavailable),
     }
 }
 

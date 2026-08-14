@@ -4,7 +4,7 @@ use crate::InteractionRequest;
 use anyhow::Result;
 
 use crate::McpRuntimeHandle;
-use crate::config::ConfigStore;
+use crate::config::ConfigRuntime;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::ThreadRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
@@ -16,11 +16,19 @@ use crate::studio::{
 mod history;
 mod interaction_continuation;
 mod lifecycle;
+mod lsp_state;
 mod mcp_health;
 mod plan_confirmation;
 mod prompt_runner;
+mod provider_usage;
+mod skill_catalog;
 mod task_recovery;
 mod thread_service;
+mod updater;
+
+pub use provider_usage::{ProviderUsageRuntime, ProviderUsageStateSnapshot};
+pub use skill_catalog::{SkillCatalogRuntime, SkillsStateSnapshot};
+pub use updater::{StudioUpdateRuntime, StudioUpdateStateSnapshot};
 
 /// Studio UI 提交 prompt 的请求。
 ///
@@ -74,11 +82,15 @@ pub struct StudioResolveInteractionResponse {
 #[derive(Clone)]
 pub struct StudioRuntime {
     store: StudioStore,
-    config_store: ConfigStore,
+    config_runtime: ConfigRuntime,
     external_runtimes: StudioExternalRuntimes,
     agent_facility: StudioAgentFacility,
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
+    skills: SkillCatalogRuntime,
+    provider_usage: ProviderUsageRuntime,
+    updater: StudioUpdateRuntime,
+    activation: ProjectActivationRuntime,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]
@@ -88,8 +100,11 @@ pub struct StudioRuntime {
 #[derive(Clone)]
 struct StudioExternalRuntimes {
     mcp: McpRuntimeHandle,
+    mcp_state: mcp_health::McpStateRuntime,
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     lsp: pl_lsp::LspRuntimeRegistry,
+    lsp_state: lsp_state::LspStateRuntime,
+    lsp_state_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 #[derive(Clone)]
@@ -98,6 +113,18 @@ struct StudioAgentFacility {
     resources: StudioAgentResources,
     interactions: InteractionRuntime,
     product_events: StudioProductEventRuntime,
+}
+
+#[derive(Clone, Default)]
+struct ProjectActivationRuntime {
+    command_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    applied: std::sync::Arc<tokio::sync::RwLock<Option<ProjectActivation>>>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProjectActivation {
+    project_id: String,
+    fingerprint: String,
 }
 
 impl StudioRuntime {
@@ -219,7 +246,10 @@ impl StudioRuntime {
                 .await?;
             self.store.reset_agent_sessions_for_root(thread_id).await?;
         }
-        let _ = self.recovery.remove(issue_id);
+        let issues = self.recovery.remove(issue_id);
+        self.agent_facility
+            .product_events
+            .emit_recovery_state(issues);
         self.runtime_snapshot().await
     }
 
@@ -233,7 +263,10 @@ impl StudioRuntime {
             anyhow::bail!("recovery issue does not authorize retry");
         }
         self.task_coordinator.retry_recovery_issue(&issue).await?;
-        let _ = self.recovery.remove(issue_id);
+        let issues = self.recovery.remove(issue_id);
+        self.agent_facility
+            .product_events
+            .emit_recovery_state(issues);
         self.runtime_snapshot().await
     }
 
@@ -275,14 +308,20 @@ impl StudioRuntime {
             .resources
             .complete_cleanup_takeover(&root_thread_ids)
             .await;
-        let _ = self.recovery.remove_for_project(project_id);
+        let issues = self.recovery.remove_for_project(project_id);
+        self.agent_facility
+            .product_events
+            .emit_recovery_state(issues);
         self.runtime_snapshot().await
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
         // Box::pin：把 agent 关闭链的大 future 状态机放堆上，减小 studio
         // runtime 侧 async 帧，避免与 agent loop 帧叠加触发线程栈耗尽。
-        let runtime = Box::pin(self.agent_framework()).await?.handle();
+        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+            return Ok(());
+        };
+        let runtime = framework.handle();
         let root_agent_ids = thread_ids
             .iter()
             .map(|thread_id| root_agent_id(thread_id))

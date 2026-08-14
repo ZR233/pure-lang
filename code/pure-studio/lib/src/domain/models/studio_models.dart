@@ -12,6 +12,7 @@ export 'studio_commands.dart';
 export 'studio_enums.dart';
 export 'studio_projection_models.dart';
 export 'studio_state.dart';
+export 'studio_state_snapshots.dart';
 export 'timeline_models.dart';
 export 'thread_models.dart';
 export 'thread_directory_models.dart';

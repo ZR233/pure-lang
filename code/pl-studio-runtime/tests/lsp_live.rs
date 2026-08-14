@@ -81,7 +81,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         "isolated live config did not retain the executor credential"
     );
     let store = StudioStore::open(&database_path).await?;
-    let runtime = StudioRuntime::new(store.clone(), config_store.clone());
+    let runtime = StudioRuntime::new(store.clone(), config_store.clone())?;
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime
         .create_thread(&project.id, "Installed config Rust LSP live")
@@ -100,7 +100,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     live_result?;
 
     let reopened_store = StudioStore::open(&database_path).await?;
-    let reopened = StudioRuntime::new(reopened_store.clone(), config_store);
+    let reopened = StudioRuntime::new(reopened_store.clone(), config_store)?;
     let persisted_result = async {
         reopened.start_runtime().await?;
         let persisted = reopened.thread_snapshot(&thread.id).await?;

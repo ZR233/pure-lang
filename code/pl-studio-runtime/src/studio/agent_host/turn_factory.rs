@@ -14,7 +14,8 @@ use pl_core::{
 };
 use pl_model::create_provider_with_catalog;
 
-use crate::config::ConfigStore;
+use crate::config::ConfigRuntime;
+use crate::studio::runtime::SkillCatalogRuntime;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionRuntime, StudioStore};
 use crate::{McpRuntimeHandle, StudioMode};
@@ -27,33 +28,36 @@ use super::workspace_resolver::AgentWorkspaceResolver;
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentTurnFactory {
     store: StudioStore,
-    config_store: ConfigStore,
+    config_runtime: ConfigRuntime,
     mcp_runtime: McpRuntimeHandle,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
+    skills: SkillCatalogRuntime,
 }
 
 impl StudioAgentTurnFactory {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         store: StudioStore,
-        config_store: ConfigStore,
+        config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
+        skills: SkillCatalogRuntime,
     ) -> Self {
         Self {
             store,
-            config_store,
+            config_runtime,
             mcp_runtime,
             lsp_runtime,
             interactions,
             coordinator,
             resources,
+            skills,
         }
     }
 }
@@ -82,7 +86,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .await
             .map_err(anyhow_error)?
             .ok_or_else(|| turn_error("selected Studio project not found"))?;
-        let config = self.config_store.load_or_default()?;
+        let config = self.config_runtime.read()?.config;
+        let skill_catalog = self.skills.read(&thread_record.project_id).await.catalog;
         let mode = StudioMode::from_label(&thread_record.mode);
         ensure_root_role_matches_mode(&context.snapshot.identity, mode)?;
         let active_task_run = if mode == StudioMode::Task {
@@ -192,6 +197,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let mut builder = TurnEngineBuilder::new(provider)
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(config.skills.clone())
+            .with_skill_catalog(skill_catalog.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
         if let Some(effort) = route.effort {
             builder = builder.with_effort(effort);
@@ -209,7 +215,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(subagent) = subagent_context {
             engine = engine.with_subagent_context(subagent);
         }
-        self.lsp_runtime.reconcile_workspace(&workspace_root).await;
         engine.register_profile_tools().await;
 
         web_search.install(&mut engine, &config.web_search)?;
@@ -223,9 +228,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 active_task_run.as_ref(),
             );
         }
-        self.mcp_runtime
-            .reconcile(crate::config::effective_mcp_servers(&config))
-            .await?;
         let mcp_lease = self.mcp_runtime.acquire_turn_lease().await?;
         let active_mcp_servers = mcp_lease.server_ids().to_vec();
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
@@ -278,19 +280,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .iter()
             .map(crate::studio::store::attachment::trace_attachment)
             .collect();
-        let instruction_snapshot = instruction_snapshot(
-            &config,
-            &route.model,
+        let instruction_snapshot = instruction_snapshot(StudioInstructionContext {
+            config: &config,
+            model: &route.model,
             mode,
-            &context.snapshot.identity,
-            &workspace_root,
-            &workspace_instructions,
-            context
+            identity: &context.snapshot.identity,
+            workspace_root: &workspace_root,
+            workspace_instructions: &workspace_instructions,
+            skill_catalog: &skill_catalog,
+            subagent_constraint: context
                 .input
                 .metadata
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
-        )?;
+        })?;
         let request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
             .with_user_content(user_content)
@@ -346,28 +349,34 @@ fn studio_turn_options(options: TurnOptions) -> TurnOptions {
     options.with_user_input_end_turn()
 }
 
-fn instruction_snapshot(
-    config: &crate::config::StudioConfig,
-    model: &pl_model::ModelInfo,
+struct StudioInstructionContext<'a> {
+    config: &'a crate::config::StudioConfig,
+    model: &'a pl_model::ModelInfo,
     mode: StudioMode,
-    identity: &AgentIdentity,
-    workspace_root: &Path,
-    workspace_instructions: &str,
-    subagent_constraint: Option<&str>,
-) -> Result<InstructionSnapshot> {
+    identity: &'a AgentIdentity,
+    workspace_root: &'a Path,
+    workspace_instructions: &'a str,
+    skill_catalog: &'a pl_core::skill::SkillCatalog,
+    subagent_constraint: Option<&'a str>,
+}
+
+fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<InstructionSnapshot> {
     InstructionAssembler::assemble(InstructionAssemblyRequest {
-        instructions: Some(&config.instructions),
-        skills: Some(&config.skills),
+        instructions: Some(&context.config.instructions),
+        skills: Some(&context.config.skills),
+        skill_catalog: Some(context.skill_catalog),
         execution_profile: Some(ExecutionInstructionProfile {
-            label: mode.label(),
-            instructions: mode
-                .instructions_for(identity.role.as_str(), identity.parent_id.is_none()),
+            label: context.mode.label(),
+            instructions: context.mode.instructions_for(
+                context.identity.role.as_str(),
+                context.identity.parent_id.is_none(),
+            ),
         }),
-        model,
-        workspace_root,
-        current_dir: workspace_root,
-        workspace_instructions: Some(workspace_instructions),
-        subagent_constraint,
+        model: context.model,
+        workspace_root: context.workspace_root,
+        current_dir: context.workspace_root,
+        workspace_instructions: Some(context.workspace_instructions),
+        subagent_constraint: context.subagent_constraint,
     })
 }
 

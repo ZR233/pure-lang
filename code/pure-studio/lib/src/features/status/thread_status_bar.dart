@@ -361,6 +361,7 @@ class _ModeModelSelector extends ConsumerWidget {
     final role = workspace.role(roleKey);
     final current = _modelFor(workspace, mode) ?? options.first;
     return UpwardPopupMenu<String>(
+      key: StudioDriverKeys.model,
       tooltip: mode == StudioMode.task
           ? context.l10n.statusPlannerModel
           : context.l10n.statusExecutorModel,
@@ -382,6 +383,7 @@ class _ModeModelSelector extends ConsumerWidget {
       itemBuilder: (context) => [
         for (final option in options)
           PopupMenuItem(
+            key: StudioDriverKeys.modelOption(option.providerId, option.model),
             value: option.key,
             child: SizedBox(
               width: 260,
@@ -435,6 +437,7 @@ class _ReasoningEffortSelector extends ConsumerWidget {
       itemBuilder: (context) => [
         for (final effort in efforts)
           PopupMenuItem(
+            key: StudioDriverKeys.reasoningEffortOption(effort),
             value: effort,
             child: Row(
               children: [

@@ -6,6 +6,7 @@ mod labeled;
 mod mcp;
 mod message;
 mod model_context;
+mod observed_state;
 mod permission;
 mod provider_catalog;
 mod thread;
@@ -45,6 +46,7 @@ pub use model_context::{
     PromptPrefixChangedReason, ResponsesContextItem, ResponsesContextItemKind, SessionNote,
     ThreadPromptMetadata, ThreadPromptSnapshot, ToolResultReceipt,
 };
+pub use observed_state::{ObservedStateMeta, ObservedStatePhase, StateError, StateOperation};
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,

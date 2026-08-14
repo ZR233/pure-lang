@@ -8,6 +8,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
 class InstructionsTab extends ConsumerStatefulWidget {
@@ -237,45 +238,11 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
   bool _discovering = false;
   String? _discoverError;
   String? _saveError;
-  TabController? _tabController;
-  bool _wasTabActive = false;
 
   @override
   void initState() {
     super.initState();
     _discoveredSkills.addAll(widget.skills);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final controller = DefaultTabController.of(context);
-    if (controller != _tabController) {
-      _tabController?.removeListener(_handleTabChanged);
-      _tabController = controller;
-      _tabController?.addListener(_handleTabChanged);
-      _wasTabActive = controller.index == widget.tabIndex;
-      if (_wasTabActive && !_discovering) {
-        _discoverSkills();
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _tabController?.removeListener(_handleTabChanged);
-    super.dispose();
-  }
-
-  void _handleTabChanged() {
-    final controller = _tabController;
-    if (controller == null) return;
-    final isActive =
-        controller.index == widget.tabIndex && !controller.indexIsChanging;
-    if (isActive && !_wasTabActive && !_discovering) {
-      _discoverSkills();
-    }
-    _wasTabActive = isActive;
   }
 
   @override
@@ -297,6 +264,7 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
           title: context.l10n.settingsSkillsTitle,
           subtitle: context.l10n.settingsSkillsSubtitle,
           trailing: FilledButton.icon(
+            key: StudioDriverKeys.skillsDiscover,
             icon: _discovering
                 ? const SizedBox.square(
                     dimension: 18,
@@ -398,7 +366,7 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
     try {
       final discovered = await ref
           .read(studioControllerProvider.notifier)
-          .listDiscoveredSkills();
+          .discoverSkills();
       if (!mounted) {
         return;
       }

@@ -8,65 +8,91 @@ import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
-import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<BridgeProviderCatalogSnapshot> loadProviderCatalog() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsLoadProviderCatalog();
 
-Future<BridgeWebSearchSettingsDto> loadWebSearchSettings() =>
-    RustLib.instance.api.crateApiStudioHandlersSettingsLoadWebSearchSettings();
+Future<BridgeWebSearchSettingsDto> readWebSearchSettings() =>
+    RustLib.instance.api.crateApiStudioHandlersSettingsReadWebSearchSettings();
 
-Future<BridgeStudioSnapshotResponse> saveWebSearchSettings({
+Future<BridgeSettingsStateSnapshot> saveWebSearchSettings({
+  required BigInt expectedSettingsRevision,
   required WebSearchSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveWebSearchSettings(
+  expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeStudioSnapshotResponse> saveRuntimePermissionMode({
+Future<BridgeSettingsStateSnapshot> readSettingsState() =>
+    RustLib.instance.api.crateApiStudioHandlersSettingsReadSettingsState();
+
+Future<BridgeSettingsStateSnapshot> reloadSettingsFromDisk({
+  required BigInt expectedSettingsRevision,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsReloadSettingsFromDisk(
+  expectedSettingsRevision: expectedSettingsRevision,
+);
+
+Future<BridgeSettingsStateSnapshot> saveRuntimePermissionMode({
+  required BigInt expectedSettingsRevision,
   required String mode,
 }) => RustLib.instance.api
-    .crateApiStudioHandlersSettingsSaveRuntimePermissionMode(mode: mode);
+    .crateApiStudioHandlersSettingsSaveRuntimePermissionMode(
+      expectedSettingsRevision: expectedSettingsRevision,
+      mode: mode,
+    );
 
-Future<BridgeStudioSnapshotResponse> saveProviderSettings({
+Future<BridgeSettingsStateSnapshot> saveProviderSettings({
+  required BigInt expectedSettingsRevision,
   required ProviderSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveProviderSettings(
+  expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeStudioSnapshotResponse> saveInstructionsSettings({
+Future<BridgeSettingsStateSnapshot> saveInstructionsSettings({
+  required BigInt expectedSettingsRevision,
   required InstructionsSettingsInput input,
-}) => RustLib.instance.api
-    .crateApiStudioHandlersSettingsSaveInstructionsSettings(input: input);
+}) =>
+    RustLib.instance.api.crateApiStudioHandlersSettingsSaveInstructionsSettings(
+      expectedSettingsRevision: expectedSettingsRevision,
+      input: input,
+    );
 
-Future<BridgeStudioSnapshotResponse> saveSkillsSettings({
+Future<BridgeSettingsStateSnapshot> saveSkillsSettings({
+  required BigInt expectedSettingsRevision,
   required SkillsSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveSkillsSettings(
+  expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeStudioSnapshotResponse> saveMcpSettings({
+Future<BridgeSettingsStateSnapshot> saveMcpSettings({
+  required BigInt expectedSettingsRevision,
   required McpSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveMcpSettings(
+  expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeStudioSnapshotResponse> saveGeneralSettings({
+Future<BridgeSettingsStateSnapshot> saveGeneralSettings({
+  required BigInt expectedSettingsRevision,
   required GeneralSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveGeneralSettings(
+  expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeStudioSnapshotResponse> setModelRole({
+Future<BridgeSettingsStateSnapshot> setModelRole({
+  required BigInt expectedSettingsRevision,
   required String roleKey,
   required String providerId,
   required String model,
   String? effort,
-  String? selectedThreadId,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSetModelRole(
+  expectedSettingsRevision: expectedSettingsRevision,
   roleKey: roleKey,
   providerId: providerId,
   model: model,
   effort: effort,
-  selectedThreadId: selectedThreadId,
 );

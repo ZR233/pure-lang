@@ -1,24 +1,58 @@
 part of 'studio_api.dart';
 
-StudioState _stateFromTypedSnapshot({
-  required List<StudioProject> projects,
-  required List<StudioThread> threads,
-  required String? selectedProjectId,
-  required String? selectedThreadId,
-  List<StudioRecoveryIssue> recoveryIssues = const [],
-  TaskRuntimeView? selectedTask,
-  required frb.BridgeStudioSettingsDto settings,
+ObservedStateMeta _observedMetaFromFrb(frb.BridgeObservedStateMeta meta) {
+  return meta.phase.when(
+    uninitialized: () => _observedMeta(meta, ObservedStatePhase.uninitialized),
+    ready: () => _observedMeta(meta, ObservedStatePhase.ready),
+    running: (operation, operationId) => _observedMeta(
+      meta,
+      ObservedStatePhase.running,
+      operation: operation.name,
+      operationId: operationId,
+    ),
+    failed: (operation, error) => _observedMeta(
+      meta,
+      ObservedStatePhase.failed,
+      operation: operation.name,
+      errorCode: error.code,
+      errorMessage: error.message,
+      retryable: error.retryable,
+    ),
+    stopped: () => _observedMeta(meta, ObservedStatePhase.stopped),
+  );
+}
+
+ObservedStateMeta _observedMeta(
+  frb.BridgeObservedStateMeta meta,
+  ObservedStatePhase phase, {
+  String? operation,
+  String? operationId,
+  String? errorCode,
+  String? errorMessage,
+  bool retryable = false,
 }) {
-  final selectedRootThreadId = threads
-      .where((thread) => thread.id == selectedThreadId)
-      .firstOrNull
-      ?.effectiveRootThreadId;
-  return StudioState(
-    projects: projects,
-    threads: threads,
-    tasksByRootThread: selectedTask == null || selectedRootThreadId == null
-        ? const {}
-        : {selectedRootThreadId: selectedTask},
+  return ObservedStateMeta(
+    revision: meta.revision.toInt(),
+    phase: phase,
+    updatedAt: _dateFromUnix(meta.updatedAt),
+    lastCheckedAt: meta.lastCheckedAt == null
+        ? null
+        : _dateFromUnix(meta.lastCheckedAt!),
+    stale: meta.stale,
+    operation: operation,
+    operationId: operationId,
+    errorCode: errorCode,
+    errorMessage: errorMessage,
+    retryable: retryable,
+  );
+}
+
+SettingsStateSnapshot _settingsStateFromFrb(
+  frb.BridgeSettingsStateSnapshot snapshot,
+) {
+  final settings = snapshot.settings;
+  return SettingsStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
     providers: settings.providers.map(_providerSettingsFromFrb).toList(),
     defaultProviderId: settings.defaultProviderId,
     roles: settings.roles.map(_roleSettingsFromFrb).toList(),
@@ -27,10 +61,7 @@ StudioState _stateFromTypedSnapshot({
     skills: _skillsSettingsFromFrb(settings.skills),
     general: _generalSettingsFromFrb(settings.general),
     webSearch: _webSearchFromFrb(settings.webSearch),
-    selectedProjectId: selectedProjectId,
-    selectedThreadId: selectedThreadId,
     permissionMode: _permissionMode(settings.permissionMode),
-    recoveryIssues: recoveryIssues,
   );
 }
 

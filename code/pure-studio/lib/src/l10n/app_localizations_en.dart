@@ -154,6 +154,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsMcpTab => 'MCP';
 
   @override
+  String get settingsLspTab => 'LSP';
+
+  @override
   String get settingsSecurityTab => 'Security';
 
   @override
@@ -1324,6 +1327,25 @@ class AppLocalizationsEn extends AppLocalizations {
       'Model Context Protocol servers and inline endpoints.';
 
   @override
+  String get settingsMcpRefresh => 'Refresh';
+
+  @override
+  String get settingsMcpReconnect => 'Reconnect';
+
+  @override
+  String get settingsMcpResetAll => 'Reset all';
+
+  @override
+  String get settingsMcpResetConfirmTitle => 'Reset all MCP servers?';
+
+  @override
+  String get settingsMcpResetConfirmBody =>
+      'Every configured MCP connection will be rebuilt. Active turns keep their current leased generation.';
+
+  @override
+  String get settingsMcpResetConfirmAction => 'Reset all';
+
+  @override
   String get settingsEndpoint => 'Endpoint';
 
   @override
@@ -1332,6 +1354,35 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsMcpEmptyMessage =>
       'Configured MCP servers will appear here.';
+
+  @override
+  String get settingsLspTitle => 'Language servers';
+
+  @override
+  String get settingsLspSubtitle =>
+      'Last-known project language server status and explicit lifecycle commands.';
+
+  @override
+  String get settingsLspRefresh => 'Refresh';
+
+  @override
+  String get settingsLspProbe => 'Probe';
+
+  @override
+  String get settingsLspRepair => 'Repair';
+
+  @override
+  String get settingsLspReset => 'Reset';
+
+  @override
+  String get settingsLspResetWorkspace => 'Reset workspace';
+
+  @override
+  String get settingsLspEmptyTitle => 'No language servers';
+
+  @override
+  String get settingsLspEmptyMessage =>
+      'Activate a supported project to create language server membership.';
 
   @override
   String get settingsSecurityTitle => 'Security';

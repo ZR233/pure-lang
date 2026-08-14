@@ -1,154 +1,172 @@
+use anyhow::Result;
+
 use crate::api::studio::bridge_runtime::BridgeRuntime;
-use crate::api::studio::convert::records::thread_from_record;
-use crate::api::studio::convert::runtime::{bridge_recovery_issue, bridge_task_runtime};
-use crate::api::studio::convert::settings::studio_settings_dto;
+use crate::api::studio::convert::runtime::{
+    bridge_mcp_health, bridge_recovery_issue, bridge_task_runtime, runtime_snapshot,
+};
+use crate::api::studio::convert::settings::{provider_usage_dto, studio_settings_dto};
 use crate::api::studio::convert::thread_stream::bridge_thread;
-use crate::api::studio::types::{BridgeGeneralSettingsDto, BridgeStudioSnapshotResponse};
-use anyhow::{Context, Result};
-use std::collections::HashSet;
-// ── Inner async helpers ──
+use crate::api::studio::types::*;
 
-pub(super) async fn bootstrap_studio_inner(
+/// Studio 聚合纯查询；只组合各 owner 已发布 snapshot 与 SQLite canonical facts。
+pub(super) async fn read_studio_state_inner(
     bridge: &'static BridgeRuntime,
-) -> Result<BridgeStudioSnapshotResponse> {
-    let projects = bridge.studio.list_projects().await?;
-    let selected_project_id = projects.first().map(|project| project.id.clone());
-    studio_snapshot_from_projects_inner(bridge, projects, selected_project_id, None).await
-}
-
-pub(super) async fn studio_snapshot_inner(
-    bridge: &'static BridgeRuntime,
-    requested_project_id: Option<String>,
-    requested_thread_id: Option<String>,
-) -> Result<BridgeStudioSnapshotResponse> {
-    let projects = bridge.studio.list_projects().await?;
-    studio_snapshot_from_projects_inner(bridge, projects, requested_project_id, requested_thread_id)
-        .await
-}
-
-pub(super) async fn studio_snapshot_from_projects_inner(
-    bridge: &'static BridgeRuntime,
-    projects: Vec<pl_studio_runtime::ProjectRecord>,
-    requested_project_id: Option<String>,
-    requested_thread_id: Option<String>,
-) -> Result<BridgeStudioSnapshotResponse> {
-    let recovery_issues = bridge.studio.recovery_issues();
-    let blocked_project_ids = recovery_issues
-        .iter()
-        .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project)
-        .filter_map(|issue| issue.project_id.as_deref())
-        .map(ToOwned::to_owned)
-        .collect::<HashSet<_>>();
-    let blocked_thread_ids = recovery_issues
-        .iter()
-        .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Thread)
-        .filter_map(|issue| issue.thread_id.as_deref())
-        .collect::<std::collections::HashSet<_>>();
-    let selected_project = select_available_project(
-        &projects,
-        requested_project_id.as_deref(),
-        &blocked_project_ids,
-    );
-    let selected_project_id = selected_project.as_ref().map(|project| project.id.clone());
-    let mut threads = Vec::new();
-    let mut selected_thread_id = None;
-
-    if let Some(project) = selected_project {
-        // LSP probe 在后台执行：启动 snapshot 不等待语言服务器探测（首次可能
-        // 触发 rustup 组件安装），探测结果会在 turn 构建时再次 reconcile 并
-        // 随 ThreadRuntimeUpdated 推送；失败只记录日志。
-        let studio = bridge.studio.clone();
-        let project_id = project.id.clone();
-        tokio::spawn(async move {
-            if let Err(error) = studio.reconcile_lsp_runtime_for_project(&project_id).await {
-                tracing::warn!(
-                    error_bytes = error.to_string().len(),
-                    "background LSP reconcile failed for project {project_id}"
-                );
-            }
-        });
-        let roots = bridge.studio.ensure_project_threads(&project.id).await?;
-        threads = bridge.studio.store().list_threads(&project.id).await?;
-        selected_thread_id = requested_thread_id
-            .filter(|thread_id| {
-                !blocked_thread_ids.contains(thread_id.as_str())
-                    && threads.iter().any(|thread| thread.id == *thread_id)
-            })
-            .or_else(|| {
-                roots
-                    .iter()
-                    .find(|thread| !blocked_thread_ids.contains(thread.id.as_str()))
-                    .map(|thread| thread.id.clone())
-            });
-    }
-    let selected_thread_task = match selected_thread_id.as_deref() {
-        Some(thread_id) => bridge
-            .studio
-            .thread_task_view(thread_id)
-            .await?
-            .map(bridge_task_runtime),
-        None => None,
-    };
-    let config = bridge.studio.config_store().load_or_default()?;
-    let web_search_role = selected_thread_id
-        .as_deref()
-        .and_then(|thread_id| threads.iter().find(|thread| thread.id == thread_id))
-        .map(|thread| pl_studio_runtime::StudioMode::from_label(&thread.mode))
-        .map_or(pl_studio_runtime::StudioRole::Executor, |mode| match mode {
-            pl_studio_runtime::StudioMode::Simple => pl_studio_runtime::StudioRole::Executor,
-            pl_studio_runtime::StudioMode::Task => pl_studio_runtime::StudioRole::Planner,
-        });
-    let general_settings = bridge
+) -> Result<BridgeStudioStateSnapshot> {
+    let runtime = runtime_snapshot(bridge.studio.runtime_snapshot().await?);
+    let project_directory = bridge
         .studio
-        .store()
-        .load_setting("flutterSettings:general")
-        .await?
-        .map(|value| {
-            serde_json::from_str::<BridgeGeneralSettingsDto>(&value)
-                .context("invalid stored Flutter general settings")
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let settings = studio_settings_dto(&config, general_settings, web_search_role)?;
+        .product_events()
+        .read_project_directory()
+        .await?;
+    let thread_directory = bridge
+        .studio
+        .product_events()
+        .read_thread_directory()
+        .await?;
+    let task_directory = bridge.studio.product_events().read_task_directory().await?;
+    let agent_directory = bridge.studio.product_events().read_agent_directory().await;
+    let recovery_issues = bridge.studio.recovery_issues();
+    let settings_state = bridge.studio.settings_state()?;
+    let general_settings = general_settings(&settings_state.config);
+    let settings = studio_settings_dto(
+        &settings_state.config,
+        general_settings,
+        pl_studio_runtime::StudioRole::Executor,
+    )?;
+    let mcp_state = bridge.studio.read_mcp_state().await?;
+    let lsp_state = bridge.studio.read_lsp_state().await;
+    let provider_usage = bridge.studio.read_provider_usage_state().await;
+    let updater = bridge.studio.read_update_state().await;
+    let mut skills_by_project = Vec::with_capacity(project_directory.projects.len());
+    for project in &project_directory.projects {
+        let state = bridge
+            .studio
+            .skill_catalog_runtime()
+            .read(&project.id)
+            .await;
+        skills_by_project.push(BridgeSkillsStateSnapshot {
+            meta: state.meta.into(),
+            project_id: state.project_id,
+            config_fingerprint: state.config_fingerprint,
+            catalog_revision: state.catalog_revision,
+            skills: state
+                .catalog
+                .skills
+                .iter()
+                .map(|skill| SkillSummaryDto {
+                    name: skill.name.clone(),
+                })
+                .collect(),
+            warnings: state.catalog.warnings.clone(),
+        });
+    }
 
-    Ok(BridgeStudioSnapshotResponse {
-        projects: projects.into_iter().map(Into::into).collect(),
-        selected_project_id,
-        threads: threads
-            .into_iter()
-            .map(thread_from_record)
-            .map(bridge_thread)
-            .collect(),
-        selected_thread_id,
-        selected_thread_task,
-        recovery_issues: recovery_issues
-            .into_iter()
-            .map(bridge_recovery_issue)
-            .collect(),
-        settings,
+    Ok(BridgeStudioStateSnapshot {
+        runtime,
+        project_directory: BridgeProjectDirectoryState {
+            meta: project_directory.meta.into(),
+            projects: project_directory
+                .projects
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        },
+        thread_directory: BridgeThreadDirectoryState {
+            meta: thread_directory.meta.into(),
+            threads: thread_directory
+                .threads
+                .into_iter()
+                .map(bridge_thread)
+                .collect(),
+        },
+        task_directory: BridgeTaskDirectoryState {
+            meta: task_directory.meta.into(),
+            tasks: task_directory
+                .tasks
+                .into_iter()
+                .map(|entry| BridgeTaskDirectoryEntry {
+                    root_thread_id: entry.root_thread_id,
+                    task: bridge_task_runtime(entry.task),
+                })
+                .collect(),
+        },
+        agent_directory: BridgeAgentDirectoryState {
+            meta: agent_directory.meta.into(),
+            agents: agent_directory
+                .agents
+                .into_iter()
+                .map(crate::api::studio::convert::runtime::bridge_agent_directory_entry)
+                .collect(),
+        },
+        settings: BridgeSettingsStateSnapshot {
+            meta: observed_ready(settings_state.revision, settings_state.updated_at),
+            settings,
+        },
+        recovery: BridgeRecoveryStateSnapshot {
+            meta: bridge.studio.product_events().recovery_meta().into(),
+            issues: recovery_issues
+                .into_iter()
+                .map(bridge_recovery_issue)
+                .collect(),
+        },
+        mcp: BridgeMcpStateSnapshot {
+            meta: mcp_state.meta.into(),
+            desired_config_fingerprint: mcp_state.desired_config_fingerprint,
+            applied_config_fingerprint: mcp_state.applied_config_fingerprint,
+            health: bridge_mcp_health(mcp_state.health),
+        },
+        lsp: BridgeLspStateSnapshot {
+            meta: lsp_state.meta.into(),
+            health: lsp_state.health.into(),
+        },
+        skills_by_project,
+        provider_usage: BridgeProviderUsageStateSnapshot {
+            meta: provider_usage.meta.into(),
+            config_fingerprint: provider_usage.config_fingerprint,
+            usages: provider_usage
+                .usages
+                .into_iter()
+                .map(provider_usage_dto)
+                .collect(),
+        },
+        updater: BridgeUpdaterStateSnapshot {
+            meta: updater.meta.into(),
+            update: updater.update.map(|update| BridgeVerifiedUpdateSummary {
+                version: update.version,
+                published_at: update.published_at,
+                notes_url: update.notes_url,
+            }),
+        },
     })
 }
 
-fn select_available_project(
-    projects: &[pl_studio_runtime::ProjectRecord],
-    requested_project_id: Option<&str>,
-    blocked_project_ids: &HashSet<String>,
-) -> Option<pl_studio_runtime::ProjectRecord> {
-    requested_project_id
-        .and_then(|project_id| {
-            projects
-                .iter()
-                .find(|project| {
-                    project.id == project_id && !blocked_project_ids.contains(&project.id)
-                })
-                .cloned()
-        })
-        .or_else(|| {
-            projects
-                .iter()
-                .find(|project| !blocked_project_ids.contains(&project.id))
-                .cloned()
-        })
+/// 读取完整 Studio canonical state；不得触发生命周期命令。
+pub async fn read_studio_state() -> Result<BridgeStudioStateSnapshot, BridgeError> {
+    let bridge = super::super::bridge_runtime::active_bridge().await?;
+    Ok(read_studio_state_inner(bridge).await?)
+}
+
+pub(super) fn settings_snapshot(
+    state: &pl_studio_runtime::ConfigRuntimeSnapshot,
+) -> Result<BridgeSettingsStateSnapshot> {
+    Ok(BridgeSettingsStateSnapshot {
+        meta: observed_ready(state.revision, state.updated_at),
+        settings: studio_settings_dto(
+            &state.config,
+            general_settings(&state.config),
+            pl_studio_runtime::StudioRole::Executor,
+        )?,
+    })
+}
+
+pub(crate) fn general_settings(
+    config: &pl_studio_runtime::StudioConfig,
+) -> BridgeGeneralSettingsDto {
+    BridgeGeneralSettingsDto {
+        follow_system_theme: config.ui.follow_system_theme,
+        follow_active_turn: config.ui.follow_active_turn,
+        compact_timeline: config.ui.compact_timeline,
+    }
 }
 
 pub(super) fn ensure_project_recovery_available(
@@ -164,48 +182,6 @@ pub(super) fn ensure_project_recovery_available(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::select_available_project;
-    use pl_studio_runtime::ProjectRecord;
-    use std::collections::HashSet;
-
-    #[test]
-    fn blocked_requested_project_falls_back_to_healthy_project() {
-        let projects = vec![project("broken"), project("healthy")];
-        let blocked = HashSet::from(["broken".to_string()]);
-
-        let selected = select_available_project(&projects, Some("broken"), &blocked).unwrap();
-
-        assert_eq!(selected.id, "healthy");
-    }
-
-    #[test]
-    fn all_blocked_projects_leave_selection_empty() {
-        let projects = vec![project("broken")];
-        let blocked = HashSet::from(["broken".to_string()]);
-
-        let selected = select_available_project(&projects, Some("broken"), &blocked);
-
-        assert_eq!(selected, None);
-    }
-
-    #[test]
-    fn requested_healthy_project_takes_precedence() {
-        let projects = vec![project("first"), project("requested")];
-
-        let selected =
-            select_available_project(&projects, Some("requested"), &HashSet::new()).unwrap();
-
-        assert_eq!(selected.id, "requested");
-    }
-
-    fn project(id: &str) -> ProjectRecord {
-        ProjectRecord {
-            id: id.to_string(),
-            name: id.to_string(),
-            path: format!("C:/work/{id}"),
-            updated_at: 0,
-        }
-    }
+fn observed_ready(revision: u64, updated_at: i64) -> BridgeObservedStateMeta {
+    pl_protocol::ObservedStateMeta::ready(revision, updated_at).into()
 }

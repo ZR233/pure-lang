@@ -213,9 +213,7 @@ impl StudioPlanConfirmationProjector {
                     crate::studio::ids::unix_seconds(),
                 )
                 .await?;
-            self.product_events
-                .emit_thread_directory(&thread.project_id)
-                .await?;
+            self.product_events.emit_thread_directory().await?;
         }
         Ok(())
     }
@@ -233,7 +231,6 @@ mod tests {
     use pl_protocol::{ThreadItem, ThreadItemContent, ThreadItemStatus, ThreadNotification};
 
     use super::*;
-    use crate::studio::agent_host::root_agent_id;
 
     #[tokio::test]
     async fn child_plan_trace_never_creates_plan_confirmation() {
@@ -306,11 +303,10 @@ mod tests {
         let studio = StudioRuntime::new(
             store.clone(),
             ConfigStore::new(ConfigPaths::from_home(&home)),
-        );
-        studio.thread_snapshot(&session.id).await.unwrap();
+        )
+        .unwrap();
         let framework = studio.agent_framework().await.unwrap();
-        let handle = framework.handle();
-        let agent_id = root_agent_id(&session.id);
+        let (handle, agent_id) = studio.ensure_thread_agent(&session.id).await.unwrap();
         let plan_item = ThreadItem {
             id: "plan-item".to_string(),
             thread_id: session.id.clone(),

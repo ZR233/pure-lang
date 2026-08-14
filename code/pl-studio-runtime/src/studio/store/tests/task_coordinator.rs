@@ -1376,13 +1376,15 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         .await
         .unwrap()
         .unwrap();
-    let crate::StudioProductEventKind::TaskChanged {
-        task: Some(first_task),
-        ..
-    } = first.kind
-    else {
+    let crate::StudioProductEventKind::TaskDirectoryChanged(first_state) = first.kind else {
         panic!("expected task snapshot");
     };
+    let first_task = &first_state
+        .tasks
+        .iter()
+        .find(|entry| entry.root_thread_id == fixture.run.root_thread_id)
+        .expect("task directory should contain the refreshed task")
+        .task;
     assert_eq!(first_task.work_units[0].executor_progress_revision, 7);
     assert!(
         product_events
@@ -1404,12 +1406,14 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         .await
         .unwrap()
         .unwrap();
-    let crate::StudioProductEventKind::TaskChanged {
-        task: Some(second_task),
-        ..
-    } = second.kind
-    else {
+    let crate::StudioProductEventKind::TaskDirectoryChanged(second_state) = second.kind else {
         panic!("expected task snapshot after executor progress");
     };
+    let second_task = &second_state
+        .tasks
+        .iter()
+        .find(|entry| entry.root_thread_id == fixture.run.root_thread_id)
+        .expect("task directory should contain executor progress")
+        .task;
     assert_eq!(second_task.work_units[0].executor_progress_revision, 8);
 }

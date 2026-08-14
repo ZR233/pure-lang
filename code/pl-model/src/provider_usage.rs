@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use pl_protocol::{PureError, Result};
 use reqwest::header::{ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::provider_info::ProviderInfo;
@@ -11,13 +11,13 @@ use crate::provider_info::ProviderInfo;
 const ZHIPU_TOKEN_LIMIT_TYPE: &str = "TOKENS_LIMIT";
 const ZHIPU_TIME_LIMIT_TYPE: &str = "TIME_LIMIT";
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeepSeekBalanceUsage {
     pub is_available: bool,
     pub balances: Vec<DeepSeekBalanceInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeepSeekBalanceInfo {
     pub currency: String,
     pub total_balance: String,
@@ -25,13 +25,13 @@ pub struct DeepSeekBalanceInfo {
     pub topped_up_balance: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ZhipuCodingPlanUsage {
     pub level: Option<String>,
     pub limits: Vec<ZhipuQuotaLimit>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ZhipuQuotaLimit {
     pub window: ZhipuQuotaWindow,
     pub percentage: f64,
@@ -42,7 +42,7 @@ pub struct ZhipuQuotaLimit {
     pub usage_details: Vec<ZhipuToolUsageDetail>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ZhipuQuotaWindow {
     FiveHour,
     Weekly,
@@ -50,7 +50,7 @@ pub enum ZhipuQuotaWindow {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ZhipuToolUsageDetail {
     pub name: String,
     pub current_value: Option<f64>,

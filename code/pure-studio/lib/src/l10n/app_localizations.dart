@@ -357,6 +357,12 @@ abstract class AppLocalizations {
   /// **'MCP'**
   String get settingsMcpTab;
 
+  /// No description provided for @settingsLspTab.
+  ///
+  /// In en, this message translates to:
+  /// **'LSP'**
+  String get settingsLspTab;
+
   /// No description provided for @settingsSecurityTab.
   ///
   /// In en, this message translates to:
@@ -2441,6 +2447,42 @@ abstract class AppLocalizations {
   /// **'Model Context Protocol servers and inline endpoints.'**
   String get settingsMcpSubtitle;
 
+  /// No description provided for @settingsMcpRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get settingsMcpRefresh;
+
+  /// No description provided for @settingsMcpReconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get settingsMcpReconnect;
+
+  /// No description provided for @settingsMcpResetAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset all'**
+  String get settingsMcpResetAll;
+
+  /// No description provided for @settingsMcpResetConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset all MCP servers?'**
+  String get settingsMcpResetConfirmTitle;
+
+  /// No description provided for @settingsMcpResetConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Every configured MCP connection will be rebuilt. Active turns keep their current leased generation.'**
+  String get settingsMcpResetConfirmBody;
+
+  /// No description provided for @settingsMcpResetConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset all'**
+  String get settingsMcpResetConfirmAction;
+
   /// No description provided for @settingsEndpoint.
   ///
   /// In en, this message translates to:
@@ -2458,6 +2500,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Configured MCP servers will appear here.'**
   String get settingsMcpEmptyMessage;
+
+  /// No description provided for @settingsLspTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Language servers'**
+  String get settingsLspTitle;
+
+  /// No description provided for @settingsLspSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Last-known project language server status and explicit lifecycle commands.'**
+  String get settingsLspSubtitle;
+
+  /// No description provided for @settingsLspRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get settingsLspRefresh;
+
+  /// No description provided for @settingsLspProbe.
+  ///
+  /// In en, this message translates to:
+  /// **'Probe'**
+  String get settingsLspProbe;
+
+  /// No description provided for @settingsLspRepair.
+  ///
+  /// In en, this message translates to:
+  /// **'Repair'**
+  String get settingsLspRepair;
+
+  /// No description provided for @settingsLspReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get settingsLspReset;
+
+  /// No description provided for @settingsLspResetWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset workspace'**
+  String get settingsLspResetWorkspace;
+
+  /// No description provided for @settingsLspEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No language servers'**
+  String get settingsLspEmptyTitle;
+
+  /// No description provided for @settingsLspEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Activate a supported project to create language server membership.'**
+  String get settingsLspEmptyMessage;
 
   /// No description provided for @settingsSecurityTitle.
   ///

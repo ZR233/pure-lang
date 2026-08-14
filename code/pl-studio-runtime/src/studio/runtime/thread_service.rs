@@ -2,9 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
-use crate::skill::SkillCatalog;
-use crate::studio::agent_host::root_agent_id;
+use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioRole};
 use crate::studio::records::{ProjectRecord, ThreadRecord};
 use crate::{StudioMode, resolve_workspace_root};
 
@@ -14,23 +12,26 @@ impl StudioRuntime {
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
-        self.store.upsert_project(path).await
+        let project = self.store.upsert_project(path).await?;
+        if self.store.list_root_threads(&project.id).await?.is_empty() {
+            let _ = self
+                .store
+                .create_thread(&project.id, "新会话", StudioMode::Simple)
+                .await?;
+        }
+        self.agent_facility
+            .product_events
+            .emit_project_directory()
+            .await?;
+        self.agent_facility
+            .product_events
+            .emit_thread_directory()
+            .await?;
+        Ok(project)
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
         self.store.list_projects().await
-    }
-
-    pub async fn ensure_project_threads(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
-        let mut threads = self.store.list_root_threads(project_id).await?;
-        if threads.is_empty() {
-            threads.push(
-                self.store
-                    .create_thread(project_id, "新会话", StudioMode::Simple)
-                    .await?,
-            );
-        }
-        Ok(threads)
     }
 
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
@@ -40,7 +41,7 @@ impl StudioRuntime {
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_directory(project_id)
+            .emit_thread_directory()
             .await?;
         Ok(thread)
     }
@@ -81,9 +82,20 @@ impl StudioRuntime {
         }
         let archived = self.store.archive_thread(&thread_id).await?;
         if let Some(thread) = &archived {
+            if self
+                .store
+                .list_root_threads(&thread.project_id)
+                .await?
+                .is_empty()
+            {
+                let _ = self
+                    .store
+                    .create_thread(&thread.project_id, "新会话", StudioMode::Simple)
+                    .await?;
+            }
             self.agent_facility
                 .product_events
-                .emit_thread_directory(&thread.project_id)
+                .emit_thread_directory()
                 .await?;
         }
         Ok(archived)
@@ -116,7 +128,11 @@ impl StudioRuntime {
         if archived.is_some() {
             self.agent_facility
                 .product_events
-                .emit_thread_directory(project_id)
+                .emit_project_directory()
+                .await?;
+            self.agent_facility
+                .product_events
+                .emit_thread_directory()
                 .await?;
         }
         Ok(archived)
@@ -169,21 +185,28 @@ impl StudioRuntime {
         }
         self.agent_facility
             .product_events
-            .emit_thread_directory(&thread.project_id)
+            .emit_thread_directory()
             .await?;
         Ok(())
     }
 
     pub fn set_model_role(
         &self,
+        expected_settings_revision: u64,
         role: StudioRole,
         provider_id: &str,
         model_slug: &str,
         effort: Option<&str>,
-    ) -> Result<StudioConfig> {
+    ) -> Result<crate::ConfigRuntimeSnapshot> {
         let provider_id = provider_id.trim();
         let model_slug = model_slug.trim();
-        let mut config = self.config_store.load_or_default()?;
+        let current = self.config_runtime.read()?;
+        anyhow::ensure!(
+            current.revision == expected_settings_revision,
+            "settings revision conflict: expected {expected_settings_revision}, actual {}",
+            current.revision
+        );
+        let mut config = current.config;
         let provider_key = ProviderId::new(provider_id)?;
         let resolved_effort = {
             let provider = config
@@ -231,32 +254,21 @@ impl StudioRuntime {
         };
         config.models.routes.insert(role.id(), next_route);
         config.validate()?;
-        self.config_store.save(&config)?;
-        Ok(config)
-    }
-
-    pub async fn provider_usages(&self) -> Result<Vec<crate::ProviderUsageRecord>> {
-        let config = self.config_store.load_or_default()?;
-        Ok(crate::provider_usage_records(&config).await)
-    }
-
-    pub async fn discovered_skills(&self, project_id: &str) -> Result<SkillCatalog> {
-        let project = self
-            .store
-            .read_project(project_id)
-            .await?
-            .context("selected project not found")?;
-        let config = self.config_store.load_or_default()?;
-        let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
-        Ok(SkillCatalog::discover(&workspace_root, &config.skills)?)
+        Ok(self.config_runtime.replace(current.revision, config)?)
     }
 
     pub(super) async fn thread_is_busy(&self, thread_id: &str) -> Result<bool> {
-        let runtime = self.agent_framework().await?;
-        match runtime.handle().snapshot(root_agent_id(thread_id)).await {
-            Ok(snapshot) => Ok(snapshot.active_turn_id.is_some() || snapshot.pending_inputs > 0),
-            Err(crate::AgentRuntimeError::NotFound(_)) => Ok(false),
-            Err(error) => Err(anyhow::anyhow!(error)),
+        if let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? {
+            return match handle.snapshot(agent_id).await {
+                Ok(snapshot) => {
+                    Ok(snapshot.active_turn_id.is_some() || snapshot.pending_inputs > 0)
+                }
+                Err(crate::AgentRuntimeError::NotFound(_)) => {
+                    self.store.thread_has_active_work(thread_id).await
+                }
+                Err(error) => Err(anyhow::anyhow!(error)),
+            };
         }
+        self.store.thread_has_active_work(thread_id).await
     }
 }

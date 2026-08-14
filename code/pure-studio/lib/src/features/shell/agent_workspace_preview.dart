@@ -126,8 +126,54 @@ StudioState _agentWorkspacePreviewState({
     agentCount: 1,
   );
   return StudioState(
-    projects: const [project],
-    threads: [root, child],
+    projectDirectory: const ProjectDirectoryState(values: [project]),
+    threadDirectory: ThreadDirectoryState(values: [root, child]),
+    taskDirectory: const TaskDirectoryState(),
+    agentDirectory: const AgentDirectoryState(),
+    settingsState: const SettingsStateSnapshot(
+      providers: [
+        ProviderSettingsView(
+          id: 'preview-provider',
+          name: 'Preview Provider',
+          baseUrl: '',
+          defaultModel: 'planner/model',
+          models: [
+            ProviderModelView(
+              slug: 'planner/model',
+              displayName: 'Planner Model',
+              reasoningEfforts: ['high'],
+              wireProtocol: 'responses',
+              supportedConnectionModes: ['web_socket', 'http'],
+              defaultConnectionMode: 'web_socket',
+              connectionMode: 'web_socket',
+            ),
+          ],
+          status: 'ready',
+          usageLabel: '',
+        ),
+      ],
+      roles: [
+        RoleSettingsView(
+          key: 'planner',
+          providerId: 'preview-provider',
+          model: 'planner/model',
+          effort: 'high',
+        ),
+        RoleSettingsView(
+          key: 'executor',
+          providerId: 'preview-provider',
+          model: 'planner/model',
+          effort: 'high',
+        ),
+      ],
+      permissionMode: PermissionMode.requestApproval,
+    ),
+    recoveryState: const RecoveryStateSnapshot(),
+    mcpState: const McpStateSnapshot(),
+    lspState: const LspStateSnapshot(),
+    skillsByProject: const {},
+    providerUsageState: const ProviderUsageStateSnapshot(),
+    updaterState: const UpdaterStateSnapshot(),
     workspacesByThread: childLoading
         ? const {}
         : {
@@ -171,44 +217,7 @@ StudioState _agentWorkspacePreviewState({
               ),
       ),
     },
-    providers: const [
-      ProviderSettingsView(
-        id: 'preview-provider',
-        name: 'Preview Provider',
-        baseUrl: '',
-        defaultModel: 'planner/model',
-        models: [
-          ProviderModelView(
-            slug: 'planner/model',
-            displayName: 'Planner Model',
-            reasoningEfforts: ['high'],
-            wireProtocol: 'responses',
-            supportedConnectionModes: ['web_socket', 'http'],
-            defaultConnectionMode: 'web_socket',
-            connectionMode: 'web_socket',
-          ),
-        ],
-        status: 'ready',
-        usageLabel: '',
-      ),
-    ],
-    roles: const [
-      RoleSettingsView(
-        key: 'planner',
-        providerId: 'preview-provider',
-        model: 'planner/model',
-        effort: 'high',
-      ),
-      RoleSettingsView(
-        key: 'executor',
-        providerId: 'preview-provider',
-        model: 'planner/model',
-        effort: 'high',
-      ),
-    ],
-    mcpServers: const [],
     selectedProjectId: project.id,
     selectedThreadId: selected.id,
-    permissionMode: PermissionMode.requestApproval,
   );
 }

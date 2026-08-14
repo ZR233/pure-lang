@@ -27,7 +27,21 @@ pub enum LspAvailabilityKind {
     Available,
     Unavailable,
     MissingCommand,
+    MissingRustupComponent,
     Disabled,
+}
+
+/// LSP reset 的明确作用域。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LspScope {
+    Server {
+        workspace_root: PathBuf,
+        server_id: String,
+    },
+    Workspace {
+        workspace_root: PathBuf,
+    },
+    All,
 }
 
 impl LspAvailabilityKind {
@@ -37,6 +51,7 @@ impl LspAvailabilityKind {
             Self::Available => "available",
             Self::Unavailable => "unavailable",
             Self::MissingCommand => "missingCommand",
+            Self::MissingRustupComponent => "missingRustupComponent",
             Self::Disabled => "disabled",
         }
     }

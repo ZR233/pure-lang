@@ -2,7 +2,7 @@ part of '../widget_test.dart';
 
 void registerStudioUpdateTests() {
   test('disabled builds never call the update service', () async {
-    final api = _FakeStudioUpdateApi(const StudioUpdateUpToDate());
+    final api = _FakeStudioUpdateApi(_upToDateSnapshot());
     final container = ProviderContainer(
       overrides: [
         studioUpdateApiProvider.overrideWithValue(api),
@@ -19,10 +19,8 @@ void registerStudioUpdateTests() {
     expect(api.checkCount, 0);
   });
 
-  test('startup check publishes available and up-to-date states', () async {
-    final availableApi = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+  test('startup reads last-known state without checking the network', () async {
+    final availableApi = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     final available = _updateContainer(availableApi);
     addTearDown(available.dispose);
     available.read(studioUpdateControllerProvider);
@@ -36,8 +34,9 @@ void registerStudioUpdateTests() {
       available.read(studioUpdateControllerProvider).update?.version,
       '1.1.0',
     );
+    expect(availableApi.checkCount, 0);
 
-    final currentApi = _FakeStudioUpdateApi(const StudioUpdateUpToDate());
+    final currentApi = _FakeStudioUpdateApi(_upToDateSnapshot());
     final current = _updateContainer(currentApi);
     addTearDown(current.dispose);
     current.read(studioUpdateControllerProvider);
@@ -45,19 +44,20 @@ void registerStudioUpdateTests() {
 
     expect(
       current.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.upToDate,
+      StudioUpdatePhase.idle,
     );
+    expect(currentApi.checkCount, 0);
   });
 
   test('check errors are retryable', () async {
     final api = _FakeStudioUpdateApi(
-      const StudioUpdateUpToDate(),
+      _upToDateSnapshot(),
       checkError: StateError('offline'),
     );
     final container = _updateContainer(api);
     addTearDown(container.dispose);
     container.read(studioUpdateControllerProvider);
-    await _flushUpdateController();
+    await container.read(studioUpdateControllerProvider.notifier).check();
 
     final failed = container.read(studioUpdateControllerProvider);
     expect(failed.phase, StudioUpdatePhase.failed);
@@ -72,9 +72,7 @@ void registerStudioUpdateTests() {
   });
 
   test('install maps download, verify, and installer events', () async {
-    final api = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+    final api = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     final container = _updateContainer(api);
     addTearDown(container.dispose);
     container.read(studioUpdateControllerProvider);
@@ -125,9 +123,7 @@ void registerStudioUpdateTests() {
   });
 
   test('busy guard refuses to enter the install stream', () async {
-    final api = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+    final api = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     final container = _updateContainer(api, runtimeBusy: true);
     addTearDown(container.dispose);
     container.read(studioUpdateControllerProvider);
@@ -144,9 +140,7 @@ void registerStudioUpdateTests() {
   test(
     'active update operation can be cancelled before installer launch',
     () async {
-      final api = _FakeStudioUpdateApi(
-        const StudioUpdateAvailable(_testStudioUpdate),
-      );
+      final api = _FakeStudioUpdateApi(_availableUpdateSnapshot());
       final container = _updateContainer(api);
       addTearDown(container.dispose);
       container.read(studioUpdateControllerProvider);
@@ -175,16 +169,16 @@ void registerStudioUpdateTests() {
     tester,
   ) async {
     _configureSettingsTestView(tester);
-    final updateApi = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+    final updateApi = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           studioApiProvider.overrideWithValue(
             _FakeStudioApi(
               _withSelectedTurn(
-                _stateWithPlannerModels(),
+                _stateWithPlannerModels().copyWith(
+                  updaterState: _availableUpdateSnapshot(),
+                ),
                 _testTurn(
                   threadId: 'session-1',
                   state: const StudioTurnState.inProgress(
@@ -225,14 +219,16 @@ void registerStudioUpdateTests() {
   testWidgets('sidebar settings button shows a quiet update indicator', (
     tester,
   ) async {
-    final updateApi = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+    final updateApi = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           studioApiProvider.overrideWithValue(
-            _FakeStudioApi(_stateWithPlannerModels()),
+            _FakeStudioApi(
+              _stateWithPlannerModels().copyWith(
+                updaterState: _availableUpdateSnapshot(),
+              ),
+            ),
           ),
           studioUpdateApiProvider.overrideWithValue(updateApi),
           studioUpdateEnabledProvider.overrideWithValue(true),
@@ -251,14 +247,16 @@ void registerStudioUpdateTests() {
 
   testWidgets('update row has zh Hans copy', (tester) async {
     _configureSettingsTestView(tester);
-    final updateApi = _FakeStudioUpdateApi(
-      const StudioUpdateAvailable(_testStudioUpdate),
-    );
+    final updateApi = _FakeStudioUpdateApi(_availableUpdateSnapshot());
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           studioApiProvider.overrideWithValue(
-            _FakeStudioApi(_stateWithPlannerModels()),
+            _FakeStudioApi(
+              _stateWithPlannerModels().copyWith(
+                updaterState: _availableUpdateSnapshot(),
+              ),
+            ),
           ),
           studioUpdateApiProvider.overrideWithValue(updateApi),
           studioUpdateEnabledProvider.overrideWithValue(true),
@@ -289,6 +287,9 @@ ProviderContainer _updateContainer(
 }) {
   return ProviderContainer(
     overrides: [
+      studioApiProvider.overrideWithValue(
+        _FakeStudioApi(_emptyState().copyWith(updaterState: api.checkResult)),
+      ),
       studioUpdateApiProvider.overrideWithValue(api),
       studioUpdateEnabledProvider.overrideWithValue(true),
       studioVersionProvider.overrideWithValue('1.0.0'),
@@ -305,7 +306,7 @@ Future<void> _flushUpdateController() async {
 class _FakeStudioUpdateApi implements StudioUpdateApi {
   _FakeStudioUpdateApi(this.checkResult, {this.checkError});
 
-  StudioUpdateCheckResult checkResult;
+  UpdaterStateSnapshot checkResult;
   Object? checkError;
   final installStarted = Completer<void>();
   final _installEvents = StreamController<StudioUpdateInstallEvent>();
@@ -315,14 +316,17 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
   late _FakeStudioUpdateOperation operation;
 
   @override
-  Future<StudioUpdateCheckResult> check(String currentVersion) async {
+  Future<UpdaterStateSnapshot> check() async {
     checkCount += 1;
     if (checkError case final error?) throw error;
     return checkResult;
   }
 
   @override
-  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update) async {
+  Future<StudioUpdateOperation> startInstall({
+    required int expectedRevision,
+    required String version,
+  }) async {
     installCount += 1;
     if (!installStarted.isCompleted) installStarted.complete();
     return operation = _FakeStudioUpdateOperation(_installEvents);
@@ -356,17 +360,25 @@ class _FakeStudioUpdateOperation implements StudioUpdateOperation {
   void dispose() {}
 }
 
-const _testStudioUpdate = StudioUpdateInfo(
+UpdaterStateSnapshot _availableUpdateSnapshot() => UpdaterStateSnapshot(
+  meta: ObservedStateMeta(
+    revision: 1,
+    phase: ObservedStatePhase.ready,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    stale: false,
+  ),
   version: '1.1.0',
-  publishedAt: 1,
+  publishedAt: DateTime.fromMillisecondsSinceEpoch(1000),
   notesUrl: 'https://github.com/ZR233/pure-lang/releases/tag/v1.1.0',
-  installerUrl:
-      'https://github.com/ZR233/pure-lang/releases/download/v1.1.0/'
-      'Pure-Studio-1.1.0-windows-x86_64-setup.exe',
-  installerSize: 100,
-  installerSha256:
-      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-  installerSignatureUrl:
-      'https://github.com/ZR233/pure-lang/releases/download/v1.1.0/'
-      'Pure-Studio-1.1.0-windows-x86_64-setup.exe.minisig',
+);
+
+UpdaterStateSnapshot _upToDateSnapshot() => UpdaterStateSnapshot(
+  meta: ObservedStateMeta(
+    revision: 1,
+    phase: ObservedStatePhase.ready,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    stale: false,
+  ),
 );

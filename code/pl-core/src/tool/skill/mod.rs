@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use pl_protocol::{PureError, SkillActivation};
 use schemars::JsonSchema;
@@ -19,17 +20,23 @@ use actions::*;
 
 #[derive(Debug, Clone)]
 pub struct SkillsListTool {
-    config: SkillsConfig,
+    source: SkillCatalogSource,
 }
 
 #[derive(Debug, Clone)]
 pub struct SkillViewTool {
-    config: SkillsConfig,
+    source: SkillCatalogSource,
 }
 
 #[derive(Debug, Clone)]
 pub struct SkillManageTool {
-    config: SkillsConfig,
+    source: SkillCatalogSource,
+}
+
+#[derive(Debug, Clone)]
+enum SkillCatalogSource {
+    Config(SkillsConfig),
+    Frozen(Arc<SkillCatalog>),
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -199,19 +206,43 @@ struct SkillFileOutput<'a> {
 
 impl SkillsListTool {
     pub fn new(config: SkillsConfig) -> Self {
-        Self { config }
+        Self {
+            source: SkillCatalogSource::Config(config),
+        }
+    }
+
+    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+        Self {
+            source: SkillCatalogSource::Frozen(catalog),
+        }
     }
 }
 
 impl SkillViewTool {
     pub fn new(config: SkillsConfig) -> Self {
-        Self { config }
+        Self {
+            source: SkillCatalogSource::Config(config),
+        }
+    }
+
+    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+        Self {
+            source: SkillCatalogSource::Frozen(catalog),
+        }
     }
 }
 
 impl SkillManageTool {
     pub fn new(config: SkillsConfig) -> Self {
-        Self { config }
+        Self {
+            source: SkillCatalogSource::Config(config),
+        }
+    }
+
+    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+        Self {
+            source: SkillCatalogSource::Frozen(catalog),
+        }
     }
 }
 
@@ -240,8 +271,7 @@ impl Tool for SkillsListTool {
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
-                .map_err(|error| tool_error(self.name(), error))?;
+            let catalog = catalog_for(&self.source, &context, self.name())?;
             let skills = catalog
                 .skills
                 .iter()
@@ -259,7 +289,7 @@ impl Tool for SkillsListTool {
                 count: skills.len(),
                 project_dir: &catalog.project_dir,
                 skills,
-                warnings: catalog.warnings,
+                warnings: catalog.warnings.clone(),
             })
         })
     }
@@ -292,8 +322,7 @@ impl Tool for SkillViewTool {
             let turn_id = input.session_id.clone();
             let tool_id = input.tool_id.clone();
             let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
-                .map_err(|error| tool_error(self.name(), error))?;
+            let catalog = catalog_for(&self.source, &context, self.name())?;
             let skill = catalog.find(&input.target.name).ok_or_else(|| {
                 let name = &input.target.name;
                 tool_error(self.name(), format!("skill not found: {name}"))
@@ -344,8 +373,7 @@ impl Tool for SkillManageTool {
         Box::pin(async move {
             context.ensure_workspace_writable()?;
             let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
-                .map_err(|error| tool_error(self.name(), error))?;
+            let catalog = catalog_for(&self.source, &context, self.name())?;
             match input {
                 SkillManageInput::Create(input) => create_skill(self.name(), &catalog, input),
                 SkillManageInput::Patch(input) => patch_skill(self.name(), &catalog, input),
@@ -359,6 +387,21 @@ impl Tool for SkillManageTool {
                 }
             }
         })
+    }
+}
+
+fn catalog_for(
+    source: &SkillCatalogSource,
+    context: &ToolContext,
+    tool_name: &str,
+) -> Result<Arc<SkillCatalog>, PureError> {
+    match source {
+        SkillCatalogSource::Config(config) => {
+            SkillCatalog::discover(context.workspace.root(), config)
+                .map(Arc::new)
+                .map_err(|error| tool_error(tool_name, error))
+        }
+        SkillCatalogSource::Frozen(catalog) => Ok(catalog.clone()),
     }
 }
 

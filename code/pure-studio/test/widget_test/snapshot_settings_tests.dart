@@ -3,8 +3,14 @@ part of '../widget_test.dart';
 void registerSnapshotSettingsTests() {
   test('settings merge does not replace canonical Thread workspace', () {
     final current = _emptyState();
-    final next = _emptyState().copyWith(
-      providers: const [
+    final next = const SettingsStateSnapshot(
+      meta: ObservedStateMeta(
+        revision: 1,
+        phase: ObservedStatePhase.ready,
+        updatedAt: null,
+        stale: false,
+      ),
+      providers: [
         ProviderSettingsView(
           id: 'provider-1',
           name: 'Provider',
@@ -16,10 +22,9 @@ void registerSnapshotSettingsTests() {
         ),
       ],
       permissionMode: PermissionMode.fullAccess,
-      workspacesByThread: const {},
     );
 
-    final merged = mergeStudioConfigState(current, next);
+    final merged = applySettingsState(current, next);
 
     expect(merged.workspacesByThread, same(current.workspacesByThread));
     expect(merged.providers.single.id, 'provider-1');

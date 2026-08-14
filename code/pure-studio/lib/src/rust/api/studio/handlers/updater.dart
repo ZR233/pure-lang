@@ -5,23 +5,24 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
+import '../types/response.dart';
+import '../types/runtime.dart';
 import '../types/updater.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update`, `cancel_all_update_operations`, `runtime_error`, `runtime_update`, `update_operations`, `updater`, `wait`
+// These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update_state`, `cancel_all_update_operations`, `runtime_error`, `update_operations`, `wait`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
-Future<BridgeStudioUpdateCheckDto> checkStudioUpdate({
-  required String currentVersion,
-}) => RustLib.instance.api.crateApiStudioHandlersUpdaterCheckStudioUpdate(
-  currentVersion: currentVersion,
-);
+Future<BridgeUpdaterStateSnapshot> checkStudioUpdate() =>
+    RustLib.instance.api.crateApiStudioHandlersUpdaterCheckStudioUpdate();
 
 Future<BridgeStudioUpdateOperation> installStudioUpdate({
-  required BridgeStudioUpdateDto update,
+  required BigInt expectedRevision,
+  required String version,
 }) => RustLib.instance.api.crateApiStudioHandlersUpdaterInstallStudioUpdate(
-  update: update,
+  expectedRevision: expectedRevision,
+  version: version,
 );
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeStudioUpdateOperation>>

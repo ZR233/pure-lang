@@ -37,6 +37,14 @@ pub struct BridgeError {
 }
 
 impl BridgeError {
+    pub(crate) fn not_initialized() -> Self {
+        Self::new(
+            BridgeErrorCode::NotInitialized,
+            "Studio runtime is not initialized",
+            true,
+        )
+    }
+
     pub(crate) fn runtime_stopped() -> Self {
         Self::new(
             BridgeErrorCode::RuntimeStopped,

@@ -268,6 +268,7 @@ fn discovers_system_skills_between_user_and_external_priority() {
     config
         .external_dirs
         .push(external.to_string_lossy().to_string());
+    install_system_skills(&config).unwrap();
 
     let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
 
@@ -293,6 +294,7 @@ fn project_skill_shadows_system_skill() {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
+    install_system_skills(&config).unwrap();
 
     let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
 
@@ -347,6 +349,7 @@ fn disabled_filters_system_skill_by_name() {
         disabled: vec!["skill-creator".to_string()],
         ..SkillsConfig::default()
     };
+    install_system_skills(&config).unwrap();
 
     let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
 
@@ -364,6 +367,7 @@ fn skills_prompt_includes_system_readonly_guidance() {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
+    install_system_skills(&config).unwrap();
 
     let prompt = build_skills_prompt(&workspace, &config).unwrap().unwrap();
 

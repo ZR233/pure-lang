@@ -443,9 +443,8 @@ impl StudioAgentEventProjector {
                     .max(0),
             )
             .unwrap_or_default();
-            self.product_events.emit_agent_directory(
-                &thread.project_id,
-                StudioAgentDirectoryEntry {
+            self.product_events
+                .update_agent_directory(StudioAgentDirectoryEntry {
                     id: snapshot.identity.id.to_string(),
                     thread_id: thread.id.clone(),
                     root_thread_id: thread.root_thread_id.clone(),
@@ -476,10 +475,10 @@ impl StudioAgentEventProjector {
                     progress,
                     updated_at: snapshot.updated_at,
                     summary_age_seconds,
-                },
-            );
+                })
+                .await;
             self.product_events
-                .emit_thread_directory(&thread.project_id)
+                .emit_thread_directory()
                 .await
                 .at("emitThreadDirectory")?;
         }

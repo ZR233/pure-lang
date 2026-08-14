@@ -18,18 +18,40 @@ StudioReduceResult reduceStudioEvent(
   StudioBridgeEvent event,
 ) {
   return switch (event.payload) {
-    ThreadDirectoryChangedPayload(:final projectId, :final threads) =>
-      StudioReduceResult(_replaceThreadDirectory(current, projectId, threads)),
-    TaskChangedPayload(:final rootThreadId, :final task) => StudioReduceResult(
-      _withTask(current, rootThreadId, task),
+    ProjectDirectoryChangedPayload(:final state) => StudioReduceResult(
+      applyProjectDirectory(current, state),
     ),
-    AgentDirectoryChangedPayload(:final agent) => StudioReduceResult(
-      _withThreadDirectoryEntry(current, agent),
+    ThreadDirectoryChangedPayload(:final state) => StudioReduceResult(
+      applyThreadDirectory(current, state),
     ),
-    McpHealthChangedPayload(:final servers) => StudioReduceResult(
-      servers.isEmpty ? current : current.copyWith(mcpServers: servers),
+    TaskDirectoryChangedPayload(:final state) => StudioReduceResult(
+      applyTaskDirectory(current, state),
     ),
-    LspHealthChangedPayload() || StalePayload() => StudioReduceResult(current),
+    AgentDirectoryChangedPayload(:final state) => StudioReduceResult(
+      applyAgentDirectory(current, state),
+    ),
+    SettingsStateChangedPayload(:final state) => StudioReduceResult(
+      applySettingsState(current, state),
+    ),
+    RecoveryStateChangedPayload(:final state) => StudioReduceResult(
+      applyRecoveryState(current, state),
+    ),
+    McpStateChangedPayload(:final state) => StudioReduceResult(
+      applyMcpState(current, state),
+    ),
+    LspStateChangedPayload(:final state) => StudioReduceResult(
+      applyLspState(current, state),
+    ),
+    SkillsStateChangedPayload(:final state) => StudioReduceResult(
+      applySkillsState(current, state),
+    ),
+    ProviderUsageStateChangedPayload(:final state) => StudioReduceResult(
+      applyProviderUsageState(current, state),
+    ),
+    UpdaterStateChangedPayload(:final state) => StudioReduceResult(
+      applyUpdaterState(current, state),
+    ),
+    StalePayload() => StudioReduceResult(current),
   };
 }
 
@@ -43,6 +65,10 @@ StudioState applyThreadSnapshot(
 ) {
   final threadId = workspace.thread.id;
   if (threadId.isEmpty) return current;
+  final previous = current.workspacesByThread[threadId];
+  if (previous != null && workspace.revision <= previous.revision) {
+    return current;
+  }
   final directoryThread = current.threads
       .where((thread) => thread.id == threadId)
       .firstOrNull;
@@ -141,54 +167,113 @@ StudioState mergeThreadHistoryPage(
   );
 }
 
-StudioState mergeStudioConfigState(StudioState current, StudioState next) {
-  final nextProviders = next.providers.isEmpty
-      ? current.providers
-      : next.providers;
+StudioState applySettingsState(
+  StudioState current,
+  SettingsStateSnapshot next,
+) {
+  if (!next.meta.isNewerThan(current.settingsState.meta)) return current;
+  return current.copyWith(settingsState: next);
+}
+
+StudioState applyProjectDirectory(
+  StudioState current,
+  ProjectDirectoryState next,
+) {
+  if (!next.meta.isNewerThan(current.projectDirectory.meta)) return current;
+  final projectIds = next.values.map((project) => project.id).toSet();
+  final selectedProjectId = projectIds.contains(current.selectedProjectId)
+      ? current.selectedProjectId
+      : ([
+          ...next.values,
+        ]..sort((a, b) => a.id.compareTo(b.id))).firstOrNull?.id;
   return current.copyWith(
-    projects: next.projects.isEmpty ? current.projects : next.projects,
-    threads: next.threads.isEmpty ? current.threads : next.threads,
-    providers: [
-      for (final provider in nextProviders)
-        providerWithCatalogMetadata(provider, current.providerCatalog),
-    ],
-    defaultProviderId: next.defaultProviderId,
-    providerUsages: next.providerUsages.isEmpty
-        ? current.providerUsages
-        : next.providerUsages,
-    roles: next.roles.isEmpty ? current.roles : next.roles,
-    mcpServers: next.mcpServers.isEmpty ? current.mcpServers : next.mcpServers,
-    instructions: next.instructions,
-    skills: next.skills,
-    general: next.general,
-    webSearch: next.webSearch,
-    permissionMode: next.permissionMode,
-    recoveryIssues: next.recoveryIssues,
+    projectDirectory: next,
+    selectedProjectId: selectedProjectId,
   );
 }
 
-StudioState mergeStudioThreadState(
+StudioState applyThreadDirectory(
   StudioState current,
-  StudioState next,
-  String threadId,
+  ThreadDirectoryState next,
 ) {
-  final thread = next.threads
-      .where((candidate) => candidate.id == threadId)
-      .firstOrNull;
-  if (thread == null) return current;
-  final workspace = current.workspacesByThread[threadId];
+  if (!next.meta.isNewerThan(current.threadDirectory.meta)) return current;
+  final knownThreads = {for (final thread in next.values) thread.id: thread};
+  var selectedThreadId = current.selectedThreadId;
+  if (!knownThreads.containsKey(selectedThreadId)) {
+    final roots =
+        next.values
+            .where(
+              (thread) =>
+                  thread.isRoot &&
+                  thread.projectId == current.selectedProjectId,
+            )
+            .toList()
+          ..sort((a, b) => a.id.compareTo(b.id));
+    selectedThreadId = roots.firstOrNull?.id;
+  }
+  final workspaces = {
+    for (final entry in current.workspacesByThread.entries)
+      if (knownThreads.containsKey(entry.key))
+        entry.key: entry.value.copyWith(thread: knownThreads[entry.key]),
+  };
+  final workspaceUi = Map<String, WorkspaceUiState>.from(
+    current.workspaceUiByThread,
+  )..removeWhere((id, _) => !knownThreads.containsKey(id));
   return current.copyWith(
-    threads: [
-      for (final candidate in current.threads)
-        candidate.id == threadId ? thread : candidate,
-    ],
-    workspacesByThread: workspace == null
-        ? current.workspacesByThread
-        : {
-            ...current.workspacesByThread,
-            threadId: workspace.copyWith(thread: thread),
-          },
+    threadDirectory: next,
+    selectedThreadId: selectedThreadId,
+    workspacesByThread: workspaces,
+    workspaceUiByThread: workspaceUi,
   );
+}
+
+StudioState applyTaskDirectory(StudioState current, TaskDirectoryState next) {
+  if (!next.meta.isNewerThan(current.taskDirectory.meta)) return current;
+  return current.copyWith(taskDirectory: next);
+}
+
+StudioState applyAgentDirectory(StudioState current, AgentDirectoryState next) {
+  if (!next.meta.isNewerThan(current.agentDirectory.meta)) return current;
+  return current.copyWith(agentDirectory: next);
+}
+
+StudioState applyRecoveryState(
+  StudioState current,
+  RecoveryStateSnapshot next,
+) {
+  if (!next.meta.isNewerThan(current.recoveryState.meta)) return current;
+  return current.copyWith(recoveryState: next);
+}
+
+StudioState applyProviderUsageState(
+  StudioState current,
+  ProviderUsageStateSnapshot next,
+) {
+  if (!next.meta.isNewerThan(current.providerUsageState.meta)) return current;
+  return current.copyWith(providerUsageState: next);
+}
+
+StudioState applySkillsState(StudioState current, SkillsStateSnapshot next) {
+  final previous = current.skillsByProject[next.projectId];
+  if (previous != null && !next.meta.isNewerThan(previous.meta)) return current;
+  return current.copyWith(
+    skillsByProject: {...current.skillsByProject, next.projectId: next},
+  );
+}
+
+StudioState applyMcpState(StudioState current, McpStateSnapshot next) {
+  if (!next.meta.isNewerThan(current.mcpState.meta)) return current;
+  return current.copyWith(mcpState: next);
+}
+
+StudioState applyLspState(StudioState current, LspStateSnapshot next) {
+  if (!next.meta.isNewerThan(current.lspState.meta)) return current;
+  return current.copyWith(lspState: next);
+}
+
+StudioState applyUpdaterState(StudioState current, UpdaterStateSnapshot next) {
+  if (!next.meta.isNewerThan(current.updaterState.meta)) return current;
+  return current.copyWith(updaterState: next);
 }
 
 String defaultEffortForModel(
@@ -296,100 +381,6 @@ ThreadWorkspace _updateThreadInteraction(
     interactions.add(interaction);
   }
   return workspace.copyWith(revision: revision, interactions: interactions);
-}
-
-StudioState _replaceThreadDirectory(
-  StudioState current,
-  String? projectId,
-  List<StudioThread> incoming,
-) {
-  final affectedProjects = projectId == null
-      ? incoming.map((thread) => thread.projectId).toSet()
-      : {projectId};
-  final threads = projectId == null && incoming.isEmpty
-      ? <StudioThread>[]
-      : [
-          for (final thread in current.threads)
-            if (!affectedProjects.contains(thread.projectId)) thread,
-          ...incoming,
-        ];
-  final knownIds = threads.map((thread) => thread.id).toSet();
-  final threadsById = {for (final thread in threads) thread.id: thread};
-  var selectedThreadId = current.selectedThreadId;
-  if (selectedThreadId != null && !knownIds.contains(selectedThreadId)) {
-    selectedThreadId = threads
-        .where(
-          (thread) =>
-              thread.isRoot &&
-              (projectId == null || thread.projectId == projectId),
-        )
-        .firstOrNull
-        ?.id;
-  }
-  final workspaces = {
-    for (final entry in current.workspacesByThread.entries)
-      if (knownIds.contains(entry.key))
-        entry.key: entry.value.copyWith(thread: threadsById[entry.key]),
-  };
-  final workspaceUi = Map<String, WorkspaceUiState>.from(
-    current.workspaceUiByThread,
-  )..removeWhere((id, _) => !knownIds.contains(id));
-  final agentsByThread = Map<String, StudioAgentView>.from(
-    current.agentsByThread,
-  )..removeWhere((id, _) => !knownIds.contains(id));
-  return current.copyWith(
-    threads: threads,
-    selectedThreadId: selectedThreadId,
-    workspacesByThread: workspaces,
-    workspaceUiByThread: workspaceUi,
-    agentsByThread: agentsByThread,
-  );
-}
-
-StudioState _withTask(
-  StudioState current,
-  String rootThreadId,
-  TaskRuntimeView? task,
-) {
-  final tasks = Map<String, TaskRuntimeView>.from(current.tasksByRootThread);
-  if (task == null) {
-    tasks.remove(rootThreadId);
-  } else {
-    tasks[rootThreadId] = task;
-  }
-  return current.copyWith(tasksByRootThread: tasks);
-}
-
-StudioState _withThreadDirectoryEntry(
-  StudioState current,
-  StudioAgentView agent,
-) {
-  final agentsByThread = <String, StudioAgentView>{
-    ...current.agentsByThread,
-    agent.threadId: agent,
-  };
-  final index = current.threads.indexWhere(
-    (thread) => thread.id == agent.threadId,
-  );
-  if (index < 0) return current.copyWith(agentsByThread: agentsByThread);
-  final threads = [...current.threads];
-  threads[index] = threads[index].copyWith(
-    agentPath: agent.path,
-    role: agent.role,
-    status: agent.status,
-  );
-  final canonical = threads[index];
-  final workspace = current.workspacesByThread[canonical.id];
-  return current.copyWith(
-    threads: threads,
-    agentsByThread: agentsByThread,
-    workspacesByThread: workspace == null
-        ? current.workspacesByThread
-        : {
-            ...current.workspacesByThread,
-            canonical.id: workspace.copyWith(thread: canonical),
-          },
-  );
 }
 
 bool _sameItemIdentity(ThreadItemView left, ThreadItemView right) {

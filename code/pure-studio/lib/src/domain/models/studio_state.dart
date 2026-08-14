@@ -9,6 +9,7 @@ import 'runtime_models.dart';
 import 'thread_directory_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
+import 'studio_state_snapshots.dart';
 import 'thread_models.dart';
 import 'timeline_models.dart';
 import 'turn_models.dart';
@@ -32,48 +33,64 @@ const _emptySessionRuntime = ThreadRuntimeView(
 
 class StudioState {
   StudioState({
-    required this.projects,
-    required this.threads,
+    required this.projectDirectory,
+    required this.threadDirectory,
+    required this.taskDirectory,
+    required this.agentDirectory,
+    required this.settingsState,
+    required this.recoveryState,
+    required this.mcpState,
+    required this.lspState,
+    required this.skillsByProject,
+    required this.providerUsageState,
+    required this.updaterState,
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
-    this.tasksByRootThread = const {},
-    this.agentsByThread = const {},
-    required this.providers,
     this.providerCatalog = const ProviderCatalogView.empty(),
-    this.defaultProviderId,
-    this.providerUsages = const [],
-    required this.roles,
-    required this.mcpServers,
-    this.instructions = const InstructionsSettingsView(),
-    this.skills = const SkillsSettingsView(),
-    this.general = const GeneralSettingsView(),
-    this.webSearch = const WebSearchSettingsView(),
     required this.selectedProjectId,
     required this.selectedThreadId,
-    required this.permissionMode,
-    this.recoveryIssues = const [],
   });
 
-  final List<StudioProject> projects;
-  final List<StudioThread> threads;
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
-  final Map<String, TaskRuntimeView> tasksByRootThread;
-  final Map<String, StudioAgentView> agentsByThread;
-  final List<ProviderSettingsView> providers;
   final ProviderCatalogView providerCatalog;
-  final String? defaultProviderId;
-  final List<ProviderUsageView> providerUsages;
-  final List<RoleSettingsView> roles;
-  final List<McpServerSettingsView> mcpServers;
-  final InstructionsSettingsView instructions;
-  final SkillsSettingsView skills;
-  final GeneralSettingsView general;
-  final WebSearchSettingsView webSearch;
   final String? selectedProjectId;
   final String? selectedThreadId;
-  final PermissionMode permissionMode;
-  final List<StudioRecoveryIssue> recoveryIssues;
+  final ProjectDirectoryState projectDirectory;
+  final ThreadDirectoryState threadDirectory;
+  final TaskDirectoryState taskDirectory;
+  final AgentDirectoryState agentDirectory;
+  final SettingsStateSnapshot settingsState;
+  final RecoveryStateSnapshot recoveryState;
+  final McpStateSnapshot mcpState;
+  final LspStateSnapshot lspState;
+  final Map<String, SkillsStateSnapshot> skillsByProject;
+  final ProviderUsageStateSnapshot providerUsageState;
+  final UpdaterStateSnapshot updaterState;
+
+  List<StudioProject> get projects => projectDirectory.values;
+  List<StudioThread> get threads => threadDirectory.values;
+  Map<String, TaskRuntimeView> get tasksByRootThread => {
+    for (final entry in taskDirectory.values) entry.rootThreadId: entry.task,
+  };
+  Map<String, StudioAgentView> get agentsByThread => {
+    for (final agent in agentDirectory.values) agent.threadId: agent,
+  };
+  List<ProviderSettingsView> get providers => [
+    for (final provider in settingsState.providers)
+      providerWithCatalogMetadata(provider, providerCatalog),
+  ];
+  String? get defaultProviderId => settingsState.defaultProviderId;
+  List<ProviderUsageView> get providerUsages => providerUsageState.usages;
+  List<RoleSettingsView> get roles => settingsState.roles;
+  List<McpServerSettingsView> get mcpServers => settingsState.mcpServers;
+  InstructionsSettingsView get instructions => settingsState.instructions;
+  SkillsSettingsView get skills => settingsState.skills;
+  GeneralSettingsView get general => settingsState.general;
+  WebSearchSettingsView get webSearch => settingsState.webSearch;
+  PermissionMode get permissionMode => settingsState.permissionMode;
+  List<StudioRecoveryIssue> get recoveryIssues => recoveryState.values;
+  int get settingsRevision => settingsState.meta.revision;
 
   ThreadWorkspace? get selectedWorkspace {
     final id = selectedThreadId;
@@ -252,54 +269,44 @@ class StudioState {
   bool get isBusy => turn?.state.isBusy ?? false;
 
   StudioState copyWith({
-    List<StudioProject>? projects,
-    List<StudioThread>? threads,
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
-    Map<String, TaskRuntimeView>? tasksByRootThread,
-    Map<String, StudioAgentView>? agentsByThread,
-    List<ProviderSettingsView>? providers,
     ProviderCatalogView? providerCatalog,
-    Object? defaultProviderId = _studioStateUnset,
-    List<ProviderUsageView>? providerUsages,
-    List<RoleSettingsView>? roles,
-    List<McpServerSettingsView>? mcpServers,
-    InstructionsSettingsView? instructions,
-    SkillsSettingsView? skills,
-    GeneralSettingsView? general,
-    WebSearchSettingsView? webSearch,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
-    PermissionMode? permissionMode,
-    List<StudioRecoveryIssue>? recoveryIssues,
+    ProjectDirectoryState? projectDirectory,
+    ThreadDirectoryState? threadDirectory,
+    TaskDirectoryState? taskDirectory,
+    AgentDirectoryState? agentDirectory,
+    SettingsStateSnapshot? settingsState,
+    RecoveryStateSnapshot? recoveryState,
+    McpStateSnapshot? mcpState,
+    LspStateSnapshot? lspState,
+    Map<String, SkillsStateSnapshot>? skillsByProject,
+    ProviderUsageStateSnapshot? providerUsageState,
+    UpdaterStateSnapshot? updaterState,
   }) {
     return StudioState(
-      projects: projects ?? this.projects,
-      threads: threads ?? this.threads,
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
       workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
-      tasksByRootThread: tasksByRootThread ?? this.tasksByRootThread,
-      agentsByThread: agentsByThread ?? this.agentsByThread,
-      providers: providers ?? this.providers,
       providerCatalog: providerCatalog ?? this.providerCatalog,
-      defaultProviderId: identical(defaultProviderId, _studioStateUnset)
-          ? this.defaultProviderId
-          : defaultProviderId as String?,
-      providerUsages: providerUsages ?? this.providerUsages,
-      roles: roles ?? this.roles,
-      mcpServers: mcpServers ?? this.mcpServers,
-      instructions: instructions ?? this.instructions,
-      skills: skills ?? this.skills,
-      general: general ?? this.general,
-      webSearch: webSearch ?? this.webSearch,
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId
           : selectedProjectId as String?,
       selectedThreadId: identical(selectedThreadId, _studioStateUnset)
           ? this.selectedThreadId
           : selectedThreadId as String?,
-      permissionMode: permissionMode ?? this.permissionMode,
-      recoveryIssues: recoveryIssues ?? this.recoveryIssues,
+      projectDirectory: projectDirectory ?? this.projectDirectory,
+      threadDirectory: threadDirectory ?? this.threadDirectory,
+      taskDirectory: taskDirectory ?? this.taskDirectory,
+      agentDirectory: agentDirectory ?? this.agentDirectory,
+      settingsState: settingsState ?? this.settingsState,
+      recoveryState: recoveryState ?? this.recoveryState,
+      mcpState: mcpState ?? this.mcpState,
+      lspState: lspState ?? this.lspState,
+      skillsByProject: skillsByProject ?? this.skillsByProject,
+      providerUsageState: providerUsageState ?? this.providerUsageState,
+      updaterState: updaterState ?? this.updaterState,
     );
   }
 }

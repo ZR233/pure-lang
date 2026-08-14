@@ -7,15 +7,18 @@ use pl_model::{
 use crate::ProviderConfig;
 use crate::config::StudioConfig;
 use crate::config_editor::provider_template_kind;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderUsageRecord {
     pub provider_id: String,
     pub updated_at: i64,
     pub state: ProviderUsageState,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum ProviderUsageState {
     Unsupported,
     MissingCredential,
@@ -23,7 +26,8 @@ pub enum ProviderUsageState {
     Failed(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum ProviderUsageData {
     DeepSeekBalance(DeepSeekBalanceUsage),
     ZhipuCodingPlan(ZhipuCodingPlanUsage),

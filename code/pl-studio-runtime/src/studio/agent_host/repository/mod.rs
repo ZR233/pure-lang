@@ -58,6 +58,40 @@ impl StudioAgentRepository {
         Self { store }
     }
 
+    /// 只从 SQLite canonical facts 读取 Thread snapshot，不注册或唤醒 actor。
+    pub(in crate::studio) async fn read_thread_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<ThreadSnapshot>, PureError> {
+        let Some(model) = thread::Entity::find_by_id(thread_id.to_string())
+            .one(self.store.database())
+            .await
+            .map_err(store_error)?
+        else {
+            return Ok(None);
+        };
+        if model.archived != 0 {
+            return Ok(None);
+        }
+        if model.runtime_revision.is_none() {
+            return Ok(Some(ThreadSnapshot {
+                schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
+                revision: u64_from_i64(model.revision)?,
+                thread: thread_from_model(model)?,
+                active_turn: None,
+                items: Vec::new(),
+                interactions: Vec::new(),
+                runtime: None,
+            }));
+        }
+        let context = self.restore_session(&model).await?;
+        Ok(Some(
+            self.restore_thread_snapshot(model, &context)
+                .await?
+                .snapshot,
+        ))
+    }
+
     pub(in crate::studio) async fn audit_registered_sessions(
         &self,
     ) -> Result<Vec<StudioSessionRecoveryFailure>, PureError> {

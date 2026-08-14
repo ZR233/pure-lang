@@ -156,6 +156,7 @@ pub struct TurnEngineBuilder {
     effort: Option<ReasoningEffort>,
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
+    skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     runtime_profile: CoreRuntimeProfile,
 }
@@ -167,6 +168,7 @@ impl TurnEngineBuilder {
             effort: None,
             tool_capabilities: ToolCapabilityConfig::default(),
             skills: None,
+            skill_catalog: None,
             lsp_runtime: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
         }
@@ -198,6 +200,14 @@ impl TurnEngineBuilder {
         self
     }
 
+    pub fn with_skill_catalog(
+        mut self,
+        catalog: std::sync::Arc<crate::skill::SkillCatalog>,
+    ) -> Self {
+        self.skill_catalog = Some(catalog);
+        self
+    }
+
     pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
         self.lsp_runtime = Some(registry);
         self
@@ -220,6 +230,7 @@ impl TurnEngineBuilder {
             provider: self.provider,
             effort: self.effort,
             skills: self.skills,
+            skill_catalog: self.skill_catalog,
             lsp_runtime: self.lsp_runtime,
             workspace: workspace_profile.workspace,
             workspace_instructions: workspace_profile.instructions,

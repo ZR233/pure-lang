@@ -5,9 +5,11 @@ class _FakeStudioApi implements StudioApi {
     this.initialState, {
     List<ProviderUsageView>? providerUsages,
     this.providerCatalog = _testProviderCatalog,
-  }) : providerUsages = providerUsages ?? _defaultProviderUsages;
+  }) : providerUsages = providerUsages ?? _defaultProviderUsages,
+       _currentState = initialState;
 
   final StudioState initialState;
+  StudioState _currentState;
   final List<ProviderUsageView> providerUsages;
   final ProviderCatalogView providerCatalog;
   final _global = StreamController<Object>.broadcast();
@@ -33,6 +35,7 @@ class _FakeStudioApi implements StudioApi {
   String? archiveSelectedProjectId;
   ({String threadId, StudioMode mode})? modeUpdate;
   _RoleUpdate? roleUpdate;
+  Completer<SettingsStateSnapshot>? blockedModelRoleSave;
   Map<String, Object?>? savedProviderSettings;
   Map<String, Object?>? savedInstructionsSettings;
   Map<String, Object?>? savedSkillsSettings;
@@ -50,6 +53,14 @@ class _FakeStudioApi implements StudioApi {
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
   Completer<void>? blockedThreadCancellation;
+  int readMcpStateCount = 0;
+  String? resetMcpServerId;
+  int resetAllMcpCount = 0;
+  int readLspStateCount = 0;
+  String? probedLspProjectId;
+  ({String projectId, String serverId})? repairedLspServer;
+  ({String projectId, String serverId})? resetLspServerRequest;
+  String? resetLspWorkspaceProjectId;
   int submitPromptCount = 0;
   final List<({String threadId, String prompt})> submittedPrompts = [];
   Completer<SubmitPromptReceipt>? blockedPromptSubmit;
@@ -101,30 +112,38 @@ class _FakeStudioApi implements StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
 
   @override
-  Future<StudioState> bootstrap() async {
+  Future<StudioState> readStudioState() async {
     bootstrapCount += 1;
     if (bootstrapError case final error?) {
       throw error;
     }
-    return initialState;
+    return _currentState;
   }
 
   @override
-  Future<StudioState> openProject(String path) async {
+  Future<StudioProject> openProject(String path) async {
     openedProjectPath = path;
-    return initialState;
+    return _currentState.projects.first;
   }
 
   @override
-  Future<StudioState> selectProject(String projectId) async {
+  Future<void> activateProject(String projectId) async {
     selectedProjectRequest = projectId;
-    return selectProjectStates[projectId] ?? initialState;
+    if (selectProjectStates[projectId] case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+    }
   }
 
   @override
-  Future<StudioState> createThread(String projectId, {String? title}) async {
+  Future<StudioThread> createThread(String projectId, {String? title}) async {
     createdThreadProjectId = projectId;
-    if (createThreadState case final next?) return next;
+    if (createThreadState case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+      return next.threads
+              .where((thread) => !initialState.threads.contains(thread))
+              .firstOrNull ??
+          next.threads.last;
+    }
     final now = DateTime.fromMillisecondsSinceEpoch(1);
     final thread = StudioThread(
       id: 'session-created',
@@ -135,42 +154,51 @@ class _FakeStudioApi implements StudioApi {
       createdAt: now,
       updatedAt: now,
     );
-    return initialState.copyWith(
-      threads: [...initialState.threads, thread],
+    _currentState = _currentState.copyWith(
+      threadDirectory: ThreadDirectoryState(
+        meta: _nextMeta(_currentState.threadDirectory.meta),
+        values: [..._currentState.threads, thread],
+      ),
       selectedProjectId: projectId,
       selectedThreadId: thread.id,
     );
+    return thread;
   }
 
   @override
-  Future<StudioState> archiveThread(
-    String threadId, {
-    String? selectedThreadId,
-  }) async {
+  Future<StudioThread> archiveThread(String threadId) async {
     archivedThreadId = threadId;
-    archiveSelectedThreadId = selectedThreadId;
-    if (archiveThreadState case final next?) return next;
-    final threads = initialState.threads
+    final archived = _currentState.threads
+        .where((thread) => thread.id == threadId)
+        .first;
+    if (archiveThreadState case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+      return archived;
+    }
+    final threads = _currentState.threads
         .where((thread) => thread.effectiveRootThreadId != threadId)
         .toList();
+    final selectedThreadId = _currentState.selectedThreadId;
     final remainingIds = threads.map((thread) => thread.id).toSet();
     final nextSelected = remainingIds.contains(selectedThreadId)
         ? selectedThreadId
         : threads.where((thread) => thread.isRoot).firstOrNull?.id;
-    return initialState.copyWith(
-      threads: threads,
+    _currentState = _currentState.copyWith(
+      threadDirectory: ThreadDirectoryState(
+        meta: _nextMeta(_currentState.threadDirectory.meta),
+        values: threads,
+      ),
       selectedThreadId: nextSelected,
     );
+    return archived;
   }
 
   @override
-  Future<StudioState> archiveProject(
-    String projectId, {
-    String? selectedProjectId,
-  }) async {
+  Future<void> archiveProject(String projectId) async {
     archivedProjectId = projectId;
-    archiveSelectedProjectId = selectedProjectId;
-    return archiveProjectStates[projectId] ?? initialState;
+    if (archiveProjectStates[projectId] case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+    }
   }
 
   @override
@@ -191,17 +219,15 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupProject(
-    String projectId,
-    String expectedRevision, {
-    String? selectedProjectId,
-  }) async {
+  Future<void> cleanupProject(String projectId, String expectedRevision) async {
     if (projectCleanupError case final error?) {
       throw error;
     }
     cleanedProjectId = projectId;
     projectCleanupExpectedRevision = expectedRevision;
-    return projectCleanupState ?? initialState;
+    if (projectCleanupState case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+    }
   }
 
   @override
@@ -223,33 +249,31 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> cleanupRecoveryIssue(
+  Future<void> cleanupRecoveryIssue(
     String issueId,
-    String expectedRevision, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) async {
+    String expectedRevision,
+  ) async {
     if (recoveryCleanupError case final error?) {
       throw error;
     }
     cleanedRecoveryIssueId = issueId;
     cleanupExpectedRevision = expectedRevision;
-    return recoveryCleanupState ?? initialState;
+    if (recoveryCleanupState case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+    }
   }
 
   @override
-  Future<StudioState> retryRecoveryIssue(
-    String issueId, {
-    String? selectedProjectId,
-    String? selectedThreadId,
-  }) async {
+  Future<void> retryRecoveryIssue(String issueId) async {
     if (recoveryRetryError case final error?) {
       throw error;
     }
     retriedRecoveryIssueId = issueId;
-    retrySelectedProjectId = selectedProjectId;
-    retrySelectedThreadId = selectedThreadId;
-    return recoveryRetryState ?? initialState;
+    retrySelectedProjectId = _currentState.selectedProjectId;
+    retrySelectedThreadId = _currentState.selectedThreadId;
+    if (recoveryRetryState case final next?) {
+      _currentState = _asNewerProductState(_currentState, next);
+    }
   }
 
   @override
@@ -272,12 +296,12 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setModelRole({
+  Future<SettingsStateSnapshot> setModelRole({
+    required int expectedSettingsRevision,
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedThreadId,
   }) async {
     roleUpdate = _RoleUpdate(
       roleKey: roleKey,
@@ -285,9 +309,11 @@ class _FakeStudioApi implements StudioApi {
       model: model,
       effort: effort,
     );
-    return initialState.copyWith(
+    final settings = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
       roles: [
-        for (final role in initialState.roles)
+        for (final role in _currentState.roles)
           role.key == roleKey
               ? RoleSettingsView(
                   key: role.key,
@@ -298,14 +324,16 @@ class _FakeStudioApi implements StudioApi {
               : role,
       ],
     );
+    _currentState = _currentState.copyWith(settingsState: settings);
+    return blockedModelRoleSave?.future ?? settings;
   }
 
   @override
-  Future<StudioState> setThreadMode({
+  Future<void> setThreadMode({
     required String threadId,
     required StudioMode mode,
   }) async {
-    final thread = initialState.threads
+    final thread = _currentState.threads
         .where((candidate) => candidate.id == threadId)
         .firstOrNull;
     if (thread == null) {
@@ -314,7 +342,7 @@ class _FakeStudioApi implements StudioApi {
     if (!thread.isRoot) {
       throw StateError('only a root Thread can change mode');
     }
-    if (initialState.tasksByRootThread[threadId]?.isActive ?? false) {
+    if (_currentState.tasksByRootThread[threadId]?.isActive ?? false) {
       throw StateError('thread mode cannot change while a task is active');
     }
     modeUpdate = (threadId: threadId, mode: mode);
@@ -322,16 +350,19 @@ class _FakeStudioApi implements StudioApi {
       mode: mode,
       role: mode == StudioMode.task ? 'planner' : 'executor',
     );
-    final workspace = initialState.workspacesByThread[threadId];
-    return initialState.copyWith(
-      threads: [
-        for (final candidate in initialState.threads)
-          candidate.id == threadId ? updated : candidate,
-      ],
+    final workspace = _currentState.workspacesByThread[threadId];
+    _currentState = _currentState.copyWith(
+      threadDirectory: ThreadDirectoryState(
+        meta: _nextMeta(_currentState.threadDirectory.meta),
+        values: [
+          for (final candidate in _currentState.threads)
+            candidate.id == threadId ? updated : candidate,
+        ],
+      ),
       workspacesByThread: workspace == null
-          ? initialState.workspacesByThread
+          ? _currentState.workspacesByThread
           : {
-              ...initialState.workspacesByThread,
+              ..._currentState.workspacesByThread,
               threadId: workspace.copyWith(thread: updated),
             },
     );
@@ -350,7 +381,7 @@ class _FakeStudioApi implements StudioApi {
     resolvedInteraction = _interactionResolutionJson(resolution);
     return PendingInteraction(
       id: interactionId,
-      threadId: initialState.selectedThreadId ?? '',
+      threadId: _currentState.selectedThreadId ?? '',
       turnId: 'turn-response',
       kind: InteractionKind.userInput,
       title: '',
@@ -384,6 +415,12 @@ class _FakeStudioApi implements StudioApi {
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
+    return _currentState.workspacesByThread[threadId] ??
+        (throw StateError('unknown fake Thread workspace $threadId'));
   }
 
   @override
@@ -437,35 +474,151 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<SettingsStateSnapshot> saveRuntimePermissionMode(
+    int expectedSettingsRevision,
+    PermissionMode mode,
+  ) async {
     savedPermissionMode = mode;
-    return initialState.copyWith(permissionMode: mode);
+    final settings = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      permissionMode: mode,
+    );
+    _currentState = _currentState.copyWith(settingsState: settings);
+    return settings;
   }
 
   @override
-  Future<List<String>> listDiscoveredSkills(String projectId) async {
+  Future<SkillsStateSnapshot> readSkillsState(String projectId) async {
+    return _skillsState(projectId);
+  }
+
+  @override
+  Future<SkillsStateSnapshot> discoverSkills(String projectId) async {
     discoverProjectId = projectId;
     discoverCallCount += 1;
-    return discoveredSkills;
+    return _skillsState(projectId, revision: discoverCallCount);
   }
 
   @override
-  Future<StudioState> saveProviderSettings(
+  Future<McpStateSnapshot> readMcpState() async {
+    readMcpStateCount += 1;
+    return _currentState.mcpState;
+  }
+
+  @override
+  Future<McpStateSnapshot> resetMcpServer(String serverId) async {
+    resetMcpServerId = serverId;
+    return _nextMcpState();
+  }
+
+  @override
+  Future<McpStateSnapshot> resetAllMcp() async {
+    resetAllMcpCount += 1;
+    return _nextMcpState();
+  }
+
+  @override
+  Future<LspStateSnapshot> readLspState() async {
+    readLspStateCount += 1;
+    return _currentState.lspState;
+  }
+
+  @override
+  Future<LspStateSnapshot> probeLspServer(String projectId) async {
+    probedLspProjectId = projectId;
+    return _nextLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> repairLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    repairedLspServer = (projectId: projectId, serverId: serverId);
+    return _nextLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspServer(
+    String projectId,
+    String serverId,
+  ) async {
+    resetLspServerRequest = (projectId: projectId, serverId: serverId);
+    return _nextLspState();
+  }
+
+  @override
+  Future<LspStateSnapshot> resetLspWorkspace(String projectId) async {
+    resetLspWorkspaceProjectId = projectId;
+    return _nextLspState();
+  }
+
+  McpStateSnapshot _nextMcpState() {
+    final current = _currentState.mcpState;
+    final snapshot = McpStateSnapshot(
+      meta: _nextObservedMeta(current.meta),
+      desiredConfigFingerprint: current.desiredConfigFingerprint,
+      appliedConfigFingerprint: current.appliedConfigFingerprint,
+      activeServers: current.activeServers,
+      servers: current.servers,
+    );
+    _currentState = _currentState.copyWith(mcpState: snapshot);
+    return snapshot;
+  }
+
+  LspStateSnapshot _nextLspState() {
+    final current = _currentState.lspState;
+    final snapshot = LspStateSnapshot(
+      meta: _nextObservedMeta(current.meta),
+      activeServers: current.activeServers,
+      servers: current.servers,
+    );
+    _currentState = _currentState.copyWith(lspState: snapshot);
+    return snapshot;
+  }
+
+  ObservedStateMeta _nextObservedMeta(ObservedStateMeta current) {
+    return ObservedStateMeta(
+      revision: current.revision + 1,
+      phase: ObservedStatePhase.ready,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      stale: false,
+    );
+  }
+
+  @override
+  Future<SettingsStateSnapshot> saveProviderSettings(
+    int expectedSettingsRevision,
     ProviderSettingsCommand command,
   ) async {
     final settings = _providerSettingsCommandJson(command);
     savedProviderSettings = settings;
-    return initialState.copyWith(
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
       defaultProviderId: settings['defaultProviderId'] as String?,
       providers: [
         for (final value in settings['providers'] as List<Object?>)
           _providerFromSettings(value),
       ],
+      roles: [
+        for (final role in command.roles)
+          RoleSettingsView(
+            key: role.key,
+            providerId: role.providerId,
+            model: role.model,
+            effort: role.effort,
+          ),
+      ],
     );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<StudioState> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> saveInstructionsSettings(
+    int expectedSettingsRevision,
     InstructionsSettingsCommand command,
   ) async {
     final settings = <String, Object?>{
@@ -476,7 +629,9 @@ class _FakeStudioApi implements StudioApi {
       'projectDocFallbackFilenames': command.projectDocFallbackFilenames,
     };
     savedInstructionsSettings = settings;
-    return initialState.copyWith(
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
       instructions: InstructionsSettingsView(
         baseOverride: settings['baseOverride'] as String? ?? '',
         developer: settings['developer'] as String? ?? '',
@@ -490,10 +645,15 @@ class _FakeStudioApi implements StudioApi {
         ],
       ),
     );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
+  Future<SettingsStateSnapshot> saveSkillsSettings(
+    int expectedSettingsRevision,
+    SkillsSettingsCommand command,
+  ) async {
     final settings = <String, Object?>{
       'enabled': command.enabled,
       'autoLearn': command.autoLearn,
@@ -505,8 +665,10 @@ class _FakeStudioApi implements StudioApi {
       'autoLearnMinToolCalls': command.autoLearnMinToolCalls,
     };
     savedSkillsSettings = settings;
-    return initialState.copyWith(
-      skills: initialState.skills.copyWith(
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      skills: _currentState.skills.copyWith(
         disabled: [
           for (final value
               in settings['disabled'] as List<Object?>? ?? const <Object?>[])
@@ -514,10 +676,15 @@ class _FakeStudioApi implements StudioApi {
         ],
       ),
     );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
+  Future<SettingsStateSnapshot> saveMcpSettings(
+    int expectedSettingsRevision,
+    McpSettingsCommand command,
+  ) async {
     final settings = <String, Object?>{
       'servers': [
         for (final server in command.servers)
@@ -530,11 +697,27 @@ class _FakeStudioApi implements StudioApi {
       ],
     };
     savedMcpSettings = settings;
-    return initialState;
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      mcpServers: [
+        for (final server in command.servers)
+          McpServerSettingsView(
+            id: server.id,
+            enabled: server.enabled,
+            transport: server.transport,
+            endpoint: server.endpoint,
+            status: 'configured',
+          ),
+      ],
+    );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<StudioState> saveGeneralSettings(
+  Future<SettingsStateSnapshot> saveGeneralSettings(
+    int expectedSettingsRevision,
     GeneralSettingsCommand command,
   ) async {
     final settings = <String, Object?>{
@@ -543,22 +726,29 @@ class _FakeStudioApi implements StudioApi {
       'compactTimeline': command.compactTimeline,
     };
     savedGeneralSettings = settings;
-    return initialState.copyWith(
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
       general: GeneralSettingsView(
         followSystemTheme: settings['followSystemTheme'] as bool? ?? true,
         followActiveTurn: settings['followActiveTurn'] as bool? ?? true,
         compactTimeline: settings['compactTimeline'] as bool? ?? false,
       ),
     );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<StudioState> saveWebSearchSettings(
+  Future<SettingsStateSnapshot> saveWebSearchSettings(
+    int expectedSettingsRevision,
     WebSearchSettingsCommand command,
   ) async {
     savedWebSearchSettings = command;
-    return initialState.copyWith(
-      webSearch: initialState.webSearch.withConfiguredValues(
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      webSearch: _currentState.webSearch.withConfiguredValues(
         configuredMode: command.mode,
         contextSize: command.contextSize,
         allowedDomains: command.allowedDomains,
@@ -568,14 +758,124 @@ class _FakeStudioApi implements StudioApi {
         timezone: command.timezone,
       ),
     );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
   }
 
   @override
-  Future<List<ProviderUsageView>> loadProviderUsages() async {
+  Future<ProviderUsageStateSnapshot> checkProviderUsage() async {
     loadProviderUsagesCount += 1;
     final blocked = blockedProviderUsageLoad;
-    return blocked == null ? providerUsages : blocked.future;
+    final usages = blocked == null ? providerUsages : await blocked.future;
+    final snapshot = ProviderUsageStateSnapshot(
+      meta: ObservedStateMeta(
+        revision: _currentState.providerUsageState.meta.revision + 1,
+        phase: ObservedStatePhase.ready,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        stale: false,
+      ),
+      usages: usages,
+    );
+    _currentState = _currentState.copyWith(providerUsageState: snapshot);
+    return snapshot;
   }
+
+  SkillsStateSnapshot _skillsState(String projectId, {int revision = 0}) {
+    return SkillsStateSnapshot(
+      meta: ObservedStateMeta(
+        revision: revision,
+        phase: ObservedStatePhase.ready,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        stale: false,
+      ),
+      projectId: projectId,
+      configFingerprint: 'fake-skills',
+      catalogRevision: revision,
+      skills: discoveredSkills,
+      warnings: const [],
+    );
+  }
+}
+
+SettingsStateSnapshot _settingsSnapshot(
+  SettingsStateSnapshot current, {
+  required int revision,
+  List<ProviderSettingsView>? providers,
+  Object? defaultProviderId = _fakeUnset,
+  List<RoleSettingsView>? roles,
+  List<McpServerSettingsView>? mcpServers,
+  InstructionsSettingsView? instructions,
+  SkillsSettingsView? skills,
+  GeneralSettingsView? general,
+  WebSearchSettingsView? webSearch,
+  PermissionMode? permissionMode,
+}) {
+  return SettingsStateSnapshot(
+    meta: ObservedStateMeta(
+      revision: revision,
+      phase: ObservedStatePhase.ready,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      stale: false,
+    ),
+    providers: providers ?? current.providers,
+    defaultProviderId: identical(defaultProviderId, _fakeUnset)
+        ? current.defaultProviderId
+        : defaultProviderId as String?,
+    roles: roles ?? current.roles,
+    mcpServers: mcpServers ?? current.mcpServers,
+    instructions: instructions ?? current.instructions,
+    skills: skills ?? current.skills,
+    general: general ?? current.general,
+    webSearch: webSearch ?? current.webSearch,
+    permissionMode: permissionMode ?? current.permissionMode,
+  );
+}
+
+const _fakeUnset = Object();
+
+StudioState _asNewerProductState(StudioState current, StudioState next) {
+  return next.copyWith(
+    projectDirectory: ProjectDirectoryState(
+      meta: _nextMeta(current.projectDirectory.meta),
+      values: next.projects,
+    ),
+    threadDirectory: ThreadDirectoryState(
+      meta: _nextMeta(current.threadDirectory.meta),
+      values: next.threads,
+    ),
+    taskDirectory: TaskDirectoryState(
+      meta: _nextMeta(current.taskDirectory.meta),
+      values: next.taskDirectory.values,
+    ),
+    agentDirectory: AgentDirectoryState(
+      meta: _nextMeta(current.agentDirectory.meta),
+      values: next.agentDirectory.values,
+    ),
+    recoveryState: RecoveryStateSnapshot(
+      meta: _nextMeta(current.recoveryState.meta),
+      values: next.recoveryIssues,
+    ),
+    providerUsageState: ProviderUsageStateSnapshot(
+      meta: _nextMeta(current.providerUsageState.meta),
+      configFingerprint: next.providerUsageState.configFingerprint,
+      usages: next.providerUsages,
+    ),
+    updaterState: UpdaterStateSnapshot(
+      meta: _nextMeta(current.updaterState.meta),
+      version: next.updaterState.version,
+      publishedAt: next.updaterState.publishedAt,
+      notesUrl: next.updaterState.notesUrl,
+    ),
+  );
+}
+
+ObservedStateMeta _nextMeta(ObservedStateMeta current) {
+  return ObservedStateMeta(
+    revision: current.revision + 1,
+    phase: ObservedStatePhase.ready,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    stale: false,
+  );
 }
 
 Map<String, Object?> _providerSettingsCommandJson(

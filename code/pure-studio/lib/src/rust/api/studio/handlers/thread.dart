@@ -5,9 +5,6 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
-import '../types/response.dart';
-import '../types/runtime.dart';
-import '../types/settings.dart';
 import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -16,33 +13,28 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// # Errors
 ///
 /// Returns an error when the Project does not exist or the canonical snapshot cannot be read.
-Future<BridgeStudioSnapshotResponse> createThread({
-  required String projectId,
-  String? title,
-}) => RustLib.instance.api.crateApiStudioHandlersThreadCreateThread(
-  projectId: projectId,
-  title: title,
-);
+Future<BridgeThread> createThread({required String projectId, String? title}) =>
+    RustLib.instance.api.crateApiStudioHandlersThreadCreateThread(
+      projectId: projectId,
+      title: title,
+    );
 
 /// Archives a root Thread and selects the next available Thread.
 ///
 /// # Errors
 ///
 /// Returns an error when the Thread does not exist, is a child Thread, or its tree is active.
-Future<BridgeStudioSnapshotResponse> archiveThread({
-  required String threadId,
-  String? selectedThreadId,
-}) => RustLib.instance.api.crateApiStudioHandlersThreadArchiveThread(
-  threadId: threadId,
-  selectedThreadId: selectedThreadId,
-);
+Future<BridgeThread> archiveThread({required String threadId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersThreadArchiveThread(threadId: threadId);
 
 /// Changes the selected root Thread between Simple and Task mode.
 ///
 /// # Errors
 ///
 /// Returns an error when the Thread does not exist, is a child Thread, or has an active Task.
-Future<BridgeStudioSnapshotResponse> setThreadMode({
+Future<void> setThreadMode({
   required String threadId,
   required BridgeThreadMode mode,
 }) => RustLib.instance.api.crateApiStudioHandlersThreadSetThreadMode(

@@ -6,7 +6,9 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+import 'response.dart';
 import 'runtime.dart';
+import 'settings.dart';
 import 'thread_stream.dart';
 part 'event.freezed.dart';
 
@@ -14,17 +16,15 @@ part 'event.freezed.dart';
 
 /// Flutter Bridge 的 Studio 产品事件信封。
 ///
-/// Thread 高频事件通过 Thread subscription 传输，不得加入此类型。
+/// `sequence` 只检测 transport lag；payload 中完整 snapshot 的领域 revision 决定替换顺序。
 class BridgeProductEventEnvelope {
   final String eventId;
-  final String? projectId;
   final BigInt sequence;
   final PlatformInt64 createdAt;
   final BridgeProductEventPayload payload;
 
   const BridgeProductEventEnvelope({
     required this.eventId,
-    this.projectId,
     required this.sequence,
     required this.createdAt,
     required this.payload,
@@ -40,7 +40,6 @@ class BridgeProductEventEnvelope {
   @override
   int get hashCode =>
       eventId.hashCode ^
-      projectId.hashCode ^
       sequence.hashCode ^
       createdAt.hashCode ^
       payload.hashCode;
@@ -51,7 +50,6 @@ class BridgeProductEventEnvelope {
       other is BridgeProductEventEnvelope &&
           runtimeType == other.runtimeType &&
           eventId == other.eventId &&
-          projectId == other.projectId &&
           sequence == other.sequence &&
           createdAt == other.createdAt &&
           payload == other.payload;
@@ -61,24 +59,39 @@ class BridgeProductEventEnvelope {
 sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const BridgeProductEventPayload._();
 
-  const factory BridgeProductEventPayload.threadDirectoryChanged({
-    required String projectId,
-    required List<BridgeThread> threads,
-  }) = BridgeProductEventPayload_ThreadDirectoryChanged;
-  const factory BridgeProductEventPayload.mcpHealthChanged({
-    required BridgeMcpHealthDto health,
-  }) = BridgeProductEventPayload_McpHealthChanged;
-  const factory BridgeProductEventPayload.lspHealthChanged({
-    required BridgeLspHealthDto health,
-  }) = BridgeProductEventPayload_LspHealthChanged;
-  const factory BridgeProductEventPayload.taskChanged({
-    required String rootThreadId,
-    BridgeTaskRuntimeDto? task,
-  }) = BridgeProductEventPayload_TaskChanged;
-  const factory BridgeProductEventPayload.agentDirectoryChanged({
-    required String rootThreadId,
-    required BridgeAgentDirectoryEntryDto agent,
-  }) = BridgeProductEventPayload_AgentDirectoryChanged;
+  const factory BridgeProductEventPayload.projectDirectoryChanged(
+    BridgeProjectDirectoryState field0,
+  ) = BridgeProductEventPayload_ProjectDirectoryChanged;
+  const factory BridgeProductEventPayload.threadDirectoryChanged(
+    BridgeThreadDirectoryState field0,
+  ) = BridgeProductEventPayload_ThreadDirectoryChanged;
+  const factory BridgeProductEventPayload.taskDirectoryChanged(
+    BridgeTaskDirectoryState field0,
+  ) = BridgeProductEventPayload_TaskDirectoryChanged;
+  const factory BridgeProductEventPayload.agentDirectoryChanged(
+    BridgeAgentDirectoryState field0,
+  ) = BridgeProductEventPayload_AgentDirectoryChanged;
+  const factory BridgeProductEventPayload.settingsStateChanged(
+    BridgeSettingsStateSnapshot field0,
+  ) = BridgeProductEventPayload_SettingsStateChanged;
+  const factory BridgeProductEventPayload.recoveryStateChanged(
+    BridgeRecoveryStateSnapshot field0,
+  ) = BridgeProductEventPayload_RecoveryStateChanged;
+  const factory BridgeProductEventPayload.mcpStateChanged(
+    BridgeMcpStateSnapshot field0,
+  ) = BridgeProductEventPayload_McpStateChanged;
+  const factory BridgeProductEventPayload.lspStateChanged(
+    BridgeLspStateSnapshot field0,
+  ) = BridgeProductEventPayload_LspStateChanged;
+  const factory BridgeProductEventPayload.skillsStateChanged(
+    BridgeSkillsStateSnapshot field0,
+  ) = BridgeProductEventPayload_SkillsStateChanged;
+  const factory BridgeProductEventPayload.providerUsageStateChanged(
+    BridgeProviderUsageStateSnapshot field0,
+  ) = BridgeProductEventPayload_ProviderUsageStateChanged;
+  const factory BridgeProductEventPayload.updaterStateChanged(
+    BridgeUpdaterStateSnapshot field0,
+  ) = BridgeProductEventPayload_UpdaterStateChanged;
   const factory BridgeProductEventPayload.stale({
     required BigInt laggedEvents,
   }) = BridgeProductEventPayload_Stale;

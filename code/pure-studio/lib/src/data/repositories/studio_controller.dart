@@ -34,7 +34,7 @@ class StudioController extends _$StudioController {
     });
     final catalog = await _api.loadProviderCatalog();
     final bootstrapped = _attachProviderCatalog(
-      await _api.bootstrap(),
+      await _api.readStudioState(),
       catalog,
     );
     _productCoordinator.start();
@@ -47,7 +47,9 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> openProject(String path) async {
-    await _adoptProductState(await _api.openProject(path));
+    final project = await _api.openProject(path);
+    await _api.activateProject(project.id);
+    await _reloadProductState(selectedProjectId: project.id);
   }
 
   Future<void> selectProject(String projectId) async {
@@ -61,7 +63,8 @@ class StudioController extends _$StudioController {
             null) {
       return;
     }
-    await _adoptProductState(await _api.selectProject(projectId));
+    await _api.activateProject(projectId);
+    await _reloadProductState(selectedProjectId: projectId);
   }
 
   Future<void> createThread() async {
@@ -76,7 +79,11 @@ class StudioController extends _$StudioController {
             null) {
       return;
     }
-    await _adoptProductState(await _api.createThread(projectId));
+    final thread = await _api.createThread(projectId);
+    await _reloadProductState(
+      selectedProjectId: projectId,
+      selectedThreadId: thread.id,
+    );
   }
 
   Future<void> archiveThread(String threadId) async {
@@ -94,11 +101,12 @@ class StudioController extends _$StudioController {
         (current.isBusy && current.selectedRootThread?.id == threadId)) {
       return;
     }
-    await _adoptProductState(
-      await _api.archiveThread(
-        threadId,
-        selectedThreadId: current.selectedThreadId,
-      ),
+    await _api.archiveThread(threadId);
+    await _reloadProductState(
+      selectedProjectId: current.selectedProjectId,
+      selectedThreadId: current.selectedThreadId == threadId
+          ? null
+          : current.selectedThreadId,
     );
   }
 
@@ -108,11 +116,14 @@ class StudioController extends _$StudioController {
         (current.isBusy && current.selectedProjectId == projectId)) {
       return;
     }
-    await _adoptProductState(
-      await _api.archiveProject(
-        projectId,
-        selectedProjectId: current.selectedProjectId,
-      ),
+    await _api.archiveProject(projectId);
+    await _reloadProductState(
+      selectedProjectId: current.selectedProjectId == projectId
+          ? null
+          : current.selectedProjectId,
+      selectedThreadId: current.selectedProjectId == projectId
+          ? null
+          : current.selectedThreadId,
     );
   }
 
@@ -123,12 +134,14 @@ class StudioController extends _$StudioController {
   Future<void> cleanupProject(String projectId, String expectedRevision) async {
     final current = state.value;
     if (current == null) return;
-    await _adoptProductState(
-      await _api.cleanupProject(
-        projectId,
-        expectedRevision,
-        selectedProjectId: current.selectedProjectId,
-      ),
+    await _api.cleanupProject(projectId, expectedRevision);
+    await _reloadProductState(
+      selectedProjectId: current.selectedProjectId == projectId
+          ? null
+          : current.selectedProjectId,
+      selectedThreadId: current.selectedProjectId == projectId
+          ? null
+          : current.selectedThreadId,
     );
   }
 
@@ -393,7 +406,9 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> setPermissionMode(PermissionMode mode) async {
-    await _saveConfigSettings(() => _api.saveRuntimePermissionMode(mode));
+    await _saveConfigSettings(
+      (revision) => _api.saveRuntimePermissionMode(revision, mode),
+    );
   }
 
   Future<void> setThreadMode(StudioMode mode) async {
@@ -406,11 +421,14 @@ class StudioController extends _$StudioController {
         current.runtime.hasActiveTask) {
       return;
     }
-    final next = await _api.setThreadMode(threadId: thread.id, mode: mode);
+    await _api.setThreadMode(threadId: thread.id, mode: mode);
     if (!ref.mounted) return;
     final latest = state.value;
     if (latest == null) return;
-    state = AsyncData(mergeStudioThreadState(latest, next, thread.id));
+    await _reloadProductState(
+      selectedProjectId: latest.selectedProjectId,
+      selectedThreadId: thread.id,
+    );
     if (latest.selectedThreadId == thread.id) {
       await _subscribeThread(thread.id);
     }
@@ -432,64 +450,146 @@ class StudioController extends _$StudioController {
       return;
     }
     final next = await _api.setModelRole(
+      expectedSettingsRevision: current.settingsRevision,
       roleKey: roleKey,
       providerId: providerId,
       model: model,
       effort: effort ?? defaultEffortForModel(current, providerId, model),
-      selectedThreadId: current.selectedThreadId,
     );
     final latest = state.value;
-    if (latest != null) state = AsyncData(mergeStudioConfigState(latest, next));
+    if (latest != null) state = AsyncData(applySettingsState(latest, next));
   }
 
   Future<void> saveProviderSettings(ProviderSettingsCommand command) async {
-    await _saveConfigSettings(() => _api.saveProviderSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveProviderSettings(revision, command),
+    );
   }
 
   Future<void> saveInstructionsSettings(
     InstructionsSettingsCommand command,
   ) async {
-    await _saveConfigSettings(() => _api.saveInstructionsSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveInstructionsSettings(revision, command),
+    );
   }
 
   Future<void> saveSkillsSettings(SkillsSettingsCommand command) async {
-    await _saveConfigSettings(() => _api.saveSkillsSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveSkillsSettings(revision, command),
+    );
   }
 
   Future<void> saveMcpSettings(McpSettingsCommand command) async {
-    await _saveConfigSettings(() => _api.saveMcpSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveMcpSettings(revision, command),
+    );
   }
 
   Future<void> saveGeneralSettings(GeneralSettingsCommand command) async {
-    await _saveConfigSettings(() => _api.saveGeneralSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveGeneralSettings(revision, command),
+    );
   }
 
   Future<void> saveWebSearchSettings(WebSearchSettingsCommand command) async {
-    await _saveConfigSettings(() => _api.saveWebSearchSettings(command));
+    await _saveConfigSettings(
+      (revision) => _api.saveWebSearchSettings(revision, command),
+    );
   }
 
   Future<void> _saveConfigSettings(
-    Future<StudioState> Function() request,
+    Future<SettingsStateSnapshot> Function(int revision) request,
   ) async {
-    if (state.value == null) return;
-    final next = await request();
+    final current = state.value;
+    if (current == null) return;
+    final next = await request(current.settingsRevision);
     final latest = state.value;
-    if (latest != null) state = AsyncData(mergeStudioConfigState(latest, next));
+    if (latest != null) state = AsyncData(applySettingsState(latest, next));
   }
 
   Future<void> refreshProviderUsages() async {
     final current = state.value;
     if (current == null) return;
-    final usages = await _api.loadProviderUsages();
+    final usageState = await _api.checkProviderUsage();
     final latest = state.value;
     if (latest != null) {
-      state = AsyncData(latest.copyWith(providerUsages: usages));
+      state = AsyncData(applyProviderUsageState(latest, usageState));
     }
   }
 
   Future<List<String>> listDiscoveredSkills() async {
     final projectId = state.value?.selectedProjectId;
-    return projectId == null ? const [] : _api.listDiscoveredSkills(projectId);
+    return projectId == null
+        ? const []
+        : (await _api.readSkillsState(projectId)).skills;
+  }
+
+  Future<List<String>> discoverSkills() async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return const [];
+    final snapshot = await _api.discoverSkills(projectId);
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applySkillsState(latest, snapshot));
+    return snapshot.skills;
+  }
+
+  Future<void> refreshMcpState() async {
+    await _applyMcpCommand(_api.readMcpState);
+  }
+
+  Future<void> resetMcpServer(String serverId) async {
+    await _applyMcpCommand(() => _api.resetMcpServer(serverId));
+  }
+
+  Future<void> resetAllMcp() async {
+    await _applyMcpCommand(_api.resetAllMcp);
+  }
+
+  Future<void> _applyMcpCommand(
+    Future<McpStateSnapshot> Function() command,
+  ) async {
+    if (state.value == null) return;
+    final snapshot = await command();
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applyMcpState(latest, snapshot));
+  }
+
+  Future<void> refreshLspState() async {
+    await _applyLspCommand(_api.readLspState);
+  }
+
+  Future<void> probeLspServer() async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return;
+    await _applyLspCommand(() => _api.probeLspServer(projectId));
+  }
+
+  Future<void> repairLspServer(String serverId) async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return;
+    await _applyLspCommand(() => _api.repairLspServer(projectId, serverId));
+  }
+
+  Future<void> resetLspServer(String serverId) async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return;
+    await _applyLspCommand(() => _api.resetLspServer(projectId, serverId));
+  }
+
+  Future<void> resetLspWorkspace() async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return;
+    await _applyLspCommand(() => _api.resetLspWorkspace(projectId));
+  }
+
+  Future<void> _applyLspCommand(
+    Future<LspStateSnapshot> Function() command,
+  ) async {
+    if (state.value == null) return;
+    final snapshot = await command();
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applyLspState(latest, snapshot));
   }
 
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId) {
@@ -502,13 +602,10 @@ class StudioController extends _$StudioController {
   ) async {
     final current = state.value;
     if (current == null) return;
-    await _adoptProductState(
-      await _api.cleanupRecoveryIssue(
-        issueId,
-        expectedRevision,
-        selectedProjectId: current.selectedProjectId,
-        selectedThreadId: current.selectedThreadId,
-      ),
+    await _api.cleanupRecoveryIssue(issueId, expectedRevision);
+    await _reloadProductState(
+      selectedProjectId: current.selectedProjectId,
+      selectedThreadId: current.selectedThreadId,
     );
   }
 
@@ -517,12 +614,10 @@ class StudioController extends _$StudioController {
     if (current == null) return;
     final issue = current.recoveryIssue(id: issueId);
     if (issue == null || !issue.canRetry) return;
-    await _adoptProductState(
-      await _api.retryRecoveryIssue(
-        issueId,
-        selectedProjectId: issue.projectId ?? current.selectedProjectId,
-        selectedThreadId: issue.threadId ?? current.selectedThreadId,
-      ),
+    await _api.retryRecoveryIssue(issueId);
+    await _reloadProductState(
+      selectedProjectId: issue.projectId ?? current.selectedProjectId,
+      selectedThreadId: issue.threadId ?? current.selectedThreadId,
     );
   }
 
@@ -575,9 +670,21 @@ class StudioController extends _$StudioController {
     }
   }
 
-  Future<void> _reloadProductState() async {
+  Future<void> _reloadProductState({
+    String? selectedProjectId,
+    String? selectedThreadId,
+  }) async {
     try {
-      await _adoptProductState(await _api.bootstrap());
+      final current = state.value;
+      final desiredProjectId = selectedProjectId ?? current?.selectedProjectId;
+      final desiredThreadId = selectedThreadId ?? current?.selectedThreadId;
+      await _adoptProductState(
+        _withStableSelection(
+          await _api.readStudioState(),
+          selectedProjectId: desiredProjectId,
+          selectedThreadId: desiredThreadId,
+        ),
+      );
     } on Object {
       // Product stream will retry on the next explicit action or app reload.
     }
@@ -618,12 +725,30 @@ class StudioController extends _$StudioController {
           update: update,
         );
         if (reduced.resyncThreadId != null) {
-          _markThreadDisconnected(threadId, generation);
+          unawaited(_resyncThread(threadId, generation));
           return;
         }
         state = AsyncData(_reconcileComposer(reduced.state, threadId));
       case ThreadResyncRequiredFrame():
-        _markThreadDisconnected(threadId, generation);
+        unawaited(_resyncThread(threadId, generation));
+    }
+  }
+
+  Future<void> _resyncThread(String threadId, int generation) async {
+    _markThreadDisconnected(threadId, generation);
+    try {
+      final workspace = await _api.readThreadSnapshot(threadId);
+      final current = state.value;
+      if (current == null ||
+          generation != _threadCoordinator.generation ||
+          current.selectedThreadId != threadId) {
+        return;
+      }
+      state = AsyncData(
+        _reconcileComposer(applyThreadSnapshot(current, workspace), threadId),
+      );
+    } on Object {
+      // The scheduled subscription retry remains the recovery path.
     }
   }
 
@@ -654,30 +779,10 @@ class StudioController extends _$StudioController {
     final previousThreadId = current?.selectedThreadId;
     var next = incoming;
     if (current != null) {
-      next = _attachProviderCatalog(next, current.providerCatalog);
-      final knownIds = next.threads.map((thread) => thread.id).toSet();
-      final threadsById = {
-        for (final thread in next.threads) thread.id: thread,
-      };
-      final tasks = Map<String, TaskRuntimeView>.from(
-        current.tasksByRootThread,
-      );
-      final selectedRootThreadId = next.selectedRootThread?.id;
-      if (selectedRootThreadId != null) {
-        tasks.remove(selectedRootThreadId);
-      }
-      tasks.addAll(next.tasksByRootThread);
-      next = next.copyWith(
-        workspacesByThread: {
-          for (final entry in current.workspacesByThread.entries)
-            if (knownIds.contains(entry.key))
-              entry.key: entry.value.copyWith(thread: threadsById[entry.key]),
-        },
-        workspaceUiByThread: {
-          for (final entry in current.workspaceUiByThread.entries)
-            if (knownIds.contains(entry.key)) entry.key: entry.value,
-        },
-        tasksByRootThread: tasks,
+      next = _mergeProductSnapshots(current, incoming).copyWith(
+        providerCatalog: current.providerCatalog,
+        selectedProjectId: incoming.selectedProjectId,
+        selectedThreadId: incoming.selectedThreadId,
       );
     }
     state = AsyncData(next);
@@ -685,6 +790,23 @@ class StudioController extends _$StudioController {
       await _subscribeThread(next.selectedThreadId);
     }
   }
+}
+
+StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
+  var next = applyProjectDirectory(current, incoming.projectDirectory);
+  next = applyThreadDirectory(next, incoming.threadDirectory);
+  next = applyTaskDirectory(next, incoming.taskDirectory);
+  next = applyAgentDirectory(next, incoming.agentDirectory);
+  next = applySettingsState(next, incoming.settingsState);
+  next = applyRecoveryState(next, incoming.recoveryState);
+  next = applyMcpState(next, incoming.mcpState);
+  next = applyLspState(next, incoming.lspState);
+  next = applyProviderUsageState(next, incoming.providerUsageState);
+  next = applyUpdaterState(next, incoming.updaterState);
+  for (final snapshot in incoming.skillsByProject.values) {
+    next = applySkillsState(next, snapshot);
+  }
+  return next;
 }
 
 StudioState _reconcileComposer(StudioState state, String threadId) {
@@ -719,11 +841,30 @@ StudioState _attachProviderCatalog(
   StudioState state,
   ProviderCatalogView catalog,
 ) {
+  return state.copyWith(providerCatalog: catalog);
+}
+
+StudioState _withStableSelection(
+  StudioState state, {
+  String? selectedProjectId,
+  String? selectedThreadId,
+}) {
+  final projectId =
+      state.projects.any((project) => project.id == selectedProjectId)
+      ? selectedProjectId
+      : state.selectedProjectId;
+  final threadId =
+      state.threads.any(
+        (thread) =>
+            thread.id == selectedThreadId && thread.projectId == projectId,
+      )
+      ? selectedThreadId
+      : state.threads
+            .where((thread) => thread.isRoot && thread.projectId == projectId)
+            .firstOrNull
+            ?.id;
   return state.copyWith(
-    providerCatalog: catalog,
-    providers: [
-      for (final provider in state.providers)
-        providerWithCatalogMetadata(provider, catalog),
-    ],
+    selectedProjectId: projectId,
+    selectedThreadId: threadId,
   );
 }

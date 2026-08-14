@@ -7,6 +7,12 @@ Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v4；测试和隔
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 通过 SQLite
 单 writer 事务串行化，snapshot、分页和设置查询共用该连接。
 
+所有 `read*` 查询严格无 mutation；测试注入 SQLite mutation counter 并验证重复 read 为零。
+Provider Usage 与 Updater 的 last-known cache 复用现有 `app_settings`，键分别为
+`observed:providerUsage:v1` 和 `observed:studioUpdate:v1`，不新增 migration。内存 owner snapshot
+不是第二套 durable projection；进程重启后仅从 canonical tables/config 和这两个明确的 observed
+cache 重建。
+
 核心表：
 
 - projects

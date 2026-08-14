@@ -1,17 +1,19 @@
-use super::runtime::{
-    BridgeAgentDirectoryEntryDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeTaskRuntimeDto,
-};
-use super::thread_stream::BridgeThread;
 use serde::{Deserialize, Serialize};
+
+use super::{
+    BridgeAgentDirectoryState, BridgeLspStateSnapshot, BridgeMcpStateSnapshot,
+    BridgeProjectDirectoryState, BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot,
+    BridgeSettingsStateSnapshot, BridgeSkillsStateSnapshot, BridgeTaskDirectoryState,
+    BridgeThreadDirectoryState, BridgeUpdaterStateSnapshot,
+};
 
 /// Flutter Bridge 的 Studio 产品事件信封。
 ///
-/// Thread 高频事件通过 Thread subscription 传输，不得加入此类型。
+/// `sequence` 只检测 transport lag；payload 中完整 snapshot 的领域 revision 决定替换顺序。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeProductEventEnvelope {
     pub event_id: String,
-    pub project_id: Option<String>,
     pub sequence: u64,
     pub created_at: i64,
     pub payload: BridgeProductEventPayload,
@@ -20,27 +22,18 @@ pub struct BridgeProductEventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum BridgeProductEventPayload {
-    ThreadDirectoryChanged {
-        project_id: String,
-        threads: Vec<BridgeThread>,
-    },
-    McpHealthChanged {
-        health: BridgeMcpHealthDto,
-    },
-    LspHealthChanged {
-        health: BridgeLspHealthDto,
-    },
-    TaskChanged {
-        root_thread_id: String,
-        task: Option<Box<BridgeTaskRuntimeDto>>,
-    },
-    AgentDirectoryChanged {
-        root_thread_id: String,
-        agent: Box<BridgeAgentDirectoryEntryDto>,
-    },
-    Stale {
-        lagged_events: u64,
-    },
+    ProjectDirectoryChanged(BridgeProjectDirectoryState),
+    ThreadDirectoryChanged(BridgeThreadDirectoryState),
+    TaskDirectoryChanged(BridgeTaskDirectoryState),
+    AgentDirectoryChanged(BridgeAgentDirectoryState),
+    SettingsStateChanged(Box<BridgeSettingsStateSnapshot>),
+    RecoveryStateChanged(BridgeRecoveryStateSnapshot),
+    McpStateChanged(BridgeMcpStateSnapshot),
+    LspStateChanged(BridgeLspStateSnapshot),
+    SkillsStateChanged(BridgeSkillsStateSnapshot),
+    ProviderUsageStateChanged(BridgeProviderUsageStateSnapshot),
+    UpdaterStateChanged(BridgeUpdaterStateSnapshot),
+    Stale { lagged_events: u64 },
 }
 
 impl BridgeProductEventEnvelope {
@@ -50,7 +43,6 @@ impl BridgeProductEventEnvelope {
             .unwrap_or_default();
         Self {
             event_id: format!("bridge-product-stale-{:x}", now.as_nanos()),
-            project_id: None,
             sequence: 0,
             created_at: now.as_secs() as i64,
             payload: BridgeProductEventPayload::Stale { lagged_events },

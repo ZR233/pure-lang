@@ -1,4 +1,7 @@
-use super::runtime::{BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto};
+use super::runtime::{
+    BridgeAgentDirectoryEntryDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeObservedStateMeta,
+    BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto, RuntimeSnapshot,
+};
 use super::settings::BridgeStudioSettingsDto;
 use super::thread_stream::BridgeThread;
 use serde::{Deserialize, Serialize};
@@ -6,14 +9,118 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeStudioSnapshotResponse {
+pub struct BridgeStudioStateSnapshot {
+    pub runtime: RuntimeSnapshot,
+    pub project_directory: BridgeProjectDirectoryState,
+    pub thread_directory: BridgeThreadDirectoryState,
+    pub task_directory: BridgeTaskDirectoryState,
+    pub agent_directory: BridgeAgentDirectoryState,
+    pub settings: BridgeSettingsStateSnapshot,
+    pub recovery: BridgeRecoveryStateSnapshot,
+    pub mcp: BridgeMcpStateSnapshot,
+    pub lsp: BridgeLspStateSnapshot,
+    pub skills_by_project: Vec<BridgeSkillsStateSnapshot>,
+    pub provider_usage: BridgeProviderUsageStateSnapshot,
+    pub updater: BridgeUpdaterStateSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeProjectDirectoryState {
+    pub meta: BridgeObservedStateMeta,
     pub projects: Vec<ProjectDto>,
-    pub selected_project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeThreadDirectoryState {
+    pub meta: BridgeObservedStateMeta,
     pub threads: Vec<BridgeThread>,
-    pub selected_thread_id: Option<String>,
-    pub selected_thread_task: Option<BridgeTaskRuntimeDto>,
-    pub recovery_issues: Vec<BridgeStudioRecoveryIssueDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskDirectoryState {
+    pub meta: BridgeObservedStateMeta,
+    pub tasks: Vec<BridgeTaskDirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskDirectoryEntry {
+    pub root_thread_id: String,
+    pub task: BridgeTaskRuntimeDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeAgentDirectoryState {
+    pub meta: BridgeObservedStateMeta,
+    pub agents: Vec<BridgeAgentDirectoryEntryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSettingsStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
     pub settings: BridgeStudioSettingsDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRecoveryStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub issues: Vec<BridgeStudioRecoveryIssueDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMcpStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub desired_config_fingerprint: String,
+    pub applied_config_fingerprint: String,
+    pub health: BridgeMcpHealthDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeLspStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub health: BridgeLspHealthDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSkillsStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub project_id: String,
+    pub config_fingerprint: String,
+    pub catalog_revision: u64,
+    pub skills: Vec<SkillSummaryDto>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeProviderUsageStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub config_fingerprint: String,
+    pub usages: Vec<ProviderUsageDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeUpdaterStateSnapshot {
+    pub meta: BridgeObservedStateMeta,
+    pub update: Option<BridgeVerifiedUpdateSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeVerifiedUpdateSummary {
+    pub version: String,
+    pub published_at: i64,
+    pub notes_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

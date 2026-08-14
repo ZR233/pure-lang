@@ -1,8 +1,8 @@
 part of '../widget_test.dart';
 
 void registerDemoProjectTests() {
-  test('Demo bootstrap exposes independent Thread workspaces', () async {
-    final state = await DemoStudioApi().bootstrap();
+  test('Demo read exposes independent Thread workspaces', () async {
+    final state = await DemoStudioApi().readStudioState();
 
     expect(state.threads.map((thread) => thread.id), [
       'thread-main',
@@ -23,10 +23,8 @@ void registerDemoProjectTests() {
   test('Demo mode update changes only the addressed root Thread', () async {
     final api = DemoStudioApi();
 
-    final state = await api.setThreadMode(
-      threadId: 'thread-main',
-      mode: StudioMode.task,
-    );
+    await api.setThreadMode(threadId: 'thread-main', mode: StudioMode.task);
+    final state = await api.readStudioState();
 
     expect(state.threads[0].mode, StudioMode.task);
     expect(state.threads[0].role, 'planner');
@@ -53,25 +51,30 @@ void registerDemoProjectTests() {
   });
 
   test('Fake mode update rejects an active Task', () async {
-    final state = await DemoStudioApi().bootstrap();
+    final state = await DemoStudioApi().readStudioState();
     final api = _FakeStudioApi(
       state.copyWith(
-        tasksByRootThread: const {
-          'thread-main': TaskRuntimeView(
-            runId: 'task-run-active',
-            phase: 'implementing',
-            branch: 'codex/task-mode',
-            expectedHead: '1234567890abcdef',
-            statusMessage: null,
-            stopRequestedOrigin: null,
-            stopRequestedReason: null,
-            taskGeneration: 0,
-            workUnits: [],
-            completions: [],
-            merges: [],
-            reviews: [],
-          ),
-        },
+        taskDirectory: const TaskDirectoryState(
+          values: [
+            TaskDirectoryEntryView(
+              rootThreadId: 'thread-main',
+              task: TaskRuntimeView(
+                runId: 'task-run-active',
+                phase: 'implementing',
+                branch: 'codex/task-mode',
+                expectedHead: '1234567890abcdef',
+                statusMessage: null,
+                stopRequestedOrigin: null,
+                stopRequestedReason: null,
+                taskGeneration: 0,
+                workUnits: [],
+                completions: [],
+                merges: [],
+                reviews: [],
+              ),
+            ),
+          ],
+        ),
       ),
     );
 

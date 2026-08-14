@@ -1,4 +1,55 @@
 use serde::{Deserialize, Serialize};
+// ── Observed state types ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeObservedStateMeta {
+    pub revision: u64,
+    pub phase: BridgeObservedStatePhase,
+    pub updated_at: i64,
+    pub last_checked_at: Option<i64>,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeObservedStatePhase {
+    Uninitialized,
+    Ready,
+    Running {
+        operation: BridgeStateOperation,
+        operation_id: String,
+    },
+    Failed {
+        operation: BridgeStateOperation,
+        error: BridgeStateError,
+    },
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeStateOperation {
+    Initialize,
+    Activate,
+    Reload,
+    Reconcile,
+    Discover,
+    Check,
+    Probe,
+    Repair,
+    Reset,
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStateError {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
 // ── Runtime types ──
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -419,17 +470,38 @@ pub struct BridgeMcpServerDto {
     pub id: String,
     pub enabled: bool,
     pub transport: String,
-    pub command: Option<String>,
-    pub url: Option<String>,
     pub endpoint: String,
     pub source_kind: String,
     pub status_kind: String,
     pub mutation_policy: String,
     pub availability_kind: String,
+    pub availability_message: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub tool_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeLspHealthDto {
     pub active_lsp_servers: Vec<String>,
+    pub lsp_servers: Vec<BridgeLspServerDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeLspServerDto {
+    pub id: String,
+    pub display_name: String,
+    pub extensions: Vec<String>,
+    pub language_ids: Vec<String>,
+    pub availability_kind: String,
+    pub availability_message: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub diagnostic_count: u64,
+    pub activity_kind: String,
+    pub activity_title: Option<String>,
+    pub activity_message: Option<String>,
+    pub activity_percentage: Option<u32>,
+    pub last_error: Option<String>,
+    pub last_error_at: Option<i64>,
 }

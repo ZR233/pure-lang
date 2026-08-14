@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
-use crate::{StudioMode, StudioRuntimeStatus};
+use crate::{ConfigStore, StudioMode, StudioRuntimeStatus};
 
 const TEST_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
 

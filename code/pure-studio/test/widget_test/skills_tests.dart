@@ -20,7 +20,10 @@ void registerSkillsTests() {
     await tester.tap(find.text('Skills'));
     await tester.pumpAndSettle();
 
-    // Switching to the Skills tab auto-triggers discovery.
+    expect(api.discoverCallCount, 0);
+    await tester.tap(find.text('Discover'));
+    await tester.pumpAndSettle();
+
     expect(api.discoverProjectId, 'project-1');
     expect(find.text('flutter-ui-polish'), findsOneWidget);
     expect(find.text('runtime-review'), findsOneWidget);
@@ -44,8 +47,10 @@ void registerSkillsTests() {
     );
     await tester.pumpAndSettle();
 
-    // First entry triggers auto-discovery.
     await tester.tap(find.text('Skills'));
+    await tester.pumpAndSettle();
+    expect(api.discoverCallCount, 0);
+    await tester.tap(find.text('Discover'));
     await tester.pumpAndSettle();
     expect(api.discoverCallCount, 1);
     expect(find.text('flutter-ui-polish'), findsOneWidget);
@@ -58,8 +63,11 @@ void registerSkillsTests() {
     // Simulate a changed skill catalog on the backend.
     api.discoveredSkills = const ['new-skill-a', 'new-skill-b'];
 
-    // Re-enter Skills tab: second auto-discovery fires.
+    // Re-entering is pure read; explicit discover applies the changed catalog.
     await tester.tap(find.text('Skills'));
+    await tester.pumpAndSettle();
+    expect(api.discoverCallCount, 1);
+    await tester.tap(find.text('Discover'));
     await tester.pumpAndSettle();
 
     expect(api.discoverCallCount, 2);

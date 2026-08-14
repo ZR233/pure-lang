@@ -1,10 +1,9 @@
-use super::snapshot::{
-    bootstrap_studio_inner, ensure_project_recovery_available, studio_snapshot_from_projects_inner,
-    studio_snapshot_inner,
+use super::snapshot::ensure_project_recovery_available;
+use crate::api::studio::bridge_runtime::{
+    BridgeLifecycle, BridgeRuntime, active_bridge, install_bridge_runtime, installed_bridge,
 };
-use crate::api::studio::bridge_runtime::{BridgeLifecycle, BridgeRuntime, active_bridge, bridge};
 use crate::api::studio::convert::runtime::runtime_snapshot;
-use crate::api::studio::types::{BridgeError, BridgeStudioSnapshotResponse, RuntimeSnapshot};
+use crate::api::studio::types::{BridgeError, ProjectDto, RuntimeSnapshot};
 use anyhow::Context;
 use flutter_rust_bridge::frb;
 
@@ -17,27 +16,15 @@ pub fn init_app() {
     crate::diagnostics::initialize();
 }
 
-pub async fn initialize_runtime() -> Result<RuntimeSnapshot, BridgeError> {
-    let bridge = bridge().await?;
-    let lifecycle = bridge.lifecycle.lock().await;
-    match *lifecycle {
-        BridgeLifecycle::Stopped | BridgeLifecycle::ShuttingDown => {
-            Err(BridgeError::runtime_stopped())
-        }
-        BridgeLifecycle::Initialized | BridgeLifecycle::Started => {
-            Ok(runtime_snapshot(bridge.studio.initialize_runtime().await?))
-        }
-    }
-}
-
-pub async fn start_runtime() -> Result<RuntimeSnapshot, BridgeError> {
-    let bridge = bridge().await?;
+pub async fn start_studio_runtime() -> Result<RuntimeSnapshot, BridgeError> {
+    let bridge = install_bridge_runtime().await?;
     let mut lifecycle = bridge.lifecycle.lock().await;
     match *lifecycle {
         BridgeLifecycle::Stopped | BridgeLifecycle::ShuttingDown => {
             Err(BridgeError::runtime_stopped())
         }
         BridgeLifecycle::Initialized => {
+            let _ = bridge.studio.initialize_runtime().await?;
             let snapshot = runtime_snapshot(bridge.studio.start_runtime().await?);
             *lifecycle = BridgeLifecycle::Started;
             Ok(snapshot)
@@ -47,7 +34,7 @@ pub async fn start_runtime() -> Result<RuntimeSnapshot, BridgeError> {
 }
 
 pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
-    let bridge = bridge().await?;
+    let bridge = installed_bridge()?;
     loop {
         let shutdown_complete = bridge.shutdown_complete.notified();
         let starts_shutdown = {
@@ -133,45 +120,27 @@ pub(super) async fn shutdown_runtime_for_update(
     }
 }
 
-// ── Studio bootstrap ──
+// ── Studio commands ──
 
-pub async fn bootstrap_studio() -> Result<BridgeStudioSnapshotResponse, BridgeError> {
-    let bridge = active_bridge().await?;
-    Ok(bootstrap_studio_inner(bridge).await?)
-}
-
-pub async fn open_project(path: String) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
+pub async fn open_project(path: String) -> Result<ProjectDto, BridgeError> {
     let bridge = active_bridge().await?;
     let project = bridge.studio.open_project(path).await?;
-    bridge
-        .studio
-        .reconcile_lsp_runtime_for_project(&project.id)
-        .await?;
-    let _ = bridge.studio.ensure_project_threads(&project.id).await?;
-    Ok(studio_snapshot_inner(bridge, Some(project.id), None).await?)
+    Ok(project.into())
 }
 
-pub async fn select_project(
-    project_id: String,
-) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
+pub async fn activate_project(project_id: String) -> Result<(), BridgeError> {
     let bridge = active_bridge().await?;
     ensure_project_recovery_available(bridge, &project_id)?;
-    Ok(studio_snapshot_inner(bridge, Some(project_id), None).await?)
+    bridge.studio.activate_project(&project_id).await?;
+    Ok(())
 }
 
-pub async fn archive_project(
-    project_id: String,
-    selected_project_id: Option<String>,
-) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
+pub async fn archive_project(project_id: String) -> Result<Option<ProjectDto>, BridgeError> {
     let bridge = active_bridge().await?;
-    bridge
+    let archived = bridge
         .studio
         .archive_project(&project_id)
         .await?
         .context("selected project not found")?;
-    let projects = bridge.studio.list_projects().await?;
-    let next_project_id = selected_project_id
-        .filter(|id| id != &project_id && projects.iter().any(|project| project.id == *id))
-        .or_else(|| projects.first().map(|project| project.id.clone()));
-    Ok(studio_snapshot_from_projects_inner(bridge, projects, next_project_id, None).await?)
+    Ok(Some(archived.into()))
 }

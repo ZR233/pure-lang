@@ -95,12 +95,24 @@ impl McpRuntimeHandle {
         &self,
         servers: BTreeMap<String, EffectiveMcpServerConfig>,
     ) -> Result<()> {
-        self.send_reconcile(servers, ReconcilePolicy::Changed).await
+        let (reply, response) = oneshot::channel();
+        self.send(RuntimeCommand::Reconcile { servers, reply })?;
+        response.await.map_err(runtime_stopped)?
     }
 
-    /// 强制重新连接所有启用的 server。
-    pub async fn recheck(&self, servers: BTreeMap<String, EffectiveMcpServerConfig>) -> Result<()> {
-        self.send_reconcile(servers, ReconcilePolicy::Force).await
+    /// 显式重置目标连接；范围外 server 继续复用。
+    pub async fn reset(
+        &self,
+        scope: McpResetScope,
+        servers: BTreeMap<String, EffectiveMcpServerConfig>,
+    ) -> Result<()> {
+        let (reply, response) = oneshot::channel();
+        self.send(RuntimeCommand::Reset {
+            servers,
+            scope,
+            reply,
+        })?;
+        response.await.map_err(runtime_stopped)?
     }
 
     /// 获取本轮固定 generation 的工具与资源 lease。
@@ -153,20 +165,6 @@ impl McpRuntimeHandle {
         if self.send(RuntimeCommand::Shutdown { reply }).is_ok() {
             let _ = response.await;
         }
-    }
-
-    async fn send_reconcile(
-        &self,
-        servers: BTreeMap<String, EffectiveMcpServerConfig>,
-        policy: ReconcilePolicy,
-    ) -> Result<()> {
-        let (reply, response) = oneshot::channel();
-        self.send(RuntimeCommand::Reconcile {
-            servers,
-            policy,
-            reply,
-        })?;
-        response.await.map_err(runtime_stopped)?
     }
 
     pub(super) async fn call_tool(
@@ -371,10 +369,10 @@ impl Drop for McpLeaseGuard {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum ReconcilePolicy {
-    Changed,
-    Force,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpResetScope {
+    Server { server_id: String },
+    All,
 }
 
 #[derive(Debug, Clone)]
@@ -393,7 +391,11 @@ pub(super) struct LeaseSnapshot {
 pub(super) enum RuntimeCommand {
     Reconcile {
         servers: BTreeMap<String, EffectiveMcpServerConfig>,
-        policy: ReconcilePolicy,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Reset {
+        servers: BTreeMap<String, EffectiveMcpServerConfig>,
+        scope: McpResetScope,
         reply: oneshot::Sender<Result<()>>,
     },
     AcquireLease {

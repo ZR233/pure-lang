@@ -9,49 +9,361 @@ import 'runtime.dart';
 import 'settings.dart';
 import 'thread_stream.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-class BridgeStudioSnapshotResponse {
-  final List<ProjectDto> projects;
-  final String? selectedProjectId;
-  final List<BridgeThread> threads;
-  final String? selectedThreadId;
-  final BridgeTaskRuntimeDto? selectedThreadTask;
-  final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
-  final BridgeStudioSettingsDto settings;
+class BridgeAgentDirectoryState {
+  final BridgeObservedStateMeta meta;
+  final List<BridgeAgentDirectoryEntryDto> agents;
 
-  const BridgeStudioSnapshotResponse({
-    required this.projects,
-    this.selectedProjectId,
-    required this.threads,
-    this.selectedThreadId,
-    this.selectedThreadTask,
-    required this.recoveryIssues,
-    required this.settings,
-  });
+  const BridgeAgentDirectoryState({required this.meta, required this.agents});
 
   @override
-  int get hashCode =>
-      projects.hashCode ^
-      selectedProjectId.hashCode ^
-      threads.hashCode ^
-      selectedThreadId.hashCode ^
-      selectedThreadTask.hashCode ^
-      recoveryIssues.hashCode ^
-      settings.hashCode;
+  int get hashCode => meta.hashCode ^ agents.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeStudioSnapshotResponse &&
+      other is BridgeAgentDirectoryState &&
           runtimeType == other.runtimeType &&
-          projects == other.projects &&
-          selectedProjectId == other.selectedProjectId &&
-          threads == other.threads &&
-          selectedThreadId == other.selectedThreadId &&
-          selectedThreadTask == other.selectedThreadTask &&
-          recoveryIssues == other.recoveryIssues &&
+          meta == other.meta &&
+          agents == other.agents;
+}
+
+class BridgeLspStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final BridgeLspHealthDto health;
+
+  const BridgeLspStateSnapshot({required this.meta, required this.health});
+
+  @override
+  int get hashCode => meta.hashCode ^ health.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeLspStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          health == other.health;
+}
+
+class BridgeMcpStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final String desiredConfigFingerprint;
+  final String appliedConfigFingerprint;
+  final BridgeMcpHealthDto health;
+
+  const BridgeMcpStateSnapshot({
+    required this.meta,
+    required this.desiredConfigFingerprint,
+    required this.appliedConfigFingerprint,
+    required this.health,
+  });
+
+  @override
+  int get hashCode =>
+      meta.hashCode ^
+      desiredConfigFingerprint.hashCode ^
+      appliedConfigFingerprint.hashCode ^
+      health.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeMcpStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          desiredConfigFingerprint == other.desiredConfigFingerprint &&
+          appliedConfigFingerprint == other.appliedConfigFingerprint &&
+          health == other.health;
+}
+
+class BridgeProjectDirectoryState {
+  final BridgeObservedStateMeta meta;
+  final List<ProjectDto> projects;
+
+  const BridgeProjectDirectoryState({
+    required this.meta,
+    required this.projects,
+  });
+
+  @override
+  int get hashCode => meta.hashCode ^ projects.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProjectDirectoryState &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          projects == other.projects;
+}
+
+class BridgeProviderUsageStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final String configFingerprint;
+  final List<ProviderUsageDto> usages;
+
+  const BridgeProviderUsageStateSnapshot({
+    required this.meta,
+    required this.configFingerprint,
+    required this.usages,
+  });
+
+  @override
+  int get hashCode =>
+      meta.hashCode ^ configFingerprint.hashCode ^ usages.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderUsageStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          configFingerprint == other.configFingerprint &&
+          usages == other.usages;
+}
+
+class BridgeRecoveryStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final List<BridgeStudioRecoveryIssueDto> issues;
+
+  const BridgeRecoveryStateSnapshot({required this.meta, required this.issues});
+
+  @override
+  int get hashCode => meta.hashCode ^ issues.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRecoveryStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          issues == other.issues;
+}
+
+class BridgeSettingsStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final BridgeStudioSettingsDto settings;
+
+  const BridgeSettingsStateSnapshot({
+    required this.meta,
+    required this.settings,
+  });
+
+  @override
+  int get hashCode => meta.hashCode ^ settings.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSettingsStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
           settings == other.settings;
+}
+
+class BridgeSkillsStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final String projectId;
+  final String configFingerprint;
+  final BigInt catalogRevision;
+  final List<SkillSummaryDto> skills;
+  final List<String> warnings;
+
+  const BridgeSkillsStateSnapshot({
+    required this.meta,
+    required this.projectId,
+    required this.configFingerprint,
+    required this.catalogRevision,
+    required this.skills,
+    required this.warnings,
+  });
+
+  @override
+  int get hashCode =>
+      meta.hashCode ^
+      projectId.hashCode ^
+      configFingerprint.hashCode ^
+      catalogRevision.hashCode ^
+      skills.hashCode ^
+      warnings.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSkillsStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          projectId == other.projectId &&
+          configFingerprint == other.configFingerprint &&
+          catalogRevision == other.catalogRevision &&
+          skills == other.skills &&
+          warnings == other.warnings;
+}
+
+class BridgeStudioStateSnapshot {
+  final RuntimeSnapshot runtime;
+  final BridgeProjectDirectoryState projectDirectory;
+  final BridgeThreadDirectoryState threadDirectory;
+  final BridgeTaskDirectoryState taskDirectory;
+  final BridgeAgentDirectoryState agentDirectory;
+  final BridgeSettingsStateSnapshot settings;
+  final BridgeRecoveryStateSnapshot recovery;
+  final BridgeMcpStateSnapshot mcp;
+  final BridgeLspStateSnapshot lsp;
+  final List<BridgeSkillsStateSnapshot> skillsByProject;
+  final BridgeProviderUsageStateSnapshot providerUsage;
+  final BridgeUpdaterStateSnapshot updater;
+
+  const BridgeStudioStateSnapshot({
+    required this.runtime,
+    required this.projectDirectory,
+    required this.threadDirectory,
+    required this.taskDirectory,
+    required this.agentDirectory,
+    required this.settings,
+    required this.recovery,
+    required this.mcp,
+    required this.lsp,
+    required this.skillsByProject,
+    required this.providerUsage,
+    required this.updater,
+  });
+
+  @override
+  int get hashCode =>
+      runtime.hashCode ^
+      projectDirectory.hashCode ^
+      threadDirectory.hashCode ^
+      taskDirectory.hashCode ^
+      agentDirectory.hashCode ^
+      settings.hashCode ^
+      recovery.hashCode ^
+      mcp.hashCode ^
+      lsp.hashCode ^
+      skillsByProject.hashCode ^
+      providerUsage.hashCode ^
+      updater.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          runtime == other.runtime &&
+          projectDirectory == other.projectDirectory &&
+          threadDirectory == other.threadDirectory &&
+          taskDirectory == other.taskDirectory &&
+          agentDirectory == other.agentDirectory &&
+          settings == other.settings &&
+          recovery == other.recovery &&
+          mcp == other.mcp &&
+          lsp == other.lsp &&
+          skillsByProject == other.skillsByProject &&
+          providerUsage == other.providerUsage &&
+          updater == other.updater;
+}
+
+class BridgeTaskDirectoryEntry {
+  final String rootThreadId;
+  final BridgeTaskRuntimeDto task;
+
+  const BridgeTaskDirectoryEntry({
+    required this.rootThreadId,
+    required this.task,
+  });
+
+  @override
+  int get hashCode => rootThreadId.hashCode ^ task.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskDirectoryEntry &&
+          runtimeType == other.runtimeType &&
+          rootThreadId == other.rootThreadId &&
+          task == other.task;
+}
+
+class BridgeTaskDirectoryState {
+  final BridgeObservedStateMeta meta;
+  final List<BridgeTaskDirectoryEntry> tasks;
+
+  const BridgeTaskDirectoryState({required this.meta, required this.tasks});
+
+  @override
+  int get hashCode => meta.hashCode ^ tasks.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskDirectoryState &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          tasks == other.tasks;
+}
+
+class BridgeThreadDirectoryState {
+  final BridgeObservedStateMeta meta;
+  final List<BridgeThread> threads;
+
+  const BridgeThreadDirectoryState({required this.meta, required this.threads});
+
+  @override
+  int get hashCode => meta.hashCode ^ threads.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadDirectoryState &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          threads == other.threads;
+}
+
+class BridgeUpdaterStateSnapshot {
+  final BridgeObservedStateMeta meta;
+  final BridgeVerifiedUpdateSummary? update;
+
+  const BridgeUpdaterStateSnapshot({required this.meta, this.update});
+
+  @override
+  int get hashCode => meta.hashCode ^ update.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeUpdaterStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          update == other.update;
+}
+
+class BridgeVerifiedUpdateSummary {
+  final String version;
+  final PlatformInt64 publishedAt;
+  final String notesUrl;
+
+  const BridgeVerifiedUpdateSummary({
+    required this.version,
+    required this.publishedAt,
+    required this.notesUrl,
+  });
+
+  @override
+  int get hashCode =>
+      version.hashCode ^ publishedAt.hashCode ^ notesUrl.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeVerifiedUpdateSummary &&
+          runtimeType == other.runtimeType &&
+          version == other.version &&
+          publishedAt == other.publishedAt &&
+          notesUrl == other.notesUrl;
 }
 
 class DeepSeekBalanceDto {
@@ -199,22 +511,6 @@ class ProviderUsageDto {
           codingPlan == other.codingPlan;
 }
 
-class ProviderUsagesResponse {
-  final List<ProviderUsageDto> usages;
-
-  const ProviderUsagesResponse({required this.usages});
-
-  @override
-  int get hashCode => usages.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ProviderUsagesResponse &&
-          runtimeType == other.runtimeType &&
-          usages == other.usages;
-}
-
 class SkillSummaryDto {
   final String name;
 
@@ -229,22 +525,6 @@ class SkillSummaryDto {
       other is SkillSummaryDto &&
           runtimeType == other.runtimeType &&
           name == other.name;
-}
-
-class SkillsResponse {
-  final List<SkillSummaryDto> skills;
-
-  const SkillsResponse({required this.skills});
-
-  @override
-  int get hashCode => skills.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SkillsResponse &&
-          runtimeType == other.runtimeType &&
-          skills == other.skills;
 }
 
 class StartTurnResponse {

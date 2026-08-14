@@ -69,6 +69,7 @@ pub struct TurnEngine {
     provider: SharedModelProvider,
     effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
+    skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace: Option<crate::tool::AgentWorkspace>,
     workspace_instructions: Option<String>,
@@ -87,6 +88,7 @@ impl TurnEngine {
             provider,
             effort: None,
             skills: None,
+            skill_catalog: None,
             lsp_runtime: None,
             workspace: None,
             workspace_instructions: None,
@@ -105,6 +107,7 @@ impl TurnEngine {
             provider,
             effort: Some(effort),
             skills: None,
+            skill_catalog: None,
             lsp_runtime: None,
             workspace: None,
             workspace_instructions: None,
@@ -260,9 +263,15 @@ impl TurnEngine {
         if !config.enabled {
             return;
         }
-        self.register_tool(SkillsListTool::new(config.clone()));
-        self.register_tool(SkillViewTool::new(config.clone()));
-        self.register_tool(SkillManageTool::new(config));
+        if let Some(catalog) = self.skill_catalog.clone() {
+            self.register_tool(SkillsListTool::from_catalog(catalog.clone()));
+            self.register_tool(SkillViewTool::from_catalog(catalog.clone()));
+            self.register_tool(SkillManageTool::from_catalog(catalog));
+        } else {
+            self.register_tool(SkillsListTool::new(config.clone()));
+            self.register_tool(SkillViewTool::new(config.clone()));
+            self.register_tool(SkillManageTool::new(config));
+        }
     }
 
     async fn review_tool_call_with_ai(
@@ -410,6 +419,7 @@ impl TurnEngine {
                 let assembly_request = InstructionAssemblyRequest {
                     instructions: None,
                     skills: self.skills.as_ref(),
+                    skill_catalog: self.skill_catalog.as_deref(),
                     execution_profile: None,
                     model: &model_info,
                     workspace_root: &workspace_root,

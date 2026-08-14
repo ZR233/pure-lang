@@ -75,8 +75,19 @@ StudioBridgeEvent _threadDirectoryChangedEvent({
 }) {
   return StudioBridgeEvent(
     payload: ThreadDirectoryChangedPayload(
-      projectId: projectId,
-      threads: threads,
+      ThreadDirectoryState(
+        meta: ObservedStateMeta(
+          revision: 1,
+          phase: ObservedStatePhase.ready,
+          updatedAt: _fixtureDate(1),
+          stale: false,
+        ),
+        values: threads,
+      ),
     ),
   );
+}
+
+StudioBridgeEvent _settingsChangedEvent(SettingsStateSnapshot settings) {
+  return StudioBridgeEvent(payload: SettingsStateChangedPayload(settings));
 }

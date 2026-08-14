@@ -97,6 +97,26 @@ pub struct McpServerInput {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "scope")]
+pub enum McpResetInput {
+    Server { server_id: String },
+    All,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "scope")]
+pub enum LspScopeInput {
+    Server {
+        project_id: String,
+        server_id: String,
+    },
+    Workspace {
+        project_id: String,
+    },
+    All,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum ProviderSecretInput {
     Preserve,

@@ -151,6 +151,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsMcpTab => 'MCP';
 
   @override
+  String get settingsLspTab => 'LSP';
+
+  @override
   String get settingsSecurityTab => '安全';
 
   @override
@@ -1274,6 +1277,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsMcpSubtitle => 'Model Context Protocol servers 和内联端点。';
 
   @override
+  String get settingsMcpRefresh => '刷新';
+
+  @override
+  String get settingsMcpReconnect => '重新连接';
+
+  @override
+  String get settingsMcpResetAll => '全部重置';
+
+  @override
+  String get settingsMcpResetConfirmTitle => '重置全部 MCP server？';
+
+  @override
+  String get settingsMcpResetConfirmBody =>
+      '将重新构建所有已配置的 MCP 连接。活动 Turn 继续使用当前租约 generation。';
+
+  @override
+  String get settingsMcpResetConfirmAction => '全部重置';
+
+  @override
   String get settingsEndpoint => 'Endpoint';
 
   @override
@@ -1281,6 +1303,33 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsMcpEmptyMessage => '已配置的 MCP servers 会显示在这里。';
+
+  @override
+  String get settingsLspTitle => '语言服务器';
+
+  @override
+  String get settingsLspSubtitle => '显示 Project 最近一次语言服务器状态，并提供明确的生命周期命令。';
+
+  @override
+  String get settingsLspRefresh => '刷新';
+
+  @override
+  String get settingsLspProbe => '探测';
+
+  @override
+  String get settingsLspRepair => '修复';
+
+  @override
+  String get settingsLspReset => '重置';
+
+  @override
+  String get settingsLspResetWorkspace => '重置工作区';
+
+  @override
+  String get settingsLspEmptyTitle => '没有语言服务器';
+
+  @override
+  String get settingsLspEmptyMessage => '激活受支持的 Project 后会创建语言服务器 membership。';
 
   @override
   String get settingsSecurityTitle => '安全';
@@ -1655,6 +1704,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get settingsMcpTab => 'MCP';
 
   @override
+  String get settingsLspTab => 'LSP';
+
+  @override
   String get settingsSecurityTab => '安全';
 
   @override
@@ -2778,6 +2830,25 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get settingsMcpSubtitle => 'Model Context Protocol servers 和内联端点。';
 
   @override
+  String get settingsMcpRefresh => '刷新';
+
+  @override
+  String get settingsMcpReconnect => '重新连接';
+
+  @override
+  String get settingsMcpResetAll => '全部重置';
+
+  @override
+  String get settingsMcpResetConfirmTitle => '重置全部 MCP server？';
+
+  @override
+  String get settingsMcpResetConfirmBody =>
+      '将重新构建所有已配置的 MCP 连接。活动 Turn 继续使用当前租约 generation。';
+
+  @override
+  String get settingsMcpResetConfirmAction => '全部重置';
+
+  @override
   String get settingsEndpoint => 'Endpoint';
 
   @override
@@ -2785,6 +2856,33 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsMcpEmptyMessage => '已配置的 MCP servers 会显示在这里。';
+
+  @override
+  String get settingsLspTitle => '语言服务器';
+
+  @override
+  String get settingsLspSubtitle => '显示 Project 最近一次语言服务器状态，并提供明确的生命周期命令。';
+
+  @override
+  String get settingsLspRefresh => '刷新';
+
+  @override
+  String get settingsLspProbe => '探测';
+
+  @override
+  String get settingsLspRepair => '修复';
+
+  @override
+  String get settingsLspReset => '重置';
+
+  @override
+  String get settingsLspResetWorkspace => '重置工作区';
+
+  @override
+  String get settingsLspEmptyTitle => '没有语言服务器';
+
+  @override
+  String get settingsLspEmptyMessage => '激活受支持的 Project 后会创建语言服务器 membership。';
 
   @override
   String get settingsSecurityTitle => '安全';

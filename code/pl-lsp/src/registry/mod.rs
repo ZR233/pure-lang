@@ -5,12 +5,13 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock, broadcast};
 
 use crate::client::LspClient;
+use crate::diagnostics::DiagnosticSink;
 use crate::formatting::{format_diagnostics, format_lsp_result};
 use crate::server_definition::LspServerDefinition;
 use crate::status::LspClientRuntimeStatus;
 use crate::types::{
     LanguageToolInfo, LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery,
-    LspQueryOperation, LspQueryResult, LspResult, LspServerSnapshot,
+    LspQueryOperation, LspQueryResult, LspResult, LspScope, LspServerSnapshot,
 };
 use crate::uri::path_to_file_uri;
 
@@ -22,8 +23,9 @@ use self::lsp_query::{
     diagnostic_counts, extensions_for_language, request_for_query, unix_seconds,
 };
 use self::rustup::{
-    ProbeError, RUST_ANALYZER_COMMAND, missing_rust_analyzer_message, probe_rust_analyzer,
-    rust_analyzer_definition,
+    ProbeError, RUST_ANALYZER_COMMAND, install_rust_analyzer_component,
+    missing_rust_analyzer_message, probe_rust_analyzer, rust_analyzer_definition,
+    rustup_is_available,
 };
 use crate::server_definition::RUST_ANALYZER_ID;
 
@@ -60,9 +62,193 @@ impl LspRuntimeRegistry {
         self.updates.subscribe()
     }
 
-    pub async fn reconcile_workspace(&self, workspace_root: impl AsRef<Path>) {
-        self.reconcile_workspace_with_command(workspace_root.as_ref(), RUST_ANALYZER_COMMAND)
-            .await;
+    /// 只更新 workspace/server membership，不启动任何进程或执行 probe。
+    pub async fn reconcile_workspace_membership(&self, workspace_root: impl AsRef<Path>) {
+        self.reconcile_workspace_membership_with_command(
+            workspace_root.as_ref(),
+            RUST_ANALYZER_COMMAND,
+        )
+        .await;
+    }
+
+    /// 显式探测一个 workspace 的 rust-analyzer availability。
+    pub async fn probe_lsp_server(&self, workspace_root: impl AsRef<Path>) {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let _lifecycle_guard = self.lifecycle.read().await;
+        let definition = {
+            let state = self.state.lock().await;
+            if state.closed {
+                return;
+            }
+            state
+                .workspaces
+                .get(&workspace_root)
+                .and_then(|workspace| workspace.servers.get(RUST_ANALYZER_ID))
+                .map(|server| server.definition.clone())
+        };
+        let Some(definition) = definition else {
+            return;
+        };
+        let outcome = probe_rust_analyzer(&definition.command).await;
+        let checked_at = unix_seconds();
+        let (kind, message) = match outcome {
+            Ok(version) => (LspAvailabilityKind::Available, Some(version)),
+            Err(ProbeError::MissingCommand) => (
+                LspAvailabilityKind::MissingCommand,
+                Some(missing_rust_analyzer_message()),
+            ),
+            Err(ProbeError::MissingRustupComponent) => (
+                LspAvailabilityKind::MissingRustupComponent,
+                Some("rust-analyzer rustup component is missing".to_string()),
+            ),
+            Err(ProbeError::Failed(message)) => (LspAvailabilityKind::Unavailable, Some(message)),
+        };
+        let mut state = self.state.lock().await;
+        if state.closed {
+            return;
+        }
+        let Some(server) = state
+            .workspaces
+            .get_mut(&workspace_root)
+            .and_then(|workspace| workspace.servers.get_mut(RUST_ANALYZER_ID))
+        else {
+            return;
+        };
+        if server.definition.command != definition.command {
+            return;
+        }
+        server.availability_kind = kind;
+        server.availability_message = message;
+        server.last_checked_at = Some(checked_at);
+        drop(state);
+        self.emit_update();
+    }
+
+    /// 仅在 typed missing-component 状态下安装 rust-analyzer 并重新 probe。
+    pub async fn repair_lsp_server(
+        &self,
+        workspace_root: impl AsRef<Path>,
+        server_id: &str,
+    ) -> LspResult<()> {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        {
+            let state = self.state.lock().await;
+            if state.closed {
+                return Err(crate::types::LspRuntimeError::Unavailable(
+                    "LSP runtime is stopped".to_string(),
+                ));
+            }
+            let server = state
+                .workspaces
+                .get(&workspace_root)
+                .and_then(|workspace| workspace.servers.get(server_id))
+                .ok_or_else(|| {
+                    crate::types::LspRuntimeError::Unavailable(format!(
+                        "LSP server not configured: {server_id}"
+                    ))
+                })?;
+            if server.availability_kind != LspAvailabilityKind::MissingRustupComponent {
+                return Err(crate::types::LspRuntimeError::Unavailable(
+                    "LSP repair requires missingRustupComponent state".to_string(),
+                ));
+            }
+        }
+        let _lifecycle_guard = self.lifecycle.read().await;
+        if !rustup_is_available().await {
+            return Err(crate::types::LspRuntimeError::Unavailable(
+                "rustup was not found on PATH".to_string(),
+            ));
+        }
+        install_rust_analyzer_component()
+            .await
+            .map_err(|error| crate::types::LspRuntimeError::Unavailable(format!("{error:?}")))?;
+        drop(_lifecycle_guard);
+        self.probe_lsp_server(workspace_root).await;
+        Ok(())
+    }
+
+    /// 重置目标 client；registry 保持可用，shutdown 才进入终止态。
+    pub async fn reset_lsp(&self, scope: LspScope) -> LspResult<()> {
+        let _lifecycle_guard = self.lifecycle.write().await;
+        let targets = {
+            let mut state = self.state.lock().await;
+            if state.closed {
+                return Err(crate::types::LspRuntimeError::Unavailable(
+                    "LSP runtime is stopped".to_string(),
+                ));
+            }
+            let mut targets = Vec::new();
+            for (workspace_root, workspace) in &mut state.workspaces {
+                let workspace_matches = match &scope {
+                    LspScope::All => true,
+                    LspScope::Workspace {
+                        workspace_root: target,
+                    }
+                    | LspScope::Server {
+                        workspace_root: target,
+                        ..
+                    } => canonical_workspace_root(target) == *workspace_root,
+                };
+                if !workspace_matches {
+                    continue;
+                }
+                for (server_id, server) in &mut workspace.servers {
+                    if matches!(
+                        &scope,
+                        LspScope::Server {
+                            server_id: target,
+                            ..
+                        } if target != server_id
+                    ) {
+                        continue;
+                    }
+                    targets.push((
+                        workspace_root.clone(),
+                        server_id.clone(),
+                        server.definition.clone(),
+                        workspace.diagnostics.clone(),
+                        server.client.take(),
+                    ));
+                }
+                workspace.diagnostics.lock().await.clear();
+            }
+            targets
+        };
+        for (workspace_root, server_id, definition, diagnostics, previous) in targets {
+            let restart = previous.is_some();
+            if let Some(client) = previous {
+                client.shutdown().await;
+            }
+            if !restart {
+                continue;
+            }
+            let sink = DiagnosticSink::new(
+                definition.id.clone(),
+                definition.workspace_root.clone(),
+                diagnostics,
+                self.updates.clone(),
+            );
+            let client = Arc::new(LspClient::new(definition, sink));
+            let start_result = client.start().await;
+            let mut state = self.state.lock().await;
+            let Some(server) = state
+                .workspaces
+                .get_mut(&workspace_root)
+                .and_then(|workspace| workspace.servers.get_mut(&server_id))
+            else {
+                client.shutdown().await;
+                continue;
+            };
+            match start_result {
+                Ok(()) => server.client = Some(client),
+                Err(error) => {
+                    server.availability_kind = LspAvailabilityKind::Unavailable;
+                    server.availability_message = Some(error.to_string());
+                }
+            }
+        }
+        self.emit_update();
+        Ok(())
     }
 
     pub async fn active_server_names(&self) -> Vec<String> {
@@ -217,7 +403,14 @@ impl LspRuntimeRegistry {
             let uri = path_to_file_uri(path);
             let _ = client.open_document(path, &uri).await;
         }
-        let value = request_for_query(&client, &query).await?;
+        let value = match request_for_query(&client, &query).await {
+            Ok(value) => value,
+            Err(error) => {
+                self.mark_client_failure(&workspace_root, &server_id, error.to_string())
+                    .await;
+                return Err(error);
+            }
+        };
         let formatted = format_lsp_result(query.operation, &value, &definition.workspace_root);
         Ok(LspQueryResult {
             success: true,
@@ -274,7 +467,11 @@ impl LspRuntimeRegistry {
         self.emit_update();
     }
 
-    async fn reconcile_workspace_with_command(&self, workspace_root: &Path, command: &str) {
+    async fn reconcile_workspace_membership_with_command(
+        &self,
+        workspace_root: &Path,
+        command: &str,
+    ) {
         let workspace_root = canonical_workspace_root(workspace_root);
         if self.state.lock().await.closed {
             return;
@@ -293,44 +490,69 @@ impl LspRuntimeRegistry {
                 None,
             )
         } else {
-            match probe_rust_analyzer(command).await {
-                Ok(version) => LspRuntimeServerState::new(
-                    definition,
-                    LspAvailabilityKind::Available,
-                    Some(version),
-                    Some(unix_seconds()),
-                ),
-                Err(ProbeError::MissingCommand) => LspRuntimeServerState::new(
-                    definition,
-                    LspAvailabilityKind::MissingCommand,
-                    Some(missing_rust_analyzer_message()),
-                    Some(unix_seconds()),
-                ),
-                Err(ProbeError::MissingRustupComponent) => LspRuntimeServerState::new(
-                    definition,
-                    LspAvailabilityKind::MissingCommand,
-                    Some(missing_rust_analyzer_message()),
-                    Some(unix_seconds()),
-                ),
-                Err(ProbeError::Failed(message)) => LspRuntimeServerState::new(
-                    definition,
-                    LspAvailabilityKind::Unavailable,
-                    Some(message),
-                    Some(unix_seconds()),
-                ),
-            }
+            LspRuntimeServerState::new(
+                definition,
+                LspAvailabilityKind::Checking,
+                Some("LSP server has not been probed".to_string()),
+                None,
+            )
         };
-        {
+        let retired_clients = {
             let mut state = self.state.lock().await;
             if state.closed {
                 return;
             }
+            let mut retired_clients = state
+                .workspaces
+                .extract_if(.., |root, _| root != &workspace_root)
+                .flat_map(|(_, workspace)| {
+                    workspace
+                        .servers
+                        .into_values()
+                        .filter_map(|server| server.client)
+                })
+                .collect::<Vec<_>>();
             let workspace = state.workspaces.entry(workspace_root).or_default();
-            next.client = workspace
+            if let Some(current) = workspace.servers.get(RUST_ANALYZER_ID)
+                && current.definition.command == next.definition.command
+                && current.availability_kind != LspAvailabilityKind::Disabled
+            {
+                next.availability_kind = current.availability_kind;
+                next.availability_message = current.availability_message.clone();
+                next.last_checked_at = current.last_checked_at;
+                next.client = current.client.clone();
+            } else if let Some(client) = workspace
                 .servers
-                .get(RUST_ANALYZER_ID)
-                .and_then(|server| server.client.clone());
+                .get_mut(RUST_ANALYZER_ID)
+                .and_then(|server| server.client.take())
+            {
+                retired_clients.push(client);
+            }
             workspace.servers.insert(RUST_ANALYZER_ID.to_string(), next);
+            retired_clients
+        };
+        for client in retired_clients {
+            client.shutdown().await;
+        }
+        self.emit_update();
+    }
+
+    async fn mark_client_failure(&self, workspace_root: &Path, server_id: &str, message: String) {
+        let client = {
+            let mut state = self.state.lock().await;
+            let Some(server) = state
+                .workspaces
+                .get_mut(workspace_root)
+                .and_then(|workspace| workspace.servers.get_mut(server_id))
+            else {
+                return;
+            };
+            server.availability_kind = LspAvailabilityKind::Unavailable;
+            server.availability_message = Some(message);
+            server.client.take()
+        };
+        if let Some(client) = client {
+            client.shutdown().await;
         }
         self.emit_update();
     }
@@ -540,8 +762,12 @@ mod tests {
         let registry = LspRuntimeRegistry::new();
 
         registry
-            .reconcile_workspace_with_command(&dir, "definitely-not-rust-analyzer-pure-test")
+            .reconcile_workspace_membership_with_command(
+                &dir,
+                "definitely-not-rust-analyzer-pure-test",
+            )
             .await;
+        registry.probe_lsp_server(&dir).await;
         let snapshots = registry.snapshots().await;
 
         assert_eq!(snapshots.len(), 1);
@@ -574,7 +800,9 @@ mod tests {
         .expect("write demo binary");
         let registry = LspRuntimeRegistry::new();
 
-        registry.reconcile_workspace(&workspace_root).await;
+        registry
+            .reconcile_workspace_membership(&workspace_root)
+            .await;
         let snapshots = registry.snapshots().await;
         let outcome = async {
             let document_symbols = registry
@@ -709,7 +937,7 @@ mod tests {
 
         registry.shutdown().await;
         registry
-            .reconcile_workspace_with_command(
+            .reconcile_workspace_membership_with_command(
                 workspace.path(),
                 "command-must-not-run-after-lsp-shutdown",
             )
@@ -752,7 +980,10 @@ mod tests {
         .unwrap();
         let registry = LspRuntimeRegistry::new();
         registry
-            .reconcile_workspace_with_command(&dir, "definitely-not-rust-analyzer-pure-test")
+            .reconcile_workspace_membership_with_command(
+                &dir,
+                "definitely-not-rust-analyzer-pure-test",
+            )
             .await;
 
         let languages = registry.available_languages().await;

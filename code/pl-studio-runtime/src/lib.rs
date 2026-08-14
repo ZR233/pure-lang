@@ -4,6 +4,7 @@
 //! 通用模型循环、agent actor、工具和协议基础类型由 `pl-core` 提供。
 
 pub use pl_core::*;
+pub use pl_lsp::LspScope;
 pub use pl_protocol::*;
 
 pub mod agent;
@@ -22,9 +23,10 @@ pub use agent::{
     reconcile_task_worktree_group, same_worktree_path,
 };
 pub use config::{
-    ConfigPaths, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioInstructionsConfig,
-    StudioMcpConfig, StudioMode, StudioRole, StudioRuntimeConfig, StudioSkillsConfig,
-    StudioUiConfig, StudioWebSearchConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    ConfigPaths, ConfigRuntimeSnapshot, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
+    StudioInstructionsConfig, StudioMcpConfig, StudioMode, StudioRole, StudioRuntimeConfig,
+    StudioSkillsConfig, StudioUiConfig, StudioWebSearchConfig, WebSearchContextSize,
+    WebSearchLocation, WebSearchMode,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, provider_template_kind,

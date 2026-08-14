@@ -29,17 +29,23 @@ async fn set_model_role_persists_planner_model_and_default_effort() {
         crate::ProviderModelCatalogConfig::Explicit { models, .. } => models.push(fast_model),
     }
     config_store.save(&config).unwrap();
-    let runtime = StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store);
+    let runtime =
+        StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store).unwrap();
 
     let next = runtime
-        .set_model_role(StudioRole::Planner, "local", "local-fast", None)
+        .set_model_role(1, StudioRole::Planner, "local", "local-fast", None)
         .unwrap();
 
-    let next_route = next.models.routes.get(&StudioRole::Planner.id()).unwrap();
+    let next_route = next
+        .config
+        .models
+        .routes
+        .get(&StudioRole::Planner.id())
+        .unwrap();
     assert_eq!(next_route.provider.as_str(), "local");
     assert_eq!(next_route.model, "local-fast");
     assert_eq!(next_route.effort.as_ref().unwrap().as_str(), "low");
-    let saved = runtime.config_store().load_or_default().unwrap();
+    let saved = runtime.config_runtime().store().load_or_default().unwrap();
     assert_eq!(
         saved.models.routes.get(&StudioRole::Planner.id()),
         Some(next_route)

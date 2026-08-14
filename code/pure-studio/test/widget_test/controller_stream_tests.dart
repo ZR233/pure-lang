@@ -23,6 +23,71 @@ void registerControllerStreamTests() {
   });
 
   test(
+    'model command response cannot overwrite a newer settings event',
+    () async {
+      final initial = _stateWithPlannerModels();
+      final api = _FakeStudioApi(initial)
+        ..blockedModelRoleSave = Completer<SettingsStateSnapshot>();
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      final save = controller.setModelRole(
+        roleKey: 'planner',
+        providerId: 'deepseek',
+        model: 'deepseek-reasoner',
+        effort: 'max',
+      );
+      await pumpEventQueue();
+      final eventSettings = _settingsSnapshot(
+        initial.settingsState,
+        revision: initial.settingsRevision + 2,
+        roles: [
+          for (final role in initial.roles)
+            role.key == 'planner'
+                ? const RoleSettingsView(
+                    key: 'planner',
+                    providerId: 'openai',
+                    model: 'gpt-5.6',
+                    effort: 'high',
+                  )
+                : role,
+        ],
+      );
+      api.emitGlobal(_settingsChangedEvent(eventSettings));
+      await pumpEventQueue();
+      api.blockedModelRoleSave!.complete(
+        _settingsSnapshot(
+          initial.settingsState,
+          revision: initial.settingsRevision + 1,
+          roles: [
+            for (final role in initial.roles)
+              role.key == 'planner'
+                  ? const RoleSettingsView(
+                      key: 'planner',
+                      providerId: 'deepseek',
+                      model: 'deepseek-reasoner',
+                      effort: 'max',
+                    )
+                  : role,
+          ],
+        ),
+      );
+      await save;
+
+      final state = container.read(studioControllerProvider).requireValue;
+      expect(state.settingsRevision, initial.settingsRevision + 2);
+      expect(state.role('planner')?.providerId, 'openai');
+      expect(state.role('planner')?.model, 'gpt-5.6');
+      expect(state.selectedWorkspace, same(initial.selectedWorkspace));
+      expect(state.runtime, initial.runtime);
+    },
+  );
+
+  test(
     'authoritative product snapshot removes a stale selected Task',
     () async {
       const staleTask = TaskRuntimeView(
@@ -39,13 +104,17 @@ void registerControllerStreamTests() {
         merges: [],
         reviews: [],
       );
-      final initial = _twoProjectState(
-        selectedProjectId: 'project-a',
-      ).copyWith(tasksByRootThread: const {'session-b': staleTask});
+      final initial = _twoProjectState(selectedProjectId: 'project-a').copyWith(
+        taskDirectory: const TaskDirectoryState(
+          values: [
+            TaskDirectoryEntryView(rootThreadId: 'session-b', task: staleTask),
+          ],
+        ),
+      );
       final api = _FakeStudioApi(initial);
       api.selectProjectStates['project-b'] = _twoProjectState(
         selectedProjectId: 'project-b',
-      ).copyWith(tasksByRootThread: const {});
+      ).copyWith(taskDirectory: const TaskDirectoryState());
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
@@ -63,7 +132,7 @@ void registerControllerStreamTests() {
   );
 
   test('idle composer starts a Turn and busy composer steers it', () async {
-    final initial = _emptyState();
+    final initial = _stateWithPlannerModels();
     final api = _FakeStudioApi(initial);
     final container = ProviderContainer(
       overrides: [studioApiProvider.overrideWithValue(api)],
@@ -171,6 +240,11 @@ void registerControllerStreamTests() {
           .requireValue
           .selectedWorkspaceUi
           .subscriptionGeneration;
+      final workspaceBefore = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspace;
+      final productReadsBefore = api.bootstrapCount;
       api.emitThreadFrame(
         const ThreadResyncRequiredFrame(threadId: 'session-1', dropped: 3),
       );
@@ -183,6 +257,11 @@ void registerControllerStreamTests() {
           .selectedWorkspaceUi;
       expect(after.subscriptionGeneration, greaterThan(before));
       expect(api.threadSubscriptions.length, 2);
+      expect(
+        container.read(studioControllerProvider).requireValue.selectedWorkspace,
+        same(workspaceBefore),
+      );
+      expect(api.bootstrapCount, productReadsBefore);
     },
   );
 

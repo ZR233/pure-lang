@@ -36,30 +36,7 @@ pub(crate) fn rust_analyzer_definition(
 }
 
 pub(crate) async fn probe_rust_analyzer(command: &str) -> Result<String, ProbeError> {
-    if !is_builtin_rust_analyzer_command(command) {
-        return probe_command(command).await;
-    }
-    match probe_command(command).await {
-        Ok(version) => Ok(version),
-        Err(ProbeError::MissingCommand) => {
-            if !rustup_is_available().await {
-                return Err(ProbeError::MissingCommand);
-            }
-            install_rust_analyzer_component().await?;
-            probe_command(command).await
-        }
-        Err(ProbeError::MissingRustupComponent) => {
-            if !rustup_is_available().await {
-                return Err(ProbeError::Failed(
-                    "rust-analyzer component is missing, but rustup was not found on PATH"
-                        .to_string(),
-                ));
-            }
-            install_rust_analyzer_component().await?;
-            probe_command(command).await
-        }
-        Err(other) => Err(other),
-    }
+    probe_command(command).await
 }
 
 async fn probe_command(command: &str) -> Result<String, ProbeError> {
@@ -150,15 +127,8 @@ fn command_failure_message(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> 
 }
 
 pub(crate) fn missing_rust_analyzer_message() -> String {
-    "rust-analyzer command not found; if you use rustup, ensure it is on PATH so Pure Studio can run `rustup component add rust-analyzer` automatically".to_string()
-}
-
-fn is_builtin_rust_analyzer_command(command: &str) -> bool {
-    let path = Path::new(command);
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.eq_ignore_ascii_case(RUST_ANALYZER_COMMAND))
-        .unwrap_or_else(|| command.eq_ignore_ascii_case(RUST_ANALYZER_COMMAND))
+    "rust-analyzer command not found; use the explicit repair action when rustup owns the component"
+        .to_string()
 }
 
 pub(crate) fn is_rustup_missing_component_error(stderr: &str) -> bool {

@@ -42,7 +42,7 @@ impl TaskFlowFixture {
         config_store.save(&task_test_config(base_url))?;
 
         let store = StudioStore::open(home.join("studio.sqlite")).await?;
-        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let runtime = StudioRuntime::new(store.clone(), config_store)?;
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
             .create_thread(&project.id, "Offline task orchestration")

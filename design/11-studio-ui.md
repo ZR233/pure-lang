@@ -150,28 +150,24 @@ typed recovery issue：健康内容继续可用，故障项显示错误与安全
 
 ## 11.8 启动时序
 
-启动只等待主界面骨架的必要内容，慢的后台能力一律异步就绪：
+Bridge 只暴露一个 `startStudioRuntime` 启动 command。它完成 SQLite、ConfigRuntime、durable
+recovery、Thread framework/MCP owner 和 system Skills 的明确初始化，随后发布 runtime ready。
+Flutter 再调用纯查询 `readStudioState`，本地选择健康 Project/root Thread，并通过一次
+`activateProject` 执行该 Project 的 LSP membership/probe 与 Skills discovery。
 
-- 关键路径（bridge `initializeRuntime` + `bootstrapStudio`）：SQLite 打开与 schema 检查、
-  会话/任务恢复检查、project/thread 目录与 settings snapshot（本地读取，毫秒级）。
-  主界面骨架（sidebar、header、chrome）只依赖该 snapshot。
-- 非关键路径全部后台执行，结果经既有事件流推送：
-  - MCP：`startRuntime` 不再同步等待 server 探测。后台 reconcile 完成后经
-    `McpHealthChanged` 推送 health；失败只记日志并补发一次 health 快照，不改变
-    runtime 生命周期状态。首个 turn 的 `AcquireLease` 对进行中的探测有界等待
-    （约 20s），超时回落到当前 generation，慢 server 不阻塞 turn 也不阻塞启动。
-  - LSP：bootstrap snapshot 不等待语言服务器探测（首次可能触发 rustup 组件
-    安装）。探测结果在 turn 构建时再次 reconcile，并随 `ThreadRuntimeUpdated`
-    携带的 active LSP 列表填充状态栏。
-- 用户主动操作（`openProject` 等）仍同步等待各自路径的 LSP/MCP 就绪，交互路径
-  可等待。
+启动后的任何页面刷新、Widget 重建、窗口恢复和 product/thread lag resync 都只读取最新
+canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或默认 Thread 创建。
+完整 CQS 与 owner 合同见 `20-studio-state-runtime.md`。
 
 ## 11.9 设置与视觉
 
-Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、Security、General。
+Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、Security、General。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
 secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
-Skills 页在每次变为 active tab 时自动重新发现项目技能列表，用最新快照替换缓存而非累加。
+Skills 页进入时只读取当前 catalog；只有用户点击“重新发现”或 Project 激活 command 才执行发现。
+MCP/LSP 页进入和“刷新”只读取各 owner 的 last-known snapshot；MCP 单 server“重新连接”、
+经确认的“全部重置”，以及 LSP probe、typed repair 和 reset 都必须调用各自的明确 command。
+这些操作使用稳定 `ValueKey`，其 command response 仍按领域 revision 应用，不能覆盖更晚事件。
 
 聊天页保持低对比双栏桌面布局：左侧 Project/root Thread，右侧当前 Thread workspace；窄屏改为
 icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasoning/tool 默认折叠。Composer、
@@ -204,6 +200,7 @@ directory 增量更新和 selected agent 重建时必须保留。
 - 空正文 provider failure、fatal/recoverable Task 状态、agent directory 错误保留与
   `task_complete` 门禁拒绝 message 有 widget test；
 - Flutter analyze、widget/integration tests 通过；
-- Skills 页 active 时自动重新发现有 widget test 覆盖再次进入与快照替换；
+- Skills 页进入不扫描目录，“重新发现”使用明确 command 并整体替换 catalog；
+- MCP/LSP 页刷新无副作用，reset/probe/repair 只由对应稳定控件触发并有 widget test；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。

@@ -4,37 +4,59 @@ StudioBridgeEventPayload _productPayloadFromFrb(
   frb.BridgeProductEventPayload payload,
 ) {
   return switch (payload) {
-    frb.BridgeProductEventPayload_ThreadDirectoryChanged(
-      :final projectId,
-      :final threads,
-    ) =>
+    frb.BridgeProductEventPayload_ProjectDirectoryChanged(:final field0) =>
+      ProjectDirectoryChangedPayload(
+        ProjectDirectoryState(
+          meta: _observedMetaFromFrb(field0.meta),
+          values: field0.projects.map(_projectFromFrb).toList(),
+        ),
+      ),
+    frb.BridgeProductEventPayload_ThreadDirectoryChanged(:final field0) =>
       ThreadDirectoryChangedPayload(
-        projectId: _emptyToNull(projectId),
-        threads: threads.map(_threadFromFrb).toList(),
+        ThreadDirectoryState(
+          meta: _observedMetaFromFrb(field0.meta),
+          values: field0.threads.map(_threadFromFrb).toList(),
+        ),
       ),
-    frb.BridgeProductEventPayload_McpHealthChanged(:final health) =>
-      McpHealthChangedPayload(
-        activeMcpServers: health.activeMcpServers,
-        servers: health.mcpServers.map(_mcpServerFromFrb).toList(),
+    frb.BridgeProductEventPayload_TaskDirectoryChanged(:final field0) =>
+      TaskDirectoryChangedPayload(
+        TaskDirectoryState(
+          meta: _observedMetaFromFrb(field0.meta),
+          values: [
+            for (final entry in field0.tasks)
+              TaskDirectoryEntryView(
+                rootThreadId: entry.rootThreadId,
+                task: _taskRuntimeFromFrb(entry.task),
+              ),
+          ],
+        ),
       ),
-    frb.BridgeProductEventPayload_LspHealthChanged(:final health) =>
-      LspHealthChangedPayload(activeLspServers: health.activeLspServers),
-    frb.BridgeProductEventPayload_TaskChanged(
-      :final rootThreadId,
-      :final task,
-    ) =>
-      TaskChangedPayload(
-        rootThreadId: rootThreadId,
-        task: task == null ? null : _taskRuntimeFromFrb(task),
-      ),
-    frb.BridgeProductEventPayload_AgentDirectoryChanged(
-      :final rootThreadId,
-      :final agent,
-    ) =>
+    frb.BridgeProductEventPayload_AgentDirectoryChanged(:final field0) =>
       AgentDirectoryChangedPayload(
-        rootThreadId: rootThreadId,
-        agent: _agentDirectoryEntryFromFrb(agent),
+        AgentDirectoryState(
+          meta: _observedMetaFromFrb(field0.meta),
+          values: field0.agents.map(_agentDirectoryEntryFromFrb).toList(),
+        ),
       ),
+    frb.BridgeProductEventPayload_SettingsStateChanged(:final field0) =>
+      SettingsStateChangedPayload(_settingsStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_RecoveryStateChanged(:final field0) =>
+      RecoveryStateChangedPayload(
+        RecoveryStateSnapshot(
+          meta: _observedMetaFromFrb(field0.meta),
+          values: field0.issues.map(_recoveryIssueFromFrb).toList(),
+        ),
+      ),
+    frb.BridgeProductEventPayload_McpStateChanged(:final field0) =>
+      McpStateChangedPayload(_mcpStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_LspStateChanged(:final field0) =>
+      LspStateChangedPayload(_lspStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_SkillsStateChanged(:final field0) =>
+      SkillsStateChangedPayload(_skillsStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_ProviderUsageStateChanged(:final field0) =>
+      ProviderUsageStateChangedPayload(_providerUsageStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_UpdaterStateChanged(:final field0) =>
+      UpdaterStateChangedPayload(_updaterStateFromFrb(field0)),
     frb.BridgeProductEventPayload_Stale(:final laggedEvents) => StalePayload(
       laggedEvents: laggedEvents.toInt(),
     ),
@@ -250,9 +272,7 @@ McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
   return McpServerSettingsView(
     id: server.id,
     transport: server.transport,
-    endpoint: server.endpoint.isNotEmpty
-        ? server.endpoint
-        : (server.url ?? server.command ?? ''),
+    endpoint: server.endpoint,
     enabled: server.enabled,
     status: server.statusKind.isEmpty
         ? server.availabilityKind
@@ -262,21 +282,154 @@ McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
   );
 }
 
-String? _emptyToNull(String value) {
-  return value.isEmpty ? null : value;
+StudioState studioStateFromFrbSnapshot(
+  frb.BridgeStudioStateSnapshot value, {
+  String? selectedProjectId,
+  String? selectedThreadId,
+}) {
+  final projects = value.projectDirectory.projects
+      .map(_projectFromFrb)
+      .toList();
+  final threads = value.threadDirectory.threads.map(_threadFromFrb).toList();
+  final selectedProject = _stableProjectSelection(projects, selectedProjectId);
+  final selectedThread = _stableThreadSelection(
+    threads,
+    selectedProject,
+    selectedThreadId,
+  );
+  return StudioState(
+    projectDirectory: ProjectDirectoryState(
+      meta: _observedMetaFromFrb(value.projectDirectory.meta),
+      values: projects,
+    ),
+    threadDirectory: ThreadDirectoryState(
+      meta: _observedMetaFromFrb(value.threadDirectory.meta),
+      values: threads,
+    ),
+    taskDirectory: TaskDirectoryState(
+      meta: _observedMetaFromFrb(value.taskDirectory.meta),
+      values: [
+        for (final entry in value.taskDirectory.tasks)
+          TaskDirectoryEntryView(
+            rootThreadId: entry.rootThreadId,
+            task: _taskRuntimeFromFrb(entry.task),
+          ),
+      ],
+    ),
+    agentDirectory: AgentDirectoryState(
+      meta: _observedMetaFromFrb(value.agentDirectory.meta),
+      values: value.agentDirectory.agents
+          .map(_agentDirectoryEntryFromFrb)
+          .toList(),
+    ),
+    settingsState: _settingsStateFromFrb(value.settings),
+    recoveryState: RecoveryStateSnapshot(
+      meta: _observedMetaFromFrb(value.recovery.meta),
+      values: value.recovery.issues.map(_recoveryIssueFromFrb).toList(),
+    ),
+    mcpState: _mcpStateFromFrb(value.mcp),
+    lspState: _lspStateFromFrb(value.lsp),
+    skillsByProject: {
+      for (final snapshot in value.skillsByProject)
+        snapshot.projectId: _skillsStateFromFrb(snapshot),
+    },
+    providerUsageState: _providerUsageStateFromFrb(value.providerUsage),
+    updaterState: _updaterStateFromFrb(value.updater),
+    selectedProjectId: selectedProject,
+    selectedThreadId: selectedThread,
+  );
 }
 
-StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
-  return _stateFromTypedSnapshot(
-    projects: value.projects.map(_projectFromFrb).toList(),
-    threads: value.threads.map(_threadFromFrb).toList(),
-    selectedProjectId: value.selectedProjectId,
-    selectedThreadId: value.selectedThreadId,
-    recoveryIssues: value.recoveryIssues.map(_recoveryIssueFromFrb).toList(),
-    selectedTask: value.selectedThreadTask == null
-        ? null
-        : _taskRuntimeFromFrb(value.selectedThreadTask!),
-    settings: value.settings,
+String? _stableProjectSelection(
+  List<StudioProject> projects,
+  String? selectedProjectId,
+) {
+  if (projects.any((project) => project.id == selectedProjectId)) {
+    return selectedProjectId;
+  }
+  final sorted = [...projects]..sort((a, b) => a.id.compareTo(b.id));
+  return sorted.firstOrNull?.id;
+}
+
+String? _stableThreadSelection(
+  List<StudioThread> threads,
+  String? projectId,
+  String? selectedThreadId,
+) {
+  if (threads.any((thread) => thread.id == selectedThreadId)) {
+    return selectedThreadId;
+  }
+  final roots =
+      threads
+          .where((thread) => thread.projectId == projectId && thread.isRoot)
+          .toList()
+        ..sort((a, b) => a.id.compareTo(b.id));
+  return roots.firstOrNull?.id;
+}
+
+McpStateSnapshot _mcpStateFromFrb(frb.BridgeMcpStateSnapshot snapshot) {
+  return McpStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
+    desiredConfigFingerprint: snapshot.desiredConfigFingerprint,
+    appliedConfigFingerprint: snapshot.appliedConfigFingerprint,
+    activeServers: snapshot.health.activeMcpServers,
+    servers: snapshot.health.mcpServers.map(_mcpServerFromFrb).toList(),
+  );
+}
+
+LspStateSnapshot _lspStateFromFrb(frb.BridgeLspStateSnapshot snapshot) {
+  return LspStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
+    activeServers: snapshot.health.activeLspServers,
+    servers: [
+      for (final server in snapshot.health.lspServers)
+        LspServerStateView(
+          id: server.id,
+          displayName: server.displayName,
+          availability: server.availabilityKind,
+          message: server.availabilityMessage,
+          lastCheckedAt: server.lastCheckedAt == null
+              ? null
+              : _dateFromUnix(server.lastCheckedAt!),
+          lastError: server.lastError,
+          diagnosticCount: server.diagnosticCount.toInt(),
+        ),
+    ],
+  );
+}
+
+SkillsStateSnapshot _skillsStateFromFrb(
+  frb.BridgeSkillsStateSnapshot snapshot,
+) {
+  return SkillsStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
+    projectId: snapshot.projectId,
+    configFingerprint: snapshot.configFingerprint,
+    catalogRevision: snapshot.catalogRevision.toInt(),
+    skills: snapshot.skills.map((skill) => skill.name).toList(),
+    warnings: snapshot.warnings,
+  );
+}
+
+ProviderUsageStateSnapshot _providerUsageStateFromFrb(
+  frb.BridgeProviderUsageStateSnapshot snapshot,
+) {
+  return ProviderUsageStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
+    configFingerprint: snapshot.configFingerprint,
+    usages: snapshot.usages.map(_providerUsageFromFrb).toList(),
+  );
+}
+
+UpdaterStateSnapshot _updaterStateFromFrb(
+  frb.BridgeUpdaterStateSnapshot snapshot,
+) {
+  final update = snapshot.update;
+  return UpdaterStateSnapshot(
+    meta: _observedMetaFromFrb(snapshot.meta),
+    version: update?.version,
+    publishedAt: update == null ? null : _dateFromUnix(update.publishedAt),
+    notesUrl: update?.notesUrl,
   );
 }
 

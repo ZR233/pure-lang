@@ -872,7 +872,7 @@ as List<PendingInteraction>,
 /// @nodoc
 mixin _$SettingsPageView {
 
- List<ProviderSettingsView> get providers; ProviderCatalogView get providerCatalog; String? get defaultProviderId; List<RoleSettingsView> get roles; InstructionsSettingsView get instructions; SkillsSettingsView get skills; List<String> get activeSkills; String? get selectedProjectId; List<McpServerSettingsView> get mcpServers; PermissionMode get permissionMode; GeneralSettingsView get general; WebSearchSettingsView get webSearch; bool get runtimeBusy;
+ List<ProviderSettingsView> get providers; ProviderCatalogView get providerCatalog; String? get defaultProviderId; List<RoleSettingsView> get roles; InstructionsSettingsView get instructions; SkillsSettingsView get skills; List<String> get activeSkills; String? get selectedProjectId; List<McpServerSettingsView> get mcpServers; McpStateSnapshot get mcpState; LspStateSnapshot get lspState; PermissionMode get permissionMode; GeneralSettingsView get general; WebSearchSettingsView get webSearch; bool get runtimeBusy;
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -883,16 +883,16 @@ $SettingsPageViewCopyWith<SettingsPageView> get copyWith => _$SettingsPageViewCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, activeSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, mcpServers)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, activeSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(roles),instructions,skills,const DeepCollectionEquality().hash(activeSkills),selectedProjectId,const DeepCollectionEquality().hash(mcpServers),permissionMode,general,webSearch,runtimeBusy);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(roles),instructions,skills,const DeepCollectionEquality().hash(activeSkills),selectedProjectId,const DeepCollectionEquality().hash(mcpServers),mcpState,lspState,permissionMode,general,webSearch,runtimeBusy);
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
+  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
 }
 
 
@@ -903,7 +903,7 @@ abstract mixin class $SettingsPageViewCopyWith<$Res>  {
   factory $SettingsPageViewCopyWith(SettingsPageView value, $Res Function(SettingsPageView) _then) = _$SettingsPageViewCopyWithImpl;
 @useResult
 $Res call({
- List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
+ List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
 });
 
 
@@ -920,7 +920,7 @@ class _$SettingsPageViewCopyWithImpl<$Res>
 
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
   return _then(_self.copyWith(
 providers: null == providers ? _self.providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,providerCatalog: null == providerCatalog ? _self.providerCatalog : providerCatalog // ignore: cast_nullable_to_non_nullable
@@ -931,7 +931,9 @@ as InstructionsSettingsView,skills: null == skills ? _self.skills : skills // ig
 as SkillsSettingsView,activeSkills: null == activeSkills ? _self.activeSkills : activeSkills // ignore: cast_nullable_to_non_nullable
 as List<String>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,mcpServers: null == mcpServers ? _self.mcpServers : mcpServers // ignore: cast_nullable_to_non_nullable
-as List<McpServerSettingsView>,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
+as List<McpServerSettingsView>,mcpState: null == mcpState ? _self.mcpState : mcpState // ignore: cast_nullable_to_non_nullable
+as McpStateSnapshot,lspState: null == lspState ? _self.lspState : lspState // ignore: cast_nullable_to_non_nullable
+as LspStateSnapshot,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,general: null == general ? _self.general : general // ignore: cast_nullable_to_non_nullable
 as GeneralSettingsView,webSearch: null == webSearch ? _self.webSearch : webSearch // ignore: cast_nullable_to_non_nullable
 as WebSearchSettingsView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable
@@ -1020,10 +1022,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SettingsPageView() when $default != null:
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
   return orElse();
 
 }
@@ -1041,10 +1043,10 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)  $default,) {final _that = this;
 switch (_that) {
 case _SettingsPageView():
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -1061,10 +1063,10 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,) {final _that = this;
 switch (_that) {
 case _SettingsPageView() when $default != null:
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
   return null;
 
 }
@@ -1076,7 +1078,7 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 
 
 class _SettingsPageView implements SettingsPageView {
-  const _SettingsPageView({required final  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required final  List<RoleSettingsView> roles, required this.instructions, required this.skills, required final  List<String> activeSkills, required this.selectedProjectId, required final  List<McpServerSettingsView> mcpServers, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_mcpServers = mcpServers;
+  const _SettingsPageView({required final  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required final  List<RoleSettingsView> roles, required this.instructions, required this.skills, required final  List<String> activeSkills, required this.selectedProjectId, required final  List<McpServerSettingsView> mcpServers, required this.mcpState, required this.lspState, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_mcpServers = mcpServers;
 
 
  final  List<ProviderSettingsView> _providers;
@@ -1112,6 +1114,8 @@ class _SettingsPageView implements SettingsPageView {
   return EqualUnmodifiableListView(_mcpServers);
 }
 
+@override final  McpStateSnapshot mcpState;
+@override final  LspStateSnapshot lspState;
 @override final  PermissionMode permissionMode;
 @override final  GeneralSettingsView general;
 @override final  WebSearchSettingsView webSearch;
@@ -1127,16 +1131,16 @@ _$SettingsPageViewCopyWith<_SettingsPageView> get copyWith => __$SettingsPageVie
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other._providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other._activeSkills, _activeSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._mcpServers, _mcpServers)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other._providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other._activeSkills, _activeSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._mcpServers, _mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),permissionMode,general,webSearch,runtimeBusy);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),mcpState,lspState,permissionMode,general,webSearch,runtimeBusy);
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
+  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
 }
 
 
@@ -1147,7 +1151,7 @@ abstract mixin class _$SettingsPageViewCopyWith<$Res> implements $SettingsPageVi
   factory _$SettingsPageViewCopyWith(_SettingsPageView value, $Res Function(_SettingsPageView) _then) = __$SettingsPageViewCopyWithImpl;
 @override @useResult
 $Res call({
- List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
+ List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
 });
 
 
@@ -1164,7 +1168,7 @@ class __$SettingsPageViewCopyWithImpl<$Res>
 
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
   return _then(_SettingsPageView(
 providers: null == providers ? _self._providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,providerCatalog: null == providerCatalog ? _self.providerCatalog : providerCatalog // ignore: cast_nullable_to_non_nullable
@@ -1175,7 +1179,9 @@ as InstructionsSettingsView,skills: null == skills ? _self.skills : skills // ig
 as SkillsSettingsView,activeSkills: null == activeSkills ? _self._activeSkills : activeSkills // ignore: cast_nullable_to_non_nullable
 as List<String>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,mcpServers: null == mcpServers ? _self._mcpServers : mcpServers // ignore: cast_nullable_to_non_nullable
-as List<McpServerSettingsView>,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
+as List<McpServerSettingsView>,mcpState: null == mcpState ? _self.mcpState : mcpState // ignore: cast_nullable_to_non_nullable
+as McpStateSnapshot,lspState: null == lspState ? _self.lspState : lspState // ignore: cast_nullable_to_non_nullable
+as LspStateSnapshot,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,general: null == general ? _self.general : general // ignore: cast_nullable_to_non_nullable
 as GeneralSettingsView,webSearch: null == webSearch ? _self.webSearch : webSearch // ignore: cast_nullable_to_non_nullable
 as WebSearchSettingsView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable

@@ -12,7 +12,8 @@ use std::sync::Arc;
 use pl_core::{AgentRuntimeHost, AgentRuntimeOptions};
 
 use crate::McpRuntimeHandle;
-use crate::config::ConfigStore;
+use crate::config::ConfigRuntime;
+use crate::studio::runtime::SkillCatalogRuntime;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
 
@@ -39,24 +40,26 @@ impl StudioAgentHost {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         store: StudioStore,
-        config_store: ConfigStore,
+        config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: StudioProductEventRuntime,
+        skills: SkillCatalogRuntime,
     ) -> Self {
         Self {
             repository: StudioAgentRepository::new(store.clone()),
             turn_factory: StudioAgentTurnFactory::new(
                 store.clone(),
-                config_store,
+                config_runtime,
                 mcp_runtime,
                 lsp_runtime,
                 interactions.clone(),
                 coordinator.clone(),
                 resources.clone(),
+                skills,
             ),
             lifecycle: StudioAgentLifecycle::new(
                 store.clone(),

@@ -67,6 +67,9 @@ struct OpenDocument {
 }
 
 impl LspClient {
+    pub(crate) async fn start(&self) -> LspResult<()> {
+        self.ensure_started().await
+    }
     pub fn new(definition: LspServerDefinition, diagnostics: DiagnosticSink) -> Self {
         Self {
             definition,

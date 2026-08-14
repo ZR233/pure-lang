@@ -65,7 +65,15 @@ impl InstructionAssembler {
             }
         }
         if let Some(skills) = request.skills {
-            match crate::skill::build_skills_prompt(request.workspace_root, skills) {
+            let prompt = request
+                .skill_catalog
+                .map(crate::skill::build_skills_prompt_from_catalog)
+                .map(Some)
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    crate::skill::build_skills_prompt(request.workspace_root, skills)
+                });
+            match prompt {
                 Ok(Some(skills)) => {
                     snapshot.push_developer(
                         InstructionSource::new(InstructionSourceKind::Skills, "skills"),

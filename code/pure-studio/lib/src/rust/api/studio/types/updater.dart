@@ -8,62 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'updater.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
-
-@freezed
-sealed class BridgeStudioUpdateCheckDto with _$BridgeStudioUpdateCheckDto {
-  const BridgeStudioUpdateCheckDto._();
-
-  const factory BridgeStudioUpdateCheckDto.upToDate() =
-      BridgeStudioUpdateCheckDto_UpToDate;
-  const factory BridgeStudioUpdateCheckDto.available({
-    required BridgeStudioUpdateDto update,
-  }) = BridgeStudioUpdateCheckDto_Available;
-}
-
-/// 已通过 Rust 清单验证的更新，Dart 不接触 raw JSON。
-class BridgeStudioUpdateDto {
-  final String version;
-  final PlatformInt64 publishedAt;
-  final String notesUrl;
-  final String installerUrl;
-  final BigInt installerSize;
-  final String installerSha256;
-  final String installerSignatureUrl;
-
-  const BridgeStudioUpdateDto({
-    required this.version,
-    required this.publishedAt,
-    required this.notesUrl,
-    required this.installerUrl,
-    required this.installerSize,
-    required this.installerSha256,
-    required this.installerSignatureUrl,
-  });
-
-  @override
-  int get hashCode =>
-      version.hashCode ^
-      publishedAt.hashCode ^
-      notesUrl.hashCode ^
-      installerUrl.hashCode ^
-      installerSize.hashCode ^
-      installerSha256.hashCode ^
-      installerSignatureUrl.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStudioUpdateDto &&
-          runtimeType == other.runtimeType &&
-          version == other.version &&
-          publishedAt == other.publishedAt &&
-          notesUrl == other.notesUrl &&
-          installerUrl == other.installerUrl &&
-          installerSize == other.installerSize &&
-          installerSha256 == other.installerSha256 &&
-          installerSignatureUrl == other.installerSignatureUrl;
-}
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
 
 @freezed
 sealed class BridgeStudioUpdateEventDto with _$BridgeStudioUpdateEventDto {

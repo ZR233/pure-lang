@@ -10,7 +10,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ClientLifecycleMode, ClientServiceExt, ErrorData as McpError, RoleServer, ServiceExt};
 use serde_json::{Map, Value, json};
 
-use super::{ConnectedMcp, McpConnector, McpRuntime};
+use super::{ConnectedMcp, McpConnector, McpResetScope, McpRuntime};
 use crate::config::*;
 use crate::tool::*;
 use crate::turn::ToolEffect;
@@ -358,7 +358,10 @@ async fn retired_generation_closes_only_after_last_lease_releases() {
     let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
     runtime.reconcile(servers.clone()).await.expect("first");
     let first = runtime.acquire_turn_lease().await.expect("first lease");
-    runtime.recheck(servers).await.expect("second");
+    runtime
+        .reset(McpResetScope::All, servers)
+        .await
+        .expect("second");
     let second = runtime.acquire_turn_lease().await.expect("second lease");
     assert_eq!(first.tools()[0].raw_name, "first");
     assert_eq!(second.tools()[0].raw_name, "second");

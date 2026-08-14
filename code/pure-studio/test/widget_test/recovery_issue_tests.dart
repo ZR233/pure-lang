@@ -92,17 +92,19 @@ void registerRecoveryIssueTests() {
       path: r'C:\missing',
     );
     final state = _noProjectState().copyWith(
-      projects: const [brokenProject],
-      recoveryIssues: const [
-        StudioRecoveryIssue(
-          id: 'issue-project',
-          scope: RecoveryIssueScope.project,
-          category: RecoveryIssueCategory.repository,
-          availableActions: [RecoveryIssueAction.removeProject],
-          projectId: 'project-broken',
-          detail: 'Project workspace is unavailable.',
-        ),
-      ],
+      projectDirectory: const ProjectDirectoryState(values: [brokenProject]),
+      recoveryState: const RecoveryStateSnapshot(
+        values: [
+          StudioRecoveryIssue(
+            id: 'issue-project',
+            scope: RecoveryIssueScope.project,
+            category: RecoveryIssueCategory.repository,
+            availableActions: [RecoveryIssueAction.removeProject],
+            projectId: 'project-broken',
+            detail: 'Project workspace is unavailable.',
+          ),
+        ],
+      ),
     );
     final api = _FakeStudioApi(state)
       ..recoveryPreviews['issue-project'] = const RecoveryCleanupPreview(
@@ -169,7 +171,9 @@ void registerRecoveryIssueTests() {
         ),
       ],
     );
-    api.recoveryCleanupState = state.copyWith(recoveryIssues: const []);
+    api.recoveryCleanupState = state.copyWith(
+      recoveryState: const RecoveryStateSnapshot(),
+    );
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -331,7 +335,9 @@ void registerRecoveryIssueTests() {
 
     api
       ..recoveryCleanupError = null
-      ..recoveryCleanupState = state.copyWith(recoveryIssues: const [])
+      ..recoveryCleanupState = state.copyWith(
+        recoveryState: const RecoveryStateSnapshot(),
+      )
       ..recoveryPreviews['issue-session'] = const RecoveryCleanupPreview(
         issueId: 'issue-session',
         expectedRevision: 'revision-refreshed',
@@ -363,18 +369,20 @@ void registerRecoveryIssueTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final initial = _recoveryIssueState(sessionIssueOnly: true).copyWith(
-        recoveryIssues: const [
-          StudioRecoveryIssue(
-            id: 'issue-merge',
-            scope: RecoveryIssueScope.thread,
-            category: RecoveryIssueCategory.merge,
-            availableActions: [RecoveryIssueAction.retry],
-            projectId: 'project-current',
-            threadId: 'session-broken',
-            taskRunId: 'task-session',
-            detail: 'Planner Git integration needs reconciliation.',
-          ),
-        ],
+        recoveryState: const RecoveryStateSnapshot(
+          values: [
+            StudioRecoveryIssue(
+              id: 'issue-merge',
+              scope: RecoveryIssueScope.thread,
+              category: RecoveryIssueCategory.merge,
+              availableActions: [RecoveryIssueAction.retry],
+              projectId: 'project-current',
+              threadId: 'session-broken',
+              taskRunId: 'task-session',
+              detail: 'Planner Git integration needs reconciliation.',
+            ),
+          ],
+        ),
       );
       final api = _FakeStudioApi(initial)
         ..recoveryRetryError = StateError('branch identity changed');
@@ -400,15 +408,13 @@ void registerRecoveryIssueTests() {
       api
         ..recoveryRetryError = null
         ..recoveryRetryState = initial.copyWith(
-          recoveryIssues: const [],
+          recoveryState: const RecoveryStateSnapshot(),
           selectedThreadId: 'session-broken',
         );
       await tester.tap(retry);
       await tester.pumpAndSettle();
 
       expect(api.retriedRecoveryIssueId, 'issue-merge');
-      expect(api.retrySelectedProjectId, 'project-current');
-      expect(api.retrySelectedThreadId, 'session-broken');
       expect(api.threadSubscriptions.last, 'session-broken');
       expect(find.byIcon(Icons.error_outline), findsNothing);
       expect(tester.takeException(), isNull);
@@ -484,24 +490,28 @@ StudioState _recoveryIssueState({
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
   return _emptyState().copyWith(
-    projects: const [
-      StudioProject(
-        id: 'project-current',
-        name: 'Project Current',
-        path: r'C:\current',
-      ),
-      StudioProject(
-        id: 'project-broken',
-        name: 'Broken Project',
-        path: r'C:\broken',
-      ),
-      StudioProject(
-        id: 'project-other',
-        name: 'Project Other',
-        path: r'C:\other',
-      ),
-    ],
-    threads: [healthySession, brokenSession],
+    projectDirectory: const ProjectDirectoryState(
+      values: [
+        StudioProject(
+          id: 'project-current',
+          name: 'Project Current',
+          path: r'C:\current',
+        ),
+        StudioProject(
+          id: 'project-broken',
+          name: 'Broken Project',
+          path: r'C:\broken',
+        ),
+        StudioProject(
+          id: 'project-other',
+          name: 'Project Other',
+          path: r'C:\other',
+        ),
+      ],
+    ),
+    threadDirectory: ThreadDirectoryState(
+      values: [healthySession, brokenSession],
+    ),
     selectedProjectId: 'project-current',
     selectedThreadId: healthySession.id,
     workspacesByThread: {
@@ -520,35 +530,37 @@ StudioState _recoveryIssueState({
           syncState: AgentWorkspaceSyncState.ready,
         ),
     },
-    recoveryIssues: [
-      if (!sessionIssueOnly)
+    recoveryState: RecoveryStateSnapshot(
+      values: [
+        if (!sessionIssueOnly)
+          const StudioRecoveryIssue(
+            id: 'issue-project',
+            scope: RecoveryIssueScope.project,
+            category: RecoveryIssueCategory.repository,
+            availableActions: [RecoveryIssueAction.removeProject],
+            projectId: 'project-broken',
+            taskRunId: 'task-project',
+            detail: 'Project Git identity cannot be read.',
+          ),
         const StudioRecoveryIssue(
-          id: 'issue-project',
-          scope: RecoveryIssueScope.project,
-          category: RecoveryIssueCategory.repository,
-          availableActions: [RecoveryIssueAction.removeProject],
-          projectId: 'project-broken',
-          taskRunId: 'task-project',
-          detail: 'Project Git identity cannot be read.',
-        ),
-      const StudioRecoveryIssue(
-        id: 'issue-session',
-        scope: RecoveryIssueScope.thread,
-        category: RecoveryIssueCategory.worktree,
-        availableActions: [RecoveryIssueAction.cleanupThread],
-        projectId: 'project-current',
-        threadId: 'session-broken',
-        taskRunId: 'task-session',
-        detail: 'Worktree ownership is incomplete.',
-      ),
-      if (includeApplicationIssue)
-        const StudioRecoveryIssue(
-          id: 'issue-application',
-          scope: RecoveryIssueScope.application,
+          id: 'issue-session',
+          scope: RecoveryIssueScope.thread,
           category: RecoveryIssueCategory.worktree,
-          availableActions: [RecoveryIssueAction.retry],
-          detail: 'An orphan resource could not be classified.',
+          availableActions: [RecoveryIssueAction.cleanupThread],
+          projectId: 'project-current',
+          threadId: 'session-broken',
+          taskRunId: 'task-session',
+          detail: 'Worktree ownership is incomplete.',
         ),
-    ],
+        if (includeApplicationIssue)
+          const StudioRecoveryIssue(
+            id: 'issue-application',
+            scope: RecoveryIssueScope.application,
+            category: RecoveryIssueCategory.worktree,
+            availableActions: [RecoveryIssueAction.retry],
+            detail: 'An orphan resource could not be classified.',
+          ),
+      ],
+    ),
   );
 }

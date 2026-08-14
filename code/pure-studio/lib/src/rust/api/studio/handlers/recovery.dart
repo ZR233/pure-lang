@@ -5,10 +5,7 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
-import '../types/response.dart';
 import '../types/runtime.dart';
-import '../types/settings.dart';
-import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<BridgeTaskRecoveryPreviewDto> previewTaskRecovery({
@@ -36,34 +33,23 @@ Future<BridgeRecoveryCleanupPreviewDto> previewProjectCleanup({
   projectId: projectId,
 );
 
-Future<BridgeStudioSnapshotResponse> cleanupRecoveryIssue({
+Future<RuntimeSnapshot> cleanupRecoveryIssue({
   required String issueId,
   required String expectedRevision,
-  String? selectedProjectId,
-  String? selectedThreadId,
 }) => RustLib.instance.api.crateApiStudioHandlersRecoveryCleanupRecoveryIssue(
   issueId: issueId,
   expectedRevision: expectedRevision,
-  selectedProjectId: selectedProjectId,
-  selectedThreadId: selectedThreadId,
 );
 
-Future<BridgeStudioSnapshotResponse> retryRecoveryIssue({
-  required String issueId,
-  String? selectedProjectId,
-  String? selectedThreadId,
-}) => RustLib.instance.api.crateApiStudioHandlersRecoveryRetryRecoveryIssue(
-  issueId: issueId,
-  selectedProjectId: selectedProjectId,
-  selectedThreadId: selectedThreadId,
-);
+Future<RuntimeSnapshot> retryRecoveryIssue({required String issueId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersRecoveryRetryRecoveryIssue(issueId: issueId);
 
-Future<BridgeStudioSnapshotResponse> cleanupProject({
+Future<RuntimeSnapshot> cleanupProject({
   required String projectId,
   required String expectedRevision,
-  String? selectedProjectId,
 }) => RustLib.instance.api.crateApiStudioHandlersRecoveryCleanupProject(
   projectId: projectId,
   expectedRevision: expectedRevision,
-  selectedProjectId: selectedProjectId,
 );

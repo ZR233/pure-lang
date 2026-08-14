@@ -56,6 +56,7 @@ class ProviderList extends StatelessWidget {
             runSpacing: 8,
             children: [
               OutlinedButton.icon(
+                key: StudioDriverKeys.providerUsageCheck,
                 icon: const Icon(Icons.refresh),
                 label: Text(context.l10n.settingsRefreshUsage),
                 onPressed: () => onRefreshAll(),

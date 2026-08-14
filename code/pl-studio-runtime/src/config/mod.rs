@@ -5,6 +5,7 @@
 
 mod credential;
 mod mode;
+mod runtime;
 mod store;
 
 use std::collections::BTreeMap;
@@ -25,6 +26,7 @@ pub use pl_core::config::{
     validate_mcp_identifier, zhipu_coding_plan_token,
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
+pub use runtime::{ConfigRuntime, ConfigRuntimeSnapshot};
 pub use store::{ConfigPaths, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 14;
@@ -104,14 +106,35 @@ pub struct StudioMcpConfig {
     pub builtin_servers: BTreeMap<String, BuiltinMcpServerState>,
 }
 
-/// Studio UI 本地偏好；当前持久化的 UI read model 仍位于 SQLite。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StudioUiConfig {}
+/// Studio UI 本地偏好，由 [`ConfigRuntime`] 与其余 desired settings 一起持有。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StudioUiConfig {
+    #[serde(default = "default_true")]
+    pub follow_system_theme: bool,
+    #[serde(default = "default_true")]
+    pub follow_active_turn: bool,
+    #[serde(default)]
+    pub compact_timeline: bool,
+}
+
+impl Default for StudioUiConfig {
+    fn default() -> Self {
+        Self {
+            follow_system_theme: true,
+            follow_active_turn: true,
+            compact_timeline: false,
+        }
+    }
+}
 
 impl StudioUiConfig {
     fn is_default(&self) -> bool {
         self == &Self::default()
     }
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// Pure Studio 的完整配置文档。

@@ -196,7 +196,7 @@ impl StudioRuntime {
         })
     }
 
-    pub(super) async fn ensure_thread_agent(
+    pub(in crate::studio) async fn ensure_thread_agent(
         &self,
         thread_id: &str,
     ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::AgentId)> {

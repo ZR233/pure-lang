@@ -74,7 +74,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     .await?;
 
     let store = StudioStore::open(&database_path).await?;
-    let runtime = StudioRuntime::new(store.clone(), config_store.clone());
+    let runtime = StudioRuntime::new(store.clone(), config_store.clone())?;
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime
         .create_thread(&project.id, "Installed DeepSeek cache live")
@@ -176,7 +176,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     drop(store);
 
     let reopened_store = StudioStore::open(&database_path).await?;
-    let reopened = StudioRuntime::new(reopened_store, config_store);
+    let reopened = StudioRuntime::new(reopened_store, config_store)?;
     reopened.start_runtime().await?;
     let restored = reopened.thread_snapshot(&thread.id).await?;
     let restored_usage = &restored

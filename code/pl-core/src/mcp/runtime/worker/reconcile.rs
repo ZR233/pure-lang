@@ -6,7 +6,7 @@ use std::sync::Arc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_protocol::{PureError, Result};
 
-use super::super::{McpGeneration, ReconcilePolicy};
+use super::super::{McpGeneration, McpResetScope};
 use super::redaction::McpErrorRedactor;
 use super::{
     RuntimeGeneration, RuntimeServer, assign_tool_descriptors, configured_startup_timeout,
@@ -18,13 +18,14 @@ use crate::mcp::{McpConnectRequest, McpConnector};
 
 pub(super) struct PendingReconcile {
     pub(super) servers: BTreeMap<String, EffectiveMcpServerConfig>,
-    pub(super) policy: ReconcilePolicy,
+    pub(super) reset_scope: Option<McpResetScope>,
     pub(super) reply: tokio::sync::oneshot::Sender<Result<()>>,
 }
 
 pub(super) struct ActivePreparation {
     pub(super) future: Pin<Box<dyn Future<Output = RuntimeGeneration> + Send>>,
     pub(super) reply: tokio::sync::oneshot::Sender<Result<()>>,
+    pub(super) reset_scope: Option<McpResetScope>,
 }
 
 pub(super) async fn await_preparation(

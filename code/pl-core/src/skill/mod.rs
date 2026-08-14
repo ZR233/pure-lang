@@ -13,11 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SkillsConfig;
 
-pub use catalog::build_skills_prompt;
+pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
 pub use scanning::{
     list_support_files, project_skill_dir_for_create, read_skill_file, support_file_path,
     validate_skill_document,
 };
+pub use system::install_system_skills;
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 pub const USAGE_FILE_NAME: &str = ".usage.json";

@@ -55,15 +55,21 @@ extension BridgeProductEventPayloadPatterns on BridgeProductEventPayload {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult Function( BridgeProductEventPayload_TaskChanged value)?  taskChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult Function( BridgeProductEventPayload_TaskDirectoryChanged value)?  taskDirectoryChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
-return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
-return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
+case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
+return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
+return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
+return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
+return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
+return mcpStateChanged(_that);case BridgeProductEventPayload_LspStateChanged() when lspStateChanged != null:
+return lspStateChanged(_that);case BridgeProductEventPayload_SkillsStateChanged() when skillsStateChanged != null:
+return skillsStateChanged(_that);case BridgeProductEventPayload_ProviderUsageStateChanged() when providerUsageStateChanged != null:
+return providerUsageStateChanged(_that);case BridgeProductEventPayload_UpdaterStateChanged() when updaterStateChanged != null:
+return updaterStateChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return orElse();
 
@@ -82,15 +88,21 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)  threadDirectoryChanged,required TResult Function( BridgeProductEventPayload_McpHealthChanged value)  mcpHealthChanged,required TResult Function( BridgeProductEventPayload_LspHealthChanged value)  lspHealthChanged,required TResult Function( BridgeProductEventPayload_TaskChanged value)  taskChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)  projectDirectoryChanged,required TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)  threadDirectoryChanged,required TResult Function( BridgeProductEventPayload_TaskDirectoryChanged value)  taskDirectoryChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_SettingsStateChanged value)  settingsStateChanged,required TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)  recoveryStateChanged,required TResult Function( BridgeProductEventPayload_McpStateChanged value)  mcpStateChanged,required TResult Function( BridgeProductEventPayload_LspStateChanged value)  lspStateChanged,required TResult Function( BridgeProductEventPayload_SkillsStateChanged value)  skillsStateChanged,required TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)  providerUsageStateChanged,required TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)  updaterStateChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged():
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged():
-return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged():
-return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged():
-return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
-return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale():
+case BridgeProductEventPayload_ProjectDirectoryChanged():
+return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged():
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged():
+return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged():
+return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged():
+return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged():
+return mcpStateChanged(_that);case BridgeProductEventPayload_LspStateChanged():
+return lspStateChanged(_that);case BridgeProductEventPayload_SkillsStateChanged():
+return skillsStateChanged(_that);case BridgeProductEventPayload_ProviderUsageStateChanged():
+return providerUsageStateChanged(_that);case BridgeProductEventPayload_UpdaterStateChanged():
+return updaterStateChanged(_that);case BridgeProductEventPayload_Stale():
 return stale(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -105,15 +117,21 @@ return stale(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult? Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult? Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult? Function( BridgeProductEventPayload_TaskChanged value)?  taskChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult? Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult? Function( BridgeProductEventPayload_TaskDirectoryChanged value)?  taskDirectoryChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult? Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult? Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult? Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult? Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult? Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult? Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
-return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
-return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
+case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
+return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
+return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
+return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
+return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
+return mcpStateChanged(_that);case BridgeProductEventPayload_LspStateChanged() when lspStateChanged != null:
+return lspStateChanged(_that);case BridgeProductEventPayload_SkillsStateChanged() when skillsStateChanged != null:
+return skillsStateChanged(_that);case BridgeProductEventPayload_ProviderUsageStateChanged() when providerUsageStateChanged != null:
+return providerUsageStateChanged(_that);case BridgeProductEventPayload_UpdaterStateChanged() when updaterStateChanged != null:
+return updaterStateChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return null;
 
@@ -131,14 +149,20 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String projectId,  List<BridgeThread> threads)?  threadDirectoryChanged,TResult Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult Function( String rootThreadId,  BridgeTaskRuntimeDto? task)?  taskChanged,TResult Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult Function( BridgeThreadDirectoryState field0)?  threadDirectoryChanged,TResult Function( BridgeTaskDirectoryState field0)?  taskDirectoryChanged,TResult Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
-return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
-return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
+case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
+return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
+return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
+return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
+return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
+return mcpStateChanged(_that.field0);case BridgeProductEventPayload_LspStateChanged() when lspStateChanged != null:
+return lspStateChanged(_that.field0);case BridgeProductEventPayload_SkillsStateChanged() when skillsStateChanged != null:
+return skillsStateChanged(_that.field0);case BridgeProductEventPayload_ProviderUsageStateChanged() when providerUsageStateChanged != null:
+return providerUsageStateChanged(_that.field0);case BridgeProductEventPayload_UpdaterStateChanged() when updaterStateChanged != null:
+return updaterStateChanged(_that.field0);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return orElse();
 
@@ -157,14 +181,20 @@ return stale(_that.laggedEvents);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String projectId,  List<BridgeThread> threads)  threadDirectoryChanged,required TResult Function( BridgeMcpHealthDto health)  mcpHealthChanged,required TResult Function( BridgeLspHealthDto health)  lspHealthChanged,required TResult Function( String rootThreadId,  BridgeTaskRuntimeDto? task)  taskChanged,required TResult Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)  agentDirectoryChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeProjectDirectoryState field0)  projectDirectoryChanged,required TResult Function( BridgeThreadDirectoryState field0)  threadDirectoryChanged,required TResult Function( BridgeTaskDirectoryState field0)  taskDirectoryChanged,required TResult Function( BridgeAgentDirectoryState field0)  agentDirectoryChanged,required TResult Function( BridgeSettingsStateSnapshot field0)  settingsStateChanged,required TResult Function( BridgeRecoveryStateSnapshot field0)  recoveryStateChanged,required TResult Function( BridgeMcpStateSnapshot field0)  mcpStateChanged,required TResult Function( BridgeLspStateSnapshot field0)  lspStateChanged,required TResult Function( BridgeSkillsStateSnapshot field0)  skillsStateChanged,required TResult Function( BridgeProviderUsageStateSnapshot field0)  providerUsageStateChanged,required TResult Function( BridgeUpdaterStateSnapshot field0)  updaterStateChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged():
-return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged():
-return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged():
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged():
-return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged():
-return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale():
+case BridgeProductEventPayload_ProjectDirectoryChanged():
+return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged():
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged():
+return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged():
+return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged():
+return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged():
+return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged():
+return mcpStateChanged(_that.field0);case BridgeProductEventPayload_LspStateChanged():
+return lspStateChanged(_that.field0);case BridgeProductEventPayload_SkillsStateChanged():
+return skillsStateChanged(_that.field0);case BridgeProductEventPayload_ProviderUsageStateChanged():
+return providerUsageStateChanged(_that.field0);case BridgeProductEventPayload_UpdaterStateChanged():
+return updaterStateChanged(_that.field0);case BridgeProductEventPayload_Stale():
 return stale(_that.laggedEvents);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -179,14 +209,20 @@ return stale(_that.laggedEvents);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String projectId,  List<BridgeThread> threads)?  threadDirectoryChanged,TResult? Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult? Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult? Function( String rootThreadId,  BridgeTaskRuntimeDto? task)?  taskChanged,TResult? Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult? Function( BridgeThreadDirectoryState field0)?  threadDirectoryChanged,TResult? Function( BridgeTaskDirectoryState field0)?  taskDirectoryChanged,TResult? Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult? Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult? Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult? Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult? Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult? Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult? Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult? Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
-return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
-return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
+case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
+return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
+return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
+return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
+return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
+return mcpStateChanged(_that.field0);case BridgeProductEventPayload_LspStateChanged() when lspStateChanged != null:
+return lspStateChanged(_that.field0);case BridgeProductEventPayload_SkillsStateChanged() when skillsStateChanged != null:
+return skillsStateChanged(_that.field0);case BridgeProductEventPayload_ProviderUsageStateChanged() when providerUsageStateChanged != null:
+return providerUsageStateChanged(_that.field0);case BridgeProductEventPayload_UpdaterStateChanged() when updaterStateChanged != null:
+return updaterStateChanged(_that.field0);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return null;
 
@@ -198,18 +234,77 @@ return stale(_that.laggedEvents);case _:
 /// @nodoc
 
 
-class BridgeProductEventPayload_ThreadDirectoryChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_ThreadDirectoryChanged({required this.projectId, required final  List<BridgeThread> threads}): _threads = threads,super._();
+class BridgeProductEventPayload_ProjectDirectoryChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_ProjectDirectoryChanged(this.field0): super._();
 
 
- final  String projectId;
- final  List<BridgeThread> _threads;
- List<BridgeThread> get threads {
-  if (_threads is EqualUnmodifiableListView) return _threads;
-  // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_threads);
+ final  BridgeProjectDirectoryState field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_ProjectDirectoryChangedCopyWith<BridgeProductEventPayload_ProjectDirectoryChanged> get copyWith => _$BridgeProductEventPayload_ProjectDirectoryChangedCopyWithImpl<BridgeProductEventPayload_ProjectDirectoryChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProjectDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.projectDirectoryChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_ProjectDirectoryChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_ProjectDirectoryChangedCopyWith(BridgeProductEventPayload_ProjectDirectoryChanged value, $Res Function(BridgeProductEventPayload_ProjectDirectoryChanged) _then) = _$BridgeProductEventPayload_ProjectDirectoryChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeProjectDirectoryState field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_ProjectDirectoryChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_ProjectDirectoryChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_ProjectDirectoryChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_ProjectDirectoryChanged _self;
+  final $Res Function(BridgeProductEventPayload_ProjectDirectoryChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_ProjectDirectoryChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeProjectDirectoryState,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_ThreadDirectoryChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_ThreadDirectoryChanged(this.field0): super._();
+
+
+ final  BridgeThreadDirectoryState field0;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
@@ -221,16 +316,16 @@ $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<BridgeProductEventPayl
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ThreadDirectoryChanged&&(identical(other.projectId, projectId) || other.projectId == projectId)&&const DeepCollectionEquality().equals(other._threads, _threads));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ThreadDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,projectId,const DeepCollectionEquality().hash(_threads));
+int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.threadDirectoryChanged(projectId: $projectId, threads: $threads)';
+  return 'BridgeProductEventPayload.threadDirectoryChanged(field0: $field0)';
 }
 
 
@@ -241,7 +336,7 @@ abstract mixin class $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<$
   factory $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith(BridgeProductEventPayload_ThreadDirectoryChanged value, $Res Function(BridgeProductEventPayload_ThreadDirectoryChanged) _then) = _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl;
 @useResult
 $Res call({
- String projectId, List<BridgeThread> threads
+ BridgeThreadDirectoryState field0
 });
 
 
@@ -258,11 +353,10 @@ class _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl<$Res>
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? projectId = null,Object? threads = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
   return _then(BridgeProductEventPayload_ThreadDirectoryChanged(
-projectId: null == projectId ? _self.projectId : projectId // ignore: cast_nullable_to_non_nullable
-as String,threads: null == threads ? _self._threads : threads // ignore: cast_nullable_to_non_nullable
-as List<BridgeThread>,
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeThreadDirectoryState,
   ));
 }
 
@@ -272,43 +366,43 @@ as List<BridgeThread>,
 /// @nodoc
 
 
-class BridgeProductEventPayload_McpHealthChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_McpHealthChanged({required this.health}): super._();
+class BridgeProductEventPayload_TaskDirectoryChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_TaskDirectoryChanged(this.field0): super._();
 
 
- final  BridgeMcpHealthDto health;
+ final  BridgeTaskDirectoryState field0;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeProductEventPayload_McpHealthChangedCopyWith<BridgeProductEventPayload_McpHealthChanged> get copyWith => _$BridgeProductEventPayload_McpHealthChangedCopyWithImpl<BridgeProductEventPayload_McpHealthChanged>(this, _$identity);
+$BridgeProductEventPayload_TaskDirectoryChangedCopyWith<BridgeProductEventPayload_TaskDirectoryChanged> get copyWith => _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl<BridgeProductEventPayload_TaskDirectoryChanged>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_McpHealthChanged&&(identical(other.health, health) || other.health == health));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_TaskDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,health);
+int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.mcpHealthChanged(health: $health)';
+  return 'BridgeProductEventPayload.taskDirectoryChanged(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeProductEventPayload_McpHealthChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_McpHealthChangedCopyWith(BridgeProductEventPayload_McpHealthChanged value, $Res Function(BridgeProductEventPayload_McpHealthChanged) _then) = _$BridgeProductEventPayload_McpHealthChangedCopyWithImpl;
+abstract mixin class $BridgeProductEventPayload_TaskDirectoryChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_TaskDirectoryChangedCopyWith(BridgeProductEventPayload_TaskDirectoryChanged value, $Res Function(BridgeProductEventPayload_TaskDirectoryChanged) _then) = _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl;
 @useResult
 $Res call({
- BridgeMcpHealthDto health
+ BridgeTaskDirectoryState field0
 });
 
 
@@ -316,153 +410,19 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeProductEventPayload_McpHealthChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_McpHealthChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_McpHealthChangedCopyWithImpl(this._self, this._then);
+class _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_TaskDirectoryChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl(this._self, this._then);
 
-  final BridgeProductEventPayload_McpHealthChanged _self;
-  final $Res Function(BridgeProductEventPayload_McpHealthChanged) _then;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? health = null,}) {
-  return _then(BridgeProductEventPayload_McpHealthChanged(
-health: null == health ? _self.health : health // ignore: cast_nullable_to_non_nullable
-as BridgeMcpHealthDto,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeProductEventPayload_LspHealthChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_LspHealthChanged({required this.health}): super._();
-
-
- final  BridgeLspHealthDto health;
+  final BridgeProductEventPayload_TaskDirectoryChanged _self;
+  final $Res Function(BridgeProductEventPayload_TaskDirectoryChanged) _then;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeProductEventPayload_LspHealthChangedCopyWith<BridgeProductEventPayload_LspHealthChanged> get copyWith => _$BridgeProductEventPayload_LspHealthChangedCopyWithImpl<BridgeProductEventPayload_LspHealthChanged>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_LspHealthChanged&&(identical(other.health, health) || other.health == health));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,health);
-
-@override
-String toString() {
-  return 'BridgeProductEventPayload.lspHealthChanged(health: $health)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeProductEventPayload_LspHealthChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_LspHealthChangedCopyWith(BridgeProductEventPayload_LspHealthChanged value, $Res Function(BridgeProductEventPayload_LspHealthChanged) _then) = _$BridgeProductEventPayload_LspHealthChangedCopyWithImpl;
-@useResult
-$Res call({
- BridgeLspHealthDto health
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeProductEventPayload_LspHealthChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_LspHealthChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_LspHealthChangedCopyWithImpl(this._self, this._then);
-
-  final BridgeProductEventPayload_LspHealthChanged _self;
-  final $Res Function(BridgeProductEventPayload_LspHealthChanged) _then;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? health = null,}) {
-  return _then(BridgeProductEventPayload_LspHealthChanged(
-health: null == health ? _self.health : health // ignore: cast_nullable_to_non_nullable
-as BridgeLspHealthDto,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeProductEventPayload_TaskChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_TaskChanged({required this.rootThreadId, this.task}): super._();
-
-
- final  String rootThreadId;
- final  BridgeTaskRuntimeDto? task;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeProductEventPayload_TaskChangedCopyWith<BridgeProductEventPayload_TaskChanged> get copyWith => _$BridgeProductEventPayload_TaskChangedCopyWithImpl<BridgeProductEventPayload_TaskChanged>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_TaskChanged&&(identical(other.rootThreadId, rootThreadId) || other.rootThreadId == rootThreadId)&&(identical(other.task, task) || other.task == task));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,rootThreadId,task);
-
-@override
-String toString() {
-  return 'BridgeProductEventPayload.taskChanged(rootThreadId: $rootThreadId, task: $task)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeProductEventPayload_TaskChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_TaskChangedCopyWith(BridgeProductEventPayload_TaskChanged value, $Res Function(BridgeProductEventPayload_TaskChanged) _then) = _$BridgeProductEventPayload_TaskChangedCopyWithImpl;
-@useResult
-$Res call({
- String rootThreadId, BridgeTaskRuntimeDto? task
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeProductEventPayload_TaskChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_TaskChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_TaskChangedCopyWithImpl(this._self, this._then);
-
-  final BridgeProductEventPayload_TaskChanged _self;
-  final $Res Function(BridgeProductEventPayload_TaskChanged) _then;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? rootThreadId = null,Object? task = freezed,}) {
-  return _then(BridgeProductEventPayload_TaskChanged(
-rootThreadId: null == rootThreadId ? _self.rootThreadId : rootThreadId // ignore: cast_nullable_to_non_nullable
-as String,task: freezed == task ? _self.task : task // ignore: cast_nullable_to_non_nullable
-as BridgeTaskRuntimeDto?,
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_TaskDirectoryChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeTaskDirectoryState,
   ));
 }
 
@@ -473,11 +433,10 @@ as BridgeTaskRuntimeDto?,
 
 
 class BridgeProductEventPayload_AgentDirectoryChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_AgentDirectoryChanged({required this.rootThreadId, required this.agent}): super._();
+  const BridgeProductEventPayload_AgentDirectoryChanged(this.field0): super._();
 
 
- final  String rootThreadId;
- final  BridgeAgentDirectoryEntryDto agent;
+ final  BridgeAgentDirectoryState field0;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
@@ -489,16 +448,16 @@ $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<BridgeProductEventPaylo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.rootThreadId, rootThreadId) || other.rootThreadId == rootThreadId)&&(identical(other.agent, agent) || other.agent == agent));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,rootThreadId,agent);
+int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.agentDirectoryChanged(rootThreadId: $rootThreadId, agent: $agent)';
+  return 'BridgeProductEventPayload.agentDirectoryChanged(field0: $field0)';
 }
 
 
@@ -509,7 +468,7 @@ abstract mixin class $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<$R
   factory $BridgeProductEventPayload_AgentDirectoryChangedCopyWith(BridgeProductEventPayload_AgentDirectoryChanged value, $Res Function(BridgeProductEventPayload_AgentDirectoryChanged) _then) = _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl;
 @useResult
 $Res call({
- String rootThreadId, BridgeAgentDirectoryEntryDto agent
+ BridgeAgentDirectoryState field0
 });
 
 
@@ -526,11 +485,472 @@ class _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl<$Res>
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? rootThreadId = null,Object? agent = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
   return _then(BridgeProductEventPayload_AgentDirectoryChanged(
-rootThreadId: null == rootThreadId ? _self.rootThreadId : rootThreadId // ignore: cast_nullable_to_non_nullable
-as String,agent: null == agent ? _self.agent : agent // ignore: cast_nullable_to_non_nullable
-as BridgeAgentDirectoryEntryDto,
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeAgentDirectoryState,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_SettingsStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_SettingsStateChanged(this.field0): super._();
+
+
+ final  BridgeSettingsStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_SettingsStateChangedCopyWith<BridgeProductEventPayload_SettingsStateChanged> get copyWith => _$BridgeProductEventPayload_SettingsStateChangedCopyWithImpl<BridgeProductEventPayload_SettingsStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SettingsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.settingsStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_SettingsStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_SettingsStateChangedCopyWith(BridgeProductEventPayload_SettingsStateChanged value, $Res Function(BridgeProductEventPayload_SettingsStateChanged) _then) = _$BridgeProductEventPayload_SettingsStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeSettingsStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_SettingsStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_SettingsStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_SettingsStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_SettingsStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_SettingsStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_SettingsStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeSettingsStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_RecoveryStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_RecoveryStateChanged(this.field0): super._();
+
+
+ final  BridgeRecoveryStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_RecoveryStateChangedCopyWith<BridgeProductEventPayload_RecoveryStateChanged> get copyWith => _$BridgeProductEventPayload_RecoveryStateChangedCopyWithImpl<BridgeProductEventPayload_RecoveryStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_RecoveryStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.recoveryStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_RecoveryStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_RecoveryStateChangedCopyWith(BridgeProductEventPayload_RecoveryStateChanged value, $Res Function(BridgeProductEventPayload_RecoveryStateChanged) _then) = _$BridgeProductEventPayload_RecoveryStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeRecoveryStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_RecoveryStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_RecoveryStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_RecoveryStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_RecoveryStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_RecoveryStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_RecoveryStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeRecoveryStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_McpStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_McpStateChanged(this.field0): super._();
+
+
+ final  BridgeMcpStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_McpStateChangedCopyWith<BridgeProductEventPayload_McpStateChanged> get copyWith => _$BridgeProductEventPayload_McpStateChangedCopyWithImpl<BridgeProductEventPayload_McpStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_McpStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.mcpStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_McpStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_McpStateChangedCopyWith(BridgeProductEventPayload_McpStateChanged value, $Res Function(BridgeProductEventPayload_McpStateChanged) _then) = _$BridgeProductEventPayload_McpStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeMcpStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_McpStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_McpStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_McpStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_McpStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_McpStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_McpStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeMcpStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_LspStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_LspStateChanged(this.field0): super._();
+
+
+ final  BridgeLspStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_LspStateChangedCopyWith<BridgeProductEventPayload_LspStateChanged> get copyWith => _$BridgeProductEventPayload_LspStateChangedCopyWithImpl<BridgeProductEventPayload_LspStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_LspStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.lspStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_LspStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_LspStateChangedCopyWith(BridgeProductEventPayload_LspStateChanged value, $Res Function(BridgeProductEventPayload_LspStateChanged) _then) = _$BridgeProductEventPayload_LspStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeLspStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_LspStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_LspStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_LspStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_LspStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_LspStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_LspStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeLspStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_SkillsStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_SkillsStateChanged(this.field0): super._();
+
+
+ final  BridgeSkillsStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_SkillsStateChangedCopyWith<BridgeProductEventPayload_SkillsStateChanged> get copyWith => _$BridgeProductEventPayload_SkillsStateChangedCopyWithImpl<BridgeProductEventPayload_SkillsStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SkillsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.skillsStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_SkillsStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_SkillsStateChangedCopyWith(BridgeProductEventPayload_SkillsStateChanged value, $Res Function(BridgeProductEventPayload_SkillsStateChanged) _then) = _$BridgeProductEventPayload_SkillsStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeSkillsStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_SkillsStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_SkillsStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_SkillsStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_SkillsStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_SkillsStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_SkillsStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeSkillsStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_ProviderUsageStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_ProviderUsageStateChanged(this.field0): super._();
+
+
+ final  BridgeProviderUsageStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_ProviderUsageStateChangedCopyWith<BridgeProductEventPayload_ProviderUsageStateChanged> get copyWith => _$BridgeProductEventPayload_ProviderUsageStateChangedCopyWithImpl<BridgeProductEventPayload_ProviderUsageStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProviderUsageStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.providerUsageStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_ProviderUsageStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_ProviderUsageStateChangedCopyWith(BridgeProductEventPayload_ProviderUsageStateChanged value, $Res Function(BridgeProductEventPayload_ProviderUsageStateChanged) _then) = _$BridgeProductEventPayload_ProviderUsageStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeProviderUsageStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_ProviderUsageStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_ProviderUsageStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_ProviderUsageStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_ProviderUsageStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_ProviderUsageStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_ProviderUsageStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeProviderUsageStateSnapshot,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_UpdaterStateChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_UpdaterStateChanged(this.field0): super._();
+
+
+ final  BridgeUpdaterStateSnapshot field0;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_UpdaterStateChangedCopyWith<BridgeProductEventPayload_UpdaterStateChanged> get copyWith => _$BridgeProductEventPayload_UpdaterStateChangedCopyWithImpl<BridgeProductEventPayload_UpdaterStateChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_UpdaterStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.updaterStateChanged(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_UpdaterStateChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_UpdaterStateChangedCopyWith(BridgeProductEventPayload_UpdaterStateChanged value, $Res Function(BridgeProductEventPayload_UpdaterStateChanged) _then) = _$BridgeProductEventPayload_UpdaterStateChangedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeUpdaterStateSnapshot field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_UpdaterStateChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_UpdaterStateChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_UpdaterStateChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_UpdaterStateChanged _self;
+  final $Res Function(BridgeProductEventPayload_UpdaterStateChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeProductEventPayload_UpdaterStateChanged(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeUpdaterStateSnapshot,
   ));
 }
 

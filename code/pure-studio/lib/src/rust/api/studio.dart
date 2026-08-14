@@ -1,11 +1,13 @@
 // Public Studio bridge surface generated from the Rust API.
 
 export 'studio/handlers/history.dart';
+export 'studio/handlers/external_state.dart';
 export 'studio/handlers/lifecycle.dart';
 export 'studio/handlers/prompt.dart';
 export 'studio/handlers/providers.dart';
 export 'studio/handlers/recovery.dart';
 export 'studio/handlers/settings.dart';
+export 'studio/handlers/snapshot.dart';
 export 'studio/handlers/thread.dart';
 export 'studio/handlers/updater.dart';
 export 'studio/subscription.dart';

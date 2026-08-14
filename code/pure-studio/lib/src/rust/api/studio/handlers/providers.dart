@@ -6,12 +6,26 @@
 import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/response.dart';
+import '../types/runtime.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-Future<ProviderUsagesResponse> loadProviderUsages() =>
-    RustLib.instance.api.crateApiStudioHandlersProvidersLoadProviderUsages();
+// These functions are ignored because they are not marked as `pub`: `provider_usage_state`, `skills_state`
 
-Future<SkillsResponse> listDiscoveredSkills({required String projectId}) =>
-    RustLib.instance.api.crateApiStudioHandlersProvidersListDiscoveredSkills(
+Future<BridgeProviderUsageStateSnapshot> readProviderUsageState() => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersProvidersReadProviderUsageState();
+
+Future<BridgeProviderUsageStateSnapshot> checkProviderUsage() =>
+    RustLib.instance.api.crateApiStudioHandlersProvidersCheckProviderUsage();
+
+Future<BridgeSkillsStateSnapshot> readSkillsState({
+  required String projectId,
+}) => RustLib.instance.api.crateApiStudioHandlersProvidersReadSkillsState(
+  projectId: projectId,
+);
+
+Future<BridgeSkillsStateSnapshot> discoverSkills({required String projectId}) =>
+    RustLib.instance.api.crateApiStudioHandlersProvidersDiscoverSkills(
       projectId: projectId,
     );

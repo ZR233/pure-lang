@@ -27,9 +27,18 @@ SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
 `~/.pure/config.toml` schema 14 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema 14；旧 schema、未知版本、无法解析或无法校验的配置直接报错，不迁移、不归档、不重建。配置写入使用同目录临时文件和原子替换。
+`ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
+snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
+`reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
+本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
+14；旧 schema、未知版本、无法解析或无法校验的配置直接报错，不迁移、不归档、不重建。配置
+写入使用同目录临时文件和原子替换。
 
-`pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical settings/bootstrap snapshot，由 Flutter store 原子替换对应配置状态。bootstrap 与设置保存响应不得携带 `configJson`、`generalSettingsJson` 或 raw map；FRB typed DTO 是 Flutter 配置状态的唯一入口。校验失败时只展示错误并保留当前 canonical 状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
+`pure-studio` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
+`SettingsStateSnapshot`，由 Flutter 原子替换 Settings 领域；不得返回 Studio 聚合状态，也不得
+携带 `configJson`、`generalSettingsJson` 或 raw map。CAS 或校验失败时保留当前 canonical 状态，
+不覆盖新配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入
+`~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
@@ -296,7 +305,7 @@ MCP server 配置保存在 `[mcp.servers.<server_id>]` 表。`server_id` 必须�
 - `bearer_token_env_var`（可选）
 - `headers`
 
-Pure 启动后由 `McpRuntime<McpConnector>` 在后台探测启用且凭据完整的 MCP server。`McpConnector`
+Pure 启动后由 `McpRuntime<McpConnector>` owner 显式 reconcile 启用且凭据完整的 MCP server。`McpConnector`
 只负责通过 rmcp 建立连接并返回 `ConnectedMcp`；PL 统一维护配置 fingerprint、增量 reconcile、
 工具命名、冲突检查、健康状态和 generation 原子替换。Studio 只负责组合配置。Simple executor
 可以消费 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，
@@ -320,7 +329,9 @@ mcp__{server_id}__{tool_name}
 PL 对 server id 和远端 tool name 统一规范化，合成名称最长 64 个字符；发生冲突时追加稳定 hash
 后缀。命名规则属于公共 MCP runtime，产品 Host 和 UI 不重复实现。每个 turn 从 runtime 获取固定
 generation 的 `McpTurnLease` 后再安装工具；新 generation 完全 ready 前不对新 turn 可见，旧
-generation 在最后一个 lease 释放后异步关闭。
+generation 在最后一个 lease 释放后异步关闭。相同 effective fingerprint 的 reconcile 完全 no-op；
+手动重连走独立的单 server/All reset，不使用 force reconcile 模拟。reset 候选失败时保留当前
+live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio-state-runtime.md`。
 
 ## 10.9 Skills 配置
 
@@ -377,12 +388,19 @@ generation 在最后一个 lease 释放后异步关闭。
 - MCP 标签页管理用户 `[mcp.servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 - Provider 列表卡片展示供应商身份、默认模型、模型数量和只读额度状态，不把 base URL 作为主卡片信息。base URL 仍保留在编辑页和 TOML 配置中。
 - Provider 额度查询由后端执行，前端只消费脱敏 DTO。DeepSeek provider 查询账户余额；Zhipu Coding Plan provider 查询 5 小时、7 天和 MCP 工具额度；普通 Zhipu provider 不查询 Coding Plan 额度。
-- 供应商设置页打开时可触发一次额度刷新，并提供手动刷新入口；不做后台定时轮询。缺少 API key、网络失败和 provider 业务失败必须作为卡片状态展示，不能阻塞配置编辑。
+- 供应商设置页打开时只展示 last-known state；只有手动“检查额度”命令访问网络，不做后台定时
+  轮询。缺少 API key、网络失败和 provider 业务失败必须作为 failed/stale 卡片状态展示，不能阻塞
+  配置编辑。
 
 每次设置项写入前必须执行 `StudioConfig::validate()`（内部调用
 `AgentModelConfig::validate()`）；失败时只在 UI 中展示错误，不写入磁盘。
 
-MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml`、触发后台 MCP registry reconcile 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示配置状态和实际可用性。设置页状态栏展示的 MCP 数量和列表来自 MCP registry 中当前 `available` 的 server。
+MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后
+即时写入 `~/.pure/config.toml`，effective fingerprint 变化时向 MCP owner 提交 incremental
+reconcile。删除 server 和启用切换同样即时写入。页面“刷新”只读取 owner snapshot；单 server
+“重新连接”调用 reset，“全部重置”经确认调用 All reset。内置 Zhipu Coding Plan MCP server
+不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示 desired
+配置和 applied runtime。设置页状态栏展示的 MCP 数量和列表来自当前 owner snapshot。
 
 设置页 UI 按 Flutter feature/page 模块拆分，顶层 `MaterialApp.router` 负责页面路由，Riverpod controller 负责共享状态，具体页面放在 `lib/src/features/settings`，桥接调用封装在 repository 层。Provider 标签页并行消费 canonical catalog 与服务端解析的 provider projection，不引入前端配置存储或目录 fallback。
 

@@ -84,6 +84,11 @@ fn thread_notification(
 }
 
 pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThreadSnapshot> {
+    let runtime_availability = if value.runtime.is_some() {
+        BridgeThreadRuntimeAvailability::Active
+    } else {
+        BridgeThreadRuntimeAvailability::Inactive
+    };
     let items = value
         .items
         .into_iter()
@@ -104,6 +109,7 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
             .map(interaction::interaction)
             .collect::<Result<Vec<_>>>()?,
         runtime: value.runtime.map(runtime_snapshot),
+        runtime_availability,
     })
 }
 

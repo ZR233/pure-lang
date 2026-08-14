@@ -54,7 +54,8 @@ pub use interaction::{
 };
 pub use mcp::{
     ConnectedMcp, McpAvailabilityKind, McpAvailabilitySnapshot, McpConnectRequest, McpConnector,
-    McpGeneration, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor, McpTurnLease,
+    McpGeneration, McpResetScope, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor,
+    McpTurnLease,
 };
 pub use message::{
     CompletionResponseOutputSnapshot, CompletionResponseSnapshot, append_message_fragment_text,

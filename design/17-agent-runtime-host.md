@@ -105,10 +105,14 @@ replacement、working state、recovery marker、Thread revision 和通知必须�
 产品 owner，清空旧 Todo，推进 prompt generation，并废弃旧物理 model transport session。模型
 恢复后的新 Turn 只能由显式 durable input 启动，conversation recovery 本身不自动执行模型。
 
-Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `snapshot` 在 disposed、closed 或 reset
-时可重建连接并 health check，最多三次，退避 250ms、500ms、1s；tap、输入、prompt submit、计划
-确认、恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取 canonical postcondition，
-且 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
+Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `readThreadSnapshot` 只能读取
+repository 与已存在 actor 的 live overlay；actor 不存在时返回 inactive，不能为了观察而注册、
+修 role 或投递 durable wake。连接 disposed/closed 时 Driver 可以重建 transport 并再次纯读；tap、
+输入、prompt submit、计划确认、恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取
+canonical postcondition，且 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
+
+启动 command 负责注册所有未归档 durable Thread 并 materialize pending wake。运行中 actor 缺失
+只有 `repairThreadRuntime(threadId)` 可以修复；read/subscribe 返回 typed inactive/not-activated。
 
 ## 17.4 Agent control plane
 
