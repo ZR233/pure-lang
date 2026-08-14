@@ -157,7 +157,16 @@ fn write_pid_file(path: Option<PathBuf>) -> std::io::Result<()> {
 }
 
 fn spawn_stdio_child(arguments: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let status = std::process::Command::new(std::env::current_exe()?)
+    let executable = std::env::current_exe()?;
+    #[cfg(windows)]
+    let status = std::process::Command::new("cmd.exe")
+        .args(["/d", "/s", "/c"])
+        .arg(executable)
+        .arg("--stdio")
+        .args(arguments.iter().skip(1))
+        .status()?;
+    #[cfg(not(windows))]
+    let status = std::process::Command::new(executable)
         .arg("--stdio")
         .args(arguments.iter().skip(1))
         .status()?;

@@ -212,11 +212,11 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
         .command
         .as_deref()
         .ok_or_else(|| connection_config_error(&request.server_id, "stdio command is required"))?;
-    let mut command = Command::new(
-        stdio_program::resolve(command_name)
-            .map_err(|error| connection_error(&request.server_id, error))?,
-    );
+    let program = stdio_program::resolve(command_name)
+        .map_err(|error| connection_error(&request.server_id, error))?;
+    let mut command = Command::new(program.executable);
     command
+        .args(program.prefix_args)
         .args(&config.args)
         .envs(&config.env)
         .stdin(Stdio::piped())
