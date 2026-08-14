@@ -275,8 +275,14 @@ McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
     endpoint: server.endpoint,
     enabled: server.enabled,
     status: server.statusKind.isEmpty
-        ? server.availabilityKind
+        ? (server.enabled ? 'enabled' : 'disabled')
         : server.statusKind,
+    availabilityKind: server.availabilityKind,
+    availabilityMessage: server.availabilityMessage,
+    lastCheckedAt: server.lastCheckedAt == null
+        ? null
+        : _dateFromUnix(server.lastCheckedAt!),
+    toolCount: server.toolCount?.toInt(),
     sourceKind: server.sourceKind,
     mutationPolicy: server.mutationPolicy,
   );

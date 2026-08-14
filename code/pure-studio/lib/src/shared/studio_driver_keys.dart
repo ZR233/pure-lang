@@ -103,6 +103,12 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> mcpResetServer(String serverId) =>
       ValueKey<String>('mcp-reset-$serverId');
 
+  static ValueKey<String> mcpServerRow(String serverId) =>
+      ValueKey<String>('mcp-server-$serverId');
+
+  static ValueKey<String> mcpServerError(String serverId) =>
+      ValueKey<String>('mcp-server-error-$serverId');
+
   static ValueKey<String> lspRepairServer(String serverId) =>
       ValueKey<String>('lsp-repair-$serverId');
 

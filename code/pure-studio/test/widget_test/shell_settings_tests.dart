@@ -765,6 +765,63 @@ void registerShellSettingsTests() {
     expect(api.resetAllMcpCount, 1);
   });
 
+  testWidgets('MCP runtime errors stay scoped to the unavailable server', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const unavailable = McpServerSettingsView(
+      id: 'zhipu_vision',
+      transport: 'stdio',
+      endpoint: 'npx',
+      enabled: true,
+      status: 'enabled',
+      availabilityKind: 'unavailable',
+      availabilityMessage: 'MCP connection failed: credential [REDACTED]',
+    );
+    const available = McpServerSettingsView(
+      id: 'dart',
+      transport: 'stdio',
+      endpoint: 'dart mcp-server',
+      enabled: true,
+      status: 'enabled',
+      availabilityKind: 'available',
+      toolCount: 4,
+    );
+    final state =
+        _withSettingsFixture(
+          _emptyState(),
+          mcpServers: const [unavailable, available],
+        ).copyWith(
+          mcpState: McpStateSnapshot(
+            meta: _testObservedMeta(1),
+            activeServers: const ['dart'],
+            servers: const [unavailable, available],
+          ),
+        );
+    final api = _FakeStudioApi(state);
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('mcp')));
+    await tester.pumpAndSettle();
+
+    final unavailableRow = find.byKey(
+      StudioDriverKeys.mcpServerRow('zhipu_vision'),
+    );
+    final availableRow = find.byKey(StudioDriverKeys.mcpServerRow('dart'));
+    expect(
+      find.descendant(of: unavailableRow, matching: find.text('unavailable')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: availableRow, matching: find.text('available')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.mcpServerError('zhipu_vision')),
+      findsOneWidget,
+    );
+    expect(find.byKey(StudioDriverKeys.mcpServerError('dart')), findsNothing);
+  });
+
   testWidgets('LSP refresh, probe, repair and reset use typed commands', (
     tester,
   ) async {

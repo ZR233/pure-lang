@@ -8,7 +8,7 @@ use pl_core::*;
 use serde_json::json;
 
 #[tokio::test]
-async fn rmcp_stdio_transport_calls_tool_and_cleans_process_tree() {
+async fn rmcp_stdio_transport_hides_unmanaged_descendant_console_and_cleans_tree() {
     let temp = fixture_temp_dir("stdio");
     tokio::fs::create_dir_all(&temp).await.unwrap();
     let pid_file = temp.join("server.pid");
@@ -26,7 +26,7 @@ async fn rmcp_stdio_transport_calls_tool_and_cleans_process_tree() {
             transport: McpServerTransport::Stdio,
             command: Some(command_file.to_string_lossy().into_owned()),
             args: vec![
-                "--stdio".to_string(),
+                "--spawn-stdio-child".to_string(),
                 "--pid-file".to_string(),
                 pid_file.to_string_lossy().into_owned(),
                 "--console-window-file".to_string(),

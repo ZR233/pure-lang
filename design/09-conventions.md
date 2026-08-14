@@ -76,8 +76,18 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
   方向（pl-core → pl-lsp）保留自己的 `spawn_background` 统一入口，语义与
   pl-core 工厂等价；`pl-xtask` 在自身 process 模块内统一配置，所有子进程
   创建入口必须经过它。
+- stdio MCP 配置保存跨平台命令名，不写入 `.cmd` 等平台后缀，也不统一套 `pwsh`/shell；
+  connector 在 Windows 按 `PATHEXT` 解析 CreateProcess 可执行目标，并保持 `shell=false` 语义。
+  stdin、stdout、stderr 必须全部管道化并消费，禁止继承启动 Studio 的终端；stderr 只允许以
+  有界、凭证脱敏的形式补充启动错误。
+- MCP 客户端优先使用 `server/discover` 协商已知协议版本；仅当对端明确返回
+  `METHOD_NOT_FOUND`、证明它是传统协议服务时，回退标准 `initialize` 协商。不得把网络失败
+  或任意协议错误当成旧版本并盲目重试，也不得为单一 provider 写专用版本特判。
 - 启动路径的慢能力（MCP 探测、LSP probe）一律后台异步执行，结果经产品事件
   流推送，不阻塞主界面骨架。
+- 单个 MCP 启动或探测失败必须归属到该 server 的运行时 health，投影为
+  `unavailable` 和有界、脱敏的错误消息；配置启用态与运行时可用态不得混用，
+  单个 MCP 失败也不得阻塞 Studio shell。
 
 ## 9.7 配置约定
 

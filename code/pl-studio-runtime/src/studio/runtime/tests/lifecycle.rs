@@ -1545,6 +1545,74 @@ async fn start_runtime_returns_while_mcp_discovery_is_pending() {
 }
 
 #[tokio::test]
+async fn failed_mcp_startup_is_projected_to_its_server_without_blocking_runtime() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-mcp-unavailable-home-{unique}"));
+    let missing_command = format!("pure-mcp-missing-command-{unique}");
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    let mut config = StudioConfig::default_config();
+    config.mcp.servers.insert(
+        "unavailable-startup".to_string(),
+        crate::McpServerConfig {
+            transport: crate::McpServerTransport::Stdio,
+            command: Some(missing_command.clone()),
+            startup_timeout_secs: Some(2),
+            ..crate::McpServerConfig::default()
+        },
+    );
+    config_store.save(&config).unwrap();
+    let runtime =
+        StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store).unwrap();
+    let mut events = runtime.product_events().subscribe();
+
+    let startup = runtime.start_runtime().await.unwrap();
+
+    assert_eq!(startup.status, StudioRuntimeStatus::Ready);
+    let state = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let event = events.recv().await.unwrap();
+            if let StudioProductEventKind::McpStateChanged(state) = event.kind
+                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
+                && state
+                    .health
+                    .mcp_servers
+                    .iter()
+                    .any(|server| server.id == "unavailable-startup")
+            {
+                break state;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let server = state
+        .health
+        .mcp_servers
+        .iter()
+        .find(|server| server.id == "unavailable-startup")
+        .unwrap();
+    assert_eq!(server.availability_kind, "unavailable");
+    assert!(
+        server
+            .availability_message
+            .as_deref()
+            .is_some_and(|message| message.contains(&missing_command))
+    );
+    assert!(
+        !state
+            .health
+            .active_mcp_servers
+            .contains(&"unavailable-startup".to_string())
+    );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
 async fn start_runtime_emits_mcp_health_snapshot() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

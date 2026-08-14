@@ -19,6 +19,10 @@ class McpServerSettingsView {
     required this.endpoint,
     required this.enabled,
     required this.status,
+    this.availabilityKind = '',
+    this.availabilityMessage,
+    this.lastCheckedAt,
+    this.toolCount,
     this.sourceKind = 'user',
     this.mutationPolicy = 'userEditable',
   });
@@ -28,10 +32,17 @@ class McpServerSettingsView {
   final String endpoint;
   final bool enabled;
   final String status;
+  final String availabilityKind;
+  final String? availabilityMessage;
+  final DateTime? lastCheckedAt;
+  final int? toolCount;
   final String sourceKind;
   final String mutationPolicy;
 
   bool get hasLockedIdentity => mutationPolicy == 'lockedIdentity';
+
+  String get displayedAvailability =>
+      availabilityKind.isEmpty ? status : availabilityKind;
 }
 
 class InstructionsSettingsView {

@@ -560,7 +560,9 @@ class _McpSettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final availabilityMessage = server.availabilityMessage;
     return Padding(
+      key: StudioDriverKeys.mcpServerRow(server.id),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -598,10 +600,21 @@ class _McpSettingsRow extends StatelessWidget {
               ),
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: server.status,
+                label: server.displayedAvailability,
               ),
             ],
           ),
+          if (server.availabilityKind == 'unavailable' &&
+              availabilityMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              availabilityMessage,
+              key: StudioDriverKeys.mcpServerError(server.id),
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
+          ],
           const SizedBox(height: 9),
           TextFormField(
             key: ValueKey(

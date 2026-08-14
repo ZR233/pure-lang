@@ -83,18 +83,23 @@ impl ServerHandler for FixtureServer {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    write_pid_file(pid_file(&arguments))?;
-    write_console_window_file(console_window_file(&arguments))?;
     match arguments.first().map(String::as_str) {
-        Some("--stdio") => serve_stdio().await?,
+        Some("--spawn-stdio-child") => spawn_stdio_child(&arguments)?,
+        Some("--stdio") => {
+            write_pid_file(pid_file(&arguments))?;
+            write_console_window_file(console_window_file(&arguments))?;
+            serve_stdio().await?;
+        }
         Some("--http") => {
+            write_pid_file(pid_file(&arguments))?;
+            write_console_window_file(console_window_file(&arguments))?;
             let address = arguments
                 .get(1)
                 .ok_or("--http requires a socket address")?
                 .parse::<SocketAddr>()?;
             serve_http(address).await?;
         }
-        _ => return Err("expected --stdio or --http <address>".into()),
+        _ => return Err("expected --spawn-stdio-child, --stdio, or --http <address>".into()),
     }
     Ok(())
 }
@@ -147,6 +152,17 @@ fn pid_file(arguments: &[String]) -> Option<PathBuf> {
 fn write_pid_file(path: Option<PathBuf>) -> std::io::Result<()> {
     if let Some(path) = path {
         std::fs::write(path, std::process::id().to_string())?;
+    }
+    Ok(())
+}
+
+fn spawn_stdio_child(arguments: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let status = std::process::Command::new(std::env::current_exe()?)
+        .arg("--stdio")
+        .args(arguments.iter().skip(1))
+        .status()?;
+    if !status.success() {
+        return Err(format!("stdio child exited with {status}").into());
     }
     Ok(())
 }

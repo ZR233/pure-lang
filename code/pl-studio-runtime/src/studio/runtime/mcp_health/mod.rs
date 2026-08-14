@@ -327,6 +327,16 @@ impl StudioRuntime {
 
     async fn publish_mcp_failed(&self, operation: StateOperation, error: &impl std::fmt::Display) {
         let previous = self.external_runtimes.mcp_state.read().await;
+        let health = self
+            .collect_mcp_health()
+            .await
+            .unwrap_or_else(|_| previous.health.clone());
+        let last_checked_at = health
+            .mcp_servers
+            .iter()
+            .filter_map(|server| server.last_checked_at)
+            .max()
+            .or(previous.meta.last_checked_at);
         let snapshot = StudioMcpStateSnapshot {
             meta: ObservedStateMeta {
                 revision: previous.meta.revision.saturating_add(1),
@@ -339,9 +349,10 @@ impl StudioRuntime {
                     },
                 },
                 updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
+                last_checked_at,
                 stale: true,
             },
+            health,
             ..previous
         };
         self.publish_mcp(snapshot).await;

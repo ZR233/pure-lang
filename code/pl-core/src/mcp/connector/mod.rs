@@ -15,6 +15,11 @@ use tokio::sync::RwLock;
 
 use crate::config::{EffectiveMcpServerConfig, McpServerTransport};
 
+mod stderr_capture;
+mod stdio_program;
+
+use stderr_capture::StderrCapture;
+
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
@@ -42,7 +47,7 @@ pub struct McpConnector {
 }
 
 impl McpConnector {
-    /// 连接并完成 MCP `2026-07-28` discovery。
+    /// 连接并完成 MCP discovery，或对明确拒绝 discovery 的旧服务回退 initialize。
     pub async fn connect(&self, request: McpConnectRequest) -> Result<ConnectedMcp> {
         #[cfg(test)]
         if let Some(connections) = &self.test_connections {
@@ -207,24 +212,42 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
         .command
         .as_deref()
         .ok_or_else(|| connection_config_error(&request.server_id, "stdio command is required"))?;
-    let mut command = Command::new(command_name);
+    let mut command = Command::new(
+        stdio_program::resolve(command_name)
+            .map_err(|error| connection_error(&request.server_id, error))?,
+    );
     command
         .args(&config.args)
         .envs(&config.env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
     if let Some(cwd) = config.cwd.as_deref() {
         command.current_dir(cwd);
     }
     let command = crate::process::wrap_background_command(command);
 
-    let transport = TokioChildProcess::new(command)
+    // `TokioChildProcess::new` 会把 stderr 重置为 inherit；GUI 进程必须像
+    // 官方 MCP SDK 一样显式管道化三路 stdio，避免 launcher 重新连接终端。
+    let (transport, stderr) = TokioChildProcess::builder(command)
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| connection_error(&request.server_id, error))?;
-    let service = client_info()
+    let stderr = stderr.map(|stderr| StderrCapture::spawn(stderr, &config.env));
+    let service = match client_info()
         .serve_with_lifecycle(transport, lifecycle())
         .await
-        .map_err(|error| connection_error(&request.server_id, error))?;
+    {
+        Ok(service) => service,
+        Err(error) => {
+            tokio::task::yield_now().await;
+            let error = stderr.as_ref().and_then(StderrCapture::render).map_or_else(
+                || error.to_string(),
+                |stderr| format!("{error}; stderr: {stderr}"),
+            );
+            return Err(connection_error(&request.server_id, error));
+        }
+    };
     Ok(ConnectedMcp::from_running(service).await)
 }
 
@@ -267,8 +290,17 @@ fn client_info() -> ClientInfo {
 }
 
 fn lifecycle() -> ClientLifecycleMode {
-    ClientLifecycleMode::Discover {
-        preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+    ClientLifecycleMode::Auto {
+        preferred_versions: vec![
+            ProtocolVersion::V_2026_07_28,
+            ProtocolVersion::V_2025_11_25,
+            ProtocolVersion::V_2025_06_18,
+            ProtocolVersion::V_2025_03_26,
+            ProtocolVersion::V_2024_11_05,
+        ],
+        // 不支持 `server/discover` 的标准 MCP 服务仍通过传统 initialize
+        // 协商具体版本；只在对端明确返回 METHOD_NOT_FOUND 时走这条路径。
+        legacy_version: Some(ProtocolVersion::V_2025_11_25),
     }
 }
 
@@ -283,5 +315,33 @@ fn connection_error(server_id: &str, error: impl fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: server_id.to_string(),
         error: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_prefers_discovery_and_allows_proven_legacy_fallback() {
+        let ClientLifecycleMode::Auto {
+            preferred_versions,
+            legacy_version,
+        } = lifecycle()
+        else {
+            panic!("MCP lifecycle must negotiate discovery with a legacy fallback");
+        };
+
+        assert_eq!(
+            preferred_versions,
+            vec![
+                ProtocolVersion::V_2026_07_28,
+                ProtocolVersion::V_2025_11_25,
+                ProtocolVersion::V_2025_06_18,
+                ProtocolVersion::V_2025_03_26,
+                ProtocolVersion::V_2024_11_05,
+            ]
+        );
+        assert_eq!(legacy_version, Some(ProtocolVersion::V_2025_11_25));
     }
 }
