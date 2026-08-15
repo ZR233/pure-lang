@@ -249,9 +249,12 @@ StudioState applyThreadDirectoryDelta(
     upserted: upserted,
     removed: removed,
   );
-  final knownThreads = {for (final thread in window.threads) thread.id: thread};
+  final upsertedById = {for (final thread in upserted) thread.id: thread};
+  final removedSet = removed.toSet();
+  // 分页窗口不是完整目录：选中线程只在被显式移除（归档/清理）时才回退，
+  // "不在已加载窗口内"不代表线程不存在，不得触发选择切换。
   var selectedThreadId = current.selectedThreadId;
-  if (!knownThreads.containsKey(selectedThreadId)) {
+  if (selectedThreadId != null && removedSet.contains(selectedThreadId)) {
     final roots = window.threads
         .where(
           (thread) =>
@@ -260,14 +263,17 @@ StudioState applyThreadDirectoryDelta(
         .toList();
     selectedThreadId = roots.firstOrNull?.id;
   }
+  // 只为窗口内的线程重绑 directory 引用；窗口外的 workspace 原样保留。
   final workspaces = {
     for (final entry in current.workspacesByThread.entries)
-      if (knownThreads.containsKey(entry.key))
-        entry.key: entry.value.copyWith(thread: knownThreads[entry.key]),
+      if (!removedSet.contains(entry.key))
+        entry.key: upsertedById[entry.key] == null
+            ? entry.value
+            : entry.value.copyWith(thread: upsertedById[entry.key]),
   };
   final workspaceUi = Map<String, WorkspaceUiState>.from(
     current.workspaceUiByThread,
-  )..removeWhere((id, _) => !knownThreads.containsKey(id));
+  )..removeWhere((id, _) => removedSet.contains(id));
   return current.copyWith(
     threadDirectory: window,
     selectedThreadId: selectedThreadId,

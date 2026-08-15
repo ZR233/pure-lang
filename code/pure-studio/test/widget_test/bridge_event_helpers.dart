@@ -81,10 +81,7 @@ StudioBridgeEvent _threadDirectoryChangedEvent({
   List<String> removed = const [],
 }) {
   return StudioBridgeEvent(
-    payload: ThreadDirectoryChangedPayload(
-      upserted: threads,
-      removed: removed,
-    ),
+    payload: ThreadDirectoryChangedPayload(upserted: threads, removed: removed),
   );
 }
 

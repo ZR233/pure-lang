@@ -16,7 +16,7 @@ use crate::request::CompletionResponse;
 use crate::request::{ModelCompactionRequest, ModelCompactionResponse};
 use crate::stream::CompletionEventStream;
 
-mod openai_runtime;
+pub(crate) mod openai_runtime;
 
 pub use openai_runtime::OpenAiProvider;
 

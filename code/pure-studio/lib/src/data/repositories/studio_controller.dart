@@ -832,15 +832,13 @@ class StudioController extends _$StudioController {
 
 StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   var next = applyProjectDirectory(current, incoming.projectDirectory);
-  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口，选中线程
-  // 不在新窗口时回退到 snapshot 的稳定选择。
-  next = next.copyWith(threadDirectory: incoming.threadDirectory);
-  final knownThreadIds = {
-    for (final thread in incoming.threadDirectory.threads) thread.id,
-  };
-  if (!knownThreadIds.contains(next.selectedThreadId)) {
-    next = next.copyWith(selectedThreadId: incoming.selectedThreadId);
-  }
+  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口。选中线程是
+  // 用户状态——首页窗口不完整，绝不因选中线程不在首页而切换选择；
+  // 仅在当前没有选择时才采纳 snapshot 的稳定选择。
+  next = next.copyWith(
+    threadDirectory: incoming.threadDirectory,
+    selectedThreadId: current.selectedThreadId ?? incoming.selectedThreadId,
+  );
   next = applyTaskDirectory(next, incoming.taskDirectory);
   next = applyAgentDirectory(next, incoming.agentDirectory);
   next = applySettingsState(next, incoming.settingsState);

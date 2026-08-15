@@ -39,7 +39,7 @@ mod compaction;
 mod provider_error;
 mod responses_websocket;
 
-use provider_error::openai_error_to_pure;
+pub(crate) use provider_error::openai_error_to_pure;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OpenAiTransport {
@@ -156,8 +156,9 @@ impl OpenAiProvider {
                         .boxed();
                     let result =
                         collect_completion_event_stream(tracked_stream, &event_tx, trace).await;
-                    let retry_allowed = transport == OpenAiTransport::ResponsesWebSocket
-                        && !stream_started.load(Ordering::Acquire);
+                    // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。
+                    // 该门控对全部 transport 一致；事件一旦出现即禁止重放，避免重复输出。
+                    let retry_allowed = !stream_started.load(Ordering::Acquire);
                     (result, retry_allowed)
                 }
                 Err(error) => (Err(error), true),

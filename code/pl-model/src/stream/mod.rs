@@ -43,9 +43,10 @@ pub(crate) fn decode_provider_stream(
     stream: StreamResponse<sse::SseStreamEvent>,
     protocol: OpenAiProtocol,
 ) -> CompletionEventStream {
-    let stream = stream.map(|event| {
-        event.map_err(|error| PureError::LlmError(format!("provider stream error: {error}")))
-    });
+    // 保留 typed provider 失败分类：流中断的传输层根因必须可重试，
+    // 不能折叠成不可重试的 LlmError。
+    let stream =
+        stream.map(|event| event.map_err(crate::provider::openai_runtime::openai_error_to_pure));
     decode_openai_event_stream(stream.boxed(), protocol)
 }
 

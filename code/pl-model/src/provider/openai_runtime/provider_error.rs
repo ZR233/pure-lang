@@ -1,6 +1,5 @@
 use async_openai::error::OpenAIError;
 use pl_protocol::{ProviderFailure, ProviderFailureKind, PureError, RetryDisposition};
-use std::error::Error as _;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ProviderFailureMetadata<'a> {
@@ -38,7 +37,7 @@ impl ProviderFailureMetadata<'_> {
     }
 }
 
-pub(super) fn openai_error_to_pure(error: OpenAIError) -> PureError {
+pub(crate) fn openai_error_to_pure(error: OpenAIError) -> PureError {
     match error {
         OpenAIError::ApiError(api_error) => {
             let status = api_error.status_code.as_u16();
@@ -58,14 +57,47 @@ pub(super) fn openai_error_to_pure(error: OpenAIError) -> PureError {
         OpenAIError::JSONDeserialize(error, content) => {
             protocol_failure(redact_secret_like_values(&format!("{error}: {content}")))
         }
-        OpenAIError::StreamError(error) => {
-            protocol_failure(redact_secret_like_values(&error.to_string()))
-        }
+        OpenAIError::StreamError(error) => stream_error_to_pure(&error),
         OpenAIError::InvalidArgument(message) => configuration_failure(message),
         OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
             PureError::Io(std::io::Error::other(message))
         }
     }
+}
+
+/// SSE 流中断：传输层根因（连接被掐断/响应体解码失败）按瞬态处理并允许重试；
+/// 纯协议解析错误仍保持 Permanent。
+fn stream_error_to_pure(error: &async_openai::error::StreamError) -> PureError {
+    match error {
+        async_openai::error::StreamError::EventStream(detail) => {
+            let detail = redact_secret_like_values(detail);
+            if eventstream_transport_failure(&detail) {
+                PureError::transient_model_failure(detail, None, None, None)
+            } else {
+                protocol_failure(detail)
+            }
+        }
+        async_openai::error::StreamError::UnknownEvent(_) => {
+            protocol_failure(redact_secret_like_values(&error.to_string()))
+        }
+    }
+}
+
+/// eventsource_stream 的错误只剩字符串；按已知传输层签名识别瞬时网络中断。
+fn eventstream_transport_failure(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    [
+        "transport error",
+        "error decoding response body",
+        "error reading a body",
+        "connection closed",
+        "connection reset",
+        "broken pipe",
+        "unexpected eof",
+        "incomplete message",
+    ]
+    .iter()
+    .any(|signature| lower.contains(signature))
 }
 
 fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
@@ -81,7 +113,18 @@ fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
     if error.is_builder() || error.is_redirect() {
         configuration_failure(detail)
     } else if error.is_decode() || error.is_body() {
-        protocol_failure(detail)
+        // 响应体解码失败多由连接中途断开引起（与 ConnectionReset 同性质），
+        // 只有确认无传输层根因时才视为协议错误。
+        if response_start_connection_closed(&error) {
+            PureError::transient_model_failure(
+                detail,
+                None,
+                None,
+                error.status().map(|status| status.as_u16()),
+            )
+        } else {
+            protocol_failure(detail)
+        }
     } else {
         PureError::provider_failure(ProviderFailure {
             kind: ProviderFailureKind::Unknown,
@@ -114,15 +157,11 @@ fn protocol_failure(message: impl Into<String>) -> PureError {
 }
 
 fn response_start_connection_closed(error: &reqwest::Error) -> bool {
-    if error.is_builder()
-        || error.is_body()
-        || error.is_decode()
-        || error.is_redirect()
-        || error.is_status()
-    {
+    if error.is_builder() || error.is_redirect() || error.is_status() {
         return false;
     }
-    let mut source = error.source();
+    // decode/body 错误需要保留：它们可能根源于连接中断，逐层检查 source。
+    let mut source: Option<&dyn std::error::Error> = Some(error);
     while let Some(cause) = source {
         if cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
             matches!(
@@ -131,6 +170,7 @@ fn response_start_connection_closed(error: &reqwest::Error) -> bool {
                     | std::io::ErrorKind::ConnectionReset
                     | std::io::ErrorKind::BrokenPipe
                     | std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::TimedOut
             )
         }) || cause
             .to_string()
@@ -350,5 +390,53 @@ mod tests {
                 code: code.map(ToString::to_string),
             },
         })
+    }
+    #[test]
+    fn stream_transport_drop_is_transient_and_retryable() {
+        let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
+            async_openai::error::StreamError::EventStream(
+                "Transport error: error decoding response body".to_string(),
+            ),
+        )));
+
+        assert!(error.is_transient_model_transport());
+        let failure = error
+            .provider_failure_ref()
+            .expect("typed provider failure");
+        assert_eq!(failure.kind, ProviderFailureKind::Transport);
+        assert!(failure.retry.is_retryable());
+    }
+
+    #[test]
+    fn stream_connection_reset_signature_is_transient() {
+        for detail in [
+            "EventStream error: Transport error: connection reset by peer",
+            "EventStream error: error reading a body from connection",
+            "EventStream error: connection closed before message completed",
+        ] {
+            let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
+                async_openai::error::StreamError::EventStream(detail.to_string()),
+            )));
+            assert!(
+                error.is_transient_model_transport(),
+                "detail must classify as transient: {detail}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_pure_parse_failure_remains_permanent() {
+        let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
+            async_openai::error::StreamError::EventStream(
+                "expected field `id` of type String".to_string(),
+            ),
+        )));
+
+        assert!(!error.is_transient_model_transport());
+        let failure = error
+            .provider_failure_ref()
+            .expect("typed provider failure");
+        assert_eq!(failure.kind, ProviderFailureKind::Protocol);
+        assert!(!failure.retry.is_retryable());
     }
 }
