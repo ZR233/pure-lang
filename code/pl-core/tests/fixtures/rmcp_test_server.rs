@@ -4,6 +4,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::post;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;
@@ -99,7 +103,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .parse::<SocketAddr>()?;
             serve_http(address).await?;
         }
-        _ => return Err("expected --spawn-stdio-child, --stdio, or --http <address>".into()),
+        Some("--legacy-http") => {
+            write_pid_file(pid_file(&arguments))?;
+            write_console_window_file(console_window_file(&arguments))?;
+            let address = arguments
+                .get(1)
+                .ok_or("--legacy-http requires a socket address")?
+                .parse::<SocketAddr>()?;
+            serve_legacy_http(address).await?;
+        }
+        _ => {
+            return Err(
+                "expected --spawn-stdio-child, --stdio, --http, or --legacy-http <address>".into(),
+            );
+        }
     }
     Ok(())
 }
@@ -139,6 +156,94 @@ async fn serve_http(address: SocketAddr) -> Result<(), Box<dyn std::error::Error
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await?;
     Ok(())
+}
+
+async fn serve_legacy_http(
+    address: SocketAddr,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    let router = axum::Router::new().route("/mcp", post(handle_legacy_http));
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+async fn handle_legacy_http(Json(message): Json<serde_json::Value>) -> Response {
+    let id = message
+        .get("id")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    match message.get("method").and_then(serde_json::Value::as_str) {
+        Some("server/discover") => {
+            let error = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32601,
+                    "message": "Method not found: server/discover"
+                }
+            });
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                format!("event: message\ndata: {error}\n\n"),
+            )
+                .into_response()
+        }
+        Some("initialize") => Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "legacy-http-fixture", "version": "1.0.0" }
+            }
+        }))
+        .into_response(),
+        Some("notifications/initialized") => StatusCode::ACCEPTED.into_response(),
+        Some("tools/list") => Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "tools": [{
+                    "name": "lookup",
+                    "description": "Return a structured result from a legacy HTTP transport.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": { "query": { "type": "string" } },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    },
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "transport": { "type": "string" },
+                            "arguments": { "type": "object" }
+                        }
+                    }
+                }]
+            }
+        }))
+        .into_response(),
+        Some("tools/call") => Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [],
+                "structuredContent": {
+                    "transport": "legacyHttp",
+                    "arguments": message["params"]["arguments"].clone()
+                },
+                "isError": false
+            }
+        }))
+        .into_response(),
+        _ => Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": "Method not found" }
+        }))
+        .into_response(),
+    }
 }
 
 fn pid_file(arguments: &[String]) -> Option<PathBuf> {

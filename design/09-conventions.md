@@ -89,8 +89,10 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
   stdin、stdout、stderr 必须全部管道化并消费，禁止继承启动 Studio 的终端；stderr 只允许以
   有界、凭证脱敏的形式补充启动错误。
 - MCP 客户端优先使用 `server/discover` 协商已知协议版本；仅当对端明确返回
-  `METHOD_NOT_FOUND`、证明它是传统协议服务时，回退标准 `initialize` 协商。不得把网络失败
-  或任意协议错误当成旧版本并盲目重试，也不得为单一 provider 写专用版本特判。
+  `METHOD_NOT_FOUND`、证明它是传统协议服务时，回退标准 `initialize` 协商。Streamable HTTP
+  transport 若把 discovery bootstrap 的终止 SSE 折叠为关闭的 discover response，必须用全新
+  transport 重试标准 `initialize`；该兼容重试不得扩展到认证、超时或其他任意协议错误，也不得为
+  单一 provider 写专用版本特判。
 - 启动路径的慢能力（MCP 探测、LSP probe）一律后台异步执行，结果经产品事件
   流推送，不阻塞主界面骨架。
 - 单个 MCP 启动或探测失败必须归属到该 server 的运行时 health，投影为

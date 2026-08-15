@@ -73,7 +73,10 @@ template 和 read façade 同样由公共 `RegisteredTool` builder 注册，hand
 resource API。`McpTurnLease` 固定 generation、tool schema、resource 入口和 `ConnectedMcp`，配置
 更新不得改变活动 Turn 的连接或工具集合。
 
-rmcp 是唯一 MCP 协议实现，只启用 MCP `2026-07-28`。`McpConnector` 仅负责构造 rmcp stdio、
+rmcp 是唯一 MCP 协议实现。transport 优先通过 `server/discover` 协商 `2026-07-28`，并只在明确的
+`METHOD_NOT_FOUND` 后回退传统初始化；Streamable HTTP 若因 startup SSE 终止而只暴露关闭的
+discover response，则重建 transport 并使用 `2025-11-25` 标准 `initialize` 兼容现役服务。
+`McpConnector` 仅负责构造 rmcp stdio、
 Streamable HTTP 或宿主提供的容器 transport，并启动 `RunningService`；`ConnectedMcp` 持有可克隆
 `Peer` 与唯一关闭 owner。rmcp 负责协议发现、分页、typed request/result、response cache、MRTR、
 请求取消、OAuth、SSE 和连接关闭；PL 只负责跨 server reconcile、generation lease、health、可信

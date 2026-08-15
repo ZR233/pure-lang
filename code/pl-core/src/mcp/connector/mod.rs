@@ -6,7 +6,7 @@ use std::time::Duration;
 use pl_protocol::{PureError, Result};
 use reqwest::header::{HeaderName, HeaderValue};
 use rmcp::model::*;
-use rmcp::service::{Peer, RunningService};
+use rmcp::service::{ClientInitializeError, Peer, RunningService};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{ClientCacheConfig, ClientLifecycleMode, ClientServiceExt, RoleClient};
@@ -47,7 +47,7 @@ pub struct McpConnector {
 }
 
 impl McpConnector {
-    /// 连接并完成 MCP discovery，或对明确拒绝 discovery 的旧服务回退 initialize。
+    /// 按 transport 选择兼容的 MCP 启动协商并建立连接。
     pub async fn connect(&self, request: McpConnectRequest) -> Result<ConnectedMcp> {
         #[cfg(test)]
         if let Some(connections) = &self.test_connections {
@@ -234,8 +234,8 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
         .spawn()
         .map_err(|error| connection_error(&request.server_id, error))?;
     let stderr = stderr.map(|stderr| StderrCapture::spawn(stderr, &config.env));
-    let service = match client_info()
-        .serve_with_lifecycle(transport, lifecycle())
+    let service = match client_info(ProtocolVersion::V_2026_07_28)
+        .serve_with_lifecycle(transport, discovery_lifecycle())
         .await
     {
         Ok(service) => service,
@@ -273,23 +273,50 @@ async fn connect_http(request: McpConnectRequest) -> Result<ConnectedMcp> {
     if let Some(token) = request.server.bearer_token.as_deref() {
         transport_config = transport_config.auth_header(token);
     }
-    let transport = StreamableHttpClientTransport::from_config(transport_config);
-    let service = client_info()
-        .serve_with_lifecycle(transport, lifecycle())
+    let transport = StreamableHttpClientTransport::from_config(transport_config.clone());
+    let service = match client_info(ProtocolVersion::V_2026_07_28)
+        .serve_with_lifecycle(transport, discovery_lifecycle())
         .await
-        .map_err(|error| connection_error(&request.server_id, error))?;
+    {
+        Ok(service) => service,
+        Err(discovery_error) if should_retry_http_with_initialize(&discovery_error) => {
+            // rmcp 会先耗尽 startup SSE，只转发成功 response；传统服务返回的
+            // METHOD_NOT_FOUND error 因而表现为关闭 discover response。失败的 worker
+            // 不可复用，必须用一个全新的 transport 走标准 initialize。
+            let transport = StreamableHttpClientTransport::from_config(transport_config);
+            client_info(ProtocolVersion::V_2025_11_25)
+                .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
+                .await
+                .map_err(|initialize_error| {
+                    connection_error(
+                        &request.server_id,
+                        format!(
+                            "discovery failed ({discovery_error}); standard initialize failed ({initialize_error})"
+                        ),
+                    )
+                })?
+        }
+        Err(error) => return Err(connection_error(&request.server_id, error)),
+    };
     Ok(ConnectedMcp::from_running(service).await)
 }
 
-fn client_info() -> ClientInfo {
+fn should_retry_http_with_initialize(error: &ClientInitializeError) -> bool {
+    matches!(
+        error,
+        ClientInitializeError::ConnectionClosed(context) if context == "discover response"
+    )
+}
+
+fn client_info(protocol_version: ProtocolVersion) -> ClientInfo {
     ClientInfo::new(
         ClientCapabilities::default(),
         Implementation::new("pure-lang", env!("CARGO_PKG_VERSION")),
     )
-    .with_protocol_version(ProtocolVersion::V_2026_07_28)
+    .with_protocol_version(protocol_version)
 }
 
-fn lifecycle() -> ClientLifecycleMode {
+fn discovery_lifecycle() -> ClientLifecycleMode {
     ClientLifecycleMode::Auto {
         preferred_versions: vec![
             ProtocolVersion::V_2026_07_28,
@@ -323,11 +350,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lifecycle_prefers_discovery_and_allows_proven_legacy_fallback() {
+    fn stdio_lifecycle_prefers_discovery_and_allows_proven_legacy_fallback() {
         let ClientLifecycleMode::Auto {
             preferred_versions,
             legacy_version,
-        } = lifecycle()
+        } = discovery_lifecycle()
         else {
             panic!("MCP lifecycle must negotiate discovery with a legacy fallback");
         };
@@ -343,5 +370,18 @@ mod tests {
             ]
         );
         assert_eq!(legacy_version, Some(ProtocolVersion::V_2025_11_25));
+    }
+
+    #[test]
+    fn http_initialize_retry_only_accepts_closed_discover_response() {
+        assert!(should_retry_http_with_initialize(
+            &ClientInitializeError::ConnectionClosed("discover response".to_string())
+        ));
+        assert!(!should_retry_http_with_initialize(
+            &ClientInitializeError::ConnectionClosed("initialize response".to_string())
+        ));
+        assert!(!should_retry_http_with_initialize(
+            &ClientInitializeError::Cancelled
+        ));
     }
 }

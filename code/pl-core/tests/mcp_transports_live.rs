@@ -52,6 +52,15 @@ async fn rmcp_stdio_transport_hides_unmanaged_descendant_console_and_cleans_tree
 
 #[tokio::test]
 async fn rmcp_streamable_http_transport_calls_tool() {
+    assert_http_transport("--http", "streamableHttp").await;
+}
+
+#[tokio::test]
+async fn rmcp_streamable_http_transport_connects_legacy_initialize_server() {
+    assert_http_transport("--legacy-http", "legacyHttp").await;
+}
+
+async fn assert_http_transport(server_mode: &str, expected_transport: &str) {
     let temp = fixture_temp_dir("http");
     tokio::fs::create_dir_all(&temp).await.unwrap();
     let pid_file = temp.join("server.pid");
@@ -59,7 +68,7 @@ async fn rmcp_streamable_http_transport_calls_tool() {
     let mut command = tokio::process::Command::new(fixture_executable());
     command
         .args([
-            "--http",
+            server_mode,
             &address.to_string(),
             "--pid-file",
             &pid_file.to_string_lossy(),
@@ -81,7 +90,7 @@ async fn rmcp_streamable_http_transport_calls_tool() {
         },
     );
     let connection = McpConnector::default().connect(request).await.unwrap();
-    assert_real_call(&connection, "streamableHttp").await;
+    assert_real_call(&connection, expected_transport).await;
     connection.close().await;
 
     child.kill().await.unwrap();
