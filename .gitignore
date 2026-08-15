@@ -33,6 +33,8 @@ Thumbs.db
 .env
 /.cargo/config.local.toml
 /.pure
+/code/pure-studio/target
+/code/pure-studio/rust/target
 /code/pure-studio/src-tauri/target
 .usage.json
 .playwright-mcp
