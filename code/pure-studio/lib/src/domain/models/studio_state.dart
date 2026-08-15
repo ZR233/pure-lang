@@ -57,7 +57,7 @@ class StudioState {
   final String? selectedProjectId;
   final String? selectedThreadId;
   final ProjectDirectoryState projectDirectory;
-  final ThreadDirectoryState threadDirectory;
+  final ThreadDirectoryWindow threadDirectory;
   final TaskDirectoryState taskDirectory;
   final AgentDirectoryState agentDirectory;
   final SettingsStateSnapshot settingsState;
@@ -69,7 +69,7 @@ class StudioState {
   final UpdaterStateSnapshot updaterState;
 
   List<StudioProject> get projects => projectDirectory.values;
-  List<StudioThread> get threads => threadDirectory.values;
+  List<StudioThread> get threads => threadDirectory.threads;
   Map<String, TaskRuntimeView> get tasksByRootThread => {
     for (final entry in taskDirectory.values) entry.rootThreadId: entry.task,
   };
@@ -275,7 +275,7 @@ class StudioState {
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
     ProjectDirectoryState? projectDirectory,
-    ThreadDirectoryState? threadDirectory,
+    ThreadDirectoryWindow? threadDirectory,
     TaskDirectoryState? taskDirectory,
     AgentDirectoryState? agentDirectory,
     SettingsStateSnapshot? settingsState,

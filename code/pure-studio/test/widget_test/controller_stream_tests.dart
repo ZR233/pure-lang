@@ -416,4 +416,98 @@ void registerControllerStreamTests() {
       );
     },
   );
+
+  test('sidebar loadMoreThreads appends the next directory page', () async {
+    final bootstrap = _emptyState();
+    final initial = bootstrap.copyWith(
+      threadDirectory: bootstrap.threadDirectory.copyWith(
+        nextCursor: 'opaque-dir',
+        hasMore: true,
+      ),
+    );
+    final api = _FakeStudioApi(initial);
+    final older = StudioThread(
+      id: 'session-old',
+      projectId: 'project-1',
+      title: 'Older session',
+      mode: StudioMode.simple,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    api.directoryPages['opaque-dir'] = ThreadDirectoryPage(
+      threads: [older],
+      nextCursor: null,
+    );
+    // 初始窗口标记还有更多页。
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+
+    await container
+        .read(studioControllerProvider.notifier)
+        .loadMoreThreads();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(api.directoryPageRequests, ['opaque-dir']);
+    expect(
+      state.threads.map((thread) => thread.id),
+      containsAll(['session-1', 'session-old']),
+    );
+    expect(state.threadDirectory.hasMore, isFalse);
+    expect(state.threadDirectory.isLoading, isFalse);
+  });
+
+  test('history eviction rolls the cursor back to the evicted page boundary',
+      () async {
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
+    List<ThreadItemView> pageItems(int base, int count) => List.generate(
+      count,
+      (index) => _threadItemFixture(
+        id: 'history-${base + index}',
+        threadId: 'session-1',
+        turnId: 'turn-${base + index}',
+        ordinal: base + index,
+        text: 'message ${base + index}',
+      ),
+    );
+    // 两页共 520 > maxLoadedHistoryItems(500)：第二页加载后最旧一页被驱逐。
+    api.historyPagesByThread['session-1'] = {
+      // 第一页是较新历史（ordinal 更大），第二页是更旧历史。
+      null: ThreadHistoryPage(
+        items: pageItems(260, 260),
+        nextCursor: 'cursor-2',
+      ),
+      'cursor-2': ThreadHistoryPage(
+        items: pageItems(0, 260),
+        nextCursor: 'cursor-3',
+      ),
+    };
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+
+    await container
+        .read(studioControllerProvider.notifier)
+        .loadOlderHistory('session-1');
+    await container
+        .read(studioControllerProvider.notifier)
+        .loadOlderHistory('session-1');
+
+    final state = container.read(studioControllerProvider).requireValue;
+    final history = state.selectedWorkspaceUi.history;
+    expect(history.loadedItems, 260);
+    expect(history.pageSizes.length, 1);
+    // load-older cursor 回退到被驱逐页的请求 cursor；向上滚动时按它回源重取。
+    expect(history.nextCursor, 'cursor-2');
+    expect(history.hasMore, isTrue);
+    // 工作区只保留较新一页的 item。
+    expect(
+      state.selectedWorkspace!.items.map((item) => item.id).first,
+      'history-260',
+    );
+  });
 }

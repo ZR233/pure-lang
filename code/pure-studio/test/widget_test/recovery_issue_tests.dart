@@ -566,8 +566,8 @@ StudioState _recoveryIssueState({
         ),
       ],
     ),
-    threadDirectory: ThreadDirectoryState(
-      values: [healthySession, brokenSession],
+    threadDirectory: ThreadDirectoryWindow(
+      threads: [healthySession, brokenSession],
     ),
     selectedProjectId: 'project-current',
     selectedThreadId: healthySession.id,

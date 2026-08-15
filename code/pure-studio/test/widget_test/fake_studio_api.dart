@@ -23,6 +23,11 @@ class _FakeStudioApi implements StudioApi {
   final List<String> threadSubscriptions = [];
   final List<({String threadId, String? cursor})> historyRequests = [];
   final Map<String, Map<String?, ThreadHistoryPage>> historyPagesByThread = {};
+  final List<String?> directoryPageRequests = [];
+  final Map<String?, ThreadDirectoryPage> directoryPages = {};
+  final StreamController<StudioShutdownProgress> _shutdownProgress =
+      StreamController<StudioShutdownProgress>.broadcast();
+  bool shutdownRuntimeCalled = false;
   int bootstrapCount = 0;
   Object? bootstrapError;
   String? openedProjectPath;
@@ -158,9 +163,8 @@ class _FakeStudioApi implements StudioApi {
       updatedAt: now,
     );
     _currentState = _currentState.copyWith(
-      threadDirectory: ThreadDirectoryState(
-        meta: _nextMeta(_currentState.threadDirectory.meta),
-        values: [..._currentState.threads, thread],
+      threadDirectory: _currentState.threadDirectory.copyWith(
+        threads: [..._currentState.threads, thread],
       ),
       selectedProjectId: projectId,
       selectedThreadId: thread.id,
@@ -187,10 +191,7 @@ class _FakeStudioApi implements StudioApi {
         ? selectedThreadId
         : threads.where((thread) => thread.isRoot).firstOrNull?.id;
     _currentState = _currentState.copyWith(
-      threadDirectory: ThreadDirectoryState(
-        meta: _nextMeta(_currentState.threadDirectory.meta),
-        values: threads,
-      ),
+      threadDirectory: _currentState.threadDirectory.copyWith(threads: threads),
       selectedThreadId: nextSelected,
     );
     return archived;
@@ -355,9 +356,8 @@ class _FakeStudioApi implements StudioApi {
     );
     final workspace = _currentState.workspacesByThread[threadId];
     _currentState = _currentState.copyWith(
-      threadDirectory: ThreadDirectoryState(
-        meta: _nextMeta(_currentState.threadDirectory.meta),
-        values: [
+      threadDirectory: _currentState.threadDirectory.copyWith(
+        threads: [
           for (final candidate in _currentState.threads)
             candidate.id == threadId ? updated : candidate,
         ],
@@ -424,6 +424,27 @@ class _FakeStudioApi implements StudioApi {
   Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
     return _currentState.workspacesByThread[threadId] ??
         (throw StateError('unknown fake Thread workspace $threadId'));
+  }
+
+  @override
+  Future<ThreadDirectoryPage> listThreadsPage({
+    String? cursor,
+    int limit = 50,
+  }) async {
+    directoryPageRequests.add(cursor);
+    final fixture = directoryPages[cursor];
+    if (fixture != null) return fixture;
+    return ThreadDirectoryPage(threads: const [], nextCursor: null);
+  }
+
+  @override
+  Stream<StudioShutdownProgress> subscribeShutdownProgress() {
+    return _shutdownProgress.stream;
+  }
+
+  @override
+  Future<void> shutdownRuntime() async {
+    shutdownRuntimeCalled = true;
   }
 
   @override
@@ -842,9 +863,10 @@ StudioState _asNewerProductState(StudioState current, StudioState next) {
       meta: _nextMeta(current.projectDirectory.meta),
       values: next.projects,
     ),
-    threadDirectory: ThreadDirectoryState(
-      meta: _nextMeta(current.threadDirectory.meta),
-      values: next.threads,
+    threadDirectory: ThreadDirectoryWindow(
+      threads: next.threads,
+      nextCursor: next.threadDirectory.nextCursor,
+      hasMore: next.threadDirectory.hasMore,
     ),
     taskDirectory: TaskDirectoryState(
       meta: _nextMeta(current.taskDirectory.meta),

@@ -18,6 +18,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarSessions => '会话';
 
   @override
+  String get sidebarLoadingMore => '正在加载更多会话…';
+
+  @override
+  String get sidebarLoadError => '会话目录分页加载失败';
+
+  @override
+  String get shutdownTitle => '正在安全关机';
+
+  @override
+  String get shutdownPhaseStoppingSubscriptions => '正在停止订阅';
+
+  @override
+  String get shutdownPhaseCancellingTurns => '正在停止会话任务';
+
+  @override
+  String get shutdownPhaseFlushingPersistence => '正在保存会话';
+
+  @override
+  String get shutdownPhaseSuspendingTasks => '正在挂起后台任务';
+
+  @override
+  String get shutdownPhaseStoppingMcp => '正在关闭 MCP';
+
+  @override
+  String get shutdownPhaseStoppingLsp => '正在关闭语言服务';
+
+  @override
+  String get shutdownPhaseStopped => '关机完成';
+
+  @override
+  String shutdownPendingCommits(int count) {
+    return '剩余 $count 项待落库';
+  }
+
+  @override
   String get sidebarCloseProject => '关闭项目';
 
   @override
@@ -1569,6 +1604,41 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get sidebarSessions => '会话';
+
+  @override
+  String get sidebarLoadingMore => '正在加载更多会话…';
+
+  @override
+  String get sidebarLoadError => '会话目录分页加载失败';
+
+  @override
+  String get shutdownTitle => '正在安全关机';
+
+  @override
+  String get shutdownPhaseStoppingSubscriptions => '正在停止订阅';
+
+  @override
+  String get shutdownPhaseCancellingTurns => '正在停止会话任务';
+
+  @override
+  String get shutdownPhaseFlushingPersistence => '正在保存会话';
+
+  @override
+  String get shutdownPhaseSuspendingTasks => '正在挂起后台任务';
+
+  @override
+  String get shutdownPhaseStoppingMcp => '正在关闭 MCP';
+
+  @override
+  String get shutdownPhaseStoppingLsp => '正在关闭语言服务';
+
+  @override
+  String get shutdownPhaseStopped => '关机完成';
+
+  @override
+  String shutdownPendingCommits(int count) {
+    return '剩余 $count 项待落库';
+  }
 
   @override
   String get sidebarCloseProject => '关闭项目';

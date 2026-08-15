@@ -9,7 +9,7 @@ use pl_core::{
 use pl_protocol::{ThreadItem, ThreadItemContent, ThreadNotification, ThreadSnapshot, Turn};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 
 use crate::PureError;
@@ -20,6 +20,7 @@ mod billing;
 mod context;
 mod conversion;
 mod labels;
+mod write_behind;
 
 use billing::{
     aggregate_billing_usage, authoritative_turn_usage, persist_inference_billing, restore_billing,
@@ -35,10 +36,16 @@ use labels::{
     thread_status_label, turn_state_columns,
 };
 
-/// Studio 单库对 canonical Thread 状态的 CAS repository。
+use write_behind::ThreadWriteBehindWriter;
+
+/// Studio 单库对 canonical Thread 状态的 write-behind repository。
+///
+/// commit 只进入 [`ThreadWriteBehindWriter`] 队列，由后台批量事务落库；
+/// 内存 actor state 是唯一权威实例。
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentRepository {
     store: StudioStore,
+    writer: ThreadWriteBehindWriter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,10 +58,24 @@ pub(in crate::studio) struct StudioSessionRecoveryFailure {
 
 impl StudioAgentRepository {
     pub(in crate::studio) fn new(store: StudioStore) -> Self {
-        Self { store }
+        Self {
+            writer: ThreadWriteBehindWriter::new(store.clone()),
+            store,
+        }
     }
 
-    /// 只从 SQLite canonical facts 读取 Thread snapshot，不注册或唤醒 actor。
+    /// 只读用途构造（restore_thread / read_thread_snapshot 等）。
+    ///
+    /// writer 不会被使用；禁止在该实例上调用 commit/flush。
+    pub(in crate::studio) fn for_reads(store: StudioStore) -> Self {
+        Self::new(store)
+    }
+
+    /// write-behind writer 句柄；关机排空与进度查询使用。
+    pub(in crate::studio) fn writer(&self) -> &ThreadWriteBehindWriter {
+        &self.writer
+    }
+
     pub(in crate::studio) async fn read_thread_snapshot(
         &self,
         thread_id: &str,
@@ -86,6 +107,149 @@ impl StudioAgentRepository {
                 .await?
                 .snapshot,
         ))
+    }
+
+    /// 钉住集合：pending input、pending Interaction、活动 Turn、活动 Task root、
+    /// pending planner wake root 与 pending executor continuation agent。
+    async fn pinned_thread_ids(&self) -> Result<BTreeSet<String>, PureError> {
+        let database = self.store.database();
+        let mut ids = BTreeSet::new();
+        ids.extend(
+            thread_input::Entity::find()
+                .filter(thread_input::Column::State.ne("consumed"))
+                .all(database)
+                .await
+                .map_err(store_error)?
+                .into_iter()
+                .map(|row| row.thread_id),
+        );
+        ids.extend(
+            interaction::Entity::find()
+                .filter(interaction::Column::Status.eq("pending"))
+                .all(database)
+                .await
+                .map_err(store_error)?
+                .into_iter()
+                .map(|row| row.thread_id),
+        );
+        ids.extend(
+            turn::Entity::find()
+                .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+                .all(database)
+                .await
+                .map_err(store_error)?
+                .into_iter()
+                .map(|row| row.thread_id),
+        );
+        for run in self
+            .store
+            .list_active_task_runs()
+            .await
+            .map_err(anyhow_into)?
+        {
+            ids.insert(run.root_thread_id);
+        }
+        for wake in self
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .map_err(anyhow_into)?
+        {
+            ids.insert(wake.root_thread_id.clone());
+        }
+        for continuation in self
+            .store
+            .list_pending_executor_continuations()
+            .await
+            .map_err(anyhow_into)?
+        {
+            ids.insert(continuation.agent_id.clone());
+        }
+        Ok(ids)
+    }
+
+    /// 为 depth 计算构建 parent 映射；不钉住的祖先只进入映射，不恢复 actor。
+    async fn ancestor_parents(
+        &self,
+        models: &[thread::Model],
+    ) -> Result<BTreeMap<String, Option<String>>, PureError> {
+        let mut parents: BTreeMap<String, Option<String>> = models
+            .iter()
+            .map(|model| (model.id.clone(), model.parent_thread_id.clone()))
+            .collect();
+        for model in models {
+            let mut cursor = model.parent_thread_id.clone();
+            let mut remaining = models.len() + 64;
+            while let Some(parent_id) = cursor {
+                if parents.contains_key(&parent_id) {
+                    break;
+                }
+                if remaining == 0 {
+                    return Err(store_error("Thread parent graph contains a cycle"));
+                }
+                remaining -= 1;
+                let parent = thread::Entity::find_by_id(parent_id.clone())
+                    .one(self.store.database())
+                    .await
+                    .map_err(store_error)?
+                    .ok_or_else(|| store_error(format!("Thread parent {parent_id} is missing")))?;
+                cursor = parent.parent_thread_id.clone();
+                parents.insert(parent.id.clone(), parent.parent_thread_id.clone());
+            }
+        }
+        Ok(parents)
+    }
+
+    /// 把单个 thread 行恢复成驻留 actor 状态。
+    async fn restore_model(
+        &self,
+        model: thread::Model,
+        parents: &BTreeMap<String, Option<String>>,
+    ) -> Result<RestoredAgentRuntime, PureError> {
+        let thread_id = ThreadId::new(model.id.clone())?;
+        let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
+        let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
+        let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
+            .await?
+            .map(AgentTurnOutcome::try_from)
+            .transpose()?;
+        let snapshot = AgentSnapshot {
+            identity: AgentIdentity {
+                id: thread_id,
+                parent_id: model
+                    .parent_thread_id
+                    .as_ref()
+                    .map(|id| ThreadId::new(id.clone()))
+                    .transpose()?,
+                role: AgentRoleId::new(model.role.clone())?,
+                depth: thread_depth(&model.id, parents)?,
+            },
+            lifecycle: lifecycle_from_status(&model.status)?,
+            activity: restored_activity(&model.status, active_turn.as_ref(), &pending_inputs),
+            active_turn_id: active_turn
+                .as_ref()
+                .map(|row| TurnId::new(row.id.clone()))
+                .transpose()?,
+            pending_inputs: pending_inputs.len(),
+            progress: None,
+            last_turn,
+            revision: u64_from_i64(model.runtime_revision.ok_or_else(|| {
+                store_error(format!("Thread {} actor is not registered", model.id))
+            })?)?,
+            event_sequence: u64_from_i64(model.event_sequence)?,
+            updated_at: model.updated_at,
+        };
+        let session = self.restore_session(&model).await?;
+        let thread_snapshot = self.restore_thread_snapshot(model, &session).await?;
+        Ok(RestoredAgentRuntime {
+            state: ThreadActorState {
+                snapshot,
+                session,
+                pending_inputs,
+                active_input,
+            },
+            thread_snapshot: Some(thread_snapshot),
+        })
     }
 
     pub(in crate::studio) async fn audit_registered_sessions(
@@ -237,18 +401,22 @@ impl StudioAgentRepository {
 impl ThreadRepository for StudioAgentRepository {
     type Error = PureError;
 
+    /// 只恢复启动钉住集合：存在 pending input、pending Interaction、活动 Turn
+    /// 或被活动 Task/唤醒/续轮引用的 Thread。其余 Thread 惰性驻留。
     async fn restore_runtime(&self) -> Result<Vec<RestoredAgentRuntime>, Self::Error> {
+        let pinned = self.pinned_thread_ids().await?;
+        if pinned.is_empty() {
+            return Ok(Vec::new());
+        }
         let models = thread::Entity::find()
             .filter(thread::Column::RuntimeRevision.is_not_null())
+            .filter(thread::Column::Id.is_in(pinned))
             .order_by_asc(thread::Column::CreatedAt)
             .order_by_asc(thread::Column::Id)
             .all(self.store.database())
             .await
             .map_err(store_error)?;
-        let parents = models
-            .iter()
-            .map(|model| (model.id.clone(), model.parent_thread_id.clone()))
-            .collect::<BTreeMap<_, _>>();
+        let parents = self.ancestor_parents(&models).await?;
         let blocked_roots = self
             .session_recovery_failures(&models)
             .await?
@@ -265,56 +433,49 @@ impl ThreadRepository for StudioAgentRepository {
                 );
                 continue;
             }
-            let thread_id = ThreadId::new(model.id.clone())?;
-            let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
-            let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
-            let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
-                .await?
-                .map(AgentTurnOutcome::try_from)
-                .transpose()?;
-            let snapshot = AgentSnapshot {
-                identity: AgentIdentity {
-                    id: thread_id,
-                    parent_id: model
-                        .parent_thread_id
-                        .as_ref()
-                        .map(|id| ThreadId::new(id.clone()))
-                        .transpose()?,
-                    role: AgentRoleId::new(model.role.clone())?,
-                    depth: thread_depth(&model.id, &parents)?,
-                },
-                lifecycle: lifecycle_from_status(&model.status)?,
-                activity: restored_activity(&model.status, active_turn.as_ref(), &pending_inputs),
-                active_turn_id: active_turn
-                    .as_ref()
-                    .map(|row| TurnId::new(row.id.clone()))
-                    .transpose()?,
-                pending_inputs: pending_inputs.len(),
-                progress: None,
-                last_turn,
-                revision: u64_from_i64(model.runtime_revision.ok_or_else(|| {
-                    store_error(format!("Thread {} actor is not registered", model.id))
-                })?)?,
-                event_sequence: u64_from_i64(model.event_sequence)?,
-                updated_at: model.updated_at,
-            };
-            let session = self.restore_session(&model).await?;
-            let thread_snapshot = self.restore_thread_snapshot(model, &session).await?;
-            restored.push(RestoredAgentRuntime {
-                state: ThreadActorState {
-                    snapshot,
-                    session,
-                    pending_inputs,
-                    active_input,
-                },
-                thread_snapshot: Some(thread_snapshot),
-            });
+            restored.push(self.restore_model(model, &parents).await?);
         }
         Ok(restored)
     }
 
+    /// 按需恢复单个已注册 Thread；不存在、未注册 runtime 或 session 损坏时返回 `None`。
+    async fn restore_thread(
+        &self,
+        thread_id: &ThreadId,
+    ) -> Result<Option<RestoredAgentRuntime>, Self::Error> {
+        let Some(model) = thread::Entity::find_by_id(thread_id.to_string())
+            .one(self.store.database())
+            .await
+            .map_err(store_error)?
+        else {
+            return Ok(None);
+        };
+        if model.runtime_revision.is_none() {
+            return Ok(None);
+        }
+        if let Err(SessionSnapshotAuditError::Corrupt(_)) =
+            audit_session_snapshot(&self.store, &model.id).await
+        {
+            tracing::warn!(
+                agent_thread_id = %model.id,
+                " refusing to lazily restore a thread with a corrupt durable session"
+            );
+            return Ok(None);
+        }
+        let parents = self.ancestor_parents(std::slice::from_ref(&model)).await?;
+        Ok(Some(self.restore_model(model, &parents).await?))
+    }
+
     async fn commit(&self, commit: ThreadCommit) -> Result<ThreadCommitOutcome, Self::Error> {
-        persist_state_commit(&self.store, &commit).await
+        self.writer.enqueue(commit).await
+    }
+
+    async fn flush_pending(&self, _thread_id: Option<&ThreadId>) -> Result<(), Self::Error> {
+        self.writer.flush().await
+    }
+
+    fn pending_commit_count(&self) -> usize {
+        self.writer.pending_commit_count()
     }
 
     async fn list_submissions(
@@ -363,25 +524,23 @@ async fn list_thread_submissions(
     })
 }
 
-pub(super) async fn persist_state_commit(
-    store: &StudioStore,
+/// 在调用方事务内应用一次 Thread commit；不负责 begin/commit/rollback。
+pub(super) async fn apply_state_commit(
+    tx: &sea_orm::DatabaseTransaction,
     commit: &ThreadCommit,
 ) -> Result<ThreadCommitOutcome, PureError> {
     let thread_id = commit.agent_id.to_string();
-    let tx = store.database().begin().await.map_err(store_error)?;
     let Some(existing) = thread::Entity::find_by_id(thread_id.clone())
-        .one(&tx)
+        .one(tx)
         .await
         .map_err(store_error)?
     else {
-        tx.rollback().await.map_err(store_error)?;
         return Err(store_error(format!(
             "Thread {thread_id} must exist before runtime registration"
         )));
     };
     let actual_revision = existing.runtime_revision.map(u64_from_i64).transpose()?;
     if actual_revision != commit.expected_revision {
-        tx.rollback().await.map_err(store_error)?;
         return Ok(ThreadCommitOutcome::RevisionConflict { actual_revision });
     }
 
@@ -411,15 +570,14 @@ pub(super) async fn persist_state_commit(
         .transpose()?);
     active.trace_sequence = Set(i64_from_u64(commit.next_state.session.trace_sequence)?);
     active.updated_at = Set(commit.next_state.snapshot.updated_at);
-    active.update(&tx).await.map_err(store_error)?;
+    active.update(tx).await.map_err(store_error)?;
 
-    persist_inputs(&tx, &commit.next_state).await?;
-    persist_state_turns(&tx, &commit.next_state).await?;
-    persist_thread_notifications(&tx, commit).await?;
-    persist_session_snapshot(&tx, commit).await?;
-    persist_inference_billing(&tx, commit).await?;
-    persist_submission(&tx, commit).await?;
-    tx.commit().await.map_err(store_error)?;
+    persist_inputs(tx, &commit.next_state).await?;
+    persist_state_turns(tx, &commit.next_state).await?;
+    persist_thread_notifications(tx, commit).await?;
+    persist_session_snapshot(tx, commit).await?;
+    persist_inference_billing(tx, commit).await?;
+    persist_submission(tx, commit).await?;
     Ok(ThreadCommitOutcome::Applied)
 }
 
@@ -1028,6 +1186,78 @@ fn i64_from_u64(value: u64) -> Result<i64, PureError> {
 
 fn store_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
+}
+
+fn anyhow_into(error: anyhow::Error) -> PureError {
+    PureError::MemoryError(error.to_string())
+}
+
+/// write-behind writer 与 repository 的事务级测试支撑。
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::collections::VecDeque;
+
+    use pl_core::{
+        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
+        CommitDurability, DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadContextState,
+        ThreadId, ThreadMutation,
+    };
+
+    use super::StudioStore;
+    use crate::config::StudioMode;
+
+    /// 建立内存库中的 project + thread 行，返回 thread id。
+    pub(super) async fn seed_thread(store: &StudioStore, title: &str) -> String {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("pure-writer-support-{unique}-{title}"));
+        let project = store.upsert_project(&workspace).await.expect("project");
+        let thread = store
+            .create_thread(&project.id, title, StudioMode::Simple)
+            .await
+            .expect("thread");
+        thread.id
+    }
+
+    /// 构造首次注册（expected_revision=None）的最小 ThreadCommit。
+    pub(super) fn writer_test_commit(
+        thread_id: &str,
+        durability: CommitDurability,
+    ) -> ThreadCommit {
+        let thread_id = ThreadId::new(thread_id).expect("thread id");
+        let state = ThreadActorState {
+            snapshot: AgentSnapshot {
+                identity: AgentIdentity {
+                    id: thread_id.clone(),
+                    parent_id: None,
+                    role: AgentRoleId::new("executor").expect("role"),
+                    depth: 0,
+                },
+                lifecycle: AgentLifecycleState::Active,
+                activity: AgentActivityState::Idle,
+                active_turn_id: None,
+                pending_inputs: 0,
+                progress: None,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 1,
+                updated_at: 1,
+            },
+            session: ThreadContextState::empty(),
+            pending_inputs: VecDeque::new(),
+            active_input: None,
+        };
+        ThreadCommit {
+            agent_id: thread_id.clone(),
+            durability,
+            expected_revision: None,
+            facts: DurableCommitFacts::from_state(&state, Vec::new(), Vec::new(), None, None),
+            next_state: state,
+            mutation: ThreadMutation::SnapshotAndQueue,
+        }
+    }
 }
 
 #[cfg(test)]

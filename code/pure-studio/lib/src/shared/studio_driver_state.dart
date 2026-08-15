@@ -11,6 +11,9 @@ abstract final class StudioDriverState {
   static String? _planContent;
   static TaskRecoveryPreview? _taskRecoveryPreview;
   static TaskRecoveryResult? _taskRecoveryResult;
+  static final List<StudioShutdownProgress> _shutdownProgress = [];
+  static List<String> _sidebarDirectoryIds = const [];
+  static bool _sidebarDirectoryHasMore = false;
 
   static void publishTask(TaskRuntimeView? task) {
     _task = task;
@@ -34,6 +37,18 @@ abstract final class StudioDriverState {
     _planContent = content;
   }
 
+  static void publishSidebarDirectory(List<String> threadIds, bool hasMore) {
+    _sidebarDirectoryIds = List.unmodifiable(threadIds);
+    _sidebarDirectoryHasMore = hasMore;
+  }
+
+  static void publishShutdownProgress(StudioShutdownProgress progress) {
+    _shutdownProgress.add(progress);
+  }
+
+  static List<StudioShutdownProgress> get shutdownProgress =>
+      List.unmodifiable(_shutdownProgress);
+
   static void clearTaskRecovery() {
     _taskRecoveryPreview = null;
     _taskRecoveryResult = null;
@@ -54,6 +69,15 @@ abstract final class StudioDriverState {
         : _lastTurnsByThread[workspace.threadId];
     return jsonEncode({
       'planContent': _planContent,
+      'sidebarDirectory': {
+        'count': _sidebarDirectoryIds.length,
+        'hasMore': _sidebarDirectoryHasMore,
+        'ids': _sidebarDirectoryIds,
+      },
+      'shutdownPhases': <String>[
+        for (final progress in _shutdownProgress)
+          '${progress.phase.name}:${progress.pendingCommits}',
+      ],
       'project': _project == null
           ? null
           : {'id': _project!.id, 'path': _project!.path},

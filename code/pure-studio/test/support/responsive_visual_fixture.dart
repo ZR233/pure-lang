@@ -314,7 +314,9 @@ StudioState responsiveVisualState() {
   ];
   return StudioState(
     projectDirectory: const ProjectDirectoryState(values: [project]),
-    threadDirectory: ThreadDirectoryState(values: [session, ...agentSessions]),
+    threadDirectory: ThreadDirectoryWindow(
+      threads: [session, ...agentSessions],
+    ),
     taskDirectory: const TaskDirectoryState(),
     agentDirectory: const AgentDirectoryState(),
     settingsState: const SettingsStateSnapshot(

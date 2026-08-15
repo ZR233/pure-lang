@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 pub struct BridgeStudioStateSnapshot {
     pub runtime: RuntimeSnapshot,
     pub project_directory: BridgeProjectDirectoryState,
-    pub thread_directory: BridgeThreadDirectoryState,
+    /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
+    pub thread_directory: BridgeThreadDirectoryPage,
     pub task_directory: BridgeTaskDirectoryState,
     pub agent_directory: BridgeAgentDirectoryState,
     pub settings: BridgeSettingsStateSnapshot,
@@ -36,6 +37,24 @@ pub struct BridgeProjectDirectoryState {
 pub struct BridgeThreadDirectoryState {
     pub meta: BridgeObservedStateMeta,
     pub threads: Vec<BridgeThread>,
+}
+
+/// Thread directory 分页窗口页（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeThreadDirectoryPage {
+    pub meta: BridgeObservedStateMeta,
+    pub threads: Vec<BridgeThread>,
+    /// `None` 表示没有更旧的页。
+    pub next_cursor: Option<String>,
+}
+
+/// `listThreadsPage` 请求；`cursor` 为 `null` 时从最新一页开始。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeListThreadsPageRequest {
+    pub cursor: Option<String>,
+    pub limit: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

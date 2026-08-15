@@ -21,9 +21,14 @@ StudioReduceResult reduceStudioEvent(
     ProjectDirectoryChangedPayload(:final state) => StudioReduceResult(
       applyProjectDirectory(current, state),
     ),
-    ThreadDirectoryChangedPayload(:final state) => StudioReduceResult(
-      applyThreadDirectory(current, state),
-    ),
+    ThreadDirectoryChangedPayload(:final upserted, :final removed) =>
+      StudioReduceResult(
+        applyThreadDirectoryDelta(
+          current,
+          upserted: upserted,
+          removed: removed,
+        ),
+      ),
     TaskDirectoryChangedPayload(:final state) => StudioReduceResult(
       applyTaskDirectory(current, state),
     ),
@@ -167,6 +172,49 @@ StudioState mergeThreadHistoryPage(
   );
 }
 
+/// 时间线已加载历史的驱逐上限；超过后从最旧一页开始丢弃。
+const int maxLoadedHistoryItems = 500;
+
+/// 驱逐最旧一页已加载历史：回退 load-older cursor 到该页的请求 cursor，
+/// 再次向上滚动时以它回源数据库重取（内存未命中 → 数据库）。
+StudioState evictOldestHistoryPage(StudioState current, String threadId) {
+  final ui = current.workspaceUiByThread[threadId];
+  final workspace = current.workspacesByThread[threadId];
+  if (ui == null || workspace == null) return current;
+  final history = ui.history;
+  if (history.pageSizes.length <= 1) return current;
+  final boundaryCursor = history.boundaryCursors.last;
+  final removed = history.pageSizes.last;
+  final remainingItems = (history.loadedItems - removed).clamp(0, 1 << 30);
+  // items 按时间升序，最旧一页在列表头部。
+  final evictedItems = workspace.items.length >= removed
+      ? workspace.items.sublist(removed)
+      : const <ThreadItemView>[];
+  final nextHistory = ThreadHistoryPagingState(
+    nextCursor: boundaryCursor,
+    hasMore: true,
+    isLoading: false,
+    isLoaded: history.isLoaded,
+    errorMessage: history.errorMessage,
+    boundaryCursors: history.boundaryCursors.sublist(
+      0,
+      history.boundaryCursors.length - 1,
+    ),
+    pageSizes: history.pageSizes.sublist(0, history.pageSizes.length - 1),
+    loadedItems: remainingItems,
+  );
+  return current.copyWith(
+    workspacesByThread: {
+      ...current.workspacesByThread,
+      threadId: workspace.copyWith(items: evictedItems),
+    },
+    workspaceUiByThread: {
+      ...current.workspaceUiByThread,
+      threadId: ui.copyWith(history: nextHistory),
+    },
+  );
+}
+
 StudioState applySettingsState(
   StudioState current,
   SettingsStateSnapshot next,
@@ -192,23 +240,24 @@ StudioState applyProjectDirectory(
   );
 }
 
-StudioState applyThreadDirectory(
-  StudioState current,
-  ThreadDirectoryState next,
-) {
-  if (!next.meta.isNewerThan(current.threadDirectory.meta)) return current;
-  final knownThreads = {for (final thread in next.values) thread.id: thread};
+StudioState applyThreadDirectoryDelta(
+  StudioState current, {
+  required List<StudioThread> upserted,
+  required List<String> removed,
+}) {
+  final window = current.threadDirectory.applyDelta(
+    upserted: upserted,
+    removed: removed,
+  );
+  final knownThreads = {for (final thread in window.threads) thread.id: thread};
   var selectedThreadId = current.selectedThreadId;
   if (!knownThreads.containsKey(selectedThreadId)) {
-    final roots =
-        next.values
-            .where(
-              (thread) =>
-                  thread.isRoot &&
-                  thread.projectId == current.selectedProjectId,
-            )
-            .toList()
-          ..sort((a, b) => a.id.compareTo(b.id));
+    final roots = window.threads
+        .where(
+          (thread) =>
+              thread.isRoot && thread.projectId == current.selectedProjectId,
+        )
+        .toList();
     selectedThreadId = roots.firstOrNull?.id;
   }
   final workspaces = {
@@ -220,10 +269,27 @@ StudioState applyThreadDirectory(
     current.workspaceUiByThread,
   )..removeWhere((id, _) => !knownThreads.containsKey(id));
   return current.copyWith(
-    threadDirectory: next,
+    threadDirectory: window,
     selectedThreadId: selectedThreadId,
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
+  );
+}
+
+/// 触底加载的下一页追加进分页窗口（按身份去重，不覆盖已加载 revision）。
+StudioState appendThreadDirectoryPage(
+  StudioState current,
+  ThreadDirectoryPage page,
+) {
+  return current.copyWith(
+    threadDirectory: current.threadDirectory.appendPage(page),
+  );
+}
+
+StudioState setThreadDirectoryLoading(StudioState current, bool isLoading) {
+  if (current.threadDirectory.isLoading == isLoading) return current;
+  return current.copyWith(
+    threadDirectory: current.threadDirectory.copyWith(isLoading: isLoading),
   );
 }
 

@@ -32,9 +32,15 @@ final class ProjectDirectoryChangedPayload extends StudioBridgeEventPayload {
   final ProjectDirectoryState state;
 }
 
+/// Thread directory 增量：GUI 按身份合并进分页窗口，未加载条目的增量忽略。
 final class ThreadDirectoryChangedPayload extends StudioBridgeEventPayload {
-  const ThreadDirectoryChangedPayload(this.state);
-  final ThreadDirectoryState state;
+  const ThreadDirectoryChangedPayload({
+    required this.upserted,
+    required this.removed,
+  });
+
+  final List<StudioThread> upserted;
+  final List<String> removed;
 }
 
 final class TaskDirectoryChangedPayload extends StudioBridgeEventPayload {

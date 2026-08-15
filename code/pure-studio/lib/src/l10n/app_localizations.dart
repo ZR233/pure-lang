@@ -117,6 +117,72 @@ abstract class AppLocalizations {
   /// **'Sessions'**
   String get sidebarSessions;
 
+  /// No description provided for @sidebarLoadingMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading more sessions…'**
+  String get sidebarLoadingMore;
+
+  /// No description provided for @sidebarLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load more sessions'**
+  String get sidebarLoadError;
+
+  /// No description provided for @shutdownTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Shutting down safely'**
+  String get shutdownTitle;
+
+  /// No description provided for @shutdownPhaseStoppingSubscriptions.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping subscriptions'**
+  String get shutdownPhaseStoppingSubscriptions;
+
+  /// No description provided for @shutdownPhaseCancellingTurns.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping active turns'**
+  String get shutdownPhaseCancellingTurns;
+
+  /// No description provided for @shutdownPhaseFlushingPersistence.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving sessions'**
+  String get shutdownPhaseFlushingPersistence;
+
+  /// No description provided for @shutdownPhaseSuspendingTasks.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspending background tasks'**
+  String get shutdownPhaseSuspendingTasks;
+
+  /// No description provided for @shutdownPhaseStoppingMcp.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping MCP servers'**
+  String get shutdownPhaseStoppingMcp;
+
+  /// No description provided for @shutdownPhaseStoppingLsp.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping language servers'**
+  String get shutdownPhaseStoppingLsp;
+
+  /// No description provided for @shutdownPhaseStopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Shutdown complete'**
+  String get shutdownPhaseStopped;
+
+  /// No description provided for @shutdownPendingCommits.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} commits pending'**
+  String shutdownPendingCommits(int count);
+
   /// No description provided for @sidebarCloseProject.
   ///
   /// In en, this message translates to:

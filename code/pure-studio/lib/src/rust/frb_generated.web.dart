@@ -90,6 +90,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_StreamSink_bridge_product_stream_envelope_Sse(dynamic raw);
 
   @protected
+  RustStreamSink<BridgeShutdownProgress>
+  dco_decode_StreamSink_bridge_shutdown_progress_Sse(dynamic raw);
+
+  @protected
   RustStreamSink<BridgeStudioUpdateEventDto>
   dco_decode_StreamSink_bridge_studio_update_event_dto_Sse(dynamic raw);
 
@@ -129,6 +133,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeInteractionResolution
   dco_decode_box_autoadd_bridge_interaction_resolution(dynamic raw);
+
+  @protected
+  BridgeListThreadsPageRequest
+  dco_decode_box_autoadd_bridge_list_threads_page_request(dynamic raw);
 
   @protected
   BridgeLspStateSnapshot dco_decode_box_autoadd_bridge_lsp_state_snapshot(
@@ -186,8 +194,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_task_recovery_request_dto(dynamic raw);
 
   @protected
-  BridgeThreadDirectoryState
-  dco_decode_box_autoadd_bridge_thread_directory_state(dynamic raw);
+  BridgeThreadDirectoryDelta
+  dco_decode_box_autoadd_bridge_thread_directory_delta(dynamic raw);
 
   @protected
   BridgeThreadItem dco_decode_box_autoadd_bridge_thread_item(dynamic raw);
@@ -390,6 +398,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeInteractionStatus dco_decode_bridge_interaction_status(dynamic raw);
 
   @protected
+  BridgeListThreadsPageRequest dco_decode_bridge_list_threads_page_request(
+    dynamic raw,
+  );
+
+  @protected
   BridgeLspHealthDto dco_decode_bridge_lsp_health_dto(dynamic raw);
 
   @protected
@@ -548,6 +561,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeShutdownPhase dco_decode_bridge_shutdown_phase(dynamic raw);
+
+  @protected
+  BridgeShutdownProgress dco_decode_bridge_shutdown_progress(dynamic raw);
+
+  @protected
   BridgeSkillsSettingsDto dco_decode_bridge_skills_settings_dto(dynamic raw);
 
   @protected
@@ -660,7 +679,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeThreadDirectoryState dco_decode_bridge_thread_directory_state(
+  BridgeThreadDirectoryDelta dco_decode_bridge_thread_directory_delta(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeThreadDirectoryPage dco_decode_bridge_thread_directory_page(
     dynamic raw,
   );
 
@@ -1253,6 +1277,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RustStreamSink<BridgeShutdownProgress>
+  sse_decode_StreamSink_bridge_shutdown_progress_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RustStreamSink<BridgeStudioUpdateEventDto>
   sse_decode_StreamSink_bridge_studio_update_event_dto_Sse(
     SseDeserializer deserializer,
@@ -1296,6 +1326,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeInteractionResolution
   sse_decode_box_autoadd_bridge_interaction_resolution(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeListThreadsPageRequest
+  sse_decode_box_autoadd_bridge_list_threads_page_request(
     SseDeserializer deserializer,
   );
 
@@ -1371,8 +1407,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeThreadDirectoryState
-  sse_decode_box_autoadd_bridge_thread_directory_state(
+  BridgeThreadDirectoryDelta
+  sse_decode_box_autoadd_bridge_thread_directory_delta(
     SseDeserializer deserializer,
   );
 
@@ -1623,6 +1659,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeListThreadsPageRequest sse_decode_bridge_list_threads_page_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeLspHealthDto sse_decode_bridge_lsp_health_dto(
     SseDeserializer deserializer,
   );
@@ -1815,6 +1856,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeShutdownPhase sse_decode_bridge_shutdown_phase(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeShutdownProgress sse_decode_bridge_shutdown_progress(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeSkillsSettingsDto sse_decode_bridge_skills_settings_dto(
     SseDeserializer deserializer,
   );
@@ -1951,7 +2002,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeThreadDirectoryState sse_decode_bridge_thread_directory_state(
+  BridgeThreadDirectoryDelta sse_decode_bridge_thread_directory_delta(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadDirectoryPage sse_decode_bridge_thread_directory_page(
     SseDeserializer deserializer,
   );
 
@@ -2687,6 +2743,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_bridge_shutdown_progress_Sse(
+    RustStreamSink<BridgeShutdownProgress> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_StreamSink_bridge_studio_update_event_dto_Sse(
     RustStreamSink<BridgeStudioUpdateEventDto> self,
     SseSerializer serializer,
@@ -2737,6 +2799,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_interaction_resolution(
     BridgeInteractionResolution self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_list_threads_page_request(
+    BridgeListThreadsPageRequest self,
     SseSerializer serializer,
   );
 
@@ -2819,8 +2887,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_bridge_thread_directory_state(
-    BridgeThreadDirectoryState self,
+  void sse_encode_box_autoadd_bridge_thread_directory_delta(
+    BridgeThreadDirectoryDelta self,
     SseSerializer serializer,
   );
 
@@ -3119,6 +3187,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_list_threads_page_request(
+    BridgeListThreadsPageRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_lsp_health_dto(
     BridgeLspHealthDto self,
     SseSerializer serializer,
@@ -3353,6 +3427,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_shutdown_phase(
+    BridgeShutdownPhase self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_shutdown_progress(
+    BridgeShutdownProgress self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_skills_settings_dto(
     BridgeSkillsSettingsDto self,
     SseSerializer serializer,
@@ -3518,8 +3604,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_thread_directory_state(
-    BridgeThreadDirectoryState self,
+  void sse_encode_bridge_thread_directory_delta(
+    BridgeThreadDirectoryDelta self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_thread_directory_page(
+    BridgeThreadDirectoryPage self,
     SseSerializer serializer,
   );
 

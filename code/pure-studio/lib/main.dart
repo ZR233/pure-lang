@@ -8,6 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/app/pure_studio_app.dart';
 
 void main() {
+  bootstrapStudio();
+}
+
+/// Driver 构建可注入外部 ProviderContainer，让 driver 请求访问应用级状态。
+void bootstrapStudio({ProviderContainer? container}) {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     _recordDartError(details.exception, details.stack);
@@ -17,7 +22,14 @@ void main() {
     return true;
   };
   runZonedGuarded(
-    () => runApp(const ProviderScope(child: PureStudioApp())),
+    () => runApp(
+      container == null
+          ? const ProviderScope(child: PureStudioApp())
+          : UncontrolledProviderScope(
+              container: container,
+              child: const PureStudioApp(),
+            ),
+    ),
     _recordDartError,
   );
 }

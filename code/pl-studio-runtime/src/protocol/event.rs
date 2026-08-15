@@ -18,11 +18,12 @@ pub struct StudioProductEventEnvelope {
     pub kind: StudioProductEventKind,
 }
 
-/// Studio 全局产品事件。每个变体都携带可直接替换的完整领域 snapshot。
+/// Studio 全局产品事件。除 `ThreadDirectoryChanged` 携带增量 payload 外，
+/// 每个变体都携带可直接替换的完整领域 snapshot。
 #[derive(Debug, Clone, PartialEq)]
 pub enum StudioProductEventKind {
     ProjectDirectoryChanged(StudioProjectDirectoryState),
-    ThreadDirectoryChanged(StudioThreadDirectoryState),
+    ThreadDirectoryChanged(StudioThreadDirectoryDelta),
     TaskDirectoryChanged(StudioTaskDirectoryState),
     AgentDirectoryChanged(StudioAgentDirectoryState),
     SettingsStateChanged(Box<StudioSettingsStateSnapshot>),
@@ -44,6 +45,26 @@ pub struct StudioProjectDirectoryState {
 pub struct StudioThreadDirectoryState {
     pub meta: ObservedStateMeta,
     pub threads: Vec<Thread>,
+}
+
+/// Thread directory 增量事件 payload：由常驻内存目录索引派生，不再携带全量列表。
+///
+/// `upserted` 按线程身份原位替换，`removed` 携带已归档/删除的 Thread id；
+/// 未加载进分页窗口的增量由消费端忽略。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioThreadDirectoryDelta {
+    pub meta: ObservedStateMeta,
+    pub upserted: Vec<Thread>,
+    pub removed: Vec<String>,
+}
+
+/// Thread directory 的 keyset 分页页（按 `updatedAt` 倒序、id 倒序）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioThreadDirectoryPage {
+    pub meta: ObservedStateMeta,
+    pub threads: Vec<Thread>,
+    /// `None` 表示没有更旧的页。
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,4 +109,41 @@ pub struct StudioMcpStateSnapshot {
 pub struct StudioLspStateSnapshot {
     pub meta: ObservedStateMeta,
     pub health: StudioLspHealth,
+}
+
+/// Studio 关机的固定阶段序列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StudioShutdownPhase {
+    StoppingSubscriptions,
+    CancellingTurns,
+    FlushingPersistence,
+    SuspendingTasks,
+    StoppingMcp,
+    StoppingLsp,
+    Stopped,
+}
+
+impl StudioShutdownPhase {
+    /// 1-based 阶段序号；驱动验收按它断言顺序与完备性。
+    pub fn index(self) -> u8 {
+        match self {
+            Self::StoppingSubscriptions => 1,
+            Self::CancellingTurns => 2,
+            Self::FlushingPersistence => 3,
+            Self::SuspendingTasks => 4,
+            Self::StoppingMcp => 5,
+            Self::StoppingLsp => 6,
+            Self::Stopped => 7,
+        }
+    }
+}
+
+/// 一次关机进度的进度事件。
+///
+/// `FlushingPersistence` 除进入事件外还发布 pending=0 的完成事件；
+/// 并发 shutdown 共享同一次阶段序列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StudioShutdownProgress {
+    pub phase: StudioShutdownPhase,
+    pub pending_commits: u64,
 }

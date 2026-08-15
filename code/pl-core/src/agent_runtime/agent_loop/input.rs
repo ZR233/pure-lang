@@ -118,11 +118,12 @@ where
             return Ok(());
         }
         next.refresh_mailbox_snapshot();
-        self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
-            AgentRuntimeEventKind::StateChanged {
+        self.commit_transition(
+            super::persist::TransitionCommit::new(next).immediate(),
+            |snapshot| AgentRuntimeEventKind::StateChanged {
                 snapshot: Box::new(snapshot),
-            }
-        })
+            },
+        )
         .await
     }
 

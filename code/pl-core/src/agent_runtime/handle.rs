@@ -15,7 +15,7 @@ use super::{
     AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
     AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage, AgentSubmitRequest,
     AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
-    ConversationRecoveryResult, ConversationRecoveryTarget, ThreadId, TurnId,
+    ConversationRecoveryResult, ConversationRecoveryTarget, RestoredAgentRuntime, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -57,6 +57,28 @@ impl AgentRuntimeHandle {
             reply,
         })
         .await?;
+        receive(receiver).await?
+    }
+
+    /// 惰性驻留：把 repository 恢复出的单个 Thread 注册为 actor（幂等）。
+    pub async fn restore_agent(
+        &self,
+        agent: RestoredAgentRuntime,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::RestoreAgent {
+            agent: Box::new(agent),
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// LRU 淘汰一个空闲驻留 actor；busy（活动 Turn/pending input）时拒绝。
+    pub async fn evict_agent(&self, agent_id: AgentId) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::EvictAgent { agent_id, reply })
+            .await?;
         receive(receiver).await?
     }
 

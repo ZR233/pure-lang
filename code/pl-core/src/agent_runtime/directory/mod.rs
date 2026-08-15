@@ -89,6 +89,21 @@ impl AgentDirectoryHandle {
             .insert(snapshot.identity.id.clone(), snapshot);
     }
 
+    /// LRU 淘汰驻留 actor 时移除其 directory 条目；返回是否存在。
+    pub(crate) fn remove(&self, agent_id: &AgentId) -> bool {
+        let removed = self
+            .inner
+            .snapshots
+            .write()
+            .expect("agent directory snapshots lock poisoned")
+            .remove(agent_id)
+            .is_some();
+        if removed {
+            self.advance_revision();
+        }
+        removed
+    }
+
     pub(crate) fn snapshot(&self, agent_id: &AgentId) -> AgentRuntimeResult<AgentSnapshot> {
         self.inner
             .snapshots

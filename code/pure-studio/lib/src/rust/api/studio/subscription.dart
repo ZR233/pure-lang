@@ -14,7 +14,7 @@ import 'types/settings.dart';
 import 'types/thread_stream.dart';
 part 'subscription.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
+// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_phase`, `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 
@@ -25,6 +25,14 @@ Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
 
 Future<BridgeEventSubscription> createProductSubscription() =>
     RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();
+
+/// 订阅关机阶段进度流。
+///
+/// 生命周期独立于 product/thread 订阅：不挂到 bridge shutdown token 下，
+/// 从订阅建立一直转发到 `Stopped`（或 Dart 关闭 sink），保证关机期间的
+/// 阶段事件与 `FlushingPersistence` 的 pending=0 完成事件可达。
+Stream<BridgeShutdownProgress> subscribeShutdownProgress() =>
+    RustLib.instance.api.crateApiStudioSubscriptionSubscribeShutdownProgress();
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>
 abstract class BridgeEventSubscription implements RustOpaqueInterface {

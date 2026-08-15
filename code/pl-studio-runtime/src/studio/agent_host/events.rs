@@ -191,7 +191,6 @@ impl StudioAgentEventProjector {
         }
         Ok(())
     }
-
     async fn project_runtime_event(
         &self,
         event: pl_core::AgentRuntimeEvent,
@@ -471,8 +470,10 @@ impl StudioAgentEventProjector {
                     summary_age_seconds,
                 })
                 .await;
+            // 目录走内存索引增量：这里 upsert 刚重读的 canonical Thread 行。
+            let directory_thread: pl_protocol::Thread = thread.into();
             self.product_events
-                .emit_thread_directory()
+                .apply_thread_delta(vec![directory_thread], Vec::new())
                 .await
                 .at("emitThreadDirectory")?;
         }

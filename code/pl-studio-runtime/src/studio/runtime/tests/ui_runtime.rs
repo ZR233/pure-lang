@@ -154,6 +154,8 @@ async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     active.update(store.database()).await.unwrap();
 
     runtime.start_runtime().await.unwrap();
+    // 惰性驻留：显式激活后按需注册，并复用启动时的 role 修复结果。
+    runtime.ensure_thread_agent(&thread.id).await.unwrap();
     let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
     let actor = framework
@@ -744,7 +746,9 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     assert!(runtime.active_turns_for_test().await.is_empty());
     assert!(runtime.list_projects().await.unwrap().is_empty());
     assert!(project_directory.projects.is_empty());
-    assert!(thread_directory.threads.is_empty());
+    // 目录事件是增量 payload：清理项目时受影响 Thread 以 removal 形式发布。
+    assert!(thread_directory.removed.contains(&session.id));
+    assert!(thread_directory.upserted.is_empty());
     assert!(project_directory.meta.revision > before_project_revision);
     assert!(thread_directory.meta.revision > before_thread_revision);
     assert!(

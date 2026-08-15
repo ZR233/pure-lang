@@ -12,7 +12,7 @@ import 'settings.dart';
 import 'thread_stream.dart';
 part 'event.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Flutter Bridge 的 Studio 产品事件信封。
 ///
@@ -62,8 +62,10 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.projectDirectoryChanged(
     BridgeProjectDirectoryState field0,
   ) = BridgeProductEventPayload_ProjectDirectoryChanged;
+
+  /// Thread directory 增量：GUI 按身份合并进分页窗口，未加载条目的增量忽略。
   const factory BridgeProductEventPayload.threadDirectoryChanged(
-    BridgeThreadDirectoryState field0,
+    BridgeThreadDirectoryDelta field0,
   ) = BridgeProductEventPayload_ThreadDirectoryChanged;
   const factory BridgeProductEventPayload.taskDirectoryChanged(
     BridgeTaskDirectoryState field0,
@@ -95,4 +97,62 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.stale({
     required BigInt laggedEvents,
   }) = BridgeProductEventPayload_Stale;
+}
+
+/// 关机阶段枚举（与 Rust `StudioShutdownPhase` 一一对应）。
+enum BridgeShutdownPhase {
+  stoppingSubscriptions,
+  cancellingTurns,
+  flushingPersistence,
+  suspendingTasks,
+  stoppingMcp,
+  stoppingLsp,
+  stopped,
+}
+
+/// 一次关机进度的进度事件；`flushingPersistence` 完成事件携带 `pendingCommits: 0`。
+class BridgeShutdownProgress {
+  final BridgeShutdownPhase phase;
+  final BigInt pendingCommits;
+
+  const BridgeShutdownProgress({
+    required this.phase,
+    required this.pendingCommits,
+  });
+
+  @override
+  int get hashCode => phase.hashCode ^ pendingCommits.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeShutdownProgress &&
+          runtimeType == other.runtimeType &&
+          phase == other.phase &&
+          pendingCommits == other.pendingCommits;
+}
+
+/// Thread directory 增量事件 payload。
+class BridgeThreadDirectoryDelta {
+  final BridgeObservedStateMeta meta;
+  final List<BridgeThread> upserted;
+  final List<String> removed;
+
+  const BridgeThreadDirectoryDelta({
+    required this.meta,
+    required this.upserted,
+    required this.removed,
+  });
+
+  @override
+  int get hashCode => meta.hashCode ^ upserted.hashCode ^ removed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadDirectoryDelta &&
+          runtimeType == other.runtimeType &&
+          meta == other.meta &&
+          upserted == other.upserted &&
+          removed == other.removed;
 }

@@ -78,18 +78,12 @@ DateTime _fixtureDate(int unixSeconds) =>
 StudioBridgeEvent _threadDirectoryChangedEvent({
   required String? projectId,
   required List<StudioThread> threads,
+  List<String> removed = const [],
 }) {
   return StudioBridgeEvent(
     payload: ThreadDirectoryChangedPayload(
-      ThreadDirectoryState(
-        meta: ObservedStateMeta(
-          revision: 1,
-          phase: ObservedStatePhase.ready,
-          updatedAt: _fixtureDate(1),
-          stale: false,
-        ),
-        values: threads,
-      ),
+      upserted: threads,
+      removed: removed,
     ),
   );
 }

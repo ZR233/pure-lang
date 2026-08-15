@@ -232,6 +232,9 @@ class ThreadHistoryPagingState {
     required this.isLoading,
     required this.isLoaded,
     this.errorMessage,
+    this.boundaryCursors = const [],
+    this.pageSizes = const [],
+    this.loadedItems = 0,
   });
 
   const ThreadHistoryPagingState.initial()
@@ -239,13 +242,25 @@ class ThreadHistoryPagingState {
       hasMore = true,
       isLoading = false,
       isLoaded = false,
-      errorMessage = null;
+      errorMessage = null,
+      boundaryCursors = const [],
+      pageSizes = const [],
+      loadedItems = 0;
 
   final String? nextCursor;
   final bool hasMore;
   final bool isLoading;
   final bool isLoaded;
   final String? errorMessage;
+
+  /// 每个已加载历史页的请求 cursor；栈首=最新页，栈尾=最旧页。
+  final List<String?> boundaryCursors;
+
+  /// 每个已加载历史页的 item 数量，与 [boundaryCursors] 一一对应。
+  final List<int> pageSizes;
+
+  /// 已加载的历史 item 总数（驱逐上限的判定输入）。
+  final int loadedItems;
 }
 
 const _workspaceUnset = Object();

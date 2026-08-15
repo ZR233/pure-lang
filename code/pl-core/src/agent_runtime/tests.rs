@@ -116,6 +116,22 @@ impl ThreadRepository for TestRepository {
             .collect())
     }
 
+    async fn restore_thread(
+        &self,
+        thread_id: &ThreadId,
+    ) -> std::result::Result<Option<RestoredAgentRuntime>, Self::Error> {
+        Ok(self
+            .states
+            .lock()
+            .unwrap()
+            .get(&thread_id.clone())
+            .cloned()
+            .map(|state| RestoredAgentRuntime {
+                state,
+                thread_snapshot: None,
+            }))
+    }
+
     async fn commit(
         &self,
         commit: ThreadCommit,
@@ -199,6 +215,17 @@ impl ThreadRepository for TestRepository {
         }
         states.insert(commit.agent_id, commit.next_state);
         Ok(ThreadCommitOutcome::Applied)
+    }
+
+    async fn flush_pending(
+        &self,
+        _thread_id: Option<&ThreadId>,
+    ) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn pending_commit_count(&self) -> usize {
+        0
     }
 
     async fn list_submissions(

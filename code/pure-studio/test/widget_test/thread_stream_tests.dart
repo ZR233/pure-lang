@@ -63,8 +63,8 @@ void registerThreadStreamTests() {
           StudioProject(id: 'project-2', name: 'two', path: 'two'),
         ],
       ),
-      threadDirectory: ThreadDirectoryState(
-        values: [
+      threadDirectory: ThreadDirectoryWindow(
+        threads: [
           StudioThread(
             id: 'session-1',
             projectId: 'project-1',
@@ -90,7 +90,11 @@ void registerThreadStreamTests() {
 
     await container.read(studioControllerProvider.future);
     api.emitGlobal(
-      _threadDirectoryChangedEvent(projectId: 'project-1', threads: const []),
+      _threadDirectoryChangedEvent(
+        projectId: 'project-1',
+        threads: const [],
+        removed: const ['session-1', 'session-2'],
+      ),
     );
     await pumpEventQueue();
 

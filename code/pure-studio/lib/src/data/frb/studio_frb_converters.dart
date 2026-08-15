@@ -13,10 +13,8 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       ),
     frb.BridgeProductEventPayload_ThreadDirectoryChanged(:final field0) =>
       ThreadDirectoryChangedPayload(
-        ThreadDirectoryState(
-          meta: _observedMetaFromFrb(field0.meta),
-          values: field0.threads.map(_threadFromFrb).toList(),
-        ),
+        upserted: field0.upserted.map(_threadFromFrb).toList(),
+        removed: field0.removed.toList(),
       ),
     frb.BridgeProductEventPayload_TaskDirectoryChanged(:final field0) =>
       TaskDirectoryChangedPayload(
@@ -308,9 +306,10 @@ StudioState studioStateFromFrbSnapshot(
       meta: _observedMetaFromFrb(value.projectDirectory.meta),
       values: projects,
     ),
-    threadDirectory: ThreadDirectoryState(
-      meta: _observedMetaFromFrb(value.threadDirectory.meta),
-      values: threads,
+    threadDirectory: ThreadDirectoryWindow(
+      threads: threads,
+      nextCursor: value.threadDirectory.nextCursor,
+      hasMore: value.threadDirectory.nextCursor != null,
     ),
     taskDirectory: TaskDirectoryState(
       meta: _observedMetaFromFrb(value.taskDirectory.meta),

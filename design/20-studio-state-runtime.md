@@ -59,10 +59,18 @@ repairThreadRuntime(threadId)
 overlay。actor 不存在时返回 `runtimeAvailability=inactive`；订阅返回
 `runtimeNotActivated`，只有 repair command 可以注册、恢复并重新投递 durable wake。
 
-Product event 只携带完整领域 snapshot：ProjectDirectoryChanged、ThreadDirectoryChanged、
-TaskDirectoryChanged、AgentDirectoryChanged、SettingsStateChanged、RecoveryStateChanged、
-McpStateChanged、LspStateChanged、SkillsStateChanged、ProviderUsageStateChanged、
-UpdaterStateChanged。信封 sequence 只用于 transport lag；payload 自带领域 revision。
+Product event 携带完整领域 snapshot：ProjectDirectoryChanged、TaskDirectoryChanged、
+AgentDirectoryChanged、SettingsStateChanged、RecoveryStateChanged、McpStateChanged、LspStateChanged、
+SkillsStateChanged、ProviderUsageStateChanged、UpdaterStateChanged；唯一例外是
+`ThreadDirectoryChanged`，它携带增量 payload（upserted entries、removed ids 与 thread directory
+revision），由常驻内存目录索引派生（见 19.6），Flutter 按增量合并进分页窗口。信封 sequence 只用于
+transport lag；payload 自带领域 revision。
+
+`subscribeShutdownProgress()` 是独立的短生命周期 typed 流，只在 shutdown 期间可用，不复用
+product stream（它在关机早期被取消）。事件携带阶段 enum、阶段序号与 pending commit 计数，
+固定顺序为 StoppingSubscriptions、CancellingTurns、FlushingPersistence、SuspendingTasks、
+StoppingMcp、StoppingLsp、Stopped；`FlushingPersistence` 的完成事件必须携带 pending=0。并发
+shutdown 调用共享同一次阶段序列，`shutdownRuntimeForUpdate` 的 idle 关机复用同一协议。
 
 Flutter 对每个领域分别保存 canonical snapshot。新 revision 才整体替换，相同 revision 幂等
 忽略，旧 revision 丢弃；空 list、空 map 和 null 都是 authoritative value，不能解释为缺省。
@@ -72,7 +80,9 @@ Product lag 只调用 `readStudioState`；Thread lag 只重订阅并调用 `read
 
 `startStudioRuntime` 是唯一启动 command，顺序固定为：打开并校验 SQLite；加载
 `ConfigRuntime`；加载 Usage/Updater last-known cache；执行启动恢复；修复 root Thread role；
-启动 Thread framework；注册所有未归档 durable Thread；materialize pending wake；初始化 MCP
+启动 Thread framework；建立全部未归档 durable Thread 的内存目录索引；只为钉住集合（queued
+input、pending Interaction、活动 Task 引用）恢复 ThreadActor 并 materialize pending wake，其余
+Thread 在订阅或提交输入时按需恢复；初始化 MCP
 owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 system Skills；发布 runtime
 ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
 或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
@@ -168,7 +178,9 @@ revision 使旧结果失效；reset、shutdown 与 reconcile 在生命周期锁�
 覆盖更高 event revision。
 
 副作用探针覆盖 SQLite mutation、actor registration、durable wake、process spawn、Skills scan、
-Usage network、Updater fetch、MCP connector 与 LSP probe。所有 read 连续调用必须保持计数为零。
-真实验收使用隔离 `PURE_STUDIO_HOME`、`cargo xtask run-gui --driver`、Driver health `ok`、
+Usage network、Updater fetch、MCP connector 与 LSP probe。所有 read 连续调用必须保持计数为零；
+SQLite mutation 探针同时验证 mutation 只来自后台 write-behind writer 的批量事务，Immediate
+flush 边界与关机 drain 有隔离测试，惰性恢复与 LRU 淘汰有回归测试。真实验收使用隔离
+`PURE_STUDIO_HOME`、`cargo xtask run-gui --driver`、Driver health `ok`、
 `set_frame_sync(false)`、稳定 `ValueKey`、SQLite 对比、Windows 进程审计和绝对路径截图；默认不使用
 Computer Use。

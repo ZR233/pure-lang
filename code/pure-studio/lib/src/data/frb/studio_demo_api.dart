@@ -3,15 +3,23 @@ part of 'studio_api.dart';
 class DemoStudioApi implements StudioApi {
   DemoStudioApi({this._providerCatalog = demoProviderCatalogFixture});
 
+  /// 目录分页窗口的页大小；Driver 模式填充大量历史会话以验收触底加载。
+  static const int directoryPageSize = 20;
+
   final ProviderCatalogView _providerCatalog;
   final _productEvents = StreamController<Object>.broadcast();
   final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
+  final _shutdownEvents = StreamController<StudioShutdownProgress>.broadcast();
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
   final Map<String, StudioMode> _threadModes = {};
   final Set<String> _archivedProjectIds = {};
   final Set<String> _archivedThreadIds = {};
   final List<StudioThread> _createdRootThreads = [];
+  final List<StudioThread> _pageFillThreads = [];
+
+  /// Driver 模式注入的历史会话数量；普通 demo 为 0。
+  int get directoryPageFillCount => 0;
 
   List<ProviderSettingsView>? _providers;
   List<RoleSettingsView>? _roles;
@@ -39,6 +47,46 @@ class DemoStudioApi implements StudioApi {
   Duration get promptActivityDelay => const Duration(milliseconds: 350);
 
   Duration get promptToolDelay => const Duration(milliseconds: 500);
+
+  /// 模拟关机每个阶段的停留时长。
+  Duration get shutdownPhaseDelay => const Duration(milliseconds: 80);
+
+  @override
+  Stream<StudioShutdownProgress> subscribeShutdownProgress() {
+    return _shutdownEvents.stream;
+  }
+
+  @override
+  Future<void> shutdownRuntime() async {
+    for (final phase in StudioShutdownPhase.values) {
+      await Future<void>.delayed(shutdownPhaseDelay);
+      if (phase == StudioShutdownPhase.flushingPersistence) {
+        _emitShutdownProgress(
+          const StudioShutdownProgress(
+            phase: StudioShutdownPhase.flushingPersistence,
+            pendingCommits: 3,
+          ),
+        );
+        await Future<void>.delayed(shutdownPhaseDelay);
+        _emitShutdownProgress(
+          const StudioShutdownProgress(
+            phase: StudioShutdownPhase.flushingPersistence,
+            pendingCommits: 0,
+          ),
+        );
+        continue;
+      }
+      _emitShutdownProgress(
+        StudioShutdownProgress(phase: phase, pendingCommits: 0),
+      );
+    }
+    await _shutdownEvents.close();
+  }
+
+  void _emitShutdownProgress(StudioShutdownProgress progress) {
+    _shutdownEvents.add(progress);
+    StudioDriverState.publishShutdownProgress(progress);
+  }
 
   @override
   Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) {
@@ -75,7 +123,7 @@ class DemoStudioApi implements StudioApi {
     if (_archivedProjectIds.contains(project.id)) {
       return StudioState(
         projectDirectory: const ProjectDirectoryState(),
-        threadDirectory: const ThreadDirectoryState(),
+        threadDirectory: const ThreadDirectoryWindow(),
         taskDirectory: const TaskDirectoryState(),
         agentDirectory: const AgentDirectoryState(),
         settingsState: _settingsSnapshot(
@@ -99,14 +147,19 @@ class DemoStudioApi implements StudioApi {
             .firstOrNull
             ?.id ??
         threads.firstOrNull?.id;
+    final directory = _sortedDirectoryThreads();
+    final firstPage = directory.take(directoryPageSize).toList();
     return StudioState(
       projectDirectory: ProjectDirectoryState(
         meta: _demoMeta(1),
         values: [project],
       ),
-      threadDirectory: ThreadDirectoryState(
-        meta: _demoMeta(1),
-        values: threads,
+      threadDirectory: ThreadDirectoryWindow(
+        threads: firstPage,
+        nextCursor: directory.length > directoryPageSize
+            ? _demoDirectoryCursor(directoryPageSize - 1)
+            : null,
+        hasMore: directory.length > directoryPageSize,
       ),
       taskDirectory: const TaskDirectoryState(),
       agentDirectory: const AgentDirectoryState(),
@@ -263,7 +316,80 @@ class DemoStudioApi implements StudioApi {
         ),
       );
     }
+    _ensurePageFillThreads(project.id, now);
     return (project: project, threads: threads);
+  }
+
+  /// Driver 模式的历史会话填充：保证触底分页有足够数据。
+  void _ensurePageFillThreads(String projectId, DateTime now) {
+    if (directoryPageFillCount <= 0 || _pageFillThreads.isNotEmpty) {
+      return;
+    }
+    for (var index = 0; index < directoryPageFillCount; index++) {
+      final updated = now.subtract(Duration(minutes: 30 + index * 17));
+      final thread = StudioThread(
+        id: 'thread-page-$index',
+        projectId: projectId,
+        title: '历史会话 ${index + 1}',
+        mode: StudioMode.simple,
+        role: 'executor',
+        createdAt: updated,
+        updatedAt: updated,
+        agentPath: 'root-page-$index',
+      );
+      _pageFillThreads.add(thread);
+      _workspaces.putIfAbsent(
+        thread.id,
+        () => ThreadWorkspace(
+          thread: thread,
+          revision: 0,
+          items: const [],
+          interactions: const [],
+          runtime: _emptyRuntimeView(),
+        ),
+      );
+    }
+  }
+
+  /// 目录完整排序视图（updatedAt 倒序、id 倒序），分页窗口的模拟数据源。
+  List<StudioThread> _sortedDirectoryThreads() {
+    final fixture = _ensureWorkspaceFixture();
+    final threads =
+        [
+          ...fixture.threads,
+          ..._pageFillThreads.where(
+            (thread) => !_archivedThreadIds.contains(thread.id),
+          ),
+        ]..sort((a, b) {
+          final byUpdated = b.updatedAt.compareTo(a.updatedAt);
+          return byUpdated != 0 ? byUpdated : b.id.compareTo(a.id);
+        });
+    return threads;
+  }
+
+  String _demoDirectoryCursor(int lastIndex) => 'demo:$lastIndex';
+
+  @override
+  Future<ThreadDirectoryPage> listThreadsPage({
+    String? cursor,
+    int limit = 50,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    final directory = _sortedDirectoryThreads();
+    final lastIndex = cursor == null
+        ? -1
+        : int.tryParse(cursor.replaceFirst('demo:', '')) ?? -1;
+    final page = directory
+        .skip(lastIndex + 1)
+        .take(limit.clamp(1, 100))
+        .toList();
+    final nextLastIndex = lastIndex + page.length;
+    return ThreadDirectoryPage(
+      threads: page,
+      nextCursor: nextLastIndex < directory.length - 1
+          ? _demoDirectoryCursor(nextLastIndex)
+          : null,
+    );
   }
 
   ThreadWorkspace _rootWorkspace(StudioThread thread, DateTime now) {
@@ -1140,6 +1266,13 @@ class DriverDemoStudioApi extends DemoStudioApi {
 
   @override
   Duration get promptToolDelay => const Duration(seconds: 3);
+
+  @override
+  Duration get shutdownPhaseDelay => const Duration(milliseconds: 400);
+
+  /// Driver 目录分页验收需要大量历史会话。
+  @override
+  int get directoryPageFillCount => 42;
 
   @override
   Future<StudioState> readStudioState() async {

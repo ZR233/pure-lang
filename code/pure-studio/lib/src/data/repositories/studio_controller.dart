@@ -221,27 +221,36 @@ class StudioController extends _$StudioController {
       ),
     );
     try {
-      final page = await _api.listThreadTurns(
-        threadId,
-        cursor: paging.isLoaded ? paging.nextCursor : null,
-      );
+      final requestCursor = paging.isLoaded ? paging.nextCursor : null;
+      final page = await _api.listThreadTurns(threadId, cursor: requestCursor);
       if (!ref.mounted) return;
       final latest = state.value;
       if (latest == null) return;
-      state = AsyncData(
-        _withWorkspaceUi(
-          mergeThreadHistoryPage(latest, threadId, page),
-          threadId,
-          (ui) => ui.copyWith(
-            history: ThreadHistoryPagingState(
-              nextCursor: page.nextCursor,
-              hasMore: page.nextCursor != null,
-              isLoading: false,
-              isLoaded: true,
-            ),
+      // 记录页边界（请求 cursor + 页大小）；驱逐时按它回源数据库重取。
+      final boundaryCursors = [...paging.boundaryCursors, requestCursor];
+      final pageSizes = [...paging.pageSizes, page.items.length];
+      var next = _withWorkspaceUi(
+        mergeThreadHistoryPage(latest, threadId, page),
+        threadId,
+        (ui) => ui.copyWith(
+          history: ThreadHistoryPagingState(
+            nextCursor: page.nextCursor,
+            hasMore: page.nextCursor != null,
+            isLoading: false,
+            isLoaded: true,
+            boundaryCursors: boundaryCursors,
+            pageSizes: pageSizes,
+            loadedItems: paging.loadedItems + page.items.length,
           ),
         ),
       );
+      // 超过上限时驱逐最旧已加载页；时间线只保留窗口内历史。
+      while (_workspaceUi(next, threadId).history.loadedItems >
+              maxLoadedHistoryItems &&
+          _workspaceUi(next, threadId).history.pageSizes.length > 1) {
+        next = evictOldestHistoryPage(next, threadId);
+      }
+      state = AsyncData(next);
     } catch (error) {
       if (!ref.mounted) return;
       final latest = state.value;
@@ -262,6 +271,28 @@ class StudioController extends _$StudioController {
           ),
         ),
       );
+    }
+  }
+
+  /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
+  Future<void> loadMoreThreads() async {
+    final current = state.value;
+    if (current == null) return;
+    final directory = current.threadDirectory;
+    if (directory.isLoading || !directory.hasMore) return;
+    state = AsyncData(setThreadDirectoryLoading(current, true));
+    try {
+      final page = await _api.listThreadsPage(cursor: directory.nextCursor);
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      state = AsyncData(appendThreadDirectoryPage(latest, page));
+    } catch (error) {
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      state = AsyncData(setThreadDirectoryLoading(latest, false));
+      ref.read(directoryLoadErrorProvider.notifier).state = error.toString();
     }
   }
 
@@ -801,7 +832,15 @@ class StudioController extends _$StudioController {
 
 StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   var next = applyProjectDirectory(current, incoming.projectDirectory);
-  next = applyThreadDirectory(next, incoming.threadDirectory);
+  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口，选中线程
+  // 不在新窗口时回退到 snapshot 的稳定选择。
+  next = next.copyWith(threadDirectory: incoming.threadDirectory);
+  final knownThreadIds = {
+    for (final thread in incoming.threadDirectory.threads) thread.id,
+  };
+  if (!knownThreadIds.contains(next.selectedThreadId)) {
+    next = next.copyWith(selectedThreadId: incoming.selectedThreadId);
+  }
   next = applyTaskDirectory(next, incoming.taskDirectory);
   next = applyAgentDirectory(next, incoming.agentDirectory);
   next = applySettingsState(next, incoming.settingsState);
@@ -879,4 +918,13 @@ StudioState _withStableSelection(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
   );
+}
+
+/// 侧栏目录分页加载的最近一次错误文案；null 表示无未恢复错误。
+@Riverpod(keepAlive: true)
+class DirectoryLoadError extends _$DirectoryLoadError {
+  @override
+  String? build() => null;
+
+  void set(String? message) => state = message;
 }

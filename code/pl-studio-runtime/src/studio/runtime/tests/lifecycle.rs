@@ -111,6 +111,8 @@ async fn start_runtime_registers_persisted_child_thread_identity() {
     let snapshot = runtime.start_runtime().await.unwrap();
 
     assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    // 惰性驻留：持久化 child 在显式激活后按需注册，身份链保持不变。
+    runtime.ensure_thread_agent(&child.id).await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
     let child_agent = framework
         .handle()
@@ -1942,5 +1944,163 @@ async fn external_state_reads_are_stable_and_lsp_stopped_snapshot_remains_readab
         pl_protocol::ObservedStatePhase::Stopped
     ));
     assert_eq!(stopped.health, lsp.health);
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+fn lazy_home(unique: u128, label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("pure-lazy-{label}-{unique}"))
+}
+
+#[tokio::test]
+async fn idle_registered_thread_stays_lazy_until_subscription_activates_it() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = lazy_home(unique, "ws");
+    let home = lazy_home(unique, "home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Lazy session", StudioMode::Simple)
+        .await
+        .unwrap();
+    // 第一段 runtime：激活并 durable 注册，然后关机排空 write-behind。
+    {
+        let runtime = StudioRuntime::new(
+            store.clone(),
+            ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        )
+        .unwrap();
+        runtime.start_runtime().await.unwrap();
+        runtime.ensure_thread_agent(&thread.id).await.unwrap();
+        runtime.shutdown().await;
+    }
+
+    // 第二段 runtime：空闲（无 pending input/活动 Task）Thread 不驻留。
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+    runtime.start_runtime().await.unwrap();
+    let framework = runtime.agent_framework().await.unwrap();
+    let agent_id = pl_core::AgentId::new(thread.id.clone()).unwrap();
+    assert!(matches!(
+        framework.handle().snapshot(agent_id.clone()).await,
+        Err(pl_core::AgentRuntimeError::NotFound(_))
+    ));
+
+    // 订阅是显式激活命令：按需恢复驻留。
+    let mut subscription = runtime
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread.id.clone(),
+        })
+        .await
+        .unwrap();
+    let _ = subscription.recv().await;
+    let actor = framework.handle().snapshot(agent_id).await.unwrap();
+    assert_eq!(actor.identity.id.as_str(), thread.id);
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn residency_evicts_idle_actors_beyond_capacity_and_restores_on_demand() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = lazy_home(unique, "evict-ws");
+    let home = lazy_home(unique, "evict-home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let runtime = StudioRuntime::new(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+    runtime.start_runtime().await.unwrap();
+
+    // 超过 LRU 容量（16）后，最久未访问的空闲 Thread 被淘汰。
+    let mut threads = Vec::new();
+    for index in 0..17 {
+        let thread = runtime
+            .create_thread(&project.id, &format!("Session {index}"))
+            .await
+            .unwrap();
+        runtime.ensure_thread_agent(&thread.id).await.unwrap();
+        threads.push(thread);
+    }
+    let framework = runtime.agent_framework().await.unwrap();
+    let first_id = pl_core::AgentId::new(threads[0].id.clone()).unwrap();
+    assert!(
+        matches!(
+            framework.handle().snapshot(first_id.clone()).await,
+            Err(pl_core::AgentRuntimeError::NotFound(_))
+        ),
+        "LRU front idle actor must be evicted beyond capacity"
+    );
+    let last_id = pl_core::AgentId::new(threads[16].id.clone()).unwrap();
+    assert!(framework.handle().snapshot(last_id).await.is_ok());
+
+    // 被淘汰 Thread 再次访问时按需恢复。
+    runtime.ensure_thread_agent(&threads[0].id).await.unwrap();
+    assert!(framework.handle().snapshot(first_id).await.is_ok());
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn shutdown_emits_ordered_phase_progress_with_flush_pending_zero() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = lazy_home(unique, "phases");
+    let runtime = StudioRuntime::new(
+        StudioStore::open_memory().await.unwrap(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    )
+    .unwrap();
+    runtime.start_runtime().await.unwrap();
+
+    let mut progress = runtime.subscribe_shutdown_progress().await;
+    runtime.shutdown_runtime().await.unwrap();
+
+    let mut phases = Vec::new();
+    while let Ok(event) = progress.try_recv() {
+        phases.push(event);
+    }
+    let sequence = phases.iter().map(|event| event.phase).collect::<Vec<_>>();
+    assert_eq!(
+        sequence,
+        vec![
+            crate::StudioShutdownPhase::StoppingSubscriptions,
+            crate::StudioShutdownPhase::CancellingTurns,
+            crate::StudioShutdownPhase::FlushingPersistence,
+            crate::StudioShutdownPhase::FlushingPersistence,
+            crate::StudioShutdownPhase::SuspendingTasks,
+            crate::StudioShutdownPhase::StoppingMcp,
+            crate::StudioShutdownPhase::StoppingLsp,
+            crate::StudioShutdownPhase::Stopped,
+        ]
+    );
+    let flush_events = phases
+        .iter()
+        .filter(|event| event.phase == crate::StudioShutdownPhase::FlushingPersistence)
+        .map(|event| event.pending_commits)
+        .collect::<Vec<_>>();
+    assert_eq!(*flush_events.last().unwrap(), 0);
+
+    // 已停止的 runtime 再次 shutdown 不重复发布阶段序列。
+    runtime.shutdown_runtime().await.unwrap();
+    assert!(progress.try_recv().is_err());
     let _ = tokio::fs::remove_dir_all(home).await;
 }

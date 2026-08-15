@@ -4,10 +4,11 @@ void registerDemoProjectTests() {
   test('Demo read exposes independent Thread workspaces', () async {
     final state = await DemoStudioApi().readStudioState();
 
+    // 目录窗口按 updatedAt 倒序：main(now) → alt(-3m) → reviewer(-7m)。
     expect(state.threads.map((thread) => thread.id), [
       'thread-main',
-      'thread-reviewer',
       'thread-alt',
+      'thread-reviewer',
     ]);
     expect(
       state.workspacesByThread.keys,
@@ -29,9 +30,9 @@ void registerDemoProjectTests() {
     expect(state.threads[0].mode, StudioMode.task);
     expect(state.threads[0].role, 'planner');
     expect(state.threads[1].mode, StudioMode.simple);
-    expect(state.threads[1].role, 'reviewer');
+    expect(state.threads[1].role, 'executor');
     expect(state.threads[2].mode, StudioMode.simple);
-    expect(state.threads[2].role, 'executor');
+    expect(state.threads[2].role, 'reviewer');
     expect(state.workspacesByThread['thread-main']!.thread, state.threads[0]);
   });
 

@@ -360,7 +360,7 @@ StudioState _responsiveActivityStressState() {
       ),
   ];
   return state.copyWith(
-    threadDirectory: ThreadDirectoryState(values: [root, ...agentSessions]),
+    threadDirectory: ThreadDirectoryWindow(threads: [root, ...agentSessions]),
   );
 }
 

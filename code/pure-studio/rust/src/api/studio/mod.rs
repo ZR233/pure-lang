@@ -41,9 +41,10 @@ mod tests {
             sequence: 7,
             created_at: 10,
             kind: StudioProductEventKind::ThreadDirectoryChanged(
-                pl_studio_runtime::StudioThreadDirectoryState {
+                pl_studio_runtime::StudioThreadDirectoryDelta {
                     meta: pl_protocol::ObservedStateMeta::ready(3, 10),
-                    threads: Vec::new(),
+                    upserted: Vec::new(),
+                    removed: Vec::new(),
                 },
             ),
         };
@@ -53,9 +54,10 @@ mod tests {
         assert_eq!(envelope.sequence, 7);
         assert_eq!(
             envelope.payload,
-            BridgeProductEventPayload::ThreadDirectoryChanged(super::BridgeThreadDirectoryState {
+            BridgeProductEventPayload::ThreadDirectoryChanged(super::BridgeThreadDirectoryDelta {
                 meta: pl_protocol::ObservedStateMeta::ready(3, 10).into(),
-                threads: Vec::new(),
+                upserted: Vec::new(),
+                removed: Vec::new(),
             })
         );
     }

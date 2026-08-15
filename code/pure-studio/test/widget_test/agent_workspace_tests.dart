@@ -77,7 +77,7 @@ void registerAgentWorkspaceTests() {
       updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
     );
     final current = base.copyWith(
-      threadDirectory: ThreadDirectoryState(values: [canonical]),
+      threadDirectory: ThreadDirectoryWindow(threads: [canonical]),
     );
 
     final next = applyThreadSnapshot(
@@ -191,7 +191,7 @@ StudioState _rootAndChildState() {
     ),
   );
   return base.copyWith(
-    threadDirectory: ThreadDirectoryState(values: [root, child]),
+    threadDirectory: ThreadDirectoryWindow(threads: [root, child]),
     workspacesByThread: {root.id: rootWorkspace, child.id: childWorkspace},
     workspaceUiByThread: {
       root.id: const WorkspaceUiState(

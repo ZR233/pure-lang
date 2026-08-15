@@ -10,9 +10,11 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::event::bridge_product_event;
 use crate::api::studio::convert::thread_stream::bridge_thread_update;
 use crate::api::studio::types::{
-    BridgeError, BridgeProductEventEnvelope, BridgeThreadSubscriptionUpdate,
+    BridgeError, BridgeProductEventEnvelope, BridgeShutdownPhase, BridgeShutdownProgress,
+    BridgeThreadSubscriptionUpdate,
 };
 use crate::frb_generated::StreamSink;
+use pl_studio_runtime::StudioShutdownPhase;
 
 #[derive(Debug, Clone)]
 pub enum BridgeThreadStreamEnvelope {
@@ -313,6 +315,54 @@ pub async fn create_product_subscription() -> Result<BridgeEventSubscription, Br
     });
     bridge.subscriptions.register(&inner).await;
     Ok(BridgeEventSubscription { inner })
+}
+
+/// 订阅关机阶段进度流。
+///
+/// 生命周期独立于 product/thread 订阅：不挂到 bridge shutdown token 下，
+/// 从订阅建立一直转发到 `Stopped`（或 Dart 关闭 sink），保证关机期间的
+/// 阶段事件与 `FlushingPersistence` 的 pending=0 完成事件可达。
+pub async fn subscribe_shutdown_progress(
+    sink: StreamSink<BridgeShutdownProgress>,
+) -> Result<(), BridgeError> {
+    let bridge = active_bridge().await?;
+    let mut events = bridge.studio.subscribe_shutdown_progress().await;
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(progress) => {
+                    let stopped = progress.phase == StudioShutdownPhase::Stopped;
+                    let event = BridgeShutdownProgress {
+                        phase: bridge_shutdown_phase(progress.phase),
+                        pending_commits: progress.pending_commits,
+                    };
+                    if sink.add(event).is_err() {
+                        break;
+                    }
+                    if stopped {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // 进度事件不重放；跳过错乱继续等待后续阶段。
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    Ok(())
+}
+
+fn bridge_shutdown_phase(phase: StudioShutdownPhase) -> BridgeShutdownPhase {
+    match phase {
+        StudioShutdownPhase::StoppingSubscriptions => BridgeShutdownPhase::StoppingSubscriptions,
+        StudioShutdownPhase::CancellingTurns => BridgeShutdownPhase::CancellingTurns,
+        StudioShutdownPhase::FlushingPersistence => BridgeShutdownPhase::FlushingPersistence,
+        StudioShutdownPhase::SuspendingTasks => BridgeShutdownPhase::SuspendingTasks,
+        StudioShutdownPhase::StoppingMcp => BridgeShutdownPhase::StoppingMcp,
+        StudioShutdownPhase::StoppingLsp => BridgeShutdownPhase::StoppingLsp,
+        StudioShutdownPhase::Stopped => BridgeShutdownPhase::Stopped,
+    }
 }
 
 #[cfg(test)]

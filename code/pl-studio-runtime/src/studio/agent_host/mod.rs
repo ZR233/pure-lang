@@ -83,6 +83,11 @@ impl StudioAgentHost {
     pub(super) async fn detach_runtime(&self) {
         self.observer.detach_runtime().await;
     }
+
+    /// 暴露内部 repository（含 write-behind writer）句柄，供关机排空使用。
+    pub(super) fn persistence(&self) -> StudioAgentRepository {
+        self.repository.clone()
+    }
 }
 
 async fn wait_for_runtime(

@@ -77,3 +77,114 @@ class StudioThread {
     );
   }
 }
+
+/// 一次目录分页查询的结果页。
+class ThreadDirectoryPage {
+  const ThreadDirectoryPage({required this.threads, this.nextCursor});
+
+  final List<StudioThread> threads;
+  final String? nextCursor;
+
+  bool get hasMore => nextCursor != null;
+}
+
+/// 侧栏会话目录的有界分页窗口。
+///
+/// 只保留已加载页的条目；触底通过 `nextCursor` 继续加载，目录增量按身份
+/// 原位合并（新会话前置、归档移除），未加载条目的增量直接忽略。
+class ThreadDirectoryWindow {
+  const ThreadDirectoryWindow({
+    this.threads = const [],
+    this.nextCursor,
+    this.hasMore = false,
+    this.isLoading = false,
+  });
+
+  final List<StudioThread> threads;
+  final String? nextCursor;
+  final bool hasMore;
+  final bool isLoading;
+
+  ThreadDirectoryWindow copyWith({
+    List<StudioThread>? threads,
+    Object? nextCursor = _sentinel,
+    bool? hasMore,
+    bool? isLoading,
+  }) {
+    return ThreadDirectoryWindow(
+      threads: threads ?? this.threads,
+      nextCursor: identical(nextCursor, _sentinel)
+          ? this.nextCursor
+          : nextCursor as String?,
+      hasMore: hasMore ?? this.hasMore,
+      isLoading: isLoading ?? this.isLoading,
+    );
+  }
+
+  /// 增量合并：已加载条目原位替换；比当前窗口最新条目更新的前置；
+  /// 其余（窗口未覆盖的更旧条目）忽略。
+  ThreadDirectoryWindow applyDelta({
+    required List<StudioThread> upserted,
+    required List<String> removed,
+  }) {
+    if (upserted.isEmpty && removed.isEmpty) {
+      return this;
+    }
+    final removedSet = removed.toSet();
+    final upsertedById = {for (final thread in upserted) thread.id: thread};
+    final retained = [
+      for (final thread in threads)
+        if (!removedSet.contains(thread.id))
+          upsertedById.remove(thread.id) ?? thread,
+    ];
+    final newThreads =
+        upsertedById.values.where((thread) => !thread.archived).toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final prependable = newThreads.where((thread) {
+      if (retained.isEmpty) return true;
+      return thread.updatedAt.isAfter(retained.first.updatedAt) ||
+          (thread.updatedAt.isAtSameMomentAs(retained.first.updatedAt) &&
+              thread.id.compareTo(retained.first.id) > 0);
+    }).toList();
+    return copyWith(threads: [...prependable, ...retained]);
+  }
+
+  ThreadDirectoryWindow appendPage(ThreadDirectoryPage page) {
+    final loaded = {...threads.map((thread) => thread.id)};
+    final appended = page.threads
+        .where((thread) => !loaded.contains(thread.id))
+        .toList();
+    return copyWith(
+      threads: [...threads, ...appended],
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      isLoading: false,
+    );
+  }
+}
+
+const Object _sentinel = Object();
+
+/// 关机阶段（与 Rust `StudioShutdownPhase` 一一对应）。
+enum StudioShutdownPhase {
+  stoppingSubscriptions,
+  cancellingTurns,
+  flushingPersistence,
+  suspendingTasks,
+  stoppingMcp,
+  stoppingLsp,
+  stopped;
+
+  int get index1 => index + 1;
+}
+
+/// 一次关机进度事件；`flushingPersistence` 的完成事件携带 `pendingCommits: 0`。
+class StudioShutdownProgress {
+  const StudioShutdownProgress({
+    required this.phase,
+    required this.pendingCommits,
+  });
+
+  final StudioShutdownPhase phase;
+  final int pendingCommits;
+}

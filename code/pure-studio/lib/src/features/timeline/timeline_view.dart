@@ -97,6 +97,10 @@ class _TimelineViewState extends State<TimelineView> {
     }
     final wasNearBottom = _isNearBottom();
     final prepended = _hasPrependedTimelineRows(oldWidget.rows, widget.rows);
+    final evictedLeading = _hasEvictedLeadingTimelineRows(
+      oldWidget.rows,
+      widget.rows,
+    );
     final previousExtent = _controller.hasClients
         ? _controller.position.maxScrollExtent
         : 0.0;
@@ -116,6 +120,32 @@ class _TimelineViewState extends State<TimelineView> {
         final insertedExtent =
             _controller.position.maxScrollExtent - previousExtent;
         final target = (previousPixels + insertedExtent)
+            .clamp(
+              _controller.position.minScrollExtent,
+              _controller.position.maxScrollExtent,
+            )
+            .toDouble();
+        _programmaticScroll = true;
+        try {
+          _controller.jumpTo(target);
+        } finally {
+          _programmaticScroll = false;
+        }
+        _saveThreadState(widget.threadId);
+      });
+      return;
+    }
+
+    if (evictedLeading && _controller.hasClients && !wasNearBottom) {
+      // 历史窗口驱逐了最旧一页：按移除内容高度回补偏移，保持视口内容稳定。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) {
+          return;
+        }
+        final removedExtent =
+            previousExtent - _controller.position.maxScrollExtent;
+        if (removedExtent <= 0) return;
+        final target = (previousPixels - removedExtent)
             .clamp(
               _controller.position.minScrollExtent,
               _controller.position.maxScrollExtent,
@@ -588,6 +618,17 @@ bool _hasPrependedTimelineRows(
     return false;
   }
   return next.indexWhere((row) => row.id == previous.first.id) > 0;
+}
+
+/// 历史窗口驱逐最旧一页：首行被移除且总行数变少。
+bool _hasEvictedLeadingTimelineRows(
+  List<TimelineRow> previous,
+  List<TimelineRow> next,
+) {
+  if (previous.isEmpty || next.isEmpty || next.length >= previous.length) {
+    return false;
+  }
+  return next.indexWhere((row) => row.id == previous.first.id) < 0;
 }
 
 String? _timelineActivityIdentity(

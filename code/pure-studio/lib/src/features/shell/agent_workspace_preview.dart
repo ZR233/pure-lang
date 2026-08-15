@@ -127,7 +127,7 @@ StudioState _agentWorkspacePreviewState({
   );
   return StudioState(
     projectDirectory: const ProjectDirectoryState(values: [project]),
-    threadDirectory: ThreadDirectoryState(values: [root, child]),
+    threadDirectory: ThreadDirectoryWindow(threads: [root, child]),
     taskDirectory: const TaskDirectoryState(),
     agentDirectory: const AgentDirectoryState(),
     settingsState: const SettingsStateSnapshot(

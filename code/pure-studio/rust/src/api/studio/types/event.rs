@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use super::runtime::BridgeObservedStateMeta;
 use super::{
     BridgeAgentDirectoryState, BridgeLspStateSnapshot, BridgeMcpStateSnapshot,
     BridgeProjectDirectoryState, BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot,
-    BridgeSettingsStateSnapshot, BridgeSkillsStateSnapshot, BridgeTaskDirectoryState,
-    BridgeThreadDirectoryState, BridgeUpdaterStateSnapshot,
+    BridgeSettingsStateSnapshot, BridgeSkillsStateSnapshot, BridgeTaskDirectoryState, BridgeThread,
+    BridgeUpdaterStateSnapshot,
 };
 
 /// Flutter Bridge 的 Studio 产品事件信封。
@@ -23,7 +24,8 @@ pub struct BridgeProductEventEnvelope {
 #[serde(rename_all = "camelCase")]
 pub enum BridgeProductEventPayload {
     ProjectDirectoryChanged(BridgeProjectDirectoryState),
-    ThreadDirectoryChanged(BridgeThreadDirectoryState),
+    /// Thread directory 增量：GUI 按身份合并进分页窗口，未加载条目的增量忽略。
+    ThreadDirectoryChanged(BridgeThreadDirectoryDelta),
     TaskDirectoryChanged(BridgeTaskDirectoryState),
     AgentDirectoryChanged(BridgeAgentDirectoryState),
     SettingsStateChanged(Box<BridgeSettingsStateSnapshot>),
@@ -33,7 +35,39 @@ pub enum BridgeProductEventPayload {
     SkillsStateChanged(BridgeSkillsStateSnapshot),
     ProviderUsageStateChanged(BridgeProviderUsageStateSnapshot),
     UpdaterStateChanged(BridgeUpdaterStateSnapshot),
-    Stale { lagged_events: u64 },
+    Stale {
+        lagged_events: u64,
+    },
+}
+
+/// Thread directory 增量事件 payload。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeThreadDirectoryDelta {
+    pub meta: BridgeObservedStateMeta,
+    pub upserted: Vec<BridgeThread>,
+    pub removed: Vec<String>,
+}
+
+/// 关机阶段枚举（与 Rust `StudioShutdownPhase` 一一对应）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeShutdownPhase {
+    StoppingSubscriptions,
+    CancellingTurns,
+    FlushingPersistence,
+    SuspendingTasks,
+    StoppingMcp,
+    StoppingLsp,
+    Stopped,
+}
+
+/// 一次关机进度的进度事件；`flushingPersistence` 完成事件携带 `pendingCommits: 0`。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeShutdownProgress {
+    pub phase: BridgeShutdownPhase,
+    pub pending_commits: u64,
 }
 
 impl BridgeProductEventEnvelope {

@@ -9,8 +9,8 @@ import 'runtime.dart';
 import 'settings.dart';
 import 'thread_stream.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeThreadDirectoryState`, `ProviderUsagesResponse`, `SkillsResponse`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeAgentDirectoryState {
   final BridgeObservedStateMeta meta;
@@ -28,6 +28,25 @@ class BridgeAgentDirectoryState {
           runtimeType == other.runtimeType &&
           meta == other.meta &&
           agents == other.agents;
+}
+
+/// `listThreadsPage` 请求；`cursor` 为 `null` 时从最新一页开始。
+class BridgeListThreadsPageRequest {
+  final String? cursor;
+  final int limit;
+
+  const BridgeListThreadsPageRequest({this.cursor, required this.limit});
+
+  @override
+  int get hashCode => cursor.hashCode ^ limit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeListThreadsPageRequest &&
+          runtimeType == other.runtimeType &&
+          cursor == other.cursor &&
+          limit == other.limit;
 }
 
 class BridgeLspStateSnapshot {
@@ -206,7 +225,9 @@ class BridgeSkillsStateSnapshot {
 class BridgeStudioStateSnapshot {
   final RuntimeSnapshot runtime;
   final BridgeProjectDirectoryState projectDirectory;
-  final BridgeThreadDirectoryState threadDirectory;
+
+  /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
+  final BridgeThreadDirectoryPage threadDirectory;
   final BridgeTaskDirectoryState taskDirectory;
   final BridgeAgentDirectoryState agentDirectory;
   final BridgeSettingsStateSnapshot settings;
@@ -305,22 +326,31 @@ class BridgeTaskDirectoryState {
           tasks == other.tasks;
 }
 
-class BridgeThreadDirectoryState {
+/// Thread directory 分页窗口页（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
+class BridgeThreadDirectoryPage {
   final BridgeObservedStateMeta meta;
   final List<BridgeThread> threads;
 
-  const BridgeThreadDirectoryState({required this.meta, required this.threads});
+  /// `None` 表示没有更旧的页。
+  final String? nextCursor;
+
+  const BridgeThreadDirectoryPage({
+    required this.meta,
+    required this.threads,
+    this.nextCursor,
+  });
 
   @override
-  int get hashCode => meta.hashCode ^ threads.hashCode;
+  int get hashCode => meta.hashCode ^ threads.hashCode ^ nextCursor.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeThreadDirectoryState &&
+      other is BridgeThreadDirectoryPage &&
           runtimeType == other.runtimeType &&
           meta == other.meta &&
-          threads == other.threads;
+          threads == other.threads &&
+          nextCursor == other.nextCursor;
 }
 
 class BridgeUpdaterStateSnapshot {

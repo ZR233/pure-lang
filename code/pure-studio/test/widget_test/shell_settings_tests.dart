@@ -52,11 +52,11 @@ void registerShellSettingsTests() {
       updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
     );
     final state = initial.copyWith(
-      threadDirectory: ThreadDirectoryState(values: [first, second]),
+      threadDirectory: ThreadDirectoryWindow(threads: [first, second]),
     );
     final api = _FakeStudioApi(state)
       ..archiveThreadState = state.copyWith(
-        threadDirectory: ThreadDirectoryState(values: [second]),
+        threadDirectory: ThreadDirectoryWindow(threads: [second]),
         selectedThreadId: second.id,
       );
     await tester.pumpWidget(
@@ -503,7 +503,7 @@ void registerShellSettingsTests() {
     final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
     final api = _FakeStudioApi(
       state.copyWith(
-        threadDirectory: ThreadDirectoryState(values: [thread]),
+        threadDirectory: ThreadDirectoryWindow(threads: [thread]),
         workspacesByThread: {
           thread.id: state.selectedWorkspace!.copyWith(
             thread: thread,
@@ -602,7 +602,7 @@ void registerShellSettingsTests() {
     final api = _FakeStudioApi(
       _withSettingsFixture(
         state.copyWith(
-          threadDirectory: ThreadDirectoryState(values: [taskThread]),
+          threadDirectory: ThreadDirectoryWindow(threads: [taskThread]),
           workspacesByThread: {
             taskThread.id: state.selectedWorkspace!.copyWith(
               thread: taskThread,

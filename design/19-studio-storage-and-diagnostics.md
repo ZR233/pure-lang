@@ -4,8 +4,8 @@
 
 Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v4；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
-busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 通过 SQLite
-单 writer 事务串行化，snapshot、分页和设置查询共用该连接。
+busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
+write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
 
 所有 `read*` 查询严格无 mutation；测试注入 SQLite mutation counter 并验证重复 read 为零。
 Provider Usage 与 Updater 的 last-known cache 复用现有 `app_settings`，键分别为
@@ -31,12 +31,21 @@ runtime snapshot、agent outcome 或 durable event journal。
 
 ## 19.2 提交
 
-ThreadActor 向 ThreadRepository 提交窄 `ThreadMutation`。每次 mutation 在一个 SQLite 事务中
-校验 thread revision、更新涉及的 canonical 行并递增 revision；事务失败不更新 actor、不广播。
+ThreadActor 的内存 snapshot 是会话的唯一权威实例。每次 mutation 先更新内存、递增 revision
+并广播可观察事实，然后把 `ThreadCommit` 送入 persistence 队列，由后台 write-behind writer
+异步落库。writer drain 队列后把一批 commit 按 thread 分组，在单个 SQLite 事务中按提交顺序
+应用并校验 thread revision 连续性；内存是唯一 writer，落库冲突属于内部错误，必须上报并
+触发 actor resync，不得静默重试或丢弃。
 
-Item start 分配不可变 ordinal；delta 不写库；terminal 更新同一 Item 完整 payload。Turn terminal、
-shutdown 和 Interaction resolution 都等待事务完成。历史查询按 `(thread_id, turn_sequence)`
-keyset 分页，不使用 OFFSET。
+Flush 分为批量和 Immediate 两类：流式增量（Item start/terminal、trace、observation 等）按
+入队条数阈值或时间窗口批量落库；Turn 终态、durable input claim/consume、Interaction 提交与
+resolution、归档/重命名、conversation recovery、Task fatal terminalization 和 shutdown 属于
+Immediate flush 边界——内存先更新，但广播终态、调度 continuation 或关闭进程内 agent 之前
+必须等待包含该 commit 的事务完成。批窗口内尚未落库的流式增量在进程崩溃时可以丢弃；重启后
+以 SQLite 已提交状态为准恢复。数据库保持 `synchronous=FULL`，批量事务已摊薄 fsync 成本。
+
+Item start 分配不可变 ordinal；delta 不写库；terminal 更新同一 Item 完整 payload。历史查询按
+`(thread_id, turn_sequence)` keyset 分页，不使用 OFFSET。
 
 模型 transcript 与 Studio Timeline 分开持久化。`thread_context_segments` 按 Thread revision 保存
 `append | replace`：普通 checkpoint 只追加新增 `ModelContextItem` suffix；compaction、回滚或截断
@@ -45,7 +54,8 @@ keyset 分页，不使用 OFFSET。
 
 runtime 从每次 Thread transition 的提交前后 session 自动派生 transcript mutation；TurnFinished、
 rollover 和 child 注册不得以 `context=None` 丢弃已变化 transcript。Replace、session snapshot、
-Turn terminal 与 mailbox 状态在同一 SQLite 事务中提交，失败时整体回滚且 actor 不更新内存状态。
+Turn terminal 与 mailbox 状态在同一 SQLite 事务中提交；事务失败整体回滚并上报，由 resync
+收束内存与数据库的分叉。
 
 `thread_session_state` 每个 Thread 只有一行，replacement 保存 pinned working context、session note
 与 prompt generation 状态。Evidence Ledger 更新只覆盖这行的有界 working state，不复制完整
@@ -68,11 +78,12 @@ Task/WorkUnit owner、usage 和全部 Git/工作区状态。
 ReviewRound、完整 `TurnFailure`、Task disposition 与 resolved 状态；`task_runs.terminal_failure_id`
 固定首个 fatal failure。Recoverable failure 只在同一来源 Thread 成功开启后续 Turn 时解决，fatal
 failure 永不被迟到 child 事件覆盖。fatal terminalization 使用 SQLite immediate 事务串行化首胜、
-Task/children/lease 更新，数据库提交后才关闭进程内 agent。
+Task/children/lease 更新，属于 Immediate flush 边界，数据库提交后才关闭进程内 agent。
 
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
-`model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。完整 usage 必须先持久化成功，再发布
-runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
+`model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。Turn 终态聚合 usage 必须随 Immediate flush 持久化
+成功后，才发布 runtime usage 终态通知；turn 内增量 usage 通知跟随内存权威事实，落库由批量
+事务异步跟随。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
 当时保存的价格和币种，不能按当前 catalog 重新计算。
 
 usage 区分 prompt、缓存读取、缓存写入、completion 与 reasoning token。归一化时缓存读取与
@@ -129,5 +140,23 @@ attempt 日志目录，用于证明原始 prompt 只提交一次以及 recovery 
 与 Git fingerprint 保持不变。
 
 工具编排诊断仅暴露与 inference/Turn 关联的聚合数值和稳定 enum；schema、工具参数、工具结果、
-program 正文、caller 原始 JSON 与 cache key 均不进入日志或 Flutter timeline。compaction 指标只保存
+program 正文、caller 原始 JSON 与 cache key 均不得进入日志或 Flutter timeline。compaction 指标只保存
 替换前后 token 估算，不能保存被移除正文。
+
+## 19.6 内存驻留与目录索引
+
+启动只从 `threads` 表构建常驻内存目录索引（全部未归档 Thread 的列表元数据），它是会话列表
+查询与 `ThreadDirectoryChanged` 事件的唯一来源，由内存权威 mutation 同步维护，不重读数据库。
+`list_threads_page` 以 `(updated_at, id)` keyset cursor 从索引分页，`readStudioState` 快照只携带
+首页目录条目与窗口游标；SQLite 只在启动重建索引时参与。
+
+完整会话（transcript、working state、mailbox、Interaction）按需恢复：订阅、提交输入或 Task
+恢复引用时从 canonical 表加载并创建 ThreadActor；启动只为钉住集合（queued input、pending
+Interaction、活动 Task 引用）主动恢复。驻留 actor 由 manager 的 LRU 双端队列管理，订阅、提交
+或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无 pending input，超容量时从队首淘汰。
+淘汰前必须同步 flush 该 Thread 的全部 pending commits，被淘汰 Thread 保留目录索引与全部
+durable 状态，再次订阅时按需恢复。
+
+会话内容查询遵循同一窗口语义：Timeline 历史仍按 `(thread_id, turn_sequence)` keyset 分页从
+SQLite 读取，GUI 与 runtime 都不保留第二份完整历史；内存（GUI 已加载页或驻留 actor）未命中时
+一律回源 SQLite。

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
-use super::host::{AgentCommitObserver, ThreadRepository};
+use super::host::{AgentCommitObserver, CommitDurability, ThreadRepository};
 use super::state::{AgentRuntimeError, derive_activity, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
@@ -125,7 +125,10 @@ where
     }
 }
 
-async fn recover_interrupted_turns<H>(
+/// 收束恢复出的遗留 active Turn/Claimed input，并派生 `RecoveryCancelledTurn`。
+///
+/// 启动恢复与惰性驻留的按需恢复共用本函数。
+pub(crate) async fn recover_interrupted_turns<H>(
     host: &H,
     thread_events: &ThreadEventBusHandle,
     restored: Vec<RestoredAgentRuntime>,
@@ -236,6 +239,7 @@ where
             .repository()
             .commit(super::ThreadCommit {
                 agent_id: agent.state.snapshot.identity.id.clone(),
+                durability: CommitDurability::Immediate,
                 expected_revision: Some(expected_revision),
                 next_state: agent.state.clone(),
                 facts: super::DurableCommitFacts::from_state(

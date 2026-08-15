@@ -24,13 +24,44 @@ pub struct RestoredThreadSnapshot {
     pub snapshot: ThreadSnapshot,
 }
 
+/// Thread commit 的落库边界。
+///
+/// 内存 snapshot 是唯一权威实例；`Batched` 只入队、由后台 writer 批量落库，
+/// `Immediate` 额外等待包含该 commit 的批量事务完成后才返回。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitDurability {
+    Batched,
+    Immediate,
+}
+
+impl CommitDurability {
+    /// 按 runtime 事件类型推导默认落库边界。
+    ///
+    /// 输入队列、Turn 终态、注册与故障是 durable 边界；活动投影与普通状态
+    /// 变化属于流式增量。调用点可用显式标记覆盖默认值。
+    pub fn for_event(kind: &super::AgentRuntimeEventKind) -> Self {
+        match kind {
+            super::AgentRuntimeEventKind::Registered { .. }
+            | super::AgentRuntimeEventKind::TurnQueued { .. }
+            | super::AgentRuntimeEventKind::TurnStarted { .. }
+            | super::AgentRuntimeEventKind::ThreadOpened { .. }
+            | super::AgentRuntimeEventKind::TurnFinished { .. }
+            | super::AgentRuntimeEventKind::RecoveryCancelledTurn { .. }
+            | super::AgentRuntimeEventKind::Faulted { .. } => Self::Immediate,
+            super::AgentRuntimeEventKind::StateChanged { .. }
+            | super::AgentRuntimeEventKind::TurnActivityChanged { .. } => Self::Batched,
+        }
+    }
+}
+
 /// ThreadActor 的一次原子提交。
 ///
-/// 实现必须在单个事务内校验 revision 并写入涉及的 Thread、Turn、Item、Input、Interaction
-/// 与模型上下文。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
+/// 实现先把 commit 写入 write-behind 队列并按 [`CommitDurability`] 决定是否等待
+/// flush；内存 state 在 commit 返回 `Applied` 后由 runtime 更新并广播事件。
 #[derive(Debug, Clone)]
 pub struct ThreadCommit {
     pub agent_id: AgentId,
+    pub durability: CommitDurability,
     pub expected_revision: Option<u64>,
     pub next_state: ThreadActorState,
     pub facts: DurableCommitFacts,
@@ -199,7 +230,9 @@ impl AgentCommittedEvent {
 
 /// ThreadActor 使用的 canonical 存储端口。
 ///
-/// 实现者负责事务和 expected revision CAS，不得在返回 `Applied` 前广播事件。
+/// 内存 snapshot 是唯一权威实例：`commit` 先入队 write-behind writer，按
+/// `commit.durability` 决定是否等待 flush 完成后才返回 `Applied`；`flush_pending`
+/// 与 `pending_commit_count` 供淘汰和关机等待积压落库。
 pub trait ThreadRepository: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
@@ -207,10 +240,31 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
         &self,
     ) -> impl Future<Output = std::result::Result<Vec<RestoredAgentRuntime>, Self::Error>> + Send;
 
+    /// 按需恢复单个 Thread 的 durable runtime（惰性驻留）。
+    ///
+    /// `restore_runtime` 只返回启动钉住集合；未驻留 Thread 在订阅、提交输入
+    /// 或修复时通过本方法恢复。Thread 不存在或尚未注册 runtime 时返回 `None`。
+    fn restore_thread(
+        &self,
+        thread_id: &super::ThreadId,
+    ) -> impl Future<Output = std::result::Result<Option<RestoredAgentRuntime>, Self::Error>> + Send;
+
     fn commit(
         &self,
         commit: ThreadCommit,
     ) -> impl Future<Output = std::result::Result<ThreadCommitOutcome, Self::Error>> + Send;
+
+    /// 等待当前全部（或指定 Thread 的）pending commit 完成落库。
+    ///
+    /// LRU 淘汰与关机必须在 drop actor 之前调用；writer 已停止或存在不可恢复
+    /// 落库失败时返回错误。
+    fn flush_pending(
+        &self,
+        thread_id: Option<&super::ThreadId>,
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+
+    /// 当前尚未落库的 pending commit 数量，用于关机进度。
+    fn pending_commit_count(&self) -> usize;
 
     /// 读取某 agent 的 durable 阶段提交历史（含已关闭 agent）。
     ///

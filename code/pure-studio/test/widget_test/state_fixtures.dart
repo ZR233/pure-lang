@@ -189,7 +189,7 @@ StudioState _twoProjectState({
       : 'session-a';
   return _emptyState().copyWith(
     projectDirectory: ProjectDirectoryState(values: projects),
-    threadDirectory: ThreadDirectoryState(values: threads),
+    threadDirectory: ThreadDirectoryWindow(threads: threads),
     workspacesByThread: {
       for (final session in threads)
         session.id: ThreadWorkspace(
@@ -309,7 +309,7 @@ StudioState _studioStateFixture({
 }) {
   return StudioState(
     projectDirectory: ProjectDirectoryState(values: projects),
-    threadDirectory: ThreadDirectoryState(values: threads),
+    threadDirectory: ThreadDirectoryWindow(threads: threads),
     taskDirectory: TaskDirectoryState(
       values: [
         for (final entry in tasksByRootThread.entries)

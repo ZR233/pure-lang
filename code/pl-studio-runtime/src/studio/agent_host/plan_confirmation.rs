@@ -215,7 +215,9 @@ impl StudioPlanConfirmationProjector {
                     crate::studio::ids::unix_seconds(),
                 )
                 .await?;
-            self.product_events.emit_thread_directory().await?;
+            self.product_events
+                .emit_thread_delta_for(&[thread_id.to_string()])
+                .await?;
         }
         Ok(())
     }

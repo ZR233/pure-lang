@@ -3,6 +3,7 @@ part of 'studio_api.dart';
 abstract class StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog();
   Future<StudioState> readStudioState();
+  Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
   Future<void> activateProject(String projectId);
   Future<StudioProject> openProject(String path);
   Future<StudioThread> createThread(String projectId, {String? title});
@@ -28,6 +29,8 @@ abstract class StudioApi {
   });
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
+  Stream<StudioShutdownProgress> subscribeShutdownProgress();
+  Future<void> shutdownRuntime();
   Future<ThreadWorkspace> readThreadSnapshot(String threadId);
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
@@ -181,6 +184,26 @@ class FrbStudioApi implements StudioApi {
   Future<StudioState> readStudioState() async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(await _bridgeCall(frb.readStudioState));
+  }
+
+  @override
+  Future<ThreadDirectoryPage> listThreadsPage({
+    String? cursor,
+    int limit = 50,
+  }) async {
+    await _ensureReady();
+    final page = await _bridgeCall(
+      () => frb.listThreadsPage(
+        request: frb.BridgeListThreadsPageRequest(
+          cursor: cursor,
+          limit: limit.clamp(1, 100),
+        ),
+      ),
+    );
+    return ThreadDirectoryPage(
+      threads: page.threads.map(_threadFromFrb).toList(),
+      nextCursor: page.nextCursor,
+    );
   }
 
   @override
@@ -341,6 +364,37 @@ class FrbStudioApi implements StudioApi {
       await _bridgeCall(() => frb.readThread(threadId: threadId)),
     );
   }
+
+  @override
+  Stream<StudioShutdownProgress> subscribeShutdownProgress() {
+    // 冷流：监听即建立；关机期间 bridge 不取消该订阅（Rust 侧独立生命周期）。
+    return frb
+        .subscribeShutdownProgress()
+        .map(
+          (event) => StudioShutdownProgress(
+            phase: switch (event.phase) {
+              frb.BridgeShutdownPhase.stoppingSubscriptions =>
+                StudioShutdownPhase.stoppingSubscriptions,
+              frb.BridgeShutdownPhase.cancellingTurns =>
+                StudioShutdownPhase.cancellingTurns,
+              frb.BridgeShutdownPhase.flushingPersistence =>
+                StudioShutdownPhase.flushingPersistence,
+              frb.BridgeShutdownPhase.suspendingTasks =>
+                StudioShutdownPhase.suspendingTasks,
+              frb.BridgeShutdownPhase.stoppingMcp =>
+                StudioShutdownPhase.stoppingMcp,
+              frb.BridgeShutdownPhase.stoppingLsp =>
+                StudioShutdownPhase.stoppingLsp,
+              frb.BridgeShutdownPhase.stopped => StudioShutdownPhase.stopped,
+            },
+            pendingCommits: event.pendingCommits.toInt(),
+          ),
+        )
+        .handleError((Object error) => throw _studioFailure(error));
+  }
+
+  @override
+  Future<void> shutdownRuntime() => shutdownAndDispose();
 
   @override
   Future<PendingInteraction> respondInteraction(

@@ -39,6 +39,8 @@ abstract class SidebarView with _$SidebarView {
     required bool isBusy,
     required Map<String, StudioRecoveryIssue> projectRecoveryIssues,
     required Map<String, StudioRecoveryIssue> threadRecoveryIssues,
+    @Default(false) bool directoryHasMore,
+    @Default(false) bool directoryIsLoading,
   }) = _SidebarView;
 
   factory SidebarView.fromState(StudioState state) {
@@ -66,6 +68,8 @@ abstract class SidebarView with _$SidebarView {
       isBusy: state.isBusy,
       projectRecoveryIssues: projectRecoveryIssues,
       threadRecoveryIssues: threadRecoveryIssues,
+      directoryHasMore: state.threadDirectory.hasMore,
+      directoryIsLoading: state.threadDirectory.isLoading,
     );
   }
 }

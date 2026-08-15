@@ -22,12 +22,15 @@ mod mcp_health;
 mod plan_confirmation;
 mod prompt_runner;
 mod provider_usage;
+mod residency;
+mod shutdown_progress;
 mod skill_catalog;
 mod task_recovery;
 mod thread_service;
 mod updater;
 
 pub use provider_usage::{ProviderUsageRuntime, ProviderUsageStateSnapshot};
+pub use shutdown_progress::StudioShutdownProgressRuntime;
 pub use skill_catalog::{SkillCatalogRuntime, SkillsStateSnapshot};
 pub use updater::{StudioUpdateRuntime, StudioUpdateStateSnapshot};
 
@@ -86,6 +89,8 @@ pub struct StudioRuntime {
     config_runtime: ConfigRuntime,
     external_runtimes: StudioExternalRuntimes,
     agent_facility: StudioAgentFacility,
+    residency: residency::ThreadResidency,
+    shutdown_progress: StudioShutdownProgressRuntime,
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
     skills: SkillCatalogRuntime,
@@ -115,6 +120,10 @@ struct StudioAgentFacility {
     resources: StudioAgentResources,
     interactions: InteractionRuntime,
     product_events: StudioProductEventRuntime,
+    /// agent framework 的 write-behind writer 句柄；framework 被 take 后关机仍能排空。
+    persistence: std::sync::Arc<
+        tokio::sync::Mutex<Option<crate::studio::agent_host::StudioAgentRepository>>,
+    >,
 }
 
 #[derive(Clone, Default)]
@@ -319,7 +328,7 @@ impl StudioRuntime {
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_directory()
+            .emit_thread_delta_for(&thread_ids)
             .await?;
         let issues = self.recovery.remove_for_project(project_id);
         self.agent_facility

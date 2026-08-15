@@ -19,6 +19,11 @@ Controller 负责命令和订阅生命周期，不承担 timeline 投影。Widge
 shutdown future。该 future 顺序关闭 Agent、MCP 和 LSP，并等待所有后台子进程树退出；
 不得用未等待的 Dart callback 作为正常 GUI 退出路径。
 
+关闭请求先呈现不可关闭的关机阶段 overlay：订阅 typed `subscribeShutdownProgress` 进度流，
+按阶段（停止订阅、停止 Turn、保存会话、挂起任务、关闭 MCP、关闭 LSP）更新本地化文案与
+进度指示；`FlushingPersistence` 阶段必须等待 pending 落库归零后才进入下一阶段，关机完成的
+判定以进度流到达 `Stopped` 为准。updater 安装更新触发的 idle 关机复用同一进度流与 overlay。
+
 ## 11.2 Canonical state
 
 Flutter canonical state 只有：
@@ -38,7 +43,10 @@ Task DTO 中经过脱敏的相对 locator 和可展示状态，不能缓存后�
 `ThreadRuntimeSnapshot`。authoritative snapshot 总是整体替换一个 workspace；不得把 snapshot
 与旧 runtime、旧 Turn 或旧 Item overlay 混合。
 
-Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedAt。`ThreadWorkspace`
+Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedAt。GUI 内 Thread directory
+是有界分页窗口：只保存已加载页的条目、`nextCursor` 与 `hasMore`；侧栏触底通过
+`listThreadsPage` keyset cursor 继续加载，目录增量事件按 ThreadId 原位合并（新会话前置、
+归档移除），未加载条目的增量直接忽略。`ThreadWorkspace`
 中的 Thread 是归一化后的 directory 引用，不是第二份事实源：thread snapshot 只能替换 Turn、
 Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry，不能覆盖 directory。
 
@@ -70,7 +78,9 @@ snapshot 直接覆盖对应 workspace 的实时内容，但保留 product stream
 不维护 durable cursor 或 replay journal。
 
 历史通过 opaque keyset cursor 调用 `listThreadTurns` 向前分页。历史页只补充更旧的 Turn，
-不能覆盖 live snapshot 中相同身份的新 revision。
+不能覆盖 live snapshot 中相同身份的新 revision。已加载历史页超过上限时驱逐离当前视口
+最远的旧页，记录被驱逐页的边界 cursor 并做滚动偏移补偿；再次滚动进入已驱逐区域时以
+边界 cursor 回源重取——内存未命中一律从数据库读取，GUI 不保留第二份完整历史。
 
 ## 11.4 Timeline
 
@@ -200,11 +210,17 @@ directory 增量更新和 selected agent 重建时必须保留。
 
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
+- 侧栏分页窗口、触底加载与目录增量合并有 widget test；
+- 时间线历史驱逐、边界 cursor 回源与滚动补偿有 widget test；
+- 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
 - 空正文 provider failure、fatal/recoverable Task 状态、agent directory 错误保留与
   `task_complete` 门禁拒绝 message 有 widget test；
 - Flutter analyze、widget/integration tests 通过；
+- Flutter Driver 验收覆盖侧栏翻页到底、时间线驱逐回源与关机阶段序列；真实 runtime harness
+  在隔离 `PURE_STUDIO_HOME` 下验证 write-behind flush、pending 归零、二次启动数据完整与
+  进程树清理；
 - Skills 页进入不扫描目录，“重新发现”使用明确 command 并整体替换 catalog；
 - MCP/LSP 页刷新无副作用，reset/probe/repair 只由对应稳定控件触发并有 widget test；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、

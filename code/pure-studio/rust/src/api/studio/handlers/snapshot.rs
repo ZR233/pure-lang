@@ -8,6 +8,9 @@ use crate::api::studio::convert::settings::{provider_usage_dto, studio_settings_
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
 
+/// 聚合快照携带的 Thread 目录首页大小；后续页由 `listThreadsPage` 按需加载。
+const SNAPSHOT_THREAD_PAGE_LIMIT: usize = 50;
+
 /// Studio 聚合纯查询；只组合各 owner 已发布 snapshot 与 SQLite canonical facts。
 pub(super) async fn read_studio_state_inner(
     bridge: &'static BridgeRuntime,
@@ -21,7 +24,7 @@ pub(super) async fn read_studio_state_inner(
     let thread_directory = bridge
         .studio
         .product_events()
-        .read_thread_directory()
+        .read_thread_directory_page(None, SNAPSHOT_THREAD_PAGE_LIMIT)
         .await?;
     let task_directory = bridge.studio.product_events().read_task_directory().await?;
     let agent_directory = bridge.studio.product_events().read_agent_directory().await;
@@ -71,13 +74,14 @@ pub(super) async fn read_studio_state_inner(
                 .map(Into::into)
                 .collect(),
         },
-        thread_directory: BridgeThreadDirectoryState {
+        thread_directory: BridgeThreadDirectoryPage {
             meta: thread_directory.meta.into(),
             threads: thread_directory
                 .threads
                 .into_iter()
                 .map(bridge_thread)
                 .collect(),
+            next_cursor: thread_directory.next_cursor,
         },
         task_directory: BridgeTaskDirectoryState {
             meta: task_directory.meta.into(),

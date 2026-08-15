@@ -1,6 +1,6 @@
 use pl_trace::TraceEvent;
 
-use super::super::host::{ThreadProjectionCommit, transcript_mutation};
+use super::super::host::{CommitDurability, ThreadProjectionCommit, transcript_mutation};
 use super::super::state::{ActiveTurnActivity, AgentRuntimeError, derive_activity, unix_timestamp};
 use super::super::*;
 use super::commit::{CommitPublication, PendingCommit};
@@ -11,6 +11,7 @@ use crate::thread_event::{
 };
 
 pub(super) struct TransitionCommit {
+    durability_override: Option<CommitDurability>,
     next_state: ThreadActorState,
     thread_facts: Vec<ThreadNotificationFact>,
     submission: Option<super::super::ProgressSubmissionCommit>,
@@ -19,10 +20,17 @@ pub(super) struct TransitionCommit {
 impl TransitionCommit {
     pub(super) fn new(next_state: ThreadActorState) -> Self {
         Self {
+            durability_override: None,
             next_state,
             thread_facts: Vec::new(),
             submission: None,
         }
+    }
+
+    /// 显式覆盖按事件类型推导的落库边界；只用于 durable 边界调用点。
+    pub(super) fn immediate(mut self) -> Self {
+        self.durability_override = Some(CommitDurability::Immediate);
+        self
     }
 
     pub(super) fn with_thread_facts(mut self, thread_facts: Vec<ThreadNotificationFact>) -> Self {
@@ -73,6 +81,7 @@ where
         }
         let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
+        let durability = observation_durability(&observed.observation);
         let expected_revision = self.state.snapshot.revision;
         let current = self
             .runtime
@@ -108,6 +117,7 @@ where
                     thread_id: thread_id.clone(),
                 },
             )
+            .durability(durability)
             .publish(
                 CommitPublication::new(Some(thread_id), Some(turn_id))
                     .store_directory_snapshot()
@@ -201,6 +211,7 @@ where
         F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
     {
         let TransitionCommit {
+            durability_override,
             mut next_state,
             thread_facts,
             submission,
@@ -314,13 +325,29 @@ where
             .first()
             .and_then(notification_turn_id)
             .and_then(|value| TurnId::new(value.to_string()).ok());
+        let durability =
+            durability_override.unwrap_or_else(|| CommitDurability::for_event(&event.kind));
         self.commit_and_publish(
-            PendingCommit::new(next_state, facts, ThreadMutation::SnapshotAndQueue).publish(
-                CommitPublication::new(published_thread_id, published_turn_id)
-                    .with_runtime_event(event)
-                    .with_thread_notifications(committed_thread_events),
-            ),
+            PendingCommit::new(next_state, facts, ThreadMutation::SnapshotAndQueue)
+                .durability(durability)
+                .publish(
+                    CommitPublication::new(published_thread_id, published_turn_id)
+                        .with_runtime_event(event)
+                        .with_thread_notifications(committed_thread_events),
+                ),
         )
         .await
+    }
+}
+
+/// Interaction 的提交与 resolution 是 durable 边界；其余 observation 属于流式增量。
+fn observation_durability(observation: &TurnObservation) -> CommitDurability {
+    match observation {
+        TurnObservation::InteractionChanged { .. } => CommitDurability::Immediate,
+        TurnObservation::DirectoryChanged
+        | TurnObservation::RuntimeDelta(_)
+        | TurnObservation::TodoList(_)
+        | TurnObservation::ContextCompacted { .. }
+        | TurnObservation::Diagnostic => CommitDurability::Batched,
     }
 }

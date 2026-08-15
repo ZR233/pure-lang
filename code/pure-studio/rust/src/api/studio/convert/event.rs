@@ -24,9 +24,10 @@ pub(crate) fn bridge_product_event(
                 })
             }
             StudioProductEventKind::ThreadDirectoryChanged(state) => {
-                BridgeProductEventPayload::ThreadDirectoryChanged(BridgeThreadDirectoryState {
+                BridgeProductEventPayload::ThreadDirectoryChanged(BridgeThreadDirectoryDelta {
                     meta: state.meta.into(),
-                    threads: state.threads.into_iter().map(bridge_thread).collect(),
+                    upserted: state.upserted.into_iter().map(bridge_thread).collect(),
+                    removed: state.removed,
                 })
             }
             StudioProductEventKind::TaskDirectoryChanged(state) => {

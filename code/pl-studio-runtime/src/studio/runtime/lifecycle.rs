@@ -49,6 +49,8 @@ impl StudioRuntime {
         let lsp_state = super::lsp_state::LspStateRuntime::new(product_events.clone());
         Ok(Self {
             store,
+            residency: super::residency::ThreadResidency::new(),
+            shutdown_progress: super::StudioShutdownProgressRuntime::new(),
             config_runtime,
             external_runtimes: super::StudioExternalRuntimes {
                 mcp: McpRuntime::new(McpConnector::default()).handle(),
@@ -63,6 +65,7 @@ impl StudioRuntime {
                 framework: Default::default(),
                 resources: StudioAgentResources::default(),
                 interactions,
+                persistence: Default::default(),
                 product_events: product_events.clone(),
             },
             runtime_state,
@@ -170,6 +173,8 @@ impl StudioRuntime {
             self.agent_facility.product_events.clone(),
             self.skills.clone(),
         );
+        // 记录 host 内部 repository 句柄，让 framework 被 take 后关机仍能排空 write-behind 队列。
+        *self.agent_facility.persistence.lock().await = Some(host.persistence());
         let repaired_roles = self.store.repair_root_thread_roles().await?;
         if repaired_roles > 0 {
             tracing::warn!(
@@ -182,25 +187,44 @@ impl StudioRuntime {
                 .await
                 .map_err(|error| anyhow::anyhow!(error))?,
         );
+        *framework = Some(runtime.clone());
+        drop(framework);
+        // Pending wake/continuation 目标必须先驻留，attach 时 materialize 才不会
+        // 跳过（wake）或破坏性失败（executor continuation）。
+        let mut activation_targets = Vec::new();
+        for wake in self.store.list_pending_task_planner_wakes().await? {
+            activation_targets.push(wake.root_thread_id);
+        }
+        for continuation in self.store.list_pending_executor_continuations().await? {
+            activation_targets.push(continuation.agent_id);
+        }
+        for target in activation_targets {
+            // Box::pin 引入间接层，避免与 ensure_thread_agent 的 async 递归。
+            if let Err(error) = Box::pin(self.ensure_thread_agent(&target)).await {
+                tracing::warn!(
+                    thread_id = %target,
+                    error_bytes = error.to_string().len(),
+                    "failed to activate a durable wake target at startup"
+                );
+            }
+        }
         let handle = runtime.handle();
         runtime.host().attach_runtime(handle.clone()).await;
         handle
             .start_restored_inputs()
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        *framework = Some(runtime.clone());
         Ok(runtime)
     }
 
     /// 订阅 PL canonical Thread stream；首帧固定为 authoritative snapshot。
+    ///
+    /// 订阅是显式激活命令：未驻留的 Thread 在这里按需恢复。
     pub async fn subscribe_thread(
         &self,
         request: pl_protocol::ThreadSubscriptionRequest,
     ) -> Result<pl_core::ThreadEventSubscription> {
-        let (handle, _) = self
-            .try_get_thread_handle(&request.thread_id)
-            .await?
-            .context("runtimeNotActivated")?;
+        let (handle, _) = self.ensure_thread_agent(&request.thread_id).await?;
         let thread_id = request.thread_id.clone();
         let mut subscription = handle
             .subscribe_thread(request)
@@ -368,12 +392,9 @@ impl StudioRuntime {
             .product_events
             .initialize_directories()
             .await?;
+        // 惰性驻留：这里只启动 framework（restore_runtime 恢复钉住集合），
+        // 其余 Thread 在订阅、提交输入或修复时按需恢复。
         let _ = self.agent_framework().await?;
-        for project in self.store.list_projects().await? {
-            for thread in self.store.list_threads(&project.id).await? {
-                let _ = self.ensure_thread_agent(&thread.id).await?;
-            }
-        }
         self.start_mcp_health_watcher().await;
         self.start_lsp_state_watcher().await;
         self.start_mcp_reconcile_background().await?;
@@ -385,6 +406,85 @@ impl StudioRuntime {
             .product_events
             .emit_recovery_state(self.recovery.snapshot());
         self.runtime_snapshot().await
+    }
+
+    /// 淘汰超出 LRU 容量的空闲驻留 actor；淘汰前先排空 pending commits。
+    pub(super) async fn enforce_residency_limit(&self) {
+        let candidates = self.residency.over_capacity().await;
+        if candidates.is_empty() {
+            return;
+        }
+        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+            return;
+        };
+        let handle = framework.handle();
+        for thread_id in candidates {
+            let agent_id = match self.store.read_thread(&thread_id).await {
+                Ok(Some(record)) => match pl_core::AgentId::new(record.agent_path) {
+                    Ok(agent_id) => agent_id,
+                    Err(error) => {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            error_bytes = error.to_string().len(),
+                            "resident thread has an invalid agent path"
+                        );
+                        self.residency.remove(&thread_id).await;
+                        continue;
+                    }
+                },
+                Ok(None) => {
+                    // Thread 已删除/归档；从驻留队列清除。
+                    self.residency.remove(&thread_id).await;
+                    continue;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        thread_id = %thread_id,
+                        error_bytes = error.to_string().len(),
+                        "failed to read resident thread for eviction"
+                    );
+                    continue;
+                }
+            };
+            // busy 的候选移回队尾，等下一轮再试。
+            match handle.snapshot(agent_id.clone()).await {
+                Ok(snapshot)
+                    if snapshot.active_turn_id.is_none() && snapshot.pending_inputs == 0 =>
+                {
+                    if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
+                        && let Err(error) = repository.writer().flush().await
+                    {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            error_bytes = error.to_string().len(),
+                            "failed to flush pending commits before eviction; retrying later"
+                        );
+                        self.residency.touch(&thread_id).await;
+                        continue;
+                    }
+                    match handle.evict_agent(agent_id).await {
+                        Ok(()) => {
+                            self.residency.remove(&thread_id).await;
+                            tracing::debug!(
+                                thread_id = %thread_id,
+                                "evicted idle resident thread actor"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                thread_id = %thread_id,
+                                error_bytes = error.to_string().len(),
+                                "failed to evict idle resident thread actor"
+                            );
+                            self.residency.touch(&thread_id).await;
+                        }
+                    }
+                }
+                _ => {
+                    self.residency.touch(&thread_id).await;
+                }
+            }
+        }
     }
 
     /// 显式修复缺失的 Thread actor，并恢复其 durable mailbox/wake。
@@ -420,19 +520,77 @@ impl StudioRuntime {
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
+        // 阶段 1：订阅方自行消费进度流后由 bridge 取消订阅。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::StoppingSubscriptions, 0);
+        // 阶段 2：中断所有活动 Turn 并等待 actor 收束。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::CancellingTurns, 0);
         self.shutdown_agent_framework().await?;
+        // 阶段 3：等待 write-behind 全部 pending commit 落库；完成事件必须 pending=0。
+        let pending_before = self.pending_persistence_commits().await;
+        self.shutdown_progress.emit(
+            crate::StudioShutdownPhase::FlushingPersistence,
+            pending_before as u64,
+        );
+        if let Err(error) = self.flush_persistence().await {
+            tracing::error!(
+                error_bytes = error.to_string().len(),
+                "failed to drain write-behind persistence during shutdown"
+            );
+        }
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::FlushingPersistence, 0);
+        // 阶段 4：挂起 Task 协调。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::SuspendingTasks, 0);
         self.task_coordinator.suspend();
+        // 阶段 5：关闭 MCP。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::StoppingMcp, 0);
         self.stop_mcp_startup_reconcile().await;
         self.stop_mcp_health_watcher().await;
         self.stop_lsp_state_watcher().await;
         self.external_runtimes.mcp.shutdown().await;
         self.publish_mcp_stopped().await;
+        // 阶段 6：关闭 LSP。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::StoppingLsp, 0);
         self.external_runtimes.lsp.shutdown().await;
         self.external_runtimes.lsp_state.stopped().await;
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::Stopped, None)?;
+        // 阶段 7：终态。
+        self.shutdown_progress
+            .emit(crate::StudioShutdownPhase::Stopped, 0);
         self.runtime_snapshot().await
+    }
+
+    /// 订阅关机阶段进度；通道随 runtime 共享，并发 shutdown 共享同一次序列。
+    pub async fn subscribe_shutdown_progress(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::StudioShutdownProgress> {
+        self.shutdown_progress.subscribe()
+    }
+
+    /// 排空 agent framework 的 write-behind 队列并停止 writer。
+    async fn flush_persistence(&self) -> Result<()> {
+        let repository = self.agent_facility.persistence.lock().await.take();
+        if let Some(repository) = repository {
+            repository
+                .writer()
+                .shutdown()
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// 当前尚未落库的 pending commit 数量（关机进度用）。
+    pub async fn pending_persistence_commits(&self) -> usize {
+        let repository = self.agent_facility.persistence.lock().await.clone();
+        repository.map_or(0, |repository| repository.writer().pending_commit_count())
     }
 
     pub async fn shutdown(&self) {

@@ -18,6 +18,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarSessions => 'Sessions';
 
   @override
+  String get sidebarLoadingMore => 'Loading more sessions…';
+
+  @override
+  String get sidebarLoadError => 'Failed to load more sessions';
+
+  @override
+  String get shutdownTitle => 'Shutting down safely';
+
+  @override
+  String get shutdownPhaseStoppingSubscriptions => 'Stopping subscriptions';
+
+  @override
+  String get shutdownPhaseCancellingTurns => 'Stopping active turns';
+
+  @override
+  String get shutdownPhaseFlushingPersistence => 'Saving sessions';
+
+  @override
+  String get shutdownPhaseSuspendingTasks => 'Suspending background tasks';
+
+  @override
+  String get shutdownPhaseStoppingMcp => 'Stopping MCP servers';
+
+  @override
+  String get shutdownPhaseStoppingLsp => 'Stopping language servers';
+
+  @override
+  String get shutdownPhaseStopped => 'Shutdown complete';
+
+  @override
+  String shutdownPendingCommits(int count) {
+    return '$count commits pending';
+  }
+
+  @override
   String get sidebarCloseProject => 'Close project';
 
   @override

@@ -43,11 +43,12 @@ where
 
         let mut next = self.state.clone();
         next.snapshot.identity.role = role;
-        self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
-            AgentRuntimeEventKind::StateChanged {
+        self.commit_transition(
+            super::persist::TransitionCommit::new(next).immediate(),
+            |snapshot| AgentRuntimeEventKind::StateChanged {
                 snapshot: Box::new(snapshot),
-            }
-        })
+            },
+        )
         .await?;
         Ok(self.state.snapshot.clone())
     }
@@ -93,11 +94,12 @@ where
         closing.snapshot.active_turn_id = None;
         closing.active_input = None;
         if let Err(error) = self
-            .commit_transition(super::persist::TransitionCommit::new(closing), |snapshot| {
-                AgentRuntimeEventKind::StateChanged {
+            .commit_transition(
+                super::persist::TransitionCommit::new(closing).immediate(),
+                |snapshot| AgentRuntimeEventKind::StateChanged {
                     snapshot: Box::new(snapshot),
-                }
-            })
+                },
+            )
             .await
         {
             if let Err(rollback_error) = self.host.lifecycle().rollback_close(lease).await {
@@ -129,11 +131,12 @@ where
         closed.snapshot.active_turn_id = None;
         closed.snapshot.pending_inputs = 0;
         if let Err(error) = self
-            .commit_transition(super::persist::TransitionCommit::new(closed), |snapshot| {
-                AgentRuntimeEventKind::StateChanged {
+            .commit_transition(
+                super::persist::TransitionCommit::new(closed).immediate(),
+                |snapshot| AgentRuntimeEventKind::StateChanged {
                     snapshot: Box::new(snapshot),
-                }
-            })
+                },
+            )
             .await
         {
             let rollback = self.host.lifecycle().rollback_close(lease).await;
@@ -165,7 +168,7 @@ where
         let event_compensation = compensation;
         if let Err(error) = self
             .commit_transition(
-                super::persist::TransitionCommit::new(next),
+                super::persist::TransitionCommit::new(next).immediate(),
                 move |snapshot| match event_compensation {
                     CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged {
                         snapshot: Box::new(snapshot),

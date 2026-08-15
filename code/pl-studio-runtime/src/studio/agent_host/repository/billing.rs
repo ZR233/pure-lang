@@ -235,8 +235,8 @@ mod tests {
 
     use pl_core::{
         ActiveKind, AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId,
-        AgentSnapshot, DurableCommitFacts, ThreadActorState, ThreadContextState, ThreadId,
-        ThreadMutation, TurnId,
+        AgentSnapshot, CommitDurability, DurableCommitFacts, ThreadActorState, ThreadContextState,
+        ThreadId, ThreadMutation, TurnId,
     };
     use pl_protocol::{
         AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
@@ -508,6 +508,7 @@ mod tests {
         };
         ThreadCommit {
             agent_id: thread_id.clone(),
+            durability: CommitDurability::Immediate,
             expected_revision: None,
             next_state: state,
             facts: DurableCommitFacts {

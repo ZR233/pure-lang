@@ -6,10 +6,11 @@ use futures::FutureExt;
 
 use crate::StudioMode;
 use crate::config::StudioRole;
-use crate::studio::agent_host::root_agent_id;
+use crate::studio::agent_host::{StudioAgentRepository, root_agent_id};
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
 use crate::studio::{ThreadKind, ThreadRecord};
+use pl_core::ThreadRepository as _;
 
 use super::{
     StudioResolveInteractionResponse, StudioRuntime, StudioStopPromptResponse,
@@ -224,18 +225,14 @@ impl StudioRuntime {
         }
 
         for thread_record in missing.into_iter().rev() {
-            let registration = self
-                .thread_agent_registration(&handle, thread_record)
-                .await?;
-            match handle.register(registration).await {
-                Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
-                Err(error) => return Err(anyhow::anyhow!(error)),
-            }
+            self.ensure_thread_resident(&handle, thread_record).await?;
         }
         handle
             .snapshot(target_agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
+        self.residency.touch(thread_id).await;
+        self.enforce_residency_limit().await;
         crate::studio::agent_host::materialize_pending_task_planner_wakes(
             &handle,
             &self.store,
@@ -243,6 +240,45 @@ impl StudioRuntime {
         )
         .await?;
         Ok((handle, target_agent_id))
+    }
+
+    /// 让单个缺失的 Thread 驻留：已注册过 runtime 的走 durable 恢复，
+    /// 从未注册的沿用初始注册（空 session）。
+    async fn ensure_thread_resident(
+        &self,
+        handle: &pl_core::AgentRuntimeHandle,
+        thread_record: ThreadRecord,
+    ) -> Result<()> {
+        let registered = self
+            .store
+            .read_thread_runtime_revision(&thread_record.id)
+            .await?
+            > 0;
+        if registered {
+            let repository = StudioAgentRepository::for_reads(self.store.clone());
+            let thread_id = pl_core::ThreadId::new(thread_record.id.clone())?;
+            let Some(restored) = repository.restore_thread(&thread_id).await? else {
+                anyhow::bail!(
+                    "Thread {} has a corrupt durable session and cannot be activated",
+                    thread_record.id
+                );
+            };
+            match handle.restore_agent(restored).await {
+                Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
+                Err(error) => return Err(anyhow::anyhow!(error)),
+            }
+            self.residency.touch(&thread_record.id).await;
+            return Ok(());
+        }
+        let registration = self
+            .thread_agent_registration(handle, thread_record.clone())
+            .await?;
+        match handle.register(registration).await {
+            Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
+            Err(error) => return Err(anyhow::anyhow!(error)),
+        }
+        self.residency.touch(&thread_record.id).await;
+        Ok(())
     }
 
     async fn thread_agent_registration(

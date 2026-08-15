@@ -1,4 +1,4 @@
-use super::super::host::initial_transcript_mutation;
+use super::super::host::{CommitDurability, initial_transcript_mutation};
 use super::super::state::derive_activity;
 use super::super::{AgentIdentity, AgentLifecycleState, ThreadActorState};
 use super::*;
@@ -35,6 +35,7 @@ where
         .repository()
         .commit(ThreadCommit {
             agent_id: id.clone(),
+            durability: CommitDurability::Immediate,
             expected_revision: None,
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(
@@ -171,6 +172,7 @@ where
         .repository()
         .commit(ThreadCommit {
             agent_id: child_id.clone(),
+            durability: CommitDurability::Immediate,
             expected_revision: None,
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(
@@ -297,6 +299,7 @@ where
         .repository()
         .commit(ThreadCommit {
             agent_id: state.snapshot.identity.id.clone(),
+            durability: CommitDurability::Immediate,
             expected_revision: Some(expected_revision),
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(

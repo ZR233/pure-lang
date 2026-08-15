@@ -1,7 +1,7 @@
 use pl_protocol::ThreadNotificationEnvelope;
 use pl_trace::TraceEvent;
 
-use super::super::host::{AgentCommitObserver, ThreadRepository};
+use super::super::host::{AgentCommitObserver, CommitDurability, ThreadRepository};
 use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeHost, AgentRuntimeResult,
@@ -66,8 +66,9 @@ impl CommitPublication {
     }
 }
 
-/// 已准备完成、等待 repository CAS 的提交命令。
+/// 已准备完成、待入队 write-behind 队列的提交命令。
 pub(super) struct PendingCommit {
+    durability: CommitDurability,
     next_state: ThreadActorState,
     facts: DurableCommitFacts,
     mutation: ThreadMutation,
@@ -81,11 +82,18 @@ impl PendingCommit {
         mutation: ThreadMutation,
     ) -> Self {
         Self {
+            durability: CommitDurability::Batched,
             next_state,
             facts,
             mutation,
             publication: None,
         }
+    }
+
+    /// 覆盖默认落库边界；只在 durable 边界调用点使用。
+    pub(super) fn durability(mut self, durability: CommitDurability) -> Self {
+        self.durability = durability;
+        self
     }
 
     pub(super) fn publish(mut self, publication: CommitPublication) -> Self {
@@ -98,10 +106,11 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
-    /// 统一执行 repository CAS 与提交后的状态/事件发布模板。
+    /// 统一执行 write-behind 入队与提交后的状态/事件发布模板。
     ///
-    /// 调用方负责准备领域 state、facts 与 mutation；本方法保证只有 durable
-    /// commit 返回 `Applied` 后才替换 actor 状态并广播可观察事实。
+    /// 调用方负责准备领域 state、facts 与 mutation；本方法先把 commit 送入
+    /// repository（`Immediate` 边界会等待 flush 完成），返回 `Applied` 后才替换
+    /// 内存权威状态并广播可观察事实。
     pub(super) async fn commit_and_publish(
         &mut self,
         commit: PendingCommit,
@@ -117,6 +126,7 @@ where
             .repository()
             .commit(ThreadCommit {
                 agent_id: commit.next_state.snapshot.identity.id.clone(),
+                durability: commit.durability,
                 expected_revision: Some(expected_revision),
                 next_state: commit.next_state.clone(),
                 facts: commit.facts,

@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     Arc,
     atomic::{AtomicI64, AtomicU64, Ordering},
 };
 
 use anyhow::Result;
-use pl_protocol::ObservedStateMeta;
+use pl_protocol::{ObservedStateMeta, Thread};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::{
@@ -13,15 +13,21 @@ use crate::{
     StudioAgentDirectoryState, StudioLspStateSnapshot, StudioMcpStateSnapshot,
     StudioProductEventEnvelope, StudioProductEventKind, StudioProjectDirectoryState,
     StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot, StudioTaskDirectoryEntry,
-    StudioTaskDirectoryState, StudioThreadDirectoryState, StudioUpdateStateSnapshot,
+    StudioTaskDirectoryState, StudioThreadDirectoryDelta, StudioThreadDirectoryPage,
+    StudioThreadDirectoryState, StudioUpdateStateSnapshot,
 };
 
 use super::{StudioStore, ids::unix_seconds};
 
+/// Thread directory 分页的默认页大小上限。
+const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
+
 /// Studio 低频产品状态 owner 与事件通道。
 ///
-/// SQLite 仍是 project/thread/task 的 canonical facts；本类型只持有各目录的单调 revision、
-/// agent live directory 以及 transport。所有 `read_*` 都是纯查询。
+/// SQLite 是 project/thread/task 的 canonical facts；`threads` 的列表元数据在启动时
+/// 建成常驻内存目录索引，此后由增量 mutation 同步维护——目录查询与
+/// `ThreadDirectoryChanged` 事件都从索引派生，不重读数据库。其余目录只持有单调
+/// revision、agent live directory 与 transport。所有 `read_*` 都是纯查询。
 #[derive(Clone)]
 pub struct StudioProductEventRuntime {
     store: StudioStore,
@@ -30,6 +36,8 @@ pub struct StudioProductEventRuntime {
     revisions: Arc<ProductStateRevisions>,
     task_snapshot: Arc<Mutex<Option<Vec<StudioTaskDirectoryEntry>>>>,
     agents: Arc<Mutex<BTreeMap<String, StudioAgentDirectoryEntry>>>,
+    /// 常驻内存 Thread 目录索引（thread id → 列表元数据）。
+    thread_index: Arc<std::sync::Mutex<HashMap<String, Thread>>>,
 }
 
 #[derive(Default)]
@@ -57,6 +65,7 @@ impl StudioProductEventRuntime {
             revisions: Arc::new(ProductStateRevisions::default()),
             task_snapshot: Arc::new(Mutex::new(None)),
             agents: Arc::new(Mutex::new(BTreeMap::new())),
+            thread_index: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -80,7 +89,7 @@ impl StudioProductEventRuntime {
         envelope
     }
 
-    /// 启动命令显式建立目录初始 revision；普通 read 不会改变 revision。
+    /// 启动命令显式建立目录初始 revision 与内存目录索引；普通 read 不改变 revision。
     pub async fn initialize_directories(&self) -> Result<()> {
         self.initialize_revision(&self.revisions.project);
         self.initialize_revision(&self.revisions.thread);
@@ -88,17 +97,19 @@ impl StudioProductEventRuntime {
         self.initialize_revision(&self.revisions.agent);
         self.initialize_revision(&self.revisions.recovery);
         *self.task_snapshot.lock().await = Some(self.load_tasks().await?);
+        let index_threads = self.load_index_threads().await?;
+        let mut index = self
+            .thread_index
+            .lock()
+            .expect("thread index lock poisoned");
+        index.clear();
+        for thread in index_threads {
+            index.insert(thread.id.clone(), thread);
+        }
         Ok(())
     }
 
-    pub async fn read_project_directory(&self) -> Result<StudioProjectDirectoryState> {
-        Ok(StudioProjectDirectoryState {
-            meta: self.meta(&self.revisions.project),
-            projects: self.store.list_projects().await?,
-        })
-    }
-
-    pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
+    async fn load_index_threads(&self) -> Result<Vec<Thread>> {
         let mut threads = Vec::new();
         for project in self.store.list_projects().await? {
             threads.extend(
@@ -109,10 +120,119 @@ impl StudioProductEventRuntime {
                     .map(Into::into),
             );
         }
+        Ok(threads)
+    }
+
+    pub async fn read_project_directory(&self) -> Result<StudioProjectDirectoryState> {
+        Ok(StudioProjectDirectoryState {
+            meta: self.meta(&self.revisions.project),
+            projects: self.store.list_projects().await?,
+        })
+    }
+
+    pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
         Ok(StudioThreadDirectoryState {
             meta: self.meta(&self.revisions.thread),
-            threads,
+            threads: self.sorted_thread_index(),
         })
+    }
+
+    /// 从内存目录索引按 `(updatedAt, id)` 倒序 keyset 分页。
+    pub async fn read_thread_directory_page(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<StudioThreadDirectoryPage> {
+        let limit = limit.clamp(1, THREAD_DIRECTORY_PAGE_LIMIT);
+        let threads = self.sorted_thread_index();
+        let remaining = match cursor.and_then(decode_thread_cursor) {
+            Some(cursor_key) => threads
+                .into_iter()
+                .skip_while(|thread| thread_cursor_key(thread) >= cursor_key)
+                .collect::<Vec<_>>(),
+            None => threads,
+        };
+        let has_more = remaining.len() > limit;
+        let page = remaining.into_iter().take(limit).collect::<Vec<_>>();
+        let next_cursor = if has_more {
+            page.last().map(encode_thread_cursor)
+        } else {
+            None
+        };
+        Ok(StudioThreadDirectoryPage {
+            meta: self.meta(&self.revisions.thread),
+            threads: page,
+            next_cursor,
+        })
+    }
+
+    /// 应用一次目录增量并发布 `ThreadDirectoryChanged` 事件。
+    pub async fn apply_thread_delta(
+        &self,
+        upserted: Vec<Thread>,
+        removed: Vec<String>,
+    ) -> Result<StudioProductEventEnvelope> {
+        {
+            let mut index = self
+                .thread_index
+                .lock()
+                .expect("thread index lock poisoned");
+            for thread in &upserted {
+                index.insert(thread.id.clone(), thread.clone());
+            }
+            for id in &removed {
+                index.remove(id);
+            }
+        }
+        self.bump(&self.revisions.thread);
+        Ok(self.emit(StudioProductEventKind::ThreadDirectoryChanged(
+            StudioThreadDirectoryDelta {
+                meta: self.meta(&self.revisions.thread),
+                upserted,
+                removed,
+            },
+        )))
+    }
+
+    /// 重读受影响 Thread 的 canonical 行并发布目录增量（归档/删除按移除处理）。
+    ///
+    /// 直接 store mutation（创建、归档、重命名、状态修复）之后调用；actor 的
+    /// write-behind 提交由 observer 路径维护索引。
+    pub async fn emit_thread_delta_for(&self, thread_ids: &[String]) -> Result<()> {
+        let mut upserted = Vec::new();
+        let mut removed = Vec::new();
+        for id in thread_ids {
+            match self.store.read_thread(id).await? {
+                Some(record)
+                    if record.visibility != crate::studio::records::ThreadVisibility::Archived =>
+                {
+                    upserted.push(record.into())
+                }
+                _ => removed.push(id.clone()),
+            }
+        }
+        if upserted.is_empty() && removed.is_empty() {
+            return Ok(());
+        }
+        self.apply_thread_delta(upserted, removed).await?;
+        Ok(())
+    }
+
+    fn sorted_thread_index(&self) -> Vec<Thread> {
+        let mut threads = self
+            .thread_index
+            .lock()
+            .expect("thread index lock poisoned")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        threads.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        threads
     }
 
     pub async fn read_task_directory(&self) -> Result<StudioTaskDirectoryState> {
@@ -137,12 +257,6 @@ impl StudioProductEventRuntime {
         self.bump(&self.revisions.project);
         let state = self.read_project_directory().await?;
         Ok(self.emit(StudioProductEventKind::ProjectDirectoryChanged(state)))
-    }
-
-    pub async fn emit_thread_directory(&self) -> Result<StudioProductEventEnvelope> {
-        self.bump(&self.revisions.thread);
-        let state = self.read_thread_directory().await?;
-        Ok(self.emit(StudioProductEventKind::ThreadDirectoryChanged(state)))
     }
 
     pub fn emit_agent_directory(
@@ -272,5 +386,102 @@ impl StudioProductEventRuntime {
         } else {
             ObservedStateMeta::ready(revision, updated_at)
         }
+    }
+}
+
+type ThreadCursorKey = (i64, String);
+
+fn thread_cursor_key(thread: &Thread) -> ThreadCursorKey {
+    (thread.updated_at, thread.id.clone())
+}
+
+fn encode_thread_cursor(thread: &Thread) -> String {
+    format!("v1:{}:{}", thread.updated_at, thread.id)
+}
+
+fn decode_thread_cursor(cursor: &str) -> Option<ThreadCursorKey> {
+    let rest = cursor.strip_prefix("v1:")?;
+    let (updated_at, id) = rest.split_once(':')?;
+    Some((updated_at.parse().ok()?, id.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn seed_directory_threads(count: i64) -> StudioProductEventRuntime {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let runtime = StudioProductEventRuntime::new(store.clone());
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("pure-directory-{unique}"));
+        let project = store.upsert_project(&workspace).await.expect("project");
+        for index in 0..count {
+            store
+                .create_thread(
+                    &project.id,
+                    &format!("Session {index}"),
+                    crate::StudioMode::Simple,
+                )
+                .await
+                .expect("thread");
+        }
+        runtime.initialize_directories().await.expect("directories");
+        runtime
+    }
+
+    #[tokio::test]
+    async fn thread_directory_page_walks_keyset_cursor_without_overlap() {
+        let runtime = seed_directory_threads(7).await;
+        let first = runtime
+            .read_thread_directory_page(None, 3)
+            .await
+            .expect("first page");
+        assert_eq!(first.threads.len(), 3);
+        let cursor = first.next_cursor.expect("first page has more");
+
+        let second = runtime
+            .read_thread_directory_page(Some(&cursor), 3)
+            .await
+            .expect("second page");
+        assert_eq!(second.threads.len(), 3);
+        assert_ne!(
+            second.threads.first().unwrap().id,
+            first.threads.last().unwrap().id
+        );
+
+        let cursor = second.next_cursor.expect("second page has more");
+        let third = runtime
+            .read_thread_directory_page(Some(&cursor), 3)
+            .await
+            .expect("third page");
+        assert_eq!(third.threads.len(), 1);
+        assert!(third.next_cursor.is_none());
+
+        let all = runtime.read_thread_directory().await.expect("full read");
+        assert_eq!(all.threads.len(), 7);
+    }
+
+    #[tokio::test]
+    async fn thread_delta_updates_index_and_emits_removed_ids() {
+        let runtime = seed_directory_threads(1).await;
+        let threads = runtime.read_thread_directory().await.expect("read");
+        let thread = threads.threads.first().expect("seeded thread").clone();
+
+        runtime
+            .apply_thread_delta(Vec::new(), vec![thread.id.clone()])
+            .await
+            .expect("delta");
+        let after = runtime.read_thread_directory().await.expect("read");
+        assert!(after.threads.is_empty());
+
+        let page = runtime
+            .read_thread_directory_page(None, 10)
+            .await
+            .expect("page");
+        assert!(page.threads.is_empty());
+        assert!(page.next_cursor.is_none());
     }
 }

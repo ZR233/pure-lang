@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/frb/studio_api.dart';
+import '../data/repositories/studio_api_provider.dart';
 import '../features/settings/settings.dart';
 import '../features/shell/studio_shell.dart';
 import '../features/update/studio_update_controller.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/studio_l10n.dart';
+import 'studio_shutdown.dart';
 import 'theme/material3_theme.dart';
 
 class PureStudioApp extends StatelessWidget {
@@ -39,13 +40,15 @@ class PureStudioApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: _router,
+          builder: (context, child) =>
+              StudioShutdownOverlay(child: child ?? const SizedBox()),
         ),
       ),
     );
   }
 }
 
-class StudioLifecycleCoordinator extends StatefulWidget {
+class StudioLifecycleCoordinator extends ConsumerStatefulWidget {
   const StudioLifecycleCoordinator({
     required this.child,
     this.shutdown,
@@ -56,11 +59,12 @@ class StudioLifecycleCoordinator extends StatefulWidget {
   final Future<void> Function()? shutdown;
 
   @override
-  State<StudioLifecycleCoordinator> createState() =>
+  ConsumerState<StudioLifecycleCoordinator> createState() =>
       _StudioLifecycleCoordinatorState();
 }
 
-class _StudioLifecycleCoordinatorState extends State<StudioLifecycleCoordinator>
+class _StudioLifecycleCoordinatorState
+    extends ConsumerState<StudioLifecycleCoordinator>
     with WidgetsBindingObserver {
   Future<void>? _shutdownFuture;
 
@@ -90,9 +94,16 @@ class _StudioLifecycleCoordinatorState extends State<StudioLifecycleCoordinator>
     super.dispose();
   }
 
+  /// 幂等共享同一个 shutdown future；默认路径先呈现关机阶段 overlay，
+  /// 等待 write-behind 落库排空（FlushingPersistence pending=0）后才放行退出。
   Future<void> _shutdown() {
-    return _shutdownFuture ??=
-        (widget.shutdown ?? FrbStudioApi.shutdownAndDispose)();
+    return _shutdownFuture ??= (widget.shutdown ?? _defaultShutdown)();
+  }
+
+  Future<void> _defaultShutdown() {
+    final api = ref.read(studioApiProvider);
+    final progress = ref.read(studioShutdownProgressStateProvider.notifier);
+    return runStudioShutdown(api, progress.update);
   }
 
   @override

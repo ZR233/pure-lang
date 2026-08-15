@@ -12,8 +12,10 @@ ThreadManager 管理 registry、容量和 spawn/close。ThreadHandle 查表后�
 snapshot 和 progress 命令直接发给目标 ThreadActor。只有 spawn/close 修改全局目录。
 
 ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像、活动 RunningTurn、取消
-identity、live Item overlay 和当前 prompt generation/context baseline。它不缓存完整历史，也不
-拥有 Task/worktree；context baseline 只用于生成模型输入差量，不能成为 runtime 事实源。
+identity、live Item overlay 和当前 prompt generation/context baseline。它的内存 snapshot 是该
+会话的唯一权威实例，SQLite 由 write-behind 批量事务异步跟随（持久化语义见 19.2，驻留策略见
+19.6）。它不缓存完整历史，也不拥有 Task/worktree；context baseline 只用于生成模型输入差量，
+不能成为 runtime 事实源。
 
 Agent activity 不再是调用方可独立写入的状态轴。公开形状固定为：
 
@@ -24,15 +26,15 @@ Idle | Queued | Active(Running | WaitingTool | WaitingInteraction) | Cancelling
 ThreadActor 在每次 commit 前从 lifecycle、RunningTurn.kind/cancelling 与 pending triggering input
 派生 activity，优先级为：active cancellation → Cancelling，active Turn → Active(kind)，无 active
 Turn 且存在 triggering input → Queued，其余 → Idle；非 Active lifecycle 不保留活动投影。调用方
-不能直接修改 snapshot.activity。trace/tool/interaction 只更新 RunningTurn.kind，并在同一次
-repository CAS 中提交 `TurnActivityChanged` runtime event 与新 snapshot。这样 durable snapshot、
-directory watch 和产品投影共享一个提交点，重启恢复只从 active Turn 与 pending input 重建，不
+不能直接修改 snapshot.activity。trace/tool/interaction 只更新 RunningTurn.kind，并在同一次内存
+commit 中提交 `TurnActivityChanged` runtime event 与新 snapshot。这样 durable snapshot、directory
+watch 和产品投影共享一个内存提交点，重启恢复只从 active Turn 与 pending input 重建，不
 维护第二份 activity truth。
 
 所有改变 canonical session 的 Thread transition 都由 runtime 根据提交前后 session 自动派生
 `Append | Replace | None`，调用方不能在 transcript 已变化时省略 context mutation。child 注册若
 携带非空初始 transcript，必须写 replacement baseline；工作上下文与 child snapshot 同次提交。
-TurnFinished/rollover 提交成功之前不得发布终态或调度 continuation。
+TurnFinished/rollover 的 Immediate flush 完成之前不得发布终态或调度 continuation。
 
 产品可通过受限命令重配置 idle ThreadActor 的 role。该命令要求 lifecycle Active、没有活动 Turn、
 active input 或 pending input，并通过 repository CAS 持久化 identity 与发布 directory revision；
@@ -42,13 +44,15 @@ active input 或 pending input，并通过 repository CAS 持久化 identity 与
 
 pl-core 只保留三个窄端口：
 
-- `ThreadRepository`：以 expected revision 在单库事务中提交 Thread/Turn/Item/Input/Interaction
-  mutation，并读取启动恢复所需状态。
+- `ThreadRepository`：接收 Thread/Turn/Item/Input/Interaction mutation 写入 write-behind 队列
+  （Immediate 边界等待 flush 完成后返回），提供 pending 查询与按需 flush，并读取惰性恢复所需
+  状态。
 - `TurnFactory`：准备 TurnEngine、request、instructions、tools 与 execution policy。
 - `ChildLifecycle`：为 child Thread 准备/释放产品外部资源；Task 实现可以拒绝不安全的 close。
 
-通知由 pl-core 在 repository 事务成功后直接发布，不经过额外 durable projection 或 replay
-journal。Task tool 自己事务性写 TaskService；core 不携带 product mutation。
+通知由 pl-core 在内存 state 更新后直接发布，不经过额外 durable projection 或 replay
+journal；只有 Immediate 边界（Turn 终态、Interaction 提交与 resolution 等）等待 flush 完成后
+才发布终态事实。Task tool 自己事务性写 TaskService；core 不携带 product mutation。
 
 TurnFactory 为每次 turn 提供 typed `AgentWorkspace { root, boundary, mutability }`。Studio 通过
 durable owner 解析 workspace：root/explorer 绑定 Project，executor 绑定 WorkUnit worktree，
@@ -61,7 +65,7 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 RunningTurn 包含 turnId、进程内 identity、当前 ActiveKind、CancellationToken、abort handle、done
 和 steer sender。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
-abort；终态数据库事务成功后才能广播 turnCompleted。
+abort；Turn 终态的 Immediate flush 完成后才能广播 turnCompleted。
 
 产品提交的 `StartOrQueue` 输入可以携带通用 queue coalescing key。Thread idle 并准备下一 Turn
 时，只合并队首连续、key 相同且仍为 pending 的输入：最后一条决定新 Turn identity，较早输入作为
@@ -71,12 +75,12 @@ checkpoint 才 consume；进程在 checkpoint 前崩溃时仍可从 durable inpu
 coalescing key 属于 runtime envelope 元数据，不进入自然语言提示词或工具 schema。
 
 Studio 使用专门的 durable interaction continuation 命令。`request_user_input` 产生 typed
-`InteractionRequested` observation；ThreadActor 必须先在 repository 事务中提交 pending
-Interaction，才允许原 Turn terminal。UserInput 回答和 PlanConfirmation `ContinuePlanning` 都由
-ThreadActor 在一个 `ThreadCommit` 中同时提交 resolved Interaction、mail ID 为
-`interaction-resolution:{interactionId}` 的 hidden input 和 `TurnQueued` runtime fact。该命令固定
+`InteractionRequested` observation；ThreadActor 必须先把 pending Interaction 与原 Turn 终态一起
+通过 Immediate flush 持久化，才允许原 Turn terminal。UserInput 回答和 PlanConfirmation
+`ContinuePlanning` 都由 ThreadActor 在一个 `ThreadCommit` 中同时提交 resolved Interaction、mail ID
+为 `interaction-resolution:{interactionId}` 的 hidden input 和 `TurnQueued` runtime fact。该命令固定
 采用 StartOrQueue，不读取 `active_turn_id` 猜测进程内 waiter，不 steer 活动 Turn，也不设置 queue
-coalescing key。repository 失败时内存 state、Interaction projection 与 mailbox 都保持提交前状态；
+coalescing key。Interaction 提交与 resolution 属于 Immediate flush 边界，落库失败上报并 resync；
 重复命令以 pending/resolved Interaction 与稳定 mail ID 幂等收束。PlanConfirmation 的 fresh Turn
 仍继承 Planner `RequiredTool(plan_exit)`，调整完成后必须再次产生新的确认。
 
@@ -91,14 +95,16 @@ active Turn 时，把 pending Interaction 与随后的 `EndTurn` 一起提交，
 mail ID 的 durable hidden input 在 fresh Turn 继续，绝不复活已 terminal 的 origin Turn 或
 覆盖无关 Turn。普通 `budgetLimited` 不触发 continuation；预算续轮必须由产品状态机另行授权。
 
-重启无法恢复物理连接。repository 在 manager 启动前收束遗留 active Turn/Item、恢复 queued
-input 和 pending Interaction；manager 只创建 idle ThreadActor。任何恢复路径都不自动执行模型。
+重启无法恢复物理连接。repository 在 manager 启动前收束钉住集合遗留的 active Turn/Item、恢复
+queued input 和 pending Interaction；manager 只为钉住集合创建 idle ThreadActor，其余 Thread 惰性
+驻留（见 19.6），订阅、提交输入或 Task 恢复引用时按需恢复。任何恢复路径都不自动执行模型。
 
 ThreadActor 另外提供 idle-only 的 conversation recovery 命令。Preview 读取 canonical session、
 working state、Turn 消费的 mailbox input 与 runtime/session revision，不产生 mutation；Apply 同时
 校验 expected runtime revision 与 expected session revision，并以 recoveryId 幂等。恢复时 transcript
 replacement、working state、recovery marker、Thread revision 和通知必须由同一个 `ThreadCommit`
-提交；提交冲突时 actor 不更新内存。
+提交；conversation recovery 属于 Immediate flush 边界，内存是唯一 writer 不存在进程内冲突，
+落库失败上报并 resync。
 
 恢复模式为 `rewindTail | rebuildThread`。前者只接受经 user-message hash 和 tool 配对证明的安全
 前缀，后者只重建普通 transcript。两者均保留 Timeline、usage、session note、Evidence Ledger 和
@@ -106,13 +112,17 @@ replacement、working state、recovery marker、Thread revision 和通知必须�
 恢复后的新 Turn 只能由显式 durable input 启动，conversation recovery 本身不自动执行模型。
 
 Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `readThreadSnapshot` 只能读取
-repository 与已存在 actor 的 live overlay；actor 不存在时返回 inactive，不能为了观察而注册、
-修 role 或投递 durable wake。连接 disposed/closed 时 Driver 可以重建 transport 并再次纯读；tap、
-输入、prompt submit、计划确认、恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取
-canonical postcondition，且 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
+repository 与已驻留 actor 的 live overlay；actor 未驻留时返回 inactive，不触发恢复、不改 role、
+不投递 durable wake。`subscribeThread` 是显式激活命令，未驻留 Thread 经订阅按需恢复；连接
+disposed/closed 时 Driver 可以重建 transport 并再次纯读；tap、输入、prompt submit、计划确认、
+恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取 canonical postcondition，且
+Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
 
-启动 command 负责注册所有未归档 durable Thread 并 materialize pending wake。运行中 actor 缺失
-只有 `repairThreadRuntime(threadId)` 可以修复；read/subscribe 返回 typed inactive/not-activated。
+启动 command 负责建立全部未归档 durable Thread 的目录索引（见 19.6），只为钉住集合 materialize
+pending wake。运行中 actor 缺失由 `repairThreadRuntime(threadId)` 或订阅/提交输入按需恢复；
+`readThreadSnapshot` 对未驻留 Thread 仍返回 typed inactive，不产生副作用。驻留 actor 由 manager
+的 LRU 双端队列管理：订阅、提交或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无
+pending input，超容量时从队首淘汰，淘汰前同步 flush 该 Thread 的全部 pending commits。
 
 ## 17.4 Agent control plane
 

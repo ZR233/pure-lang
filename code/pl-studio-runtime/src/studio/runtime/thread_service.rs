@@ -13,11 +13,13 @@ impl StudioRuntime {
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
         let project = self.store.upsert_project(path).await?;
+        let mut created_ids = Vec::new();
         if self.store.list_root_threads(&project.id).await?.is_empty() {
-            let _ = self
+            let thread = self
                 .store
                 .create_thread(&project.id, "新会话", StudioMode::Simple)
                 .await?;
+            created_ids.push(thread.id);
         }
         self.agent_facility
             .product_events
@@ -25,7 +27,7 @@ impl StudioRuntime {
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_directory()
+            .emit_thread_delta_for(&created_ids)
             .await?;
         Ok(project)
     }
@@ -41,7 +43,7 @@ impl StudioRuntime {
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_directory()
+            .emit_thread_delta_for(std::slice::from_ref(&thread.id))
             .await?;
         Ok(thread)
     }
@@ -82,20 +84,25 @@ impl StudioRuntime {
         }
         let archived = self.store.archive_thread(&thread_id).await?;
         if let Some(thread) = &archived {
+            let mut delta_ids: Vec<String> = thread_tree
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect();
             if self
                 .store
                 .list_root_threads(&thread.project_id)
                 .await?
                 .is_empty()
             {
-                let _ = self
+                let fallback = self
                     .store
                     .create_thread(&thread.project_id, "新会话", StudioMode::Simple)
                     .await?;
+                delta_ids.push(fallback.id);
             }
             self.agent_facility
                 .product_events
-                .emit_thread_directory()
+                .emit_thread_delta_for(&delta_ids)
                 .await?;
         }
         Ok(archived)
@@ -117,11 +124,11 @@ impl StudioRuntime {
                 bail!("project has an active turn");
             }
         }
-        for thread_id in thread_ids {
+        for thread_id in &thread_ids {
             let emitter = self.interaction_emitter(thread_id.clone());
             self.agent_facility
                 .interactions
-                .cancel_thread(&thread_id, "project archived", emitter)
+                .cancel_thread(thread_id, "project archived", emitter)
                 .await?;
         }
         let archived = self.store.archive_project(project_id).await?;
@@ -132,7 +139,7 @@ impl StudioRuntime {
                 .await?;
             self.agent_facility
                 .product_events
-                .emit_thread_directory()
+                .emit_thread_delta_for(&thread_ids)
                 .await?;
         }
         Ok(archived)
@@ -185,7 +192,7 @@ impl StudioRuntime {
         }
         self.agent_facility
             .product_events
-            .emit_thread_directory()
+            .emit_thread_delta_for(&[thread_id.to_string()])
             .await?;
         Ok(())
     }
