@@ -114,6 +114,11 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 - `cargo xtask verify-gui` 必须复用 `check-gui-generated`，PR、默认分支和正式发布 CI
   只调用 xtask 入口，不在 workflow 中复制生成器命令。生成后存在 Git 差异时检查必须失败，
   并提示提交生成器产生的结果，而不是指导开发者手工修补生成文件。
+- CI 质量门禁（PR Quality Gate）只运行确定性检查：Rust fmt/clippy/test、
+  `cargo xtask verify-gui`、Conventional PR 标题和发布配置校验。Flutter Driver
+  smoke、任务流 harness 与 live 模型验收不在 CI 中运行，交付前在本地 Windows
+  环境执行；AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
+  可通过（pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
 - xtask 中的生成输出规则是 Git 一致性检查和生成文件规范化的共同事实来源。新增生成器或
   输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。
 

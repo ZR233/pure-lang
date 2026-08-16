@@ -141,14 +141,26 @@
 - 测试名称表达场景和期望；优先比较完整对象并使用 `pretty_assertions::assert_eq!` 获得清晰 diff。
 - 测试 helper 只服务测试时放在测试模块或专用测试模块，不为测试方便扩大生产 API。
 - 避免在测试中修改进程环境变量；确需修改时必须隔离并恢复。
-- 按改动范围执行相关检查，常用根目录命令：
+- 提交前在本地执行与 CI 门禁一致的检查清单（只需保证当前环境通过；
+  `PUB_HOSTED_URL` 镜像导致的 pubspec.lock hosted URL 差异由 xtask 自动
+  规范化为 pub.dev canonical，无需手工处理）：
 
   ```powershell
   cargo fmt --all --check
-  cargo clippy --workspace --all-targets --all-features -- -D warnings
-  cargo test --workspace --all-features
-  cargo doc --workspace --all-features --no-deps
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test --workspace
+  cargo xtask verify-gui
   ```
+
+- 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
+  API key，需要时以 `cargo test -p pl-core --features live-tests` 等显式
+  opt-in 执行，CI 与本地默认检查都不包含。
+- CI（PR Quality Gate）只运行上述确定性检查，外加 Conventional PR 标题与发布
+  配置校验；Flutter Driver smoke、任务流 harness 与 live 模型验收不在 CI 中
+  运行——涉及 GUI 行为改动时，交付前本地执行 `cargo xtask verify-gui
+  --integration`，交互验收使用 `cargo xtask run-gui --demo --driver` 与对应
+  harness。
+- `cargo doc --workspace --all-features --no-deps` 为按需检查项，CI 不执行。
 
 - Flutter、Dart、GUI 和生成文件检查统一使用前文定义的项目命令入口；验收时结合 widget tree、窗口截图和日志判断结果。
 - 交付前运行 `git diff --check`，确认无意外生成文件、无范围外改动，并在总结中列出实际执行的测试、未执行项及原因。
