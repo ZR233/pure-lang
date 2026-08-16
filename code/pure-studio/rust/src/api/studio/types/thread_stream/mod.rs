@@ -60,6 +60,8 @@ pub struct BridgeThreadSnapshot {
     pub thread: BridgeThread,
     pub active_turn: Option<BridgeTurn>,
     pub items: Vec<BridgeThreadItem>,
+    /// 更旧历史的回源锚点（窗口首 Turn 的 id，before 语义）；None 表示无更旧内容。
+    pub history_cursor: Option<String>,
     pub interactions: Vec<BridgeInteractionRequest>,
     pub runtime: Option<BridgeThreadRuntimeSnapshot>,
     pub runtime_availability: BridgeThreadRuntimeAvailability,

@@ -9,6 +9,9 @@ use crate::studio::entity::{item, turn};
 use crate::studio::store::StudioStore;
 
 impl StudioStore {
+    /// 按 turn ordinal 倒序 keyset 分页。cursor 是业务锚点（turn id）：
+    /// 取锚点 turn 的 ordinal 做 before 过滤，客户端可从已加载窗口的
+    /// 首条内容直接派生回源位置，无需理解或存储服务端编码。
     pub(crate) async fn list_thread_turns(
         &self,
         thread_id: &str,
@@ -16,12 +19,20 @@ impl StudioStore {
         limit: usize,
     ) -> Result<ThreadTurnPage> {
         let limit = limit.clamp(1, 200);
-        let before_ordinal = cursor.map(parse_cursor).transpose()?;
         let mut query = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id))
             .order_by_desc(turn::Column::Ordinal);
-        if let Some(before_ordinal) = before_ordinal {
-            query = query.filter(turn::Column::Ordinal.lt(before_ordinal));
+        if let Some(anchor_turn_id) = cursor {
+            let anchor_ordinal = turn::Entity::find()
+                .filter(turn::Column::Id.eq(anchor_turn_id))
+                .filter(turn::Column::ThreadId.eq(thread_id))
+                .select_only()
+                .column(turn::Column::Ordinal)
+                .into_tuple::<i64>()
+                .one(&self.db)
+                .await?
+                .with_context(|| format!("unknown Thread turn cursor {anchor_turn_id}"))?;
+            query = query.filter(turn::Column::Ordinal.lt(anchor_ordinal));
         }
         let mut models = query
             .limit(u64::try_from(limit.saturating_add(1))?)
@@ -60,21 +71,10 @@ impl StudioStore {
             });
         }
         let next_cursor = has_more
-            .then(|| models.last().map(|turn| encode_cursor(turn.ordinal)))
+            .then(|| models.last().map(|turn| turn.id.clone()))
             .flatten();
         Ok(ThreadTurnPage { turns, next_cursor })
     }
-}
-
-fn encode_cursor(ordinal: i64) -> String {
-    format!("v1:{ordinal:x}")
-}
-
-fn parse_cursor(cursor: &str) -> Result<i64> {
-    let value = cursor
-        .strip_prefix("v1:")
-        .context("invalid Thread cursor")?;
-    i64::from_str_radix(value, 16).context("invalid Thread cursor")
 }
 
 fn turn_record(model: &turn::Model) -> Result<Turn> {
@@ -120,4 +120,80 @@ fn turn_record(model: &turn::Model) -> Result<Turn> {
         updated_at: model.updated_at,
         completed_at: model.completed_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StudioMode;
+    use sea_orm::{ActiveModelTrait, Set};
+
+    async fn seed_turn(store: &StudioStore, thread_id: &str, ordinal: i64) {
+        turn::ActiveModel {
+            id: Set(format!("turn-{ordinal}")),
+            thread_id: Set(thread_id.to_string()),
+            ordinal: Set(ordinal),
+            revision: Set(1),
+            status: Set("completed".to_string()),
+            phase: Set(None),
+            reason: Set(None),
+            model_json: Set(None),
+            usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+            failure_json: Set(None),
+            budget_limit_json: Set(None),
+            rollover_compacted: Set(0),
+            rollover_compaction_error: Set(None),
+            metadata_json: Set(None),
+            started_at: Set(Some(ordinal)),
+            updated_at: Set(ordinal),
+            completed_at: Set(Some(ordinal)),
+        }
+        .insert(&store.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_thread_turns_pages_by_turn_id_anchor() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let workspace = std::env::temp_dir().join("history-anchor-test-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let project = store.upsert_project(&workspace).await.unwrap();
+        let thread = store
+            .create_thread(&project.id, "History anchor", StudioMode::Simple)
+            .await
+            .unwrap();
+        for ordinal in 1..=5 {
+            seed_turn(&store, &thread.id, ordinal).await;
+        }
+
+        // 无锚点：从最新方向取一页；next_cursor 是更旧方向下一页锚点（turn id）。
+        let first = store.list_thread_turns(&thread.id, None, 2).await.unwrap();
+        let ids: Vec<&str> = first.turns.iter().map(|t| t.turn.id.as_str()).collect();
+        assert_eq!(ids, ["turn-5", "turn-4"]);
+        assert_eq!(first.next_cursor.as_deref(), Some("turn-4"));
+
+        // 锚点是 before 语义：严格早于锚点 ordinal 的 turns。
+        let second = store
+            .list_thread_turns(&thread.id, Some("turn-4"), 2)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = second.turns.iter().map(|t| t.turn.id.as_str()).collect();
+        assert_eq!(ids, ["turn-3", "turn-2"]);
+        assert_eq!(second.next_cursor.as_deref(), Some("turn-2"));
+
+        let last = store
+            .list_thread_turns(&thread.id, Some("turn-2"), 2)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = last.turns.iter().map(|t| t.turn.id.as_str()).collect();
+        assert_eq!(ids, ["turn-1"]);
+        assert_eq!(last.next_cursor, None);
+
+        // 锚点限定同一线程：他线程的同名锚点视为未知。
+        let error = store
+            .list_thread_turns("thread-other", Some("turn-2"), 2)
+            .await;
+        assert!(error.is_err());
+    }
 }

@@ -83,26 +83,32 @@ fn thread_notification(
     }))
 }
 
+/// wire 快照的 item 窗口上限（低于 GUI 侧历史窗口上限，留出加载余量）。
+/// 超过后按整 Turn 从最旧方向截断，被截内容经 `history_cursor` 回源。
+const SNAPSHOT_ITEM_WINDOW: usize = 400;
+
 pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThreadSnapshot> {
     let runtime_availability = if value.runtime.is_some() {
         BridgeThreadRuntimeAvailability::Active
     } else {
         BridgeThreadRuntimeAvailability::Inactive
     };
-    let items = value
+    let all_items = value
         .items
         .into_iter()
         .map(bridge_thread_item)
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .flatten()
-        .collect();
+        .collect::<Vec<_>>();
+    let (items, history_cursor) = snapshot_item_window(all_items);
     Ok(BridgeThreadSnapshot {
         schema_version: value.schema_version,
         revision: value.revision,
         thread: bridge_thread(value.thread),
         active_turn: value.active_turn.map(bridge_turn),
         items,
+        history_cursor,
         interactions: value
             .interactions
             .into_iter()
@@ -111,6 +117,25 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
         runtime: value.runtime.map(runtime_snapshot),
         runtime_availability,
     })
+}
+
+/// 按 item 窗口上限截断快照；窗口起点回退到整 Turn 边界，锚点 Turn 完整保留。
+/// `history_cursor` 是窗口首 Turn 的 id：以它做 before 锚点回源恰好取回被截段。
+fn snapshot_item_window(
+    mut items: Vec<BridgeThreadItem>,
+) -> (Vec<BridgeThreadItem>, Option<String>) {
+    if items.len() <= SNAPSHOT_ITEM_WINDOW {
+        return (items, None);
+    }
+    let mut start = items.len() - SNAPSHOT_ITEM_WINDOW;
+    while start > 0 && items[start - 1].turn_id == items[start].turn_id {
+        start -= 1;
+    }
+    if start == 0 {
+        return (items, None);
+    }
+    let cursor = items[start].turn_id.clone();
+    (items.split_off(start), Some(cursor))
 }
 
 pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
@@ -501,6 +526,52 @@ mod tests {
         ];
         let bridged = bridge_thread_snapshot(snapshot).unwrap();
         assert_eq!(bridged.items.len(), 1);
+    }
+
+    #[test]
+    fn snapshot_window_truncates_on_turn_boundaries_with_history_cursor() {
+        let mut snapshot = ThreadSnapshot::empty("thread-1");
+        snapshot.items = (0..500)
+            .map(|ordinal| window_item(ordinal, format!("turn-{}", ordinal / 2)))
+            .collect();
+        let bridged = bridge_thread_snapshot(snapshot).unwrap();
+        // 截断到窗口上限；锚点 Turn 的 items 完整保留，锚点即窗口首 Turn。
+        assert_eq!(bridged.items.len(), 400);
+        assert_eq!(bridged.history_cursor.as_deref(), Some("turn-50"));
+        assert_eq!(bridged.items.first().unwrap().turn_id, "turn-50");
+        assert_eq!(bridged.items.last().unwrap().turn_id, "turn-249");
+    }
+
+    #[test]
+    fn small_snapshots_carry_no_history_cursor() {
+        let mut snapshot = ThreadSnapshot::empty("thread-1");
+        snapshot.items = vec![
+            window_item(0, "turn-0".to_string()),
+            window_item(1, "turn-1".to_string()),
+        ];
+        let bridged = bridge_thread_snapshot(snapshot).unwrap();
+        assert_eq!(bridged.items.len(), 2);
+        assert_eq!(bridged.history_cursor, None);
+    }
+
+    fn window_item(ordinal: u64, turn_id: String) -> ThreadItem {
+        ThreadItem {
+            id: format!("item-{ordinal}"),
+            thread_id: "thread-1".to_string(),
+            turn_id,
+            ordinal,
+            revision: 1,
+            status: ThreadItemStatus::Completed,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: Some(1),
+            error: None,
+            content: ThreadItemContent::UserMessage {
+                text: format!("message {ordinal}"),
+                attachments: Vec::new(),
+            },
+            usage: None,
+        }
     }
 
     fn item(content: ThreadItemContent) -> ThreadItem {

@@ -5211,6 +5211,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadSnapsho
             <Vec<crate::api::studio::types::thread_stream::BridgeThreadItem>>::sse_decode(
                 deserializer,
             );
+        let mut var_historyCursor = <Option<String>>::sse_decode(deserializer);
         let mut var_interactions = <Vec<
             crate::api::studio::types::thread_stream::BridgeInteractionRequest,
         >>::sse_decode(deserializer);
@@ -5227,6 +5228,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadSnapsho
             thread: var_thread,
             active_turn: var_activeTurn,
             items: var_items,
+            history_cursor: var_historyCursor,
             interactions: var_interactions,
             runtime: var_runtime,
             runtime_availability: var_runtimeAvailability,
@@ -10556,6 +10558,7 @@ impl flutter_rust_bridge::IntoDart
             self.thread.into_into_dart().into_dart(),
             self.active_turn.into_into_dart().into_dart(),
             self.items.into_into_dart().into_dart(),
+            self.history_cursor.into_into_dart().into_dart(),
             self.interactions.into_into_dart().into_dart(),
             self.runtime.into_into_dart().into_dart(),
             self.runtime_availability.into_into_dart().into_dart(),
@@ -13869,6 +13872,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadSnapsho
         <Vec<crate::api::studio::types::thread_stream::BridgeThreadItem>>::sse_encode(
             self.items, serializer,
         );
+        <Option<String>>::sse_encode(self.history_cursor, serializer);
         <Vec<crate::api::studio::types::thread_stream::BridgeInteractionRequest>>::sse_encode(
             self.interactions,
             serializer,

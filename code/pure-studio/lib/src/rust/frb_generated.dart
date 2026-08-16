@@ -4778,20 +4778,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThreadSnapshot dco_decode_bridge_thread_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeThreadSnapshot(
       schemaVersion: dco_decode_u_32(arr[0]),
       revision: dco_decode_u_64(arr[1]),
       thread: dco_decode_bridge_thread(arr[2]),
       activeTurn: dco_decode_opt_box_autoadd_bridge_turn(arr[3]),
       items: dco_decode_list_bridge_thread_item(arr[4]),
-      interactions: dco_decode_list_bridge_interaction_request(arr[5]),
+      historyCursor: dco_decode_opt_String(arr[5]),
+      interactions: dco_decode_list_bridge_interaction_request(arr[6]),
       runtime: dco_decode_opt_box_autoadd_bridge_thread_runtime_snapshot(
-        arr[6],
+        arr[7],
       ),
       runtimeAvailability: dco_decode_bridge_thread_runtime_availability(
-        arr[7],
+        arr[8],
       ),
     );
   }
@@ -9086,6 +9087,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_thread = sse_decode_bridge_thread(deserializer);
     var var_activeTurn = sse_decode_opt_box_autoadd_bridge_turn(deserializer);
     var var_items = sse_decode_list_bridge_thread_item(deserializer);
+    var var_historyCursor = sse_decode_opt_String(deserializer);
     var var_interactions = sse_decode_list_bridge_interaction_request(
       deserializer,
     );
@@ -9101,6 +9103,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       thread: var_thread,
       activeTurn: var_activeTurn,
       items: var_items,
+      historyCursor: var_historyCursor,
       interactions: var_interactions,
       runtime: var_runtime,
       runtimeAvailability: var_runtimeAvailability,
@@ -13385,6 +13388,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_thread(self.thread, serializer);
     sse_encode_opt_box_autoadd_bridge_turn(self.activeTurn, serializer);
     sse_encode_list_bridge_thread_item(self.items, serializer);
+    sse_encode_opt_String(self.historyCursor, serializer);
     sse_encode_list_bridge_interaction_request(self.interactions, serializer);
     sse_encode_opt_box_autoadd_bridge_thread_runtime_snapshot(
       self.runtime,
