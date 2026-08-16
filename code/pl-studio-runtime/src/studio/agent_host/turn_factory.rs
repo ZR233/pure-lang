@@ -7,6 +7,9 @@ use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
 };
+use pl_core::tool::{
+    NamespaceDescriptor, ToolEntry, ToolRegistry, ToolSourceId, ToolSourceMetadata,
+};
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
     CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
@@ -31,6 +34,8 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     store: StudioStore,
     config_runtime: ConfigRuntime,
     mcp_runtime: McpRuntimeHandle,
+    /// 与 MCP worker 共享的工具注册表；MCP 工具按 generation 发布于此。
+    mcp_shared_tools: std::sync::Arc<ToolRegistry>,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     coordinator: Arc<TaskCoordinator>,
@@ -44,6 +49,7 @@ impl StudioAgentTurnFactory {
         store: StudioStore,
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
+        mcp_shared_tools: std::sync::Arc<ToolRegistry>,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         coordinator: Arc<TaskCoordinator>,
@@ -54,6 +60,7 @@ impl StudioAgentTurnFactory {
             store,
             config_runtime,
             mcp_runtime,
+            mcp_shared_tools,
             lsp_runtime,
             interactions,
             coordinator,
@@ -200,6 +207,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_skills_config(config.skills.clone())
             .with_skill_catalog(skill_catalog.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
+        if config.runtime.tool_capabilities.mcp {
+            builder = builder.with_shared_tool_registry(self.mcp_shared_tools.clone());
+        }
         if let Some(effort) = route.effort {
             builder = builder.with_effort(effort);
         }
@@ -229,14 +239,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 active_task_run.as_ref(),
             );
         }
-        let mcp_lease = self.mcp_runtime.acquire_turn_lease().await?;
-        let active_mcp_servers = mcp_lease.server_ids().to_vec();
+        let active_mcp_servers = self.mcp_runtime.available_server_names().await;
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
         let active_lsp_servers = self
             .lsp_runtime
             .active_server_names_for_workspace(&workspace_root)
             .await;
-        mcp_lease.install(&mut engine)?;
 
         let mut policy = studio_execution_policy(
             &context.snapshot,
@@ -252,9 +260,23 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         // 所有 agent（含 Task planner）共享同一套协作基础能力。send_message 统一
         // 作为 parent→direct-child 调度原语；子代理向主代理的报告改由 durable
         // 阶段提交 + read_agent_submissions 主动查询承载。
-        for tool in collaboration.tools() {
-            engine.register_tool(tool);
-        }
+        let collaboration_source = ToolSourceId::collaboration();
+        let collaboration_entries = collaboration
+            .tools()
+            .into_iter()
+            .map(|tool| {
+                ToolEntry::from_arc(
+                    tool,
+                    ToolSourceMetadata::new(collaboration_source.clone()).with_namespace(
+                        NamespaceDescriptor::new(
+                            "agents",
+                            "Subagent discovery, messaging, waiting, and lifecycle tools.",
+                        ),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        engine.register_source_tools(collaboration_source, collaboration_entries)?;
 
         let attachment_ids = context
             .input

@@ -11,7 +11,10 @@ use super::{
     ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
-use crate::tool::{FunctionToolDefinition, RegisteredTool, SubagentContext, ToolExecutionResult};
+use crate::tool::{
+    FunctionToolDefinition, NamespaceDescriptor, RegisteredTool, SubagentContext, ToolEntry,
+    ToolExecutionResult, ToolSourceId, ToolSourceMetadata,
+};
 use crate::turn::ToolEffect;
 use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
 
@@ -87,34 +90,81 @@ impl TaskCoordinator {
         if active_task_run.is_none() {
             return;
         }
+        // Task 协调工具统一发布到 task 来源（task 命名空间，延迟加载）。
+        let source = ToolSourceId::task();
+        let metadata = || {
+            ToolSourceMetadata::new(source.clone()).with_namespace(NamespaceDescriptor::new(
+                "task",
+                "Task coordination, review, delivery, and completion tools.",
+            ))
+        };
+        let mut entries = Vec::new();
         if snapshot.identity.parent_id.is_none() {
             // planner 复用框架统一的 send_message（parent→direct-child）调度子代理；
             // 不再注册 Task 专用 send_message。
-            core.register_tool(self.task_spawn_executor_tool(thread_id, runtime.clone()));
-            core.register_tool(self.task_update_design_tool(thread_id));
-            core.register_tool(self.task_record_merge_tool(thread_id, runtime.clone()));
-            core.register_tool(self.task_request_delivery_review_tool(thread_id, runtime.clone()));
-            core.register_tool(
+            entries.push(ToolEntry::new(
+                self.task_spawn_executor_tool(thread_id, runtime.clone()),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_update_design_tool(thread_id),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_record_merge_tool(thread_id, runtime.clone()),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_request_delivery_review_tool(thread_id, runtime.clone()),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
                 self.task_request_integrated_review_tool(thread_id, runtime.clone()),
-            );
-            core.register_tool(self.task_status_tool(thread_id, Some(runtime.clone())));
-            core.register_tool(self.read_review_round_tool(thread_id));
-            core.register_tool(self.read_review_file_coverage_tool(thread_id));
-            core.register_tool(self.task_complete_tool(thread_id));
-            core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
-            return;
-        }
-        match snapshot.identity.role.as_str() {
-            "executor" => {
-                core.register_tool(self.report_completion_tool(runtime));
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_status_tool(thread_id, Some(runtime.clone())),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.read_review_round_tool(thread_id),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.read_review_file_coverage_tool(thread_id),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_complete_tool(thread_id),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
+                self.task_stop_tool(thread_id, runtime.clone()),
+                metadata(),
+            ));
+        } else {
+            match snapshot.identity.role.as_str() {
+                "executor" => {
+                    entries.push(ToolEntry::new(
+                        self.report_completion_tool(runtime),
+                        metadata(),
+                    ));
+                }
+                "reviewer" => {
+                    entries.push(ToolEntry::new(
+                        self.read_review_file_coverage_tool(thread_id),
+                        metadata(),
+                    ));
+                    entries.push(ToolEntry::new(
+                        self.review_exit_tool(thread_id, Some(runtime)),
+                        metadata(),
+                    ));
+                }
+                "explorer" | "planner" => {}
+                _ => {}
             }
-            "reviewer" => {
-                core.register_tool(self.read_review_file_coverage_tool(thread_id));
-                core.register_tool(self.review_exit_tool(thread_id, Some(runtime)));
-            }
-            "explorer" | "planner" => {}
-            _ => {}
         }
+        let _ = core.register_source_tools(source, entries);
     }
 
     pub(crate) fn report_completion_tool(

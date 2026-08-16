@@ -106,6 +106,8 @@ pub struct StudioRuntime {
 #[derive(Clone)]
 struct StudioExternalRuntimes {
     mcp: McpRuntimeHandle,
+    /// MCP worker 与全部 Turn engine 共享的工具注册表。
+    mcp_shared_tools: std::sync::Arc<pl_core::ToolRegistry>,
     mcp_state: mcp_health::McpStateRuntime,
     mcp_startup_reconcile: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
