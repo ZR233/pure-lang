@@ -129,7 +129,7 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
           rows: workspace.timelineRows,
           turn: workspace.turn,
           isLoading: workspace.isLoading,
-          hasOlderHistory: history?.hasMore ?? false,
+          hasOlderHistory: history?.hasOlder ?? false,
           isLoadingOlderHistory: history?.isLoading ?? false,
         );
       }),

@@ -202,19 +202,19 @@ class WorkspaceUiState {
     this.composer = const ComposerThreadState.idle(),
     this.syncState = AgentWorkspaceSyncState.loading,
     this.subscriptionGeneration = 0,
-    this.history = const ThreadHistoryPagingState.initial(),
+    this.history = const ThreadHistoryWindow(),
   });
 
   final ComposerThreadState composer;
   final AgentWorkspaceSyncState syncState;
   final int subscriptionGeneration;
-  final ThreadHistoryPagingState history;
+  final ThreadHistoryWindow history;
 
   WorkspaceUiState copyWith({
     ComposerThreadState? composer,
     AgentWorkspaceSyncState? syncState,
     int? subscriptionGeneration,
-    ThreadHistoryPagingState? history,
+    ThreadHistoryWindow? history,
   }) {
     return WorkspaceUiState(
       composer: composer ?? this.composer,
@@ -226,42 +226,31 @@ class WorkspaceUiState {
   }
 }
 
-class ThreadHistoryPagingState {
-  const ThreadHistoryPagingState({
-    required this.nextCursor,
-    required this.hasMore,
-    required this.isLoading,
-    required this.isLoaded,
+/// 已加载时间线窗口的分页状态。
+///
+/// 窗口内容就是 workspace.items；向旧方向回源的锚点永远从
+/// `items.first.turnId` 现场派生（服务器 cursor 即 Turn id 的 before 语义），
+/// 因此这里不保存任何 cursor 或页簿记——items 变化不可能让本状态漂移。
+/// [epoch] 是窗口代际：快照重建窗口时递增，用于作废在途的历史页响应。
+class ThreadHistoryWindow {
+  const ThreadHistoryWindow({
+    this.hasOlder = false,
+    this.isLoading = false,
+    this.epoch = 0,
     this.errorMessage,
-    this.boundaryCursors = const [],
-    this.pageSizes = const [],
-    this.loadedItems = 0,
   });
 
-  const ThreadHistoryPagingState.initial()
-    : nextCursor = null,
-      hasMore = true,
-      isLoading = false,
-      isLoaded = false,
-      errorMessage = null,
-      boundaryCursors = const [],
-      pageSizes = const [],
-      loadedItems = 0;
+  /// 窗口最旧一端之外是否还有可回源的历史。
+  final bool hasOlder;
 
-  final String? nextCursor;
-  final bool hasMore;
+  /// 一次向旧方向的回源请求是否在途。
   final bool isLoading;
-  final bool isLoaded;
+
+  /// 窗口代际；快照重建时递增。
+  final int epoch;
+
+  /// 最近一次回源失败的信息；成功后清空。
   final String? errorMessage;
-
-  /// 每个已加载历史页的请求 cursor；栈首=最新页，栈尾=最旧页。
-  final List<String?> boundaryCursors;
-
-  /// 每个已加载历史页的 item 数量，与 [boundaryCursors] 一一对应。
-  final List<int> pageSizes;
-
-  /// 已加载的历史 item 总数（驱逐上限的判定输入）。
-  final int loadedItems;
 }
 
 const _workspaceUnset = Object();

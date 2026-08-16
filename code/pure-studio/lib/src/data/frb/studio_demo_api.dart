@@ -698,10 +698,11 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
+  Future<({ThreadWorkspace workspace, String? historyCursor})>
+  readThreadSnapshot(String threadId) async {
     final workspace = (await readStudioState()).workspacesByThread[threadId];
     if (workspace == null) throw StateError('unknown demo thread $threadId');
-    return workspace;
+    return (workspace: workspace, historyCursor: null);
   }
 
   @override

@@ -118,7 +118,9 @@ replacement、working state、recovery marker、Thread revision 和通知必须�
 
 Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `readThreadSnapshot` 只能读取
 repository 与已驻留 actor 的 live overlay；actor 未驻留时返回 inactive，不触发恢复、不改 role、
-不投递 durable wake。`subscribeThread` 是显式激活命令，未驻留 Thread 经订阅按需恢复；连接
+不投递 durable wake。wire 快照（订阅 bootstrap 帧与 `readThreadSnapshot`）在 bridge 转换层
+窗口化：items 按整 Turn 对齐截断到最近 400 条，并携带 `historyCursor`（窗口首 Turn 的 id，
+`listThreadTurns` 的 before 语义锚点）——内部 protocol 快照保持全量，只有 wire 边界窗口化。`subscribeThread` 是显式激活命令，未驻留 Thread 经订阅按需恢复；连接
 disposed/closed 时 Driver 可以重建 transport 并再次纯读；tap、输入、prompt submit、计划确认、
 恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取 canonical postcondition，且
 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。

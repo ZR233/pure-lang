@@ -5,8 +5,10 @@ sealed class ThreadStreamFrame {
 
   factory ThreadStreamFrame.fromFrb(frb.BridgeThreadSubscriptionUpdate value) {
     return value.when(
-      snapshot: (snapshot) =>
-          ThreadSnapshotFrame(workspace: _threadWorkspaceFromFrb(snapshot)),
+      snapshot: (snapshot) => ThreadSnapshotFrame(
+        workspace: _threadWorkspaceFromFrb(snapshot),
+        historyCursor: snapshot.historyCursor,
+      ),
       notification: (envelope) => envelope.notification.when(
         turnStarted: (turn) => ThreadNotificationFrame(
           threadId: envelope.threadId,
@@ -64,9 +66,12 @@ sealed class ThreadStreamFrame {
 }
 
 final class ThreadSnapshotFrame extends ThreadStreamFrame {
-  const ThreadSnapshotFrame({required this.workspace});
+  const ThreadSnapshotFrame({required this.workspace, this.historyCursor});
 
   final ThreadWorkspace workspace;
+
+  /// 快照窗口之外的更旧历史回源锚点（Turn id，before 语义）；null = 无更旧内容。
+  final String? historyCursor;
 }
 
 final class ThreadNotificationFrame extends ThreadStreamFrame {

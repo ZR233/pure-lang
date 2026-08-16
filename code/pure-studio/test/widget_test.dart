@@ -59,6 +59,7 @@ part 'widget_test/settings_helpers.dart';
 part 'widget_test/studio_update_tests.dart';
 part 'widget_test/provider_lifecycle_tests.dart';
 part 'widget_test/app_lifecycle_tests.dart';
+part 'widget_test/history_window_tests.dart';
 
 void main() {
   registerControllerStreamTests();
@@ -83,4 +84,5 @@ void main() {
   registerStudioUpdateTests();
   registerProviderLifecycleTests();
   registerAppLifecycleTests();
+  registerHistoryWindowTests();
 }

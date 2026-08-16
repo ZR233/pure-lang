@@ -25,6 +25,10 @@ class _FakeStudioApi implements StudioApi {
   final Map<String, Map<String?, ThreadHistoryPage>> historyPagesByThread = {};
   final List<String?> directoryPageRequests = [];
   final Map<String?, ThreadDirectoryPage> directoryPages = {};
+
+  /// 排队的历史响应闸门：每次 listThreadTurns 消费队首 Completer，
+  /// 用于构造"响应在窗口重建之后才返回"的竞态。
+  final List<Completer<void>> historyGates = [];
   final StreamController<StudioShutdownProgress> _shutdownProgress =
       StreamController<StudioShutdownProgress>.broadcast();
   bool shutdownRuntimeCalled = false;
@@ -440,9 +444,12 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
-    return _currentState.workspacesByThread[threadId] ??
+  Future<({ThreadWorkspace workspace, String? historyCursor})>
+  readThreadSnapshot(String threadId) async {
+    final workspace =
+        _currentState.workspacesByThread[threadId] ??
         (throw StateError('unknown fake Thread workspace $threadId'));
+    return (workspace: workspace, historyCursor: null);
   }
 
   @override
@@ -473,6 +480,9 @@ class _FakeStudioApi implements StudioApi {
     int limit = 50,
   }) async {
     historyRequests.add((threadId: threadId, cursor: cursor));
+    if (historyGates.isNotEmpty) {
+      await historyGates.removeAt(0).future;
+    }
     return historyPagesByThread[threadId]?[cursor] ??
         const ThreadHistoryPage(items: [], nextCursor: null);
   }

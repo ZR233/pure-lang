@@ -86,10 +86,15 @@ snapshot 直接覆盖对应 workspace 的实时内容，但保留 product stream
 与 transcript delta 是 lossless；收到 `Lagged`、断流或未知 revision 后重新订阅取 snapshot，
 不维护 durable cursor 或 replay journal。
 
-历史通过 opaque keyset cursor 调用 `listThreadTurns` 向前分页。历史页只补充更旧的 Turn，
-不能覆盖 live snapshot 中相同身份的新 revision。已加载历史页超过上限时驱逐离当前视口
-最远的旧页，记录被驱逐页的边界 cursor 并做滚动偏移补偿；再次滚动进入已驱逐区域时以
-边界 cursor 回源重取——内存未命中一律从数据库读取，GUI 不保留第二份完整历史。
+历史窗口遵循「窗口状态从已加载内容派生」的单一模型，只有 `hasOlder / isLoading /
+epoch` 三个标量；回源锚点永远从 `items.first.turnId` 现场派生，GUI 不保存 cursor 栈或
+页计数，items 与窗口状态不可能漂移。订阅/重订快照是窗口的重建点：wire 快照只携带最近
+400 条（整 Turn 对齐截断）与 `historyCursor`（窗口首 Turn 的 id）；快照落地时 epoch 递增，
+跨重建的在途历史响应整体丢弃。`listThreadTurns` 的 cursor 是 Turn id 的 before 语义锚点；
+历史页幂等合并进窗口，更旧方向是否还有内容由页响应的 nextCursor 决定。窗口超过 500 条
+时从最旧方向裁剪并把 `hasOlder` 置回 true，被裁内容按裁剪后新首条的锚点回源重取——
+内存未命中一律从数据库读取，GUI 不保留第二份完整历史。rolledBack 恢复标记只来自 DB
+历史查询，按 id 覆盖窗口内同 id 条目，不受 revision 门槛约束。
 
 ## 11.4 Timeline
 
@@ -222,7 +227,7 @@ directory 增量更新和 selected agent 重建时必须保留。
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
 - 侧栏分页窗口、触底加载与目录增量合并有 widget test；
-- 时间线历史驱逐、边界 cursor 回源与滚动补偿有 widget test；
+- 时间线窗口三迁移（快照重建、历史页扩展、上限裁剪）、锚点派生回源与跨代际响应丢弃有 widget test；
 - 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；

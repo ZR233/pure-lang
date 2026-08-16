@@ -64,14 +64,17 @@ StudioReduceResult reduceStudioEvent(
 ///
 /// Subscription generation checks belong to the controller. Once a snapshot
 /// reaches this reducer it wins over every locally accumulated delta.
-/// revision-gap enforcement keeps local state at revision N identical to the
-/// canonical N, so an equal-revision snapshot keeps the workspace instance
-/// and only resolves the subscription sync state back to ready — that is what
-/// unblocks the timeline after switching to an already-resident Thread.
+/// A replacing snapshot is also the rebuild point of the timeline history
+/// window: items ← snapshot window, [ThreadHistoryWindow.epoch] increments to
+/// invalidate in-flight history responses, and `hasOlder` derives from the
+/// snapshot's history cursor. An equal-revision snapshot keeps the workspace
+/// instance and the window untouched — revision-gap enforcement makes local
+/// state at revision N identical to the canonical N.
 StudioState applyThreadSnapshot(
   StudioState current,
-  ThreadWorkspace workspace,
-) {
+  ThreadWorkspace workspace, {
+  String? historyCursor,
+}) {
   final threadId = workspace.thread.id;
   if (threadId.isEmpty) return current;
   final previous = current.workspacesByThread[threadId];
@@ -89,11 +92,19 @@ StudioState applyThreadSnapshot(
         ..[threadId] = _sortedWorkspace(
           workspace.copyWith(thread: directoryThread ?? workspace.thread),
         );
+  final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
   final workspaceUi = Map<String, WorkspaceUiState>.from(
     current.workspaceUiByThread,
   );
-  workspaceUi[threadId] = (workspaceUi[threadId] ?? const WorkspaceUiState())
-      .copyWith(syncState: AgentWorkspaceSyncState.ready);
+  workspaceUi[threadId] = ui.copyWith(
+    syncState: AgentWorkspaceSyncState.ready,
+    history: ThreadHistoryWindow(
+      hasOlder: historyCursor != null,
+      isLoading: false,
+      epoch: ui.history.epoch + 1,
+      errorMessage: null,
+    ),
+  );
   return current.copyWith(
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
@@ -161,46 +172,58 @@ StudioReduceResult applyThreadUpdate(
   );
 }
 
-StudioState mergeThreadHistoryPage(
+/// 历史页落地（窗口向旧扩展）：items 幂等合并、hasOlder 推进、超限收缩，
+/// 一次归约完成。调用方（controller）已校验响应属于当前窗口代际。
+StudioState applyThreadHistoryPage(
   StudioState current,
   String threadId,
   ThreadHistoryPage page,
 ) {
   final workspace = current.workspacesByThread[threadId];
-  if (workspace == null || page.items.isEmpty) return current;
-  // 历史页与 live 帧共用 [mergeThreadItems]；rolledBack 优先是恢复投影的
-  // 额外事实——同 revision 也用历史页的 rolledBack 条目覆盖 active。
-  final overrideRolledBack = <String>{
-    for (final item in page.items)
-      if (item.threadId == threadId &&
-          item.contextDisposition == ThreadContextDisposition.rolledBack)
-        item.id,
-  };
-  final incoming = [
-    for (final item in page.items)
-      if (item.threadId == threadId)
-        item.copyWith(
-          contextDisposition: overrideRolledBack.contains(item.id)
-              ? ThreadContextDisposition.rolledBack
-              : item.contextDisposition,
-        ),
-  ];
-  var items = mergeThreadItems(workspace, incoming)?.items ?? workspace.items;
-  if (overrideRolledBack.isNotEmpty) {
-    final rolledBackIds = {
-      for (final item in page.items)
-        if (item.contextDisposition == ThreadContextDisposition.rolledBack)
-          item.id,
-    };
-    items = [
-      for (final item in items)
-        if (rolledBackIds.contains(item.id) &&
-            item.contextDisposition == ThreadContextDisposition.active)
-          item.copyWith(contextDisposition: ThreadContextDisposition.rolledBack)
-        else
-          item,
-    ];
+  if (workspace == null) return current;
+  final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  var items = workspace.items;
+  if (page.items.isNotEmpty) {
+    items =
+        mergeThreadItems(workspace, [
+          for (final item in page.items)
+            if (item.threadId == threadId) item,
+        ])?.items ??
+        workspace.items;
+    items = _overlayRolledBackItems(items, page.items, threadId);
   }
+  var next = current.copyWith(
+    workspacesByThread: {
+      ...current.workspacesByThread,
+      threadId: workspace.copyWith(items: items),
+    },
+    workspaceUiByThread: {
+      ...current.workspaceUiByThread,
+      threadId: ui.copyWith(
+        history: ThreadHistoryWindow(
+          hasOlder: page.nextCursor != null,
+          isLoading: false,
+          epoch: ui.history.epoch,
+          errorMessage: null,
+        ),
+      ),
+    },
+  );
+  return enforceTimelineWindowLimit(next, threadId);
+}
+
+/// 恢复事实注入：历史页携带的 rolledBack 标记优先于窗口内任何条目（标记
+/// 来自恢复投影的 rolled-back 范围，只有 DB 历史查询会给出，且可能落在
+/// 比 内存投影更旧的 revision 上）。这不是翻页事件，不改变窗口分页状态。
+StudioState applyRecoveredDispositions(
+  StudioState current,
+  String threadId,
+  ThreadHistoryPage page,
+) {
+  final workspace = current.workspacesByThread[threadId];
+  if (workspace == null) return current;
+  final items = _overlayRolledBackItems(workspace.items, page.items, threadId);
+  if (identical(items, workspace.items)) return current;
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
@@ -209,45 +232,61 @@ StudioState mergeThreadHistoryPage(
   );
 }
 
-/// 时间线已加载历史的驱逐上限；超过后从最旧一页开始丢弃。
-const int maxLoadedHistoryItems = 500;
+/// rolledBack 条目（按 id）强制覆盖窗口内同 id 条目的 disposition；
+/// 内存投影不产生 rolledBack 事实，故覆盖不受 revision 门槛约束。
+List<ThreadItemView> _overlayRolledBackItems(
+  List<ThreadItemView> items,
+  List<ThreadItemView> pageItems,
+  String threadId,
+) {
+  final rolledBackIds = {
+    for (final item in pageItems)
+      if (item.threadId == threadId &&
+          item.contextDisposition == ThreadContextDisposition.rolledBack)
+        item.id,
+  };
+  if (rolledBackIds.isEmpty) return items;
+  return [
+    for (final item in items)
+      if (rolledBackIds.contains(item.id) &&
+          item.contextDisposition == ThreadContextDisposition.active)
+        item.copyWith(contextDisposition: ThreadContextDisposition.rolledBack)
+      else
+        item,
+  ];
+}
 
-/// 驱逐最旧一页已加载历史：回退 load-older cursor 到该页的请求 cursor，
-/// 再次向上滚动时以它回源数据库重取（内存未命中 → 数据库）。
-StudioState evictOldestHistoryPage(StudioState current, String threadId) {
-  final ui = current.workspaceUiByThread[threadId];
+/// 时间线窗口的 item 上限；超过后从最旧方向裁剪。
+const int maxTimelineWindowItems = 500;
+
+/// 窗口收缩：items 超过上限时裁掉最旧一端。被裁内容仍可回源——回源锚点从
+/// 裁剪后的 `items.first.turnId` 派生，因此只需把 hasOlder 置回 true。
+StudioState enforceTimelineWindowLimit(StudioState current, String threadId) {
   final workspace = current.workspacesByThread[threadId];
-  if (ui == null || workspace == null) return current;
-  final history = ui.history;
-  if (history.pageSizes.length <= 1) return current;
-  final boundaryCursor = history.boundaryCursors.last;
-  final removed = history.pageSizes.last;
-  final remainingItems = (history.loadedItems - removed).clamp(0, 1 << 30);
-  // items 按时间升序，最旧一页在列表头部。
-  final evictedItems = workspace.items.length >= removed
-      ? workspace.items.sublist(removed)
-      : const <ThreadItemView>[];
-  final nextHistory = ThreadHistoryPagingState(
-    nextCursor: boundaryCursor,
-    hasMore: true,
-    isLoading: false,
-    isLoaded: history.isLoaded,
-    errorMessage: history.errorMessage,
-    boundaryCursors: history.boundaryCursors.sublist(
-      0,
-      history.boundaryCursors.length - 1,
-    ),
-    pageSizes: history.pageSizes.sublist(0, history.pageSizes.length - 1),
-    loadedItems: remainingItems,
+  if (workspace == null || workspace.items.length <= maxTimelineWindowItems) {
+    return current;
+  }
+  final items = workspace.items.sublist(
+    workspace.items.length - maxTimelineWindowItems,
   );
+  final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
-      threadId: workspace.copyWith(items: evictedItems),
+      threadId: workspace.copyWith(items: items),
     },
     workspaceUiByThread: {
       ...current.workspaceUiByThread,
-      threadId: ui.copyWith(history: nextHistory),
+      threadId: ui.copyWith(
+        history: ui.history.hasOlder
+            ? ui.history
+            : ThreadHistoryWindow(
+                hasOlder: true,
+                isLoading: ui.history.isLoading,
+                epoch: ui.history.epoch,
+                errorMessage: ui.history.errorMessage,
+              ),
+      ),
     },
   );
 }

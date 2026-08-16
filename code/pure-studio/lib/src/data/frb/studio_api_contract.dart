@@ -31,7 +31,10 @@ abstract class StudioApi {
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
   Stream<StudioShutdownProgress> subscribeShutdownProgress();
   Future<void> shutdownRuntime();
-  Future<ThreadWorkspace> readThreadSnapshot(String threadId);
+
+  /// 读取线程快照；`historyCursor` 是快照窗口之外的回源锚点（Turn id）。
+  Future<({ThreadWorkspace workspace, String? historyCursor})>
+  readThreadSnapshot(String threadId);
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
     String? cursor,
@@ -358,10 +361,15 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
+  Future<({ThreadWorkspace workspace, String? historyCursor})>
+  readThreadSnapshot(String threadId) async {
     await _ensureReady();
-    return _threadWorkspaceFromFrb(
-      await _bridgeCall(() => frb.readThread(threadId: threadId)),
+    final snapshot = await _bridgeCall(
+      () => frb.readThread(threadId: threadId),
+    );
+    return (
+      workspace: _threadWorkspaceFromFrb(snapshot),
+      historyCursor: snapshot.historyCursor,
     );
   }
 

@@ -236,69 +236,55 @@ class StudioController extends _$StudioController {
 
   Future<void> loadOlderHistory(String threadId) async {
     final current = state.value;
-    if (current == null || current.workspacesByThread[threadId] == null) return;
-    final paging = _workspaceUi(current, threadId).history;
-    if (paging.isLoading || (paging.isLoaded && !paging.hasMore)) return;
+    if (current == null) return;
+    final workspace = current.workspacesByThread[threadId];
+    final history = _workspaceUi(current, threadId).history;
+    // 回源锚点从窗口首条内容派生（服务器 cursor 即 Turn id 的 before 语义）；
+    // 窗口为空时不存在可回源的更旧历史。
+    final anchor = workspace?.items.firstOrNull?.turnId;
+    if (workspace == null || anchor == null) return;
+    if (!history.hasOlder || history.isLoading) return;
+    final epoch = history.epoch;
     state = AsyncData(
       _withWorkspaceUi(
         current,
         threadId,
         (ui) => ui.copyWith(
-          history: ThreadHistoryPagingState(
-            nextCursor: paging.nextCursor,
-            hasMore: paging.hasMore,
+          history: ThreadHistoryWindow(
+            hasOlder: ui.history.hasOlder,
             isLoading: true,
-            isLoaded: paging.isLoaded,
+            epoch: epoch,
+            errorMessage: null,
           ),
         ),
       ),
     );
     try {
-      final requestCursor = paging.isLoaded ? paging.nextCursor : null;
-      final page = await _api.listThreadTurns(threadId, cursor: requestCursor);
+      final page = await _api.listThreadTurns(threadId, cursor: anchor);
       if (!ref.mounted) return;
       final latest = state.value;
-      if (latest == null) return;
-      // 记录页边界（请求 cursor + 页大小）；驱逐时按它回源数据库重取。
-      final boundaryCursors = [...paging.boundaryCursors, requestCursor];
-      final pageSizes = [...paging.pageSizes, page.items.length];
-      var next = _withWorkspaceUi(
-        mergeThreadHistoryPage(latest, threadId, page),
-        threadId,
-        (ui) => ui.copyWith(
-          history: ThreadHistoryPagingState(
-            nextCursor: page.nextCursor,
-            hasMore: page.nextCursor != null,
-            isLoading: false,
-            isLoaded: true,
-            boundaryCursors: boundaryCursors,
-            pageSizes: pageSizes,
-            loadedItems: paging.loadedItems + page.items.length,
-          ),
-        ),
-      );
-      // 超过上限时驱逐最旧已加载页；时间线只保留窗口内历史。
-      while (_workspaceUi(next, threadId).history.loadedItems >
-              maxLoadedHistoryItems &&
-          _workspaceUi(next, threadId).history.pageSizes.length > 1) {
-        next = evictOldestHistoryPage(next, threadId);
+      // 窗口代际已变（快照重建/线程切换重订）：本次响应属于旧窗口，整体丢弃。
+      if (latest == null ||
+          _workspaceUi(latest, threadId).history.epoch != epoch) {
+        return;
       }
-      state = AsyncData(next);
+      state = AsyncData(applyThreadHistoryPage(latest, threadId, page));
     } catch (error) {
       if (!ref.mounted) return;
       final latest = state.value;
-      if (latest == null) return;
-      final active = _workspaceUi(latest, threadId).history;
+      if (latest == null ||
+          _workspaceUi(latest, threadId).history.epoch != epoch) {
+        return;
+      }
       state = AsyncData(
         _withWorkspaceUi(
           latest,
           threadId,
           (ui) => ui.copyWith(
-            history: ThreadHistoryPagingState(
-              nextCursor: active.nextCursor,
-              hasMore: active.hasMore,
+            history: ThreadHistoryWindow(
+              hasOlder: ui.history.hasOlder,
               isLoading: false,
-              isLoaded: active.isLoaded,
+              epoch: epoch,
               errorMessage: error.toString(),
             ),
           ),
@@ -389,7 +375,7 @@ class StudioController extends _$StudioController {
       if (current == null || current.workspacesByThread[threadId] == null) {
         return;
       }
-      state = AsyncData(mergeThreadHistoryPage(current, threadId, page));
+      state = AsyncData(applyRecoveredDispositions(current, threadId, page));
     } on Object {
       // Recovery is already durable; a later history load will project labels.
     }
@@ -782,15 +768,12 @@ class StudioController extends _$StudioController {
       return;
     }
     switch (frame) {
-      case ThreadSnapshotFrame(:final workspace):
+      case ThreadSnapshotFrame(:final workspace, :final historyCursor):
         final next = _reconcileComposer(
-          applyThreadSnapshot(current, workspace),
+          applyThreadSnapshot(current, workspace, historyCursor: historyCursor),
           threadId,
         );
         state = AsyncData(next);
-        if (!_workspaceUi(next, threadId).history.isLoaded) {
-          unawaited(loadOlderHistory(threadId));
-        }
       case ThreadNotificationFrame(:final revision, :final update):
         if (const bool.fromEnvironment('PURE_STUDIO_DRIVER')) {
           if (update case ThreadTurnUpdate(:final turn)) {
@@ -826,7 +809,7 @@ class StudioController extends _$StudioController {
   Future<void> _resyncThread(String threadId, int generation) async {
     _markThreadDisconnected(threadId, generation);
     try {
-      final workspace = await _api.readThreadSnapshot(threadId);
+      final snapshot = await _api.readThreadSnapshot(threadId);
       final current = state.value;
       if (current == null ||
           generation != _threadCoordinator.generation ||
@@ -834,7 +817,14 @@ class StudioController extends _$StudioController {
         return;
       }
       state = AsyncData(
-        _reconcileComposer(applyThreadSnapshot(current, workspace), threadId),
+        _reconcileComposer(
+          applyThreadSnapshot(
+            current,
+            snapshot.workspace,
+            historyCursor: snapshot.historyCursor,
+          ),
+          threadId,
+        ),
       );
     } on Object {
       // The scheduled subscription retry remains the recovery path.

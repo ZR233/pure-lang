@@ -341,11 +341,36 @@ void registerControllerStreamTests() {
     cancellation.complete();
   });
 
-  test('history uses opaque cursor and merges by Item identity', () async {
+  test('history paging derives its anchor from the loaded window', () async {
     final initial = _emptyState();
     final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    await pumpEventQueue();
+    api.emitThreadFrame(
+      ThreadSnapshotFrame(
+        workspace: initial.selectedWorkspace!.copyWith(
+          revision: 1,
+          items: [
+            _threadItemFixture(
+              id: 'live-item',
+              threadId: 'session-1',
+              turnId: 'turn-live',
+              ordinal: 10,
+              text: 'live',
+            ),
+          ],
+        ),
+        historyCursor: 'turn-live',
+      ),
+    );
+    await pumpEventQueue();
     api.historyPagesByThread['session-1'] = {
-      null: ThreadHistoryPage(
+      'turn-live': ThreadHistoryPage(
         items: [
           _threadItemFixture(
             id: 'history-item',
@@ -355,23 +380,21 @@ void registerControllerStreamTests() {
             text: 'older',
           ),
         ],
-        nextCursor: 'opaque-next',
+        nextCursor: null,
       ),
     };
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
 
-    await container.read(studioControllerProvider.future);
     await container
         .read(studioControllerProvider.notifier)
         .loadOlderHistory('session-1');
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(api.historyRequests.single.cursor, isNull);
-    expect(state.selectedWorkspace!.items.single.text, 'older');
-    expect(state.selectedWorkspaceUi.history.nextCursor, 'opaque-next');
+    expect(api.historyRequests.single.cursor, 'turn-live');
+    expect(state.selectedWorkspace!.items.map((item) => item.id), [
+      'history-item',
+      'live-item',
+    ]);
+    expect(state.selectedWorkspaceUi.history.hasOlder, isFalse);
   });
 
   test(
@@ -457,57 +480,69 @@ void registerControllerStreamTests() {
   });
 
   test(
-    'history eviction rolls the cursor back to the evicted page boundary',
+    'history window trims to the limit and keeps older history reachable',
     () async {
       final initial = _emptyState();
       final api = _FakeStudioApi(initial);
-      List<ThreadItemView> pageItems(int base, int count) => List.generate(
+      List<ThreadItemView> windowItems(int base, int count) => List.generate(
         count,
         (index) => _threadItemFixture(
-          id: 'history-${base + index}',
+          id: 'item-${base + index}',
           threadId: 'session-1',
           turnId: 'turn-${base + index}',
           ordinal: base + index,
           text: 'message ${base + index}',
         ),
       );
-      // 两页共 520 > maxLoadedHistoryItems(500)：第二页加载后最旧一页被驱逐。
-      api.historyPagesByThread['session-1'] = {
-        // 第一页是较新历史（ordinal 更大），第二页是更旧历史。
-        null: ThreadHistoryPage(
-          items: pageItems(260, 260),
-          nextCursor: 'cursor-2',
-        ),
-        'cursor-2': ThreadHistoryPage(
-          items: pageItems(0, 260),
-          nextCursor: 'cursor-3',
-        ),
-      };
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
       addTearDown(container.dispose);
       await container.read(studioControllerProvider.future);
+      await pumpEventQueue();
 
-      await container
-          .read(studioControllerProvider.notifier)
-          .loadOlderHistory('session-1');
+      // 快照携带 400 条窗口内容与更旧回源锚点；随后一页 120 条更旧历史
+      // 使窗口达到 520，超过 500 上限后从最旧方向裁剪 20 条。
+      api.emitThreadFrame(
+        ThreadSnapshotFrame(
+          workspace: initial.selectedWorkspace!.copyWith(
+            revision: 1,
+            items: windowItems(0, 400),
+          ),
+          historyCursor: 'turn-0',
+        ),
+      );
+      await pumpEventQueue();
+      api.historyPagesByThread['session-1'] = {
+        'turn-0': ThreadHistoryPage(
+          items: windowItems(-120, 120),
+          nextCursor: null,
+        ),
+      };
+
       await container
           .read(studioControllerProvider.notifier)
           .loadOlderHistory('session-1');
 
       final state = container.read(studioControllerProvider).requireValue;
       final history = state.selectedWorkspaceUi.history;
-      expect(history.loadedItems, 260);
-      expect(history.pageSizes.length, 1);
-      // load-older cursor 回退到被驱逐页的请求 cursor；向上滚动时按它回源重取。
-      expect(history.nextCursor, 'cursor-2');
-      expect(history.hasMore, isTrue);
-      // 工作区只保留较新一页的 item。
-      expect(
-        state.selectedWorkspace!.items.map((item) => item.id).first,
-        'history-260',
-      );
+      expect(state.selectedWorkspace!.items.length, 500);
+      // 裁剪后窗口首条是被保留的最旧条目；被裁内容仍可回源（hasOlder 保持）。
+      expect(state.selectedWorkspace!.items.first.id, 'item--100');
+      expect(history.hasOlder, isTrue);
+      expect(history.isLoading, isFalse);
+
+      // 再次回源的锚点从裁剪后的窗口首条派生。
+      api.historyPagesByThread['session-1'] = {
+        'turn--100': ThreadHistoryPage(
+          items: windowItems(-140, 40),
+          nextCursor: null,
+        ),
+      };
+      await container
+          .read(studioControllerProvider.notifier)
+          .loadOlderHistory('session-1');
+      expect(api.historyRequests.last.cursor, 'turn--100');
     },
   );
   test('selection survives directory delta that does not remove it', () async {
