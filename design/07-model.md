@@ -19,16 +19,16 @@ Responses continuation 状态。
 
 `CompletionEventStream` 是 `pl-model` 的公开流式边界，元素类型为 `Result<CompletionStreamEvent>`。`ModelProvider::stream_events` 返回该流，供 `mai-team` 等调用方原生消费 provider 无关事件；`stream_complete` 保留为兼容 API，但必须通过同一条 public stream API 累计出 `CompletionResponse`，避免在核心层或外部仓库复刻 provider adapter。
 
-`stream` 层负责稳定工具调用 identity。OpenAI Responses 的非流式 item、SSE added/done 和 delta
-在协议边界统一规范化身份：`item_id = id ?? call_id`，`call_id = call_id ?? item_id`。兼容
-provider 只返回一个非空身份时，该身份同时成为 canonical item id 与 Responses call id；两者
-都缺失时仍是协议错误。Responses 可能先发送只有 provider `item_id` 的
-`output_item.added`，后续 delta 或 done 才补独立 `call_id`；Chat Completions 也可能只依赖
-chunk index 作为 `stream_id`。同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id`
-中任一非空身份进入 accumulator，后续 late metadata 必须升级原 accumulator 的 fallback
-`call_id` 并合并到同一个 open tool，不得拆成第二个 tool call 或第二个 trace part。trace 的
-tool part id 以最早稳定的 provider item/runtime tool id 为锚，`call_id` 只作为 metadata 写入
-tool snapshot，用于协议回放和 provider tool result 匹配。
+`stream` 层负责稳定工具调用 identity。工具调用一经解码即具有必填的
+`ToolCallIdentity { item_id, call_id }`：Responses 使用事件携带的 `item.id` 与 `call_id`，
+两者都缺失是协议错误；Chat Completions 以 chunk index 构造 `stream_id` / `item_id`，并确定性
+赋 `call_id = item_id`。不存在 optional `call_id` 或 id 与 call_id 互为 fallback 的规范化路径。
+Responses 可能先发送只有 provider `item_id` 的 `output_item.added`，后续 delta 或 done 才补
+独立 `call_id`；同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id` 中任一非空身份
+进入 accumulator，后续 late metadata 必须升级原 accumulator 并合并到同一个 open tool，
+不得拆成第二个 tool call 或第二个 trace part。trace 的 tool part id 以最早稳定的 provider
+item/runtime tool id 为锚，`call_id` 只作为 metadata 写入 tool snapshot，用于协议回放和
+provider tool result 匹配。
 
 ## 7.2 依赖
 
@@ -152,12 +152,13 @@ Chat Completions wire 忽略该 Responses 专属字段。低层 `pl-model` API �
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
-Responses Tool Search 通过 hosted `tool_search` 和标记 `defer_loading: true` 的 namespace/function
-schema 表达。初始请求只 eager 暴露高频核心工具；动态 MCP 与低频 Git/管理工具按稳定 namespace
-延迟加载。模型或 endpoint 缺少任一显式能力时，core 发送原有完整 schema，不发送 hosted
-`tool_search`，从而保持 eager fallback。Tool Search 的 hosted call/output、其后实际 function call
-以及 programmatic program 都是有序 Responses 原生 item，必须进入 canonical context；不得只投影
-成 message metadata 或在 HTTP/SSE 聚合时丢弃。
+Responses Tool Search 使用客户端执行：初始请求只携带 eager 工具与一个 schema 固定的
+`tool_search` 函数工具，deferred 工具不出现在请求前缀。模型调用 `tool_search` 后，运行时在
+Turn 冻结的 catalog 上确定性检索，并以 Responses 原生 `tool_search_call` / `tool_search_output`
+item 把加载的工具定义写入 canonical context，其后的 function call 直接执行。这些 item 与
+programmatic program 一样必须进入 canonical context，并在 HTTP 重放、WebSocket 增量与恢复后
+完整重建；Chat Completions 不支持该机制时，全部可见工具恢复 eager function schema。
+hosted `tool_search` wire 类型不再发送。
 
 Programmatic Tool Calling 通过 hosted `programmatic_tool_calling` 与工具的 `allowed_callers` 声明。
 首期只允许稳定本地读工具、LSP 查询和 effect 被可信配置明确标为 Read 的 MCP；命令、文件写入、
@@ -341,9 +342,12 @@ provider prompt cache。
 时 replace transcript，再把当前 working context 注入新窗口一次。provider 报告 token 达到阈值时，
 下一次采样前执行同样 replacement；压缩不得丢失 tool call/output 配对或当前用户任务。
 
-每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、工具 schema、provider、
-model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具按模型
-可见名称排序，JSON Schema 递归使用确定性字段顺序。MCP lease 与工具 schema 在 Turn 内冻结，
+每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、wire 工具前缀、provider、
+model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具与
+缓存的关系由三类指纹表达：`RegistryRevision`（发布代数，仅诊断）、`ToolCatalogFingerprint`
+（Turn 冻结的 deferred catalog 哈希，不参与轮换）与 `WirePrefixFingerprint`（实际发送的
+eager schema canonical 哈希，唯一触发 `ToolSchemaChanged` 的工具信号）。工具按模型可见名称
+排序，JSON Schema 递归使用确定性字段顺序。Turn lease 在 Turn 内冻结，
 不能为了复用缓存跨 Thread、worktree、Task policy 或权限边界共享。
 
 DeepSeek 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。
@@ -359,8 +363,8 @@ provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 �
 不得仅凭模型名推断。旧模型或未声明写入能力的 provider 不得制造写入 token。DeepSeek
 继续按命中/未命中输入分类计费。
 
-缓存诊断只记录 generation、固定前缀/工具/working context 的 hash、token 数和变化原因；不得记录
-prompt、工具参数或结果、header、凭据和配置正文。
+缓存诊断只记录 generation、固定前缀/wire 工具前缀/working context 的 hash 与三类工具指纹、
+token 数和变化原因；不得记录 prompt、工具参数或结果、header、凭据和配置正文。
 
 提示词诊断同时记录 eager 与 deferred schema 的估算 token、Tool Search 实际加载 schema 数、
 Programmatic program 数与嵌套调用数。Responses transport 记录 continuation attempted/used/invalid、

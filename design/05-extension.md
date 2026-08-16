@@ -37,10 +37,11 @@ transport，启动 `RunningService`，并返回同时持有 `Peer` 和唯一关�
 容器宿主可为 transport 附加自己的进程树 owner，但不得重新实现 MCP 协议。
 
 PL 拥有配置 fingerprint、跨 server 增量 reconcile、模型可见命名、健康状态、可信 effect 与
-generation lease；rmcp 拥有协议发现、分页、typed request/result、response cache、MRTR、取消、
-OAuth、SSE 和连接关闭。turn 只持有固定 generation 的 `McpTurnLease`，配置更新不得改变正在
-执行 turn 的工具集合或连接 owner。MCP 工具与 resource façade 都构造成普通
-`RegisteredTool` 并进入同一个 `ToolRegistry`，不为 MCP 保留独立 backend 或 dispatch 体系。
+generation；rmcp 拥有协议发现、分页、typed request/result、response cache、MRTR、取消、
+OAuth、SSE 和连接关闭。MCP runtime 在连接 generation 激活时把该代工具与 resource façade
+一次性 publish 到统一工具注册表，turn 通过 `TurnToolLease` 冻结发布结果，配置更新不得改变
+正在执行 turn 的工具集合或连接 owner。MCP 工具与 resource façade 都是普通注册表工具，
+不为 MCP 保留独立 backend 或 dispatch 体系。
 
 rmcp 只位于 MCP 协议与连接边界，不作为 PL 内建工具或产品工具的 authoring framework。
 静态 function tool 使用 PL 自有的 `FunctionToolDefinition<Input>`：输入由 Rust struct/enum、

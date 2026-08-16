@@ -132,8 +132,8 @@ server 失败仍作为 unavailable 应用 desired generation。
 
 reset 不复用目标 server，范围外 server 继续复用。单 server 只构造该 server 的候选；All 构造
 全候选。reset 成功后原子切换；失败保留当前 live generation 并发布 failed/stale。旧 generation
-在最后一个 `McpTurnLease` 释放后关闭。shutdown 是不可恢复终止态，取消候选、拒绝新 lease，
-并关闭全部连接；之后只允许读取 stopped snapshot。
+在最后一个引用（活动 TurnToolLease 或进行中调用）释放后关闭。shutdown 是不可恢复终止态，
+取消候选、拒绝新 lease，并关闭全部连接；之后只允许读取 stopped snapshot。
 
 UI 的“刷新”只读状态，“重新连接”调用单 server reset，“全部重置”经确认调用 All；Settings
 保存只用 reconcile。Flutter 对 command response 继续执行领域 revision replacement，迟到响应

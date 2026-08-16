@@ -3,8 +3,22 @@
 ## 目标
 
 Pure Studio 的 LSP 为 agent 提供代码语义查询，并向 Flutter 展示当前 Project 的 last-known
-语言服务器状态。LSP runtime 只存在于本地进程，不通过 MCP 暴露，也不把 server 定义持久化到
-用户配置。v1 只内置 `rust-analyzer`。
+语言服务器状态。LSP runtime 只存在于本地进程，不通过 MCP 暴露。server 定义是数据驱动的
+catalog：内置 catalog 收录已知 server（当前只有 rust-analyzer 一条），用户可在配置中声明
+自定义 server；新增语言支持只需新增 catalog 条目、driver 实现或用户配置，不需要修改
+`pl-core`，也不存在语言名字面量或按语言的分支。
+
+## Server catalog 与 driver
+
+`LspServerDefinition` 是纯数据：声明 server id、展示名、language ids、workspace 检测规则
+（文件名/glob）、command 解析策略与能力集。catalog 由内置定义与用户配置声明合并而成；
+同一 language id 被多个 server 声明且都匹配 workspace 时，路由以 typed 歧义错误拒绝，
+不按注册顺序或名称猜测。
+
+`LspServerDriver` 是 server 生命周期的唯一 adapter 边界：环境探测与修复、进程启动/关闭、
+请求转发都由具体 driver 实现。rust-analyzer 的 rustup probe 与 `MissingRustupComponent`
+修复等内容全部封在 `RustAnalyzerDriver` 内；`pl-lsp` 的 registry 与路由层不包含任何语言
+专项逻辑。
 
 ## Owner 与 CQS
 
@@ -58,11 +72,14 @@ available server，unavailable/disabled/stopped 仍可在 UI 显示但不计入 
 
 ## 工具能力
 
-`pl-core` 在 Turn 构建时从 owner snapshot 冻结当前可用 server，并注册
-`lsp_query_{language_id}`（如 `lsp_query_rust`）。父 agent 与 subagent 共用 registry。每个工具支持
-definition、references、hover、document/workspace symbol、implementation、call hierarchy 和
-diagnostics。输入路径先经过 workspace-only 绝对路径解析；位置使用 1-based line/character，内部
-转换为 LSP 0-based UTF-16。
+LSP 以能力 seam 模式接入工具注册表：workspace 存在可用 server 时，LSP 来源发布两个
+deferred 工具——`lsp_capabilities` 与 `lsp_query`；不再存在按语言命名的
+`lsp_query_{language_id}` 工具。`lsp_capabilities` 动态返回当前 workspace 可用的 server、
+language id、支持的操作与就绪状态；`lsp_query` 接收 `languageId`、operation（definition、
+references、hover、document/workspace symbol、implementation、call hierarchy、diagnostics）
+与查询参数，运行期按 catalog 路由到对应 server。父 agent 与 subagent 共用 registry。
+输入路径先经过 workspace-only 绝对路径解析；位置使用 1-based line/character，内部转换为
+LSP 0-based UTF-16。
 
 查询前 runtime 发送 didOpen/didChange；文件工具写入、move/delete 后通知已启动 client，并发送
 watched-files 通知。Windows verbatim path 在生成 URI 前转回普通 drive/UNC。ContentModified 和
@@ -78,5 +95,6 @@ probe、仅在 `missingRustupComponent` 时可用的 repair，以及 workspace/s
 
 ## 非目标
 
-v1 不实现插件市场 LSP 配置、推荐 UI、终端展示、IDE 虚拟 URI或自动安装其他语言服务器。
-rust-analyzer 的 rustup 安装也必须由用户明确 repair command 触发。
+不实现插件市场 LSP 推荐 UI、终端展示或 IDE 虚拟 URI；除用户在配置中显式声明的自定义
+server 外，不自动安装任何语言服务器。rust-analyzer 的 rustup 安装必须由用户明确 repair
+command 触发。

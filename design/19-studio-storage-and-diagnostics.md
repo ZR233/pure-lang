@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v4；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v8；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
@@ -107,17 +107,18 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 ## 19.3 不兼容库重建
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。版本、结构或完整性不兼容时不迁移、不归档、不导入：
+fingerprint。Studio schema 只保留当前版本 v8 一个事实：不存在跨版本迁移链，任何非 v8
+库（含历史 v4–v7）一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v4 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v8 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
-Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments 或其他 legacy
-数据库。旧会话、Task 与 ownership 元数据直接丢弃；因此失去 owner 的磁盘 worktree 也不能被
-自动 GC。
+Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建
+缓存等库外数据。旧会话、Task 与 ownership 元数据直接丢弃；因此失去 owner 的磁盘 worktree
+也不能被自动 GC。
 
 ## 19.4 归档与附件
 
