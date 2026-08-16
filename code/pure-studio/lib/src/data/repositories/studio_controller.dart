@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
@@ -15,6 +16,8 @@ Duration? _disableStudioRetry(int retryCount, Object error) => null;
 
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
 class StudioController extends _$StudioController {
+  static bool _startupProjectActivated = false;
+
   late ProductStreamCoordinator _productCoordinator;
   late ThreadStreamCoordinator _threadCoordinator;
 
@@ -43,7 +46,37 @@ class StudioController extends _$StudioController {
         () => _subscribeThread(bootstrapped.selectedThreadId),
       ),
     );
+    _activateStartupProject(bootstrapped);
     return bootstrapped;
+  }
+
+  /// 重置启动激活 guard，仅用于隔离测试。
+  @visibleForTesting
+  static void resetStartupProjectActivation() {
+    _startupProjectActivated = false;
+  }
+
+  void _activateStartupProject(StudioState bootstrapped) {
+    if (_startupProjectActivated) return;
+    final projectId = bootstrapped.selectedProjectId;
+    if (projectId == null ||
+        bootstrapped.recoveryIssue(
+              scope: RecoveryIssueScope.project,
+              projectId: projectId,
+            ) !=
+            null) {
+      return;
+    }
+    _startupProjectActivated = true;
+    unawaited(_activateProjectInBackground(projectId));
+  }
+
+  Future<void> _activateProjectInBackground(String projectId) async {
+    try {
+      await _api.activateProject(projectId);
+    } catch (_) {
+      // 启动激活是后台任务：失败由事件流表达，不阻断启动。
+    }
   }
 
   Future<void> openProject(String path) async {
@@ -547,11 +580,12 @@ class StudioController extends _$StudioController {
     }
   }
 
-  Future<List<String>> listDiscoveredSkills() async {
+  Future<void> refreshSkillsState() async {
     final projectId = state.value?.selectedProjectId;
-    return projectId == null
-        ? const []
-        : (await _api.readSkillsState(projectId)).skills;
+    if (projectId == null) return;
+    final snapshot = await _api.readSkillsState(projectId);
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applySkillsState(latest, snapshot));
   }
 
   Future<List<String>> discoverSkills() async {

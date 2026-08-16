@@ -179,7 +179,9 @@ canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或�
 Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、Security、General。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
 secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
-Skills 页进入时只读取当前 catalog；只有用户点击“重新发现”或 Project 激活 command 才执行发现。
+Skills 页进入时只读取当前 catalog，并把返回的 canonical snapshot 应用到 GUI 状态；列表内容跨
+标签切换与页面重建后保留。“重新发现”仍是唯一显式发现入口；只有用户点击“重新发现”或
+Project 激活 command 才执行发现。
 MCP/LSP 页进入和“刷新”只读取各 owner 的 last-known snapshot；MCP 单 server“重新连接”、
 经确认的“全部重置”，以及 LSP probe、typed repair 和 reset 都必须调用各自的明确 command。
 这些操作使用稳定 `ValueKey`，其 command response 仍按领域 revision 应用，不能覆盖更晚事件。
@@ -221,7 +223,9 @@ directory 增量更新和 selected agent 重建时必须保留。
 - Flutter Driver 验收覆盖侧栏翻页到底、时间线驱逐回源与关机阶段序列；真实 runtime harness
   在隔离 `PURE_STUDIO_HOME` 下验证 write-behind flush、pending 归零、二次启动数据完整与
   进程树清理；
-- Skills 页进入不扫描目录，“重新发现”使用明确 command 并整体替换 catalog；
+- Skills 页进入不扫描目录，只读取当前 catalog 并有 widget test；“重新发现”使用明确
+  command 并整体替换 catalog；启动 bootstrap 对健康选中 Project 恰好调用一次
+  `activateProject`，阻断 recovery issue 时不调用；
 - MCP/LSP 页刷新无副作用，reset/probe/repair 只由对应稳定控件触发并有 widget test；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。

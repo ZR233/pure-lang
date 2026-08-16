@@ -234,7 +234,6 @@ class SkillsTab extends ConsumerStatefulWidget {
 
 class SkillsTabState extends ConsumerState<SkillsTab> {
   String _query = '';
-  final Set<String> _discoveredSkills = {};
   bool _discovering = false;
   String? _discoverError;
   String? _saveError;
@@ -242,18 +241,12 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
   @override
   void initState() {
     super.initState();
-    _discoveredSkills.addAll(widget.skills);
-  }
-
-  @override
-  void didUpdateWidget(covariant SkillsTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _discoveredSkills.addAll(widget.skills);
+    unawaited(_refreshSkillsState());
   }
 
   @override
   Widget build(BuildContext context) {
-    final skills = {...widget.skills, ..._discoveredSkills}.toList()..sort();
+    final skills = widget.skills.toList()..sort();
     final disabledSkills = widget.settings.disabled.toSet();
     final filteredSkills = skills
         .where((skill) => skill.toLowerCase().contains(_query.toLowerCase()))
@@ -358,24 +351,23 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
     }
   }
 
+  Future<void> _refreshSkillsState() async {
+    try {
+      await ref.read(studioControllerProvider.notifier).refreshSkillsState();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _discoverError = error.toString());
+      }
+    }
+  }
+
   Future<void> _discoverSkills() async {
     setState(() {
       _discovering = true;
       _discoverError = null;
     });
     try {
-      final discovered = await ref
-          .read(studioControllerProvider.notifier)
-          .discoverSkills();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _discoveredSkills
-          ..clear()
-          ..addAll(widget.skills)
-          ..addAll(discovered);
-      });
+      await ref.read(studioControllerProvider.notifier).discoverSkills();
     } catch (error) {
       if (mounted) {
         setState(() => _discoverError = error.toString());
