@@ -348,6 +348,98 @@ async fn custom_openai_endpoint_sends_client_tool_search_when_explicitly_enabled
 }
 
 #[tokio::test]
+async fn client_tool_search_call_records_tool_item_with_structured_summary() {
+    let search_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_search\",\"call_id\":\"call_search_1\",\"name\":\"tool_search\"}}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_search\",\"call_id\":\"call_search_1\",\"name\":\"tool_search\",\"arguments\":\"{\\\"query\\\":\\\"git status\\\",\\\"limit\\\":4}\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_search\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, _bodies, handle) =
+        serve_sse_sequence(vec![search_sse, final_sse("search-done", "loaded")]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "gpt-5.6-sol".to_string();
+    provider.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
+        tool_search: true,
+        programmatic_tool_calling: false,
+    };
+    let mut model = pl_model::default_models()
+        .into_iter()
+        .find(|model| model.slug == "gpt-5.6-sol")
+        .unwrap();
+    model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
+    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
+        .unwrap()
+        .build();
+    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+        .await;
+    // git_status 进入 git 命名空间，随 client tool_search 延迟加载。
+    let probe = crate::tool::ToolEntry::new(
+        HostedToolProbe,
+        crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin()).with_namespace(
+            crate::tool::NamespaceDescriptor::new("git", "Git inspection tools."),
+        ),
+    );
+    let _ = core.extend_source_tools(crate::tool::ToolSourceId::new("host"), vec![probe]);
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-tool-search".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("inspect git".to_string())
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    let tool_item = result
+        .trace_events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Tool => {
+                Some(item)
+            }
+            _ => None,
+        })
+        .find(|item| {
+            item.tool
+                .as_ref()
+                .is_some_and(|tool| tool.name == "tool_search")
+        })
+        .expect("tool_search tool trace part");
+    let tool = tool_item.tool.as_ref().unwrap();
+    assert_eq!(tool.call_id.as_deref(), Some("call_search_1"));
+    assert!(tool.arguments.contains("git status"));
+    let summary: serde_json::Value = serde_json::from_str(tool.result.as_deref().unwrap())
+        .expect("tool_search item result is structured JSON");
+    assert_eq!(summary["type"], "tool_search");
+    assert_eq!(summary["query"], "git status");
+    assert_eq!(summary["loadedToolCount"], 1);
+    assert_eq!(summary["tools"][0]["namespace"], "git");
+    assert_eq!(summary["tools"][0]["name"], "git_status");
+    // canonical context 仍由配对的 tool_search_call/output Responses 项承载。
+    let context_kinds = session
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            pl_protocol::ModelContextItem::Responses { item } => Some(item.kind),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(context_kinds.contains(&pl_protocol::ResponsesContextItemKind::ToolSearchCall));
+    assert!(context_kinds.contains(&pl_protocol::ResponsesContextItemKind::ToolSearchOutput));
+}
+
+#[tokio::test]
 async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     let first_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",

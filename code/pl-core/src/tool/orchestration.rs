@@ -118,6 +118,23 @@ impl ToolInventory {
             resolution.loaded_tool_count = resolution
                 .loaded_tool_count
                 .saturating_add(count_loaded_tools(&groups));
+            resolution.summaries.push(ClientToolSearchCallSummary {
+                call_id: call_id.to_string(),
+                query: query.to_string(),
+                groups: groups
+                    .iter()
+                    .map(|group| {
+                        (
+                            group.namespace_name.clone(),
+                            group
+                                .tools
+                                .iter()
+                                .map(|tool| tool.name().to_string())
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            });
             resolution
                 .outputs
                 .push(client_tool_search_output(call_id, &groups)?);
@@ -131,6 +148,17 @@ impl ToolInventory {
 pub(crate) struct ClientToolSearchResolution {
     pub(crate) outputs: Vec<ResponsesContextItem>,
     pub(crate) loaded_tool_count: u64,
+    /// 每个调用的展示摘要（query 与按 namespace 分组的工具名），供 timeline 投影。
+    pub(crate) summaries: Vec<ClientToolSearchCallSummary>,
+}
+
+/// 单次 client `tool_search` 调用的展示摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClientToolSearchCallSummary {
+    pub(crate) call_id: String,
+    pub(crate) query: String,
+    /// (namespace, 工具名列表)；保持检索排名顺序。
+    pub(crate) groups: Vec<(String, Vec<String>)>,
 }
 
 #[derive(Debug, serde::Deserialize)]
