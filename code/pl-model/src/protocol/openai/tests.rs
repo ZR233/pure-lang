@@ -695,7 +695,7 @@ fn responses_body_writes_custom_grammar_tool() {
 }
 
 #[test]
-fn responses_body_writes_deferred_namespace_and_programmatic_tools() {
+fn responses_body_writes_programmatic_tool_callers() {
     let model = bundled_model("gpt-5.6-sol");
     let mut request = request_with_effort("xhigh");
     request.model = model.slug.clone();
@@ -707,29 +707,19 @@ fn responses_body_writes_deferred_namespace_and_programmatic_tools() {
     .allow_programmatic(serde_json::json!({
         "type": "object",
         "additionalProperties": true
-    }))
-    .deferred();
-    request.tools = vec![
-        ToolSchema::namespace("workspace", "workspace reads", vec![read_file]),
-        ToolSchema::ToolSearch,
-        ToolSchema::ProgrammaticToolCalling,
-    ];
+    }));
+    request.tools = vec![read_file, ToolSchema::ProgrammaticToolCalling];
 
     let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
-    assert_eq!(body["tools"][0]["type"], "namespace");
-    assert_eq!(body["tools"][0]["name"], "workspace");
-    assert_eq!(body["tools"][0]["tools"][0]["defer_loading"], true);
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["name"], "read_file");
     assert_eq!(
-        body["tools"][0]["tools"][0]["allowed_callers"],
+        body["tools"][0]["allowed_callers"],
         serde_json::json!(["direct", "programmatic"])
     );
-    assert_eq!(
-        body["tools"][0]["tools"][0]["output_schema"]["type"],
-        "object"
-    );
-    assert_eq!(body["tools"][1]["type"], "tool_search");
-    assert_eq!(body["tools"][2]["type"], "programmatic_tool_calling");
+    assert_eq!(body["tools"][0]["output_schema"]["type"], "object");
+    assert_eq!(body["tools"][1]["type"], "programmatic_tool_calling");
 }
 
 #[test]
@@ -1403,6 +1393,53 @@ fn chat_history_with_item_id_call_id_replays_on_both_endpoints() {
         chat_body["messages"][1]["tool_call_id"],
         serde_json::json!("fc_1")
     );
+}
+
+#[test]
+fn responses_replay_preserves_tool_search_items_verbatim() {
+    let tool_search_call = serde_json::json!({
+        "type": "tool_search_call",
+        "call_id": "call-1",
+        "execution": "client",
+        "arguments": {"query": "git status", "limit": 4},
+    });
+    let tool_search_output = serde_json::json!({
+        "type": "tool_search_output",
+        "call_id": "call-1",
+        "status": "completed",
+        "execution": "client",
+        "tools": [{
+            "type": "namespace",
+            "name": "git",
+            "description": "Git tools",
+            "tools": [{
+                "type": "function",
+                "name": "git_status",
+                "parameters": {"type": "object"},
+                "defer_loading": true,
+            }],
+        }],
+    });
+    let mut request = request_with_effort("xhigh");
+    request.input = vec![
+        ModelContextItem::Responses {
+            item: ResponsesContextItem {
+                kind: ResponsesContextItemKind::ToolSearchCall,
+                value: tool_search_call.clone(),
+            },
+        },
+        ModelContextItem::Responses {
+            item: ResponsesContextItem {
+                kind: ResponsesContextItemKind::ToolSearchOutput,
+                value: tool_search_output.clone(),
+            },
+        },
+    ];
+
+    let body = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert_eq!(body["input"][0], tool_search_call);
+    assert_eq!(body["input"][1], tool_search_output);
 }
 
 #[test]

@@ -114,13 +114,13 @@ impl ToolInventory {
                     "limit must be greater than zero",
                 ));
             }
-            let tools = catalog.search(query, requested_limit.min(MAX_CLIENT_TOOL_SEARCH_LIMIT));
+            let groups = catalog.search(query, requested_limit.min(MAX_CLIENT_TOOL_SEARCH_LIMIT));
             resolution.loaded_tool_count = resolution
                 .loaded_tool_count
-                .saturating_add(count_loaded_tools(&tools));
+                .saturating_add(count_loaded_tools(&groups));
             resolution
                 .outputs
-                .push(client_tool_search_output(call_id, &tools)?);
+                .push(client_tool_search_output(call_id, &groups)?);
         }
         Ok(resolution)
     }
@@ -185,7 +185,7 @@ pub fn orchestrate_tool_inventory(
                 deferred.push(ClientToolSearchEntry::new(
                     namespace.name.clone(),
                     namespace.description.clone(),
-                    schema.deferred(),
+                    schema,
                 ));
             }
             _ => eager.push(schema),
@@ -275,7 +275,7 @@ impl ClientToolSearchCatalog {
     /// 确定性词项评分检索；返回按 namespace 分组的工具定义（保持排名顺序）。
     ///
     /// 返回工具数封顶 [`MAX_CLIENT_TOOL_SEARCH_LIMIT`]。
-    fn search(&self, query: &str, limit: usize) -> Vec<ToolSchema> {
+    fn search(&self, query: &str, limit: usize) -> Vec<ToolSearchGroup> {
         let limit = limit.min(MAX_CLIENT_TOOL_SEARCH_LIMIT);
         let query = query.to_lowercase();
         let terms = search_terms(&query);
@@ -294,26 +294,31 @@ impl ClientToolSearchCatalog {
                 .then_with(|| left.namespace_name.cmp(&right.namespace_name))
         });
 
-        let mut groups: Vec<(String, String, Vec<ToolSchema>)> = Vec::new();
+        let mut groups: Vec<ToolSearchGroup> = Vec::new();
         for (_, entry) in ranked.into_iter().take(limit) {
-            if let Some((_, _, tools)) = groups
+            if let Some(group) = groups
                 .iter_mut()
-                .find(|(name, _, _)| *name == entry.namespace_name)
+                .find(|group| group.namespace_name == entry.namespace_name)
             {
-                tools.push(entry.schema.clone());
+                group.tools.push(entry.schema.clone());
                 continue;
             }
-            groups.push((
-                entry.namespace_name.clone(),
-                entry.namespace_description.clone(),
-                vec![entry.schema.clone()],
-            ));
+            groups.push(ToolSearchGroup {
+                namespace_name: entry.namespace_name.clone(),
+                namespace_description: entry.namespace_description.clone(),
+                tools: vec![entry.schema.clone()],
+            });
         }
         groups
-            .into_iter()
-            .map(|(name, description, tools)| ToolSchema::namespace(name, description, tools))
-            .collect()
     }
+}
+
+/// 检索结果按 namespace 分组的工具定义。
+#[derive(Debug, Clone)]
+struct ToolSearchGroup {
+    namespace_name: String,
+    namespace_description: String,
+    tools: Vec<ToolSchema>,
 }
 
 #[derive(Debug, Clone)]
@@ -386,13 +391,21 @@ fn score_search_entry(entry: &ClientToolSearchEntry, query: &str, terms: &[Strin
 }
 
 /// 生成与 `tool_search_call` 配对的 `tool_search_output` 上下文项。
-fn client_tool_search_output(call_id: &str, tools: &[ToolSchema]) -> Result<ResponsesContextItem> {
+fn client_tool_search_output(
+    call_id: &str,
+    groups: &[ToolSearchGroup],
+) -> Result<ResponsesContextItem> {
     if call_id.trim().is_empty() {
         return Err(client_tool_search_protocol_error(
             "client tool_search output requires a non-empty call_id",
         ));
     }
-    if tools.iter().any(|tool| !is_loadable_tool_schema(tool)) {
+    if groups.iter().any(|group| {
+        group
+            .tools
+            .iter()
+            .any(|tool| !is_loadable_tool_schema(tool))
+    }) {
         return Err(client_tool_search_protocol_error(
             "client tool_search output contains a non-loadable tool schema",
         ));
@@ -402,7 +415,12 @@ fn client_tool_search_output(call_id: &str, tools: &[ToolSchema]) -> Result<Resp
         "call_id": call_id,
         "status": "completed",
         "execution": "client",
-        "tools": tools.iter().map(wire_tool_json).collect::<Vec<_>>(),
+        "tools": groups.iter().map(|group| serde_json::json!({
+            "type": "namespace",
+            "name": group.namespace_name,
+            "description": group.namespace_description,
+            "tools": group.tools.iter().map(catalog_tool_wire_json).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
     });
     Ok(ResponsesContextItem {
         kind: ResponsesContextItemKind::ToolSearchOutput,
@@ -411,23 +429,21 @@ fn client_tool_search_output(call_id: &str, tools: &[ToolSchema]) -> Result<Resp
 }
 
 fn is_loadable_tool_schema(tool: &ToolSchema) -> bool {
-    match tool {
-        ToolSchema::Function { .. } | ToolSchema::Custom { .. } => true,
-        ToolSchema::Namespace { tools, .. } => tools.iter().all(is_loadable_tool_schema),
-        ToolSchema::ToolSearch
-        | ToolSchema::ProgrammaticToolCalling
-        | ToolSchema::WebSearch { .. } => false,
-    }
+    matches!(
+        tool,
+        ToolSchema::Function { .. } | ToolSchema::Custom { .. }
+    )
 }
 
-/// 把工具 schema 投影为 Responses wire 中的工具定义形状。
-fn wire_tool_json(tool: &ToolSchema) -> serde_json::Value {
+/// 把 catalog 工具 schema 投影为 `tool_search_output` wire 中的定义形状。
+///
+/// catalog 条目按定义延迟加载，wire 固定携带 `defer_loading: true`。
+fn catalog_tool_wire_json(tool: &ToolSchema) -> serde_json::Value {
     match tool {
         ToolSchema::Function {
             name,
             description,
             input_schema,
-            defer_loading,
             allowed_callers,
             output_schema,
         } => {
@@ -436,10 +452,8 @@ fn wire_tool_json(tool: &ToolSchema) -> serde_json::Value {
                 "name": name,
                 "description": description,
                 "parameters": input_schema,
+                "defer_loading": true,
             });
-            if *defer_loading {
-                value["defer_loading"] = serde_json::Value::Bool(true);
-            }
             if !allowed_callers.is_empty() {
                 value["allowed_callers"] =
                     serde_json::to_value(allowed_callers).unwrap_or(serde_json::Value::Null);
@@ -449,37 +463,15 @@ fn wire_tool_json(tool: &ToolSchema) -> serde_json::Value {
             }
             value
         }
-        ToolSchema::Namespace {
-            name,
-            description,
-            tools,
-        } => serde_json::json!({
-            "type": "namespace",
-            "name": name,
-            "description": description,
-            "tools": tools.iter().map(wire_tool_json).collect::<Vec<_>>(),
-        }),
-        ToolSchema::Custom { .. } => {
-            // catalog 只收录 Function 工具；Custom 不会出现在输出中。
-            serde_json::json!({})
-        }
-        ToolSchema::ToolSearch
+        // catalog 只收录 Function 工具；其余变体不会出现在输出中。
+        ToolSchema::Custom { .. }
         | ToolSchema::ProgrammaticToolCalling
         | ToolSchema::WebSearch { .. } => serde_json::json!({}),
     }
 }
 
-fn count_loaded_tools(tools: &[ToolSchema]) -> u64 {
-    tools
-        .iter()
-        .map(|tool| match tool {
-            ToolSchema::Namespace { tools, .. } => tools.len() as u64,
-            ToolSchema::Function { .. } | ToolSchema::Custom { .. } => 1,
-            ToolSchema::ToolSearch
-            | ToolSchema::ProgrammaticToolCalling
-            | ToolSchema::WebSearch { .. } => 0,
-        })
-        .sum()
+fn count_loaded_tools(groups: &[ToolSearchGroup]) -> u64 {
+    groups.iter().map(|group| group.tools.len() as u64).sum()
 }
 
 fn client_tool_search_protocol_error(message: impl Into<String>) -> PureError {
@@ -725,12 +717,10 @@ mod tests {
 
         let results = catalog.search("status", 8);
 
-        let ToolSchema::Namespace { name, tools, .. } = &results[0] else {
-            panic!("namespace group");
-        };
-        assert_eq!(name, "git");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name(), "git_status");
+        let group = &results[0];
+        assert_eq!(group.namespace_name, "git");
+        assert_eq!(group.tools.len(), 1);
+        assert_eq!(group.tools[0].name(), "git_status");
     }
 
     #[test]
@@ -743,10 +733,8 @@ mod tests {
 
         let results = catalog.search("git_tool", 100);
 
-        let ToolSchema::Namespace { tools, .. } = &results[0] else {
-            panic!("namespace group");
-        };
-        assert_eq!(tools.len(), MAX_CLIENT_TOOL_SEARCH_LIMIT);
+        let total: usize = results.iter().map(|group| group.tools.len()).sum();
+        assert_eq!(total, MAX_CLIENT_TOOL_SEARCH_LIMIT);
     }
 
     #[test]

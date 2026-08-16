@@ -243,10 +243,7 @@ impl ChatTool {
                     format: ToolFormatBody::from(format),
                 },
             },
-            ToolSchema::Namespace { .. }
-            | ToolSchema::ToolSearch
-            | ToolSchema::ProgrammaticToolCalling
-            | ToolSchema::WebSearch { .. } => {
+            ToolSchema::ProgrammaticToolCalling | ToolSchema::WebSearch { .. } => {
                 return Err(protocol_error(
                     "Responses-only tools cannot be consumed by Chat Completions",
                 ));

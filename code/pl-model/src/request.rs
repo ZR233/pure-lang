@@ -400,8 +400,6 @@ pub enum ToolSchema {
         name: String,
         description: String,
         input_schema: serde_json::Value,
-        #[serde(default)]
-        defer_loading: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         allowed_callers: Vec<ToolCallerMode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -411,19 +409,11 @@ pub enum ToolSchema {
         name: String,
         description: String,
         format: ToolFormat,
-        #[serde(default)]
-        defer_loading: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         allowed_callers: Vec<ToolCallerMode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output_schema: Option<serde_json::Value>,
     },
-    Namespace {
-        name: String,
-        description: String,
-        tools: Vec<ToolSchema>,
-    },
-    ToolSearch,
     ProgrammaticToolCalling,
     WebSearch {
         external_web_access: bool,
@@ -466,35 +456,9 @@ impl ToolSchema {
             name: name.into(),
             description: description.into(),
             input_schema,
-            defer_loading: false,
             allowed_callers: Vec::new(),
             output_schema: None,
         }
-    }
-
-    pub fn namespace(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        tools: Vec<ToolSchema>,
-    ) -> Self {
-        Self::Namespace {
-            name: name.into(),
-            description: description.into(),
-            tools,
-        }
-    }
-
-    pub fn deferred(mut self) -> Self {
-        match &mut self {
-            Self::Function { defer_loading, .. } | Self::Custom { defer_loading, .. } => {
-                *defer_loading = true;
-            }
-            Self::Namespace { .. }
-            | Self::ToolSearch
-            | Self::ProgrammaticToolCalling
-            | Self::WebSearch { .. } => {}
-        }
-        self
     }
 
     pub fn allow_programmatic(mut self, output_schema: serde_json::Value) -> Self {
@@ -512,10 +476,7 @@ impl ToolSchema {
                 *allowed_callers = vec![ToolCallerMode::Direct, ToolCallerMode::Programmatic];
                 *schema = Some(output_schema);
             }
-            Self::Namespace { .. }
-            | Self::ToolSearch
-            | Self::ProgrammaticToolCalling
-            | Self::WebSearch { .. } => {}
+            Self::ProgrammaticToolCalling | Self::WebSearch { .. } => {}
         }
         self
     }
@@ -533,7 +494,6 @@ impl ToolSchema {
                 syntax: syntax.into(),
                 definition: definition.into(),
             },
-            defer_loading: false,
             allowed_callers: Vec::new(),
             output_schema: None,
         }
@@ -541,10 +501,7 @@ impl ToolSchema {
 
     pub fn name(&self) -> &str {
         match self {
-            Self::Function { name, .. }
-            | Self::Custom { name, .. }
-            | Self::Namespace { name, .. } => name,
-            Self::ToolSearch => "tool_search",
+            Self::Function { name, .. } | Self::Custom { name, .. } => name,
             Self::ProgrammaticToolCalling => "programmatic_tool_calling",
             Self::WebSearch { .. } => "web_search",
         }
@@ -552,10 +509,7 @@ impl ToolSchema {
 
     pub fn description(&self) -> &str {
         match self {
-            Self::Function { description, .. }
-            | Self::Custom { description, .. }
-            | Self::Namespace { description, .. } => description,
-            Self::ToolSearch => "Load deferred tools.",
+            Self::Function { description, .. } | Self::Custom { description, .. } => description,
             Self::ProgrammaticToolCalling => "Coordinate eligible read-only tools in hosted code.",
             Self::WebSearch { .. } => "Search the web.",
         }
@@ -566,18 +520,11 @@ impl ToolSchema {
     }
 
     pub fn is_hosted(&self) -> bool {
-        matches!(
-            self,
-            Self::WebSearch { .. } | Self::ToolSearch | Self::ProgrammaticToolCalling
-        )
+        matches!(self, Self::WebSearch { .. } | Self::ProgrammaticToolCalling)
     }
 
     pub fn is_web_search(&self) -> bool {
         matches!(self, Self::WebSearch { .. })
-    }
-
-    pub fn is_tool_search(&self) -> bool {
-        matches!(self, Self::ToolSearch)
     }
 
     pub fn is_programmatic_tool_calling(&self) -> bool {
@@ -593,7 +540,6 @@ impl ToolSchema {
             Self::Custom {
                 name,
                 description,
-                defer_loading,
                 allowed_callers,
                 output_schema,
                 ..
@@ -612,11 +558,10 @@ impl ToolSchema {
                     "additionalProperties": false
                 }),
             )
-            .with_wire_options(defer_loading, allowed_callers, output_schema),
+            .with_wire_options(allowed_callers, output_schema),
             Self::Custom {
                 name,
                 description,
-                defer_loading,
                 allowed_callers,
                 output_schema,
                 ..
@@ -632,37 +577,22 @@ impl ToolSchema {
                     "additionalProperties": false
                 }),
             )
-            .with_wire_options(defer_loading, allowed_callers, output_schema),
-            Self::Namespace {
-                name,
-                description,
-                tools,
-            } => Self::Namespace {
-                name,
-                description,
-                tools: tools
-                    .into_iter()
-                    .map(|tool| tool.provider_compatible(supports_custom_tools))
-                    .collect(),
-            },
+            .with_wire_options(allowed_callers, output_schema),
             function => function,
         }
     }
 
     fn with_wire_options(
         mut self,
-        defer_loading: bool,
         allowed_callers: Vec<ToolCallerMode>,
         output_schema: Option<serde_json::Value>,
     ) -> Self {
         if let Self::Function {
-            defer_loading: target_defer_loading,
             allowed_callers: target_allowed_callers,
             output_schema: target_output_schema,
             ..
         } = &mut self
         {
-            *target_defer_loading = defer_loading;
             *target_allowed_callers = allowed_callers;
             *target_output_schema = output_schema;
         }
@@ -740,10 +670,7 @@ impl CompletionRequest {
                 self.model
             )));
         }
-        let has_function_tools = self
-            .tools
-            .iter()
-            .any(|tool| !tool.is_hosted() || matches!(tool, ToolSchema::Namespace { .. }));
+        let has_function_tools = self.tools.iter().any(|tool| !tool.is_hosted());
         if has_function_tools && !capabilities.supports_function_calling() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support function calling",
@@ -762,13 +689,6 @@ impl CompletionRequest {
         if self.tools.iter().any(ToolSchema::is_web_search) && !capabilities.supports_web_search() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support hosted web search",
-                self.model
-            )));
-        }
-        if self.tools.iter().any(ToolSchema::is_tool_search) && !capabilities.supports_tool_search()
-        {
-            return Err(PureError::ConfigError(format!(
-                "model {} does not support tool search",
                 self.model
             )));
         }

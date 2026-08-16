@@ -66,15 +66,7 @@ fn canonicalize_tool_schema(tool: &mut ToolSchema) {
                 canonicalize_json(output_schema);
             }
         }
-        ToolSchema::Namespace { tools, .. } => {
-            for tool in &mut *tools {
-                canonicalize_tool_schema(tool);
-            }
-            sort_tool_schemas(tools);
-        }
-        ToolSchema::ToolSearch
-        | ToolSchema::ProgrammaticToolCalling
-        | ToolSchema::WebSearch { .. } => {}
+        ToolSchema::ProgrammaticToolCalling | ToolSchema::WebSearch { .. } => {}
     }
 }
 
@@ -979,45 +971,37 @@ mod tests {
     }
 
     #[test]
-    fn deferred_namespace_tools_are_canonicalized_and_sorted_recursively() {
-        let first = stable_tool_schemas(vec![ToolSchema::namespace(
-            "git",
-            "Git tools",
-            vec![
-                ToolSchema::function(
-                    "git_status",
-                    "status",
-                    serde_json::json!({"type": "object", "properties": {}}),
-                ),
-                ToolSchema::function(
-                    "git_diff",
-                    "diff",
-                    serde_json::json!({
-                        "type": "object",
-                        "properties": {"path": {"type": "string", "description": "path"}}
-                    }),
-                ),
-            ],
-        )]);
-        let second = stable_tool_schemas(vec![ToolSchema::namespace(
-            "git",
-            "Git tools",
-            vec![
-                ToolSchema::function(
-                    "git_diff",
-                    "diff",
-                    serde_json::json!({
-                        "properties": {"path": {"description": "path", "type": "string"}},
-                        "type": "object"
-                    }),
-                ),
-                ToolSchema::function(
-                    "git_status",
-                    "status",
-                    serde_json::json!({"properties": {}, "type": "object"}),
-                ),
-            ],
-        )]);
+    fn tool_schemas_are_canonicalized_and_sorted_across_key_orders() {
+        let first = stable_tool_schemas(vec![
+            ToolSchema::function(
+                "git_status",
+                "status",
+                serde_json::json!({"type": "object", "properties": {}}),
+            ),
+            ToolSchema::function(
+                "git_diff",
+                "diff",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "path"}}
+                }),
+            ),
+        ]);
+        let second = stable_tool_schemas(vec![
+            ToolSchema::function(
+                "git_diff",
+                "diff",
+                serde_json::json!({
+                    "properties": {"path": {"description": "path", "type": "string"}},
+                    "type": "object"
+                }),
+            ),
+            ToolSchema::function(
+                "git_status",
+                "status",
+                serde_json::json!({"properties": {}, "type": "object"}),
+            ),
+        ]);
 
         assert_eq!(
             serde_json::to_vec(&first).unwrap(),

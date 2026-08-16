@@ -309,8 +309,9 @@ struct 根继续统一关闭未知顶层字段；internally tagged enum 等由 `
 properties 执行，不能散落手写 JSON key 校验。
 
 `serde_json::Value` 只保留在确实运行时动态的边界：provider wire、模型返回的原始 arguments、
-远端 MCP schema、动态 `RegisteredTool::new`、运行时 role/target enum，以及 Custom、Namespace、
-Tool Search、Programmatic Tool Calling 和 Hosted Web Search 协议类型。MCP schema 由 rmcp 提供，
+远端 MCP schema、动态 `RegisteredTool::new`、运行时 role/target enum，以及 Custom、
+Programmatic Tool Calling 和 Hosted Web Search 协议类型；hosted `tool_search` 与 Namespace
+工具 wire 类型已随客户端 Tool Search 移除。MCP schema 由 rmcp 提供，
 PL 只做保证可注册所需的最小 normalize，不得把第三方动态 schema 强制改成 PL 静态 strict schema。
 
 测试应覆盖 typed 输入的必填字段、未知字段、enum、范围和业务校验，以及注册、权限、缓存、取消、

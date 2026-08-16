@@ -386,7 +386,6 @@ impl Tool for RegisteredTool {
             name: self.name.clone(),
             description: self.description.clone(),
             input_schema: self.input_schema.clone(),
-            defer_loading: false,
             allowed_callers: Vec::new(),
             output_schema: self.output_schema.clone(),
         }

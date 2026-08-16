@@ -243,8 +243,6 @@ enum ResponsesTool {
         name: String,
         description: String,
         parameters: serde_json::Value,
-        #[serde(skip_serializing_if = "is_false")]
-        defer_loading: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         allowed_callers: Vec<crate::ToolCallerMode>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,19 +252,11 @@ enum ResponsesTool {
         name: String,
         description: String,
         format: ToolFormatBody,
-        #[serde(skip_serializing_if = "is_false")]
-        defer_loading: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         allowed_callers: Vec<crate::ToolCallerMode>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_schema: Option<serde_json::Value>,
     },
-    Namespace {
-        name: String,
-        description: String,
-        tools: Vec<ResponsesTool>,
-    },
-    ToolSearch,
     ProgrammaticToolCalling,
     WebSearch {
         external_web_access: bool,
@@ -290,14 +280,12 @@ impl From<&ToolSchema> for ResponsesTool {
                 name,
                 description,
                 input_schema,
-                defer_loading,
                 allowed_callers,
                 output_schema,
             } => Self::Function {
                 name: name.clone(),
                 description: description.clone(),
                 parameters: input_schema.clone(),
-                defer_loading: *defer_loading,
                 allowed_callers: allowed_callers.clone(),
                 output_schema: output_schema.clone(),
             },
@@ -305,27 +293,15 @@ impl From<&ToolSchema> for ResponsesTool {
                 name,
                 description,
                 format,
-                defer_loading,
                 allowed_callers,
                 output_schema,
             } => Self::Custom {
                 name: name.clone(),
                 description: description.clone(),
                 format: ToolFormatBody::from(format),
-                defer_loading: *defer_loading,
                 allowed_callers: allowed_callers.clone(),
                 output_schema: output_schema.clone(),
             },
-            ToolSchema::Namespace {
-                name,
-                description,
-                tools,
-            } => Self::Namespace {
-                name: name.clone(),
-                description: description.clone(),
-                tools: tools.iter().map(Self::from).collect(),
-            },
-            ToolSchema::ToolSearch => Self::ToolSearch,
             ToolSchema::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
             ToolSchema::WebSearch {
                 external_web_access,
@@ -344,10 +320,6 @@ impl From<&ToolSchema> for ResponsesTool {
             },
         }
     }
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 #[derive(Debug, Clone, Serialize)]

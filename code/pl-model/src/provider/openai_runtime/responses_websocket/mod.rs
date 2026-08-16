@@ -649,6 +649,116 @@ mod tests {
     }
 
     #[test]
+    fn continuation_reuses_when_request_tools_unchanged_and_context_appended() {
+        // 新架构下 request tools 只含 eager 工具与 schema 固定的 tool_search；
+        // deferred-only catalog 变化不改变 request，continuation 必须复用。
+        let tools = serde_json::json!([
+            {"type": "function", "name": "exec"},
+            {"type": "function", "name": "tool_search"}
+        ]);
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "list the git tools"}],
+        });
+        let tool_search_call = serde_json::json!({
+            "type": "tool_search_call",
+            "call_id": "call-1",
+            "execution": "client",
+            "arguments": {"query": "git status"},
+        });
+        let tool_search_output = serde_json::json!({
+            "type": "tool_search_output",
+            "call_id": "call-1",
+            "status": "completed",
+            "execution": "client",
+            "tools": [{
+                "type": "namespace",
+                "name": "git",
+                "description": "Git tools",
+                "tools": [{
+                    "type": "function",
+                    "name": "git_status",
+                    "defer_loading": true,
+                }],
+            }],
+        });
+        let next_user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "run git status"}],
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                ("tools".to_string(), tools.clone()),
+                ("input".to_string(), serde_json::json!([user.clone()])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![tool_search_call.clone(), tool_search_output.clone()],
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            ("tools".to_string(), tools),
+            (
+                "input".to_string(),
+                serde_json::json!([user, tool_search_call, tool_search_output, next_user,]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &current).unwrap();
+        assert_eq!(
+            incremental["input"],
+            serde_json::json!([next_user]),
+            "request tools 未变时，session 上下文追加的 tool_search item 之后 continuation 只发送严格后缀"
+        );
+        assert_eq!(incremental["previous_response_id"], "response-1");
+    }
+
+    #[test]
+    fn continuation_falls_back_when_request_tools_change() {
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "tools".to_string(),
+                    serde_json::json!([
+                        {"type": "function", "name": "exec"},
+                        {"type": "function", "name": "tool_search"}
+                    ]),
+                ),
+                ("input".to_string(), serde_json::json!([user.clone()])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: Vec::new(),
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "tools".to_string(),
+                serde_json::json!([
+                    {"type": "function", "name": "exec"},
+                    {"type": "function", "name": "read_file"},
+                    {"type": "function", "name": "tool_search"}
+                ]),
+            ),
+            ("input".to_string(), serde_json::json!([user])),
+        ]);
+
+        assert_eq!(
+            incremental_request(&session, &current).unwrap_err(),
+            IncrementalRequestFallbackReason::RequestPropertiesChanged
+        );
+    }
+
+    #[test]
     fn incremental_request_requires_working_context_to_keep_its_turn_anchor() {
         let user = serde_json::json!({
             "type": "message",
