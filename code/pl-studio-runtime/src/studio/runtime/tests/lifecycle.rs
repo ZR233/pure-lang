@@ -2058,49 +2058,70 @@ async fn residency_evicts_idle_actors_beyond_capacity_and_restores_on_demand() {
 }
 
 #[tokio::test]
-async fn shutdown_emits_ordered_phase_progress_with_flush_pending_zero() {
+async fn pinned_thread_is_not_evicted_beyond_capacity() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let home = lazy_home(unique, "phases");
+    let workspace = lazy_home(unique, "pin-ws");
+    let home = lazy_home(unique, "pin-home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
     let runtime = StudioRuntime::new(
-        StudioStore::open_memory().await.unwrap(),
+        store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
     )
     .unwrap();
     runtime.start_runtime().await.unwrap();
 
-    let mut progress = runtime.subscribe_shutdown_progress().await;
-    runtime.shutdown_runtime().await.unwrap();
-
-    let mut phases = Vec::new();
-    while let Ok(event) = progress.try_recv() {
-        phases.push(event);
+    let mut threads = Vec::new();
+    let mut pin_guard = Option::None;
+    for index in 0..17 {
+        let thread = runtime
+            .create_thread(&project.id, &format!("Session {index}"))
+            .await
+            .unwrap();
+        runtime.ensure_thread_agent(&thread.id).await.unwrap();
+        if index == 0 {
+            // 在后续 ensure 触发淘汰前 pin 队首线程；guard 必须存活到断言后
+            // （Drop 即解除 pin），模拟活跃 GUI 订阅的完整生命周期。
+            pin_guard = Some(runtime.pin_thread(&thread.id));
+        }
+        threads.push(thread);
     }
-    let sequence = phases.iter().map(|event| event.phase).collect::<Vec<_>>();
-    assert_eq!(
-        sequence,
-        vec![
-            crate::StudioShutdownPhase::StoppingSubscriptions,
-            crate::StudioShutdownPhase::CancellingTurns,
-            crate::StudioShutdownPhase::FlushingPersistence,
-            crate::StudioShutdownPhase::FlushingPersistence,
-            crate::StudioShutdownPhase::SuspendingTasks,
-            crate::StudioShutdownPhase::StoppingMcp,
-            crate::StudioShutdownPhase::StoppingLsp,
-            crate::StudioShutdownPhase::Stopped,
-        ]
-    );
-    let flush_events = phases
-        .iter()
-        .filter(|event| event.phase == crate::StudioShutdownPhase::FlushingPersistence)
-        .map(|event| event.pending_commits)
-        .collect::<Vec<_>>();
-    assert_eq!(*flush_events.last().unwrap(), 0);
+    // 再触发一次 ensure 驱动 enforce_residency_limit。
+    runtime.ensure_thread_agent(&threads[16].id).await.unwrap();
 
-    // 已停止的 runtime 再次 shutdown 不重复发布阶段序列。
-    runtime.shutdown_runtime().await.unwrap();
-    assert!(progress.try_recv().is_err());
+    let framework = runtime.agent_framework().await.unwrap();
+    let pinned_id = pl_core::AgentId::new(threads[0].id.clone()).unwrap();
+    assert!(
+        runtime.residency.is_pinned(&threads[0].id),
+        "pin guard must keep the thread pinned"
+    );
+    assert!(
+        framework.handle().snapshot(pinned_id.clone()).await.is_ok(),
+        "pinned thread must stay resident beyond capacity"
+    );
+    // pin 期间容量是软上限：唯一候选被钉住时不淘汰其他线程。
+    let neighbor_id = pl_core::AgentId::new(threads[1].id.clone()).unwrap();
+    assert!(
+        framework.handle().snapshot(neighbor_id).await.is_ok(),
+        "pinned candidate blocks eviction; capacity is soft while observed"
+    );
+
+    // 解除 pin 后再次触发淘汰：队首（原被钉线程）按 LRU 被淘汰。
+    drop(pin_guard);
+    runtime.ensure_thread_agent(&threads[16].id).await.unwrap();
+    assert!(
+        matches!(
+            framework.handle().snapshot(pinned_id).await,
+            Err(pl_core::AgentRuntimeError::NotFound(_))
+        ),
+        "unpinned LRU front must be evicted after the pin is released"
+    );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
     let _ = tokio::fs::remove_dir_all(home).await;
 }

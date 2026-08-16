@@ -110,6 +110,12 @@ class _FakeStudioApi implements StudioApi {
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
+  /// 测试注入：直接替换下一次 readStudioState 返回的 product 状态
+  /// （模拟 resync/reload 快照）。
+  void debugReplaceCurrentState(StudioState state) {
+    _currentState = state;
+  }
+
   List<String> get discoveredSkills => _discoveredSkills;
 
   set discoveredSkills(List<String> value) {

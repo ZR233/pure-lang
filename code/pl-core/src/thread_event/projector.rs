@@ -396,7 +396,9 @@ fn thread_item(thread_id: &str, item: &TracePart, failure: Option<&str>) -> Opti
         id: item.item_id.clone(),
         thread_id: thread_id.to_string(),
         turn_id: item.turn_id.clone(),
-        ordinal: item.started_sequence,
+        // ordinal 由 ThreadEventBus 首次应用时分配（到达序）；started_sequence 仅是
+        // trace 事件自身的去重/批内排序键，不再兼任 timeline 顺序。
+        ordinal: 0,
         revision: item.revision,
         status: if failure.is_some() && item.status != TracePartStatus::BudgetLimited {
             ThreadItemStatus::Failed

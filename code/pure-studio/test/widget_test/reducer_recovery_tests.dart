@@ -124,7 +124,11 @@ void registerReducerRecoveryTests() {
       update: ThreadItemUpsert(changedOrdinal),
     );
 
-    expect(result.resyncThreadId, 'session-1');
+    // ordinal 是总线一次性分配的不可变顺序事实：正常情况下同 id 不会携带
+    // 不同 ordinal；防御性地忽略迟到载荷中的 ordinal 漂移（以已加载值为准），
+    // 不再触发 resync。
+    expect(result.resyncThreadId, isNull);
+    expect(result.state.selectedWorkspace!.items.single.revision, 1);
     expect(result.state.selectedWorkspace!.items.single.ordinal, 3);
   });
 

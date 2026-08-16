@@ -95,13 +95,15 @@ where
             &current,
             observed.observation,
         );
+        // bus 是唯一 ordinal 分配者：规范化通知同时供给快照、facts 与广播。
+        let projected_thread = self
+            .runtime
+            .thread_events
+            .project(thread_id.as_str(), &projected.notifications)
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
         let projection = ThreadProjectionCommit {
-            snapshot: self
-                .runtime
-                .thread_events
-                .project(thread_id.as_str(), &projected.notifications)
-                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-            notifications: projected.notifications.clone(),
+            snapshot: projected_thread.snapshot,
+            notifications: projected_thread.notifications.clone(),
         };
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
@@ -121,7 +123,7 @@ where
             .publish(
                 CommitPublication::new(Some(thread_id), Some(turn_id))
                     .store_directory_snapshot()
-                    .with_thread_notifications(projected.notifications),
+                    .with_thread_notifications(projected_thread.notifications),
             ),
         )
         .await
@@ -165,25 +167,34 @@ where
             .snapshot(thread_id.as_str())
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
         let projected = project_trace_events(thread_id.as_str(), &current_thread, &trace_events);
-        let session_projection = if projected.notifications.is_empty() {
+        let projected_thread = if projected.notifications.is_empty() {
             None
         } else {
-            Some(ThreadProjectionCommit {
-                snapshot: self
-                    .runtime
+            Some(
+                self.runtime
                     .thread_events
                     .project(thread_id.as_str(), &projected.notifications)
                     .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-                notifications: projected.notifications.clone(),
-            })
+            )
         };
+        let session_projection =
+            projected_thread
+                .as_ref()
+                .map(|projected_thread| ThreadProjectionCommit {
+                    snapshot: projected_thread.snapshot.clone(),
+                    notifications: projected_thread.notifications.clone(),
+                });
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.trace_sequence = next_trace_sequence;
         next.session.thread_revision = projected.through_revision;
         let committed_trace_events = trace_events.clone();
-        let committed_thread_events = projected.notifications.clone();
+        let committed_thread_events = projected_thread
+            .as_ref()
+            .map_or_else(Vec::new, |projected_thread| {
+                projected_thread.notifications.clone()
+            });
         let facts = DurableCommitFacts::from_state(
             &next,
             Vec::new(),
@@ -279,25 +290,29 @@ where
                     .thread_events
                     .project(current.thread.id.as_str(), &projected.notifications)
                     .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
+                    .snapshot
             };
             let extra =
                 project_thread_facts(current.thread.id.as_str(), &after_runtime, thread_facts);
             projected.through_revision = extra.through_revision;
             projected.notifications.extend(extra.notifications);
         }
-        let thread_projection = match thread_id.as_deref() {
-            Some(thread_id) if !projected.notifications.is_empty() => {
-                Some(ThreadProjectionCommit {
-                    snapshot: self
-                        .runtime
-                        .thread_events
-                        .project(thread_id, &projected.notifications)
-                        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-                    notifications: projected.notifications.clone(),
-                })
-            }
+        let projected_thread = match thread_id.as_deref() {
+            Some(thread_id) if !projected.notifications.is_empty() => Some(
+                self.runtime
+                    .thread_events
+                    .project(thread_id, &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+            ),
             Some(_) | None => None,
         };
+        let thread_projection =
+            projected_thread
+                .as_ref()
+                .map(|projected_thread| ThreadProjectionCommit {
+                    snapshot: projected_thread.snapshot.clone(),
+                    notifications: projected_thread.notifications.clone(),
+                });
         if let Some(thread_id) = thread_id.as_ref() {
             let thread_id = ThreadId::new(thread_id.clone())
                 .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
@@ -310,7 +325,11 @@ where
             }
             next_state.session.thread_revision = projected.through_revision;
         }
-        let committed_thread_events = projected.notifications.clone();
+        let committed_thread_events = projected_thread
+            .as_ref()
+            .map_or_else(Vec::new, |projected_thread| {
+                projected_thread.notifications.clone()
+            });
         let mut facts = DurableCommitFacts::from_state(
             &next_state,
             vec![event.clone()],

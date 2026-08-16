@@ -116,6 +116,7 @@ class ThreadItemView {
   }
 
   ThreadItemView copyWith({
+    int? ordinal,
     int? revision,
     String? status,
     DateTime? updatedAt,
@@ -131,7 +132,7 @@ class ThreadItemView {
       id: id,
       threadId: threadId,
       turnId: turnId,
-      ordinal: ordinal,
+      ordinal: ordinal ?? this.ordinal,
       revision: revision ?? this.revision,
       status: status ?? this.status,
       createdAt: createdAt,

@@ -217,6 +217,17 @@ impl StudioRuntime {
         Ok(runtime)
     }
 
+    /// 订阅 pin：guard 存活期间该线程不参与 LRU 淘汰，Drop 时自动解除。
+    ///
+    /// bridge 订阅 producer task 持有该 guard——订阅取消/流关闭即解除 pin。
+    pub fn pin_thread(&self, thread_id: &str) -> ThreadResidencyPin {
+        self.residency.pin(thread_id);
+        ThreadResidencyPin {
+            runtime: self.clone(),
+            thread_id: thread_id.to_string(),
+        }
+    }
+
     /// 订阅 PL canonical Thread stream；首帧固定为 authoritative snapshot。
     ///
     /// 订阅是显式激活命令：未驻留的 Thread 在这里按需恢复。
@@ -419,6 +430,10 @@ impl StudioRuntime {
         };
         let handle = framework.handle();
         for thread_id in candidates {
+            // 有活跃订阅的线程不淘汰（design/17：订阅是显式观察者）。
+            if self.residency.is_pinned(&thread_id) {
+                continue;
+            }
             let agent_id = match self.store.read_thread(&thread_id).await {
                 Ok(Some(record)) => match pl_core::AgentId::new(record.agent_path) {
                     Ok(agent_id) => agent_id,
@@ -816,5 +831,17 @@ impl StudioRuntime {
             });
         }
         Ok(())
+    }
+}
+
+/// 订阅驻留 pin guard：Drop 时解除 pin。
+pub struct ThreadResidencyPin {
+    runtime: StudioRuntime,
+    thread_id: String,
+}
+
+impl Drop for ThreadResidencyPin {
+    fn drop(&mut self) {
+        self.runtime.residency.unpin(&self.thread_id);
     }
 }

@@ -24,7 +24,14 @@ class ComposerDock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    StudioDriverState.publishWorkspace(workspace);
+    // Driver 快照需要完整 timelineRows；controls 视图为省内存清空了行。
+    final full = switch (ref.watch(selectedAgentWorkspaceProvider)) {
+      AsyncData(:final value) => value,
+      _ => null,
+    };
+    if (full != null) {
+      StudioDriverState.publishWorkspace(full);
+    }
     final interaction = workspace.activeInteraction;
     return SafeArea(
       top: false,

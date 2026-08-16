@@ -113,13 +113,14 @@ where
                             },
                         )],
                     );
+                    let projected_thread = self
+                        .runtime
+                        .thread_events
+                        .project(next.snapshot.identity.id.as_str(), &projected.notifications)
+                        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
                     Ok(ThreadProjectionCommit {
-                        snapshot: self
-                            .runtime
-                            .thread_events
-                            .project(next.snapshot.identity.id.as_str(), &projected.notifications)
-                            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-                        notifications: projected.notifications,
+                        snapshot: projected_thread.snapshot,
+                        notifications: projected_thread.notifications,
                     })
                 },
             )

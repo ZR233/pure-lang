@@ -220,12 +220,13 @@ where
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
             .revision;
         let projected = project_runtime_event(&event, sequence);
-        let thread_notifications = projected.notifications.clone();
+        let projected_thread = thread_events
+            .project(&thread_id, &projected.notifications)
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        let thread_notifications = projected_thread.notifications.clone();
         let projection = super::ThreadProjectionCommit {
-            snapshot: thread_events
-                .project(&thread_id, &thread_notifications)
-                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-            notifications: thread_notifications,
+            snapshot: projected_thread.snapshot,
+            notifications: projected_thread.notifications,
         };
         if agent.state.snapshot.identity.id != thread_key {
             return Err(AgentRuntimeError::ThreadMismatch {
@@ -271,7 +272,7 @@ where
                             .and_then(|value| TurnId::new(value).ok()),
                         runtime_events: vec![event],
                         trace_events: Vec::new(),
-                        thread_notifications: projected.notifications,
+                        thread_notifications: thread_notifications.clone(),
                     })
                     .await
             }

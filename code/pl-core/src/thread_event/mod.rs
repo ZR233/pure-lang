@@ -143,7 +143,7 @@ impl ThreadEventBus {
         &self,
         thread_id: &str,
         notifications: &[ThreadNotificationEnvelope],
-    ) -> Result<ThreadSnapshot, ThreadEventError> {
+    ) -> Result<ThreadProjection, ThreadEventError> {
         let mut snapshot = self
             .channel_or_create(thread_id)?
             .state
@@ -151,10 +151,14 @@ impl ThreadEventBus {
             .map_err(|_| ThreadEventError::LockPoisoned)?
             .snapshot
             .clone();
-        for notification in notifications {
-            apply_notification(&mut snapshot, notification)?;
-        }
-        Ok(snapshot)
+        let normalized = notifications
+            .iter()
+            .map(|notification| apply_notification(&mut snapshot, notification))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ThreadProjection {
+            snapshot,
+            notifications: normalized,
+        })
     }
 
     pub fn subscribe(
@@ -192,20 +196,21 @@ impl ThreadEventBus {
         channel: &ThreadChannel,
         notification: ThreadNotificationEnvelope,
     ) -> Result<(), ThreadEventError> {
-        let deliveries = {
+        let (notification, deliveries) = {
             let mut state = channel
                 .state
                 .lock()
                 .map_err(|_| ThreadEventError::LockPoisoned)?;
-            apply_notification(&mut state.snapshot, &notification)?;
-            state
+            let notification = apply_notification(&mut state.snapshot, &notification)?;
+            let deliveries = state
                 .subscribers
                 .iter_mut()
                 .map(|(subscriber_id, subscriber)| {
                     let pending_lag = std::mem::take(&mut subscriber.pending_lag);
                     (*subscriber_id, subscriber.sender.clone(), pending_lag)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (notification, deliveries)
         };
         let mut closed = Vec::new();
         for (subscriber_id, sender, pending_lag) in deliveries {
@@ -240,7 +245,7 @@ impl ThreadEventBus {
             .state
             .lock()
             .map_err(|_| ThreadEventError::LockPoisoned)?;
-        apply_notification(&mut state.snapshot, &notification)?;
+        let notification = apply_notification(&mut state.snapshot, &notification)?;
         state.subscribers.retain(|_, subscriber| {
             if subscriber.pending_lag > 0 {
                 match subscriber
@@ -380,7 +385,7 @@ impl ThreadEventBusHandle {
         &self,
         thread_id: &str,
         notifications: &[ThreadNotificationEnvelope],
-    ) -> Result<ThreadSnapshot, ThreadEventError> {
+    ) -> Result<ThreadProjection, ThreadEventError> {
         self.bus.project(thread_id, notifications)
     }
 
@@ -449,10 +454,19 @@ impl fmt::Debug for ThreadEventSubscription {
     }
 }
 
+/// 一次纯投影的结果：应用后的快照 + 携带最终 ordinal 的规范化通知。
+///
+/// 规范化通知必须同时供给内存广播、订阅者与 DB 落库事实——三处同源，
+/// 保证排序事实只有一个权威。
+pub struct ThreadProjection {
+    pub snapshot: ThreadSnapshot,
+    pub notifications: Vec<ThreadNotificationEnvelope>,
+}
+
 fn apply_notification(
     snapshot: &mut ThreadSnapshot,
     envelope: &ThreadNotificationEnvelope,
-) -> Result<(), ThreadEventError> {
+) -> Result<ThreadNotificationEnvelope, ThreadEventError> {
     if snapshot.thread.id != envelope.thread_id {
         return Err(ThreadEventError::ThreadMismatch {
             expected: snapshot.thread.id.clone(),
@@ -466,7 +480,8 @@ fn apply_notification(
             actual: envelope.revision,
         });
     }
-    match &envelope.notification {
+    let mut normalized = envelope.clone();
+    match &mut normalized.notification {
         ThreadNotification::TurnStarted { turn } | ThreadNotification::TurnUpdated { turn } => {
             snapshot.active_turn = Some(turn.clone());
         }
@@ -480,7 +495,7 @@ fn apply_notification(
             }
         }
         ThreadNotification::ItemStarted { item } | ThreadNotification::ItemCompleted { item } => {
-            upsert_item(&mut snapshot.items, item)
+            **item = upsert_item(&mut snapshot.items, item);
         }
         ThreadNotification::ItemDelta { delta } => apply_delta(&mut snapshot.items, delta)?,
         ThreadNotification::InteractionChanged { interaction } => {
@@ -494,18 +509,28 @@ fn apply_notification(
         ThreadNotification::ThreadRuntimeUpdated { runtime } => {
             snapshot.runtime = Some((**runtime).clone());
         }
-        ThreadNotification::Lagged { .. } => return Ok(()),
+        ThreadNotification::Lagged { .. } => {
+            return Ok(normalized);
+        }
     }
-    snapshot.revision = envelope.revision;
-    Ok(())
+    snapshot.revision = normalized.revision;
+    Ok(normalized)
 }
 
-fn upsert_item(items: &mut Vec<ThreadItem>, replacement: &ThreadItem) {
+/// 唯一 ordinal 分配点：新 item 按到达序取 `max(ordinal)+1`（空快照从 1 起），
+/// 已存在 item 的 ordinal 首次分配后不可变（更新载荷不改变顺序事实）。
+fn upsert_item(items: &mut Vec<ThreadItem>, replacement: &ThreadItem) -> ThreadItem {
     if let Some(existing) = items.iter_mut().find(|item| item.id == replacement.id) {
+        let immutable_ordinal = existing.ordinal;
         *existing = replacement.clone();
+        existing.ordinal = immutable_ordinal;
+        existing.clone()
     } else {
-        items.push(replacement.clone());
+        let mut assigned = replacement.clone();
+        assigned.ordinal = items.iter().map(|item| item.ordinal).max().unwrap_or(0) + 1;
+        items.push(assigned.clone());
         items.sort_by_key(|item| item.ordinal);
+        assigned
     }
 }
 

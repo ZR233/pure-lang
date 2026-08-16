@@ -308,6 +308,10 @@ class StudioController extends _$StudioController {
   }
 
   /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
+  /// 测试入口：显式触发一次 product reload（等价 StalePayload 路径）。
+  @visibleForTesting
+  Future<void> debugReloadForTest() => _reloadProductState();
+
   Future<void> loadMoreThreads() async {
     final current = state.value;
     if (current == null) return;
@@ -734,17 +738,30 @@ class StudioController extends _$StudioController {
 
   Future<void> _reloadProductState({
     String? selectedProjectId,
-    String? selectedThreadId,
+    Object? selectedThreadId = _selectionUnset,
   }) async {
     try {
       final current = state.value;
       final desiredProjectId = selectedProjectId ?? current?.selectedProjectId;
-      final desiredThreadId = selectedThreadId ?? current?.selectedThreadId;
+      // 哨兵区分"未传（沿用当前选择）"与"显式传 null（归档后清空选择）"。
+      final desiredThreadId = identical(selectedThreadId, _selectionUnset)
+          ? current?.selectedThreadId
+          : selectedThreadId as String?;
+      // 选择只在 _withStableSelection 解析一次；desired 线程的已知项目用于
+      // 判断跨项目切换，窗口外未知项目视为同项目（保留选择）。
+      final desiredThreadProjectId = desiredThreadId == null
+          ? null
+          : current?.threads
+                    .where((thread) => thread.id == desiredThreadId)
+                    .firstOrNull
+                    ?.projectId ??
+                current?.workspacesByThread[desiredThreadId]?.thread.projectId;
       await _adoptProductState(
         _withStableSelection(
           await _api.readStudioState(),
           selectedProjectId: desiredProjectId,
           selectedThreadId: desiredThreadId,
+          selectedThreadProjectId: desiredThreadProjectId,
         ),
       );
     } on Object {
@@ -849,14 +866,13 @@ class StudioController extends _$StudioController {
   Future<void> _adoptProductState(StudioState incoming) async {
     final current = state.value;
     final previousThreadId = current?.selectedThreadId;
-    var next = incoming;
-    if (current != null) {
-      next = _mergeProductSnapshots(current, incoming).copyWith(
-        providerCatalog: current.providerCatalog,
-        selectedProjectId: incoming.selectedProjectId,
-        selectedThreadId: incoming.selectedThreadId,
-      );
-    }
+    // 选择已在 _withStableSelection 解析并随 incoming 携带；这里不再改写。
+    final next = current == null
+        ? incoming
+        : _mergeProductSnapshots(
+            current,
+            incoming,
+          ).copyWith(providerCatalog: current.providerCatalog);
     state = AsyncData(next);
     if (previousThreadId != next.selectedThreadId) {
       await _subscribeThread(next.selectedThreadId);
@@ -864,14 +880,15 @@ class StudioController extends _$StudioController {
   }
 }
 
+const Object _selectionUnset = Object();
+
 StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   var next = applyProjectDirectory(current, incoming.projectDirectory);
-  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口。选中线程是
-  // 用户状态——首页窗口不完整，绝不因选中线程不在首页而切换选择；
-  // 仅在当前没有选择时才采纳 snapshot 的稳定选择。
+  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口；选择采纳
+  // incoming 携带的解析结果（_withStableSelection 是唯一解析点）。
   next = next.copyWith(
     threadDirectory: incoming.threadDirectory,
-    selectedThreadId: current.selectedThreadId ?? incoming.selectedThreadId,
+    selectedThreadId: incoming.selectedThreadId,
   );
   next = applyTaskDirectory(next, incoming.taskDirectory);
   next = applyAgentDirectory(next, incoming.agentDirectory);
@@ -931,16 +948,19 @@ StudioState _withStableSelection(
   StudioState state, {
   String? selectedProjectId,
   String? selectedThreadId,
+  String? selectedThreadProjectId,
 }) {
   final projectId =
       state.projects.any((project) => project.id == selectedProjectId)
       ? selectedProjectId
       : state.selectedProjectId;
-  final threadId =
-      state.threads.any(
-        (thread) =>
-            thread.id == selectedThreadId && thread.projectId == projectId,
-      )
+  // 选择是显式状态（design/11）：desired 线程属于解析后的项目（或项目未知，
+  // 即窗口外线程）则保留——目录是分页窗口，"不在窗口内"不代表线程不存在。
+  // 跨项目切换与无选择时回退到该项目第一个 root；线程被归档/清理由目录
+  // removal 增量负责回退选择。
+  final sameProject =
+      selectedThreadProjectId == null || selectedThreadProjectId == projectId;
+  final threadId = selectedThreadId != null && sameProject
       ? selectedThreadId
       : state.threads
             .where((thread) => thread.isRoot && thread.projectId == projectId)

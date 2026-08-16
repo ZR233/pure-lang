@@ -44,8 +44,12 @@ Immediate flush 边界——内存先更新，但广播终态、调度 continuat
 必须等待包含该 commit 的事务完成。批窗口内尚未落库的流式增量在进程崩溃时可以丢弃；重启后
 以 SQLite 已提交状态为准恢复。数据库保持 `synchronous=FULL`，批量事务已摊薄 fsync 成本。
 
-Item start 分配不可变 ordinal；delta 不写库；terminal 更新同一 Item 完整 payload。历史查询按
-`(thread_id, turn_sequence)` keyset 分页，不使用 OFFSET。
+Item ordinal 是内存权威事实：由 ThreadEventBus（每线程唯一投影者）在通知首次应用时按
+到达序分配 `max(ordinal)+1`，此后不可变；分配后的规范化通知同时供给内存快照、订阅广播
+与 SQLite 落库，三处同源。落库原样保留 item ordinal，不再从数据库派生顺序事实；恢复时
+`replace_snapshot` 以已落库 ordinal 种子化总线，续号从 max+1 继续。delta 不写库；terminal
+更新同一 Item 完整 payload。历史查询按 `(thread_id, turn_sequence)` keyset 分页，不使用
+OFFSET。
 
 模型 transcript 与 Studio Timeline 分开持久化。`thread_context_segments` 按 Thread revision 保存
 `append | replace`：普通 checkpoint 只追加新增 `ModelContextItem` suffix；compaction、回滚或截断

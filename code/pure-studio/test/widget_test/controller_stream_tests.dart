@@ -564,4 +564,47 @@ void registerControllerStreamTests() {
     expect(after.threads, isEmpty);
     expect(after.workspaceUiByThread.containsKey('session-1'), isFalse);
   });
+  test('resync reload keeps selection when incoming window drops the thread', () async {
+    // 窗口化目录：resync 快照首页不含选中线程（被更新更活跃的线程挤出首页）
+    // 时不得切换选择（选择是显式状态，仅 removal 增量可回退）。
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    // 模拟 resync：replace 快照不含 session-1（目录窗口被替换）后触发 Stale。
+    api.debugReplaceCurrentState(
+      _emptyState().copyWith(
+        threadDirectory: _emptyState().threadDirectory.copyWith(
+          threads: [
+            StudioThread(
+              id: 'session-other',
+              projectId: 'project-1',
+              title: 'Other',
+              mode: StudioMode.simple,
+              updatedAt: DateTime.now(),
+            ),
+          ],
+        ),
+      ),
+    );
+    api.emitGlobal(
+      const StudioBridgeEvent(payload: StalePayload(laggedEvents: 1)),
+    );
+    await pumpEventQueue();
+    await controller.debugReloadForTest();
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.selectedThreadId, 'session-1');
+    // 关键回归：窗口被替换后不订阅其他线程（选择未被顶掉）。
+    expect(
+      api.threadSubscriptions.every((id) => id == 'session-1'),
+      isTrue,
+      reason: 'subscriptions: ${api.threadSubscriptions}',
+    );
+  });
 }

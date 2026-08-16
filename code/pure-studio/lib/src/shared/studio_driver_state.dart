@@ -338,6 +338,16 @@ abstract final class StudioDriverState {
         for (final row in rows) row.sequence,
         for (final row in rows) row.renderVersion,
       ]),
+      // Driver 顺序验收：完整行序列（id/type/text/sequence）。
+      'rows': [
+        for (final row in rows)
+          {
+            'id': row.id,
+            'type': row.type.name,
+            'text': row.part?.text,
+            'sequence': row.sequence,
+          },
+      ],
     };
   }
 

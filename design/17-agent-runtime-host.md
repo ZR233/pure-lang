@@ -54,6 +54,11 @@ pl-core 只保留三个窄端口：
 journal；只有 Immediate 边界（Turn 终态、Interaction 提交与 resolution 等）等待 flush 完成后
 才发布终态事实。Task tool 自己事务性写 TaskService；core 不携带 product mutation。
 
+ThreadEventBus 是 timeline 顺序的唯一分配者：新 item 的 ordinal 在通知首次应用时按到达序
+分配（`max+1`），首次分配后不可变；投影/广播/落库消费同一份规范化通知。生产者（runtime
+事件投影、trace 投影、observation 投影）不再自行计算 timeline ordinal，trace 的
+`started_sequence` 只作为 trace 事件自身的去重与批内排序键。
+
 TurnFactory 为每次 turn 提供 typed `AgentWorkspace { root, boundary, mutability }`。Studio 通过
 durable owner 解析 workspace：root/explorer 绑定 Project，executor 绑定 WorkUnit worktree，
 Delivery reviewer 绑定目标 Completion worktree，Integrated reviewer 绑定 TaskRun 主 workspace。
@@ -122,7 +127,10 @@ Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
 pending wake。运行中 actor 缺失由 `repairThreadRuntime(threadId)` 或订阅/提交输入按需恢复；
 `readThreadSnapshot` 对未驻留 Thread 仍返回 typed inactive，不产生副作用。驻留 actor 由 manager
 的 LRU 双端队列管理：订阅、提交或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无
-pending input，超容量时从队首淘汰，淘汰前同步 flush 该 Thread 的全部 pending commits。
+pending input，超容量时从队首淘汰，淘汰前同步 flush 该 Thread 的全部 pending commits。订阅是
+显式观察者注册：bridge 订阅 producer 存活期间持有驻留 pin，被观察的线程不参与淘汰，订阅
+取消/流关闭即解除 pin——淘汰一个仍被订阅的线程会让该订阅流永久静默（总线无事件也无关闭
+信号）。
 
 ## 17.4 Agent control plane
 

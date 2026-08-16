@@ -138,13 +138,14 @@ where
                 TurnObservation::RuntimeDelta(inference.runtime_delta.clone()),
             );
             next.session.thread_revision = projected.through_revision;
+            let projected_thread = self
+                .runtime
+                .thread_events
+                .project(checkpoint.thread_id.as_str(), &projected.notifications)
+                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
             Some(ThreadProjectionCommit {
-                snapshot: self
-                    .runtime
-                    .thread_events
-                    .project(checkpoint.thread_id.as_str(), &projected.notifications)
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-                notifications: projected.notifications,
+                snapshot: projected_thread.snapshot,
+                notifications: projected_thread.notifications,
             })
         } else {
             None
@@ -210,13 +211,14 @@ where
         }
 
         let expected_revision = self.state.snapshot.revision;
+        let projected_thread = self
+            .runtime
+            .thread_events
+            .project(thread_id.as_str(), &projected.notifications)
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
         let projection = ThreadProjectionCommit {
-            snapshot: self
-                .runtime
-                .thread_events
-                .project(thread_id.as_str(), &projected.notifications)
-                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-            notifications: projected.notifications.clone(),
+            snapshot: projected_thread.snapshot,
+            notifications: projected_thread.notifications.clone(),
         };
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);

@@ -126,13 +126,8 @@ pub(crate) fn project_observation(
                     id: format!("{turn_id}:context-compaction:{compacted_at}"),
                     thread_id: thread_id.to_string(),
                     turn_id: turn_id.to_string(),
-                    ordinal: current
-                        .items
-                        .iter()
-                        .map(|item| item.ordinal)
-                        .max()
-                        .unwrap_or_default()
-                        .saturating_add(1),
+                    // ordinal 由 ThreadEventBus 首次应用时分配（到达序）。
+                    ordinal: 0,
                     revision: 0,
                     status: ThreadItemStatus::Completed,
                     created_at: compacted_at,

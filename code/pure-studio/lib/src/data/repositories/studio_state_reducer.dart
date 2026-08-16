@@ -150,20 +150,39 @@ StudioState mergeThreadHistoryPage(
 ) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null || page.items.isEmpty) return current;
-  final byId = <String, ThreadItemView>{
-    for (final item in workspace.items) item.id: item,
+  // 历史页与 live 帧共用 [mergeThreadItems]；rolledBack 优先是恢复投影的
+  // 额外事实——同 revision 也用历史页的 rolledBack 条目覆盖 active。
+  final overrideRolledBack = <String>{
+    for (final item in page.items)
+      if (item.threadId == threadId &&
+          item.contextDisposition == ThreadContextDisposition.rolledBack)
+        item.id,
   };
-  for (final item in page.items) {
-    if (item.threadId != threadId) continue;
-    final existing = byId[item.id];
-    if (existing == null ||
-        item.revision > existing.revision ||
-        (item.contextDisposition == ThreadContextDisposition.rolledBack &&
-            existing.contextDisposition == ThreadContextDisposition.active)) {
-      byId[item.id] = item;
-    }
+  final incoming = [
+    for (final item in page.items)
+      if (item.threadId == threadId)
+        item.copyWith(
+          contextDisposition: overrideRolledBack.contains(item.id)
+              ? ThreadContextDisposition.rolledBack
+              : item.contextDisposition,
+        ),
+  ];
+  var items = mergeThreadItems(workspace, incoming)?.items ?? workspace.items;
+  if (overrideRolledBack.isNotEmpty) {
+    final rolledBackIds = {
+      for (final item in page.items)
+        if (item.contextDisposition == ThreadContextDisposition.rolledBack)
+          item.id,
+    };
+    items = [
+      for (final item in items)
+        if (rolledBackIds.contains(item.id) &&
+            item.contextDisposition == ThreadContextDisposition.active)
+          item.copyWith(contextDisposition: ThreadContextDisposition.rolledBack)
+        else
+          item,
+    ];
   }
-  final items = byId.values.toList()..sort(_compareItems);
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
@@ -391,28 +410,52 @@ ThreadWorkspace _sortedWorkspace(ThreadWorkspace workspace) {
   return workspace.copyWith(items: items);
 }
 
+/// Timeline item 的唯一合并规则（live 帧、snapshot、历史页共用）：
+/// 身份 = itemId + threadId + turnId + kind；同 id 时仅当 incoming.revision
+/// >= existing 才替换；新 id 插入后按 (ordinal, id) 全序排序。ordinal 是
+/// Rust 事件总线一次性分配的不可变顺序事实，不参与身份比较。
+ThreadWorkspace? mergeThreadItems(
+  ThreadWorkspace workspace,
+  List<ThreadItemView> incomingItems,
+) {
+  if (incomingItems.isEmpty) return workspace;
+  var changed = false;
+  final items = [...workspace.items];
+  for (final incoming in incomingItems) {
+    if (incoming.threadId != workspace.thread.id || incoming.id.isEmpty) {
+      continue;
+    }
+    final index = items.indexWhere((item) => item.id == incoming.id);
+    if (index >= 0) {
+      final existing = items[index];
+      if (!_sameItemIdentity(existing, incoming) ||
+          incoming.revision < existing.revision) {
+        continue;
+      }
+      // 防御性不可变：ordinal 由 Rust 总线一次性分配，替换载荷时保留已加载
+      // 值，忽略迟到载荷中的 ordinal 漂移。
+      items[index] = incoming.ordinal == existing.ordinal
+          ? incoming
+          : incoming.copyWith(ordinal: existing.ordinal);
+      changed = true;
+    } else {
+      items.add(incoming);
+      changed = true;
+    }
+  }
+  if (!changed) return workspace;
+  items.sort(_compareItems);
+  return workspace.copyWith(items: items);
+}
+
 ThreadWorkspace? _upsertThreadItem(
   ThreadWorkspace workspace,
   int workspaceRevision,
   ThreadItemView incoming,
 ) {
-  if (incoming.threadId != workspace.thread.id || incoming.id.isEmpty) {
-    return null;
-  }
-  final items = [...workspace.items];
-  final index = items.indexWhere((item) => item.id == incoming.id);
-  if (index >= 0) {
-    final existing = items[index];
-    if (!_sameItemIdentity(existing, incoming) ||
-        incoming.revision < existing.revision) {
-      return null;
-    }
-    items[index] = incoming;
-  } else {
-    items.add(incoming);
-  }
-  items.sort(_compareItems);
-  return workspace.copyWith(revision: workspaceRevision, items: items);
+  final merged = mergeThreadItems(workspace, [incoming]);
+  if (merged == null) return null;
+  return merged.copyWith(revision: workspaceRevision);
 }
 
 ThreadWorkspace? _appendThreadItemDelta(
@@ -456,12 +499,12 @@ ThreadWorkspace _updateThreadInteraction(
 }
 
 bool _sameItemIdentity(ThreadItemView left, ThreadItemView right) {
+  // 身份只由稳定标识构成；ordinal 不可变（总线分配）、createdAt/revision 属
+  // 可更新事实，都不参与身份判定。
   return left.id == right.id &&
       left.threadId == right.threadId &&
       left.turnId == right.turnId &&
-      left.ordinal == right.ordinal &&
-      left.kind == right.kind &&
-      left.createdAt == right.createdAt;
+      left.kind == right.kind;
 }
 
 bool _isTerminalItemStatus(String status) {

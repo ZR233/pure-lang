@@ -320,3 +320,118 @@ fn active_turn(phase: TurnPhase) -> Turn {
         failure: None,
     }
 }
+
+#[tokio::test]
+async fn bus_assigns_monotonic_ordinals_and_normalizes_broadcast() {
+    // 唯一排序者不变式：新 item 由总线按到达序分配 max+1；更新保留首次
+    // 分配值；广播/规范化通知携带最终 ordinal（DB 与订阅者同源）。
+    let bus = ThreadEventBus::new(ThreadEventOptions::default());
+    bus.replace_snapshot(ThreadSnapshot::empty("thread-1"))
+        .unwrap();
+    let handle = bus.handle();
+
+    let user_a = notification(
+        1,
+        ThreadNotification::ItemCompleted {
+            item: Box::new(user_message_item("turn-1:user", 0)),
+        },
+    );
+    let user_b = notification(
+        2,
+        ThreadNotification::ItemCompleted {
+            item: Box::new(user_message_item("turn-2:user", 0)),
+        },
+    );
+    let projection = handle
+        .project("thread-1", &[user_a, user_b])
+        .expect("projection");
+    let ordinals = projection
+        .notifications
+        .iter()
+        .filter_map(|envelope| match &envelope.notification {
+            ThreadNotification::ItemCompleted { item } => Some(item.ordinal),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ordinals, vec![1, 2], "user inputs get arrival ordinals");
+
+    // 广播后快照顺序：用户消息按分配序排列。
+    handle
+        .publish_batch(projection.notifications.clone())
+        .await
+        .unwrap();
+    let snapshot = handle.snapshot("thread-1").unwrap();
+    let ids = snapshot
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["turn-1:user", "turn-2:user"]);
+
+    // 更新已存在 item：载荷 revision 提升但 ordinal 保持首次分配值。
+    let updated = notification(
+        3,
+        ThreadNotification::ItemCompleted {
+            item: Box::new(user_message_item("turn-1:user", 99)),
+        },
+    );
+    handle.publish_batch(vec![updated.clone()]).await.unwrap();
+    let snapshot = handle.snapshot("thread-1").unwrap();
+    let first = snapshot.items.first().unwrap();
+    assert_eq!(first.id, "turn-1:user");
+    assert_eq!(
+        first.ordinal, 1,
+        "ordinal is immutable after first assignment"
+    );
+}
+
+#[tokio::test]
+async fn bus_continues_ordinals_after_snapshot_restore() {
+    // 恢复续号：replace_snapshot 用 DB ordinal 种子化，后续分配从 max+1 继续。
+    let bus = ThreadEventBus::new(ThreadEventOptions::default());
+    let mut restored = ThreadSnapshot::empty("thread-1");
+    restored.items = vec![
+        user_message_item("legacy-a", 0),
+        user_message_item("legacy-b", 7),
+    ];
+    bus.replace_snapshot(restored).unwrap();
+    let handle = bus.handle();
+
+    let fresh = notification(
+        1,
+        ThreadNotification::ItemCompleted {
+            item: Box::new(user_message_item("turn-new:user", 0)),
+        },
+    );
+    handle.publish_batch(vec![fresh]).await.unwrap();
+    let snapshot = handle.snapshot("thread-1").unwrap();
+    let ordinals = snapshot
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item.ordinal))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ordinals,
+        vec![("legacy-a", 0), ("legacy-b", 7), ("turn-new:user", 8)]
+    );
+}
+
+fn user_message_item(id: &str, ordinal: u64) -> ThreadItem {
+    ThreadItem {
+        id: id.to_string(),
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        ordinal,
+        revision: 0,
+        status: ThreadItemStatus::Completed,
+        created_at: 1,
+        updated_at: 1,
+        completed_at: Some(1),
+        error: None,
+        content: ThreadItemContent::UserMessage {
+            text: format!("message {id}"),
+            attachments: Vec::new(),
+        },
+        usage: None,
+    }
+}

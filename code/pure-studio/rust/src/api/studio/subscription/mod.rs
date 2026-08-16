@@ -219,7 +219,11 @@ pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscripti
     let cancel = bridge.shutdown.child_token();
     let producer_cancel = cancel.clone();
     let (sender, receiver) = mpsc::channel(128);
+    // 订阅 = 观察者注册：producer 存活期间钉住驻留，防止 LRU 淘汰正在被
+    // 观察的线程（淘汰后该订阅流会永久静默——bus 无事件也无关闭信号）。
+    let residency_pin = bridge.studio.pin_thread(&thread_id);
     let producer_task = tokio::spawn(async move {
+        let _residency_pin = residency_pin;
         loop {
             tokio::select! {
                 _ = producer_cancel.cancelled() => break,

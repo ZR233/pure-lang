@@ -46,7 +46,16 @@ Task DTO 中经过脱敏的相对 locator 和可展示状态，不能缓存后�
 Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedAt。GUI 内 Thread directory
 是有界分页窗口：只保存已加载页的条目、`nextCursor` 与 `hasMore`；侧栏触底通过
 `listThreadsPage` keyset cursor 继续加载，目录增量事件按 ThreadId 原位合并（新会话前置、
-归档移除），未加载条目的增量直接忽略。`ThreadWorkspace`
+归档移除），未加载条目的增量直接忽略。
+
+`selectedThreadId` 是显式状态机，只在三种情况下变化：用户显式动作（选择/新建/跨项目切换）、
+该线程的目录 removal 增量、bootstrap 时为空。目录窗口（resync 快照首页）永不隐式改写选择；
+归档后清空选择通过显式传 null 的 reload 表达。
+
+Timeline items 使用单一合并规则（live 帧、snapshot、历史页共用）：身份 = itemId + threadId +
+turnId + kind；同 id 时仅当 incoming revision >= existing 才替换；新 id 插入后按
+`(ordinal, id)` 全序排序。ordinal 是 Rust 事件总线一次性分配的不可变顺序事实，不参与身份
+比较；替换载荷时防御性地保留已加载 ordinal。`ThreadWorkspace`
 中的 Thread 是归一化后的 directory 引用，不是第二份事实源：thread snapshot 只能替换 Turn、
 Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry，不能覆盖 directory。
 

@@ -1028,22 +1028,17 @@ async fn persist_item(
             value.id
         )));
     }
-    let ordinal = match existing.as_ref() {
-        Some(existing) => existing.ordinal,
-        None if value.ordinal > 0 => i64_from_u64(value.ordinal)?,
-        None => next_item_ordinal(tx, &value.thread_id).await?,
-    };
-    let mut persisted = value.clone();
-    persisted.ordinal = u64_from_i64(ordinal)?;
+    // ordinal 是内存权威事实：由 ThreadEventBus 首次应用时一次性分配，
+    // DB 只原样落库（含既有行），不再派生顺序事实。
     let active = item::ActiveModel {
         id: Set(value.id.clone()),
         thread_id: Set(value.thread_id.clone()),
         turn_id: Set(value.turn_id.clone()),
-        ordinal: Set(ordinal),
+        ordinal: Set(i64_from_u64(value.ordinal)?),
         revision: Set(i64_from_u64(value.revision)?),
         item_kind: Set(item_kind_label(&value.content).to_string()),
         status: Set(item_status_label(value.status).to_string()),
-        payload_json: Set(serde_json::to_string(&persisted)?),
+        payload_json: Set(serde_json::to_string(value)?),
         created_at: Set(existing
             .as_ref()
             .map_or(value.created_at, |row| row.created_at)),
@@ -1118,19 +1113,6 @@ async fn next_turn_ordinal(
     Ok(turn::Entity::find()
         .filter(turn::Column::ThreadId.eq(thread_id))
         .order_by_desc(turn::Column::Ordinal)
-        .one(tx)
-        .await
-        .map_err(store_error)?
-        .map_or(0, |row| row.ordinal.saturating_add(1)))
-}
-
-async fn next_item_ordinal(
-    tx: &sea_orm::DatabaseTransaction,
-    thread_id: &str,
-) -> Result<i64, PureError> {
-    Ok(item::Entity::find()
-        .filter(item::Column::ThreadId.eq(thread_id))
-        .order_by_desc(item::Column::Ordinal)
         .one(tx)
         .await
         .map_err(store_error)?
