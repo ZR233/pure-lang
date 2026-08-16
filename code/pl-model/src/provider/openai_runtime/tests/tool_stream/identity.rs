@@ -121,7 +121,7 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "fc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
     assert_eq!(response.tool_calls[0].name, "read_file");
     let item_ids = response
         .trace_events
@@ -204,7 +204,7 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "fc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
     assert_eq!(response.tool_calls[0].name, "read_file");
     let item_ids = response
         .trace_events

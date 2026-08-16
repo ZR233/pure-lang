@@ -49,7 +49,7 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
         format!(
             "function_call {} {}: {}",
             call.name,
-            call.stable_call_id(),
+            &call.call_id,
             call.payload_text()
         )
     }));
@@ -215,7 +215,7 @@ pub fn completion_response_snapshot(
     }
     output.extend(response.tool_calls.iter().map(|call| {
         CompletionResponseOutputSnapshot::function_call(
-            call.stable_call_id(),
+            &call.call_id,
             call.name.clone(),
             call.arguments_for_tool(),
             call.payload_text(),
@@ -478,7 +478,7 @@ mod tests {
                 "call_item",
                 "read_file",
                 serde_json::json!({"path": "Cargo.toml"}),
-                Some("call_1".to_string()),
+                "call_1",
             )],
             hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
@@ -508,9 +508,14 @@ mod tests {
                     "call_item",
                     "read_file",
                     serde_json::json!({"path": "Cargo.toml"}),
-                    Some("call_1".to_string()),
+                    "call_1",
                 ),
-                pl_model::ToolCall::custom("custom_item", "apply_patch", "*** Begin Patch", None),
+                pl_model::ToolCall::custom(
+                    "custom_item",
+                    "apply_patch",
+                    "*** Begin Patch",
+                    "custom_item",
+                ),
             ],
             hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
@@ -571,7 +576,7 @@ mod tests {
                 "call_item",
                 "read_file",
                 serde_json::json!({"path": "Cargo.toml"}),
-                Some("call_1".to_string()),
+                "call_1",
             )],
             hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),

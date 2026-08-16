@@ -213,15 +213,26 @@ pub struct CompletionTraceContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// provider 返回的工具调用 item id（`item.id`）。
     pub id: String,
     pub name: String,
     pub payload: ToolCallPayload,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub call_id: Option<String>,
+    /// 跨协议回放的 canonical 调用 id；在协议解码边界一次性确定，必填。
+    pub call_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invalid_arguments: Option<InvalidToolArguments>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caller: Option<ToolCallCaller>,
+}
+
+/// 一次工具调用的必填 typed 身份。
+///
+/// `item_id` 是 provider 返回的工具调用 item id；`call_id` 是跨协议回放使用的
+/// canonical 调用 id。两者在解码边界确定，不存在 optional 回落路径。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallIdentity {
+    pub item_id: String,
+    pub call_id: String,
 }
 
 /// Provider 返回的 function tool 参数无法解析为 JSON 时保留的诊断信息。
@@ -235,28 +246,24 @@ pub struct InvalidToolArguments {
 }
 
 impl ToolCall {
-    /// Returns the stable identity used to correlate a tool call across provider APIs.
-    ///
-    /// Responses providers expose a dedicated `call_id`; Chat Completions providers
-    /// may only expose the tool item id. Empty provider ids are treated as missing.
-    pub fn stable_call_id(&self) -> &str {
-        self.call_id
-            .as_deref()
-            .filter(|call_id| !call_id.is_empty())
-            .unwrap_or(&self.id)
+    pub fn identity(&self) -> ToolCallIdentity {
+        ToolCallIdentity {
+            item_id: self.id.clone(),
+            call_id: self.call_id.clone(),
+        }
     }
 
     pub fn function(
         id: impl Into<String>,
         name: impl Into<String>,
         arguments: serde_json::Value,
-        call_id: Option<String>,
+        call_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             payload: ToolCallPayload::Function { arguments },
-            call_id,
+            call_id: call_id.into(),
             invalid_arguments: None,
             caller: None,
         }
@@ -268,7 +275,7 @@ impl ToolCall {
         name: impl Into<String>,
         raw: impl Into<String>,
         error: impl Into<String>,
-        call_id: Option<String>,
+        call_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -276,7 +283,7 @@ impl ToolCall {
             payload: ToolCallPayload::Function {
                 arguments: serde_json::Value::Null,
             },
-            call_id,
+            call_id: call_id.into(),
             invalid_arguments: Some(InvalidToolArguments {
                 raw: raw.into(),
                 error: error.into(),
@@ -289,7 +296,7 @@ impl ToolCall {
         id: impl Into<String>,
         name: impl Into<String>,
         input: impl Into<String>,
-        call_id: Option<String>,
+        call_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -297,7 +304,7 @@ impl ToolCall {
             payload: ToolCallPayload::Custom {
                 input: input.into(),
             },
-            call_id,
+            call_id: call_id.into(),
             invalid_arguments: None,
             caller: None,
         }
@@ -362,27 +369,19 @@ impl ToolCall {
 
 #[cfg(test)]
 mod tool_call_tests {
-    use super::ToolCall;
+    use super::{ToolCall, ToolCallIdentity};
 
     #[test]
-    fn stable_call_id_prefers_provider_call_id() {
-        let call = ToolCall::function(
-            "item-1",
-            "read_file",
-            serde_json::json!({}),
-            Some("call-1".to_string()),
+    fn identity_exposes_item_and_call_ids() {
+        let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), "call-1");
+
+        assert_eq!(
+            call.identity(),
+            ToolCallIdentity {
+                item_id: "item-1".to_string(),
+                call_id: "call-1".to_string(),
+            }
         );
-
-        assert_eq!(call.stable_call_id(), "call-1");
-    }
-
-    #[test]
-    fn stable_call_id_falls_back_to_item_id() {
-        for call_id in [None, Some(String::new())] {
-            let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), call_id);
-
-            assert_eq!(call.stable_call_id(), "item-1");
-        }
     }
 }
 

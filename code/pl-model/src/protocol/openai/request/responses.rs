@@ -197,7 +197,7 @@ impl From<ToolCall> for ResponsesInputItem {
                     arguments: invalid_arguments
                         .map(|invalid| invalid.raw)
                         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
-                    call_id: tool_call.call_id.unwrap_or(tool_call.id),
+                    call_id: tool_call.call_id,
                     caller: tool_call.caller,
                 })
             }
@@ -206,7 +206,7 @@ impl From<ToolCall> for ResponsesInputItem {
                     id: None,
                     name: tool_call.name,
                     input,
-                    call_id: tool_call.call_id.unwrap_or(tool_call.id),
+                    call_id: tool_call.call_id,
                     caller: tool_call.caller,
                 })
             }

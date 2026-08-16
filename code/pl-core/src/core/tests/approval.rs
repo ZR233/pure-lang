@@ -30,7 +30,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
         "call-1",
         "read_file",
         serde_json::json!({"path": outside_file.to_string_lossy()}),
-        None,
+        "call-1",
     );
     let seen_interaction = std::sync::Arc::new(std::sync::Mutex::new(None));
     let seen_interaction_for_callback = seen_interaction.clone();
@@ -105,7 +105,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
         "provider-item-1",
         "missing_tool",
         serde_json::json!({"value": 1}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -136,7 +136,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].status, TracePartStatus::Failed);
     assert_eq!(records[0].id, "provider-item-1");
-    assert_eq!(records[0].call_id.as_deref(), Some("call-1"));
+    assert_eq!(records[0].call_id, "call-1");
     assert!(records[0].result.contains("Unknown tool: missing_tool"));
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
@@ -157,7 +157,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
         "provider-item-1",
         "write_file",
         serde_json::json!({"path": "note.txt", "content": "nope"}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -233,7 +233,7 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         "provider-item-1",
         "sleeping_tool",
         serde_json::json!({}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let token = tokio_util::sync::CancellationToken::new();
     let options = TurnOptions::default().with_cancellation(token.clone());
@@ -306,7 +306,7 @@ fn approval_request_extracts_working_directory() {
             "command": "pwd",
             "cwd": "C:/work"
         }),
-        None,
+        "call-1",
     );
 
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -321,7 +321,7 @@ fn approval_request_marks_parent_agent() {
         "call-1",
         "exec",
         serde_json::json!({"command": "pwd"}),
-        None,
+        "call-1",
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut context = test_tool_context(event_tx);

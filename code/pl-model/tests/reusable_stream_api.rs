@@ -129,7 +129,7 @@ fn public_stream_events_accumulate_completion_response() {
     assert_eq!(response.usage.cached_prompt_tokens, 2);
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "tool_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
     assert_eq!(response.tool_calls[0].name, "read_file");
 }
 

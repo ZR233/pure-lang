@@ -496,13 +496,13 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
             "patch-item-1",
             "apply_patch",
             arguments.clone(),
-            Some("patch-call-1".to_string()),
+            "patch-call-1",
         ),
         ToolCall::function(
             "patch-item-2",
             "apply_patch",
             arguments.clone(),
-            Some("patch-call-2".to_string()),
+            "patch-call-2",
         ),
         ToolCall::function(
             "patch-item-3",
@@ -511,7 +511,7 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
                 "cwd": ".",
                 "input": "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-old\n+different\n*** End Patch"
             }),
-            Some("patch-call-3".to_string()),
+            "patch-call-3",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -564,14 +564,9 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
             "spawn-item-1",
             "spawn_agent",
             assignment.clone(),
-            Some("spawn-call-1".to_string()),
+            "spawn-call-1",
         ),
-        ToolCall::function(
-            "spawn-item-2",
-            "spawn_agent",
-            assignment,
-            Some("spawn-call-2".to_string()),
-        ),
+        ToolCall::function("spawn-item-2", "spawn_agent", assignment, "spawn-call-2"),
         ToolCall::function(
             "spawn-item-3",
             "spawn_agent",
@@ -581,7 +576,7 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
                 "forkTurns": "none",
                 "metadata": { "scope": "src/component-b" }
             }),
-            Some("spawn-call-3".to_string()),
+            "spawn-call-3",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -636,24 +631,9 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
         "cwd": "."
     });
     let calls = [
-        ToolCall::function(
-            "exec-item-1",
-            "exec",
-            command.clone(),
-            Some("exec-call-1".to_string()),
-        ),
-        ToolCall::function(
-            "exec-item-2",
-            "exec",
-            command.clone(),
-            Some("exec-call-2".to_string()),
-        ),
-        ToolCall::function(
-            "exec-item-3",
-            "exec",
-            command,
-            Some("exec-call-3".to_string()),
-        ),
+        ToolCall::function("exec-item-1", "exec", command.clone(), "exec-call-1"),
+        ToolCall::function("exec-item-2", "exec", command.clone(), "exec-call-2"),
+        ToolCall::function("exec-item-3", "exec", command, "exec-call-3"),
         ToolCall::function(
             "exec-item-4",
             "exec",
@@ -661,7 +641,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
                 "command": "verify component-b",
                 "cwd": "."
             }),
-            Some("exec-call-4".to_string()),
+            "exec-call-4",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -702,7 +682,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
             "command": "verify component-a",
             "cwd": "."
         }),
-        Some("exec-call-5".to_string()),
+        "exec-call-5",
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-2".to_string(), event_tx, 0);
@@ -746,19 +726,14 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
             "read-item-1",
             "cacheable_read",
             arguments.clone(),
-            Some("read-call-1".to_string()),
+            "read-call-1",
         ),
-        ToolCall::function(
-            "read-item-2",
-            "cacheable_read",
-            arguments,
-            Some("read-call-2".to_string()),
-        ),
+        ToolCall::function("read-item-2", "cacheable_read", arguments, "read-call-2"),
         ToolCall::function(
             "read-item-3",
             "cacheable_read",
             serde_json::json!({ "path": "src/main.rs" }),
-            Some("read-call-3".to_string()),
+            "read-call-3",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -828,13 +803,13 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
             "read-item-1",
             "parallel_metric_read",
             serde_json::json!({}),
-            Some("read-call-1".to_string()),
+            "read-call-1",
         ),
         ToolCall::function(
             "read-item-2",
             "parallel_metric_read",
             serde_json::json!({}),
-            Some("read-call-2".to_string()),
+            "read-call-2",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -880,13 +855,13 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
             "mcp-item-1",
             "mcp__docs__lookup",
             serde_json::json!({ "query": "first" }),
-            Some("mcp-call-1".to_string()),
+            "mcp-call-1",
         ),
         ToolCall::function(
             "mcp-item-2",
             "mcp__docs__lookup",
             serde_json::json!({ "query": "second" }),
-            Some("mcp-call-2".to_string()),
+            "mcp-call-2",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
@@ -1019,13 +994,13 @@ async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
             "exclusive-item-1",
             "exclusive_metric_read",
             serde_json::json!({}),
-            Some("exclusive-call-1".to_string()),
+            "exclusive-call-1",
         ),
         ToolCall::function(
             "exclusive-item-2",
             "exclusive_metric_read",
             serde_json::json!({}),
-            Some("exclusive-call-2".to_string()),
+            "exclusive-call-2",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -1076,24 +1051,14 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
     });
     let arguments = serde_json::json!({ "path": "missing.rs" });
     let calls = [
-        ToolCall::function(
-            "read-item-1",
-            "read_file",
-            arguments.clone(),
-            Some("read-call-1".to_string()),
-        ),
+        ToolCall::function("read-item-1", "read_file", arguments.clone(), "read-call-1"),
         ToolCall::function(
             "process-item",
             "batch_epoch_process",
             serde_json::json!({}),
-            Some("process-call".to_string()),
+            "process-call",
         ),
-        ToolCall::function(
-            "read-item-2",
-            "read_file",
-            arguments,
-            Some("read-call-2".to_string()),
-        ),
+        ToolCall::function("read-item-2", "read_file", arguments, "read-call-2"),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1139,7 +1104,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
         "github_api_request",
         "{\"method\":\"POST\"\n\"path\":\"/repos/o/r/pulls/1/reviews\"}",
         "expected `,` or `}` at line 2 column 1",
-        None,
+        "call-1",
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1176,7 +1141,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
 async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
     let mut core = TurnEngine::default_provider().unwrap();
     core.register_test_tool(BudgetPausedWaitTool);
-    let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None);
+    let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), "wait-1");
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(5));
@@ -1212,12 +1177,12 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
     core.register_test_tool(BudgetPausedWaitTool);
     core.register_test_tool(ProviderCallIdEchoTool);
     let calls = [
-        ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None),
+        ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), "wait-1"),
         ToolCall::function(
             "echo-1",
             "provider_call_id_echo",
             serde_json::json!({}),
-            None,
+            "echo-1",
         ),
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -1250,14 +1215,14 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
 }
 
 #[tokio::test]
-async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
+async fn chat_tool_call_replays_item_id_as_call_id() {
     let mut core = TurnEngine::default_provider().unwrap();
     core.register_test_tool(ProviderCallIdEchoTool);
     let tool_call = ToolCall::function(
         "chat-tool-call-1",
         "provider_call_id_echo",
         serde_json::json!({}),
-        None,
+        "chat-tool-call-1",
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1286,7 +1251,7 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
 
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].result, "chat-tool-call-1");
-    assert_eq!(records[0].call_id, None);
+    assert_eq!(records[0].call_id, "chat-tool-call-1");
     let terminal_tool = recorder
         .drain()
         .into_iter()
@@ -1321,7 +1286,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
         "provider-item-1",
         "read_file",
         serde_json::json!({"path": "note.txt"}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1417,7 +1382,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         "provider-item-1",
         "read_file",
         serde_json::json!({"path": "note.txt"}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1517,7 +1482,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
         "provider-item-1",
         "delta_echo",
         serde_json::json!({}),
-        Some("call-1".to_string()),
+        "call-1",
     );
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);

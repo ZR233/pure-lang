@@ -10,7 +10,7 @@ use pl_trace::TracePartStatus;
 fn completed_record(name: &str) -> ToolExecutionRecord {
     ToolExecutionRecord {
         id: "item-1".to_string(),
-        call_id: None,
+        call_id: "call-1".to_string(),
         name: name.to_string(),
         kind: ToolCallKind::Function,
         result: String::new(),

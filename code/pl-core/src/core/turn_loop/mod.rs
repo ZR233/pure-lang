@@ -731,7 +731,7 @@ pub(super) async fn run_turn_with_trace(
         for ((tool_result, receipt), tool_call) in tool_results.iter().zip(&tool_calls) {
             session.push_tool_result_with_receipt_and_caller(
                 tool_result.id.clone(),
-                tool_result.call_id.clone(),
+                Some(tool_result.call_id.clone()),
                 tool_result.name.clone(),
                 tool_result.kind,
                 tool_result.result.clone(),
@@ -891,7 +891,7 @@ fn collect_client_tool_search(
             if tool_call.name != "tool_search" {
                 return true;
             }
-            let call_id = tool_call.stable_call_id().to_string();
+            let call_id = tool_call.call_id.clone();
             if call_id.is_empty() || paired.contains(&call_id) {
                 return false;
             }

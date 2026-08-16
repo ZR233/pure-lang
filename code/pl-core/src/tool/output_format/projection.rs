@@ -534,7 +534,7 @@ mod tests {
             id,
             name,
             arguments,
-            call_id.map(ToString::to_string),
+            call_id.unwrap_or(id),
         )];
         let mut metadata = Default::default();
         pl_protocol::ToolCallHistoryMetadata::new(

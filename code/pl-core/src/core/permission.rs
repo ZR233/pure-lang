@@ -230,7 +230,7 @@ mod tests {
             "call-1",
             "read_file",
             serde_json::json!({ "path": "src/lib.rs" }),
-            None,
+            "call-1",
         );
 
         let access = requested_workspace_access(&tool_call, &root);
@@ -249,7 +249,7 @@ mod tests {
             "call-1",
             "read_file",
             serde_json::json!({ "path": outside.join("secret.txt") }),
-            None,
+            "call-1",
         );
 
         let access = requested_workspace_access(&tool_call, &root);
@@ -267,7 +267,7 @@ mod tests {
             "call-1",
             "exec",
             serde_json::json!({ "command": "pwd", "cwd": ".." }),
-            None,
+            "call-1",
         );
 
         let access = requested_workspace_access(&tool_call, &root);
@@ -281,7 +281,7 @@ mod tests {
         let root = unique_temp_dir("patch");
         std::fs::create_dir_all(&root).unwrap();
         let patch = "*** Begin Patch\n*** Add File: src/new.rs\n+fn main() {}\n*** End Patch";
-        let tool_call = ToolCall::custom("call-1", "apply_patch", patch, None);
+        let tool_call = ToolCall::custom("call-1", "apply_patch", patch, "call-1");
 
         let access = requested_workspace_access(&tool_call, &root);
 

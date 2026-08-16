@@ -21,7 +21,7 @@ fn push_assistant_tool_calls_stores_metadata() {
         "call-1",
         "exec",
         serde_json::json!({"command": "ls"}),
-        Some("call-1".to_string()),
+        "call-1",
     )];
     session.push_assistant_tool_calls(Some("running...".to_string()), tool_calls, None);
 
@@ -69,7 +69,7 @@ fn push_assistant_completion_response_preserves_tool_call_history() {
         "call-1",
         "exec",
         serde_json::json!({"command": "pwd"}),
-        Some("call-1".to_string()),
+        "call-1",
     )];
     let response = CompletionResponse {
         content: Some("running".to_string()),
@@ -274,7 +274,7 @@ fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
             "call-1",
             "task_request_delivery_review",
             serde_json::json!({}),
-            Some("call-1".to_string()),
+            "call-1",
         )],
         None,
     );
@@ -473,7 +473,7 @@ fn repair_incomplete_tool_history_inserts_missing_result_before_next_user_messag
             "call-1",
             "exec",
             serde_json::json!({"command": "pwd"}),
-            Some("call-1".to_string()),
+            "call-1",
         )],
         None,
     );

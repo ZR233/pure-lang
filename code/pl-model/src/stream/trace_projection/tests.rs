@@ -279,7 +279,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
     let updated = trace
         .update_tool_trace(&ToolCall {
             id: "provider-tool-1".to_string(),
-            call_id: Some("call-1".to_string()),
+            call_id: "call-1".to_string(),
             name: "exec".to_string(),
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),
@@ -329,7 +329,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
     let updated = trace
         .update_tool_trace(&ToolCall {
             id: "provider-tool-1".to_string(),
-            call_id: Some("call-1".to_string()),
+            call_id: "call-1".to_string(),
             name: "exec".to_string(),
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),

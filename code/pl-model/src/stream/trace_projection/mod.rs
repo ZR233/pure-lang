@@ -606,7 +606,7 @@ impl TraceProjection {
                 reasoning_content_chunks: Vec::new(),
                 tool: Some(TraceToolPart {
                     tool_call_id: item_id.clone(),
-                    call_id: call.call_id.clone(),
+                    call_id: Some(call.call_id.clone()),
                     provider_item_id: (!call.id.is_empty()).then(|| call.id.clone()),
                     name: call.name.clone(),
                     arguments: call.payload_text(),
@@ -630,7 +630,7 @@ impl TraceProjection {
         item.updated_at = now;
         if let Some(tool) = &mut item.tool {
             tool.tool_call_id = item_id.clone();
-            tool.call_id = call.call_id.clone();
+            tool.call_id = Some(call.call_id.clone());
             tool.provider_item_id = Some(call.id.clone());
             tool.name = call.name.clone();
             tool.arguments = call.payload_text();
@@ -675,8 +675,8 @@ impl TraceProjection {
     }
 
     fn active_tool_call_item_id(&mut self, call: &ToolCall) -> String {
-        let trace_id = trace_tool_part_id(call.call_id.as_ref(), &call.id);
-        let aliases = tool_aliases(call.call_id.as_ref(), &call.id, &trace_id);
+        let trace_id = trace_tool_part_id(Some(&call.call_id), &call.id);
+        let aliases = tool_aliases(Some(&call.call_id), &call.id, &trace_id);
         self.resolve_tool_item_id(aliases, &trace_id)
     }
 

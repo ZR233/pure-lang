@@ -264,7 +264,7 @@ mod tests {
                     call_id.clone(),
                     "read_file",
                     serde_json::json!({"path": format!("file-{index}.rs")}),
-                    Some(call_id.clone()),
+                    call_id.clone(),
                 )],
                 None,
             );

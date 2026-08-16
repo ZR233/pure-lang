@@ -889,7 +889,7 @@ fn responses_id_only_added_and_done_canonicalize_function_identity() {
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "fc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("fc_1"));
+    assert_eq!(response.tool_calls[0].call_id, "fc_1");
 }
 
 #[test]
@@ -934,7 +934,7 @@ fn responses_done_upgrades_fallback_call_id_without_splitting_custom_tool() {
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "ctc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
 }
 
 #[test]
@@ -991,7 +991,7 @@ fn responses_call_id_only_delta_upgrades_fallback_without_splitting_trace() {
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "fc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
     let tool_item_ids = response
         .trace_events
         .iter()

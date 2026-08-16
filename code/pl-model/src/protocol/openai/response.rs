@@ -214,7 +214,7 @@ impl ResponsesOutputItem {
                     .as_deref()
                     .ok_or_else(|| response_protocol_error("function_call missing arguments"))?;
                 Ok(Some(
-                    function_tool_call_from_raw(id, name, arguments.to_string(), Some(call_id))
+                    function_tool_call_from_raw(id, name, arguments.to_string(), call_id)
                         .with_caller(self.caller.clone()),
                 ))
             }
@@ -229,8 +229,7 @@ impl ResponsesOutputItem {
                     .clone()
                     .ok_or_else(|| response_protocol_error("custom_tool_call missing input"))?;
                 Ok(Some(
-                    ToolCall::custom(id, name, input, Some(call_id))
-                        .with_caller(self.caller.clone()),
+                    ToolCall::custom(id, name, input, call_id).with_caller(self.caller.clone()),
                 ))
             }
             "message"
@@ -262,8 +261,16 @@ impl ResponsesOutputItem {
             .call_id
             .as_deref()
             .filter(|call_id| !call_id.is_empty())
-            .unwrap_or(item_id);
-        Ok((item_id.to_string(), call_id.to_string()))
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                tracing::trace!(
+                    item_id,
+                    kind,
+                    "responses tool item missing call_id; assigning item id"
+                );
+                item_id.to_string()
+            });
+        Ok((item_id.to_string(), call_id))
     }
 
     fn to_web_search_call(&self) -> Option<HostedWebSearchCall> {
@@ -454,30 +461,34 @@ impl ChatResponseToolCall {
                 let id = self
                     .id
                     .clone()
+                    .filter(|id| !id.is_empty())
                     .ok_or_else(|| response_protocol_error("custom tool call missing id"))?;
                 let custom = self.custom.as_ref().ok_or_else(|| {
                     response_protocol_error("custom tool call missing custom payload")
                 })?;
                 Ok(Some(ToolCall::custom(
-                    id,
+                    id.clone(),
                     custom.name.clone(),
                     custom.input.clone(),
-                    None,
+                    // Chat Completions 只暴露 item id；确定性赋 call_id = item_id。
+                    id,
                 )))
             }
             Some("function") | None => {
                 let id = self
                     .id
                     .clone()
+                    .filter(|id| !id.is_empty())
                     .ok_or_else(|| response_protocol_error("function tool call missing id"))?;
                 let function = self.function.as_ref().ok_or_else(|| {
                     response_protocol_error("function tool call missing function payload")
                 })?;
                 Ok(Some(function_tool_call_from_raw(
-                    id,
+                    id.clone(),
                     function.name.clone(),
                     function.arguments.clone(),
-                    None,
+                    // Chat Completions 只暴露 item id；确定性赋 call_id = item_id。
+                    id,
                 )))
             }
             Some(_) => Ok(None),

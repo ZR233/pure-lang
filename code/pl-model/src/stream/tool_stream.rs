@@ -226,12 +226,10 @@ impl ToolCallAccumulator {
 
     fn matches_tool_call_identity(&self, call: &ToolCall) -> bool {
         call.id == self.id
-            || call
+            || self
                 .call_id
-                .as_ref()
-                .filter(|call_id| !call_id.is_empty())
-                .zip(self.call_id.as_ref())
-                .is_some_and(|(left, right)| left == right)
+                .as_deref()
+                .is_some_and(|call_id| call_id == call.call_id)
     }
 
     fn uses_item_id_as_call_id(&self) -> bool {
@@ -307,12 +305,17 @@ impl ToolCallAccumulator {
                 "provider emitted tool call without stable id".to_string(),
             ));
         }
+        // call_id 必填：provider 只暴露 item id 时在解码边界确定性赋 call_id = item_id。
+        let call_id = self
+            .call_id
+            .filter(|call_id| !call_id.is_empty())
+            .unwrap_or_else(|| self.id.clone());
         match self.payload {
             ToolCallPayloadAccumulator::FunctionArguments(arguments) => Ok(
-                function_tool_call_from_raw(self.id, self.name, arguments, self.call_id),
+                function_tool_call_from_raw(self.id, self.name, arguments, call_id),
             ),
             ToolCallPayloadAccumulator::CustomInput(input) => {
-                Ok(ToolCall::custom(self.id, self.name, input, self.call_id))
+                Ok(ToolCall::custom(self.id, self.name, input, call_id))
             }
         }
     }
@@ -416,7 +419,7 @@ mod tests {
         assert_eq!(second.tool.id, "provider-tool-1");
         assert_eq!(second.tool.trace_id, "call-1");
         assert_eq!(ready.id, "provider-tool-1");
-        assert_eq!(ready.call_id.as_deref(), Some("call-1"));
+        assert_eq!(ready.call_id, "call-1");
     }
 
     #[test]
@@ -497,7 +500,7 @@ mod tests {
             .expect("ready tool call");
 
         assert_eq!(call.id, "fc_1");
-        assert_eq!(call.call_id.as_deref(), Some("call_1"));
+        assert_eq!(call.call_id, "call_1");
     }
 
     #[test]
@@ -530,7 +533,7 @@ mod tests {
         assert_eq!(delta.tool.trace_id, "fc_1");
         assert_eq!(delta.tool.call_id.as_deref(), Some("call_1"));
         assert_eq!(call.id, "fc_1");
-        assert_eq!(call.call_id.as_deref(), Some("call_1"));
+        assert_eq!(call.call_id, "call_1");
     }
 
     #[test]

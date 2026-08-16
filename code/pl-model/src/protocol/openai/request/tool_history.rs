@@ -24,7 +24,7 @@ pub(super) fn parse_tool_calls_from_metadata(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExpectedToolOutput {
     tool_call_id: String,
-    call_id: Option<String>,
+    call_id: String,
     tool_call_kind: ToolCallKind,
 }
 
@@ -44,14 +44,8 @@ pub(super) fn validate_tool_history(
                     if tool_call.id.is_empty() {
                         return Err(protocol_error("assistant tool call has empty id"));
                     }
-                    if tool_call.call_id.as_ref().is_some_and(String::is_empty) {
+                    if tool_call.call_id.is_empty() {
                         return Err(protocol_error("assistant tool call has empty call_id"));
-                    }
-                    if endpoint == OpenAiEndpoint::Responses && tool_call.call_id.is_none() {
-                        return Err(protocol_error(format!(
-                            "assistant tool call {} missing call_id for Responses history replay",
-                            tool_call.id
-                        )));
                     }
                     let tool_call_kind = tool_call.kind();
                     expected_outputs.push_back(ExpectedToolOutput {
@@ -79,7 +73,7 @@ pub(super) fn validate_tool_history(
                     )));
                 }
                 if endpoint == OpenAiEndpoint::Responses
-                    && metadata.tool_call_call_id.as_deref() != expected.call_id.as_deref()
+                    && metadata.tool_call_call_id.as_deref() != Some(expected.call_id.as_str())
                 {
                     return Err(protocol_error(format!(
                         "tool result call_id {:?} does not match assistant tool call call_id {:?}",

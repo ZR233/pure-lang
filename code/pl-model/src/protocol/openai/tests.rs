@@ -228,7 +228,7 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
         "ctc_1",
         "apply_patch",
         "*** Begin Patch\n*** End Patch",
-        Some("call_1".to_string()),
+        "call_1",
     )];
     let mut assistant_metadata = HashMap::new();
     assistant_metadata.insert(
@@ -272,7 +272,7 @@ fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) ->
         "fc_1",
         "read_file",
         serde_json::json!({ "path": "Cargo.toml" }),
-        Some("call_1".to_string()),
+        "call_1",
     )];
     let mut assistant_metadata = HashMap::new();
     assistant_metadata.insert(
@@ -717,7 +717,7 @@ fn responses_replays_program_caller_and_native_items_in_order() {
             "fc_1",
             "read_file",
             serde_json::json!({"path": "README.md"}),
-            Some("call_1".to_string()),
+            "call_1",
         )
         .with_caller(Some(caller.clone())),
     ];
@@ -987,9 +987,9 @@ fn responses_parse_response_canonicalizes_id_only_tool_identity() {
         .unwrap();
 
     assert_eq!(response.tool_calls[0].id, "fc_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("fc_1"));
+    assert_eq!(response.tool_calls[0].call_id, "fc_1");
     assert_eq!(response.tool_calls[1].id, "ctc_1");
-    assert_eq!(response.tool_calls[1].call_id.as_deref(), Some("ctc_1"));
+    assert_eq!(response.tool_calls[1].call_id, "ctc_1");
 }
 
 #[test]
@@ -1015,9 +1015,9 @@ fn responses_parse_response_uses_call_id_as_missing_item_id() {
         .unwrap();
 
     assert_eq!(response.tool_calls[0].id, "call_1");
-    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[0].call_id, "call_1");
     assert_eq!(response.tool_calls[1].id, "call_2");
-    assert_eq!(response.tool_calls[1].call_id.as_deref(), Some("call_2"));
+    assert_eq!(response.tool_calls[1].call_id, "call_2");
 }
 
 #[test]
@@ -1363,7 +1363,7 @@ fn missing_tool_output_fails_request_build() {
         "fc_1",
         "read_file",
         serde_json::json!({ "path": "Cargo.toml" }),
-        Some("call_1".to_string()),
+        "call_1",
     )];
     let mut assistant_metadata = HashMap::new();
     assistant_metadata.insert(
@@ -1406,12 +1406,14 @@ fn missing_tool_output_fails_request_build() {
 }
 
 #[test]
-fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
+fn chat_history_with_item_id_call_id_replays_on_both_endpoints() {
     let calls = vec![ToolCall::function(
         "fc_1",
         "read_file",
         serde_json::json!({ "path": "Cargo.toml" }),
-        None,
+        // Chat Completions 解码确定性赋 call_id = item_id，Responses 回放不再有
+        // missing call_id 路径。
+        "fc_1",
     )];
     let mut assistant_metadata = HashMap::new();
     assistant_metadata.insert(
@@ -1420,6 +1422,7 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
     );
     let mut tool_metadata = HashMap::new();
     tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+    tool_metadata.insert("tool_call_call_id".to_string(), "fc_1".to_string());
     tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
     tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
     let request = CompletionRequest {
@@ -1453,17 +1456,18 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
         transport_session: Default::default(),
     };
 
-    let responses_error = OpenAiProtocol::responses()
-        .build_request(&request, &ModelInfo::fallback(&request.model))
-        .unwrap_err();
+    let responses_body = OpenAiProtocol::responses()
+        .build_request_body_with_model(&request, &ModelInfo::fallback(&request.model));
     let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
-    match responses_error {
-        PureError::LlmError(message) => {
-            assert!(message.contains("missing call_id for Responses history replay"));
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    assert_eq!(
+        responses_body["input"][0]["call_id"],
+        serde_json::json!("fc_1")
+    );
+    assert_eq!(
+        responses_body["input"][1]["call_id"],
+        serde_json::json!("fc_1")
+    );
     assert_eq!(
         chat_body["messages"][1]["tool_call_id"],
         serde_json::json!("fc_1")

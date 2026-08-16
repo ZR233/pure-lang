@@ -140,7 +140,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolRuntimeEvent::EndTurn => None,
     });
     ToolResultReceipt {
-        call_id: result.call_id.clone().unwrap_or_else(|| result.id.clone()),
+        call_id: result.call_id.clone(),
         tool_name: result.name.clone(),
         arguments_hash: serde_json::from_str(&result.arguments).map_or_else(
             |_| canonical_content_hash(result.arguments.as_bytes()),
@@ -241,7 +241,7 @@ mod tests {
     fn tool_result(id: &str, result: String) -> ToolExecutionRecord {
         ToolExecutionRecord {
             id: id.to_string(),
-            call_id: Some(format!("call-{id}")),
+            call_id: format!("call-{id}"),
             name: "read_file".to_string(),
             kind: pl_protocol::ToolCallKind::Function,
             display_result: result.clone(),
@@ -345,7 +345,7 @@ mod tests {
                 "programmatic",
                 "read_file",
                 serde_json::json!({}),
-                Some("call-programmatic".to_string()),
+                "call-programmatic",
             )
             .with_caller(Some(pl_protocol::ToolCallCaller::Program {
                 caller_id: "program-1".to_string(),
@@ -354,7 +354,7 @@ mod tests {
                 "direct",
                 "read_file",
                 serde_json::json!({}),
-                Some("call-direct".to_string()),
+                "call-direct",
             ),
         ];
 

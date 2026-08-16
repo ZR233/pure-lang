@@ -26,14 +26,14 @@ pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent>
         "function_call" => Some(ModelStreamEvent::ToolInputStarted {
             stream_id: None,
             item_id,
-            call_id,
+            call_id: Some(call_id),
             name,
             payload_kind: ToolInputPayloadKind::FunctionArguments,
         }),
         "custom_tool_call" => Some(ModelStreamEvent::ToolInputStarted {
             stream_id: None,
             item_id,
-            call_id,
+            call_id: Some(call_id),
             name,
             payload_kind: ToolInputPayloadKind::CustomInput,
         }),
@@ -61,14 +61,14 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
                 ModelStreamEvent::ToolInputCompleted {
                     stream_id: None,
                     item_id: item_id.clone(),
-                    call_id: call_id.clone(),
+                    call_id: Some(call_id.clone()),
                     name: name.clone(),
                     payload: payload.clone(),
                 },
                 ModelStreamEvent::ToolCallReady {
                     stream_id: None,
                     item_id,
-                    call_id,
+                    call_id: Some(call_id),
                     name,
                     payload,
                 },
@@ -86,14 +86,14 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
                 ModelStreamEvent::ToolInputCompleted {
                     stream_id: None,
                     item_id: item_id.clone(),
-                    call_id: call_id.clone(),
+                    call_id: Some(call_id.clone()),
                     name: name.clone(),
                     payload: payload.clone(),
                 },
                 ModelStreamEvent::ToolCallReady {
                     stream_id: None,
                     item_id,
-                    call_id,
+                    call_id: Some(call_id),
                     name,
                     payload,
                 },
@@ -123,7 +123,12 @@ fn tool_caller_event(item: &Value, item_id: &str) -> Option<ModelStreamEvent> {
     })
 }
 
-fn responses_tool_identity(item: &Value) -> (String, Option<String>) {
+/// 解析 Responses output item 携带的工具调用身份。
+///
+/// `item_id` 取 `item.id`（缺失时回落 `call_id`）；`call_id` 取 `item.call_id`，
+/// 缺失时确定性赋 `item_id` 并记录——这是 late call_id 升级场景的确定性赋值，
+/// 不是 optional 语义。两者都缺失由 accumulator 以协议错误拒绝。
+fn responses_tool_identity(item: &Value) -> (String, String) {
     let item_id = item
         .get("id")
         .and_then(Value::as_str)
@@ -140,7 +145,14 @@ fn responses_tool_identity(item: &Value) -> (String, Option<String>) {
         .and_then(Value::as_str)
         .filter(|call_id| !call_id.is_empty())
         .map(String::from)
-        .or_else(|| (!item_id.is_empty()).then(|| item_id.clone()));
+        .unwrap_or_else(|| {
+            tracing::trace!(
+                item_id = %item_id,
+                kind = item.get("type").and_then(serde_json::Value::as_str).unwrap_or(""),
+                "responses tool item missing call_id; assigning item id"
+            );
+            item_id.clone()
+        });
     (item_id, call_id)
 }
 

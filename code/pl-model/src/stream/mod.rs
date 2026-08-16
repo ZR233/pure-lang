@@ -382,9 +382,11 @@ impl StreamCompletionAccumulator {
                 }
             }
             ModelStreamEvent::ToolCallCaller { item_id, caller } => {
-                if let Some(call) = self.tool_calls.iter_mut().find(|call| {
-                    call.id == item_id || call.call_id.as_deref() == Some(item_id.as_str())
-                }) {
+                if let Some(call) = self
+                    .tool_calls
+                    .iter_mut()
+                    .find(|call| call.id == item_id || call.call_id == item_id)
+                {
                     call.caller = Some(caller);
                 } else {
                     self.tool_call_callers.insert(item_id, caller);
@@ -525,11 +527,10 @@ impl StreamCompletionAccumulator {
     }
 
     fn attach_tool_caller(&mut self, call: &mut ToolCall) {
-        call.caller = self.tool_call_callers.remove(&call.id).or_else(|| {
-            call.call_id
-                .as_deref()
-                .and_then(|call_id| self.tool_call_callers.remove(call_id))
-        });
+        call.caller = self
+            .tool_call_callers
+            .remove(&call.id)
+            .or_else(|| self.tool_call_callers.remove(&call.call_id));
     }
 
     fn fail_attempt(&mut self, error: &PureError, event_tx: &AgentEventSender) {

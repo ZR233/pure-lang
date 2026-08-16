@@ -511,11 +511,13 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                 let index = tool_call.index.unwrap_or_default();
                 let stream_id = Some(format!("chat_tool_call:{index}"));
                 let item_id = tool_call.id.clone().unwrap_or_default();
+                // Chat Completions 只暴露 item id；确定性赋 call_id = item_id。
+                let call_id = (!item_id.is_empty()).then(|| item_id.clone());
                 if let Some(custom) = &tool_call.custom {
                     events.push(StreamEvent::ToolInputDelta {
                         stream_id,
                         item_id,
-                        call_id: None,
+                        call_id,
                         name: custom.name.clone(),
                         payload_delta: ToolCallDeltaPayload::CustomInput(
                             custom.input.clone().unwrap_or_default(),
@@ -527,7 +529,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                     events.push(StreamEvent::ToolInputDelta {
                         stream_id,
                         item_id,
-                        call_id: None,
+                        call_id,
                         name: function.name.clone(),
                         payload_delta: ToolCallDeltaPayload::FunctionArguments(
                             function.arguments.clone().unwrap_or_default(),
@@ -638,7 +640,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
-                call_id,
+                call_id: Some(call_id),
                 name: None,
                 payload_delta: ToolCallDeltaPayload::FunctionArguments(
                     event.delta.clone().unwrap_or_default(),
@@ -651,7 +653,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
-                call_id,
+                call_id: Some(call_id),
                 name: None,
                 payload_delta: ToolCallDeltaPayload::CustomInput(
                     event.delta.clone().unwrap_or_default(),
@@ -744,7 +746,12 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
     }
 }
 
-fn responses_tool_identity(event: &SseStreamEvent) -> (String, Option<String>) {
+/// 解析 Responses 流事件携带的工具调用身份。
+///
+/// `item_id` 取事件 `item_id`（缺失时回落 `call_id`）；`call_id` 取事件
+/// `call_id`，缺失时确定性赋 `item_id` 并记录——这是 late call_id 升级场景的
+/// 确定性赋值，不是 optional 语义。两者都缺失由 accumulator 以协议错误拒绝。
+fn responses_tool_identity(event: &SseStreamEvent) -> (String, String) {
     let item_id = event
         .item_id
         .as_deref()
@@ -762,7 +769,14 @@ fn responses_tool_identity(event: &SseStreamEvent) -> (String, Option<String>) {
         .as_deref()
         .filter(|call_id| !call_id.is_empty())
         .map(String::from)
-        .or_else(|| (!item_id.is_empty()).then(|| item_id.clone()));
+        .unwrap_or_else(|| {
+            tracing::trace!(
+                item_id = %item_id,
+                kind = %event.kind,
+                "responses tool event missing call_id; assigning item id"
+            );
+            item_id.clone()
+        });
     (item_id, call_id)
 }
 

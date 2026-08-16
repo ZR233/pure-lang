@@ -36,7 +36,7 @@ use records::{
 
 pub(super) struct ToolExecutionRecord {
     pub(super) id: String,
-    pub(super) call_id: Option<String>,
+    pub(super) call_id: String,
     pub(super) name: String,
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
@@ -69,7 +69,7 @@ pub(super) struct ToolInvocation {
     pub(super) name: String,
     pub(super) runtime_tool_call_id: String,
     pub(super) provider_item_id: String,
-    pub(super) call_id: Option<String>,
+    pub(super) call_id: String,
     pub(super) payload: ToolPayload,
     pub(super) context: ToolContext,
 }
@@ -144,7 +144,7 @@ pub(super) async fn execute_tool_call_batch(
         let mut item = recorder
             .latest_tool_trace_part(
                 &trace_part_id,
-                tool_call.call_id.as_deref(),
+                Some(tool_call.call_id.as_str()),
                 Some(tool_call.id.as_str()),
             )
             .unwrap_or_else(|| {
@@ -153,7 +153,7 @@ pub(super) async fn execute_tool_call_batch(
                     &trace_part_id,
                     tool_call.name.clone(),
                     tool_call.payload_text(),
-                    Some(tool_call.stable_call_id().to_string()),
+                    Some(tool_call.call_id.clone()),
                     Some(tool_call.id.clone()),
                 );
                 recorder.start_item(item.clone());
@@ -161,7 +161,7 @@ pub(super) async fn execute_tool_call_batch(
             });
         if let Some(tool) = &mut item.tool {
             tool.tool_call_id = trace_part_id.clone();
-            tool.call_id = Some(tool_call.stable_call_id().to_string());
+            tool.call_id = Some(tool_call.call_id.clone());
             tool.provider_item_id = Some(tool_call.id.clone());
             tool.name = tool_call.name.clone();
             tool.arguments = tool_call.payload_text();
@@ -269,7 +269,7 @@ pub(super) async fn execute_tool_call_batch(
             workspace: context.workspace.clone(),
             workspace_instructions: context.workspace_instructions.clone(),
             instruction_snapshot: context.instruction_snapshot.clone(),
-            provider_call_id: Some(tool_call.stable_call_id().to_string()),
+            provider_call_id: Some(tool_call.call_id.clone()),
             active_subagent: context.active_subagent.clone(),
             lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
@@ -364,7 +364,7 @@ pub(super) async fn execute_tool_call_batch(
                     ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
                 let _runtime_identity = (
                     invocation.provider_item_id.as_str(),
-                    invocation.call_id.as_deref(),
+                    invocation.call_id.as_str(),
                 );
                 let _display_arguments = invocation.payload.arguments_for_display();
                 let tool_input = ToolInput {
@@ -383,7 +383,7 @@ pub(super) async fn execute_tool_call_batch(
                 let cache_snapshot = tool_cache_snapshot.clone();
                 let cache_arguments = tool_input.arguments.clone();
                 let cache_workspace_root = context.workspace.root().to_path_buf();
-                let cache_call_id = tool_call.stable_call_id().to_string();
+                let cache_call_id = tool_call.call_id.clone();
                 let tool_effect = effect;
                 let budget_timing = tool.budget_timing();
                 let suppress_exact_arguments = cache_policy != ToolCachePolicy::Never;
@@ -529,7 +529,7 @@ pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -
 
 fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::ToolCall) -> String {
     let tool_call_id = if tool_call.id.is_empty() {
-        tool_call.call_id.as_deref().unwrap_or("tool_call")
+        tool_call.call_id.as_str()
     } else {
         &tool_call.id
     };
