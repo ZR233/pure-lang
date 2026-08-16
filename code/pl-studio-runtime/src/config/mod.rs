@@ -106,6 +106,21 @@ pub struct StudioMcpConfig {
     pub builtin_servers: BTreeMap<String, BuiltinMcpServerState>,
 }
 
+/// Studio 自有的 LSP 自定义 server 配置段（`[lsp.servers.<id>]`）。
+///
+/// 声明在 catalog 之外启动的命令式语言服务器；与内置 catalog 合并时冲突 fail-loud。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StudioLspConfig {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub servers: BTreeMap<String, pl_lsp::LspUserServerConfig>,
+}
+
+impl StudioLspConfig {
+    fn is_default(&self) -> bool {
+        self.servers.is_empty()
+    }
+}
+
 /// Studio UI 本地偏好，由 [`ConfigRuntime`] 与其余 desired settings 一起持有。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StudioUiConfig {
@@ -152,6 +167,8 @@ pub struct StudioConfig {
     pub skills: StudioSkillsConfig,
     #[serde(default)]
     pub mcp: StudioMcpConfig,
+    #[serde(default, skip_serializing_if = "StudioLspConfig::is_default")]
+    pub lsp: StudioLspConfig,
     #[serde(default, skip_serializing_if = "StudioUiConfig::is_default")]
     pub ui: StudioUiConfig,
 }
@@ -191,6 +208,7 @@ impl StudioConfig {
             instructions: StudioInstructionsConfig::default(),
             skills,
             mcp: StudioMcpConfig::default(),
+            lsp: StudioLspConfig::default(),
             ui: StudioUiConfig::default(),
         }
     }
@@ -209,6 +227,7 @@ impl StudioConfig {
         pl_core::skill::validate_skills_config(&self.skills)?;
         pl_core::config::validate_mcp_servers(&self.mcp.servers)?;
         pl_core::config::validate_builtin_mcp_server_states(&self.mcp.builtin_servers)?;
+        validate_lsp_servers(&self.lsp.servers)?;
         Ok(())
     }
 
@@ -249,8 +268,19 @@ pub fn normalize_builtin_mcp_server_states(config: &mut StudioConfig) {
     );
 }
 
+/// 校验自定义 LSP server 与内置 catalog 的合并结果；冲突 fail-loud。
+fn validate_lsp_servers(servers: &BTreeMap<String, pl_lsp::LspUserServerConfig>) -> Result<()> {
+    pl_lsp::LspServerCatalog::with_user_servers(servers)
+        .map(|_| ())
+        .map_err(|error| {
+            PureError::ConfigError(format!("invalid [lsp.servers] configuration: {error}"))
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]
@@ -261,5 +291,59 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("schema version"));
+    }
+
+    /// 旧 config（无 `[lsp]` 段）在 schema 14 下仍可加载与保存。
+    #[test]
+    fn legacy_config_without_lsp_section_still_loads() {
+        let mut config = StudioConfig::default_config();
+        config.lsp = StudioLspConfig::default();
+        let content = toml::to_string_pretty(&config).unwrap();
+        assert!(!content.contains("[lsp"));
+
+        let parsed: StudioConfig = toml::from_str(&content).unwrap();
+
+        assert_eq!(parsed.lsp, StudioLspConfig::default());
+        parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn lsp_user_servers_section_round_trips() {
+        let base = toml::to_string_pretty(&StudioConfig::default_config()).unwrap();
+        let content = format!(
+            "{base}\n[lsp.servers.purelang]\ncommand = \"purelang-lsp\"\nargs = [\"--stdio\"]\n\
+             language_ids = [\"purelang\"]\ndetection = [\"pure.toml\"]\n\
+             extensions = [\".purelang\"]\n"
+        );
+        let parsed: StudioConfig = toml::from_str(&content).unwrap();
+
+        assert_eq!(parsed.lsp.servers.len(), 1);
+        let server = &parsed.lsp.servers["purelang"];
+        assert_eq!(server.command, "purelang-lsp");
+        assert_eq!(server.language_ids, vec!["purelang".to_string()]);
+        assert_eq!(server.detection, vec!["pure.toml".to_string()]);
+        parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn lsp_language_conflict_fails_validation() {
+        let mut config = StudioConfig::default_config();
+        config.lsp.servers.insert(
+            "custom-rust".to_string(),
+            pl_lsp::LspUserServerConfig {
+                command: "other-rust-server".to_string(),
+                args: Vec::new(),
+                language_ids: vec!["rust".to_string()],
+                detection: Vec::new(),
+                extensions: Vec::new(),
+                display_name: None,
+                operations: Vec::new(),
+            },
+        );
+
+        let error = config.validate().unwrap_err().to_string();
+
+        assert!(error.contains("[lsp.servers]"), "{error}");
+        assert!(error.contains("rust"), "{error}");
     }
 }

@@ -624,10 +624,20 @@ impl StudioRuntime {
             .context("selected project not found")?;
         let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
         let settings = self.config_runtime.read()?;
+        // 自定义 LSP server 与 catalog 冲突在配置加载时已 fail-loud；此处再合并一次，
+        // 保证 registry catalog 与当前配置一致，并让 fingerprint 覆盖检测结果。
+        self.external_runtimes
+            .lsp
+            .apply_user_servers(&settings.config.lsp.servers)
+            .await
+            .map_err(|error| anyhow::anyhow!("invalid [lsp.servers] configuration: {error}"))?;
         let fingerprint = format!(
             "{}:{}:{}",
             workspace_root.display(),
-            workspace_root.join("Cargo.toml").is_file(),
+            self.external_runtimes
+                .lsp
+                .membership_fingerprint(&workspace_root)
+                .await,
             super::skill_catalog::skills_fingerprint(&settings.config.skills)?,
         );
         let _activation_command = self.activation.command_lock.lock().await;

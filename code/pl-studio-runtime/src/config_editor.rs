@@ -297,6 +297,7 @@ impl ProviderSettingsEdit {
             instructions: current.instructions.clone(),
             skills: current.skills.clone(),
             mcp: current.mcp.clone(),
+            lsp: current.lsp.clone(),
             ui: current.ui.clone(),
         };
         crate::config::normalize_builtin_mcp_server_states(&mut config);

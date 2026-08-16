@@ -464,3 +464,26 @@ Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | ind
 配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
 
 `cached` 映射为禁止外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled` 完全移除搜索能力。设置保存返回 canonical config 和 availability，前端不得仅修改本地 draft。
+
+## 10.14 LSP 自定义 server 配置
+
+自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 14 下为可选段：没有该段的旧
+config 按默认（空表）加载，不 bump schema 版本。每个条目必须配置 `command` 与非空
+`language_ids`，可选 `args`、`detection`（workspace 检测文件名/glob，缺省总是匹配）、
+`extensions`（文件扩展名，缺省为空）、`display_name`（缺省使用 server id）和 `operations`
+（`lsp_query` 操作子集，缺省支持全部）。示例：
+
+```toml
+[lsp.servers.purelang]
+command = "purelang-lsp"
+args = ["--stdio"]
+language_ids = ["purelang"]
+detection = ["pure.toml"]
+extensions = [".purelang"]
+```
+
+该段与 `pl-lsp` 内置 catalog 合并；重复 server id 或 language id 与内置/其他自定义 server
+冲突时，`StudioConfig::validate` 以 typed 错误 fail-loud，并按 10.1 的不兼容配置合同用初始
+配置替换。自定义 server 使用通用命令 driver（`<command> --version` 探测，无 repair 语义），
+运行行为与路由合同见 `14-lsp-runtime.md`。Studio 项目激活时把该段应用进 LSP registry
+catalog，并纳入激活 fingerprint。

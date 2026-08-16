@@ -294,6 +294,7 @@ impl FirstRunConfigDraft {
             instructions: Default::default(),
             skills: Default::default(),
             mcp: Default::default(),
+            lsp: Default::default(),
             ui: Default::default(),
         };
         config.validate()?;
