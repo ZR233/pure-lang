@@ -333,21 +333,33 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         );
         let interaction_callback = self.interactions.callback(thread_id, emitter);
         let prompt_cache_namespace = context.snapshot.identity.id.to_string();
+        let prompt_scope = format!("{}:{}", mode.label(), context.snapshot.identity.role);
+        // Turn 冻结工具诊断在本 turn 的 prompt snapshot 重建前不可得；host 读取
+        // session prompt metadata 中该 scope 的当前 slot（即最近一次冻结的
+        // lease 代数与 deferred catalog 指纹）作为 runtime 诊断投影。
+        let tool_diagnostics = context
+            .session
+            .prompt_metadata()
+            .slots
+            .get(&prompt_scope)
+            .map(|prompt| (prompt.registry_revision, prompt.tool_catalog_hash.clone()));
         let options = studio_turn_options(
             TurnOptions::default()
                 .with_permission_mode(config.runtime.permission_mode)
                 .with_prompt_cache_namespace(prompt_cache_namespace)
-                .with_prompt_scope(format!(
-                    "{}:{}",
-                    mode.label(),
-                    context.snapshot.identity.role
-                ))
+                .with_prompt_scope(prompt_scope)
                 .with_interaction_callback(interaction_callback),
         );
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)
             .with_mcp_health(mcp_health)
-            .with_lsp(active_lsp_servers);
+            .with_lsp(active_lsp_servers)
+            .with_tool_diagnostics(
+                tool_diagnostics
+                    .as_ref()
+                    .and_then(|(revision, _)| *revision),
+                tool_diagnostics.and_then(|(_, catalog)| catalog),
+            );
         if let Some(context_window) = route.model.resolved_context_window() {
             session_runtime = session_runtime.with_context_window(context_window);
         }

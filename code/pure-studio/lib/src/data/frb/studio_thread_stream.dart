@@ -436,6 +436,8 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     promptGeneration: usage.promptGeneration?.toInt(),
     promptCachePolicy: usage.promptCachePolicy,
     prefixChangedReason: usage.prefixChangedReason?.name,
+    toolRegistryRevision: value.toolRegistryRevision?.toInt(),
+    toolCatalogHash: value.toolCatalogHash,
     costLabel: costLabel.isEmpty && usage.hasUnpricedUsage
         ? 'unpriced usage'
         : costLabel,

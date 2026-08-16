@@ -313,6 +313,13 @@ pub struct ThreadRuntimeSnapshot {
     pub progress: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_health: Option<McpHealthSnapshot>,
+    /// 本 Turn 工具 lease 冻结的注册表全局发布代数；与 prompt cache 诊断分层，
+    /// 仅用于观察，不参与缓存轮换。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_registry_revision: Option<u64>,
+    /// 本 Turn 工具 lease 冻结的 deferred Tool Search catalog 指纹；仅诊断。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_catalog_hash: Option<String>,
     pub updated_at: i64,
 }
 

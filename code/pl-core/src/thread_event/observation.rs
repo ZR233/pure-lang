@@ -238,6 +238,8 @@ fn runtime_snapshot(
             .map_or_else(Vec::new, |runtime| runtime.active_lsp_servers.clone()),
         progress: previous.and_then(|runtime| runtime.progress.clone()),
         mcp_health: previous.and_then(|runtime| runtime.mcp_health.clone()),
+        tool_registry_revision: previous.and_then(|runtime| runtime.tool_registry_revision),
+        tool_catalog_hash: previous.and_then(|runtime| runtime.tool_catalog_hash.clone()),
         updated_at: delta.updated_at,
     }
 }
@@ -272,6 +274,8 @@ fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
         active_lsp_servers: Vec::new(),
         progress: None,
         mcp_health: None,
+        tool_registry_revision: None,
+        tool_catalog_hash: None,
         updated_at: 0,
     }
 }

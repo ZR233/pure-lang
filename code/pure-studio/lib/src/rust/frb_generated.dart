@@ -4723,8 +4723,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeThreadRuntimeSnapshot(
       threadId: dco_decode_String(arr[0]),
       usage: dco_decode_bridge_thread_runtime_usage(arr[1]),
@@ -4736,7 +4736,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mcpHealth: dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
         arr[7],
       ),
-      updatedAt: dco_decode_i_64(arr[8]),
+      toolRegistryRevision: dco_decode_opt_box_autoadd_u_64(arr[8]),
+      toolCatalogHash: dco_decode_opt_String(arr[9]),
+      updatedAt: dco_decode_i_64(arr[10]),
     );
   }
 
@@ -9009,6 +9011,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
           deserializer,
         );
+    var var_toolRegistryRevision = sse_decode_opt_box_autoadd_u_64(
+      deserializer,
+    );
+    var var_toolCatalogHash = sse_decode_opt_String(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     return BridgeThreadRuntimeSnapshot(
       threadId: var_threadId,
@@ -9019,6 +9025,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       activeLspServers: var_activeLspServers,
       progress: var_progress,
       mcpHealth: var_mcpHealth,
+      toolRegistryRevision: var_toolRegistryRevision,
+      toolCatalogHash: var_toolCatalogHash,
       updatedAt: var_updatedAt,
     );
   }
@@ -13341,6 +13349,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.mcpHealth,
       serializer,
     );
+    sse_encode_opt_box_autoadd_u_64(self.toolRegistryRevision, serializer);
+    sse_encode_opt_String(self.toolCatalogHash, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
   }
 

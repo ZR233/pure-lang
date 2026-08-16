@@ -43,6 +43,8 @@ class ThreadRuntimeView {
     this.promptGeneration,
     this.promptCachePolicy,
     this.prefixChangedReason,
+    this.toolRegistryRevision,
+    this.toolCatalogHash,
     this.task,
   });
 
@@ -69,6 +71,12 @@ class ThreadRuntimeView {
   final int? promptGeneration;
   final String? promptCachePolicy;
   final String? prefixChangedReason;
+
+  /// 本 Turn 工具 lease 冻结的注册表发布代数；仅诊断，供 Driver 断言。
+  final int? toolRegistryRevision;
+
+  /// 本 Turn 工具 lease 冻结的 deferred Tool Search catalog 指纹；仅诊断。
+  final String? toolCatalogHash;
   final TaskRuntimeView? task;
 
   bool get hasActiveTask => task?.isActive ?? false;
@@ -110,6 +118,8 @@ class ThreadRuntimeView {
             promptGeneration == other.promptGeneration &&
             promptCachePolicy == other.promptCachePolicy &&
             prefixChangedReason == other.prefixChangedReason &&
+            toolRegistryRevision == other.toolRegistryRevision &&
+            toolCatalogHash == other.toolCatalogHash &&
             task == other.task;
   }
 
@@ -138,6 +148,8 @@ class ThreadRuntimeView {
     promptGeneration,
     promptCachePolicy,
     prefixChangedReason,
+    toolRegistryRevision,
+    toolCatalogHash,
     task,
   ]);
 
@@ -165,6 +177,8 @@ class ThreadRuntimeView {
     int? promptGeneration,
     String? promptCachePolicy,
     String? prefixChangedReason,
+    int? toolRegistryRevision,
+    String? toolCatalogHash,
     TaskRuntimeView? task,
   }) {
     return ThreadRuntimeView(
@@ -192,6 +206,8 @@ class ThreadRuntimeView {
       promptGeneration: promptGeneration ?? this.promptGeneration,
       promptCachePolicy: promptCachePolicy ?? this.promptCachePolicy,
       prefixChangedReason: prefixChangedReason ?? this.prefixChangedReason,
+      toolRegistryRevision: toolRegistryRevision ?? this.toolRegistryRevision,
+      toolCatalogHash: toolCatalogHash ?? this.toolCatalogHash,
       task: task ?? this.task,
     );
   }

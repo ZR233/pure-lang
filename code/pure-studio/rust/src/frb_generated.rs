@@ -5129,6 +5129,8 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         let mut var_mcpHealth = <Option<
             crate::api::studio::types::thread_stream::BridgeThreadMcpHealthSnapshot,
         >>::sse_decode(deserializer);
+        let mut var_toolRegistryRevision = <Option<u64>>::sse_decode(deserializer);
+        let mut var_toolCatalogHash = <Option<String>>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::BridgeThreadRuntimeSnapshot {
             thread_id: var_threadId,
@@ -5139,6 +5141,8 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             active_lsp_servers: var_activeLspServers,
             progress: var_progress,
             mcp_health: var_mcpHealth,
+            tool_registry_revision: var_toolRegistryRevision,
+            tool_catalog_hash: var_toolCatalogHash,
             updated_at: var_updatedAt,
         };
     }
@@ -10485,6 +10489,8 @@ impl flutter_rust_bridge::IntoDart
             self.active_lsp_servers.into_into_dart().into_dart(),
             self.progress.into_into_dart().into_dart(),
             self.mcp_health.into_into_dart().into_dart(),
+            self.tool_registry_revision.into_into_dart().into_dart(),
+            self.tool_catalog_hash.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -13821,6 +13827,8 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         <Vec<String>>::sse_encode(self.active_lsp_servers, serializer);
         <Option<String>>::sse_encode(self.progress, serializer);
         <Option<crate::api::studio::types::thread_stream::BridgeThreadMcpHealthSnapshot>>::sse_encode(self.mcp_health, serializer);
+        <Option<u64>>::sse_encode(self.tool_registry_revision, serializer);
+        <Option<String>>::sse_encode(self.tool_catalog_hash, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
 }
