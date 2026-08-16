@@ -147,6 +147,8 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
             role: MessageRole::User,
             content: MessageContent::Text("hello".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         })],
         tools: vec![ToolSchema::function(
@@ -331,6 +333,8 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
             role: MessageRole::Assistant,
             content: MessageContent::Text("ok-1".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -338,6 +342,8 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
             role: MessageRole::User,
             content: MessageContent::Text("again".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -662,6 +668,8 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
             role: MessageRole::Assistant,
             content: MessageContent::Text("http-ok-1".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -669,6 +677,8 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
             role: MessageRole::User,
             content: MessageContent::Text("again".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -828,6 +838,8 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
             role: MessageRole::Assistant,
             content: MessageContent::Text("ok-1".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -835,6 +847,8 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
             role: MessageRole::User,
             content: MessageContent::Text("again".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -969,6 +983,8 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
             role: MessageRole::Assistant,
             content: MessageContent::Text("ok-1".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -976,6 +992,8 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
             role: MessageRole::User,
             content: MessageContent::Text("again".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -1094,6 +1112,8 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
             role: MessageRole::Assistant,
             content: MessageContent::Text("not-consumed".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),
@@ -1101,6 +1121,8 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
             role: MessageRole::User,
             content: MessageContent::Text("again".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into(),

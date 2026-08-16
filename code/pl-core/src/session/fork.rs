@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 
-use pl_protocol::{Message, MessageRole, TOOL_CALLS_METADATA_KEY};
+use pl_protocol::{Message, MessageRole};
 
 pub(super) fn forkable_messages(messages: &[Message]) -> Vec<Message> {
     messages
         .iter()
         .filter(|message| match message.role {
             MessageRole::System | MessageRole::User => true,
-            MessageRole::Assistant => !message.metadata.contains_key(TOOL_CALLS_METADATA_KEY),
+            MessageRole::Assistant => message.tool_calls.is_none(),
             MessageRole::Tool => false,
         })
         .map(|message| Message {
             role: message.role,
             content: message.content.clone(),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         })
         .collect()

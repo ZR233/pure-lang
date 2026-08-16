@@ -1,17 +1,12 @@
-use pl_protocol::{
-    ContentPart, MessageContent, MessageRole, Result, TOOL_CALLS_METADATA_KEY, ToolCallKind,
-    ToolResultMetadata,
-};
+use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
 use serde::Serialize;
 
-use crate::request::{
-    CompletionRequest, ReasoningConfig, ReasoningSummary, ToolCall, ToolCallPayload, ToolSchema,
-};
+use crate::request::{CompletionRequest, ReasoningConfig, ReasoningSummary, ToolSchema};
 
 use super::body::ToolFormatBody;
 use super::content::{data_url, message_content_text};
 use super::protocol_error;
-use super::tool_history::parse_tool_calls_from_metadata;
+use super::tool_history::{record_arguments_text, record_custom_input, tool_callers_by_call_id};
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct ResponsesRequestBody {
     model: String,
@@ -38,6 +33,13 @@ pub(super) struct ResponsesRequestBody {
 impl ResponsesRequestBody {
     pub(super) fn from_request(request: &CompletionRequest) -> Result<Self> {
         let mut input = Vec::new();
+        let history = request
+            .input
+            .iter()
+            .filter_map(|item| item.as_message())
+            .cloned()
+            .collect::<Vec<_>>();
+        let tool_callers = tool_callers_by_call_id(&history);
 
         for item in &request.input {
             let msg = match item {
@@ -57,7 +59,7 @@ impl ResponsesRequestBody {
                 }
             };
             match msg.role {
-                MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
+                MessageRole::Assistant if msg.tool_calls.is_some() => {
                     let text = message_content_text(&msg.content);
                     if !text.is_empty() {
                         input.push(ResponsesInputItem::message(
@@ -65,34 +67,32 @@ impl ResponsesRequestBody {
                             vec![ResponsesContent::OutputText { text }],
                         ));
                     }
-                    if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata)? {
-                        input.extend(tool_calls.into_iter().map(ResponsesInputItem::from));
+                    if let Some(tool_calls) = msg.tool_calls.as_ref() {
+                        input.extend(tool_calls.iter().map(ResponsesInputItem::from));
                     }
                 }
                 MessageRole::Tool => {
-                    let metadata =
-                        ToolResultMetadata::from_metadata(&msg.metadata).map_err(protocol_error)?;
-                    let call_id = metadata
-                        .tool_call_call_id
-                        .clone()
-                        .unwrap_or_else(|| metadata.tool_call_id.clone());
+                    let record = msg.tool_result.as_ref().ok_or_else(|| {
+                        protocol_error("tool result message missing typed tool_result record")
+                    })?;
+                    let caller = tool_callers.get(&record.call_id).cloned();
                     let output = message_content_text(&msg.content);
-                    match metadata.tool_call_kind {
+                    match record.kind {
                         ToolCallKind::Function => {
                             input.push(ResponsesInputItem::typed(
                                 ResponsesTypedInputItem::FunctionCallOutput {
-                                    call_id,
+                                    call_id: record.call_id.clone(),
                                     output,
-                                    caller: metadata.tool_call_caller,
+                                    caller,
                                 },
                             ));
                         }
                         ToolCallKind::Custom => {
                             input.push(ResponsesInputItem::typed(
                                 ResponsesTypedInputItem::CustomToolCallOutput {
-                                    call_id,
+                                    call_id: record.call_id.clone(),
                                     output,
-                                    caller: metadata.tool_call_caller,
+                                    caller,
                                 },
                             ));
                         }
@@ -186,30 +186,24 @@ impl ResponsesInputItem {
     }
 }
 
-impl From<ToolCall> for ResponsesInputItem {
-    fn from(tool_call: ToolCall) -> Self {
-        let invalid_arguments = tool_call.invalid_arguments;
-        match tool_call.payload {
-            ToolCallPayload::Function { arguments } => {
-                Self::typed(ResponsesTypedInputItem::FunctionCall {
-                    id: None,
-                    name: tool_call.name,
-                    arguments: invalid_arguments
-                        .map(|invalid| invalid.raw)
-                        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
-                    call_id: tool_call.call_id,
-                    caller: tool_call.caller,
-                })
-            }
-            ToolCallPayload::Custom { input } => {
-                Self::typed(ResponsesTypedInputItem::CustomToolCall {
-                    id: None,
-                    name: tool_call.name,
-                    input,
-                    call_id: tool_call.call_id,
-                    caller: tool_call.caller,
-                })
-            }
+impl From<&ToolCallRecord> for ResponsesInputItem {
+    fn from(record: &ToolCallRecord) -> Self {
+        let caller = record.caller.clone();
+        match record.kind {
+            ToolCallKind::Function => Self::typed(ResponsesTypedInputItem::FunctionCall {
+                id: None,
+                name: record.name.clone(),
+                arguments: record_arguments_text(&record.arguments),
+                call_id: record.call_id.clone(),
+                caller,
+            }),
+            ToolCallKind::Custom => Self::typed(ResponsesTypedInputItem::CustomToolCall {
+                id: None,
+                name: record.name.clone(),
+                input: record_custom_input(&record.arguments),
+                call_id: record.call_id.clone(),
+                caller,
+            }),
         }
     }
 }

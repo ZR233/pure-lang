@@ -230,18 +230,24 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
         .await
         .unwrap();
     let history = AgentSession::from_messages(vec![
-        pl_core::session::tool_history::tool_result_history_message(
+        pl_core::session::tool_history::tool_call_history_message(
             "call-search".to_string(),
             "exec".to_string(),
             r#"{"command":"rg --files design"}"#.to_string(),
-            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string(),
+        ),
+        pl_core::session::tool_history::tool_result_history_message(
+            "call-search".to_string(),
+            "exec".to_string(),
+            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string()),
+        pl_core::session::tool_history::tool_call_history_message(
+            "call-read".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"design/guide.md"}"#.to_string(),
         ),
         pl_core::session::tool_history::tool_result_history_message(
             "call-read".to_string(),
             "read_file".to_string(),
-            r#"{"path":"design/guide.md"}"#.to_string(),
-            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string(),
-        ),
+            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string()),
     ]);
     let tool = fixture
         .coordinator
@@ -1445,18 +1451,24 @@ impl ReviewFixture {
 
 fn review_tool_context(fixture: &ReviewFixture, provider_call_id: &str) -> ToolContext {
     let history = AgentSession::from_messages(vec![
-        pl_core::session::tool_history::tool_result_history_message(
+        pl_core::session::tool_history::tool_call_history_message(
             "call-search".to_string(),
             "exec".to_string(),
             r#"{"command":"rg --files design"}"#.to_string(),
-            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string(),
+        ),
+        pl_core::session::tool_history::tool_result_history_message(
+            "call-search".to_string(),
+            "exec".to_string(),
+            r#"{"status":"completed","exitCode":0,"stdout":"design/guide.md\n","stderr":"","timedOut":false,"outputFile":"target/pure/review/search/output.log","message":"Command completed."}"#.to_string()),
+        pl_core::session::tool_history::tool_call_history_message(
+            "call-read".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"design/guide.md"}"#.to_string(),
         ),
         pl_core::session::tool_history::tool_result_history_message(
             "call-read".to_string(),
             "read_file".to_string(),
-            r#"{"path":"design/guide.md"}"#.to_string(),
-            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string(),
-        ),
+            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string()),
     ]);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     ToolContext {

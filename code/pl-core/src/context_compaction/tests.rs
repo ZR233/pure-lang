@@ -21,6 +21,8 @@ fn text_message(role: MessageRole, text: &str) -> Message {
         role,
         content: MessageContent::Text(text.to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }

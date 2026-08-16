@@ -35,6 +35,8 @@ pub(super) async fn compact_local(
         role: MessageRole::User,
         content: MessageContent::Text(config.instructions.clone()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }));
     let mut max_tokens = Some(max_output_tokens.unwrap_or(4096).min(4096));

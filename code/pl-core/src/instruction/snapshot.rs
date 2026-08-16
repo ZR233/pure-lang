@@ -205,6 +205,8 @@ fn text_message(role: MessageRole, content: String) -> Message {
         role,
         content: MessageContent::Text(content),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }

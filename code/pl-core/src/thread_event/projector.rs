@@ -356,7 +356,7 @@ fn thread_item(thread_id: &str, item: &TracePart, failure: Option<&str>) -> Opti
                 || empty_tool(&item.item_id, "tool"),
                 |tool| ThreadToolCall {
                     tool_call_id: tool.tool_call_id.clone(),
-                    call_id: tool.call_id.clone(),
+                    call_id: tool.call_id.clone().unwrap_or_default(),
                     provider_item_id: tool.provider_item_id.clone(),
                     name: tool.name.clone(),
                     arguments: tool.arguments.clone(),
@@ -417,7 +417,7 @@ fn thread_item(thread_id: &str, item: &TracePart, failure: Option<&str>) -> Opti
 fn empty_tool(item_id: &str, name: &str) -> ThreadToolCall {
     ThreadToolCall {
         tool_call_id: item_id.to_string(),
-        call_id: None,
+        call_id: String::new(),
         provider_item_id: None,
         name: name.to_string(),
         arguments: String::new(),

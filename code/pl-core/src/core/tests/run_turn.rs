@@ -269,6 +269,8 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
         role: MessageRole::User,
         content: MessageContent::Text("only message".to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }]);
     let original_revision = session.revision();
@@ -1040,9 +1042,10 @@ impl Tool for ParentHistoryProbeTool {
     > {
         async move {
             let marker_visible = context.parent_session.messages().iter().any(|message| {
-                pl_protocol::ToolResultMetadata::from_metadata(&message.metadata)
-                    .ok()
-                    .is_some_and(|metadata| metadata.tool_name == "history_marker")
+                message
+                    .tool_result
+                    .as_ref()
+                    .is_some_and(|record| record.name == "history_marker")
             });
             Ok(ToolOutput {
                 description: if marker_visible {

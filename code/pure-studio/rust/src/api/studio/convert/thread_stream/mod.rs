@@ -276,7 +276,12 @@ fn attachment(value: ThreadAttachment) -> BridgeThreadAttachment {
 fn tool_call(value: ThreadToolCall) -> Result<BridgeThreadToolCall> {
     Ok(BridgeThreadToolCall {
         tool_call_id: value.tool_call_id,
-        call_id: value.call_id,
+        // durable 线程的 call_id 必填；空串表示没有 canonical 调用 id。
+        call_id: if value.call_id.is_empty() {
+            None
+        } else {
+            Some(value.call_id)
+        },
         provider_item_id: value.provider_item_id,
         name: value.name,
         arguments: value.arguments,

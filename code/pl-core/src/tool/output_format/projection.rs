@@ -156,37 +156,23 @@ pub fn tool_history_projection(
     let mut output = None;
 
     for message in messages {
-        if let Some(metadata) =
-            pl_protocol::ToolCallHistoryMetadata::from_metadata(&message.metadata)
-            && let Ok(tool_calls) = serde_json::from_str::<Value>(&metadata.tool_calls_json)
-            && let Some(tool_calls) = tool_calls.as_array()
-        {
-            for tool_call in tool_calls {
-                if tool_call_matches(tool_call, call_id) {
-                    if tool_name.is_none() {
-                        tool_name = tool_call
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned);
-                    }
-                    if arguments.is_none() {
-                        arguments = tool_call_arguments(tool_call);
-                    }
+        for tool_call in message.tool_calls.iter().flatten() {
+            if tool_call_matches(tool_call, call_id) {
+                if tool_name.is_none() {
+                    tool_name = Some(tool_call.name.clone());
+                }
+                if arguments.is_none() {
+                    arguments = Some(tool_call.arguments.clone());
                 }
             }
         }
 
         if message.role == pl_protocol::MessageRole::Tool
-            && let Ok(metadata) = pl_protocol::ToolResultMetadata::from_metadata(&message.metadata)
-            && tool_result_matches(&metadata, call_id)
+            && let Some(record) = &message.tool_result
+            && tool_result_matches(record, call_id)
         {
-            if tool_name.is_none() && !metadata.tool_name.is_empty() {
-                tool_name = Some(metadata.tool_name.clone());
-            }
-            if arguments.is_none()
-                && let Some(raw_arguments) = metadata.tool_call_arguments.as_deref()
-            {
-                arguments = Some(arguments_value(raw_arguments));
+            if tool_name.is_none() && !record.name.is_empty() {
+                tool_name = Some(record.name.clone());
             }
             output = Some(crate::message_content_text(&message.content));
         }
@@ -294,31 +280,12 @@ fn arguments_value(arguments: &str) -> Value {
     })
 }
 
-fn tool_call_matches(tool_call: &Value, call_id: &str) -> bool {
-    tool_call
-        .get("call_id")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == call_id)
-        || tool_call
-            .get("id")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value == call_id)
+fn tool_call_matches(tool_call: &pl_protocol::ToolCallRecord, call_id: &str) -> bool {
+    tool_call.call_id == call_id || tool_call.item_id == call_id
 }
 
-fn tool_result_matches(metadata: &pl_protocol::ToolResultMetadata, call_id: &str) -> bool {
-    metadata.tool_call_id == call_id || metadata.tool_call_call_id.as_deref() == Some(call_id)
-}
-
-fn tool_call_arguments(tool_call: &Value) -> Option<Value> {
-    let payload = tool_call.get("payload")?;
-    match payload.get("kind").and_then(Value::as_str) {
-        Some("function") => payload.get("arguments").cloned(),
-        Some("custom") => payload
-            .get("input")
-            .and_then(Value::as_str)
-            .map(|input| json!({ "input": input })),
-        Some(_) | None => payload.get("arguments").cloned(),
-    }
+fn tool_result_matches(record: &pl_protocol::ToolResultRecord, call_id: &str) -> bool {
+    record.call_id == call_id || record.item_id == call_id
 }
 
 fn tool_call_id(tool: &pl_trace::TraceToolPart) -> String {
@@ -530,22 +497,20 @@ mod tests {
         name: &str,
         arguments: serde_json::Value,
     ) -> pl_protocol::Message {
-        let tool_calls = vec![pl_model::ToolCall::function(
-            id,
-            name,
-            arguments,
-            call_id.unwrap_or(id),
-        )];
-        let mut metadata = Default::default();
-        pl_protocol::ToolCallHistoryMetadata::new(
-            serde_json::to_string(&tool_calls).expect("tool calls json"),
-        )
-        .insert_into(&mut metadata);
         pl_protocol::Message {
             role: pl_protocol::MessageRole::Assistant,
             content: pl_protocol::MessageContent::Text(String::new()),
             reasoning_content: None,
-            metadata,
+            tool_calls: Some(vec![pl_protocol::ToolCallRecord {
+                item_id: id.to_string(),
+                call_id: call_id.unwrap_or(id).to_string(),
+                name: name.to_string(),
+                kind: pl_protocol::ToolCallKind::Function,
+                arguments,
+                caller: None,
+            }]),
+            tool_result: None,
+            metadata: Default::default(),
         }
     }
 
@@ -553,23 +518,21 @@ mod tests {
         id: &str,
         call_id: Option<&str>,
         name: &str,
-        raw_arguments: &str,
+        _raw_arguments: &str,
         output: &str,
     ) -> pl_protocol::Message {
-        let mut metadata = Default::default();
-        pl_protocol::ToolResultMetadata::new(
-            id.to_string(),
-            call_id.map(ToString::to_string),
-            name.to_string(),
-            pl_protocol::ToolCallKind::Function,
-            raw_arguments.to_string(),
-        )
-        .insert_into(&mut metadata);
         pl_protocol::Message {
             role: pl_protocol::MessageRole::Tool,
             content: pl_protocol::MessageContent::Text(output.to_string()),
             reasoning_content: None,
-            metadata,
+            tool_calls: None,
+            tool_result: Some(pl_protocol::ToolResultRecord {
+                item_id: id.to_string(),
+                call_id: call_id.unwrap_or(id).to_string(),
+                name: name.to_string(),
+                kind: pl_protocol::ToolCallKind::Function,
+            }),
+            metadata: Default::default(),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashSet};
 use pl_protocol::{
     ConversationRecoveryMode, ConversationRecoveryRecord, ConversationRecoveryTurnRange,
     InteractionStatus, MessageContent, MessageRole, ModelContextItem, PromptPrefixChangedReason,
-    ThreadNotification, ToolCallHistoryMetadata, ToolResultMetadata,
+    ThreadNotification,
 };
 
 use super::super::host::{CommitDurability, ThreadProjectionCommit};
@@ -356,31 +356,22 @@ fn validate_closed_tool_history(items: &[ModelContextItem]) -> AgentRuntimeResul
             continue;
         };
         match message.role {
-            MessageRole::Assistant if message.metadata.contains_key("tool_calls") => {
+            MessageRole::Assistant if message.tool_calls.is_some() => {
                 if !pending.is_empty() {
                     return Err(invalid_tool_boundary());
                 }
-                let metadata = ToolCallHistoryMetadata::from_metadata(&message.metadata)
-                    .ok_or_else(invalid_tool_boundary)?;
-                let calls = serde_json::from_str::<serde_json::Value>(&metadata.tool_calls_json)
-                    .map_err(|_| invalid_tool_boundary())?;
-                let calls = calls.as_array().ok_or_else(invalid_tool_boundary)?;
-                for call in calls {
-                    let id = call
-                        .get("id")
-                        .or_else(|| call.get("call_id"))
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|id| !id.is_empty())
-                        .ok_or_else(invalid_tool_boundary)?;
-                    if !pending.insert(id.to_string()) {
+                for call in message.tool_calls.iter().flatten() {
+                    if !pending.insert(call.call_id.clone()) {
                         return Err(invalid_tool_boundary());
                     }
                 }
             }
             MessageRole::Tool => {
-                let metadata = ToolResultMetadata::from_metadata(&message.metadata)
-                    .map_err(|_| invalid_tool_boundary())?;
-                if !pending.remove(&metadata.tool_call_id) {
+                let record = message
+                    .tool_result
+                    .as_ref()
+                    .ok_or_else(invalid_tool_boundary)?;
+                if !pending.remove(&record.call_id) {
                     return Err(invalid_tool_boundary());
                 }
             }
@@ -433,7 +424,7 @@ fn recovery_context(record: &ConversationRecoveryRecord) -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{Message, MessageContent, ToolCallKind};
+    use pl_protocol::{Message, MessageContent, ToolCallKind, ToolCallRecord, ToolResultRecord};
 
     use super::*;
 
@@ -442,41 +433,45 @@ mod tests {
             role,
             content: MessageContent::Text(text.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
         .into()
     }
 
     fn assistant_tool_call(id: &str) -> ModelContextItem {
-        let mut metadata = HashMap::new();
-        ToolCallHistoryMetadata::new(
-            serde_json::json!([{"id": id, "type": "function"}]).to_string(),
-        )
-        .insert_into(&mut metadata);
         Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(String::new()),
             reasoning_content: None,
-            metadata,
+            tool_calls: Some(vec![ToolCallRecord {
+                item_id: id.to_string(),
+                call_id: id.to_string(),
+                name: "shell".to_string(),
+                kind: ToolCallKind::Function,
+                arguments: serde_json::json!({}),
+                caller: None,
+            }]),
+            tool_result: None,
+            metadata: HashMap::new(),
         }
         .into()
     }
 
     fn tool_result(id: &str) -> ModelContextItem {
-        let mut metadata = HashMap::new();
-        ToolResultMetadata::new(
-            id.to_string(),
-            Some(id.to_string()),
-            "shell".to_string(),
-            ToolCallKind::Function,
-            "{}".to_string(),
-        )
-        .insert_into(&mut metadata);
         Message {
             role: MessageRole::Tool,
             content: MessageContent::Text("done".to_string()),
             reasoning_content: None,
-            metadata,
+            tool_calls: None,
+            tool_result: Some(ToolResultRecord {
+                item_id: id.to_string(),
+                call_id: id.to_string(),
+                name: "shell".to_string(),
+                kind: ToolCallKind::Function,
+            }),
+            metadata: HashMap::new(),
         }
         .into()
     }

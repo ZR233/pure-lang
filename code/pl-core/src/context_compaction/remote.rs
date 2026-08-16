@@ -185,6 +185,8 @@ fn trim_tool_outputs_to_context_window(
             role: MessageRole::Tool,
             content: MessageContent::Text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: message.metadata.clone(),
         };
         input[index] = match receipt {
@@ -235,6 +237,8 @@ mod tests {
             role: MessageRole::User,
             content: MessageContent::Text(text.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }
     }
@@ -264,6 +268,8 @@ mod tests {
             role: MessageRole::Tool,
             content: MessageContent::Text("x".repeat(100)),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: metadata.clone(),
         })];
 

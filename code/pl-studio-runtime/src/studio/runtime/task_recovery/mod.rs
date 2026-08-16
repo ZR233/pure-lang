@@ -797,7 +797,7 @@ mod tests {
     fn tool_summary_reports_side_effect_outcome_without_arguments() {
         let tool = ThreadToolCall {
             tool_call_id: "call-1".to_string(),
-            call_id: None,
+            call_id: String::new(),
             provider_item_id: None,
             name: "shell_command".to_string(),
             arguments: r#"{"command":"secret"}"#.to_string(),

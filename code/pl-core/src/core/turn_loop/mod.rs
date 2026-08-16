@@ -728,16 +728,16 @@ pub(super) async fn run_turn_with_trace(
         // 先补齐全部 canonical tool result，再更新辅助 evidence ledger。这样即使
         // pinned working context 的大小校验或持久化失败，也不会留下只有
         // assistant tool call、没有对应 output 的不可重放 session。
-        for ((tool_result, receipt), tool_call) in tool_results.iter().zip(&tool_calls) {
-            session.push_tool_result_with_receipt_and_caller(
-                tool_result.id.clone(),
-                Some(tool_result.call_id.clone()),
-                tool_result.name.clone(),
-                tool_result.kind,
+        for ((tool_result, receipt), _tool_call) in tool_results.iter().zip(&tool_calls) {
+            session.push_tool_result_with_receipt(
+                pl_protocol::ToolResultRecord {
+                    item_id: tool_result.id.clone(),
+                    call_id: tool_result.call_id.clone(),
+                    name: tool_result.name.clone(),
+                    kind: tool_result.kind,
+                },
                 tool_result.result.clone(),
-                tool_result.arguments.clone(),
                 receipt.clone(),
-                tool_call.caller.clone(),
             );
         }
         inference::record(

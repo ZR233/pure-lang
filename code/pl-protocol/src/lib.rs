@@ -32,11 +32,8 @@ pub use interaction::{
 pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
-    ContentPart, ImageSource, Message, MessageContent, MessageRole,
-    TOOL_CALL_ARGUMENTS_METADATA_KEY, TOOL_CALL_CALL_ID_METADATA_KEY,
-    TOOL_CALL_CALLER_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY, TOOL_CALL_KIND_METADATA_KEY,
-    TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY, ToolCallCaller, ToolCallHistoryMetadata,
-    ToolCallKind, ToolResultMetadata,
+    ContentPart, ImageSource, Message, MessageContent, MessageRole, ToolCallCaller, ToolCallKind,
+    ToolCallRecord, ToolResultRecord,
 };
 pub use model_context::{
     AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,

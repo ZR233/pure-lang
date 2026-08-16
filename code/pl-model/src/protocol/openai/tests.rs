@@ -2,20 +2,22 @@ use std::collections::HashMap;
 
 use pl_protocol::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole, ModelContextItem, PureError,
-    ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind,
-    ToolResultMetadata,
+    ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind, ToolCallRecord,
+    ToolResultRecord,
 };
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::model_info::{MaxTokensField, ResponsesMaxTokensField};
-use crate::request::{ReasoningConfig, ReasoningSummary, ToolCall, ToolCallPayload, ToolSchema};
+use crate::request::{ReasoningConfig, ReasoningSummary, ToolCallPayload, ToolSchema};
 
 fn text_message(role: MessageRole, content: &str) -> Message {
     Message {
         role,
         content: MessageContent::Text(content.to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }
@@ -36,6 +38,8 @@ fn image_message() -> Message {
             },
         ]),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }
@@ -223,35 +227,71 @@ fn responses_parallel_tool_calls_wire_is_unchanged() {
     assert_eq!(body["parallel_tool_calls"], serde_json::json!(true));
 }
 
-fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> CompletionRequest {
-    let calls = vec![ToolCall::custom(
-        "ctc_1",
-        "apply_patch",
-        "*** Begin Patch\n*** End Patch",
-        "call_1",
-    )];
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&calls).unwrap(),
-    );
+fn custom_tool_call_record() -> ToolCallRecord {
+    ToolCallRecord {
+        item_id: "ctc_1".to_string(),
+        call_id: "call_1".to_string(),
+        name: "apply_patch".to_string(),
+        kind: ToolCallKind::Custom,
+        arguments: serde_json::Value::String("*** Begin Patch\n*** End Patch".to_string()),
+        caller: None,
+    }
+}
+
+fn function_tool_call_record() -> ToolCallRecord {
+    ToolCallRecord {
+        item_id: "fc_1".to_string(),
+        call_id: "call_1".to_string(),
+        name: "read_file".to_string(),
+        kind: ToolCallKind::Function,
+        arguments: serde_json::json!({ "path": "Cargo.toml" }),
+        caller: None,
+    }
+}
+
+fn tool_call_result_record(call: &ToolCallRecord) -> ToolResultRecord {
+    ToolResultRecord {
+        item_id: call.item_id.clone(),
+        call_id: call.call_id.clone(),
+        name: call.name.clone(),
+        kind: call.kind,
+    }
+}
+
+fn assistant_tool_call_history(call: ToolCallRecord) -> Message {
+    Message {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(String::new()),
+        reasoning_content: None,
+        tool_calls: Some(vec![call]),
+        tool_result: None,
+        metadata: HashMap::new(),
+    }
+}
+
+fn tool_result_history(record: ToolResultRecord, output: &str) -> Message {
+    Message {
+        role: MessageRole::Tool,
+        content: MessageContent::Text(output.to_string()),
+        reasoning_content: None,
+        tool_calls: None,
+        tool_result: Some(record),
+        metadata: HashMap::new(),
+    }
+}
+
+fn request_with_tool_history(tool_result: Option<ToolResultRecord>) -> CompletionRequest {
+    let call = custom_tool_call_record();
     CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        input: context_items(vec![
-            Message {
-                role: MessageRole::Assistant,
-                content: MessageContent::Text(String::new()),
-                reasoning_content: None,
-                metadata: assistant_metadata,
-            },
-            Message {
-                role: MessageRole::Tool,
-                content: MessageContent::Text("ok".to_string()),
-                reasoning_content: None,
-                metadata: tool_metadata,
-            },
-        ]),
+        input: context_items(match tool_result {
+            Some(record) => vec![
+                assistant_tool_call_history(call),
+                tool_result_history(record, "ok"),
+            ],
+            None => vec![assistant_tool_call_history(call)],
+        }),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -267,35 +307,18 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
     }
 }
 
-fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) -> CompletionRequest {
-    let calls = vec![ToolCall::function(
-        "fc_1",
-        "read_file",
-        serde_json::json!({ "path": "Cargo.toml" }),
-        "call_1",
-    )];
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&calls).unwrap(),
-    );
+fn request_with_function_tool_history(tool_result: Option<ToolResultRecord>) -> CompletionRequest {
+    let call = function_tool_call_record();
     CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        input: context_items(vec![
-            Message {
-                role: MessageRole::Assistant,
-                content: MessageContent::Text(String::new()),
-                reasoning_content: None,
-                metadata: assistant_metadata,
-            },
-            Message {
-                role: MessageRole::Tool,
-                content: MessageContent::Text("ok".to_string()),
-                reasoning_content: None,
-                metadata: tool_metadata,
-            },
-        ]),
+        input: context_items(match tool_result {
+            Some(record) => vec![
+                assistant_tool_call_history(call),
+                tool_result_history(record, "ok"),
+            ],
+            None => vec![assistant_tool_call_history(call)],
+        }),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -531,6 +554,8 @@ fn chat_body_writes_assistant_reasoning_content() {
         role: MessageRole::Assistant,
         content: MessageContent::Text("9.11 更大。".to_string()),
         reasoning_content: Some("比较小数位。".to_string()),
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     })];
 
@@ -709,33 +734,16 @@ fn responses_body_writes_deferred_namespace_and_programmatic_tools() {
 
 #[test]
 fn responses_replays_program_caller_and_native_items_in_order() {
-    let caller = ToolCallCaller::Program {
-        caller_id: "program-1".to_string(),
+    let call = ToolCallRecord {
+        item_id: "fc_1".to_string(),
+        call_id: "call_1".to_string(),
+        name: "read_file".to_string(),
+        kind: ToolCallKind::Function,
+        arguments: serde_json::json!({"path": "README.md"}),
+        caller: Some(ToolCallCaller::Program {
+            caller_id: "program-1".to_string(),
+        }),
     };
-    let calls = vec![
-        ToolCall::function(
-            "fc_1",
-            "read_file",
-            serde_json::json!({"path": "README.md"}),
-            "call_1",
-        )
-        .with_caller(Some(caller.clone())),
-    ];
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&calls).unwrap(),
-    );
-    let mut tool_metadata = HashMap::new();
-    ToolResultMetadata::new(
-        "fc_1".to_string(),
-        Some("call_1".to_string()),
-        "read_file".to_string(),
-        ToolCallKind::Function,
-        r#"{"path":"README.md"}"#.to_string(),
-    )
-    .with_caller(Some(caller))
-    .insert_into(&mut tool_metadata);
     let mut request = request_with_effort("xhigh");
     request.input = vec![
         ModelContextItem::Responses {
@@ -744,18 +752,11 @@ fn responses_replays_program_caller_and_native_items_in_order() {
                 value: serde_json::json!({"type": "program", "id": "program-1"}),
             },
         },
-        ModelContextItem::from(Message {
-            role: MessageRole::Assistant,
-            content: MessageContent::Text(String::new()),
-            reasoning_content: None,
-            metadata: assistant_metadata,
-        }),
-        ModelContextItem::from(Message {
-            role: MessageRole::Tool,
-            content: MessageContent::Text(r#"{"content":"ok"}"#.to_string()),
-            reasoning_content: None,
-            metadata: tool_metadata,
-        }),
+        ModelContextItem::from(assistant_tool_call_history(call.clone())),
+        ModelContextItem::from(tool_result_history(
+            tool_call_result_record(&call),
+            r#"{"content":"ok"}"#,
+        )),
         ModelContextItem::Responses {
             item: ResponsesContextItem {
                 kind: ResponsesContextItemKind::ProgramOutput,
@@ -1054,32 +1055,20 @@ fn responses_id_only_tool_identity_survives_strict_history_replay() {
             }]
         }))
         .unwrap();
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&response.tool_calls).unwrap(),
-    );
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
-    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+    let call = ToolCallRecord {
+        item_id: response.tool_calls[0].id.clone(),
+        call_id: response.tool_calls[0].call_id.clone(),
+        name: "read_file".to_string(),
+        kind: ToolCallKind::Function,
+        arguments: serde_json::json!({}),
+        caller: None,
+    };
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
         input: context_items(vec![
-            Message {
-                role: MessageRole::Assistant,
-                content: MessageContent::Text(String::new()),
-                reasoning_content: None,
-                metadata: assistant_metadata,
-            },
-            Message {
-                role: MessageRole::Tool,
-                content: MessageContent::Text("ok".to_string()),
-                reasoning_content: None,
-                metadata: tool_metadata,
-            },
+            assistant_tool_call_history(call.clone()),
+            tool_result_history(tool_call_result_record(&call), "ok"),
         ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
@@ -1264,12 +1253,8 @@ fn chat_parse_response_preserves_invalid_function_arguments() {
 
 #[test]
 fn responses_history_replays_custom_tool_call_and_output() {
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "ctc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "custom".to_string());
-    tool_metadata.insert("tool_name".to_string(), "apply_patch".to_string());
-    let request = request_with_tool_history(tool_metadata);
+    let call = custom_tool_call_record();
+    let request = request_with_tool_history(Some(tool_call_result_record(&call)));
 
     let body = OpenAiProtocol::responses().build_request_body(&request);
 
@@ -1293,12 +1278,8 @@ fn responses_history_replays_custom_tool_call_and_output() {
 
 #[test]
 fn tool_result_ids_are_protocol_specific() {
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "ctc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "custom".to_string());
-    tool_metadata.insert("tool_name".to_string(), "apply_patch".to_string());
-    let request = request_with_tool_history(tool_metadata);
+    let call = custom_tool_call_record();
+    let request = request_with_tool_history(Some(tool_call_result_record(&call)));
 
     let responses_body = OpenAiProtocol::responses().build_request_body(&request);
     let chat_body = OpenAiProtocol::chat().build_request_body(&request);
@@ -1316,12 +1297,8 @@ fn tool_result_ids_are_protocol_specific() {
 
 #[test]
 fn function_tool_result_ids_are_protocol_specific() {
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
-    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
-    let request = request_with_function_tool_history(tool_metadata);
+    let call = function_tool_call_record();
+    let request = request_with_function_tool_history(Some(tool_call_result_record(&call)));
 
     let responses_body = OpenAiProtocol::responses().build_request_body(&request);
     let chat_body = OpenAiProtocol::chat().build_request_body(&request);
@@ -1338,12 +1315,16 @@ fn function_tool_result_ids_are_protocol_specific() {
 }
 
 #[test]
-fn unknown_tool_call_kind_fails_request_build() {
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "mystery".to_string());
-    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
-    let request = request_with_function_tool_history(tool_metadata);
+fn tool_result_without_typed_record_fails_request_build() {
+    let mut request = request_with_function_tool_history(None);
+    request.input.push(ModelContextItem::from(Message {
+        role: MessageRole::Tool,
+        content: MessageContent::Text("ok".to_string()),
+        reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
+        metadata: HashMap::new(),
+    }));
 
     let error = OpenAiProtocol::responses()
         .build_request(&request, &ModelInfo::fallback(&request.model))
@@ -1351,7 +1332,7 @@ fn unknown_tool_call_kind_fails_request_build() {
 
     match error {
         PureError::LlmError(message) => {
-            assert!(message.contains("unknown tool_call_kind: mystery"));
+            assert!(message.contains("tool result message missing typed tool_result record"));
         }
         other => panic!("unexpected error: {other:?}"),
     }
@@ -1359,39 +1340,7 @@ fn unknown_tool_call_kind_fails_request_build() {
 
 #[test]
 fn missing_tool_output_fails_request_build() {
-    let calls = vec![ToolCall::function(
-        "fc_1",
-        "read_file",
-        serde_json::json!({ "path": "Cargo.toml" }),
-        "call_1",
-    )];
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&calls).unwrap(),
-    );
-    let request = CompletionRequest {
-        model: "gpt-5.5".to_string(),
-        instructions: None,
-        input: context_items(vec![Message {
-            role: MessageRole::Assistant,
-            content: MessageContent::Text(String::new()),
-            reasoning_content: None,
-            metadata: assistant_metadata,
-        }]),
-        tools: Vec::new(),
-        tool_choice: "auto".to_string(),
-        parallel_tool_calls: false,
-        temperature: None,
-        max_tokens: None,
-        store: None,
-        previous_response_id: None,
-        prompt_cache_key: None,
-        reasoning: None,
-        stream: true,
-        trace: None,
-        transport_session: Default::default(),
-    };
+    let request = request_with_function_tool_history(None);
 
     let error = OpenAiProtocol::responses()
         .build_request(&request, &ModelInfo::fallback(&request.model))
@@ -1407,40 +1356,22 @@ fn missing_tool_output_fails_request_build() {
 
 #[test]
 fn chat_history_with_item_id_call_id_replays_on_both_endpoints() {
-    let calls = vec![ToolCall::function(
-        "fc_1",
-        "read_file",
-        serde_json::json!({ "path": "Cargo.toml" }),
-        // Chat Completions 解码确定性赋 call_id = item_id，Responses 回放不再有
-        // missing call_id 路径。
-        "fc_1",
-    )];
-    let mut assistant_metadata = HashMap::new();
-    assistant_metadata.insert(
-        "tool_calls".to_string(),
-        serde_json::to_string(&calls).unwrap(),
-    );
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
-    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+    // Chat Completions 解码确定性赋 call_id = item_id；Responses 回放没有
+    // missing call_id 路径。
+    let call = ToolCallRecord {
+        item_id: "fc_1".to_string(),
+        call_id: "fc_1".to_string(),
+        name: "read_file".to_string(),
+        kind: ToolCallKind::Function,
+        arguments: serde_json::json!({ "path": "Cargo.toml" }),
+        caller: None,
+    };
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
         input: context_items(vec![
-            Message {
-                role: MessageRole::Assistant,
-                content: MessageContent::Text(String::new()),
-                reasoning_content: None,
-                metadata: assistant_metadata,
-            },
-            Message {
-                role: MessageRole::Tool,
-                content: MessageContent::Text("ok".to_string()),
-                reasoning_content: None,
-                metadata: tool_metadata,
-            },
+            assistant_tool_call_history(call.clone()),
+            tool_result_history(tool_call_result_record(&call), "ok"),
         ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
@@ -1472,4 +1403,141 @@ fn chat_history_with_item_id_call_id_replays_on_both_endpoints() {
         chat_body["messages"][1]["tool_call_id"],
         serde_json::json!("fc_1")
     );
+}
+
+#[test]
+fn chat_then_responses_replay_pairs_call_ids_across_protocols() {
+    // 第一段：Chat provider 解码工具调用，确定性赋 call_id = item_id。
+    let decoded = OpenAiProtocol::chat()
+        .parse_response(serde_json::json!({
+            "model": "glm-5",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "chat-call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"Cargo.toml\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }))
+        .unwrap();
+    let decoded_call = &decoded.tool_calls[0];
+    assert_eq!(decoded_call.id, "chat-call-1");
+    assert_eq!(decoded_call.call_id, "chat-call-1");
+
+    // 第二段：会话保存 typed 记录后切换 Responses provider 继续对话。
+    // 记录形状与 pl-core `session::tool_history::tool_call_record` 一致。
+    let call = ToolCallRecord {
+        item_id: decoded_call.id.clone(),
+        call_id: decoded_call.call_id.clone(),
+        name: decoded_call.name.clone(),
+        kind: ToolCallKind::Function,
+        arguments: decoded_call.arguments_for_tool(),
+        caller: None,
+    };
+    let request = CompletionRequest {
+        model: "gpt-5.5".to_string(),
+        instructions: None,
+        input: context_items(vec![
+            assistant_tool_call_history(call.clone()),
+            tool_result_history(tool_call_result_record(&call), "ok"),
+        ]),
+        tools: Vec::new(),
+        tool_choice: "auto".to_string(),
+        parallel_tool_calls: false,
+        temperature: None,
+        max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
+        reasoning: None,
+        stream: true,
+        trace: None,
+        transport_session: Default::default(),
+    };
+
+    let body = serde_json::to_value(
+        OpenAiProtocol::responses()
+            .build_request(&request, &ModelInfo::fallback(&request.model))
+            .expect("Responses replay must not hit a missing call_id path"),
+    )
+    .unwrap();
+
+    assert_eq!(body["input"][0]["type"], "function_call");
+    assert_eq!(body["input"][0]["call_id"], "chat-call-1");
+    assert_eq!(body["input"][1]["type"], "function_call_output");
+    assert_eq!(body["input"][1]["call_id"], "chat-call-1");
+    assert_eq!(
+        body["input"][0]["call_id"], body["input"][1]["call_id"],
+        "assistant function_call 与 function_call_output 必须按 call_id 配对"
+    );
+}
+
+#[test]
+fn responses_then_chat_replay_pairs_tool_call_ids_across_protocols() {
+    // 第一段：Responses provider 解码工具调用，保留独立 call_id。
+    let decoded = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [{
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": "{\"path\":\"Cargo.toml\"}"
+            }]
+        }))
+        .unwrap();
+    let decoded_call = &decoded.tool_calls[0];
+    assert_eq!(decoded_call.id, "fc_1");
+    assert_eq!(decoded_call.call_id, "call_1");
+
+    // 第二段：切换 Chat provider 继续对话；Chat wire 使用 item_id 配对。
+    let call = ToolCallRecord {
+        item_id: decoded_call.id.clone(),
+        call_id: decoded_call.call_id.clone(),
+        name: decoded_call.name.clone(),
+        kind: ToolCallKind::Function,
+        arguments: decoded_call.arguments_for_tool(),
+        caller: None,
+    };
+    let request = CompletionRequest {
+        model: "glm-5".to_string(),
+        instructions: None,
+        input: context_items(vec![
+            assistant_tool_call_history(call.clone()),
+            tool_result_history(tool_call_result_record(&call), "ok"),
+        ]),
+        tools: Vec::new(),
+        tool_choice: "auto".to_string(),
+        parallel_tool_calls: false,
+        temperature: None,
+        max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
+        reasoning: None,
+        stream: true,
+        trace: None,
+        transport_session: Default::default(),
+    };
+
+    let chat_body = OpenAiProtocol::chat().build_request_body(&request);
+    let responses_body = serde_json::to_value(
+        OpenAiProtocol::responses()
+            .build_request(&request, &ModelInfo::fallback(&request.model))
+            .expect("Responses replay must keep the provider call_id"),
+    )
+    .unwrap();
+
+    assert_eq!(chat_body["messages"][0]["tool_calls"][0]["id"], "fc_1");
+    assert_eq!(chat_body["messages"][1]["tool_call_id"], "fc_1");
+    assert_eq!(responses_body["input"][0]["call_id"], "call_1");
+    assert_eq!(responses_body["input"][1]["call_id"], "call_1");
 }

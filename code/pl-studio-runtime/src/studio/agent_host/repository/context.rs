@@ -451,6 +451,8 @@ mod tests {
             role: MessageRole::User,
             content: MessageContent::Text("metadata".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata,
         })];
         let tx = store.database().begin().await.unwrap();
@@ -601,6 +603,8 @@ mod tests {
             role: MessageRole::User,
             content: MessageContent::Text(content.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         })
     }

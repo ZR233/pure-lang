@@ -195,6 +195,8 @@ fn minimal_request(model: &str) -> CompletionRequest {
                 role: MessageRole::User,
                 content: MessageContent::Text("hello".to_string()),
                 reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
                 metadata: HashMap::new(),
             }
             .into(),

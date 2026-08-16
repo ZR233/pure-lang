@@ -373,6 +373,8 @@ impl TurnEngine {
                 serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
             ),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         };
         let completion_request = CompletionRequest::builder(provider.default_model())

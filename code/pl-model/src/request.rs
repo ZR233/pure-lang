@@ -902,6 +902,8 @@ mod tests {
                 role: MessageRole::User,
                 content,
                 reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
                 metadata: HashMap::new(),
             })],
             tools: Vec::new(),

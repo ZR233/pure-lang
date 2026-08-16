@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
-use crate::{MessageRole, ToolResultMetadata};
+use crate::MessageRole;
 use anyhow::{Context, Result, bail};
 use pl_core::path_safety::validate_existing_path_async;
+use serde_json::Value;
 
 use super::super::ReviewExitViolation;
 
@@ -17,6 +18,7 @@ pub(super) async fn inspect_review_trace(
     session: &crate::AgentSession,
     workspace: &Path,
 ) -> Result<ReviewTrace> {
+    let arguments_by_call_id = tool_call_arguments_by_id(session.messages());
     let mut locator_seen = false;
     let mut read_design = BTreeMap::<String, String>::new();
     let mut violations = Vec::new();
@@ -24,24 +26,26 @@ pub(super) async fn inspect_review_trace(
         if message.role != MessageRole::Tool {
             continue;
         }
-        let metadata =
-            ToolResultMetadata::from_metadata(&message.metadata).map_err(anyhow::Error::msg)?;
+        let record = message
+            .tool_result
+            .as_ref()
+            .context("tool result history has no typed record")?;
         let output = crate::message_content_text(&message.content);
-        if metadata.tool_name == "list_files" && successful_output(&output) {
+        let arguments = arguments_by_call_id
+            .get(&record.call_id)
+            .or_else(|| arguments_by_call_id.get(&record.item_id));
+        if record.name == "list_files" && successful_output(&output) {
             locator_seen = true;
             continue;
         }
-        if metadata.tool_name == "exec"
+        if record.name == "exec"
             && successful_exec_output(&output)
-            && metadata
-                .tool_call_arguments
-                .as_deref()
-                .is_some_and(is_ripgrep_locator)
+            && arguments.is_some_and(is_ripgrep_locator)
         {
             locator_seen = true;
             continue;
         }
-        if metadata.tool_name != "read_file" || !successful_read_output(&output) {
+        if record.name != "read_file" || !successful_read_output(&output) {
             continue;
         }
         if !locator_seen {
@@ -49,15 +53,10 @@ pub(super) async fn inspect_review_trace(
             // entire round: the reviewer may still locate and re-read the document.
             continue;
         }
-        let arguments: serde_json::Value = serde_json::from_str(
-            metadata
-                .tool_call_arguments
-                .as_deref()
-                .context("read_file history has no structured arguments")?,
-        )?;
+        let arguments = arguments.context("read_file history has no structured arguments")?;
         let path = arguments
             .get("path")
-            .and_then(serde_json::Value::as_str)
+            .and_then(Value::as_str)
             .context("read_file history has no path")?;
         if !is_design_read_candidate(path) {
             continue;
@@ -153,13 +152,22 @@ fn successful_exec_output(output: &str) -> bool {
         })
 }
 
-fn is_ripgrep_locator(arguments: &str) -> bool {
-    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(arguments) else {
-        return false;
-    };
+/// assistant 侧 typed 工具调用记录按 call_id/item_id 提供参数。
+fn tool_call_arguments_by_id(messages: &[crate::Message]) -> BTreeMap<String, serde_json::Value> {
+    let mut arguments = BTreeMap::new();
+    for message in messages {
+        for call in message.tool_calls.iter().flatten() {
+            arguments.insert(call.call_id.clone(), call.arguments.clone());
+            arguments.insert(call.item_id.clone(), call.arguments.clone());
+        }
+    }
+    arguments
+}
+
+fn is_ripgrep_locator(arguments: &serde_json::Value) -> bool {
     let Some(command) = arguments
         .get("command")
-        .and_then(serde_json::Value::as_str)
+        .and_then(Value::as_str)
         .map(str::trim)
     else {
         return false;

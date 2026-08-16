@@ -112,6 +112,8 @@ fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Mess
         role: MessageRole::System,
         content: MessageContent::Text(rendered),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     })
 }
@@ -119,7 +121,7 @@ fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Mess
 #[cfg(test)]
 mod tests {
     use pl_model::{ToolCall, ToolCallKind};
-    use pl_protocol::{SessionNote, ToolResultReceipt};
+    use pl_protocol::{SessionNote, ToolResultReceipt, ToolResultRecord};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -269,10 +271,12 @@ mod tests {
                 None,
             );
             session.push_tool_result(
-                call_id.clone(),
-                Some(call_id.clone()),
-                "read_file".to_string(),
-                ToolCallKind::Function,
+                ToolResultRecord {
+                    item_id: call_id.clone(),
+                    call_id: call_id.clone(),
+                    name: "read_file".to_string(),
+                    kind: ToolCallKind::Function,
+                },
                 format!("result-{index}"),
                 format!(r#"{{"path":"file-{index}.rs"}}"#),
             );

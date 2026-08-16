@@ -15,6 +15,8 @@ fn user_message(content: &str) -> Message {
         role: MessageRole::User,
         content: MessageContent::Text(content.to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }
@@ -24,6 +26,8 @@ fn assistant_message(content: String, reasoning_content: String) -> Message {
         role: MessageRole::Assistant,
         content: MessageContent::Text(content),
         reasoning_content: Some(reasoning_content),
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }

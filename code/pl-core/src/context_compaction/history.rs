@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use pl_protocol::{
-    ContentPart, Message, MessageContent, MessageRole, ModelContextItem,
-    TOOL_CALL_CALL_ID_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY,
-};
+use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, ModelContextItem};
 
 use super::{
     APPROX_CHARS_PER_TOKEN, CompactionTrigger, ContextCompactionConfig,
@@ -73,6 +70,8 @@ fn summary_message(summary: &str, summary_prefix: &str) -> Message {
         role: MessageRole::User,
         content: MessageContent::Text(format!("{summary_prefix}\n\n{trimmed}")),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata,
     }
 }
@@ -191,10 +190,9 @@ fn recent_interaction_tail(
                     continue;
                 }
                 let call_id = message
-                    .metadata
-                    .get(TOOL_CALL_CALL_ID_METADATA_KEY)
-                    .or_else(|| message.metadata.get(TOOL_CALL_ID_METADATA_KEY))
-                    .map(String::as_str)
+                    .tool_result
+                    .as_ref()
+                    .map(|record| record.call_id.as_str())
                     .unwrap_or("unknown");
                 selected.push(user_text_message(format!(
                     "Recent tool result `{call_id}` retained for context checkpoint:\n{}",
@@ -222,6 +220,8 @@ fn user_text_message(text: impl Into<String>) -> Message {
         role: MessageRole::User,
         content: MessageContent::Text(text.into()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }
@@ -231,6 +231,8 @@ fn assistant_text_message(text: impl Into<String>) -> Message {
         role: MessageRole::Assistant,
         content: MessageContent::Text(text.into()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }

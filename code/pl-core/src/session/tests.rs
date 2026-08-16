@@ -1,6 +1,6 @@
 use super::tool_history::*;
-use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall, ToolCallKind};
-use pl_protocol::ThreadPromptSnapshot;
+use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall};
+use pl_protocol::{ThreadPromptSnapshot, ToolCallCaller, ToolCallKind, ToolResultRecord};
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -10,12 +10,14 @@ fn text_message(text: &str) -> Message {
         role: MessageRole::User,
         content: MessageContent::Text(text.to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }
 }
 
 #[test]
-fn push_assistant_tool_calls_stores_metadata() {
+fn push_assistant_tool_calls_stores_typed_records() {
     let mut session = AgentSession::new();
     let tool_calls = vec![ToolCall::function(
         "call-1",
@@ -27,7 +29,17 @@ fn push_assistant_tool_calls_stores_metadata() {
 
     assert_eq!(session.len(), 1);
     assert_eq!(session.messages()[0].role, MessageRole::Assistant);
-    assert!(session.messages()[0].metadata.contains_key("tool_calls"));
+    let records = session.messages()[0]
+        .tool_calls
+        .as_ref()
+        .expect("tool calls");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].item_id, "call-1");
+    assert_eq!(records[0].call_id, "call-1");
+    assert_eq!(records[0].name, "exec");
+    assert_eq!(records[0].kind, ToolCallKind::Function);
+    assert_eq!(records[0].arguments["command"], "ls");
+    assert!(session.messages()[0].metadata.is_empty());
 }
 
 #[test]
@@ -57,6 +69,8 @@ fn push_assistant_completion_response_adds_text_message() {
             role: MessageRole::Assistant,
             content: MessageContent::Text("reply".to_string()),
             reasoning_content: Some("thinking".to_string()),
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         }]
     );
@@ -99,61 +113,46 @@ fn push_assistant_completion_response_preserves_tool_call_history() {
         session.messages()[0].reasoning_content,
         Some("thinking".to_string())
     );
-    let metadata = ToolCallHistoryMetadata::from_metadata(&session.messages()[0].metadata)
+    let records = session.messages()[0]
+        .tool_calls
+        .as_ref()
         .expect("tool calls");
-    assert_eq!(
-        metadata.tool_calls_json,
-        serde_json::to_string(&tool_calls).expect("tool call json")
-    );
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].item_id, "call-1");
+    assert_eq!(records[0].call_id, "call-1");
+    assert_eq!(records[0].name, "exec");
+    assert_eq!(records[0].arguments["command"], "pwd");
 }
 
 #[test]
-fn push_tool_result_stores_metadata() {
+fn push_tool_result_stores_typed_record() {
     let mut session = AgentSession::new();
     session.push_tool_result(
-        "provider-item-1".to_string(),
-        Some("call-1".to_string()),
-        "exec".to_string(),
-        ToolCallKind::Function,
+        ToolResultRecord {
+            item_id: "provider-item-1".to_string(),
+            call_id: "call-1".to_string(),
+            name: "exec".to_string(),
+            kind: ToolCallKind::Function,
+        },
         "output".to_string(),
         r#"{"command":"echo hi"}"#.to_string(),
     );
 
     assert_eq!(session.len(), 1);
     assert_eq!(session.messages()[0].role, MessageRole::Tool);
-    assert_eq!(
-        session.messages()[0].metadata.get("tool_call_id").unwrap(),
-        "provider-item-1"
-    );
-    assert_eq!(
-        session.messages()[0]
-            .metadata
-            .get("tool_call_call_id")
-            .unwrap(),
-        "call-1"
-    );
-    assert_eq!(
-        session.messages()[0].metadata.get("tool_name").unwrap(),
-        "exec"
-    );
-    assert_eq!(
-        session.messages()[0]
-            .metadata
-            .get("tool_call_kind")
-            .unwrap(),
-        "function"
-    );
-    assert_eq!(
-        session.messages()[0]
-            .metadata
-            .get("tool_call_arguments")
-            .unwrap(),
-        r#"{"command":"echo hi"}"#
-    );
+    let record = session.messages()[0]
+        .tool_result
+        .as_ref()
+        .expect("tool result record");
+    assert_eq!(record.item_id, "provider-item-1");
+    assert_eq!(record.call_id, "call-1");
+    assert_eq!(record.name, "exec");
+    assert_eq!(record.kind, ToolCallKind::Function);
+    assert!(session.messages()[0].metadata.is_empty());
 }
 
 #[test]
-fn snapshot_round_trip_preserves_responses_items_and_program_caller() {
+fn snapshot_round_trip_preserves_responses_items_and_typed_records() {
     let mut session = AgentSession::new();
     session.push_responses_context_items(vec![ResponsesContextItem {
         kind: pl_protocol::ResponsesContextItemKind::Program,
@@ -171,17 +170,30 @@ fn snapshot_round_trip_preserves_responses_items_and_program_caller() {
         continuation: None,
         reused_from_call_id: None,
     };
-    session.push_tool_result_with_receipt_and_caller(
-        "fc-1".to_string(),
-        Some("call-1".to_string()),
-        "read_file".to_string(),
-        ToolCallKind::Function,
+    session.push_assistant_tool_calls(
+        None,
+        vec![
+            pl_model::ToolCall::function(
+                "fc-1",
+                "read_file",
+                serde_json::json!({"path": "README.md"}),
+                "call-1",
+            )
+            .with_caller(Some(ToolCallCaller::Program {
+                caller_id: "program-1".to_string(),
+            })),
+        ],
+        None,
+    );
+    session.push_tool_result_with_receipt(
+        ToolResultRecord {
+            item_id: "fc-1".to_string(),
+            call_id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            kind: ToolCallKind::Function,
+        },
         r#"{"content":"ok"}"#.to_string(),
-        r#"{"path":"README.md"}"#.to_string(),
         receipt,
-        Some(ToolCallCaller::Program {
-            caller_id: "program-1".to_string(),
-        }),
     );
 
     let encoded = serde_json::to_string(&session.snapshot()).unwrap();
@@ -193,10 +205,31 @@ fn snapshot_round_trip_preserves_responses_items_and_program_caller() {
         ModelContextItem::Responses { item }
             if item.kind == pl_protocol::ResponsesContextItemKind::Program
     ));
-    let metadata = ToolResultMetadata::from_metadata(&restored.messages()[0].metadata)
-        .expect("programmatic tool metadata");
+    let tool_message = restored
+        .messages()
+        .iter()
+        .find(|message| message.role == MessageRole::Tool)
+        .expect("tool result message");
+    let record = tool_message
+        .tool_result
+        .as_ref()
+        .expect("typed tool result record");
+    assert_eq!(record.item_id, "fc-1");
+    assert_eq!(record.call_id, "call-1");
+    assert_eq!(record.kind, ToolCallKind::Function);
+
+    let assistant_message = restored
+        .messages()
+        .iter()
+        .find(|message| message.role == MessageRole::Assistant)
+        .expect("assistant message");
+    let call = assistant_message
+        .tool_calls
+        .as_ref()
+        .and_then(|calls| calls.first())
+        .expect("typed tool call record");
     assert_eq!(
-        metadata.tool_call_caller,
+        call.caller,
         Some(ToolCallCaller::Program {
             caller_id: "program-1".to_string()
         })
@@ -204,7 +237,7 @@ fn snapshot_round_trip_preserves_responses_items_and_program_caller() {
 }
 
 #[test]
-fn tool_call_history_message_parses_arguments_into_metadata() {
+fn tool_call_history_message_stores_typed_record() {
     let message = tool_call_history_message(
         "call-1".to_string(),
         "read_file".to_string(),
@@ -212,12 +245,15 @@ fn tool_call_history_message_parses_arguments_into_metadata() {
     );
 
     assert_eq!(message.role, MessageRole::Assistant);
-    let metadata = ToolCallHistoryMetadata::from_metadata(&message.metadata).expect("tool calls");
-    let value: serde_json::Value =
-        serde_json::from_str(&metadata.tool_calls_json).expect("tool call json");
-    assert_eq!(value[0]["id"], "call-1");
-    assert_eq!(value[0]["name"], "read_file");
-    assert_eq!(value[0]["payload"]["arguments"]["path"], "README.md");
+    let call = message
+        .tool_calls
+        .as_ref()
+        .and_then(|calls| calls.first())
+        .expect("typed tool call record");
+    assert_eq!(call.item_id, "call-1");
+    assert_eq!(call.call_id, "call-1");
+    assert_eq!(call.name, "read_file");
+    assert_eq!(call.arguments["path"], "README.md");
 }
 
 #[test]
@@ -225,20 +261,19 @@ fn tool_result_history_message_stores_result_metadata() {
     let message = tool_result_history_message(
         "call-1".to_string(),
         "read_file".to_string(),
-        r#"{"path":"README.md"}"#.to_string(),
         "ok".to_string(),
     );
 
     assert_eq!(message.role, MessageRole::Tool);
     assert_eq!(message.content, MessageContent::Text("ok".to_string()));
-    let metadata =
-        ToolResultMetadata::from_metadata(&message.metadata).expect("tool result metadata");
-    assert_eq!(metadata.tool_call_id, "call-1");
-    assert_eq!(metadata.tool_name, "read_file");
-    assert_eq!(
-        metadata.tool_call_arguments.as_deref(),
-        Some(r#"{"path":"README.md"}"#)
-    );
+    let record = message
+        .tool_result
+        .as_ref()
+        .expect("typed tool result record");
+    assert_eq!(record.item_id, "call-1");
+    assert_eq!(record.call_id, "call-1");
+    assert_eq!(record.name, "read_file");
+    assert_eq!(record.kind, ToolCallKind::Function);
 }
 
 #[test]
@@ -248,12 +283,16 @@ fn from_messages_preserves_order() {
             role: MessageRole::User,
             content: MessageContent::Text("q".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         },
         Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text("a".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         },
     ];
@@ -279,10 +318,12 @@ fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
         None,
     );
     parent.push_tool_result(
-        "call-1".to_string(),
-        Some("call-1".to_string()),
-        "task_request_delivery_review".to_string(),
-        ToolCallKind::Function,
+        ToolResultRecord {
+            item_id: "call-1".to_string(),
+            call_id: "call-1".to_string(),
+            name: "task_request_delivery_review".to_string(),
+            kind: ToolCallKind::Function,
+        },
         "ok".to_string(),
         "{}".to_string(),
     );
@@ -391,6 +432,8 @@ fn replace_messages_updates_history_and_revision() {
         role: MessageRole::User,
         content: MessageContent::Text("summary".to_string()),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: HashMap::new(),
     }];
 
@@ -484,13 +527,17 @@ fn repair_incomplete_tool_history_inserts_missing_result_before_next_user_messag
 
     assert_eq!(history.len(), 3);
     assert_eq!(history[1].role, MessageRole::Tool);
-    let metadata = ToolResultMetadata::from_metadata(&history[1].metadata).expect("tool metadata");
-    assert_eq!(metadata.tool_call_id, "call-1");
-    assert_eq!(metadata.tool_call_call_id.as_deref(), Some("call-1"));
-    assert_eq!(metadata.tool_name, "exec");
+    let record = history[1]
+        .tool_result
+        .as_ref()
+        .expect("synthetic typed tool result record");
+    assert_eq!(record.item_id, "call-1");
+    assert_eq!(record.call_id, "call-1");
+    assert_eq!(record.name, "exec");
+    assert_eq!(record.kind, ToolCallKind::Function);
     assert_eq!(
-        metadata.tool_call_arguments.as_deref(),
-        Some(r#"{"command":"pwd"}"#)
+        history[1].content,
+        MessageContent::Text("error: tool execution interrupted".to_string())
     );
     assert_eq!(history[2].role, MessageRole::User);
 }

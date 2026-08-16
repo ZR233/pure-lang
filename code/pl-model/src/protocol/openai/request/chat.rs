@@ -1,15 +1,13 @@
-use pl_protocol::{
-    ContentPart, MessageContent, MessageRole, Result, TOOL_CALLS_METADATA_KEY, ToolResultMetadata,
-};
+use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
 use serde::Serialize;
 
 use crate::model_info::{MaxTokensField, ModelInfo};
-use crate::request::{CompletionRequest, ToolCall, ToolCallPayload, ToolSchema};
+use crate::request::{CompletionRequest, ToolSchema};
 
 use super::body::ToolFormatBody;
 use super::content::{data_url, message_content_text};
 use super::protocol_error;
-use super::tool_history::parse_tool_calls_from_metadata;
+use super::tool_history::{record_arguments_text, record_custom_input};
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct ChatRequestBody {
     model: String,
@@ -55,21 +53,23 @@ impl ChatRequestBody {
                 }
             };
             match msg.role {
-                MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
+                MessageRole::Assistant if msg.tool_calls.is_some() => {
                     let text = message_content_text(&msg.content);
                     messages.push(ChatMessage::Assistant {
                         content: (!text.is_empty()).then_some(text),
                         reasoning_content: msg.reasoning_content.clone(),
-                        tool_calls: parse_tool_calls_from_metadata(&msg.metadata)?.map(|calls| {
-                            calls.into_iter().map(ChatMessageToolCall::from).collect()
-                        }),
+                        tool_calls: msg
+                            .tool_calls
+                            .as_ref()
+                            .map(|calls| calls.iter().map(ChatMessageToolCall::from).collect()),
                     });
                 }
                 MessageRole::Tool => {
-                    let metadata =
-                        ToolResultMetadata::from_metadata(&msg.metadata).map_err(protocol_error)?;
+                    let record = msg.tool_result.as_ref().ok_or_else(|| {
+                        protocol_error("tool result message missing typed tool_result record")
+                    })?;
                     messages.push(ChatMessage::Tool {
-                        tool_call_id: metadata.tool_call_id,
+                        tool_call_id: record.item_id.clone(),
                         content: message_content_text(&msg.content),
                     });
                 }
@@ -176,24 +176,21 @@ enum ChatMessageToolCall {
     },
 }
 
-impl From<ToolCall> for ChatMessageToolCall {
-    fn from(tool_call: ToolCall) -> Self {
-        let invalid_arguments = tool_call.invalid_arguments;
-        match tool_call.payload {
-            ToolCallPayload::Function { arguments } => Self::Function {
-                id: tool_call.id,
+impl From<&ToolCallRecord> for ChatMessageToolCall {
+    fn from(record: &ToolCallRecord) -> Self {
+        match record.kind {
+            ToolCallKind::Function => Self::Function {
+                id: record.item_id.clone(),
                 function: ChatFunctionCall {
-                    name: tool_call.name,
-                    arguments: invalid_arguments
-                        .map(|invalid| invalid.raw)
-                        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
+                    name: record.name.clone(),
+                    arguments: record_arguments_text(&record.arguments),
                 },
             },
-            ToolCallPayload::Custom { input } => Self::Custom {
-                id: tool_call.id,
+            ToolCallKind::Custom => Self::Custom {
+                id: record.item_id.clone(),
                 custom: ChatCustomToolCall {
-                    name: tool_call.name,
-                    input,
+                    name: record.name.clone(),
+                    input: record_custom_input(&record.arguments),
                 },
             },
         }

@@ -317,6 +317,8 @@ mod tests {
             role,
             content: MessageContent::Text(text.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: Default::default(),
         };
         let input = recent_input(&[
@@ -340,6 +342,8 @@ mod tests {
             role,
             content: MessageContent::Text(text.to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: Default::default(),
         };
         let input = recent_input(&[

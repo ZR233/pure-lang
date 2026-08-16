@@ -32,7 +32,6 @@ pub(crate) fn build_openai_request_body(
     let messages = messages_after_last_compaction(&request.input);
     validate_tool_history(
         &messages,
-        endpoint,
         endpoint == OpenAiEndpoint::Responses && request.previous_response_id.is_some(),
     )?;
     match endpoint {

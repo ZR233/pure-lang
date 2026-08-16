@@ -7,8 +7,7 @@ use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
     PinnedContextSection, PromptPrefixChangedReason, ResponsesContextItem, SessionNote,
-    ThreadPromptMetadata, ToolCallCaller, ToolCallHistoryMetadata, ToolCallKind,
-    ToolResultMetadata, ToolResultReceipt,
+    ThreadPromptMetadata, ToolResultReceipt, ToolResultRecord,
 };
 
 use crate::working_set::canonical_content_hash;
@@ -292,6 +291,8 @@ impl AgentSession {
             role: MessageRole::User,
             content,
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         });
     }
@@ -301,28 +302,33 @@ impl AgentSession {
             role: MessageRole::Assistant,
             content: MessageContent::Text(content),
             reasoning_content,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         });
     }
 
     /// 推入 assistant 的 tool_calls 消息。
     ///
-    /// tool_calls 序列化后存入 metadata，供 pl-model protocol 层构造正确的 wire 格式。
+    /// typed 工具调用记录直接保存在消息上，供 pl-model protocol 层构造正确的
+    /// wire 格式。
     pub fn push_assistant_tool_calls(
         &mut self,
         content: Option<String>,
         tool_calls: Vec<ToolCall>,
         reasoning_content: Option<String>,
     ) {
-        let mut metadata = HashMap::new();
-        let json = serde_json::to_string(&tool_calls)
-            .expect("ToolCall serialization should be infallible");
-        ToolCallHistoryMetadata::new(json).insert_into(&mut metadata);
+        let records = tool_calls
+            .iter()
+            .map(tool_history::tool_call_record)
+            .collect::<Vec<_>>();
         self.push_message(Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(content.unwrap_or_default()),
             reasoning_content,
-            metadata,
+            tool_calls: Some(records),
+            tool_result: None,
+            metadata: HashMap::new(),
         });
     }
 
@@ -366,16 +372,13 @@ impl AgentSession {
     /// 推入 tool result 消息。
     pub fn push_tool_result(
         &mut self,
-        tool_call_id: String,
-        tool_call_call_id: Option<String>,
-        tool_name: String,
-        tool_call_kind: ToolCallKind,
+        record: ToolResultRecord,
         result: String,
         tool_arguments: String,
     ) {
         let receipt = ToolResultReceipt {
-            call_id: tool_call_id.clone(),
-            tool_name: tool_name.clone(),
+            call_id: record.item_id.clone(),
+            tool_name: record.name.clone(),
             arguments_hash: canonical_content_hash(tool_arguments.as_bytes()),
             result_hash: canonical_content_hash(result.as_bytes()),
             total_bytes: result.len() as u64,
@@ -385,70 +388,17 @@ impl AgentSession {
             continuation: None,
             reused_from_call_id: None,
         };
-        self.push_tool_result_with_receipt(
-            tool_call_id,
-            tool_call_call_id,
-            tool_name,
-            tool_call_kind,
-            result,
-            tool_arguments,
-            receipt,
-        );
+        self.push_tool_result_with_receipt(record, result, receipt);
     }
 
     /// 推入带 compact receipt 的 canonical tool result。
-    #[allow(clippy::too_many_arguments)]
     pub fn push_tool_result_with_receipt(
         &mut self,
-        tool_call_id: String,
-        tool_call_call_id: Option<String>,
-        tool_name: String,
-        tool_call_kind: ToolCallKind,
+        record: ToolResultRecord,
         result: String,
-        tool_arguments: String,
         receipt: ToolResultReceipt,
     ) {
-        self.push_tool_result_with_receipt_and_caller(
-            tool_call_id,
-            tool_call_call_id,
-            tool_name,
-            tool_call_kind,
-            result,
-            tool_arguments,
-            receipt,
-            None,
-        );
-    }
-
-    /// 推入带 Programmatic caller 与 compact receipt 的 canonical tool result。
-    #[allow(clippy::too_many_arguments)]
-    pub fn push_tool_result_with_receipt_and_caller(
-        &mut self,
-        tool_call_id: String,
-        tool_call_call_id: Option<String>,
-        tool_name: String,
-        tool_call_kind: ToolCallKind,
-        result: String,
-        tool_arguments: String,
-        receipt: ToolResultReceipt,
-        caller: Option<ToolCallCaller>,
-    ) {
-        let mut metadata = HashMap::new();
-        ToolResultMetadata::new(
-            tool_call_id,
-            tool_call_call_id,
-            tool_name,
-            tool_call_kind,
-            tool_arguments,
-        )
-        .with_caller(caller)
-        .insert_into(&mut metadata);
-        let message = Message {
-            role: MessageRole::Tool,
-            content: MessageContent::Text(result),
-            reasoning_content: None,
-            metadata,
-        };
+        let message = tool_history::tool_result_message(record, &result);
         let state = Arc::make_mut(&mut self.state);
         state.items.push(ModelContextItem::ToolResult {
             message: message.clone(),

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use pl_protocol::{MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolResultMetadata};
+use pl_protocol::{MessageContent, MessageRole};
 
 use super::super::{
     AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSessionDigestMessage,
@@ -23,16 +23,18 @@ fn session_digest(session: &ThreadContextState) -> AgentSessionDigest {
 
     let mut tool_names = BTreeSet::new();
     for message in session.session.messages() {
-        if let Some(tool_calls) = message.metadata.get(TOOL_CALLS_METADATA_KEY)
-            && let Ok(tool_calls) = serde_json::from_str::<Vec<pl_model::ToolCall>>(tool_calls)
-        {
-            tool_names.extend(tool_calls.into_iter().map(|tool| tool.name));
-        }
+        tool_names.extend(
+            message
+                .tool_calls
+                .iter()
+                .flatten()
+                .map(|tool_call| tool_call.name.clone()),
+        );
         if message.role == MessageRole::Tool
-            && let Ok(metadata) = ToolResultMetadata::from_metadata(&message.metadata)
-            && !metadata.tool_name.is_empty()
+            && let Some(record) = &message.tool_result
+            && !record.name.is_empty()
         {
-            tool_names.insert(metadata.tool_name);
+            tool_names.insert(record.name.clone());
         }
     }
 

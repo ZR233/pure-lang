@@ -259,6 +259,8 @@ pub fn assistant_reasoning_message(content: impl Into<String>) -> Message {
         role: MessageRole::Assistant,
         content: MessageContent::Text(String::new()),
         reasoning_content: Some(content.into()),
+        tool_calls: None,
+        tool_result: None,
         metadata: Default::default(),
     }
 }
@@ -311,6 +313,8 @@ fn text_message(role: MessageRole, content: String) -> Message {
         role,
         content: MessageContent::Text(content),
         reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
         metadata: Default::default(),
     }
 }
@@ -373,6 +377,8 @@ mod tests {
                 },
             ]),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         };
 
@@ -409,6 +415,8 @@ mod tests {
             role: MessageRole::User,
             content: MessageContent::Text("   ".to_string()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         };
 
@@ -442,6 +450,8 @@ mod tests {
                 },
             ]),
             reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
             metadata: HashMap::new(),
         };
 

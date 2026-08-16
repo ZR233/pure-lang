@@ -4,7 +4,7 @@ use crate::{
     InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, TodoListSnapshot, TokenUsageSnapshot,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 2;
+pub const THREAD_SCHEMA_VERSION: u32 = 3;
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -220,8 +220,7 @@ pub struct ThreadAttachment {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadToolCall {
     pub tool_call_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call_id: Option<String>,
+    pub call_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_item_id: Option<String>,
     pub name: String,
