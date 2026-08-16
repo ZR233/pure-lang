@@ -124,6 +124,11 @@ best-effort 兜底。
   该指纹变化才以 `ToolSchemaChanged` 轮换 prompt generation 并使 Responses WebSocket
   continuation 失效；deferred-only 变化不断链。
 
+prompt cache 快照与 runtime snapshot 是两个独立事实层：前者保存轮换判定用的完整指纹组，
+后者的 `toolRegistryRevision` 与 `toolCatalogHash` 只投影本 Turn lease 冻结的注册表代数与
+deferred catalog 指纹（host 在 turn 准备时从 session prompt metadata 的当前 slot 读取），
+供产品诊断与验收断言，不参与任何轮换判定。
+
 工具按模型可见名称和 canonical JSON Schema 确定性排序；运行中的 lease 不允许替换工具集，
 也不能为了缓存命中跨 Thread、Workspace 或权限策略复用 lease。工具结果无论成功、失败或拒绝
 都只追加到 durable history，不得重排旧输入。Chat Completions 没有延迟加载概念，全部工具
@@ -448,6 +453,12 @@ Studio Timeline 直接按 ThreadItem ordinal 投影。每个工具调用是一�
 Item 首次插入时固定 id、类型、ordinal 和位置，后续只更新 revision、内容与状态。Flutter 对排序后的
 Item 单次扫描，只在视觉层合并相邻 toolCall；任何非工具 Item 立即结束分组。工具组详情显示工具名、
 状态、关键路径或命令摘要；失败、拒绝、中断和预算限制必须显示结构化原因。
+
+拦截的 client `tool_search` 调用同样落为 toolCall Item：runtime 在写入 canonical context 的
+同时补一个 toolCall Item，其 result 是面向展示的结构化 JSON 摘要（query、loadedToolCount 与
+namespace/工具名列表）；模型可见结果仍只由 `tool_search_output` Responses item 承载，两个事实层
+不得混用。Flutter 为 `tool_search` 提供专用卡片展示 query 与已加载工具，为 `lsp_query` /
+`lsp_capabilities` 提供专用图标与带 languageId/查询摘要的参数化标题；工具名保持原始领域值。
 
 工具集合变化不迁移或删除历史 ThreadItem。历史会话中的已移除工具调用继续作为普通 toolCall Item
 显示，Flutter 使用通用工具展示逻辑读取其名称、参数和既有结果，不尝试重新注册或执行该工具。
