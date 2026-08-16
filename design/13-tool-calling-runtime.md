@@ -29,7 +29,7 @@ Core 会话保存 typed 工具 transcript：assistant 侧的工具调用集合�
 
 工具注册表是唯一抽象：builtin、host、MCP、LSP 都是它的客户，一律以工具条目发布能力；
 core 不存在按来源的分支或按名称前缀的规则。来源用 opaque typed `ToolSourceId` 标识
-（如 `builtin`、`host`、`mcp:{server_id}`、`lsp`），新增来源或语言不需要修改 core。
+（如 `builtin`、`host`、`mcp`、`lsp`），新增来源或语言不需要修改 core。
 
 每个来源通过 `publish(source_id, entries)` 整组发布：发布方在注册表之外构建完整的下一代
 条目集合，注册表校验命名空间所有权与跨源名称冲突后原子替换该来源全部工具并递增全局
@@ -90,7 +90,7 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 本地 `list_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次遍历失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
 
 MCP runtime 在连接 generation 激活时把该代全部工具与 resource façade 一次性 `publish` 到
-注册表（来源 `mcp:{server_id}`），不在每个 Turn 临时安装或卸载。工具 handler 捕获所在
+注册表（统一来源 `mcp`，按 server 划分 `mcp_<server>` 命名空间），不在每个 Turn 临时安装或卸载。工具 handler 捕获所在
 generation 的调用通道、server id 和远端 raw tool name，因而与内置工具共享模式门控、权限与
 审批、runtime lock、批次、cache、trace、结果预算、Timeline 和历史配对；PL 不保留 MCP 专用
 tool backend 或第二套 dispatch。resource 的 list、template 和 read façade 随来源一起发布与
