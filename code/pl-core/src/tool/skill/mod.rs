@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SkillsConfig;
 use crate::skill::*;
+use crate::tool::cache::ToolCachePolicy;
+use crate::turn::ToolEffect;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{
@@ -265,6 +267,14 @@ impl Tool for SkillsListTool {
         true
     }
 
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        ToolCachePolicy::UntilWorkspaceMutation
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -313,6 +323,14 @@ impl Tool for SkillViewTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         true
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        ToolCachePolicy::UntilWorkspaceMutation
     }
 
     fn execute<'a>(
@@ -366,6 +384,10 @@ impl Tool for SkillManageTool {
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<SkillManageInput>::new(self.name(), self.description())
             .input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
     }
 
     fn execute<'a>(

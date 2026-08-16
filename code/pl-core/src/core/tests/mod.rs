@@ -305,7 +305,13 @@ fn record_enabled_tools_for_core(
     session_id: &str,
     turn_id: &str,
 ) -> Vec<TraceEvent> {
-    let tool_schemas = core.tools.schemas();
+    let tool_schemas = crate::tool::orchestrate_tool_inventory(
+        core.acquire_tool_lease().unwrap().entries(),
+        None,
+        crate::tool::ToolOrchestrationOptions::default(),
+    )
+    .request_schemas()
+    .to_vec();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
 
@@ -354,6 +360,10 @@ impl Tool for SleepingTool {
         true
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
@@ -398,6 +408,10 @@ impl Tool for DeltaEchoTool {
             "properties": {},
             "additionalProperties": false
         })
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
     }
 
     fn execute<'a>(

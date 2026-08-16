@@ -1,152 +1,345 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
-use pl_model::ToolSchema;
+use pl_protocol::{PureError, Result};
 
-use super::orchestration::{ToolOrchestrationOptions, orchestrate_tool_schemas};
-use super::{Tool, lsp_tool_for_language};
+use super::source::{RegistryRevision, ToolEntry, ToolRegistry, ToolSourceId};
 
-/// 工具注册表。
+/// 一次成功发布的 RAII guard。
 ///
-/// 管理已注册的工具实例，提供按名称查找和 schema 收集能力。
-#[derive(Default)]
-pub struct ToolRegistry {
-    tools: Vec<Box<dyn Tool>>,
+/// guard 被 drop 时注销该来源当前发布（revision 递增并广播通知）。若同一来源
+/// 之后又发布了新一代，旧 guard 的 drop 不影响新代——guard 只注销自己发布的
+/// 那一代，保证 MCP 等 worker 重发布时不会误删后继工具集。
+pub struct PublishGuard {
+    registry: Option<ToolRegistry>,
+    source: ToolSourceId,
+    seq: u64,
 }
 
-impl fmt::Debug for ToolRegistry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let names: Vec<&str> = self.tools.iter().map(|t| t.name()).collect();
-        f.debug_struct("ToolRegistry")
-            .field("tools", &names)
+impl fmt::Debug for PublishGuard {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PublishGuard")
+            .field("source", &self.source)
+            .field("seq", &self.seq)
             .finish()
     }
 }
 
-impl ToolRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn register(&mut self, tool: impl Tool + 'static) {
-        assert!(
-            self.get(tool.name()).is_none(),
-            "duplicate tool name: {}",
-            tool.name()
-        );
-        self.tools.push(Box::new(tool));
-    }
-
-    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.iter().find(|t| t.name() == name).map(|t| &**t)
-    }
-
-    pub fn schemas(&self) -> Vec<ToolSchema> {
-        self.tools.iter().map(|t| t.to_schema()).collect()
-    }
-
-    pub fn schemas_with_orchestration(&self, options: ToolOrchestrationOptions) -> Vec<ToolSchema> {
-        orchestrate_tool_schemas(
-            self.tools
-                .iter()
-                .map(|tool| (tool.to_schema(), tool.effect())),
-            options,
-        )
-    }
-
-    /// 按宿主数据化策略过滤模型可见 schema。
-    pub fn schemas_for_policy(&self, policy: &crate::AgentExecutionPolicy) -> Vec<ToolSchema> {
-        self.tools
-            .iter()
-            .filter(|tool| policy.allows_tool(tool.name(), tool.effect()))
-            .map(|tool| tool.to_schema())
-            .collect()
-    }
-
-    pub fn schemas_for_policy_with_orchestration(
-        &self,
-        policy: &crate::AgentExecutionPolicy,
-        options: ToolOrchestrationOptions,
-    ) -> Vec<ToolSchema> {
-        orchestrate_tool_schemas(
-            self.tools
-                .iter()
-                .filter(|tool| policy.allows_tool(tool.name(), tool.effect()))
-                .map(|tool| (tool.to_schema(), tool.effect())),
-            options,
-        )
-    }
-
-    pub fn len(&self) -> usize {
-        self.tools.len()
-    }
-
-    pub fn names(&self) -> Vec<&str> {
-        self.tools.iter().map(|t| t.name()).collect()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
-    }
-
-    /// 移除指定名称的工具（用于动态卸载）。
-    pub fn unregister(&mut self, name: &str) -> bool {
-        let len_before = self.tools.len();
-        self.tools.retain(|tool| tool.name() != name);
-        self.tools.len() != len_before
-    }
-
-    /// 注册当前可用的语言 LSP 工具。
-    ///
-    /// 遍历 `available_languages()` 返回的语言列表，为每个语言注册一个
-    /// `LspLanguageTool`。同时移除之前注册但已不再可用的语言工具。
-    pub async fn register_lsp_languages(
-        &mut self,
-        registry: &pl_lsp::LspRuntimeRegistry,
-    ) -> Vec<String> {
-        let available = registry.available_languages().await;
-        self.sync_lsp_language_tools(registry, available)
-    }
-
-    pub async fn register_lsp_languages_for_workspace(
-        &mut self,
-        registry: &pl_lsp::LspRuntimeRegistry,
-        workspace_root: impl AsRef<std::path::Path>,
-    ) -> Vec<String> {
-        let available = registry
-            .available_languages_for_workspace(workspace_root)
-            .await;
-        self.sync_lsp_language_tools(registry, available)
-    }
-
-    pub(super) fn sync_lsp_language_tools(
-        &mut self,
-        registry: &pl_lsp::LspRuntimeRegistry,
-        available: Vec<pl_lsp::LanguageToolInfo>,
-    ) -> Vec<String> {
-        let tool_names: Vec<String> = available
-            .iter()
-            .map(|info| format!("lsp_query_{}", info.language_id))
-            .collect();
-        self.tools.retain(|tool| {
-            let name = tool.name();
-            if name.starts_with("lsp_query_") {
-                tool_names.iter().any(|tn| tn == name)
-            } else {
-                true
-            }
-        });
-        let mut registered = Vec::new();
-        for info in &available {
-            let lang_id = &info.language_id;
-            let tool_name = format!("lsp_query_{lang_id}");
-            if self.get(&tool_name).is_none() {
-                self.tools
-                    .push(lsp_tool_for_language(info, registry.clone()));
-            }
-            if !registered.contains(&info.language_id) {
-                registered.push(info.language_id.clone());
-            }
+impl Drop for PublishGuard {
+    fn drop(&mut self) {
+        if let Some(registry) = self.registry.take() {
+            registry.unpublish_generation(&self.source, self.seq);
         }
-        registered
+    }
+}
+
+impl ToolRegistry {
+    /// 整组发布一个来源的全部工具条目。
+    ///
+    /// 先在锁内校验（条目名非空、来源内无重名、不与其他来源名称冲突），再原子
+    /// 替换该来源条目并递增全局 revision、广播变更；校验失败返回
+    /// [`PureError::ConfigError`]（含冲突名与两个来源），旧代原样保留。
+    /// 若该来源现有条目与新条目语义相等（名称、canonical schema、元数据），则
+    /// 不递增 revision 直接返回 guard。
+    ///
+    /// # Errors
+    ///
+    /// 条目名为空、来源内重名或与其他来源名称冲突时返回 `ConfigError`。
+    pub fn publish(&self, source: ToolSourceId, entries: Vec<ToolEntry>) -> Result<PublishGuard> {
+        let mut state = self.lock_state_mut();
+        validate_entries(&source, &entries)?;
+        validate_cross_source_names(&source, &entries, &state)?;
+        if let Some(current) = state.sources.get(&source)
+            && entries_semantically_equal(current, &entries)
+        {
+            return Ok(self.guard(source, current.seq));
+        }
+        state.next_seq = state.next_seq.saturating_add(1);
+        let seq = state.next_seq;
+        state.sources.insert(
+            source.clone(),
+            super::source::PublishedSource {
+                seq,
+                entries: entries.into(),
+            },
+        );
+        let revision = advance_revision(&mut state);
+        drop(state);
+        self.broadcast_revision(revision);
+        Ok(self.guard(source, seq))
+    }
+
+    /// 注销一个来源的全部当前条目。
+    pub fn unpublish(&self, source: &ToolSourceId) {
+        let mut state = self.lock_state_mut();
+        if state.sources.remove(source).is_some() {
+            let revision = advance_revision(&mut state);
+            drop(state);
+            self.broadcast_revision(revision);
+        }
+    }
+
+    fn unpublish_generation(&self, source: &ToolSourceId, seq: u64) {
+        let mut state = self.lock_state_mut();
+        if state
+            .sources
+            .get(source)
+            .is_some_and(|published| published.seq == seq)
+        {
+            state.sources.remove(source);
+            let revision = advance_revision(&mut state);
+            drop(state);
+            self.broadcast_revision(revision);
+        }
+    }
+
+    fn guard(&self, source: ToolSourceId, seq: u64) -> PublishGuard {
+        PublishGuard {
+            registry: Some(self.clone()),
+            source,
+            seq,
+        }
+    }
+}
+
+fn advance_revision(state: &mut super::source::RegistryState) -> RegistryRevision {
+    state.revision = state.revision.saturating_add(1);
+    RegistryRevision(state.revision)
+}
+
+fn entries_semantically_equal(
+    current: &super::source::PublishedSource,
+    next: &[ToolEntry],
+) -> bool {
+    current.entries.len() == next.len()
+        && current
+            .entries
+            .iter()
+            .zip(next.iter())
+            .all(|(current, next)| current.semantic_eq(next))
+}
+
+fn validate_entries(source: &ToolSourceId, entries: &[ToolEntry]) -> Result<()> {
+    let mut seen = BTreeMap::new();
+    for entry in entries {
+        let name = entry.name();
+        if name.trim().is_empty() {
+            return Err(PureError::ConfigError(format!(
+                "tool source `{source}` attempted to publish an entry with an empty name"
+            )));
+        }
+        if seen.insert(name.to_string(), ()).is_some() {
+            return Err(PureError::ConfigError(format!(
+                "tool source `{source}` attempted to publish duplicate tool name `{name}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_cross_source_names(
+    source: &ToolSourceId,
+    entries: &[ToolEntry],
+    state: &super::source::RegistryState,
+) -> Result<()> {
+    for entry in entries {
+        let name = entry.name();
+        if let Some((owner, _)) = state.sources.iter().find(|(owner, published)| {
+            **owner != *source && published.entries.iter().any(|e| e.name() == name)
+        }) {
+            return Err(PureError::ConfigError(format!(
+                "tool source `{source}` cannot publish tool `{name}`: already owned by source `{owner}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
+    use crate::turn::ToolEffect;
+    use futures::FutureExt;
+
+    fn output() -> ToolOutput {
+        ToolOutput {
+            description: "ok".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: std::path::PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: Vec::new(),
+        }
+    }
+
+    #[derive(Debug)]
+    struct NamedTool(&'static str);
+
+    impl Tool for NamedTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn description(&self) -> &str {
+            self.0
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+
+        fn effect(&self) -> Option<ToolEffect> {
+            Some(ToolEffect::Read)
+        }
+
+        fn execute<'a>(
+            &'a self,
+            _input: ToolInput,
+            _context: crate::tool::ToolContext,
+        ) -> futures::future::BoxFuture<'a, std::result::Result<ToolOutput, pl_protocol::PureError>>
+        {
+            async { Ok(output()) }.boxed()
+        }
+    }
+
+    fn entry(name: &'static str, source: &ToolSourceId) -> ToolEntry {
+        ToolEntry::new(
+            NamedTool(name),
+            crate::tool::ToolSourceMetadata::new(source.clone()),
+        )
+    }
+
+    #[test]
+    fn publish_replaces_source_generation_atomically() {
+        let registry = ToolRegistry::new();
+        let source = ToolSourceId::builtin();
+        let _guard = registry
+            .publish(source.clone(), vec![entry("alpha", &source)])
+            .unwrap();
+        let first_revision = registry.revision();
+        let _guard = registry
+            .publish(
+                source.clone(),
+                vec![entry("beta", &source), entry("gamma", &source)],
+            )
+            .unwrap();
+
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.names(), vec!["beta", "gamma"]);
+        assert!(snapshot.revision.0 > first_revision.0);
+    }
+
+    #[test]
+    fn publish_rejects_cross_source_name_conflicts_and_keeps_old_generation() {
+        let registry = ToolRegistry::new();
+        let builtin = ToolSourceId::builtin();
+        let mcp = ToolSourceId::mcp();
+        let _guard = registry
+            .publish(builtin.clone(), vec![entry("shared", &builtin)])
+            .unwrap();
+        let revision = registry.revision();
+
+        let error = registry
+            .publish(mcp.clone(), vec![entry("shared", &mcp)])
+            .unwrap_err();
+
+        match error {
+            PureError::ConfigError(message) => {
+                assert!(message.contains("shared"), "{message}");
+                assert!(message.contains("builtin"), "{message}");
+                assert!(message.contains("mcp"), "{message}");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(registry.revision(), revision);
+        assert_eq!(registry.snapshot().names(), vec!["shared"]);
+    }
+
+    #[test]
+    fn publish_rejects_empty_names_and_intra_source_duplicates() {
+        let registry = ToolRegistry::new();
+        let source = ToolSourceId::task();
+
+        assert!(registry.publish(source.clone(), vec![]).is_ok());
+        assert!(
+            registry
+                .publish(
+                    source.clone(),
+                    vec![entry("dup", &source), entry("dup", &source)]
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn identical_republish_is_a_no_op() {
+        let registry = ToolRegistry::new();
+        let source = ToolSourceId::lsp();
+        let _guard = registry
+            .publish(source.clone(), vec![entry("lsp_query", &source)])
+            .unwrap();
+        let revision = registry.revision();
+
+        let _guard = registry
+            .publish(source.clone(), vec![entry("lsp_query", &source)])
+            .unwrap();
+
+        assert_eq!(registry.revision(), revision);
+    }
+
+    #[test]
+    fn guard_drop_unpublishes_only_its_own_generation() {
+        let registry = ToolRegistry::new();
+        let source = ToolSourceId::mcp();
+        let old_guard = registry
+            .publish(source.clone(), vec![entry("old_tool", &source)])
+            .unwrap();
+        let new_guard = registry
+            .publish(source.clone(), vec![entry("new_tool", &source)])
+            .unwrap();
+        drop(old_guard);
+
+        assert_eq!(registry.snapshot().names(), vec!["new_tool"]);
+        drop(new_guard);
+        assert!(registry.snapshot().names().is_empty());
+    }
+
+    #[test]
+    fn revision_is_monotonic_across_operations() {
+        let registry = ToolRegistry::new();
+        let source = ToolSourceId::builtin();
+        let mut last = registry.revision().0;
+        for index in 0..3 {
+            let _guard = registry
+                .publish(source.clone(), vec![entry("tool", &source)])
+                .unwrap();
+            let revision = registry.revision().0;
+            assert!(revision > last, "publish #{index} must increase revision");
+            last = revision;
+        }
+        registry.unpublish(&source);
+        assert!(registry.revision().0 > last);
+    }
+
+    #[test]
+    fn subscribe_observes_published_revisions() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let registry = ToolRegistry::new();
+            let mut receiver = registry.subscribe();
+            let source = ToolSourceId::builtin();
+            let _guard = registry
+                .publish(source.clone(), vec![entry("tool", &source)])
+                .unwrap();
+
+            assert!(receiver.changed().await.is_ok());
+            assert_eq!(*receiver.borrow_and_update(), registry.revision());
+        });
     }
 }

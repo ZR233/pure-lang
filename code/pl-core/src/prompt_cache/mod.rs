@@ -16,7 +16,12 @@ pub(crate) struct PromptCacheInput<'a> {
     pub prelude_messages: &'a [Message],
     pub working_context: Option<&'a ModelContextSnapshot>,
     pub fixed_prefix_section_hashes: BTreeMap<String, String>,
+    /// 实际发送的 eager 工具 schema（`WirePrefixFingerprint` 语义）。
     pub tools: &'a [ToolSchema],
+    /// 延迟加载 Tool Search catalog 的哈希；仅诊断，不参与轮换比较。
+    pub tool_catalog_hash: Option<String>,
+    /// 工具注册表全局 revision；仅诊断，不参与轮换比较。
+    pub registry_revision: Option<u64>,
     pub tool_choice: &'a str,
     pub parallel_tool_calls: bool,
     pub reasoning: Option<&'a ReasoningConfig>,
@@ -146,6 +151,8 @@ pub(crate) fn prepare_prompt_context(
         fixed_prefix_section_hashes: input.fixed_prefix_section_hashes.clone(),
         request_properties_hash,
         tool_schema_hash,
+        tool_catalog_hash: input.tool_catalog_hash.clone(),
+        registry_revision: input.registry_revision,
         context_hash,
         prompt_cache_policy: input.prompt_cache_policy.label().to_string(),
         prefix_changed_reason: reason,
@@ -356,6 +363,8 @@ mod tests {
             working_context: None,
             fixed_prefix_section_hashes: BTreeMap::new(),
             tools,
+            tool_catalog_hash: None,
+            registry_revision: None,
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,

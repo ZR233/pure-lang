@@ -147,6 +147,12 @@ pub struct ThreadPromptSnapshot {
     #[serde(default)]
     pub request_properties_hash: String,
     pub tool_schema_hash: String,
+    /// 延迟加载 Tool Search catalog 的 canonical 哈希；仅诊断，不参与轮换比较。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_catalog_hash: Option<String>,
+    /// 冻结工具 lease 的注册表全局 revision；仅诊断，不参与轮换比较。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_revision: Option<u64>,
     pub context_hash: String,
     #[serde(default)]
     pub prompt_cache_policy: String,

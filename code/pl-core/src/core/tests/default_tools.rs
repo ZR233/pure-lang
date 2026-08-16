@@ -2,6 +2,10 @@ use super::*;
 use crate::ToolEffect;
 use pretty_assertions::assert_eq;
 
+fn has_tool(core: &TurnEngine, name: &str) -> bool {
+    core.tool_names().iter().any(|tool| tool == name)
+}
+
 #[test]
 fn shared_tool_schemas_describe_host_independent_workspace_surface() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
@@ -43,14 +47,15 @@ fn shared_tool_schemas_describe_host_independent_workspace_surface() {
 }
 
 #[test]
-fn session_note_tools_are_available_to_read_only_plan_policy() {
-    for name in [
-        "read_session_note",
-        "search_session_note",
-        "write_session_note",
-        "apply_session_note_patch",
-    ] {
-        assert_eq!(ToolEffect::for_builtin_name(name), Some(ToolEffect::Read));
+fn session_note_tools_declare_read_effect_for_plan_policy() {
+    use crate::tool::{SessionNoteTool, SessionNoteToolKind, Tool};
+    for kind in SessionNoteToolKind::all() {
+        assert_eq!(
+            SessionNoteTool::new(*kind).effect(),
+            Some(ToolEffect::Read),
+            "{}",
+            kind.name()
+        );
     }
 }
 
@@ -120,29 +125,29 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    assert!(core.tools.get("exec").is_some());
-    assert!(core.tools.get("write_stdin").is_some());
-    assert!(core.tools.get("spawn_agent").is_none());
-    assert!(core.tools.get("list_agents").is_none());
-    assert!(core.tools.get("send_input").is_none());
-    assert!(core.tools.get("close_agent").is_none());
-    assert!(core.tools.get("request_user_input").is_some());
-    assert!(core.tools.get("update_todo_list").is_some());
-    assert!(core.tools.get("read_session_note").is_some());
-    assert!(core.tools.get("search_session_note").is_some());
-    assert!(core.tools.get("write_session_note").is_some());
-    assert!(core.tools.get("apply_session_note_patch").is_some());
-    assert!(core.tools.get("plan_exit").is_some());
-    assert!(core.tools.get("send_message").is_none());
-    assert!(core.tools.get("followup_task").is_none());
-    assert!(core.tools.get("subagent").is_none());
-    assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("apply_patch").is_some());
-    assert!(core.tools.get("lsp_query").is_none());
-    assert!(core.tools.get("git_status").is_none());
-    assert!(core.tools.get("git_push").is_none());
-    assert!(core.tools.get("docker").is_none());
-    assert!(core.tools.get("container").is_none());
+    assert!(has_tool(&core, "exec"));
+    assert!(has_tool(&core, "write_stdin"));
+    assert!(!has_tool(&core, "spawn_agent"));
+    assert!(!has_tool(&core, "list_agents"));
+    assert!(!has_tool(&core, "send_input"));
+    assert!(!has_tool(&core, "close_agent"));
+    assert!(has_tool(&core, "request_user_input"));
+    assert!(has_tool(&core, "update_todo_list"));
+    assert!(has_tool(&core, "read_session_note"));
+    assert!(has_tool(&core, "search_session_note"));
+    assert!(has_tool(&core, "write_session_note"));
+    assert!(has_tool(&core, "apply_session_note_patch"));
+    assert!(has_tool(&core, "plan_exit"));
+    assert!(!has_tool(&core, "send_message"));
+    assert!(!has_tool(&core, "followup_task"));
+    assert!(!has_tool(&core, "subagent"));
+    assert!(has_tool(&core, "read_file"));
+    assert!(has_tool(&core, "apply_patch"));
+    assert!(!has_tool(&core, "lsp_query"));
+    assert!(!has_tool(&core, "git_status"));
+    assert!(!has_tool(&core, "git_push"));
+    assert!(!has_tool(&core, "docker"));
+    assert!(!has_tool(&core, "container"));
 }
 
 #[tokio::test]
@@ -168,7 +173,7 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         .register(&mut core, workspace_root, None)
         .await;
 
-    let names = core.tools.names();
+    let names = core.tool_names();
     for canonical in [
         "git_workspace_info",
         "exec",
@@ -184,7 +189,7 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "apply_session_note_patch",
     ] {
         assert!(
-            names.contains(&canonical),
+            names.contains(&canonical.to_string()),
             "missing canonical tool `{canonical}` in {names:?}"
         );
     }
@@ -233,12 +238,12 @@ async fn tool_set_builder_can_disable_exec() {
     core.register_tools_with_capabilities(std::env::temp_dir(), None, capabilities)
         .await;
 
-    assert!(core.tools.get("exec").is_none());
-    assert!(core.tools.get("write_stdin").is_none());
-    assert!(core.tools.get("spawn_agent").is_none());
-    assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("request_user_input").is_some());
-    assert!(core.tools.get("plan_exit").is_some());
+    assert!(!has_tool(&core, "exec"));
+    assert!(!has_tool(&core, "write_stdin"));
+    assert!(!has_tool(&core, "spawn_agent"));
+    assert!(has_tool(&core, "read_file"));
+    assert!(has_tool(&core, "request_user_input"));
+    assert!(has_tool(&core, "plan_exit"));
 }
 
 #[test]
@@ -251,14 +256,14 @@ fn register_git_tools_exposes_git_pack_explicitly() {
         std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
     );
 
-    assert!(core.tools.get("git_status").is_some());
-    assert!(core.tools.get("git_diff").is_some());
-    assert!(core.tools.get("git_branch").is_some());
-    assert!(core.tools.get("git_fetch").is_some());
-    assert!(core.tools.get("git_commit").is_some());
-    assert!(core.tools.get("git_push").is_some());
-    assert!(core.tools.get("git_workspace_info").is_some());
-    assert!(core.tools.get("git_sync_default_branch").is_some());
+    assert!(has_tool(&core, "git_status"));
+    assert!(has_tool(&core, "git_diff"));
+    assert!(has_tool(&core, "git_branch"));
+    assert!(has_tool(&core, "git_fetch"));
+    assert!(has_tool(&core, "git_commit"));
+    assert!(has_tool(&core, "git_push"));
+    assert!(has_tool(&core, "git_workspace_info"));
+    assert!(has_tool(&core, "git_sync_default_branch"));
 }
 
 #[tokio::test]
@@ -273,7 +278,7 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
-    assert!(core.tools.get("git_status").is_none());
+    assert!(!has_tool(&core, "git_status"));
 
     let mut core = TurnEngine::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
@@ -285,8 +290,8 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
-    assert!(core.tools.get("git_status").is_some());
-    assert!(core.tools.get("git_push").is_some());
+    assert!(has_tool(&core, "git_status"));
+    assert!(has_tool(&core, "git_push"));
 }
 
 #[derive(Debug, Clone, Default)]
@@ -341,11 +346,11 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(!schema_names_without_backend.contains(&"read_file".to_string()));
     assert!(!schema_names_without_backend.contains(&"list_files".to_string()));
     assert!(!schema_names_without_backend.contains(&"apply_patch".to_string()));
-    assert!(core.tools.get("exec").is_none());
-    assert!(core.tools.get("write_stdin").is_none());
-    assert!(core.tools.get("read_file").is_none());
-    assert!(core.tools.get("list_files").is_none());
-    assert!(core.tools.get("apply_patch").is_none());
+    assert!(!has_tool(&core, "exec"));
+    assert!(!has_tool(&core, "write_stdin"));
+    assert!(!has_tool(&core, "read_file"));
+    assert!(!has_tool(&core, "list_files"));
+    assert!(!has_tool(&core, "apply_patch"));
 
     let mut core = TurnEngine::default_provider().unwrap();
     ToolSetBuilder::host_provided(capabilities)
@@ -360,12 +365,12 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
-    assert!(core.tools.get("exec").is_some());
-    assert!(core.tools.get("write_stdin").is_some());
-    assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("list_files").is_some());
-    assert!(core.tools.get("search_files").is_none());
-    assert!(core.tools.get("apply_patch").is_some());
+    assert!(has_tool(&core, "exec"));
+    assert!(has_tool(&core, "write_stdin"));
+    assert!(has_tool(&core, "read_file"));
+    assert!(has_tool(&core, "list_files"));
+    assert!(!has_tool(&core, "search_files"));
+    assert!(has_tool(&core, "apply_patch"));
 }
 
 #[tokio::test]
@@ -414,15 +419,15 @@ async fn tool_set_builder_respects_allowed_tools() {
             "git_status",
         ]
     );
-    assert!(core.tools.get("exec").is_some());
-    assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("git_status").is_some());
-    assert!(core.tools.get("request_user_input").is_some());
-    assert!(core.tools.get("update_todo_list").is_some());
+    assert!(has_tool(&core, "exec"));
+    assert!(has_tool(&core, "read_file"));
+    assert!(has_tool(&core, "git_status"));
+    assert!(has_tool(&core, "request_user_input"));
+    assert!(has_tool(&core, "update_todo_list"));
 
-    assert!(core.tools.get("list_files").is_none());
-    assert!(core.tools.get("git_push").is_none());
-    assert!(core.tools.get("plan_exit").is_none());
+    assert!(!has_tool(&core, "list_files"));
+    assert!(!has_tool(&core, "git_push"));
+    assert!(!has_tool(&core, "plan_exit"));
 }
 
 #[tokio::test]
@@ -436,10 +441,11 @@ async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
 
     core.register_profile_tools().await;
 
-    let read_tool = core.tools.get("read_file").expect("read_file tool");
-    let patch_tool = core.tools.get("apply_patch").expect("apply_patch tool");
-    assert!(format!("{read_tool:?}").contains("LocalWorkspaceFileTool"));
-    assert!(format!("{patch_tool:?}").contains("LocalWorkspaceFileTool"));
+    let lease = core.acquire_tool_lease().unwrap();
+    let read_tool = lease.entry("read_file").expect("read_file tool");
+    let patch_tool = lease.entry("apply_patch").expect("apply_patch tool");
+    assert!(format!("{:?}", read_tool.tool()).contains("LocalWorkspaceFileTool"));
+    assert!(format!("{:?}", patch_tool.tool()).contains("LocalWorkspaceFileTool"));
 }
 
 #[tokio::test]
@@ -453,7 +459,7 @@ async fn profiled_host_tools_do_not_register_local_workspace_tools() {
 
     core.register_profile_tools().await;
 
-    assert!(core.tools.is_empty());
+    assert!(core.tool_names().is_empty());
 }
 
 #[tokio::test]
@@ -466,11 +472,9 @@ async fn default_tools_register_lsp_query_when_runtime_is_shared() {
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    // 空注册表没有可用语言，不应注册任何 LSP 工具。
-    assert!(core.tools.get("lsp_query_rust").is_none());
+    // 空注册表没有可用语言，不应注册任何按语言命名的 LSP 工具。
     assert!(
-        core.tools
-            .names()
+        core.tool_names()
             .iter()
             .all(|name| !name.starts_with("lsp_query_"))
     );

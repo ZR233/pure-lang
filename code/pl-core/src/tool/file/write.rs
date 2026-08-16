@@ -10,6 +10,7 @@ use crate::tool::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 #[derive(Debug)]
 pub struct WriteFileTool;
@@ -38,6 +39,10 @@ impl Tool for WriteFileTool {
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<WriteFileInput>::new(self.name(), self.description())
             .input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
     }
 
     fn execute<'a>(
@@ -100,6 +105,10 @@ impl Tool for CreateDirectoryTool {
         FunctionToolDefinition::<PathInput>::new(self.name(), self.description()).input_schema()
     }
 
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -133,6 +142,10 @@ impl Tool for DeletePathTool {
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<DeletePathInput>::new(self.name(), self.description())
             .input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
     }
 
     fn execute<'a>(
@@ -191,6 +204,10 @@ impl Tool for CopyPathTool {
         FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
     }
 
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -235,6 +252,10 @@ impl Tool for MovePathTool {
 
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::WorkspaceWrite)
     }
 
     fn execute<'a>(

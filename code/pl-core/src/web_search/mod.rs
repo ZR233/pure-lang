@@ -83,8 +83,15 @@ pub struct WebSearchPlan {
 
 impl WebSearchPlan {
     /// 把已解析计划安装到 TurnEngine；产品不得绕过该入口自行构造工具。
+    ///
+    /// web_search 属于 builtin 来源的 eager 工具；安装失败返回错误且不改变现有
+    /// 工具集合。
+    ///
+    /// # Errors
+    ///
+    /// backend 缺失或 builtin 来源发布校验失败时返回错误。
     pub fn install(&self, core: &mut TurnEngine, config: &WebSearchConfig) -> Result<()> {
-        match self.resolution.path {
+        let entry = match self.resolution.path {
             Some(WebSearchPath::Standalone) => {
                 let backend = self.backend.as_ref().ok_or_else(|| {
                     PureError::ConfigError(
@@ -94,12 +101,13 @@ impl WebSearchPlan {
                 match backend.dialect {
                     StandaloneWebSearchDialect::OpenAiSearchApi => {
                         let client = WebSearchClient::new(&backend.provider_info)?;
-                        core.register_tool(WebSearchTool::new(
+                        let tool = WebSearchTool::new(
                             client,
                             backend.model.clone(),
                             config,
                             backend.max_output_tokens,
-                        ));
+                        );
+                        builtin_eager_entry(tool)
                     }
                 }
             }
@@ -109,11 +117,11 @@ impl WebSearchPlan {
                         "hosted web search requires an enabled effective mode".to_string(),
                     )
                 })?;
-                core.register_tool(tool);
+                builtin_eager_entry(tool)
             }
-            None => {}
-        }
-        Ok(())
+            None => return Ok(()),
+        };
+        core.extend_source_tools(crate::tool::ToolSourceId::builtin(), vec![entry])
     }
 
     /// 返回 exclusive 路径唯一允许的工具名。
@@ -348,3 +356,11 @@ fn path_label(path: WebSearchPath) -> &'static str {
 
 #[cfg(test)]
 mod tests;
+
+/// builtin 来源的 eager 工具条目。
+fn builtin_eager_entry(tool: impl crate::tool::Tool + 'static) -> crate::tool::ToolEntry {
+    crate::tool::ToolEntry::new(
+        tool,
+        crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin()),
+    )
+}

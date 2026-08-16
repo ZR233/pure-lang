@@ -418,6 +418,8 @@ mod tests {
             fixed_prefix_section_hashes: Default::default(),
             request_properties_hash: "request".to_string(),
             tool_schema_hash: "tools".to_string(),
+            tool_catalog_hash: None,
+            registry_revision: None,
             context_hash: "context".to_string(),
             prompt_cache_policy: EffectivePromptCachePolicy::OpenAiPromptCacheKey {
                 cache_write_tokens: true,

@@ -323,16 +323,25 @@ async fn custom_openai_endpoint_omits_responses_hosted_tools_by_default() {
 }
 
 #[tokio::test]
-async fn custom_openai_endpoint_sends_responses_hosted_tools_when_explicitly_enabled() {
+async fn custom_openai_endpoint_sends_client_tool_search_when_explicitly_enabled() {
     let request = capture_default_tools_request(true).await;
-    let tool_types = request["tools"]
-        .as_array()
-        .unwrap()
+    let tools = request["tools"].as_array().unwrap();
+    let tool_search = tools
+        .iter()
+        .find(|tool| tool["name"].as_str() == Some("tool_search"))
+        .expect("client tool_search function tool");
+    assert_eq!(tool_search["type"], "function");
+    // schema 固定：query 必填、limit 可选。
+    assert!(
+        tool_search["parameters"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("query"))
+    );
+    let tool_types = tools
         .iter()
         .filter_map(|tool| tool["type"].as_str())
         .collect::<Vec<_>>();
-
-    assert!(tool_types.contains(&"tool_search"));
     assert!(tool_types.contains(&"programmatic_tool_calling"));
 }
 
@@ -673,8 +682,8 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
         TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
             .unwrap()
             .build();
-    core.register_tool(HistoryMarkerTool);
-    core.register_tool(ParentHistoryProbeTool);
+    core.register_test_tool(HistoryMarkerTool);
+    core.register_test_tool(ParentHistoryProbeTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-history".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -744,7 +753,7 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
         TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
             .unwrap()
             .build();
-    core.register_tool(LargeArtifactTool);
+    core.register_test_tool(LargeArtifactTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-large-artifact".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -801,7 +810,21 @@ async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json:
         .build();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
-    core.register_tool(HostedToolProbe);
+    // HostedToolProbe 命名为 git_status；启用检索时归入 git 命名空间进入延迟 catalog。
+    let probe = crate::tool::ToolEntry::new(
+        HostedToolProbe,
+        if enable_hosted_tools {
+            crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin())
+                .with_namespace(crate::tool::NamespaceDescriptor::new(
+                    "git",
+                    "Git inspection tools.",
+                ))
+                .programmatic()
+        } else {
+            crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin())
+        },
+    );
+    let _ = core.extend_source_tools(crate::tool::ToolSourceId::new("host"), vec![probe]);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-hosted-tools".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -854,6 +877,10 @@ impl Tool for HostedToolProbe {
         })
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        Some(crate::ToolEffect::Read)
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
@@ -894,6 +921,10 @@ impl Tool for LargeArtifactTool {
             "properties": {},
             "additionalProperties": false
         })
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
     }
 
     fn execute<'a>(
@@ -943,6 +974,10 @@ impl Tool for HistoryMarkerTool {
         })
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
@@ -986,6 +1021,10 @@ impl Tool for ParentHistoryProbeTool {
             "properties": {},
             "additionalProperties": false
         })
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
     }
 
     fn execute<'a>(

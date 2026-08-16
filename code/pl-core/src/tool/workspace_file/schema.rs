@@ -2,6 +2,7 @@ use pl_model::ToolSchema;
 use serde_json::Value;
 
 use crate::tool::FunctionToolDefinition;
+use crate::turn::ToolEffect;
 
 use super::ops::{ApplyPatchInput, ListFilesInput, ReadFileInput};
 
@@ -27,6 +28,14 @@ impl WorkspaceFileToolKind {
             TOOL_LIST_FILES => Some(Self::ListFiles),
             TOOL_APPLY_PATCH => Some(Self::ApplyPatch),
             _ => None,
+        }
+    }
+
+    /// 该类别工具的副作用声明。
+    pub fn effect(self) -> ToolEffect {
+        match self {
+            Self::ReadFile | Self::ListFiles => ToolEffect::Read,
+            Self::ApplyPatch => ToolEffect::WorkspaceWrite,
         }
     }
 

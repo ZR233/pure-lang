@@ -8,10 +8,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use crate::TurnEngine;
 use crate::config::EffectiveMcpServerConfig;
 use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{RegisteredTool, ToolDisplayMetadata, ToolRuntimeLockPolicy};
+use crate::tool::{
+    NamespaceDescriptor, RegisteredTool, ToolDisplayMetadata, ToolRuntimeLockPolicy,
+};
+use crate::tool::{ToolEntry, ToolRegistry, ToolSourceId, ToolSourceMetadata};
 use crate::turn::ToolEffect;
 
 use super::connector::McpConnector;
@@ -23,6 +25,30 @@ mod worker;
 /// MCP 配置原子生效的 generation 标识。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct McpGeneration(pub u64);
+
+/// 远端 annotations 解析出的 typed 安全提示。
+///
+/// 解析失败时全字段为 `None`（保守默认）；hints 只参与 effect 推导，icons 与
+/// 其余 annotations 仅作为展示与审计信息。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolSafetyHints {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
+}
+
+impl McpToolSafetyHints {
+    /// 宽容解析 annotations；失败时返回全 `None`。
+    pub fn parse(annotations: Option<&Value>) -> Self {
+        annotations
+            .and_then(|value| serde_json::from_value::<Self>(value.clone()).ok())
+            .unwrap_or_default()
+    }
+}
 
 /// 固定 generation 内的模型可见 MCP 工具。
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +62,7 @@ pub struct McpRuntimeToolDescriptor {
     pub annotations: Option<Value>,
     pub icons: Option<Value>,
     pub metadata: Option<Value>,
+    pub safety_hints: McpToolSafetyHints,
     pub effect: Option<ToolEffect>,
 }
 
@@ -52,14 +79,23 @@ impl fmt::Debug for McpRuntime {
 
 impl McpRuntime {
     /// 启动一个由薄 connector 驱动的 MCP worker。
-    pub fn new(connector: McpConnector) -> Self {
+    ///
+    /// `shared_registry` 存在时，worker 在每个 generation 激活或 server 可用性
+    /// 变化后把当前代工具整组发布到共享注册表（来源 `mcp`）。
+    pub fn new(connector: McpConnector, shared_registry: Option<Arc<ToolRegistry>>) -> Self {
         let (commands, receiver) = mpsc::unbounded_channel();
         let (updates, _) = broadcast::channel(64);
         let handle = McpRuntimeHandle {
             commands: commands.clone(),
             updates: updates.clone(),
         };
-        tokio::spawn(worker::run(connector, receiver, commands, updates));
+        tokio::spawn(worker::run(
+            connector,
+            receiver,
+            commands,
+            updates,
+            shared_registry,
+        ));
         Self { handle }
     }
 
@@ -246,45 +282,35 @@ impl McpTurnLease {
             .await
     }
 
-    /// 在当前 TurnEngine 原子安装该 lease 的工具和 resource 入口。
-    pub fn install(&self, core: &mut TurnEngine) -> Result<()> {
-        if !core.mcp_tools_enabled() {
-            return Ok(());
+    /// 构造该 lease 的全部注册表条目：工具（按 server 命名空间）+ resource façade。
+    pub(super) fn registry_entries(&self) -> Vec<ToolEntry> {
+        let source = ToolSourceId::mcp();
+        let mut entries = Vec::with_capacity(self.tools.len() + ResourceToolKind::all().len());
+        for descriptor in self.tools.iter() {
+            entries.push(ToolEntry::from_arc(
+                Arc::from(Box::new(self.registered_tool(descriptor.clone()))
+                    as Box<dyn crate::tool::Tool>),
+                ToolSourceMetadata {
+                    source: source.clone(),
+                    namespace: Some(mcp_namespace_descriptor(&descriptor.server_id)),
+                    programmatic_eligible: descriptor.effect == Some(ToolEffect::Read),
+                },
+            ));
         }
-        self.install_tools(core)?;
-        self.install_resource_tools(core);
-        Ok(())
-    }
-
-    /// 仅安装本 generation 的 MCP 调用工具。
-    ///
-    /// 产品需要把 MCP resource 与自身虚拟资源组合时，应使用本方法，并为共享 resource
-    /// schema 安装组合 backend。
-    pub fn install_tools(&self, core: &mut TurnEngine) -> Result<()> {
-        if !core.mcp_tools_enabled() {
-            return Ok(());
-        }
-        for descriptor in self.tools.iter().cloned() {
-            let exposed_name = descriptor.exposed_name.clone();
-            if core.has_tool(&exposed_name) {
-                return Err(PureError::ConfigError(format!(
-                    "mcp tool '{}' conflicts with an existing tool",
-                    exposed_name
-                )));
-            }
-            core.register_tool(self.registered_tool(descriptor));
-        }
-        Ok(())
-    }
-
-    fn install_resource_tools(&self, core: &mut TurnEngine) {
         if !self.server_ids.is_empty() {
             for kind in ResourceToolKind::all() {
-                if !core.has_tool(kind.name()) {
-                    core.register_tool(self.registered_resource_tool(*kind));
-                }
+                entries.push(ToolEntry::from_arc(
+                    Arc::from(Box::new(self.registered_resource_tool(*kind))
+                        as Box<dyn crate::tool::Tool>),
+                    ToolSourceMetadata {
+                        source: source.clone(),
+                        namespace: None,
+                        programmatic_eligible: true,
+                    },
+                ));
             }
         }
+        entries
     }
 
     fn registered_tool(&self, descriptor: McpRuntimeToolDescriptor) -> RegisteredTool {
@@ -553,6 +579,28 @@ fn parse_resource_arguments<T: for<'de> Deserialize<'de>>(
         tool: kind.name().to_string(),
         error: format!("invalid input: {error}"),
     })
+}
+
+/// MCP server 命名空间描述：`mcp_<归一化 server id>`。
+fn mcp_namespace_descriptor(server_id: &str) -> NamespaceDescriptor {
+    NamespaceDescriptor::new(
+        format!("mcp_{}", mcp_namespace_component(server_id)),
+        format!("Dynamically registered tools from MCP server `{server_id}`."),
+    )
+}
+
+/// server id 的有损归一化：仅保留字母数字、`_` 与 `-`，其余替换为 `_`。
+fn mcp_namespace_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn runtime_stopped(error: oneshot::error::RecvError) -> PureError {

@@ -10,6 +10,7 @@ use super::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 #[derive(Debug, Default)]
 pub struct PlanExitTool;
@@ -40,6 +41,10 @@ impl Tool for PlanExitTool {
 
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<PlanExitInput>::new(self.name(), self.description()).input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
     }
 
     fn execute<'a>(

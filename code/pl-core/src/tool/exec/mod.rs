@@ -15,6 +15,7 @@ use super::{
     FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 pub const TOOL_EXEC: &str = "exec";
 pub const TOOL_WRITE_STDIN: &str = "write_stdin";
@@ -216,6 +217,10 @@ where
         FunctionToolDefinition::<ExecInput>::new(self.name(), self.description()).input_schema()
     }
 
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Process)
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -278,6 +283,10 @@ where
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<WriteStdinInput>::new(self.name(), self.description())
             .input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Process)
     }
 
     fn execute<'a>(

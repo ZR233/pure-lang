@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use crate::turn::ToolEffect;
 use futures::FutureExt;
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
@@ -89,6 +90,10 @@ impl Tool for AskUserTool {
 
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<AskUserInput>::new(self.name(), self.description()).input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
     }
 
     fn execute<'a>(

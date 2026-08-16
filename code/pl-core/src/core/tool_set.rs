@@ -11,8 +11,9 @@ use crate::tool::{
     LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool, MovePathTool,
     NoGitCredentialProvider, PlanExitTool, SessionNoteTool, SessionNoteToolKind, StatPathTool,
     TodoListTool, Tool, WorkspaceFileBackend, WorkspaceFileTool, WorkspaceFileToolKind,
-    WriteFileTool, command_tool_pair, local_command_tool_pair,
+    WriteFileTool, command_tool_pair, local_command_tool_pair, lsp_tool_entries,
 };
+use crate::tool::{ToolEntry, ToolSourceId, ToolSourceMetadata};
 
 use super::TurnEngine;
 
@@ -176,63 +177,155 @@ where
         let workspace_root = workspace.root().to_path_buf();
         core.workspace = Some(workspace);
         core.workspace_instructions = workspace_instructions.clone();
-        if self.capabilities.skills {
-            core.register_skill_tools_for_workspace(workspace_root.clone());
-        }
+        let source = ToolSourceId::builtin();
+        let mut entries = Vec::new();
         if self.capabilities.exec && self.local_backends {
             let (exec, write_stdin) = local_command_tool_pair(workspace_root.clone());
-            register_if_allowed(core, exec, |name| self.tool_allowed(name));
-            register_if_allowed(core, write_stdin, |name| self.tool_allowed(name));
+            push_if_allowed(&mut entries, exec, &source, |name| self.tool_allowed(name));
+            push_if_allowed(&mut entries, write_stdin, &source, |name| {
+                self.tool_allowed(name)
+            });
         }
         if self.capabilities.exec
             && let Some(runtime) = &self.command_runtime
         {
             let (exec, write_stdin) = command_tool_pair(runtime.backend.clone());
-            register_if_allowed(core, exec, |name| self.tool_allowed(name));
-            register_if_allowed(core, write_stdin, |name| self.tool_allowed(name));
+            push_if_allowed(&mut entries, exec, &source, |name| self.tool_allowed(name));
+            push_if_allowed(&mut entries, write_stdin, &source, |name| {
+                self.tool_allowed(name)
+            });
         }
         if self.capabilities.workspace_files && self.local_backends {
-            register_file_tools(core, |name| self.tool_allowed(name));
+            for kind in WorkspaceFileToolKind::all() {
+                push_if_allowed(
+                    &mut entries,
+                    LocalWorkspaceFileTool::new(*kind),
+                    &source,
+                    |name| self.tool_allowed(name),
+                );
+            }
+            let mut file_tools: Vec<Box<dyn Tool>> = vec![
+                Box::new(WriteFileTool),
+                Box::new(StatPathTool),
+                Box::new(CreateDirectoryTool),
+                Box::new(DeletePathTool),
+                Box::new(CopyPathTool),
+                Box::new(MovePathTool),
+            ];
+            for tool in file_tools.drain(..) {
+                push_if_allowed_boxed(&mut entries, tool, &source, |name| self.tool_allowed(name));
+            }
         }
         if self.capabilities.workspace_files
             && let Some(runtime) = &self.workspace_file_runtime
         {
-            register_workspace_file_tools(core, runtime.backend.clone(), |name| {
-                self.tool_allowed(name)
-            });
-        }
-        if self.capabilities.lsp
-            && let Some(registry) = core.lsp_runtime.clone()
-        {
-            core.tools
-                .register_lsp_languages_for_workspace(&registry, &workspace_root)
-                .await;
-        }
-        if self.capabilities.ask_user {
-            register_if_allowed(core, AskUserTool, |name| self.tool_allowed(name));
-        }
-        if self.capabilities.git
-            && let Some(runtime) = &self.git_runtime
-        {
-            for kind in GitToolKind::all() {
-                if self.tool_allowed(kind.name()) {
-                    core.register_tool(crate::tool::GitTool::new(
-                        *kind,
-                        runtime.config.clone(),
-                        runtime.backend.clone(),
-                        runtime.credential_provider.clone(),
+            for kind in WorkspaceFileToolKind::all() {
+                let name = kind.name();
+                if self.tool_allowed(name) {
+                    entries.push(ToolEntry::new(
+                        WorkspaceFileTool::new(*kind, runtime.backend.clone()),
+                        ToolSourceMetadata::new(source.clone()),
                     ));
                 }
             }
         }
-        register_if_allowed(core, TodoListTool, |name| self.tool_allowed(name));
-        for kind in SessionNoteToolKind::all() {
-            register_if_allowed(core, SessionNoteTool::new(*kind), |name| {
+        if self.capabilities.ask_user {
+            push_if_allowed(&mut entries, AskUserTool, &source, |name| {
                 self.tool_allowed(name)
             });
         }
-        register_if_allowed(core, PlanExitTool, |name| self.tool_allowed(name));
+        push_if_allowed(&mut entries, TodoListTool, &source, |name| {
+            self.tool_allowed(name)
+        });
+        for kind in SessionNoteToolKind::all() {
+            push_if_allowed(&mut entries, SessionNoteTool::new(*kind), &source, |name| {
+                self.tool_allowed(name)
+            });
+        }
+        push_if_allowed(&mut entries, PlanExitTool, &source, |name| {
+            self.tool_allowed(name)
+        });
+        if self.capabilities.git
+            && let Some(runtime) = &self.git_runtime
+        {
+            entries.extend(git_entries(runtime, |name| self.tool_allowed(name)));
+        }
+        let _ = core.register_source_tools(source, entries);
+        if self.capabilities.skills {
+            core.register_skill_tools_for_workspace(workspace_root.clone());
+        }
+        if self.capabilities.lsp
+            && let Some(registry) = core.lsp_runtime.clone()
+        {
+            let _ = core.register_source_tools(ToolSourceId::lsp(), lsp_tool_entries(registry));
+        }
     }
+}
+
+fn push_if_allowed<T>(
+    entries: &mut Vec<ToolEntry>,
+    tool: T,
+    source: &ToolSourceId,
+    allowed: impl Fn(&str) -> bool,
+) where
+    T: Tool + 'static,
+{
+    if allowed(tool.name()) {
+        entries.push(ToolEntry::new(
+            tool,
+            ToolSourceMetadata::new(source.clone()),
+        ));
+    }
+}
+
+fn push_if_allowed_boxed(
+    entries: &mut Vec<ToolEntry>,
+    tool: Box<dyn Tool>,
+    source: &ToolSourceId,
+    allowed: impl Fn(&str) -> bool,
+) {
+    if allowed(tool.name()) {
+        entries.push(ToolEntry::from_arc(
+            Arc::from(tool),
+            ToolSourceMetadata::new(source.clone()),
+        ));
+    }
+}
+
+fn git_entries<B, P>(
+    runtime: &GitToolRuntime<B, P>,
+    allowed: impl Fn(&str) -> bool + Copy,
+) -> Vec<ToolEntry>
+where
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
+{
+    let namespace = Some(crate::tool::NamespaceDescriptor::new(
+        "git",
+        "Git inspection and repository management tools.",
+    ));
+    GitToolKind::all()
+        .iter()
+        .copied()
+        .filter(|kind| allowed(kind.name()))
+        .map(|kind| {
+            let programmatic = matches!(kind.effect(), crate::turn::ToolEffect::Read);
+            let metadata = ToolSourceMetadata {
+                source: ToolSourceId::builtin(),
+                namespace: namespace.clone(),
+                programmatic_eligible: programmatic,
+            };
+            ToolEntry::new(
+                crate::tool::GitTool::new(
+                    kind,
+                    runtime.config.clone(),
+                    runtime.backend.clone(),
+                    runtime.credential_provider.clone(),
+                ),
+                metadata,
+            )
+        })
+        .collect()
 }
 
 pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> {
@@ -298,40 +391,4 @@ struct CommandToolRuntime<E> {
 #[derive(Debug, Clone)]
 struct WorkspaceFileToolRuntime<W> {
     backend: Arc<W>,
-}
-
-fn register_if_allowed(
-    core: &mut TurnEngine,
-    tool: impl crate::tool::Tool + 'static,
-    allowed: impl Fn(&str) -> bool,
-) {
-    if allowed(tool.name()) {
-        core.register_tool(tool);
-    }
-}
-
-fn register_file_tools(core: &mut TurnEngine, allowed: impl Fn(&str) -> bool + Copy) {
-    for kind in WorkspaceFileToolKind::all() {
-        register_if_allowed(core, LocalWorkspaceFileTool::new(*kind), allowed);
-    }
-    register_if_allowed(core, WriteFileTool, allowed);
-    register_if_allowed(core, StatPathTool, allowed);
-    register_if_allowed(core, CreateDirectoryTool, allowed);
-    register_if_allowed(core, DeletePathTool, allowed);
-    register_if_allowed(core, CopyPathTool, allowed);
-    register_if_allowed(core, MovePathTool, allowed);
-}
-
-fn register_workspace_file_tools<W>(
-    core: &mut TurnEngine,
-    backend: Arc<W>,
-    allowed: impl Fn(&str) -> bool,
-) where
-    W: WorkspaceFileBackend + 'static,
-{
-    for kind in WorkspaceFileToolKind::all() {
-        if allowed(kind.name()) {
-            core.register_tool(WorkspaceFileTool::new(*kind, backend.clone()));
-        }
-    }
 }

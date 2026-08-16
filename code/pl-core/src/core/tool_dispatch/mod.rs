@@ -15,7 +15,7 @@ use crate::session::AgentSession;
 use crate::tool::cache::{ToolCachePolicy, TurnToolCacheHandle};
 use crate::tool::{
     AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
-    ToolRuntimeLockPolicy, WorkspaceAccess,
+    ToolRuntimeLockPolicy, TurnToolLease, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -88,6 +88,8 @@ pub(super) enum ToolExecutionError {
 
 pub(super) struct ToolExecutionContext<'a> {
     pub(super) core: &'a TurnEngine,
+    /// 本 Turn 冻结的工具 lease；调度只使用 lease 条目。
+    pub(super) lease: TurnToolLease,
     pub(super) options: &'a TurnOptions,
     pub(super) session_id: &'a str,
     pub(super) workspace: AgentWorkspace,
@@ -186,10 +188,8 @@ pub(super) async fn execute_tool_call_batch(
             continue;
         }
 
-        let registered_tool = context.core.tools.get(&tool_call.name);
-        let effect = registered_tool
-            .and_then(crate::tool::Tool::effect)
-            .or_else(|| crate::ToolEffect::for_builtin_name(&tool_call.name));
+        let registered_tool = context.lease.entry(&tool_call.name);
+        let effect = registered_tool.and_then(|entry| entry.tool().effect());
         let allowed = context
             .options
             .execution_policy
@@ -220,7 +220,7 @@ pub(super) async fn execute_tool_call_batch(
             continue;
         }
         let Some(tool) = registered_tool else {
-            let available: Vec<&str> = context.core.tools.names();
+            let available: Vec<&str> = context.lease.names();
             tracing::warn!(
                 tool = %tool_call.name,
                 available = ?available,
@@ -246,6 +246,7 @@ pub(super) async fn execute_tool_call_batch(
             continue;
         };
 
+        let tool = tool.tool();
         let supports_parallel = tool.supports_parallel_tool_calls()
             && matches!(
                 context.options.tool_execution_mode,

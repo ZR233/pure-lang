@@ -8,9 +8,11 @@ use futures::FutureExt;
 use pl_protocol::PureError;
 use serde_json::{Value, json};
 
+use super::cache::ToolCachePolicy;
 use super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 mod credential;
 mod execution;
@@ -88,6 +90,14 @@ where
 
     fn input_schema(&self) -> Value {
         self.kind.input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(self.kind.effect())
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        self.kind.cache_policy()
     }
 
     fn execute<'a>(

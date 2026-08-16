@@ -14,6 +14,7 @@ use crate::tool::{
     BoxFuture, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 pub use schema::*;
 
@@ -49,6 +50,10 @@ impl Tool for SessionNoteTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         self.kind.supports_parallel_tool_calls()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
     }
 
     fn execute<'a>(

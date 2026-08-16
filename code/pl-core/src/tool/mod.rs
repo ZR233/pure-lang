@@ -7,6 +7,7 @@ mod contract;
 mod exec;
 mod file;
 mod git;
+mod lease;
 mod lsp;
 mod model_output;
 mod orchestration;
@@ -18,6 +19,7 @@ mod registry;
 mod session_note;
 mod shell;
 mod skill;
+mod source;
 mod text_document;
 mod text_escape;
 mod todo;
@@ -35,6 +37,7 @@ pub use exec::*;
 pub use file::*;
 pub use futures::future::BoxFuture;
 pub use git::*;
+pub use lease::*;
 pub use lsp::*;
 pub use model_output::*;
 pub use orchestration::*;
@@ -45,6 +48,7 @@ pub use registry::*;
 pub use session_note::*;
 pub use shell::*;
 pub use skill::*;
+pub use source::*;
 pub use todo::*;
 pub use tool_output::*;
 pub use truncation::*;
@@ -58,129 +62,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::turn::{ToolEffect, TurnOptions};
-    use futures::FutureExt;
-    use futures::future::BoxFuture;
+    use crate::turn::TurnOptions;
     use pl_protocol::PureError;
     use pretty_assertions::assert_eq;
     use schemars::JsonSchema;
     use serde::Deserialize;
-
-    fn empty_truncation() -> OutputTruncation {
-        OutputTruncation::empty()
-    }
-
-    #[derive(Debug)]
-    struct EchoTool;
-
-    impl Tool for EchoTool {
-        fn name(&self) -> &str {
-            "echo"
-        }
-
-        fn description(&self) -> &str {
-            "Echo input"
-        }
-
-        fn input_schema(&self) -> serde_json::Value {
-            serde_json::json!({
-                "type": "object",
-                "properties": { "text": { "type": "string" } }
-            })
-        }
-
-        fn execute<'a>(
-            &'a self,
-            _input: ToolInput,
-            _context: ToolContext,
-        ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-            async {
-                Ok(ToolOutput {
-                    description: "ok".to_string(),
-                    truncated: empty_truncation(),
-                    output_file: PathBuf::new(),
-                    exit_code: None,
-                    timed_out: false,
-                    runtime_events: Vec::new(),
-                })
-            }
-            .boxed()
-        }
-    }
-
-    #[test]
-    fn registry_register_and_get() {
-        let mut reg = ToolRegistry::new();
-        reg.register(EchoTool);
-
-        assert_eq!(reg.len(), 1);
-        assert!(!reg.is_empty());
-        assert!(reg.get("echo").is_some());
-        assert!(reg.get("missing").is_none());
-    }
-
-    #[test]
-    fn registry_schemas() {
-        let mut reg = ToolRegistry::new();
-        reg.register(EchoTool);
-
-        let schemas = reg.schemas();
-        assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].name(), "echo");
-    }
-
-    #[test]
-    fn registry_schemas_are_filtered_by_host_policy() {
-        let output = || ToolOutput {
-            description: "ok".to_string(),
-            truncated: OutputTruncation::empty(),
-            output_file: PathBuf::new(),
-            exit_code: Some(0),
-            timed_out: false,
-            runtime_events: Vec::new(),
-        };
-        let mut registry = ToolRegistry::new();
-        registry.register(RegisteredTool::new(
-            "undeclared",
-            "undeclared",
-            serde_json::json!({"type": "object"}),
-            move |_input, _context| {
-                let output = output();
-                async move { Ok(output) }
-            },
-        ));
-        registry.register(
-            RegisteredTool::new(
-                "declared_read",
-                "declared read",
-                serde_json::json!({"type": "object"}),
-                |_input, _context| async {
-                    Ok(ToolOutput {
-                        description: "ok".to_string(),
-                        truncated: OutputTruncation::empty(),
-                        output_file: PathBuf::new(),
-                        exit_code: Some(0),
-                        timed_out: false,
-                        runtime_events: Vec::new(),
-                    })
-                },
-            )
-            .with_effect(ToolEffect::Read),
-        );
-
-        let policy = crate::AgentExecutionPolicy {
-            visible_tools: crate::ToolVisibilitySet::from_tool_names(["declared_read"]),
-            allowed_effects: crate::ToolEffectSet::from_effects([ToolEffect::Read]),
-            ..crate::AgentExecutionPolicy::default()
-        };
-        let names = registry
-            .schemas_for_policy(&policy)
-            .into_iter()
-            .map(|schema| schema.name().to_string())
-            .collect::<Vec<_>>();
-
-        assert_eq!(names, vec!["declared_read".to_string()]);
-    }
 
     #[test]
     fn tool_output_from_model_output_sets_exit_code_and_end_turn_event() {
@@ -609,16 +495,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_unregister_removes_named_tool() {
-        let mut reg = ToolRegistry::new();
-        reg.register(EchoTool);
-
-        assert!(reg.unregister("echo"));
-        assert!(!reg.unregister("echo"));
-        assert!(reg.get("echo").is_none());
-    }
-
-    #[test]
     fn model_visible_tool_output_truncates_json_with_codex_shape() {
         let long_stdout = "x".repeat(65);
         let output = model_visible_tool_output_with_tokens(
@@ -693,42 +569,6 @@ mod tests {
                 "items": ["<redacted>", { "value": "<redacted>" }],
             })
         );
-    }
-
-    #[test]
-    fn registry_sync_lsp_language_tools_registers_and_removes_languages() {
-        let mut reg = ToolRegistry::new();
-        reg.register(EchoTool);
-        let registry = pl_lsp::LspRuntimeRegistry::new();
-        let rust = pl_lsp::LanguageToolInfo {
-            language_id: "rust".to_string(),
-            server_id: "rust-analyzer".to_string(),
-            display_name: "rust-analyzer".to_string(),
-            extensions: vec![".rs".to_string()],
-        };
-
-        let registered = reg.sync_lsp_language_tools(&registry, vec![rust]);
-
-        assert_eq!(registered, vec!["rust".to_string()]);
-        assert!(reg.get("echo").is_some());
-        assert!(reg.get("lsp_query_rust").is_some());
-
-        let rust = pl_lsp::LanguageToolInfo {
-            language_id: "rust".to_string(),
-            server_id: "rust-analyzer".to_string(),
-            display_name: "rust-analyzer".to_string(),
-            extensions: vec![".rs".to_string()],
-        };
-        let registered = reg.sync_lsp_language_tools(&registry, vec![rust]);
-
-        assert_eq!(registered, vec!["rust".to_string()]);
-        assert!(reg.get("lsp_query_rust").is_some());
-
-        let registered = reg.sync_lsp_language_tools(&registry, Vec::new());
-
-        assert!(registered.is_empty());
-        assert!(reg.get("echo").is_some());
-        assert!(reg.get("lsp_query_rust").is_none());
     }
 
     #[tokio::test]

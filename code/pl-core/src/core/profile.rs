@@ -158,6 +158,7 @@ pub struct TurnEngineBuilder {
     skills: Option<SkillsConfig>,
     skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    shared_tool_registry: Option<std::sync::Arc<crate::tool::ToolRegistry>>,
     runtime_profile: CoreRuntimeProfile,
 }
 
@@ -170,6 +171,7 @@ impl TurnEngineBuilder {
             skills: None,
             skill_catalog: None,
             lsp_runtime: None,
+            shared_tool_registry: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
         }
     }
@@ -213,6 +215,15 @@ impl TurnEngineBuilder {
         self
     }
 
+    /// 挂接共享工具注册表（如 MCP worker 的代际发布）。
+    pub fn with_shared_tool_registry(
+        mut self,
+        registry: std::sync::Arc<crate::tool::ToolRegistry>,
+    ) -> Self {
+        self.shared_tool_registry = Some(registry);
+        self
+    }
+
     pub fn with_runtime_profile(mut self, runtime_profile: CoreRuntimeProfile) -> Self {
         self.runtime_profile = runtime_profile;
         self
@@ -232,6 +243,7 @@ impl TurnEngineBuilder {
             skills: self.skills,
             skill_catalog: self.skill_catalog,
             lsp_runtime: self.lsp_runtime,
+            shared_tools: self.shared_tool_registry,
             workspace: workspace_profile.workspace,
             workspace_instructions: workspace_profile.instructions,
             instruction_profile,
@@ -241,6 +253,8 @@ impl TurnEngineBuilder {
             context_compaction,
             active_subagent: None,
             tools: crate::tool::ToolRegistry::new(),
+            local_sources: Default::default(),
+            tool_guards: Default::default(),
         }
     }
 }

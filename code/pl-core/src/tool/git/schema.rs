@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::tool::FunctionToolDefinition;
+use crate::tool::cache::ToolCachePolicy;
+use crate::turn::ToolEffect;
 
 pub const TOOL_GIT_STATUS: &str = "git_status";
 pub const TOOL_GIT_DIFF: &str = "git_diff";
@@ -65,6 +67,28 @@ impl GitToolKind {
             Self::Push => TOOL_GIT_PUSH,
             Self::WorkspaceInfo => TOOL_GIT_WORKSPACE_INFO,
             Self::SyncDefaultBranch => TOOL_GIT_SYNC_DEFAULT_BRANCH,
+        }
+    }
+
+    /// 该类别 git 工具的副作用声明。
+    pub fn effect(self) -> ToolEffect {
+        match self {
+            Self::Status | Self::Diff | Self::WorkspaceInfo => ToolEffect::Read,
+            Self::Branch | Self::Fetch | Self::Commit | Self::Push | Self::SyncDefaultBranch => {
+                ToolEffect::BranchControl
+            }
+        }
+    }
+
+    /// 只读 git 查询结果在 workspace mutation epoch 内可复用。
+    pub fn cache_policy(self) -> ToolCachePolicy {
+        match self {
+            Self::Status | Self::Diff | Self::WorkspaceInfo => {
+                ToolCachePolicy::UntilWorkspaceMutation
+            }
+            Self::Branch | Self::Fetch | Self::Commit | Self::Push | Self::SyncDefaultBranch => {
+                ToolCachePolicy::Never
+            }
         }
     }
 

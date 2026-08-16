@@ -25,6 +25,10 @@ impl Tool for ProviderCallIdEchoTool {
         })
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
@@ -211,6 +215,10 @@ impl Tool for CountingExecTool {
         })
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        Some(crate::ToolEffect::Process)
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -263,6 +271,10 @@ impl Tool for CountingCacheableTool {
 
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
         ToolCachePolicy::UntilWorkspaceMutation
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        Some(crate::ToolEffect::Read)
     }
 
     fn execute<'a>(
@@ -321,6 +333,10 @@ impl Tool for BatchFailingReadTool {
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
         ToolRuntimeLockPolicy::Exclusive
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        Some(crate::ToolEffect::Read)
     }
 
     fn execute<'a>(
@@ -425,6 +441,10 @@ impl Tool for BudgetPausedWaitTool {
         ToolBudgetTiming::PauseWhenOnlyScheduledTool
     }
 
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
@@ -464,7 +484,7 @@ fn read_file_result_text(result: Option<&str>) -> String {
 async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(FailingApplyPatchTool {
+    core.register_test_tool(FailingApplyPatchTool {
         executions: std::sync::Arc::clone(&executions),
     });
     let arguments = serde_json::json!({
@@ -504,6 +524,7 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -529,7 +550,7 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
 async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(CountingSpawnAgentTool {
+    core.register_test_tool(CountingSpawnAgentTool {
         executions: std::sync::Arc::clone(&executions),
     });
     let assignment = serde_json::json!({
@@ -573,6 +594,7 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -606,7 +628,7 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
 async fn identical_exec_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(CountingExecTool {
+    core.register_test_tool(CountingExecTool {
         executions: std::sync::Arc::clone(&executions),
     });
     let command = serde_json::json!({
@@ -652,6 +674,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -690,6 +713,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -713,7 +737,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
 async fn identical_cacheable_calls_return_compact_receipts_per_provider_response() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(CountingCacheableTool {
+    core.register_test_tool(CountingCacheableTool {
         executions: std::sync::Arc::clone(&executions),
     });
     let arguments = serde_json::json!({ "path": "src/lib.rs" });
@@ -747,6 +771,7 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -777,7 +802,7 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
 #[tokio::test]
 async fn tool_batch_reports_parallel_candidates_and_critical_path() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(
+    core.register_test_tool(
         crate::tool::RegisteredTool::new(
             "parallel_metric_read",
             "Test-only parallel metric tool",
@@ -822,6 +847,7 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -873,6 +899,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         &mut denied_recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default()
                 .with_execution_policy(crate::AgentExecutionPolicy::default()),
             session_id: "turn-mcp-denied",
@@ -917,6 +944,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &options,
             session_id: "turn-mcp",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -970,7 +998,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
 #[tokio::test]
 async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(crate::tool::RegisteredTool::new(
+    core.register_test_tool(crate::tool::RegisteredTool::new(
         "exclusive_metric_read",
         "Test-only exclusive metric tool",
         serde_json::json!({"type": "object"}),
@@ -1010,6 +1038,7 @@ async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1036,12 +1065,12 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
     let first_started = std::sync::Arc::new(tokio::sync::Notify::new());
     let release_first = std::sync::Arc::new(tokio::sync::Notify::new());
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(BatchFailingReadTool {
+    core.register_test_tool(BatchFailingReadTool {
         executions: std::sync::Arc::clone(&executions),
         first_started: std::sync::Arc::clone(&first_started),
         release_first: std::sync::Arc::clone(&release_first),
     });
-    core.register_tool(BatchEpochProcessTool {
+    core.register_test_tool(BatchEpochProcessTool {
         first_started,
         release_first,
     });
@@ -1076,6 +1105,7 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1121,6 +1151,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1144,7 +1175,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
 #[tokio::test]
 async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(BudgetPausedWaitTool);
+    core.register_test_tool(BudgetPausedWaitTool);
     let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -1156,6 +1187,7 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1177,8 +1209,8 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
 #[tokio::test]
 async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(BudgetPausedWaitTool);
-    core.register_tool(ProviderCallIdEchoTool);
+    core.register_test_tool(BudgetPausedWaitTool);
+    core.register_test_tool(ProviderCallIdEchoTool);
     let calls = [
         ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None),
         ToolCall::function(
@@ -1198,6 +1230,7 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1219,7 +1252,7 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
 #[tokio::test]
 async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(ProviderCallIdEchoTool);
+    core.register_test_tool(ProviderCallIdEchoTool);
     let tool_call = ToolCall::function(
         "chat-tool-call-1",
         "provider_call_id_echo",
@@ -1236,6 +1269,7 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -1282,7 +1316,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
         .await
         .unwrap();
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",
@@ -1308,6 +1342,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
@@ -1377,7 +1412,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         .await
         .unwrap();
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",
@@ -1403,6 +1438,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
@@ -1476,7 +1512,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
 #[tokio::test]
 async fn tool_runtime_deltas_use_trace_part_id() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(DeltaEchoTool);
+    core.register_test_tool(DeltaEchoTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
         "delta_echo",
@@ -1493,6 +1529,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),

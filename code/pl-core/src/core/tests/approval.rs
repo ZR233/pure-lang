@@ -25,7 +25,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
         .await
         .unwrap();
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "call-1",
         "read_file",
@@ -62,6 +62,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &options,
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
@@ -116,6 +117,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -150,7 +152,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
 #[tokio::test]
 async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(WriteFileTool);
+    core.register_test_tool(WriteFileTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
         "write_file",
@@ -169,6 +171,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &options,
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
@@ -225,7 +228,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
 #[tokio::test]
 async fn cancelling_running_tool_records_interrupted_terminal_event() {
     let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(SleepingTool);
+    core.register_test_tool(SleepingTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
         "sleeping_tool",
@@ -248,6 +251,7 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
             options: &options,
             session_id: "turn-1",
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),

@@ -14,7 +14,9 @@ use pl_model::ToolSchema;
 use pl_protocol::Result;
 use serde_json::Value;
 
+use crate::tool::cache::ToolCachePolicy;
 use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use crate::turn::ToolEffect;
 
 pub use backend::*;
 pub use container::ContainerWorkspaceFileBackend;
@@ -53,6 +55,19 @@ where
 
     fn supports_parallel_tool_calls(&self) -> bool {
         self.kind.supports_parallel_tool_calls()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(self.kind.effect())
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        match self.kind {
+            WorkspaceFileToolKind::ReadFile | WorkspaceFileToolKind::ListFiles => {
+                ToolCachePolicy::UntilWorkspaceMutation
+            }
+            WorkspaceFileToolKind::ApplyPatch => ToolCachePolicy::Never,
+        }
     }
 
     fn execute<'a>(
@@ -112,6 +127,19 @@ impl Tool for LocalWorkspaceFileTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         self.kind.supports_parallel_tool_calls()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(self.kind.effect())
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        match self.kind {
+            WorkspaceFileToolKind::ReadFile | WorkspaceFileToolKind::ListFiles => {
+                ToolCachePolicy::UntilWorkspaceMutation
+            }
+            WorkspaceFileToolKind::ApplyPatch => ToolCachePolicy::Never,
+        }
     }
 
     fn execute<'a>(

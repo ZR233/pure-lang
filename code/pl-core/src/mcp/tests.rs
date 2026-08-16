@@ -21,13 +21,15 @@ pub(crate) struct McpTestHarness {
 }
 
 impl McpTestHarness {
+    /// 发布一个带只读 annotation 的 MCP server 到共享注册表并挂接到 engine。
     pub(crate) async fn install_read_tool(core: &mut crate::TurnEngine) -> Self {
         let closed = Arc::new(AtomicBool::new(false));
         let connector = McpConnector::testing([(
             "docs".to_string(),
             test_connection(vec![test_tool("lookup")], closed.clone()).await,
         )]);
-        let runtime = McpRuntime::new(connector).handle();
+        let shared = Arc::new(ToolRegistry::new());
+        let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
         runtime
             .reconcile(BTreeMap::from([(
                 "docs".to_string(),
@@ -35,12 +37,7 @@ impl McpTestHarness {
             )]))
             .await
             .expect("reconcile test MCP runtime");
-        runtime
-            .acquire_turn_lease()
-            .await
-            .expect("test MCP lease")
-            .install(core)
-            .expect("install test MCP tools");
+        core.set_shared_tool_registry(shared);
         Self { runtime, closed }
     }
 
@@ -151,6 +148,10 @@ impl ServerHandler for TestServer {
 }
 
 fn test_tool(name: &str) -> rmcp::model::Tool {
+    annotated_tool(name, ToolAnnotations::new().read_only(true))
+}
+
+fn annotated_tool(name: &str, annotations: ToolAnnotations) -> rmcp::model::Tool {
     let mut tool = rmcp::model::Tool::new(
         name.to_string(),
         format!("{name} description"),
@@ -164,13 +165,25 @@ fn test_tool(name: &str) -> rmcp::model::Tool {
         "type": "object",
         "properties": { "answer": { "type": "integer" } }
     }))));
-    tool.annotations = Some(ToolAnnotations::new().read_only(true));
+    tool.annotations = Some(annotations);
     tool.icons = Some(vec![Icon::new("data:image/png;base64,AA==")]);
     tool.meta = Some(MetaObject(Map::from_iter([(
         "displayGroup".to_string(),
         json!("tests"),
     )])));
     tool
+}
+
+fn plain_tool(name: &str) -> rmcp::model::Tool {
+    rmcp::model::Tool::new(
+        name.to_string(),
+        format!("{name} description"),
+        json_object(json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })),
+    )
 }
 
 async fn test_connection(tools: Vec<rmcp::model::Tool>, closed: Arc<AtomicBool>) -> ConnectedMcp {
@@ -200,40 +213,46 @@ async fn test_connection(tools: Vec<rmcp::model::Tool>, closed: Arc<AtomicBool>)
     ConnectedMcp::from_running(client).await
 }
 
-#[tokio::test]
-async fn rmcp_schema_and_structured_result_survive_registered_tool() {
+async fn shared_runtime(
+    tools: Vec<rmcp::model::Tool>,
+    effect: Option<ToolEffect>,
+) -> (Arc<ToolRegistry>, super::McpRuntimeHandle, Arc<AtomicBool>) {
     let closed = Arc::new(AtomicBool::new(false));
     let connector = McpConnector::testing([(
         "docs".to_string(),
-        test_connection(vec![test_tool("lookup")], closed.clone()).await,
+        test_connection(tools, closed.clone()).await,
     )]);
-    let runtime = McpRuntime::new(connector).handle();
+    let shared = Arc::new(ToolRegistry::new());
+    let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
     runtime
-        .reconcile(BTreeMap::from([("docs".to_string(), config("docs", None))]))
+        .reconcile(BTreeMap::from([(
+            "docs".to_string(),
+            config("docs", effect),
+        )]))
         .await
-        .expect("reconcile");
-    let lease = runtime.acquire_turn_lease().await.expect("lease");
-    let descriptor = &lease.tools()[0];
-    assert_eq!(descriptor.exposed_name, "mcp__docs__lookup");
-    assert!(descriptor.output_schema.is_some());
-    assert_eq!(
-        descriptor
-            .annotations
-            .as_ref()
-            .and_then(|value| value.get("readOnlyHint")),
-        Some(&Value::Bool(true))
-    );
-    assert!(descriptor.icons.is_some());
-    assert!(descriptor.metadata.is_some());
+        .expect("reconcile test MCP runtime");
+    (shared, runtime, closed)
+}
 
-    let mut core = crate::TurnEngine::default_provider().expect("core");
-    lease.install(&mut core).expect("install lease");
-    let tool = core
-        .registered_tool("mcp__docs__lookup")
-        .expect("registered MCP tool");
-    assert_eq!(tool.effect(), None, "remote annotation is not trusted");
-    assert!(!tool.supports_parallel_tool_calls());
-    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Exclusive);
+#[tokio::test]
+async fn shared_registry_publishes_tools_with_metadata_and_audit_pipeline() {
+    let (shared, runtime, closed) = shared_runtime(vec![test_tool("lookup")], None).await;
+
+    let snapshot = shared.snapshot();
+    let entry = snapshot
+        .entry("mcp__docs__lookup")
+        .expect("published MCP tool");
+    assert_eq!(entry.metadata().source, ToolSourceId::mcp());
+    let namespace = entry.metadata().namespace.as_ref().expect("namespace");
+    assert_eq!(namespace.name, "mcp_docs");
+    assert!(namespace.description.contains("docs"));
+    // 无显式配置时 readOnlyHint=true 推导 Read；推导出的 Read 工具可 programmatic。
+    assert_eq!(entry.tool().effect(), Some(ToolEffect::Read));
+    assert!(entry.metadata().programmatic_eligible);
+
+    let tool = entry.tool();
+    assert!(tool.supports_parallel_tool_calls());
+    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
     assert_eq!(
         tool.cache_policy(&json!({})),
         crate::tool::cache::ToolCachePolicy::Never
@@ -266,62 +285,64 @@ async fn rmcp_schema_and_structured_result_survive_registered_tool() {
     assert_eq!(audit["result"]["_meta"]["auditId"], "audit-1");
     assert_eq!(audit["result"]["resultType"], "complete");
 
-    drop(lease);
     runtime.shutdown().await;
     wait_for_closed(&closed).await;
 }
 
 #[tokio::test]
-async fn trusted_read_effect_enables_shared_parallel_registered_tool() {
-    let closed = Arc::new(AtomicBool::new(false));
-    let connector = McpConnector::testing([(
-        "docs".to_string(),
-        test_connection(vec![test_tool("lookup")], closed.clone()).await,
-    )]);
-    let runtime = McpRuntime::new(connector).handle();
-    runtime
-        .reconcile(BTreeMap::from([(
-            "docs".to_string(),
-            config("docs", Some(ToolEffect::Read)),
-        )]))
-        .await
-        .expect("reconcile");
-    let lease = runtime.acquire_turn_lease().await.expect("lease");
-    let mut core = crate::TurnEngine::default_provider().expect("core");
-    lease.install(&mut core).expect("install lease");
-    let tool = core
-        .registered_tool("mcp__docs__lookup")
-        .expect("registered MCP tool");
-    assert_eq!(tool.effect(), Some(ToolEffect::Read));
-    assert!(tool.supports_parallel_tool_calls());
-    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
+async fn untrusted_annotations_keep_conservative_defaults() {
+    // 无显式配置且只有 destructiveHint：不映射写 effect，保持 None（保守）。
+    let (shared, runtime, closed) = shared_runtime(
+        vec![annotated_tool(
+            "destructive",
+            ToolAnnotations::new().destructive(true),
+        )],
+        None,
+    )
+    .await;
+
+    let snapshot = shared.snapshot();
+    let entry = snapshot
+        .entry("mcp__docs__destructive")
+        .expect("published MCP tool");
+    assert_eq!(entry.tool().effect(), None);
+    assert!(!entry.metadata().programmatic_eligible);
+    assert!(!entry.tool().supports_parallel_tool_calls());
     assert_eq!(
-        tool.cache_policy(&json!({})),
-        crate::tool::cache::ToolCachePolicy::Never
+        entry.tool().runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Exclusive
     );
-    drop(lease);
+
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
+}
+
+#[tokio::test]
+async fn explicit_server_effect_overrides_remote_hints() {
+    // 无 annotation 的工具 + 显式配置 Read：优先配置。
+    let (shared, runtime, closed) =
+        shared_runtime(vec![plain_tool("configured")], Some(ToolEffect::Read)).await;
+
+    let snapshot = shared.snapshot();
+    let entry = snapshot
+        .entry("mcp__docs__configured")
+        .expect("published MCP tool");
+    assert_eq!(entry.tool().effect(), Some(ToolEffect::Read));
+    assert!(entry.metadata().programmatic_eligible);
+
     runtime.shutdown().await;
     wait_for_closed(&closed).await;
 }
 
 #[tokio::test]
 async fn mcp_error_result_keeps_structured_audit_and_failed_terminal_marker() {
-    let closed = Arc::new(AtomicBool::new(false));
-    let connector = McpConnector::testing([(
-        "docs".to_string(),
-        test_connection(vec![test_tool("fail")], closed.clone()).await,
-    )]);
-    let runtime = McpRuntime::new(connector).handle();
-    runtime
-        .reconcile(BTreeMap::from([("docs".to_string(), config("docs", None))]))
-        .await
-        .expect("reconcile");
-    let lease = runtime.acquire_turn_lease().await.expect("lease");
-    let mut core = crate::TurnEngine::default_provider().expect("core");
-    lease.install(&mut core).expect("install lease");
-    let output = core
-        .registered_tool("mcp__docs__fail")
-        .expect("registered MCP tool")
+    let (shared, runtime, closed) = shared_runtime(vec![test_tool("fail")], None).await;
+
+    let snapshot = shared.snapshot();
+    let output = snapshot
+        .entry("mcp__docs__fail")
+        .expect("published MCP tool")
+        .tool()
         .execute(tool_input(json!({})), test_context())
         .await
         .expect("typed MCP error remains an auditable output");
@@ -335,9 +356,81 @@ async fn mcp_error_result_keeps_structured_audit_and_failed_terminal_marker() {
         audit_metadata(&output.runtime_events)["result"]["structuredContent"]["code"],
         "TEST_FAILURE"
     );
-    drop(lease);
+
     runtime.shutdown().await;
     wait_for_closed(&closed).await;
+}
+
+#[tokio::test]
+async fn resource_facades_are_published_and_use_rmcp_typed_resource_api() {
+    let (shared, runtime, closed) = shared_runtime(vec![test_tool("lookup")], None).await;
+
+    let snapshot = shared.snapshot();
+    let names = snapshot.names();
+    for facade in [
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ] {
+        assert!(names.contains(&facade), "missing {facade} in {names:?}");
+    }
+    let facade = snapshot
+        .entry("read_mcp_resource")
+        .expect("resource façade");
+    assert!(facade.metadata().namespace.is_none());
+    assert!(facade.metadata().programmatic_eligible);
+
+    let output = facade
+        .tool()
+        .execute(
+            tool_input(json!({ "server": "docs", "uri": "mcp://docs/one" })),
+            test_context(),
+        )
+        .await
+        .expect("read resource");
+    let value: Value = serde_json::from_str(&output.description).expect("resource JSON");
+    assert_eq!(value["contents"][0]["text"], "resource body");
+
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
+}
+
+#[tokio::test]
+async fn generation_replacement_republishes_the_shared_registry() {
+    let first_closed = Arc::new(AtomicBool::new(false));
+    let second_closed = Arc::new(AtomicBool::new(false));
+    let connector = McpConnector::testing([
+        (
+            "docs".to_string(),
+            test_connection(vec![test_tool("first")], first_closed.clone()).await,
+        ),
+        (
+            "docs".to_string(),
+            test_connection(vec![test_tool("second")], second_closed.clone()).await,
+        ),
+    ]);
+    let shared = Arc::new(ToolRegistry::new());
+    let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
+    let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
+    runtime.reconcile(servers.clone()).await.expect("first");
+
+    let first = shared.snapshot();
+    assert!(first.entry("mcp__docs__first").is_some());
+    assert!(first.entry("mcp__docs__second").is_none());
+    let revision_after_first = first.revision.0;
+
+    runtime
+        .reset(McpResetScope::All, servers)
+        .await
+        .expect("second");
+    let second = shared.snapshot();
+    assert!(second.entry("mcp__docs__second").is_some());
+    assert!(second.entry("mcp__docs__first").is_none());
+    assert!(second.revision.0 > revision_after_first);
+
+    runtime.shutdown().await;
+    wait_for_closed(&first_closed).await;
+    wait_for_closed(&second_closed).await;
 }
 
 #[tokio::test]
@@ -354,7 +447,7 @@ async fn retired_generation_closes_only_after_last_lease_releases() {
             test_connection(vec![test_tool("second")], second_closed.clone()).await,
         ),
     ]);
-    let runtime = McpRuntime::new(connector).handle();
+    let runtime = McpRuntime::new(connector, None).handle();
     let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
     runtime.reconcile(servers.clone()).await.expect("first");
     let first = runtime.acquire_turn_lease().await.expect("first lease");
@@ -373,37 +466,6 @@ async fn retired_generation_closes_only_after_last_lease_releases() {
     drop(second);
     runtime.shutdown().await;
     wait_for_closed(&second_closed).await;
-}
-
-#[tokio::test]
-async fn resource_facades_use_rmcp_typed_resource_api() {
-    let closed = Arc::new(AtomicBool::new(false));
-    let connector = McpConnector::testing([(
-        "docs".to_string(),
-        test_connection(vec![test_tool("lookup")], closed.clone()).await,
-    )]);
-    let runtime = McpRuntime::new(connector).handle();
-    runtime
-        .reconcile(BTreeMap::from([("docs".to_string(), config("docs", None))]))
-        .await
-        .expect("reconcile");
-    let lease = runtime.acquire_turn_lease().await.expect("lease");
-    let mut core = crate::TurnEngine::default_provider().expect("core");
-    lease.install(&mut core).expect("install lease");
-    let output = core
-        .registered_tool("read_mcp_resource")
-        .expect("resource façade")
-        .execute(
-            tool_input(json!({ "server": "docs", "uri": "mcp://docs/one" })),
-            test_context(),
-        )
-        .await
-        .expect("read resource");
-    let value: Value = serde_json::from_str(&output.description).expect("resource JSON");
-    assert_eq!(value["contents"][0]["text"], "resource body");
-    drop(lease);
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
 }
 
 fn config(server_id: &str, effect: Option<ToolEffect>) -> EffectiveMcpServerConfig {

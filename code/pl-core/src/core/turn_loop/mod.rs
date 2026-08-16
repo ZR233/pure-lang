@@ -1,6 +1,9 @@
 use pl_model::{CompletionRequest, ModelProvider};
-use pl_protocol::{ErrorSeverity, Result};
+use pl_protocol::{
+    ErrorSeverity, ModelContextItem, ResponsesContextItem, ResponsesContextItemKind, Result,
+};
 use pl_trace::TracePartStatus;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 mod attachments;
@@ -25,10 +28,11 @@ use crate::context_compaction::{
 };
 use crate::runtime_usage::{InferenceBillingInput, inference_billing_record, token_usage_snapshot};
 use crate::session::AgentSession;
+use crate::tool::{ClientToolSearchResolution, ToolInventory, orchestrate_tool_inventory};
 use crate::trace::TraceRecorder;
 use crate::turn::{BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult};
 use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle};
-use crate::{PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
+use crate::{PromptCacheInput, prepare_prompt_context};
 
 use super::TurnEngine;
 use super::permission::cancellation_reason;
@@ -62,12 +66,13 @@ pub(super) async fn run_turn_with_trace(
     let model_capabilities = provider.effective_model_capabilities(&model);
     let orchestration_options =
         orchestration::options(provider.info(), &model_info, &model_capabilities);
-    let tool_schemas = stable_tool_schemas(match options.execution_policy.as_ref() {
-        Some(policy) => core
-            .tools
-            .schemas_for_policy_with_orchestration(policy, orchestration_options),
-        None => core.tools.schemas_with_orchestration(orchestration_options),
-    });
+    let lease = core.acquire_tool_lease()?;
+    let tool_inventory = orchestrate_tool_inventory(
+        lease.entries(),
+        options.execution_policy.as_ref(),
+        orchestration_options,
+    );
+    let tool_schemas = tool_inventory.request_schemas().to_vec();
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
@@ -166,6 +171,8 @@ pub(super) async fn run_turn_with_trace(
                 working_context: Some(turn_context.model_context()),
                 fixed_prefix_section_hashes: instruction_bundle.prefix_section_hashes.clone(),
                 tools: &iteration_tools,
+                tool_catalog_hash: tool_inventory.catalog_fingerprint(),
+                registry_revision: Some(lease.revision().0),
                 tool_choice: "auto",
                 parallel_tool_calls,
                 reasoning: reasoning.as_ref(),
@@ -274,6 +281,8 @@ pub(super) async fn run_turn_with_trace(
                                 .prefix_section_hashes
                                 .clone(),
                             tools: &iteration_tools,
+                            tool_catalog_hash: tool_inventory.catalog_fingerprint(),
+                            registry_revision: Some(lease.revision().0),
                             tool_choice: "auto",
                             parallel_tool_calls,
                             reasoning: reasoning.as_ref(),
@@ -479,8 +488,51 @@ pub(super) async fn run_turn_with_trace(
             .is_some_and(|limit| response_prompt_tokens >= limit || response_total_tokens >= limit);
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
-        let tool_calls = response.tool_calls;
+        let mut tool_calls = response.tool_calls;
+        let client_search = collect_client_tool_search(
+            &mut tool_calls,
+            &response.responses_context_items,
+            &tool_inventory,
+            session,
+        )?;
         session.push_responses_context_items(response.responses_context_items);
+        if !client_search.resolution.outputs.is_empty() {
+            if !tool_calls.is_empty() {
+                return Err(pl_protocol::PureError::LlmError(
+                    "provider response protocol error: client tool_search cannot be mixed with ordinary tool calls"
+                        .to_string(),
+                ));
+            }
+            apply_client_tool_search(
+                session,
+                &client_search,
+                &mut budget_tracker,
+                &mut billing.orchestration,
+            );
+            if !content.is_empty() {
+                session.push_assistant_response(content.clone(), reasoning_content.clone());
+                last_content = content;
+                last_reasoning_content = reasoning_content;
+            }
+            if response_reached_auto_compact_limit {
+                provider_prompt_tokens_for_compaction = Some(response_total_tokens);
+            }
+            let loaded = client_search.resolution.loaded_tool_count;
+            progress.tool_detail(format!(
+                "工具搜索已加载 {loaded} 个候选 schema，准备继续调用模型。"
+            ));
+            session_message_count = session.len();
+            safe_message_count = session_message_count;
+            inference::record(
+                &options,
+                session,
+                recorder,
+                inference::from_billing(active_subagent.as_ref(), billing),
+            )
+            .await?;
+            iteration = iteration.saturating_add(1);
+            continue;
+        }
 
         total_usage.prompt_tokens += response.usage.prompt_tokens;
         total_usage.completion_tokens += response.usage.completion_tokens;
@@ -572,6 +624,7 @@ pub(super) async fn run_turn_with_trace(
             recorder,
             ToolExecutionContext {
                 core,
+                lease: lease.clone(),
                 options: &options,
                 session_id: &turn_id,
                 workspace: workspace.clone(),
@@ -786,4 +839,140 @@ pub(super) async fn run_turn_with_trace(
             inference_count,
         },
     ))
+}
+
+/// 本轮 provider 响应中的 client tool search 调用集合。
+struct ClientToolSearchBatch {
+    /// 由 function call 合成的有序 `tool_search_call` 上下文项。
+    call_items: Vec<ResponsesContextItem>,
+    resolution: ClientToolSearchResolution,
+}
+
+/// 汇总客户端 tool search 调用。
+///
+/// `tool_search` 以普通 function 工具形式发送，模型调用先于普通 dispatch 被拦截，
+/// 在冻结 catalog 上检索并产出配对的 `tool_search_output`；provider 原生返回的
+/// `tool_search_call`（execution=client）项同样处理。session 中已有配对 output 的
+/// call_id 不重复解析，保证 HTTP/WS/恢复回放幂等。
+fn collect_client_tool_search(
+    tool_calls: &mut Vec<pl_model::ToolCall>,
+    response_items: &[ResponsesContextItem],
+    inventory: &ToolInventory,
+    session: &AgentSession,
+) -> Result<ClientToolSearchBatch> {
+    let paired = paired_tool_search_call_ids(session);
+    let mut calls = Vec::new();
+    let mut call_items = Vec::new();
+    for item in response_items {
+        if item.kind != ResponsesContextItemKind::ToolSearchCall {
+            continue;
+        }
+        if item
+            .value
+            .get("execution")
+            .and_then(serde_json::Value::as_str)
+            != Some("client")
+        {
+            continue;
+        }
+        let call_id = item
+            .value
+            .get("call_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if !call_id.is_empty() && paired.contains(&call_id) {
+            continue;
+        }
+        calls.push(item.clone());
+    }
+    if inventory.catalog().is_some() {
+        tool_calls.retain(|tool_call| {
+            if tool_call.name != "tool_search" {
+                return true;
+            }
+            let call_id = tool_call.stable_call_id().to_string();
+            if call_id.is_empty() || paired.contains(&call_id) {
+                return false;
+            }
+            let arguments = match &tool_call.payload {
+                pl_model::ToolCallPayload::Function { arguments } => arguments.clone(),
+                pl_model::ToolCallPayload::Custom { input } => {
+                    serde_json::json!({ "input": input })
+                }
+            };
+            let call_item = ResponsesContextItem {
+                kind: ResponsesContextItemKind::ToolSearchCall,
+                value: serde_json::json!({
+                    "type": "tool_search_call",
+                    "call_id": call_id,
+                    "execution": "client",
+                    "arguments": arguments,
+                }),
+            };
+            calls.push(call_item.clone());
+            call_items.push(call_item);
+            false
+        });
+    }
+    let resolution = if calls.is_empty() {
+        ClientToolSearchResolution::default()
+    } else {
+        inventory.resolve_client_search_calls(&calls)?
+    };
+    Ok(ClientToolSearchBatch {
+        call_items,
+        resolution,
+    })
+}
+
+/// session 中已存在 `tool_search_output` 的 call_id 集合。
+fn paired_tool_search_call_ids(session: &AgentSession) -> BTreeSet<String> {
+    session
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            ModelContextItem::Responses {
+                item:
+                    ResponsesContextItem {
+                        kind: ResponsesContextItemKind::ToolSearchOutput,
+                        value,
+                    },
+            } => value
+                .get("call_id")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            _ => None,
+        })
+        .collect()
+}
+
+/// 把 client tool search 的 call/output 项写入 canonical context 并记录指标。
+fn apply_client_tool_search(
+    session: &mut AgentSession,
+    batch: &ClientToolSearchBatch,
+    budget_tracker: &mut BudgetTracker,
+    orchestration: &mut pl_protocol::InferenceOrchestrationMetrics,
+) {
+    let output_count = batch.resolution.outputs.len();
+    for _ in 0..output_count {
+        budget_tracker.record_tool_call("tool_search");
+    }
+    let output_texts = batch
+        .resolution
+        .outputs
+        .iter()
+        .map(|item| item.value.to_string())
+        .collect::<Vec<_>>();
+    let estimated_tokens =
+        crate::tool::estimate_tool_result_tokens(output_texts.iter().map(String::as_str));
+    session.push_responses_context_items(batch.call_items.clone());
+    session.push_responses_context_items(batch.resolution.outputs.clone());
+    orchestration.tool_search_calls = orchestration
+        .tool_search_calls
+        .saturating_add(output_count as u64);
+    orchestration.tool_search_loaded_tools = orchestration
+        .tool_search_loaded_tools
+        .saturating_add(batch.resolution.loaded_tool_count);
+    orchestration.tool_result_estimated_tokens = estimated_tokens;
 }

@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 #[cfg(test)]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
@@ -24,7 +25,9 @@ use crate::permission::parse_reviewer_decision;
 use crate::session::AgentSession;
 use crate::tool::{
     ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
-    SkillManageTool, SkillViewTool, SkillsListTool, SubagentContext, ToolContext, ToolRegistry,
+    NamespaceDescriptor, PublishGuard, SkillManageTool, SkillViewTool, SkillsListTool,
+    SubagentContext, ToolContext, ToolEntry, ToolOrchestrationOptions, ToolRegistry, ToolSourceId,
+    ToolSourceMetadata, TurnToolLease, orchestrate_tool_inventory,
 };
 #[cfg(test)]
 use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
@@ -79,7 +82,14 @@ pub struct TurnEngine {
     runtime_options: CoreRuntimeOptions,
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
+    /// 引擎本地注册表：builtin/host/skills/lsp/collaboration 等来源发布于此，
+    /// 引擎持有发布 guard。
     tools: ToolRegistry,
+    /// 共享注册表（如 MCP worker 代际发布）；Turn lease 与本地注册表合并。
+    shared_tools: Option<Arc<ToolRegistry>>,
+    /// 引擎本地各来源当前的完整条目集合；发布 guard 与之一一对应。
+    local_sources: BTreeMap<ToolSourceId, Vec<ToolEntry>>,
+    tool_guards: BTreeMap<ToolSourceId, PublishGuard>,
 }
 
 impl TurnEngine {
@@ -99,6 +109,9 @@ impl TurnEngine {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             tools: ToolRegistry::new(),
+            shared_tools: None,
+            local_sources: BTreeMap::new(),
+            tool_guards: BTreeMap::new(),
         }
     }
 
@@ -118,6 +131,9 @@ impl TurnEngine {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             tools: ToolRegistry::new(),
+            shared_tools: None,
+            local_sources: BTreeMap::new(),
+            tool_guards: BTreeMap::new(),
         }
     }
 
@@ -158,23 +174,72 @@ impl TurnEngine {
         }
     }
 
-    /// 注册一个工具。
-    pub fn register_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
-        self.tools.register(tool);
+    /// 挂接共享工具注册表（如 MCP）；Turn lease 会与引擎本地注册表合并。
+    pub fn with_shared_tool_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
+        self.shared_tools = Some(registry);
+        self
     }
 
-    /// 返回当前 Turn 可见的已注册工具名。
-    pub fn tool_names(&self) -> Vec<String> {
-        self.tools.names().into_iter().map(str::to_string).collect()
+    /// 整组发布一个本地来源的工具（替换该来源旧代）。
+    ///
+    /// # Errors
+    ///
+    /// 条目校验失败（名称冲突、空名）时返回 `ConfigError`，旧代保留。
+    pub fn register_source_tools(
+        &mut self,
+        source: ToolSourceId,
+        entries: Vec<ToolEntry>,
+    ) -> Result<()> {
+        let guard = self.tools.publish(source.clone(), entries.clone())?;
+        self.local_sources.insert(source.clone(), entries);
+        self.tool_guards.insert(source, guard);
+        Ok(())
     }
 
-    pub(crate) fn has_tool(&self, name: &str) -> bool {
-        self.tools.get(name).is_some()
+    /// 向一个本地来源追加条目（例如 web_search 加入 builtin 来源）。
+    ///
+    /// # Errors
+    ///
+    /// 追加后条目校验失败时返回 `ConfigError`，旧代保留。
+    pub fn extend_source_tools(
+        &mut self,
+        source: ToolSourceId,
+        entries: Vec<ToolEntry>,
+    ) -> Result<()> {
+        let mut combined = self.local_sources.get(&source).cloned().unwrap_or_default();
+        combined.extend(entries);
+        self.register_source_tools(source, combined)
     }
 
+    /// 测试专用：向 host 来源追加单个工具，等价于旧 `register_tool`。
     #[cfg(test)]
-    pub(crate) fn registered_tool(&self, name: &str) -> Option<&dyn crate::tool::Tool> {
-        self.tools.get(name)
+    pub(crate) fn register_test_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
+        let source = ToolSourceId::new("host");
+        let entry = ToolEntry::new(tool, ToolSourceMetadata::new(source.clone()));
+        let _ = self.extend_source_tools(source, vec![entry]);
+    }
+
+    /// 测试装配用：直接挂接共享工具注册表。
+    #[cfg(test)]
+    pub(crate) fn set_shared_tool_registry(&mut self, registry: std::sync::Arc<ToolRegistry>) {
+        self.shared_tools = Some(registry);
+    }
+
+    /// 冻结一次 Turn 的工具 lease：本地与共享注册表快照的合并结果。
+    pub(crate) fn acquire_tool_lease(&self) -> Result<TurnToolLease> {
+        TurnToolLease::merge(
+            self.tools.snapshot(),
+            self.shared_tools
+                .as_ref()
+                .map(|registry| registry.snapshot()),
+        )
+    }
+
+    /// 返回当前 Turn 可见的工具名（本地与共享注册表合并）。
+    pub fn tool_names(&self) -> Vec<String> {
+        self.acquire_tool_lease()
+            .map(|lease| lease.names().into_iter().map(str::to_string).collect())
+            .unwrap_or_default()
     }
 
     /// 注册默认工具集合。
@@ -221,7 +286,7 @@ impl TurnEngine {
             .await;
     }
 
-    /// 注册 pl-core 提供的通用 git 工具集合。
+    /// 注册 pl-core 提供的通用 git 工具集合（builtin 来源，git 命名空间）。
     pub fn register_git_tools<B, P>(
         &mut self,
         config: GitWorkspaceConfig,
@@ -231,18 +296,8 @@ impl TurnEngine {
         B: ExecutionBackend + 'static,
         P: GitCredentialProvider + 'static,
     {
-        for kind in GitToolKind::all() {
-            self.register_tool(GitTool::new(
-                *kind,
-                config.clone(),
-                backend.clone(),
-                credential_provider.clone(),
-            ));
-        }
-    }
-
-    pub(crate) fn mcp_tools_enabled(&self) -> bool {
-        self.tool_capabilities.mcp
+        let entries = git_tool_entries(config, backend, credential_provider);
+        let _ = self.extend_source_tools(ToolSourceId::builtin(), entries);
     }
 
     pub fn register_skill_tools(
@@ -263,15 +318,32 @@ impl TurnEngine {
         if !config.enabled {
             return;
         }
-        if let Some(catalog) = self.skill_catalog.clone() {
-            self.register_tool(SkillsListTool::from_catalog(catalog.clone()));
-            self.register_tool(SkillViewTool::from_catalog(catalog.clone()));
-            self.register_tool(SkillManageTool::from_catalog(catalog));
+        let namespace = Some(NamespaceDescriptor::new(
+            "skills",
+            "Skill discovery, reading, and management tools.",
+        ));
+        let metadata = |programmatic: bool| ToolSourceMetadata {
+            source: ToolSourceId::builtin(),
+            namespace: namespace.clone(),
+            programmatic_eligible: programmatic,
+        };
+        let entries = if let Some(catalog) = self.skill_catalog.clone() {
+            vec![
+                ToolEntry::new(
+                    SkillsListTool::from_catalog(catalog.clone()),
+                    metadata(true),
+                ),
+                ToolEntry::new(SkillViewTool::from_catalog(catalog.clone()), metadata(true)),
+                ToolEntry::new(SkillManageTool::from_catalog(catalog), metadata(false)),
+            ]
         } else {
-            self.register_tool(SkillsListTool::new(config.clone()));
-            self.register_tool(SkillViewTool::new(config.clone()));
-            self.register_tool(SkillManageTool::new(config));
-        }
+            vec![
+                ToolEntry::new(SkillsListTool::new(config.clone()), metadata(true)),
+                ToolEntry::new(SkillViewTool::new(config.clone()), metadata(true)),
+                ToolEntry::new(SkillManageTool::new(config), metadata(false)),
+            ]
+        };
+        let _ = self.extend_source_tools(ToolSourceId::builtin(), entries);
     }
 
     async fn review_tool_call_with_ai(
@@ -436,10 +508,14 @@ impl TurnEngine {
             }
         };
         let bundle = snapshot.to_bundle();
-        let tools = request.execution_policy.as_ref().map_or_else(
-            || self.tools.schemas(),
-            |policy| self.tools.schemas_for_policy(policy),
-        );
+        let lease = self.acquire_tool_lease()?;
+        let tools = orchestrate_tool_inventory(
+            lease.entries(),
+            request.execution_policy.as_ref(),
+            ToolOrchestrationOptions::default(),
+        )
+        .request_schemas()
+        .to_vec();
         let capabilities = self.provider.effective_model_capabilities(&model);
         let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
         let reasoning = self.effort.as_ref().map(|effort| ReasoningConfig {
@@ -498,6 +574,43 @@ impl TurnEngine {
             CompactionOutcome::Compacted { snapshot, .. } => Some(snapshot),
         })
     }
+}
+
+/// 构造 builtin 来源的 git 工具条目（git 命名空间）。
+fn git_tool_entries<B, P>(
+    config: GitWorkspaceConfig,
+    backend: std::sync::Arc<B>,
+    credential_provider: std::sync::Arc<P>,
+) -> Vec<ToolEntry>
+where
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
+{
+    let namespace = Some(NamespaceDescriptor::new(
+        "git",
+        "Git inspection and repository management tools.",
+    ));
+    GitToolKind::all()
+        .iter()
+        .copied()
+        .map(|kind| {
+            let programmatic = matches!(kind.effect(), crate::turn::ToolEffect::Read);
+            let metadata = ToolSourceMetadata {
+                source: ToolSourceId::builtin(),
+                namespace: namespace.clone(),
+                programmatic_eligible: programmatic,
+            };
+            ToolEntry::new(
+                GitTool::new(
+                    kind,
+                    config.clone(),
+                    backend.clone(),
+                    credential_provider.clone(),
+                ),
+                metadata,
+            )
+        })
+        .collect()
 }
 
 // Re-export for tests

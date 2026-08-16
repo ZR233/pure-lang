@@ -9,6 +9,7 @@ use crate::tool::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 #[derive(Debug)]
 pub struct StatPathTool;
@@ -28,6 +29,14 @@ impl Tool for StatPathTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         true
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
+    }
+
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> crate::tool::cache::ToolCachePolicy {
+        crate::tool::cache::ToolCachePolicy::UntilWorkspaceMutation
     }
 
     fn execute<'a>(

@@ -195,17 +195,11 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn budget_timing(&self) -> ToolBudgetTiming {
         ToolBudgetTiming::Count
     }
-    fn effect(&self) -> Option<ToolEffect> {
-        ToolEffect::for_builtin_name(self.name())
-    }
+    /// 声明工具对运行环境的副作用类别；无法声明可信 effect 的工具返回 `None`
+    /// （独占执行、不可并行、不可 programmatic、结果不缓存）。
+    fn effect(&self) -> Option<ToolEffect>;
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        match self.name() {
-            "read_file" | "list_files" | "stat_path" | "skills_list" | "skill_view"
-            | "git_workspace_info" | "git_status" | "git_diff" => {
-                ToolCachePolicy::UntilWorkspaceMutation
-            }
-            _ => ToolCachePolicy::Never,
-        }
+        ToolCachePolicy::Never
     }
     fn invalidates_cache(&self, _arguments: &serde_json::Value) -> bool {
         false

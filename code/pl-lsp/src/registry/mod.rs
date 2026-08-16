@@ -12,6 +12,7 @@ use crate::status::LspClientRuntimeStatus;
 use crate::types::{
     LanguageToolInfo, LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery,
     LspQueryOperation, LspQueryResult, LspResult, LspScope, LspServerSnapshot,
+    LspWorkspaceCapabilities, LspWorkspaceServerCapabilities,
 };
 use crate::uri::path_to_file_uri;
 
@@ -301,6 +302,39 @@ impl LspRuntimeRegistry {
             left.language_id == right.language_id && left.server_id == right.server_id
         });
         result
+    }
+
+    /// 返回一个 workspace 当前 server 的能力投影（`lsp_capabilities` 工具输入）。
+    pub async fn capabilities_for_workspace(
+        &self,
+        workspace_root: impl AsRef<Path>,
+    ) -> LspWorkspaceCapabilities {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let state = self.state.lock().await;
+        let servers = state
+            .workspaces
+            .get(&workspace_root)
+            .map(|workspace| {
+                workspace
+                    .servers
+                    .values()
+                    .map(|server| LspWorkspaceServerCapabilities {
+                        id: server.definition.id.clone(),
+                        display_name: server.definition.display_name.clone(),
+                        language_ids: server.definition.language_ids.clone(),
+                        operations: LspQueryOperation::all()
+                            .iter()
+                            .copied()
+                            .map(LspQueryOperation::as_str)
+                            .map(str::to_string)
+                            .collect(),
+                        availability: server.availability_kind.as_str().to_string(),
+                        ready: server.availability_kind == LspAvailabilityKind::Available,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        LspWorkspaceCapabilities { servers }
     }
 
     pub async fn available_languages_for_workspace(

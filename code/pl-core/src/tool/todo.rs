@@ -11,6 +11,7 @@ use super::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
     deserialize_tool_input,
 };
+use crate::turn::ToolEffect;
 
 pub const TOOL_UPDATE_TODO_LIST: &str = "update_todo_list";
 
@@ -72,6 +73,10 @@ impl Tool for TodoListTool {
 
     fn input_schema(&self) -> serde_json::Value {
         FunctionToolDefinition::<TodoListInput>::new(self.name(), self.description()).input_schema()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        Some(ToolEffect::Read)
     }
 
     fn execute<'a>(

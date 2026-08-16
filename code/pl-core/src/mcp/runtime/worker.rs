@@ -12,11 +12,12 @@ use serde_json::{Map, Value};
 use tokio::sync::{Notify, broadcast, mpsc};
 
 use crate::config::{EffectiveMcpServerConfig, McpServerConfig, McpServerSourceKind};
+use crate::tool::{PublishGuard, ToolRegistry, ToolSourceId};
 use crate::turn::ToolEffect;
 
 use super::{
-    LeaseSnapshot, McpGeneration, McpResetScope, McpRuntimeToolDescriptor, ResourceOperation,
-    RuntimeCommand,
+    LeaseSnapshot, McpGeneration, McpResetScope, McpRuntimeToolDescriptor, McpToolSafetyHints,
+    McpTurnLease, ResourceOperation, RuntimeCommand,
 };
 use crate::mcp::health::{McpAvailabilityKind, McpAvailabilitySnapshot};
 use crate::mcp::naming::assign_exposed_tool_names;
@@ -47,8 +48,9 @@ pub(super) async fn run(
     receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
     commands: mpsc::UnboundedSender<RuntimeCommand>,
     updates: broadcast::Sender<()>,
+    shared_registry: Option<Arc<ToolRegistry>>,
 ) {
-    RuntimeWorker::new(connector, receiver, commands, updates)
+    RuntimeWorker::new(connector, receiver, commands, updates, shared_registry)
         .run()
         .await;
 }
@@ -63,6 +65,11 @@ struct RuntimeWorker {
     next_generation: u64,
     /// preparation 完成信号，用于 `AcquireLease` 的有界等待。
     preparation_notify: Arc<Notify>,
+    /// 共享工具注册表；generation 激活或 server 可用性变化后整组发布。
+    shared_registry: Option<Arc<ToolRegistry>>,
+    /// 当前发布的 master lease：钉扎 generation，条目 handler 持有它的 clone。
+    published_lease: Option<McpTurnLease>,
+    publish_guard: Option<PublishGuard>,
 }
 
 impl RuntimeWorker {
@@ -71,6 +78,7 @@ impl RuntimeWorker {
         receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
         commands: mpsc::UnboundedSender<RuntimeCommand>,
         updates: broadcast::Sender<()>,
+        shared_registry: Option<Arc<ToolRegistry>>,
     ) -> Self {
         let current = McpGeneration(0);
         Self {
@@ -84,6 +92,9 @@ impl RuntimeWorker {
             current,
             next_generation: 1,
             preparation_notify: Arc::new(Notify::new()),
+            shared_registry,
+            published_lease: None,
+            publish_guard: None,
         }
     }
 
@@ -249,6 +260,7 @@ impl RuntimeWorker {
         }
         self.current = next.id;
         self.generations.insert(next.id, next);
+        self.publish_current_generation();
         self.cleanup_retired().await;
         self.emit_update();
     }
@@ -315,6 +327,49 @@ impl RuntimeWorker {
             tools,
             server_ids,
         })
+    }
+
+    /// 把当前 generation 的全部工具与 resource façade 整组发布到共享注册表。
+    ///
+    /// 发布持有 master lease：旧 Turn 持有旧代条目时 generation 不会被回收；
+    /// 新一代发布后旧 master lease drop，旧 generation 等最后一个引用释放。
+    fn publish_current_generation(&mut self) {
+        let Some(registry) = self.shared_registry.clone() else {
+            return;
+        };
+        let snapshot = match self.acquire_lease() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(target: "pl_core::mcp", error = %error, "failed to freeze MCP lease for publication");
+                return;
+            }
+        };
+        let lease = McpTurnLease {
+            generation: snapshot.generation,
+            tools: Arc::new(snapshot.tools),
+            server_ids: Arc::new(snapshot.server_ids),
+            guard: Arc::new(super::McpLeaseGuard {
+                generation: snapshot.generation,
+                handle: self.handle_clone(),
+            }),
+        };
+        let entries = lease.registry_entries();
+        match registry.publish(ToolSourceId::mcp(), entries) {
+            Ok(guard) => {
+                self.published_lease = Some(lease);
+                self.publish_guard = Some(guard);
+            }
+            Err(error) => {
+                tracing::warn!(target: "pl_core::mcp", error = %error, "failed to publish MCP tools to shared registry");
+            }
+        }
+    }
+
+    fn handle_clone(&self) -> super::McpRuntimeHandle {
+        super::McpRuntimeHandle {
+            commands: self.commands.clone(),
+            updates: self.updates.clone(),
+        }
     }
 
     async fn release_lease(&mut self, generation: McpGeneration) {
@@ -515,6 +570,7 @@ impl RuntimeWorker {
                 }
             }
         }
+        self.publish_current_generation();
         self.emit_update();
     }
 
@@ -538,6 +594,8 @@ impl RuntimeWorker {
     }
 
     async fn shutdown(&mut self) {
+        self.published_lease = None;
+        self.publish_guard = None;
         let generations = std::mem::take(&mut self.generations);
         let mut sessions = Vec::new();
         let mut seen = BTreeSet::new();
@@ -713,24 +771,34 @@ fn assign_tool_descriptors(servers: &mut BTreeMap<String, RuntimeServer>) {
         server.tools = server
             .definitions
             .iter()
-            .map(|definition| McpRuntimeToolDescriptor {
-                server_id: server.descriptor.id.clone(),
-                raw_name: definition.name.to_string(),
-                exposed_name: names.next().expect("every MCP tool receives a name"),
-                description: definition
-                    .description
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_string(),
-                input_schema: Value::Object(definition.input_schema.as_ref().clone()),
-                output_schema: definition
-                    .output_schema
-                    .as_ref()
-                    .map(|schema| Value::Object(schema.as_ref().clone())),
-                annotations: serialize_optional(&definition.annotations),
-                icons: serialize_optional(&definition.icons),
-                metadata: serialize_optional(&definition.meta),
-                effect: server.tool_effect,
+            .map(|definition| {
+                let annotations = serialize_optional(&definition.annotations);
+                let safety_hints = McpToolSafetyHints::parse(annotations.as_ref());
+                // server 配置显式声明的 effect 优先；否则只有 readOnlyHint=true
+                // 推导为 Read。destructiveHint 不映射写 effect，保持保守 None。
+                let effect = server.tool_effect.or({
+                    (safety_hints.read_only_hint == Some(true)).then_some(ToolEffect::Read)
+                });
+                McpRuntimeToolDescriptor {
+                    server_id: server.descriptor.id.clone(),
+                    raw_name: definition.name.to_string(),
+                    exposed_name: names.next().expect("every MCP tool receives a name"),
+                    description: definition
+                        .description
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_string(),
+                    input_schema: Value::Object(definition.input_schema.as_ref().clone()),
+                    output_schema: definition
+                        .output_schema
+                        .as_ref()
+                        .map(|schema| Value::Object(schema.as_ref().clone())),
+                    annotations,
+                    icons: serialize_optional(&definition.icons),
+                    metadata: serialize_optional(&definition.meta),
+                    safety_hints,
+                    effect,
+                }
             })
             .collect();
     }

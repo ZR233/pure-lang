@@ -138,6 +138,22 @@ pub enum LspQueryOperation {
 }
 
 impl LspQueryOperation {
+    /// 全部受支持的查询操作；`lsp_capabilities` 与输入校验共用。
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::GoToDefinition,
+            Self::FindReferences,
+            Self::Hover,
+            Self::DocumentSymbol,
+            Self::WorkspaceSymbol,
+            Self::GoToImplementation,
+            Self::PrepareCallHierarchy,
+            Self::IncomingCalls,
+            Self::OutgoingCalls,
+            Self::Diagnostics,
+        ]
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::GoToDefinition => "goToDefinition",
@@ -207,6 +223,30 @@ impl LspQueryResult {
             file_count: None,
         }
     }
+}
+
+/// 一个 workspace 当前 LSP server 的能力投影。
+///
+/// 由 `LspRuntimeRegistry::capabilities_for_workspace` 生成；`lsp_capabilities`
+/// 工具把它直接返回给模型，帮助其按 languageId 路由 `lsp_query`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LspWorkspaceCapabilities {
+    pub servers: Vec<LspWorkspaceServerCapabilities>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspWorkspaceServerCapabilities {
+    pub id: String,
+    pub display_name: String,
+    pub language_ids: Vec<String>,
+    /// 该 server 支持的 `lsp_query` 操作名（definition/references/...）。
+    pub operations: Vec<String>,
+    /// availability 标签（available/unavailable/...），仅用于诊断展示。
+    pub availability: String,
+    /// server 是否处于可查询状态。
+    pub ready: bool,
 }
 
 /// 描述一个可注册为工具的语言 LSP 信息。
