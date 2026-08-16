@@ -64,6 +64,10 @@ StudioReduceResult reduceStudioEvent(
 ///
 /// Subscription generation checks belong to the controller. Once a snapshot
 /// reaches this reducer it wins over every locally accumulated delta.
+/// revision-gap enforcement keeps local state at revision N identical to the
+/// canonical N, so an equal-revision snapshot keeps the workspace instance
+/// and only resolves the subscription sync state back to ready — that is what
+/// unblocks the timeline after switching to an already-resident Thread.
 StudioState applyThreadSnapshot(
   StudioState current,
   ThreadWorkspace workspace,
@@ -71,8 +75,11 @@ StudioState applyThreadSnapshot(
   final threadId = workspace.thread.id;
   if (threadId.isEmpty) return current;
   final previous = current.workspacesByThread[threadId];
-  if (previous != null && workspace.revision <= previous.revision) {
-    return current;
+  if (previous != null) {
+    if (workspace.revision < previous.revision) return current;
+    if (workspace.revision == previous.revision) {
+      return _resolveWorkspaceSyncReady(current, threadId);
+    }
   }
   final directoryThread = current.threads
       .where((thread) => thread.id == threadId)
@@ -90,6 +97,17 @@ StudioState applyThreadSnapshot(
   return current.copyWith(
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
+  );
+}
+
+StudioState _resolveWorkspaceSyncReady(StudioState state, String threadId) {
+  final ui = state.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  if (ui.syncState == AgentWorkspaceSyncState.ready) return state;
+  return state.copyWith(
+    workspaceUiByThread: {
+      ...state.workspaceUiByThread,
+      threadId: ui.copyWith(syncState: AgentWorkspaceSyncState.ready),
+    },
   );
 }
 

@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pure_studio/src/app/pure_studio_app.dart';
+import 'package:pure_studio/src/data/frb/studio_api.dart';
+import 'package:pure_studio/src/data/repositories/studio_repository.dart';
 
 void main() {
   testWidgets('desktop exit waits for one shared runtime shutdown', (
@@ -12,12 +15,15 @@ void main() {
     final shutdown = Completer<void>();
     var shutdownCalls = 0;
     await tester.pumpWidget(
-      StudioLifecycleCoordinator(
-        shutdown: () {
-          shutdownCalls += 1;
-          return shutdown.future;
-        },
-        child: const SizedBox(),
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(DemoStudioApi())],
+        child: StudioLifecycleCoordinator(
+          shutdown: () {
+            shutdownCalls += 1;
+            return shutdown.future;
+          },
+          child: const SizedBox(),
+        ),
       ),
     );
 

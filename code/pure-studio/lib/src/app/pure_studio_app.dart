@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/frb/studio_api.dart';
 import '../data/repositories/studio_api_provider.dart';
 import '../features/settings/settings.dart';
 import '../features/shell/studio_shell.dart';
@@ -67,11 +68,16 @@ class _StudioLifecycleCoordinatorState
     extends ConsumerState<StudioLifecycleCoordinator>
     with WidgetsBindingObserver {
   Future<void>? _shutdownFuture;
+  late final StudioApi _api;
+  late final StudioShutdownProgressState _shutdownProgress;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // dispose 后 ConsumerState.ref 不可再用，关机依赖必须在挂载期间取得。
+    _api = ref.read(studioApiProvider);
+    _shutdownProgress = ref.read(studioShutdownProgressStateProvider.notifier);
   }
 
   @override
@@ -90,7 +96,9 @@ class _StudioLifecycleCoordinatorState
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    unawaited(_shutdown());
+    // 卸载兜底：此时 overlay 与 provider container 均已销毁，只执行关机，
+    // 不再向已销毁的 progress notifier 写状态。
+    unawaited(_shutdownFuture ??= _disposeShutdown());
     super.dispose();
   }
 
@@ -101,9 +109,13 @@ class _StudioLifecycleCoordinatorState
   }
 
   Future<void> _defaultShutdown() {
-    final api = ref.read(studioApiProvider);
-    final progress = ref.read(studioShutdownProgressStateProvider.notifier);
-    return runStudioShutdown(api, progress.update);
+    return runStudioShutdown(_api, _shutdownProgress.update);
+  }
+
+  Future<void> _disposeShutdown() {
+    final override = widget.shutdown;
+    if (override != null) return override();
+    return runStudioShutdown(_api, (_) {});
   }
 
   @override

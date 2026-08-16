@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pure_studio/src/app/pure_studio_app.dart';
 import 'package:pure_studio/src/app/theme/studio_tokens.dart';
 import 'package:pure_studio/src/data/frb/studio_api.dart';
 import 'package:pure_studio/src/data/repositories/studio_repository.dart';
@@ -57,6 +58,7 @@ part 'widget_test/fake_studio_api.dart';
 part 'widget_test/settings_helpers.dart';
 part 'widget_test/studio_update_tests.dart';
 part 'widget_test/provider_lifecycle_tests.dart';
+part 'widget_test/app_lifecycle_tests.dart';
 
 void main() {
   registerControllerStreamTests();
@@ -80,4 +82,5 @@ void main() {
   registerSkillsTests();
   registerStudioUpdateTests();
   registerProviderLifecycleTests();
+  registerAppLifecycleTests();
 }
