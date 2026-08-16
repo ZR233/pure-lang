@@ -10,15 +10,23 @@ catalog：内置 catalog 收录已知 server（当前只有 rust-analyzer 一条
 
 ## Server catalog 与 driver
 
-`LspServerDefinition` 是纯数据：声明 server id、展示名、language ids、workspace 检测规则
-（文件名/glob）、command 解析策略与能力集。catalog 由内置定义与用户配置声明合并而成；
-同一 language id 被多个 server 声明且都匹配 workspace 时，路由以 typed 歧义错误拒绝，
-不按注册顺序或名称猜测。
+`LspServerDefinition` 是纯数据（serde camelCase）：声明 server id、展示名、language ids、
+workspace 检测规则（相对 workspace root 的文件名或单段 glob，空列表表示总是匹配）、
+command 解析（program + args 模板，占位符当前仅支持 `{workspaceRoot}`）与能力集（支持的
+`lsp_query` 操作子集，用于 capabilities 报告与路由校验）。catalog 由内置定义与用户在
+`~/.pure/config.toml` `[lsp.servers.<id>]` 段的声明合并而成（配置面见 `10-config.md`）；
+重复 server id 或 language id 冲突在配置解析时以 typed 错误 fail-loud。同一 language id
+被多个 server 声明且都匹配 workspace 时，路由以 typed `LspRoutingError::AmbiguousLanguage`
+拒绝并列出候选，不按注册顺序或名称猜测；零匹配返回列出可用语言的 unknown language 错误。
 
-`LspServerDriver` 是 server 生命周期的唯一 adapter 边界：环境探测与修复、进程启动/关闭、
-请求转发都由具体 driver 实现。rust-analyzer 的 rustup probe 与 `MissingRustupComponent`
-修复等内容全部封在 `RustAnalyzerDriver` 内；`pl-lsp` 的 registry 与路由层不包含任何语言
-专项逻辑。
+`LspServerDriver` 是 server 生命周期的唯一 adapter 边界：环境探测（typed 就绪/缺失原因）、
+修复（repair）、进程启动参数解析与 server 特殊初始化（如 rust-analyzer 的 client watcher
+配置）由具体 driver 提供；连接、传输与请求转发由通用 client 层实现。catalog 需要运行期
+开放扩展（内置、用户配置与宿主自定义共存），driver 以 `dyn` 分发，future 使用 boxed
+形态，不使用 `#[async_trait]`。rust-analyzer 的 rustup probe、`missingServerComponent`
+判定与 `rustup component add` 修复全部封在 `RustAnalyzerDriver` 内；用户声明的自定义
+server 绑定通用 `CommandDriver`（`<command> --version` 探测，无可修复组件语义）。
+`pl-lsp` 的 registry 与路由层不包含任何语言专项逻辑。
 
 ## Owner 与 CQS
 
@@ -34,13 +42,15 @@ readLspState()
 shutdownLsp()
 ```
 
-scope 为单 server、单 workspace 或 All。membership 只规范化 workspace root、检查静态
-`Cargo.toml` 特征、增删 server 定义并清理 stale client；不得执行 `--version`、rustup、网络请求
+scope 为单 server、单 workspace 或 All。membership 只规范化 workspace root、按 catalog
+检测规则静态判定 server 适用性（检测未命中的条目保留为 Disabled member 供 UI 展示原因）、
+增删 server 定义并清理 stale client；不得执行 `--version`、rustup、网络请求
 或启动语言服务器。read 只克隆 owner 已发布的 snapshot。
 
-probe 才运行 `rust-analyzer --version`。探测到 rustup `Unknown binary 'rust-analyzer'` 时发布 typed
-`MissingRustupComponent`，不自动安装。repair 只接受该状态，执行
-`rustup component add rust-analyzer`，成功后重新 probe；其他不可用状态拒绝 repair。
+probe 才运行 driver 的环境探测（如 `rust-analyzer --version`）。rustup 组件缺失时 driver
+发布 typed `missingServerComponent`（携带组件标签与修复说明），不自动安装。repair 只接受
+该状态，委托对应 driver 修复（rust-analyzer 执行 `rustup component add rust-analyzer`），
+成功后重新 probe；其他不可用状态拒绝 repair。
 
 LSP query 可以按需启动已确认 available 的 client，但不能重新 probe。启动失败必须回写 registry
 availability/error 并发布 `LspStateChanged`。reset 对目标 client 执行 LSP shutdown/exit，清理
@@ -64,8 +74,8 @@ fingerprint，过期结果不得覆盖新状态。workspace/server 删除时先�
 `LspStateSnapshot` 包含公共 `ObservedStateMeta`、project memberships 和完整 server snapshots。
 server 记录稳定 id/display name、project id、definition fingerprint、availability、是否已启动、
 extensions/language ids、diagnostic count、activity、last error 与 checked time。availability 至少区分
-uninitialized、checking、available、missing command、missing rustup component、unavailable、
-disabled 和 stopped。
+uninitialized、checking、available、missing command、missing server component（携带组件标签与
+修复说明）、unavailable、disabled 和 stopped。
 
 失败保留最后一次成功 payload 并标 stale；首次失败使用 authoritative empty。active LSP 只包括
 available server，unavailable/disabled/stopped 仍可在 UI 显示但不计入 active 数。
@@ -74,10 +84,10 @@ available server，unavailable/disabled/stopped 仍可在 UI 显示但不计入 
 
 LSP 以能力 seam 模式接入工具注册表：workspace 存在可用 server 时，LSP 来源发布两个
 deferred 工具——`lsp_capabilities` 与 `lsp_query`；不再存在按语言命名的
-`lsp_query_{language_id}` 工具。`lsp_capabilities` 动态返回当前 workspace 可用的 server、
-language id、支持的操作与就绪状态；`lsp_query` 接收 `languageId`、operation（definition、
-references、hover、document/workspace symbol、implementation、call hierarchy、diagnostics）
-与查询参数，运行期按 catalog 路由到对应 server。父 agent 与 subagent 共用 registry。
+`lsp_query_{language_id}` 工具。`lsp_capabilities` 由 catalog × workspace 检测 × 运行态动态产出当前 workspace 的
+server、language id、支持的操作与就绪状态；`lsp_query` 接收 `languageId`、operation
+（definition、references、hover、document/workspace symbol、implementation、call hierarchy、
+diagnostics）与查询参数，运行期按 catalog 路由到对应 server，能力集外的操作被路由层拒绝。父 agent 与 subagent 共用 registry。
 输入路径先经过 workspace-only 绝对路径解析；位置使用 1-based line/character，内部转换为
 LSP 0-based UTF-16。
 
@@ -90,7 +100,7 @@ watched-files 通知。Windows verbatim path 在生成 URI 前转回普通 drive
 probe 或 repair。
 
 Flutter 的 LSP 设置页只投影产品级完整状态。页面进入和“刷新”调用 `readLspState`；Project
-probe、仅在 `missingRustupComponent` 时可用的 repair，以及 workspace/server reset 分别调用
+probe、仅在 `missingServerComponent` 时可用的 repair，以及 workspace/server reset 分别调用
 对应 typed command。Widget 不从错误字符串推断 availability，也不把 shutdown 当作 reset。
 
 ## 非目标

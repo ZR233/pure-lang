@@ -18,16 +18,41 @@ pub enum LspRuntimeError {
     Unavailable(String),
     #[error("invalid LSP query: {0}")]
     InvalidQuery(String),
+    #[error("LSP routing failed: {0}")]
+    Routing(#[from] LspRoutingError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// languageId 路由的 typed 拒绝。
+///
+/// 同一 language id 被多个 server 声明且都匹配当前 workspace 时不按注册顺序猜测，
+/// 由 `lsp_query` 把候选列表作为可恢复错误返回给模型。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LspRoutingError {
+    #[error("ambiguous language `{language_id}`: multiple LSP servers declare it: {servers:?}")]
+    AmbiguousLanguage {
+        language_id: String,
+        servers: Vec<String>,
+    },
+}
+
+/// server 组件缺失的 typed 描述：由 driver 探测产生，repair 消费。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspMissingComponent {
+    /// 缺失组件的标签，如 rustup 的 `rust-analyzer` component 名。
+    pub component: String,
+    /// driver 给出的修复说明（展示给用户，repair 按组件执行）。
+    pub repair_hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LspAvailabilityKind {
     Checking,
     Available,
     Unavailable,
     MissingCommand,
-    MissingRustupComponent,
+    MissingServerComponent(LspMissingComponent),
     Disabled,
 }
 
@@ -45,13 +70,13 @@ pub enum LspScope {
 }
 
 impl LspAvailabilityKind {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Checking => "checking",
             Self::Available => "available",
             Self::Unavailable => "unavailable",
             Self::MissingCommand => "missingCommand",
-            Self::MissingRustupComponent => "missingRustupComponent",
+            Self::MissingServerComponent(_) => "missingServerComponent",
             Self::Disabled => "disabled",
         }
     }
@@ -249,10 +274,9 @@ pub struct LspWorkspaceServerCapabilities {
     pub ready: bool,
 }
 
-/// 描述一个可注册为工具的语言 LSP 信息。
+/// 描述一个可被 `lsp_query` 按 languageId 路由的语言。
 ///
 /// 每个 `LanguageToolInfo` 对应一个当前处于 `Available` 状态的 LSP 服务器所支持的某一种语言。
-/// `pl-core` 使用此信息为每个语言生成独立的 LSP 查询工具（如 `lsp_query_rust`）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageToolInfo {

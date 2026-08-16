@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::client::{LspClient, with_content_modified_retries};
-use crate::server_definition::LspServerDefinition;
+use crate::resolved::ResolvedLspServer;
 use crate::types::{LspDiagnostic, LspQuery, LspQueryOperation, LspResult, LspRuntimeError};
 use crate::uri::path_to_file_uri;
 
@@ -157,23 +157,23 @@ pub(crate) fn method_and_params(query: &LspQuery) -> LspResult<(String, Value)> 
 }
 
 pub(crate) fn extensions_for_language(
-    definition: &LspServerDefinition,
+    server: &ResolvedLspServer,
     language_id: &str,
 ) -> Vec<String> {
-    if definition.language_ids.len() == definition.extensions.len() {
-        definition
+    if server.language_ids.len() == server.extensions.len() {
+        server
             .language_ids
             .iter()
-            .zip(definition.extensions.iter())
+            .zip(server.extensions.iter())
             .filter(|(candidate, _)| candidate.as_str() == language_id)
             .map(|(_, extension)| extension.clone())
             .collect()
-    } else if definition
+    } else if server
         .language_ids
         .iter()
         .any(|candidate| candidate == language_id)
     {
-        definition.extensions.clone()
+        server.extensions.clone()
     } else {
         Vec::new()
     }

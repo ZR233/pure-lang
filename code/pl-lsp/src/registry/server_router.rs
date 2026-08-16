@@ -1,10 +1,14 @@
+//! languageId/文件路径路由：恰一个 server 匹配才放行，歧义以 typed 错误拒绝。
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::client::LspClient;
 use crate::diagnostics::DiagnosticSink;
-use crate::server_definition::LspServerDefinition;
-use crate::types::{LspAvailabilityKind, LspQuery, LspResult, LspRuntimeError};
+use crate::resolved::ResolvedLspServer;
+use crate::types::{
+    LspAvailabilityKind, LspQuery, LspQueryOperation, LspResult, LspRoutingError, LspRuntimeError,
+};
 
 use super::{LspRuntimeRegistry, canonical_workspace_root};
 
@@ -13,7 +17,7 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: &Path,
         query: &LspQuery,
-    ) -> LspResult<(String, LspServerDefinition, Arc<LspClient>)> {
+    ) -> LspResult<(String, ResolvedLspServer, Arc<LspClient>)> {
         let server_id = self
             .server_id_for_query_in_workspace(workspace_root, query)
             .await?;
@@ -41,22 +45,32 @@ impl LspRuntimeRegistry {
                     .unwrap_or_else(|| format!("{server_id} is not available")),
             ));
         }
-        let definition = server.definition.clone();
+        if !server.resolved.supports(query.operation) {
+            return Err(LspRuntimeError::InvalidQuery(format!(
+                "operation `{}` is not supported by LSP server {server_id}",
+                query.operation.as_str(),
+            )));
+        }
+        let resolved = server.resolved.clone();
         let client = match &server.client {
             Some(client) => client.clone(),
             None => {
                 let sink = DiagnosticSink::new(
-                    definition.id.clone(),
-                    definition.workspace_root.clone(),
+                    resolved.id.clone(),
+                    resolved.workspace_root.clone(),
                     diagnostics,
                     self.updates.clone(),
                 );
-                let client = Arc::new(LspClient::new(definition.clone(), sink));
+                let client = Arc::new(LspClient::new(
+                    resolved.clone(),
+                    server.driver.clone(),
+                    sink,
+                ));
                 server.client = Some(client.clone());
                 client
             }
         };
-        Ok((server_id, definition, client))
+        Ok((server_id, resolved, client))
     }
 
     pub(crate) async fn workspace_root_for_query(&self, query: &LspQuery) -> LspResult<PathBuf> {
@@ -104,11 +118,6 @@ impl LspRuntimeRegistry {
         if let Some(language_id) = &query.language_id {
             self.server_id_for_language_in_workspace(workspace_root, language_id)
                 .await
-                .ok_or_else(|| {
-                    LspRuntimeError::Unavailable(format!(
-                        "no LSP server found for language: {language_id}"
-                    ))
-                })
         } else if let Some(path) = &query.file_path {
             self.server_id_for_path_in_workspace(workspace_root, path)
                 .await
@@ -129,23 +138,42 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: &Path,
         language_id: &str,
-    ) -> Option<String> {
+    ) -> LspResult<String> {
         let workspace_root = canonical_workspace_root(workspace_root);
-        self.state
-            .lock()
-            .await
-            .workspaces
-            .get(&workspace_root)?
+        let state = self.state.lock().await;
+        let Some(workspace) = state.workspaces.get(&workspace_root) else {
+            return Err(LspRuntimeError::Unavailable(format!(
+                "no LSP server found for language: {language_id} (available languages: none)"
+            )));
+        };
+        let matches = workspace
             .servers
-            .iter()
-            .find(|(_, server)| {
-                server
-                    .definition
-                    .language_ids
-                    .iter()
-                    .any(|item| item == language_id)
+            .values()
+            .filter(|server| {
+                server.availability_kind != LspAvailabilityKind::Disabled
+                    && server
+                        .resolved
+                        .language_ids
+                        .iter()
+                        .any(|item| item == language_id)
             })
-            .map(|(server_id, _)| server_id.clone())
+            .map(|server| server.resolved.id.clone())
+            .collect::<Vec<_>>();
+        match matches.len() {
+            1 => Ok(matches.into_iter().next().expect("single match")),
+            0 => {
+                let available = available_language_ids(workspace);
+                Err(LspRuntimeError::Unavailable(format!(
+                    "no LSP server found for language: {language_id} (available languages: {available})"
+                )))
+            }
+            _ => Err(LspRuntimeError::Routing(
+                LspRoutingError::AmbiguousLanguage {
+                    language_id: language_id.to_string(),
+                    servers: matches,
+                },
+            )),
+        }
     }
 
     pub(crate) async fn server_id_for_path_in_workspace(
@@ -162,14 +190,40 @@ impl LspRuntimeRegistry {
             .get(&workspace_root)?
             .servers
             .iter()
+            .filter(|(_, server)| server.availability_kind != LspAvailabilityKind::Disabled)
             .find(|(_, server)| {
                 server
-                    .definition
+                    .resolved
                     .extensions
                     .iter()
                     .any(|item| item == &extension)
             })
             .map(|(server_id, _)| server_id.clone())
+    }
+
+    /// Diagnostics 查询的 server 端操作校验（不启动 client）。
+    pub(crate) async fn ensure_operation_supported_in_workspace(
+        &self,
+        workspace_root: &Path,
+        server_id: &str,
+        operation: LspQueryOperation,
+    ) -> LspResult<()> {
+        let state = self.state.lock().await;
+        let server = state
+            .workspaces
+            .get(workspace_root)
+            .and_then(|workspace| workspace.servers.get(server_id))
+            .ok_or_else(|| {
+                LspRuntimeError::Unavailable(format!("LSP server not configured: {server_id}"))
+            })?;
+        if server.resolved.supports(operation) {
+            Ok(())
+        } else {
+            Err(LspRuntimeError::InvalidQuery(format!(
+                "operation `{}` is not supported by LSP server {server_id}",
+                operation.as_str(),
+            )))
+        }
     }
 
     pub(crate) async fn open_client_for_path(&self, path: &Path) -> Option<Arc<LspClient>> {
@@ -212,6 +266,22 @@ impl LspRuntimeRegistry {
             .filter(|workspace_root| path.starts_with(workspace_root))
             .max_by_key(|workspace_root| workspace_root.components().count())
             .cloned()
+    }
+}
+
+fn available_language_ids(workspace: &super::LspWorkspaceState) -> String {
+    let mut languages = Vec::new();
+    for server in workspace.servers.values() {
+        if server.availability_kind == LspAvailabilityKind::Available {
+            languages.extend(server.resolved.language_ids.iter().cloned());
+        }
+    }
+    languages.sort();
+    languages.dedup();
+    if languages.is_empty() {
+        "none".to_string()
+    } else {
+        languages.join(", ")
     }
 }
 

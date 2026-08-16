@@ -4,19 +4,23 @@ use std::str::FromStr;
 use lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent, Uri};
 use serde_json::Value;
 
-use crate::server_definition::{LspServerDefinition, RUST_ANALYZER_ID};
+use crate::driver::LspServerDriver;
+use crate::resolved::ResolvedLspServer;
 use crate::types::{LspResult, LspRuntimeError};
 
-pub(crate) fn initialize_params(definition: &LspServerDefinition) -> Value {
-    let workspace_uri = crate::uri::path_to_file_uri(&definition.workspace_root);
-    let workspace_name = definition
+pub(crate) fn initialize_params(
+    server: &ResolvedLspServer,
+    initialization_options: Value,
+) -> Value {
+    let workspace_uri = crate::uri::path_to_file_uri(&server.workspace_root);
+    let workspace_name = server
         .workspace_root
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("workspace");
     serde_json::json!({
         "processId": null,
-        "rootPath": definition.workspace_root,
+        "rootPath": server.workspace_root,
         "rootUri": workspace_uri,
         "workspaceFolders": [{
             "uri": workspace_uri,
@@ -56,11 +60,14 @@ pub(crate) fn initialize_params(definition: &LspServerDefinition) -> Value {
                 "positionEncodings": ["utf-16"],
             },
         },
-        "initializationOptions": initialization_options(definition),
+        "initializationOptions": initialization_options,
     })
 }
 
-pub(crate) fn workspace_configuration_response(params: Option<&Value>, server_id: &str) -> Value {
+pub(crate) fn workspace_configuration_response(
+    params: Option<&Value>,
+    driver: &dyn LspServerDriver,
+) -> Value {
     let Some(items) = params
         .and_then(|params| params.get("items"))
         .and_then(Value::as_array)
@@ -72,7 +79,7 @@ pub(crate) fn workspace_configuration_response(params: Option<&Value>, server_id
             .iter()
             .map(|item| {
                 let section = item.get("section").and_then(Value::as_str);
-                configuration_value_for_section(server_id, section)
+                driver.configuration_response(section)
             })
             .collect(),
     )
@@ -87,44 +94,31 @@ pub(crate) fn watched_file_event_params(path: &Path, typ: FileChangeType) -> Lsp
     Ok(serde_json::to_value(params)?)
 }
 
-fn initialization_options(definition: &LspServerDefinition) -> Value {
-    if definition.id == RUST_ANALYZER_ID {
-        rust_analyzer_settings()
-    } else {
-        Value::Null
-    }
-}
-
-fn configuration_value_for_section(server_id: &str, section: Option<&str>) -> Value {
-    if server_id != RUST_ANALYZER_ID {
-        return Value::Null;
-    }
-    match section {
-        Some("rust-analyzer") | None => rust_analyzer_settings(),
-        Some("rust-analyzer.files") => serde_json::json!({ "watcher": "client" }),
-        Some("rust-analyzer.files.watcher") => serde_json::json!("client"),
-        Some(_) => Value::Null,
-    }
-}
-
-fn rust_analyzer_settings() -> Value {
-    serde_json::json!({
-        "files": {
-            "watcher": "client",
-        },
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::server_definition::RUST_ANALYZER_ID;
+
+    fn test_server() -> ResolvedLspServer {
+        ResolvedLspServer {
+            id: "test-lsp".to_string(),
+            display_name: "Test LSP".to_string(),
+            program: "unused-test-command".to_string(),
+            args: Vec::new(),
+            extensions: vec![".rs".to_string()],
+            language_ids: vec!["rust".to_string()],
+            operations: crate::types::LspQueryOperation::all().to_vec(),
+            workspace_root: std::env::current_dir().unwrap(),
+        }
+    }
 
     #[test]
-    fn initialize_params_configures_rust_analyzer_client_watcher() {
-        let params = initialize_params(&test_definition(RUST_ANALYZER_ID));
+    fn initialize_params_carries_driver_initialization_options() {
+        let params = initialize_params(
+            &test_server(),
+            serde_json::json!({ "files": { "watcher": "client" } }),
+        );
 
         assert_eq!(
             params["capabilities"]["window"]["workDoneProgress"],
@@ -144,39 +138,50 @@ mod tests {
         );
     }
 
+    struct StubDriver;
+
+    impl LspServerDriver for StubDriver {
+        fn probe<'a>(
+            &'a self,
+            _command: &'a crate::driver::LspResolvedCommand,
+        ) -> futures::future::BoxFuture<'a, crate::driver::LspProbeOutcome> {
+            futures::FutureExt::boxed(std::future::ready(crate::driver::LspProbeOutcome::Failed {
+                message: String::new(),
+            }))
+        }
+
+        fn repair<'a>(
+            &'a self,
+            _component: &'a crate::types::LspMissingComponent,
+        ) -> futures::future::BoxFuture<'a, Result<(), crate::driver::LspRepairError>> {
+            futures::FutureExt::boxed(std::future::ready(Err(
+                crate::driver::LspRepairError::NotSupported,
+            )))
+        }
+
+        fn configuration_response(&self, section: Option<&str>) -> Value {
+            match section {
+                Some("demo") => serde_json::json!({ "watcher": "client" }),
+                _ => Value::Null,
+            }
+        }
+    }
+
     #[test]
-    fn workspace_configuration_returns_rust_analyzer_watcher_settings() {
+    fn workspace_configuration_maps_each_section_to_the_driver() {
         let params = serde_json::json!({
-            "items": [
-                { "section": "rust-analyzer" },
-                { "section": "rust-analyzer.files" },
-                { "section": "rust-analyzer.files.watcher" },
-                { "section": "rust-analyzer.cargo" }
-            ]
+            "items": [{ "section": "demo" }, { "section": "other" }, {}]
         });
 
-        let result = workspace_configuration_response(Some(&params), RUST_ANALYZER_ID);
+        let result = workspace_configuration_response(Some(&params), &StubDriver);
 
         assert_eq!(
             result,
-            serde_json::json!([
-                { "files": { "watcher": "client" } },
-                { "watcher": "client" },
-                "client",
-                null
-            ])
+            serde_json::json!([{ "watcher": "client" }, null, null])
         );
-    }
-
-    fn test_definition(id: &str) -> LspServerDefinition {
-        LspServerDefinition {
-            id: id.to_string(),
-            display_name: id.to_string(),
-            command: id.to_string(),
-            args: Vec::new(),
-            extensions: vec![".rs".to_string()],
-            language_ids: vec!["rust".to_string()],
-            workspace_root: std::env::current_dir().unwrap(),
-        }
+        assert_eq!(
+            workspace_configuration_response(None, &StubDriver),
+            serde_json::json!([])
+        );
     }
 }

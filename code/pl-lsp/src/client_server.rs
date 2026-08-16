@@ -6,17 +6,18 @@ use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 
 use crate::client_config::workspace_configuration_response;
+use crate::driver::LspServerDriver;
 use crate::status::LspClientStatus;
 
 pub(crate) async fn respond_to_server_request(
     request: Request,
-    server_id: &str,
+    driver: &dyn LspServerDriver,
     status: &Arc<Mutex<LspClientStatus>>,
     updates: &broadcast::Sender<()>,
 ) -> Response {
     let result = match request.method.as_str() {
         "workspace/configuration" => {
-            workspace_configuration_response(Some(&request.params), server_id)
+            workspace_configuration_response(Some(&request.params), driver)
         }
         "window/workDoneProgress/create" => {
             if let Ok(params) =

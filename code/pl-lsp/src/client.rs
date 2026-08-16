@@ -21,9 +21,10 @@ use crate::client_server::{
     respond_to_server_request,
 };
 use crate::diagnostics::DiagnosticSink;
+use crate::driver::LspServerDriver;
 use crate::process::{ManagedChild, spawn_background};
+use crate::resolved::ResolvedLspServer;
 use crate::rpc::RpcClient;
-use crate::server_definition::LspServerDefinition;
 use crate::status::{LspClientRuntimeStatus, LspClientStatus};
 use crate::transport::LspTransport;
 use crate::types::{LspResult, LspRuntimeError};
@@ -34,7 +35,8 @@ const SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
 
 pub(crate) struct LspClient {
-    definition: LspServerDefinition,
+    server: ResolvedLspServer,
+    driver: Arc<dyn LspServerDriver>,
     child: Mutex<Option<ManagedChild>>,
     transport: Mutex<Option<LspTransport>>,
     rpc: RwLock<Option<RpcClient>>,
@@ -52,8 +54,8 @@ pub(crate) struct LspClient {
 impl std::fmt::Debug for LspClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LspClient")
-            .field("server_id", &self.definition.id)
-            .field("workspace_root", &self.definition.workspace_root)
+            .field("server_id", &self.server.id)
+            .field("workspace_root", &self.server.workspace_root)
             .field("initialized", &self.initialized.load(Ordering::Relaxed))
             .finish_non_exhaustive()
     }
@@ -70,9 +72,14 @@ impl LspClient {
     pub(crate) async fn start(&self) -> LspResult<()> {
         self.ensure_started().await
     }
-    pub fn new(definition: LspServerDefinition, diagnostics: DiagnosticSink) -> Self {
+    pub fn new(
+        server: ResolvedLspServer,
+        driver: Arc<dyn LspServerDriver>,
+        diagnostics: DiagnosticSink,
+    ) -> Self {
         Self {
-            definition,
+            server,
+            driver,
             child: Mutex::new(None),
             transport: Mutex::new(None),
             rpc: RwLock::new(None),
@@ -135,7 +142,7 @@ impl LspClient {
                 document.content = content;
             }
         } else {
-            let language_id = self.definition.language_for_path(path).unwrap_or("text");
+            let language_id = self.server.language_for_path(path).unwrap_or("text");
             self.notify(
                 "textDocument/didOpen",
                 serde_json::json!({
@@ -319,16 +326,13 @@ impl LspClient {
         }
         self.stop_stale_connection_locked().await;
 
-        let mut command = Command::new(&self.definition.command);
-        command.args(&self.definition.args);
+        let mut command = Command::new(&self.server.program);
+        command.args(&self.server.args);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
         let mut child = spawn_background(command).map_err(|error| {
-            let message = format!(
-                "Failed to start LSP server '{}': {error}",
-                self.definition.id
-            );
+            let message = format!("Failed to start LSP server '{}': {error}", self.server.id);
             LspRuntimeError::Unavailable(message)
         })?;
 
@@ -385,7 +389,7 @@ impl LspClient {
             }
             initialize = rpc.request(
                 "initialize",
-                initialize_params(&self.definition),
+                initialize_params(&self.server, self.driver.initialization_options()),
                 STARTUP_TIMEOUT,
             ) => initialize,
         };
@@ -418,7 +422,8 @@ impl LspClient {
         let diagnostics = self.diagnostics.clone();
         let status = self.status.clone();
         let updates = self.diagnostics.updates.clone();
-        let server_id = self.definition.id.clone();
+        let driver = self.driver.clone();
+        let server_id = self.server.id.clone();
         let initialized = self.initialized.clone();
         let connection_generation = self.connection_generation.clone();
         tokio::spawn(async move {
@@ -433,7 +438,8 @@ impl LspClient {
                 match message {
                     Message::Request(request) => {
                         let response =
-                            respond_to_server_request(request, &server_id, &status, &updates).await;
+                            respond_to_server_request(request, driver.as_ref(), &status, &updates)
+                                .await;
                         let _ = rpc.respond(response).await;
                     }
                     Message::Notification(notification) => match notification.method.as_str() {
@@ -568,21 +574,51 @@ mod tests {
     fn test_client() -> LspClient {
         let (updates, _) = tokio::sync::broadcast::channel(4);
         let workspace_root = std::env::current_dir().expect("current test directory");
-        let definition = LspServerDefinition {
+        let server = ResolvedLspServer {
             id: "test-lsp".to_string(),
             display_name: "Test LSP".to_string(),
-            command: "unused-test-command".to_string(),
+            program: "unused-test-command".to_string(),
             args: Vec::new(),
-            extensions: vec![".rs".to_string()],
-            language_ids: vec!["rust".to_string()],
+            extensions: vec![".pure".to_string()],
+            language_ids: vec!["purelang".to_string()],
+            operations: Vec::new(),
             workspace_root: workspace_root.clone(),
         };
         let diagnostics = DiagnosticSink::new(
-            definition.id.clone(),
+            server.id.clone(),
             workspace_root,
             Arc::new(Mutex::new(HashMap::new())),
             updates,
         );
-        LspClient::new(definition, diagnostics)
+        LspClient::new(server, test_driver(), diagnostics)
+    }
+
+    fn test_driver() -> Arc<dyn LspServerDriver> {
+        struct StubDriver;
+
+        impl LspServerDriver for StubDriver {
+            fn probe<'a>(
+                &'a self,
+                _command: &'a crate::driver::LspResolvedCommand,
+            ) -> futures::future::BoxFuture<'a, crate::driver::LspProbeOutcome> {
+                futures::FutureExt::boxed(std::future::ready(
+                    crate::driver::LspProbeOutcome::Failed {
+                        message: "stub".to_string(),
+                    },
+                ))
+            }
+
+            fn repair<'a>(
+                &'a self,
+                _component: &'a crate::types::LspMissingComponent,
+            ) -> futures::future::BoxFuture<'a, Result<(), crate::driver::LspRepairError>>
+            {
+                futures::FutureExt::boxed(std::future::ready(Err(
+                    crate::driver::LspRepairError::NotSupported,
+                )))
+            }
+        }
+
+        Arc::new(StubDriver)
     }
 }
