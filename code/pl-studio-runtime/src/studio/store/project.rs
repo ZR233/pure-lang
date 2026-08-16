@@ -15,10 +15,7 @@ use crate::studio::mappers::project_record;
 use crate::studio::paths::{default_db_path, project_name, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
-use crate::studio::store_support::{
-    MIN_MIGRATABLE_STUDIO_DATABASE_SCHEMA_VERSION, STUDIO_DATABASE_SCHEMA_VERSION,
-    initialize_studio_schema, migrate_studio_schema,
-};
+use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
@@ -45,25 +42,19 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        let mut migration_from = None;
+        // Studio schema 只保留 v8 一个事实：任何非 v8 库（含历史 v4–v7）都按
+        // 不兼容处理，走精确重建，不存在跨版本迁移链。
         let existing_is_compatible = if database_exists {
             match inspect_database(&path).await {
                 Ok(()) => true,
-                Err(error) => match inspect_database_migratable(&path).await {
-                    Ok(version) => {
-                        migration_from = Some(version);
-                        true
-                    }
-                    Err(migration_error) => {
-                        tracing::warn!(
-                            path = %path.display(),
-                            error = %error,
-                            migration_error = %migration_error,
-                            "Studio database is incompatible and will be rebuilt"
-                        );
-                        false
-                    }
-                },
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "Studio database is incompatible and will be rebuilt"
+                    );
+                    false
+                }
             }
         } else {
             false
@@ -83,13 +74,6 @@ impl StudioStore {
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
-            } else if let Some(from_version) = migration_from {
-                migrate_studio_schema(&db, from_version).await?;
-                tracing::info!(
-                    from_version,
-                    to_version = STUDIO_DATABASE_SCHEMA_VERSION,
-                    "migrated Studio database schema"
-                );
             }
             validate_database(&db).await
         }
@@ -263,46 +247,6 @@ async fn inspect_database(path: &Path) -> Result<()> {
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(error).context("failed to close Studio schema probe"),
-        (Err(error), Err(close_error)) => Err(error).context(format!(
-            "Studio schema probe failed; closing its connection also failed: {close_error}"
-        )),
-    }
-}
-
-/// 探测既有库是否处于可迁移范围（仅校验版本号与完整性，不比对 schema 指纹）。
-///
-/// DDL 变更型迁移（如 v5→v6 新增表）会使 v5 库的指纹与当前 schema 不一致，因此
-/// 可迁移性判定不能依赖指纹——指纹校验留给迁移完成后的 `validate_database`。
-async fn inspect_database_migratable(path: &Path) -> Result<i64> {
-    let database = connect_read_only_database(path).await?;
-    let probe = async {
-        let version = database_schema_version(&database).await?;
-        if !(MIN_MIGRATABLE_STUDIO_DATABASE_SCHEMA_VERSION..STUDIO_DATABASE_SCHEMA_VERSION)
-            .contains(&version)
-        {
-            bail!("Studio database schema {version} is outside the migratable range");
-        }
-        let rows = database
-            .query_all_raw(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                "PRAGMA quick_check".to_string(),
-            ))
-            .await?;
-        let results = rows
-            .into_iter()
-            .map(|row| row.try_get::<String>("", "quick_check"))
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        if results.as_slice() != ["ok"] {
-            bail!("Studio database quick_check failed: {}", results.join("; "));
-        }
-        Ok(version)
-    }
-    .await;
-    let close = database.close().await;
-    match (probe, close) {
-        (Ok(version), Ok(())) => Ok(version),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(error)) => Err(error).context("failed to close Studio schema probe"),
         (Err(error), Err(close_error)) => Err(error).context(format!(
             "Studio schema probe failed; closing its connection also failed: {close_error}"
         )),

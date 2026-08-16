@@ -1,15 +1,11 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::Result;
 use sea_orm::sea_query::{Expr, ExprTrait, Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{
-    ConditionalStatement, ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement,
-    TransactionTrait,
-};
+use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-/// 最低可迁移版本；低于此版本的库会被直接重建。
-pub(super) const MIN_MIGRATABLE_STUDIO_DATABASE_SCHEMA_VERSION: i64 = 4;
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 7;
+/// 唯一支持的 Studio schema 版本；任何非 v8 库都按不兼容处理并精确重建。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 8;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
@@ -36,110 +32,6 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
     create_state_indexes(db).await?;
     set_schema_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await?;
     Ok(())
-}
-
-pub(super) async fn migrate_studio_schema(
-    db: &DatabaseConnection,
-    from_version: i64,
-) -> Result<()> {
-    ensure!(
-        (MIN_MIGRATABLE_STUDIO_DATABASE_SCHEMA_VERSION..STUDIO_DATABASE_SCHEMA_VERSION)
-            .contains(&from_version),
-        "unsupported Studio database migration from schema {from_version}"
-    );
-
-    // v4 -> v5: 归档残留的 waitingInteraction turn。v4 与 v5 的 DDL 完全一致，
-    // 该步只修正数据。
-    if from_version < 5 {
-        migrate_waiting_interaction_turns(db).await?;
-    }
-    // v5 -> v6: 新增 durable 阶段提交日志表。使用 schema builder 建表，保证生成
-    // 的 DDL 与 `initialize_studio_schema` 完全一致，从而通过 schema 指纹校验。
-    if from_version < 6 {
-        create_thread_submissions_schema(db).await?;
-    }
-    // v6 -> v7: ReviewRound 持久化冻结的逐文件审查状态与最近一次拒绝诊断。
-    // nullable 保留旧 round 的 unknown 语义，不能把历史记录伪装成已覆盖。
-    if from_version < 7 {
-        migrate_review_file_coverage(db).await?;
-    }
-
-    Ok(())
-}
-
-async fn migrate_review_file_coverage(db: &DatabaseConnection) -> Result<()> {
-    let tx = db.begin().await?;
-    tx.execute_unprepared("ALTER TABLE \"review_rounds\" ADD COLUMN \"file_reviews_json\" varchar")
-        .await?;
-    set_schema_version(&tx, STUDIO_DATABASE_SCHEMA_VERSION).await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn migrate_waiting_interaction_turns(db: &DatabaseConnection) -> Result<()> {
-    let tx = db.begin().await?;
-    let row = tx
-        .query_one_raw(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS candidate_count FROM turns \
-             WHERE status = 'inProgress' AND phase = 'waitingInteraction'"
-                .to_string(),
-        ))
-        .await?
-        .context("Studio turn migration dry-run returned no count")?;
-    let candidate_count = row.try_get::<i64>("", "candidate_count")?;
-    ensure!(
-        candidate_count >= 0,
-        "Studio turn migration dry-run returned a negative count"
-    );
-    let result = tx
-        .execute_unprepared(
-            "UPDATE turns \
-             SET status = 'completed', phase = NULL, completed_at = updated_at \
-             WHERE status = 'inProgress' AND phase = 'waitingInteraction'",
-        )
-        .await?;
-    let migrated = result.rows_affected();
-    ensure!(
-        migrated == candidate_count as u64,
-        "Studio turn migration expected {candidate_count} rows but updated {migrated}"
-    );
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn create_thread_submissions_schema(db: &DatabaseConnection) -> Result<()> {
-    if !sqlite_object_exists(db, "table", "thread_submissions").await? {
-        db.get_schema_builder()
-            .register(entity::thread_submission::Entity)
-            .apply(db)
-            .await?;
-    }
-    if !sqlite_object_exists(db, "index", "idx_thread_submissions_ordinal").await? {
-        execute_index(
-            db,
-            Index::create()
-                .name("idx_thread_submissions_ordinal")
-                .table(entity::thread_submission::Entity)
-                .col(entity::thread_submission::Column::ThreadId)
-                .col(entity::thread_submission::Column::Ordinal)
-                .unique()
-                .to_owned(),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-async fn sqlite_object_exists(db: &DatabaseConnection, kind: &str, name: &str) -> Result<bool> {
-    let row = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
-            "SELECT name FROM sqlite_schema WHERE type = ? AND name = ?",
-            [kind.into(), name.into()],
-        ))
-        .await?;
-    Ok(row.is_some())
 }
 
 pub(super) fn non_empty_title(title: &str) -> String {
