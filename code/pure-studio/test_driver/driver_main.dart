@@ -70,10 +70,9 @@ void _publishSidebarDirectory() {
     _ => null,
   };
   if (state == null) return;
-  StudioDriverState.publishSidebarDirectory(
-    [for (final thread in state.threads) thread.id],
-    state.threadDirectory.hasMore,
-  );
+  StudioDriverState.publishSidebarDirectory([
+    for (final thread in state.threads) thread.id,
+  ], state.threadDirectory.hasMore);
 }
 
 Future<void> _runShutdown() {

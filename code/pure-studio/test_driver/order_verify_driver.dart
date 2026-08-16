@@ -78,10 +78,7 @@ Future<String> _newSession(FlutterDriverClient client) async {
   return workspaceView['threadId'] as String;
 }
 
-Future<void> _switchSession(
-  FlutterDriverClient client,
-  String threadId,
-) async {
+Future<void> _switchSession(FlutterDriverClient client, String threadId) async {
   await client.waitFor(find.byValueKey('thread-row-$threadId'));
   await client.tap(find.byValueKey('thread-row-$threadId'));
   final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -144,7 +141,7 @@ void _assertUserMessagesOrdered(
   final userTexts = [
     for (final row in rows)
       if (row is Map<String, dynamic> && row['type'] == 'userMessage')
-      row['text'] as String? ?? '',
+        row['text'] as String? ?? '',
   ];
   final trailing = userTexts.take(messages.length).toList();
   for (var index = 0; index < messages.length; index += 1) {
