@@ -13,7 +13,8 @@ use pl_studio_runtime::{
 const LIVE_CONFIG_ENV: &str = "PURE_STUDIO_LIVE_INSTALLED_CONFIG";
 const LIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const LIVE_VERIFY_MARKER: &str = "PURE_LSP_PROMPT_VERIFY_OK";
-const LSP_TOOL_NAME: &str = "lsp_query_rust";
+const LSP_TOOL_NAME: &str = "lsp_query";
+const RUST_LANGUAGE_ID: &str = "rust";
 const RUST_ANALYZER_ID: &str = "rust-analyzer";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -273,6 +274,10 @@ fn assert_lsp_tool_results(items: &[ThreadItem]) -> Result<()> {
         );
         let arguments: serde_json::Value =
             serde_json::from_str(&tool.arguments).context("LSP tool arguments are not JSON")?;
+        ensure!(
+            arguments["languageId"].as_str() == Some(RUST_LANGUAGE_ID),
+            "live model called {LSP_TOOL_NAME} without languageId `{RUST_LANGUAGE_ID}`: {arguments}"
+        );
         let operation = arguments["operation"]
             .as_str()
             .context("LSP tool arguments omit operation")?;
@@ -370,8 +375,8 @@ fn assert_final_marker(items: &[ThreadItem]) -> Result<()> {
 
 fn live_prompt() -> &'static str {
     r#"Perform this deterministic Rust LSP verification in the current temporary Cargo workspace.
-Do not delegate and do not use any tool except lsp_query_rust.
-Call lsp_query_rust for all four operations below, using these exact inputs:
+Do not delegate and do not use any tool except lsp_query.
+Call lsp_query with languageId "rust" for all four operations below, using these exact inputs:
 1. documentSymbol on src/lib.rs.
 2. hover on src/lib.rs at line 1, character 8.
 3. goToDefinition on src/main.rs at line 4, character 20.
