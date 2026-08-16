@@ -691,7 +691,7 @@ class _LspTabState extends ConsumerState<LspTab> {
               for (final server in widget.state.servers)
                 _LspSettingsRow(
                   server: server,
-                  onRepair: server.availability == 'missingRustupComponent'
+                  onRepair: server.availability == 'missingServerComponent'
                       ? () => unawaited(_run(() => _repair(server.id)))
                       : null,
                   onReset: widget.projectId == null

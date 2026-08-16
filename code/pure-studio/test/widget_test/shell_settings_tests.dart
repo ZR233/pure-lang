@@ -829,7 +829,7 @@ void registerShellSettingsTests() {
     const server = LspServerStateView(
       id: 'rust-analyzer',
       displayName: 'rust-analyzer',
-      availability: 'missingRustupComponent',
+      availability: 'missingServerComponent',
       message: 'component missing',
     );
     final state = _emptyState().copyWith(
