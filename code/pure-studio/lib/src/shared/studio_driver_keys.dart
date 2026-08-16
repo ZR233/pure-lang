@@ -82,6 +82,9 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> timelineBlock(String id) =>
       ValueKey<String>('timeline-block-$id');
 
+  static ValueKey<String> timelineToolSearchCard(String id) =>
+      ValueKey<String>('timeline-tool-search-card-$id');
+
   static ValueKey<String> sessionModeOption(String mode) =>
       ValueKey<String>('session-mode-$mode');
 

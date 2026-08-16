@@ -1637,6 +1637,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineWebSearchResults => 'Result links';
 
   @override
+  String get timelineToolSearchTitle => 'Tool search';
+
+  @override
+  String timelineToolSearchLoadedTools(int count) {
+    return '$count loaded tools';
+  }
+
+  @override
+  String get timelineLspQueryTitle => 'LSP query';
+
+  @override
+  String timelineLspQueryTitleWithDetail(String detail) {
+    return 'LSP query · $detail';
+  }
+
+  @override
+  String get timelineLspCapabilitiesTitle => 'LSP capabilities';
+
+  @override
   String get roleExplorer => 'Explorer';
 
   @override

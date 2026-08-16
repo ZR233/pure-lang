@@ -502,6 +502,21 @@
   "timelineWebSearchOpening": "正在打开网页",
   "timelineWebSearchFinding": "正在页内查找",
   "timelineWebSearchResults": "结果链接",
+  "timelineToolSearchTitle": "工具搜索",
+  "timelineToolSearchLoadedTools": "已加载 {count} 个工具",
+  "@timelineToolSearchLoadedTools": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "timelineLspQueryTitle": "LSP 查询",
+  "timelineLspQueryTitleWithDetail": "LSP 查询 · {detail}",
+  "@timelineLspQueryTitleWithDetail": {
+    "placeholders": {
+      "detail": { "type": "String" }
+    }
+  },
+  "timelineLspCapabilitiesTitle": "LSP 能力",
   "roleExplorer": "探索者",
   "rolePlanner": "计划者",
   "roleExecutor": "执行者",

@@ -2993,6 +2993,36 @@ abstract class AppLocalizations {
   /// **'Result links'**
   String get timelineWebSearchResults;
 
+  /// No description provided for @timelineToolSearchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool search'**
+  String get timelineToolSearchTitle;
+
+  /// No description provided for @timelineToolSearchLoadedTools.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} loaded tools'**
+  String timelineToolSearchLoadedTools(int count);
+
+  /// No description provided for @timelineLspQueryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'LSP query'**
+  String get timelineLspQueryTitle;
+
+  /// No description provided for @timelineLspQueryTitleWithDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'LSP query · {detail}'**
+  String timelineLspQueryTitleWithDetail(String detail);
+
+  /// No description provided for @timelineLspCapabilitiesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'LSP capabilities'**
+  String get timelineLspCapabilitiesTitle;
+
   /// No description provided for @roleExplorer.
   ///
   /// In en, this message translates to:

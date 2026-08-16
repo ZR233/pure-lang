@@ -71,7 +71,9 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
               child: Column(
                 children: [
                   for (final item in group.items)
-                    _isWebSearch(item)
+                    _isToolSearch(item)
+                        ? _ToolSearchToolCard(item: item, embedded: true)
+                        : _isWebSearch(item)
                         ? _WebSearchToolCard(item: item, embedded: true)
                         : _ToolGroupItemRow(item: item),
                 ],
@@ -96,7 +98,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
       for (final item in visibleItems)
         activeOnly
             ? _activeToolTitle(context, item)
-            : _toolTitle(context, item.name, item.status),
+            : _toolTitle(context, item),
     ];
     final hiddenCount = items.length - visibleItems.length;
     if (hiddenCount > 0) {
@@ -123,7 +125,7 @@ bool _isActiveToolItem(TimelineToolGroupItem item) {
 }
 
 String _activeToolTitle(BuildContext context, TimelineToolGroupItem item) {
-  final title = _toolTitle(context, item.name, item.status);
+  final title = _toolTitle(context, item);
   final detail = [item.summary, item.tool?.workingDirectory]
       .whereType<String>()
       .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
@@ -137,6 +139,12 @@ IconData _toolGroupIcon(TimelineToolGroup group) {
   final name = group.items.first.name.toLowerCase();
   if (name == 'web_search') {
     return Icons.travel_explore;
+  }
+  if (name == 'tool_search') {
+    return Icons.manage_search;
+  }
+  if (name == 'lsp_query' || name == 'lsp_capabilities') {
+    return Icons.code_outlined;
   }
   if (name.contains('exec') ||
       name.contains('command') ||
@@ -166,6 +174,10 @@ IconData _toolGroupIcon(TimelineToolGroup group) {
 
 bool _isWebSearch(TimelineToolGroupItem item) {
   return item.tool?.name == 'web_search';
+}
+
+bool _isToolSearch(TimelineToolGroupItem item) {
+  return item.tool?.name == 'tool_search';
 }
 
 class _WebSearchToolCard extends StatelessWidget {
@@ -283,6 +295,172 @@ class _WebSearchToolCard extends StatelessWidget {
     }
     return _TimelinePanel(child: content);
   }
+}
+
+class _ToolSearchToolCard extends StatelessWidget {
+  const _ToolSearchToolCard({required this.item, this.embedded = false});
+
+  final TimelineToolGroupItem item;
+  final bool embedded;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _ToolSearchCardData.fromTool(item.tool);
+    final content = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.manage_search, size: 19, color: StudioColors.clay),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  context.l10n.timelineToolSearchTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.titleSmall?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _StatusPill(label: item.status),
+            ],
+          ),
+          if (data.query.isNotEmpty) ...[
+            const SizedBox(height: 9),
+            SelectionArea(
+              child: Text(
+                data.query,
+                style: context.text.bodySmall?.copyWith(
+                  color: context.studioInkSoft,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
+          if (data.loadedTools.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.timelineToolSearchLoadedTools(
+                data.loadedTools.length,
+              ),
+              style: context.text.labelSmall?.copyWith(
+                color: context.studioInkSoft,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            for (final tool in data.loadedTools)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.extension_outlined,
+                      size: 14,
+                      color: context.colors.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: SelectionArea(
+                        child: Text(
+                          tool,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.colors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          if (item.part.error?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.part.error!,
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
+          ] else if (data.loadedTools.isEmpty &&
+              item.tool?.result?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.tool!.result!,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: context.text.bodySmall?.copyWith(
+                color: context.studioInkSoft,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (embedded) {
+      return Padding(
+        key: StudioDriverKeys.timelineToolSearchCard(item.id),
+        padding: const EdgeInsets.only(top: 9),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: context.studioPaper2,
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+            border: Border.all(color: context.studioLine),
+          ),
+          child: content,
+        ),
+      );
+    }
+    return KeyedSubtree(
+      key: StudioDriverKeys.timelineToolSearchCard(item.id),
+      child: _TimelinePanel(child: content),
+    );
+  }
+}
+
+/// `tool_search` toolCall Item 的展示数据：query 与加载的工具名列表。
+class _ToolSearchCardData {
+  const _ToolSearchCardData({required this.query, required this.loadedTools});
+
+  factory _ToolSearchCardData.fromTool(TimelineToolPart? tool) {
+    final arguments = _decodeWebSearchArguments(tool?.arguments ?? '');
+    final query = _stringValue(arguments['query']) ?? '';
+    final loadedTools = <String>[];
+    final result = tool?.result;
+    if (result != null && result.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(result);
+        if (decoded is Map) {
+          final tools = decoded['tools'];
+          if (tools is List) {
+            for (final entry in tools) {
+              if (entry is Map) {
+                final name = _stringValue(entry['name']);
+                if (name == null) continue;
+                final namespace = _stringValue(entry['namespace']);
+                loadedTools.add(
+                  namespace == null ? name : '$namespace · $name',
+                );
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // result 不是结构化 JSON 时保留原始文本，由通用状态样式展示。
+      }
+    }
+    return _ToolSearchCardData(query: query, loadedTools: loadedTools);
+  }
+
+  final String query;
+  final List<String> loadedTools;
 }
 
 enum _WebSearchActionKind { search, open, find, other }
@@ -462,7 +640,7 @@ class _ToolGroupItemRow extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        _toolTitle(context, item.name, item.status),
+                        _toolTitle(context, item),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: context.text.labelLarge?.copyWith(
@@ -527,16 +705,55 @@ class _ToolGroupItemRow extends StatelessWidget {
   }
 }
 
-String _toolTitle(BuildContext context, String name, String status) {
-  return switch (status) {
-    'completed' => context.l10n.timelineToolCompleted(name),
-    'failed' => context.l10n.timelineToolFailed(name),
-    'denied' => context.l10n.timelineToolDenied(name),
-    'awaitingApproval' => context.l10n.timelineToolAwaitingApproval(name),
+String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
+  final label = _toolDisplayName(context, item);
+  return switch (item.status) {
+    'completed' => context.l10n.timelineToolCompleted(label),
+    'failed' => context.l10n.timelineToolFailed(label),
+    'denied' => context.l10n.timelineToolDenied(label),
+    'awaitingApproval' => context.l10n.timelineToolAwaitingApproval(label),
     'running' ||
     'streaming' ||
     'approved' ||
-    'started' => context.l10n.timelineToolRunning(name),
-    _ => name,
+    'started' => context.l10n.timelineToolRunning(label),
+    _ => label,
   };
+}
+
+/// 工具的展示名；LSP 工具使用本地化标题并附带参数摘要，其余保持原始领域名。
+String _toolDisplayName(BuildContext context, TimelineToolGroupItem item) {
+  final name = item.name;
+  if (name == 'lsp_query') {
+    final detail = _lspQueryDetail(item.tool?.arguments ?? '');
+    return detail.isEmpty
+        ? context.l10n.timelineLspQueryTitle
+        : context.l10n.timelineLspQueryTitleWithDetail(detail);
+  }
+  if (name == 'lsp_capabilities') {
+    return context.l10n.timelineLspCapabilitiesTitle;
+  }
+  return name;
+}
+
+/// 从 `lsp_query` 参数中提取 languageId 与查询目标摘要（沿用命令摘要思路）。
+String _lspQueryDetail(String arguments) {
+  final json = _decodeWebSearchArguments(arguments);
+  return [
+        _stringValue(json['languageId']),
+        _stringValue(json['operation']),
+        _stringValue(json['filePath']) ??
+            _stringValue(json['query']) ??
+            _stringValue(json['path']),
+      ]
+      .map((value) => value?.trim() ?? '')
+      .where((value) => value.isNotEmpty)
+      .join(' · ');
+}
+
+String? _stringValue(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }

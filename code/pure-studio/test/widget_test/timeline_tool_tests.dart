@@ -137,6 +137,125 @@ void registerTimelineToolTests() {
     expect(find.text('https://example.com/result'), findsOneWidget);
   });
 
+  testWidgets('timeline renders dedicated tool search card with loaded tools', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final part = _toolTimelinePart(
+      id: 'tool-search-1',
+      groupId: 'message-tool-search',
+      turnId: 'turn-tool-search',
+      name: 'tool_search',
+      status: 'completed',
+      arguments: jsonEncode({'query': 'git status', 'limit': 4}),
+      result: jsonEncode({
+        'type': 'tool_search',
+        'query': 'git status',
+        'loadedToolCount': 2,
+        'tools': [
+          {'namespace': 'git', 'name': 'git_status'},
+          {'namespace': 'git', 'name': 'git_diff'},
+        ],
+      }),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('tool_search completed'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.timelineToolSearchCard('tool-search-1')),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('tool_search completed'));
+    await tester.pump();
+
+    expect(find.text('Tool search'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.timelineToolSearchCard('tool-search-1')),
+      findsOneWidget,
+    );
+    expect(find.text('git status'), findsOneWidget);
+    expect(find.text('2 loaded tools'), findsOneWidget);
+    expect(find.text('git · git_status'), findsOneWidget);
+    expect(find.text('git · git_diff'), findsOneWidget);
+  });
+
+  testWidgets('lsp tool items use parameterized titles with argument summary', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final parts = [
+      _toolTimelinePart(
+        id: 'lsp-query-1',
+        groupId: 'message-lsp',
+        turnId: 'turn-lsp',
+        name: 'lsp_query',
+        status: 'completed',
+        arguments: jsonEncode({
+          'languageId': 'rust',
+          'operation': 'documentSymbol',
+          'filePath': 'src/lib.rs',
+        }),
+      ),
+      _toolTimelinePart(
+        id: 'lsp-capabilities-1',
+        groupId: 'message-lsp',
+        turnId: 'turn-lsp',
+        order: 1,
+        name: 'lsp_capabilities',
+        status: 'completed',
+        arguments: '{}',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text(
+        'LSP query · rust · documentSymbol · src/lib.rs completed'
+        ' · LSP capabilities completed',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('todo panel renders the latest flat checklist', (tester) async {
     tester.view.physicalSize = const Size(900, 620);
     tester.view.devicePixelRatio = 1;
