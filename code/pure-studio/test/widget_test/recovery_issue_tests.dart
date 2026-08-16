@@ -38,9 +38,12 @@ void registerRecoveryIssueTests() {
       expect(find.text('1 recovery issue(s) need attention'), findsOneWidget);
       expect(find.byIcon(Icons.error_outline), findsNWidgets(2));
 
+      final activateCallsBefore = api.activateCallCount;
       await tester.tap(find.text('Broken Project'));
       await tester.pump();
-      expect(api.selectedProjectRequest, isNull);
+      // Startup bootstrap may activate the healthy selected project, but a
+      // project with a blocking recovery issue must never be activated.
+      expect(api.activateCallCount, activateCallsBefore);
 
       final subscriptionCount = api.threadSubscriptions.length;
       await tester.tap(find.text('Broken Session'));

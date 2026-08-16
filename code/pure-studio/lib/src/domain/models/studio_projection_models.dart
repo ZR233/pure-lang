@@ -120,6 +120,7 @@ abstract class SettingsPageView with _$SettingsPageView {
     required InstructionsSettingsView instructions,
     required SkillsSettingsView skills,
     required List<String> activeSkills,
+    required List<String> catalogSkills,
     required String? selectedProjectId,
     required List<McpServerSettingsView> mcpServers,
     required McpStateSnapshot mcpState,
@@ -139,6 +140,8 @@ abstract class SettingsPageView with _$SettingsPageView {
       instructions: state.instructions,
       skills: state.skills,
       activeSkills: state.runtime.activeSkills,
+      catalogSkills:
+          state.skillsByProject[state.selectedProjectId]?.skills ?? const [],
       selectedProjectId: state.selectedProjectId,
       mcpServers: state.mcpServers,
       mcpState: state.mcpState,

@@ -32,6 +32,8 @@ class _FakeStudioApi implements StudioApi {
   Object? bootstrapError;
   String? openedProjectPath;
   String? selectedProjectRequest;
+  int activateCallCount = 0;
+  String? activatedProjectId;
   String? createdThreadProjectId;
   String? archivedThreadId;
   String? archiveSelectedThreadId;
@@ -55,7 +57,9 @@ class _FakeStudioApi implements StudioApi {
   int resolveInteractionCount = 0;
   String? discoverProjectId;
   int discoverCallCount = 0;
-  List<String> discoveredSkills = const [];
+  int readSkillsCallCount = 0;
+  int _skillsCatalogRevision = 0;
+  List<String> _discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
   Completer<void>? blockedThreadCancellation;
@@ -106,6 +110,13 @@ class _FakeStudioApi implements StudioApi {
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
+  List<String> get discoveredSkills => _discoveredSkills;
+
+  set discoveredSkills(List<String> value) {
+    _discoveredSkills = value;
+    _skillsCatalogRevision += 1;
+  }
+
   void emitThreadFrame(ThreadStreamFrame frame) => _thread.add(frame);
 
   Future<void> closeThreadStream() async {
@@ -137,6 +148,8 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<void> activateProject(String projectId) async {
     selectedProjectRequest = projectId;
+    activateCallCount += 1;
+    activatedProjectId = projectId;
     if (selectProjectStates[projectId] case final next?) {
       _currentState = _asNewerProductState(_currentState, next);
     }
@@ -514,14 +527,16 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<SkillsStateSnapshot> readSkillsState(String projectId) async {
-    return _skillsState(projectId);
+    readSkillsCallCount += 1;
+    return _skillsState(projectId, revision: _skillsCatalogRevision);
   }
 
   @override
   Future<SkillsStateSnapshot> discoverSkills(String projectId) async {
     discoverProjectId = projectId;
     discoverCallCount += 1;
-    return _skillsState(projectId, revision: discoverCallCount);
+    _skillsCatalogRevision += 1;
+    return _skillsState(projectId, revision: _skillsCatalogRevision);
   }
 
   @override
