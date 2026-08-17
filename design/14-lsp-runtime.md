@@ -103,6 +103,11 @@ Flutter 的 LSP 设置页只投影产品级完整状态。页面进入和“刷�
 probe、仅在 `missingServerComponent` 时可用的 repair，以及 workspace/server reset 分别调用
 对应 typed command。Widget 不从错误字符串推断 availability，也不把 shutdown 当作 reset。
 
+server activity（idle/busy/indexing 及 title/message/percentage）随同一 snapshot 与
+`LspStateChanged` 事件流投影到 Flutter：设置页 LSP 行是权威展示，activity 非 idle 时显示
+活动状态与进度；主状态栏在任一 server 非 idle 时显示轻量活动指示，数据同样取自
+`readLspState`/事件流。两者都是纯投影，不隐式触发 probe、repair 或 server 启动。
+
 ## 非目标
 
 不实现插件市场 LSP 推荐 UI、终端展示或 IDE 虚拟 URI；除用户在配置中显式声明的自定义
