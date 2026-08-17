@@ -907,10 +907,10 @@ fn provider_compatible_turns_custom_apply_patch_into_function_fallback() {
     assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));
     assert_eq!(
         body["tools"][0]["function"]["parameters"]["required"],
-        serde_json::json!(["patch"])
+        serde_json::json!(["input"])
     );
     let description =
-        body["tools"][0]["function"]["parameters"]["properties"]["patch"]["description"]
+        body["tools"][0]["function"]["parameters"]["properties"]["input"]["description"]
             .as_str()
             .unwrap();
     assert!(description.contains("*** Add File:"));

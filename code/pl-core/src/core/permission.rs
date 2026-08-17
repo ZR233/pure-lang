@@ -78,8 +78,7 @@ pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value
             .filter_map(|key| argument_path(arguments, key))
             .collect(),
         "apply_patch" => arguments
-            .get("patch")
-            .or_else(|| arguments.get("input"))
+            .get("input")
             .and_then(serde_json::Value::as_str)
             .map(paths_from_patch_text)
             .unwrap_or_default(),

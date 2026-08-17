@@ -212,8 +212,12 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
         .command
         .as_deref()
         .ok_or_else(|| connection_config_error(&request.server_id, "stdio command is required"))?;
-    let program = stdio_program::resolve(command_name)
-        .map_err(|error| connection_error(&request.server_id, error))?;
+    let program = stdio_program::resolve(command_name).map_err(|error| {
+        connection_error(
+            &request.server_id,
+            format!("failed to resolve stdio command {command_name}: {error}"),
+        )
+    })?;
     let mut command = Command::new(program.executable);
     command
         .args(program.prefix_args)
@@ -232,7 +236,12 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
     let (transport, stderr) = TokioChildProcess::builder(command)
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| connection_error(&request.server_id, error))?;
+        .map_err(|error| {
+            connection_error(
+                &request.server_id,
+                format!("failed to start stdio command {command_name}: {error}"),
+            )
+        })?;
     let stderr = stderr.map(|stderr| StderrCapture::spawn(stderr, &config.env));
     let service = match client_info(ProtocolVersion::V_2026_07_28)
         .serve_with_lifecycle(transport, discovery_lifecycle())

@@ -1778,11 +1778,14 @@ async fn failed_mcp_startup_is_projected_to_its_server_without_blocking_runtime(
             let event = events.recv().await.unwrap();
             if let StudioProductEventKind::McpStateChanged(state) = event.kind
                 && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
-                && state
-                    .health
-                    .mcp_servers
-                    .iter()
-                    .any(|server| server.id == "unavailable-startup")
+                && state.health.mcp_servers.iter().any(|server| {
+                    server.id == "unavailable-startup"
+                        && server.availability_kind == "unavailable"
+                        && server
+                            .availability_message
+                            .as_deref()
+                            .is_some_and(|message| message.contains(&missing_command))
+                })
             {
                 break state;
             }

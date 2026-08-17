@@ -5,7 +5,9 @@ use pretty_assertions::assert_eq;
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement};
 
 use super::*;
-use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
+#[cfg(windows)]
+use crate::studio::paths::sqlite_read_only_url;
+use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
@@ -305,6 +307,7 @@ async fn unsafe_sidecar_target_fails_before_deleting_the_database() {
         "CREATE TABLE legacy_only (id TEXT PRIMARY KEY); PRAGMA user_version = 1;",
     )
     .await;
+    let original_database = tokio::fs::read(&database_path).await.unwrap();
     tokio::fs::create_dir_all(sidecar_path(&database_path, "-wal"))
         .await
         .unwrap();
@@ -312,11 +315,10 @@ async fn unsafe_sidecar_target_fails_before_deleting_the_database() {
     let result = StudioStore::open(&database_path).await;
 
     assert!(result.is_err());
-    let preserved = Database::connect(sqlite_read_only_url(&database_path))
-        .await
-        .unwrap();
-    assert!(table_exists(&preserved, "legacy_only").await);
-    preserved.close().await.unwrap();
+    assert_eq!(
+        tokio::fs::read(&database_path).await.unwrap(),
+        original_database
+    );
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

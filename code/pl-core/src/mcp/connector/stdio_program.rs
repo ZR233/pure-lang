@@ -173,11 +173,10 @@ fn is_create_process_target(path: &Path) -> bool {
         })
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 
-    #[cfg(windows)]
     #[test]
     fn create_process_targets_exclude_extensionless_and_powershell_shims() {
         assert!(is_create_process_target(Path::new("npx.cmd")));
@@ -186,7 +185,6 @@ mod tests {
         assert!(!is_create_process_target(Path::new("npx.ps1")));
     }
 
-    #[cfg(windows)]
     #[test]
     fn explicit_paths_do_not_require_path_lookup() {
         assert_eq!(
@@ -199,7 +197,6 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn standard_npx_shim_is_unwrapped_and_hides_package_launcher() {
         let temp = tempfile::tempdir().unwrap();

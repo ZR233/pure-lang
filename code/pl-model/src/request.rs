@@ -325,10 +325,7 @@ impl ToolCall {
     pub fn arguments_for_tool(&self) -> serde_json::Value {
         match &self.payload {
             ToolCallPayload::Function { arguments } => arguments.clone(),
-            ToolCallPayload::Custom { input } => serde_json::json!({
-                "input": input,
-                "patch": input,
-            }),
+            ToolCallPayload::Custom { input } => serde_json::json!({ "input": input }),
         }
     }
 
@@ -549,12 +546,12 @@ impl ToolSchema {
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "patch": {
+                        "input": {
                             "type": "string",
                             "description": APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION
                         }
                     },
-                    "required": ["patch"],
+                    "required": ["input"],
                     "additionalProperties": false
                 }),
             )

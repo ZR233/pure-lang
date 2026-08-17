@@ -22,7 +22,22 @@ pub(crate) fn file_uri_to_path(uri: &str) -> PathBuf {
     Url::parse(uri)
         .ok()
         .filter(|url| url.scheme() == "file")
-        .and_then(|url| url.to_file_path().ok())
+        .and_then(|url| {
+            let path = url.to_file_path().ok()?;
+            let uri_path = url.path().as_bytes();
+            let is_windows_drive = uri_path.first() == Some(&b'/')
+                && uri_path.get(1).is_some_and(u8::is_ascii_alphabetic)
+                && uri_path.get(2) == Some(&b':');
+            if is_windows_drive {
+                Some(
+                    path.strip_prefix(Path::new("/"))
+                        .unwrap_or(&path)
+                        .to_path_buf(),
+                )
+            } else {
+                Some(path)
+            }
+        })
         .unwrap_or_else(|| PathBuf::from(uri))
 }
 
@@ -68,6 +83,15 @@ mod tests {
         assert_eq!(
             file_uri_to_path(&uri),
             PathBuf::from("C:/work/pure lang/src/lib.rs")
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_path_with_colon_stays_absolute() {
+        assert_eq!(
+            file_uri_to_path("file:///tmp/a:/lib.rs"),
+            PathBuf::from("/tmp/a:/lib.rs")
         );
     }
 

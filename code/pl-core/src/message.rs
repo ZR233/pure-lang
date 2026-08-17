@@ -560,10 +560,7 @@ mod tests {
                 super::CompletionResponseOutputSnapshot::function_call(
                     "custom_item",
                     "apply_patch",
-                    serde_json::json!({
-                        "input": "*** Begin Patch",
-                        "patch": "*** Begin Patch",
-                    }),
+                    serde_json::json!({ "input": "*** Begin Patch" }),
                     "*** Begin Patch",
                 ),
             ]

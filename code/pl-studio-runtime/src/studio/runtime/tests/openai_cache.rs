@@ -40,6 +40,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
     let workspace = root.join("workspace");
     let database_path = root.join("studio.sqlite");
     tokio::fs::create_dir_all(&home).await?;
+    tokio::fs::create_dir_all(workspace.join(".git")).await?;
     tokio::fs::create_dir_all(workspace.join("skills/cache-fixture")).await?;
     tokio::fs::write(workspace.join("README.md"), "# OpenAI cache fixture\n").await?;
     tokio::fs::write(
@@ -85,12 +86,14 @@ async fn run_fixture(root: &Path) -> Result<()> {
     let requests = model_server.requests().await;
     assert_stable_append_only_requests(&requests)?;
     assert_eq!(mcp_server.lookup_calls().await, 1);
+    let public = runtime.thread_snapshot(&thread.id).await?;
     assert_eq!(
-        tokio::fs::read_to_string(workspace.join("openai-cache-result.txt")).await?,
+        tokio::fs::read_to_string(workspace.join("openai-cache-result.txt"))
+            .await
+            .with_context(|| format!("apply_patch 未创建结果文件，Thread={public:#?}"))?,
         "openai cache integration verified\n"
     );
 
-    let public = runtime.thread_snapshot(&thread.id).await?;
     assert!(
         public
             .items
