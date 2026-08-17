@@ -141,15 +141,20 @@ plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
 
 ## 11.6 状态栏与 agent directory
 
-状态栏只读取当前 workspace 的 owner、模型、context/token/cost、skills、MCP、LSP 和 Todo。
-存在模型 usage 时，上下文读数同时显示该 Thread 的缓存命中率；详情展示缓存命中、未命中、
-写入、reasoning token、inference 数、按币种估算费用、缓存节省和部分未定价提示。读数只来自
-canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐 inference 或计费副本。
+状态栏只读取当前 workspace 的 owner、模型、context、skills、MCP、LSP 和 Todo。上下文条目只
+保留进度圆环；缓存命中率、token 明细与费用不在状态栏直接展示，统一进入点击圆环弹出的详情：
+context/total token、缓存命中、未命中、写入、reasoning token、inference 数、按币种的实际花费、
+缓存节省和部分未定价提示。读数只来自 canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐
+inference 或计费副本。
+
+费用只展示按币种聚合的实际花费：货币符号 + 金额，多币种用 ` + ` 连接（如 `￥1.2 + $2.6`），
+不做汇率换算；已知币种 CNY/USD 显示 `￥`/`$`，未知币种回退为币种代码前缀。
 
 LSP 活动指示是状态栏的运行时状态条目：任一 LSP server activity 非 idle 时显示活动摘要
 （如“正在索引 40%”），详情列出各 server 的活动类型与 title/message；数据取自产品级
 `LspStateChanged`/`readLspState` 投影，不隐式触发 probe。窄宽度下直接条目收进溢出菜单，
-活动摘要与详情仍从菜单可达；详情内容超出高度约束时滚动展示。
+活动摘要与详情仍从菜单可达；详情内容超出高度约束时滚动展示。demo 构建按确定性周期推进索引
+活动（递增 revision 的 `LspStateChanged` 事件），供 GUI demo 与 Driver 验收动态显示。
 root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
 Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
 root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。

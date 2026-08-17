@@ -49,7 +49,7 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
         format!(
             "function_call {} {}: {}",
             call.name,
-            &call.call_id,
+            call.call_id,
             call.payload_text()
         )
     }));

@@ -35,15 +35,6 @@ String _permissionModeLabel(PermissionMode mode) {
   };
 }
 
-String _compactAmount(String value) {
-  final parsed = double.tryParse(value);
-  if (parsed == null) {
-    return value;
-  }
-  final fixed = parsed.toStringAsFixed(4);
-  return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
-}
-
 String _string(Object? value, {String fallback = ''}) {
   if (value == null) {
     return fallback;

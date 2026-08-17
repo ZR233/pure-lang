@@ -1,15 +1,22 @@
 part of 'studio_api.dart';
 
 class DemoStudioApi implements StudioApi {
-  DemoStudioApi({this._providerCatalog = demoProviderCatalogFixture});
+  DemoStudioApi({
+    this.lspActivityLoop = false,
+    this._providerCatalog = demoProviderCatalogFixture,
+  });
 
   /// 目录分页窗口的页大小；Driver 模式填充大量历史会话以验收触底加载。
   static const int directoryPageSize = 20;
 
   final ProviderCatalogView _providerCatalog;
+
+  /// 是否周期推进 demo LSP 索引活动；GUI demo 构建开启，测试默认关闭保持确定性。
+  final bool lspActivityLoop;
   final _productEvents = StreamController<Object>.broadcast();
   final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
   final _shutdownEvents = StreamController<StudioShutdownProgress>.broadcast();
+  Timer? _lspActivityTimer;
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
   final Map<String, StudioMode> _threadModes = {};
@@ -50,6 +57,9 @@ class DemoStudioApi implements StudioApi {
 
   /// 模拟关机每个阶段的停留时长。
   Duration get shutdownPhaseDelay => const Duration(milliseconds: 80);
+
+  /// demo LSP 索引活动每个步进的停留时长。
+  Duration get lspActivityStepDelay => const Duration(seconds: 2);
 
   @override
   Stream<StudioShutdownProgress> subscribeShutdownProgress() {
@@ -473,7 +483,20 @@ class DemoStudioApi implements StudioApi {
         contextTokens: 18342,
         contextWindow: 128000,
         totalTokens: 26320,
-        costLabel: 'CNY 0.16',
+        promptTokens: 22160,
+        completionTokens: 4160,
+        cachedPromptTokens: 8860,
+        cacheWriteTokens: 1240,
+        cacheMissTokens: 3100,
+        reasoningTokens: 1520,
+        inferenceCount: 6,
+        cacheHitRate: 0.4,
+        estimatedCosts: [
+          RuntimeCostView(currency: 'CNY', amount: 0.13),
+          RuntimeCostView(currency: 'USD', amount: 0.02),
+        ],
+        estimatedCacheSavings: [RuntimeCostView(currency: 'CNY', amount: 0.05)],
+        costLabel: '￥0.13 + \$0.02',
         activeSkills: ['flutter-apply-architecture-best-practices'],
         activeMcpServers: ['dart'],
         activeLspServers: ['rust-analyzer'],
@@ -509,7 +532,8 @@ class DemoStudioApi implements StudioApi {
         contextTokens: 320,
         contextWindow: 128000,
         totalTokens: 512,
-        costLabel: 'CNY 0.01',
+        estimatedCosts: const [RuntimeCostView(currency: 'CNY', amount: 0.01)],
+        costLabel: '￥0.01',
         activeSkills: const [],
         activeMcpServers: const ['dart'],
         activeLspServers: const [],
@@ -678,7 +702,34 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Stream<Object> subscribeProductEvents() => _productEvents.stream;
+  Stream<Object> subscribeProductEvents() {
+    if (lspActivityLoop) {
+      _startLspActivityLoop();
+    }
+    return _productEvents.stream;
+  }
+
+  /// 周期发布 LSP 索引活动状态：40→55→70→85→100 后回到 idle，再循环。
+  /// 每步递增 revision，保证 reducer 的 meta.isNewerThan 校验通过。
+  void _startLspActivityLoop() {
+    if (_lspActivityTimer != null) return;
+    const cycle = [40, 55, 70, 85, 100, null];
+    var index = 0;
+    _lspActivityTimer = Timer.periodic(lspActivityStepDelay, (_) {
+      _lspRevision += 1;
+      final percentage = cycle[index];
+      _productEvents.add(
+        StudioBridgeEvent(
+          payload: LspStateChangedPayload(
+            percentage == null
+                ? LspStateSnapshot(meta: _demoMeta(_lspRevision))
+                : _demoLspState(percentage: percentage),
+          ),
+        ),
+      );
+      index = (index + 1) % cycle.length;
+    });
+  }
 
   @override
   Stream<ThreadStreamFrame> subscribeThread(String threadId) async* {
@@ -1123,8 +1174,22 @@ class DemoStudioApi implements StudioApi {
     return McpStateSnapshot(meta: _demoMeta(_mcpRevision));
   }
 
-  LspStateSnapshot _demoLspState() {
-    return LspStateSnapshot(meta: _demoMeta(_lspRevision));
+  LspStateSnapshot _demoLspState({int percentage = 40}) {
+    return LspStateSnapshot(
+      meta: _demoMeta(_lspRevision),
+      activeServers: const ['rust-analyzer'],
+      servers: [
+        LspServerStateView(
+          id: 'rust-analyzer',
+          displayName: 'rust-analyzer',
+          availability: 'available',
+          activityKind: 'indexing',
+          activityTitle: 'Roots Scanned',
+          activityMessage: '${(408 * percentage / 100).round()}/408',
+          activityPercentage: percentage,
+        ),
+      ],
+    );
   }
 
   void _checkSettingsRevision(int expected) {
@@ -1262,6 +1327,8 @@ ThreadWorkspace _demoUpdateInteraction(
 
 /// Deterministic demo fixture exposed only by the dedicated Driver build.
 class DriverDemoStudioApi extends DemoStudioApi {
+  DriverDemoStudioApi({super.lspActivityLoop});
+
   @override
   Duration get promptActivityDelay => const Duration(seconds: 3);
 
@@ -1270,6 +1337,9 @@ class DriverDemoStudioApi extends DemoStudioApi {
 
   @override
   Duration get shutdownPhaseDelay => const Duration(milliseconds: 400);
+
+  @override
+  Duration get lspActivityStepDelay => const Duration(seconds: 3);
 
   /// Driver 目录分页验收需要大量历史会话。
   @override

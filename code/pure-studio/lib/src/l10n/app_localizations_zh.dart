@@ -225,9 +225,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusCost => '费用';
 
   @override
-  String get statusCostDetailTitle => '会话费用';
-
-  @override
   String get statusTotalTokensLabel => '总 token';
 
   @override
@@ -1847,9 +1844,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusCost => '费用';
-
-  @override
-  String get statusCostDetailTitle => '会话费用';
 
   @override
   String get statusTotalTokensLabel => '总 token';

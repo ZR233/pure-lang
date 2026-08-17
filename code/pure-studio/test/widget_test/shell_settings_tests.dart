@@ -290,7 +290,7 @@ void registerShellSettingsTests() {
           contextTokens: 42,
           contextWindow: 100,
           totalTokens: 128,
-          costLabel: 'CNY 0.16',
+          costLabel: '￥0.16',
           activeSkills: ['flutter-ui'],
           activeMcpServers: ['dart'],
           activeLspServers: ['rust-analyzer'],
@@ -322,7 +322,7 @@ void registerShellSettingsTests() {
     );
     expect(find.text('42%'), findsNothing);
     expect(find.text('42/100'), findsNothing);
-    expect(find.text('CNY 0.16'), findsOneWidget);
+    expect(find.text('￥0.16'), findsNothing);
     expect(find.text('1 skill · 1 MCP · 1 LSP'), findsOneWidget);
     expect(find.text('1 skill · 1 MCP · 1 LSP · 1 agent'), findsNothing);
     expect(find.text('2 agents · 1 running'), findsNothing);
@@ -336,15 +336,10 @@ void registerShellSettingsTests() {
     expect(find.text('42 / 100'), findsOneWidget);
     expect(find.text('128'), findsOneWidget);
     expect(find.text('planner/local'), findsOneWidget);
+    expect(find.text('￥0.16'), findsOneWidget);
     await gesture.moveTo(Offset.zero);
     await tester.pumpAndSettle();
     await gesture.removePointer();
-
-    await tester.tap(find.text('CNY 0.16'));
-    await tester.pumpAndSettle();
-    expect(find.text('2 agents'), findsNothing);
-    await tester.tapAt(Offset.zero);
-    await tester.pumpAndSettle();
 
     final activityFinder = find.text('1 skill · 1 MCP · 1 LSP');
     final activityCenter = tester.getCenter(activityFinder);
@@ -468,7 +463,7 @@ void registerShellSettingsTests() {
           contextTokens: 42000,
           contextWindow: 100000,
           totalTokens: 128000,
-          costLabel: 'CNY 12.34',
+          costLabel: '￥12.34',
           activeSkills: ['flutter-ui'],
           activeMcpServers: ['dart'],
           activeLspServers: ['rust-analyzer'],

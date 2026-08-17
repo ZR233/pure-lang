@@ -18,6 +18,31 @@ class RuntimeCostView {
   int get hashCode => Object.hash(currency, amount);
 }
 
+/// 已知币种显示为货币符号；未知币种回退为币种代码前缀。
+const Map<String, String> _runtimeCurrencySymbols = {'CNY': '￥', 'USD': r'$'};
+
+/// 费用金额显示：最多保留 6 位小数并去掉尾随零。
+String formatRuntimeCostAmount(String currency, double amount) {
+  final fixed = amount.toStringAsFixed(6);
+  var compact = fixed.replaceFirst(RegExp(r'\.?0+$'), '');
+  if (compact == '-0' || compact.isEmpty) {
+    compact = '0';
+  }
+  final symbol = _runtimeCurrencySymbols[currency.toUpperCase()];
+  if (symbol != null) {
+    return '$symbol$compact';
+  }
+  return '$currency $compact'.trim();
+}
+
+/// 多币种实际花费合并显示，如 `￥1.2 + $2.6`；不做汇率换算。
+String formatRuntimeCosts(Iterable<RuntimeCostView> costs) {
+  return costs
+      .map((cost) => formatRuntimeCostAmount(cost.currency, cost.amount))
+      .where((label) => label.isNotEmpty)
+      .join(' + ');
+}
+
 class ThreadRuntimeView {
   const ThreadRuntimeView({
     required this.model,

@@ -143,4 +143,41 @@ void registerDemoProjectTests() {
       ],
     );
   });
+
+  test('Demo LSP activity loop publishes indexing then idle', () async {
+    final api = _FastLspDemoApi();
+    final events = <StudioBridgeEvent>[];
+    final subscription = api.subscribeProductEvents().listen((event) {
+      if (event is StudioBridgeEvent) events.add(event);
+    });
+    addTearDown(subscription.cancel);
+
+    for (var i = 0; i < 100 && events.length < 6; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    final states = [
+      for (final event in events.take(6))
+        (event.payload as LspStateChangedPayload).state,
+    ];
+    expect(states, hasLength(6));
+    expect(
+      states.take(5).map((state) => state.servers.single.activityPercentage),
+      [40, 55, 70, 85, 100],
+    );
+    expect(
+      states.take(5).map((state) => state.servers.single.activityKind),
+      everyElement('indexing'),
+    );
+    expect(states[5].servers, isEmpty);
+    final revisions = states.map((state) => state.meta.revision).toList();
+    expect(revisions.toSet().length, revisions.length);
+  });
+}
+
+class _FastLspDemoApi extends DemoStudioApi {
+  _FastLspDemoApi() : super(lspActivityLoop: true);
+
+  @override
+  Duration get lspActivityStepDelay => const Duration(milliseconds: 40);
 }

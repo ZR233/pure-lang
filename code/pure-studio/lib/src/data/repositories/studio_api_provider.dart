@@ -8,9 +8,9 @@ part 'studio_api_provider.g.dart';
 StudioApi studioApi(Ref ref) {
   if (const bool.fromEnvironment('PURE_STUDIO_DEMO')) {
     if (const bool.fromEnvironment('PURE_STUDIO_DRIVER')) {
-      return DriverDemoStudioApi();
+      return DriverDemoStudioApi(lspActivityLoop: true);
     }
-    return DemoStudioApi();
+    return DemoStudioApi(lspActivityLoop: true);
   }
   return FrbStudioApi();
 }

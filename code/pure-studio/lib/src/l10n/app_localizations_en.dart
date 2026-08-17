@@ -228,9 +228,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusCost => 'Cost';
 
   @override
-  String get statusCostDetailTitle => 'Session cost';
-
-  @override
   String get statusTotalTokensLabel => 'Total tokens';
 
   @override

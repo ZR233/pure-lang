@@ -127,6 +127,12 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> lspActivityOverflow() =>
       const ValueKey<String>('lsp-activity-overflow');
 
+  static ValueKey<String> contextUsage() =>
+      const ValueKey<String>('context-usage');
+
+  static ValueKey<String> contextUsageDetail() =>
+      const ValueKey<String>('context-usage-detail');
+
   static ValueKey<String> settingsRoleEffort(String role) =>
       ValueKey<String>('settings-role-$role-effort');
 

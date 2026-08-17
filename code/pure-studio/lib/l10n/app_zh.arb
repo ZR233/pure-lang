@@ -67,7 +67,6 @@
   "permissionModeAutoReview": "审查",
   "permissionModeFullAccess": "完全",
   "statusCost": "费用",
-  "statusCostDetailTitle": "会话费用",
   "statusTotalTokensLabel": "总 token",
   "statusModelLabel": "模型",
   "statusCapabilitiesTitle": "活动能力",

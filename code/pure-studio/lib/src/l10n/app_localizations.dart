@@ -501,12 +501,6 @@ abstract class AppLocalizations {
   /// **'Cost'**
   String get statusCost;
 
-  /// No description provided for @statusCostDetailTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Session cost'**
-  String get statusCostDetailTitle;
-
   /// No description provided for @statusTotalTokensLabel.
   ///
   /// In en, this message translates to:

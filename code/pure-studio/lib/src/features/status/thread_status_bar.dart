@@ -63,7 +63,6 @@ class ThreadStatusBar extends ConsumerWidget {
               builder: (context, constraints) {
                 final showModel = constraints.maxWidth >= 610;
                 final showEffort = constraints.maxWidth >= 720;
-                final showCost = constraints.maxWidth >= 790;
                 final showCapabilities = constraints.maxWidth >= 840;
                 final showLspActivity = constraints.maxWidth >= 850;
                 final hasOverflow =
@@ -73,7 +72,6 @@ class ThreadStatusBar extends ConsumerWidget {
                           workspace,
                           thread.mode,
                         ).isNotEmpty) ||
-                    (!showCost && runtime.costLabel.isNotEmpty) ||
                     (!showCapabilities && capabilityLabel.isNotEmpty) ||
                     (!showLspActivity && lspActiveServers.isNotEmpty);
                 return Row(
@@ -136,14 +134,6 @@ class ThreadStatusBar extends ConsumerWidget {
                     ContextUsageReadout(runtime: runtime),
                     if (showLspActivity && lspActiveServers.isNotEmpty)
                       _LspActivityReadout(servers: lspActiveServers),
-                    if (showCost && runtime.costLabel.isNotEmpty)
-                      _StatusReadout(
-                        label: runtime.costLabel,
-                        tooltip: context.l10n.statusCost,
-                        detailWidth: 260,
-                        detailBuilder: (context) =>
-                            _CostDetail(runtime: runtime),
-                      ),
                     if (showCapabilities && capabilityLabel.isNotEmpty)
                       _StatusReadout(
                         icon: Icons.tune_outlined,
@@ -160,7 +150,6 @@ class ThreadStatusBar extends ConsumerWidget {
                         effort: thread.isAgent
                             ? null
                             : _selectedEffort(workspace, thread.mode),
-                        cost: runtime.costLabel,
                         capabilities: capabilityLabel,
                         runtime: runtime,
                         lspServers: showLspActivity
@@ -327,14 +316,12 @@ String? _selectedEffort(StatusBarView workspace, StudioMode mode) {
 class _StatusOverflow extends StatelessWidget {
   const _StatusOverflow({
     required this.effort,
-    required this.cost,
     required this.capabilities,
     required this.runtime,
     this.lspServers = const <LspServerStateView>[],
   });
 
   final String? effort;
-  final String cost;
   final String capabilities;
   final ThreadRuntimeView runtime;
   final List<LspServerStateView> lspServers;
@@ -354,15 +341,6 @@ class _StatusOverflow extends StatelessWidget {
             enabled: false,
             child: Text(
               '${context.l10n.statusReasoningEffort}: $value',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        if (cost.isNotEmpty)
-          PopupMenuItem<_StatusOverflowAction>(
-            value: _StatusOverflowAction.cost,
-            child: Text(
-              '${context.l10n.statusCost}: $cost',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -392,7 +370,6 @@ class _StatusOverflow extends StatelessWidget {
 
   void _showDetail(BuildContext context, _StatusOverflowAction action) {
     final detail = switch (action) {
-      _StatusOverflowAction.cost => _CostDetail(runtime: runtime),
       _StatusOverflowAction.capabilities => _CapabilityDetail(runtime: runtime),
       _StatusOverflowAction.lsp => _LspActivityDetail(servers: lspServers),
     };
@@ -411,7 +388,7 @@ class _StatusOverflow extends StatelessWidget {
   }
 }
 
-enum _StatusOverflowAction { cost, capabilities, lsp }
+enum _StatusOverflowAction { capabilities, lsp }
 
 String _lspOverflowSummary(
   BuildContext context,
@@ -710,35 +687,6 @@ class _StatusReadout extends StatelessWidget {
   }
 }
 
-class _CostDetail extends StatelessWidget {
-  const _CostDetail({required this.runtime});
-
-  final ThreadRuntimeView runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    return StatusDetailPanel(
-      title: context.l10n.statusCostDetailTitle,
-      children: [
-        Text(
-          runtime.costLabel,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: context.text.headlineSmall?.copyWith(
-            color: StudioColors.clayDeep,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 8),
-        StatusDetailRow(
-          label: context.l10n.statusTotalTokensLabel,
-          value: _formatStatusCount(runtime.totalTokens),
-        ),
-      ],
-    );
-  }
-}
-
 class _CapabilityDetail extends StatelessWidget {
   const _CapabilityDetail({required this.runtime});
 
@@ -776,16 +724,4 @@ class _CapabilityDetail extends StatelessWidget {
       ],
     );
   }
-}
-
-String _formatStatusCount(int value) {
-  final text = value.toString();
-  final buffer = StringBuffer();
-  for (var index = 0; index < text.length; index++) {
-    if (index > 0 && (text.length - index) % 3 == 0) {
-      buffer.write(',');
-    }
-    buffer.write(text[index]);
-  }
-  return buffer.toString();
 }

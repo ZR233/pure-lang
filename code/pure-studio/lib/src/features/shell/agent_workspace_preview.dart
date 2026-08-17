@@ -119,7 +119,7 @@ StudioState _agentWorkspacePreviewState({
     contextTokens: selectChild ? 4800 : 12800,
     contextWindow: 128000,
     totalTokens: selectChild ? 7200 : 19200,
-    costLabel: selectChild ? 'CNY 0.05' : 'CNY 0.16',
+    costLabel: selectChild ? '￥0.05' : '￥0.16',
     activeSkills: selectChild ? const ['review-skill'] : const ['planning'],
     activeMcpServers: const ['dart'],
     activeLspServers: const ['rust-analyzer'],

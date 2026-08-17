@@ -63,11 +63,11 @@ void registerStatusAccessibilityTests() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Cache 40%'), findsOneWidget);
+      expect(find.text('Cache 40%'), findsNothing);
       final contextButton = find.bySemanticsLabel('Context');
       expect(
         tester.getSemantics(contextButton).getSemanticsData().value,
-        '42%, Cache 40%',
+        '42%',
       );
 
       await tester.tap(contextButton);
@@ -79,11 +79,51 @@ void registerStatusAccessibilityTests() {
         '50',
         '75',
         '3',
-        'USD 0.0025 · Partially unpriced',
-        'USD 0.0012',
+        '40%',
+        r'$0.0025 + ￥0.31 · Partially unpriced',
+        r'$0.0012',
       ]) {
         expect(find.text(value), findsOneWidget, reason: value);
       }
+    });
+
+    testWidgets('status bar omits direct cost and cache text readouts', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final base = _emptyState();
+      final workspace = base.workspacesByThread[base.selectedThreadId!];
+      final state = base.copyWith(
+        workspacesByThread: {
+          base.selectedThreadId!: workspace!.copyWith(runtime: _cacheRuntime),
+        },
+      );
+      final api = _FakeStudioApi(state);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            home: Scaffold(
+              body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.contextUsage()), findsOneWidget);
+      expect(find.textContaining('￥'), findsNothing);
+      expect(find.textContaining(r'$'), findsNothing);
+      expect(find.textContaining('Cache'), findsNothing);
+
+      await tester.tap(find.byKey(StudioDriverKeys.contextUsage()));
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.contextUsageDetail()), findsOneWidget);
+      expect(find.textContaining(r'$0.0025 + ￥0.31'), findsOneWidget);
     });
 
     testWidgets('context detail keeps hover behavior and shared radius', (
@@ -424,7 +464,7 @@ const _cacheRuntime = ThreadRuntimeView(
   contextTokens: 42,
   contextWindow: 100,
   totalTokens: 1200,
-  costLabel: 'USD 0.0025',
+  costLabel: r'$0.0025',
   activeSkills: [],
   activeMcpServers: [],
   activeLspServers: [],
@@ -437,7 +477,10 @@ const _cacheRuntime = ThreadRuntimeView(
   reasoningTokens: 75,
   inferenceCount: 3,
   cacheHitRate: 0.4,
-  estimatedCosts: [RuntimeCostView(currency: 'USD', amount: 0.0025)],
+  estimatedCosts: [
+    RuntimeCostView(currency: 'USD', amount: 0.0025),
+    RuntimeCostView(currency: 'CNY', amount: 0.31),
+  ],
   estimatedCacheSavings: [RuntimeCostView(currency: 'USD', amount: 0.0012)],
   hasUnpricedUsage: true,
   promptGeneration: 2,

@@ -78,7 +78,6 @@
   "permissionModeAutoReview": "Review",
   "permissionModeFullAccess": "Full",
   "statusCost": "Cost",
-  "statusCostDetailTitle": "Session cost",
   "statusTotalTokensLabel": "Total tokens",
   "statusModelLabel": "Model",
   "statusCapabilitiesTitle": "Active capabilities",

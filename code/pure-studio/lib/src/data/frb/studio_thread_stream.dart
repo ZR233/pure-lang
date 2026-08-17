@@ -400,13 +400,12 @@ StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
 
 ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
   final usage = value.usage;
-  final costLabel = usage.estimatedCosts
+  final estimatedCosts = usage.estimatedCosts
       .map(
-        (cost) =>
-            '${cost.currency} ${_compactAmount(cost.amount.toString())}'.trim(),
+        (cost) => RuntimeCostView(currency: cost.currency, amount: cost.amount),
       )
-      .where((label) => label.isNotEmpty)
-      .join(', ');
+      .toList(growable: false);
+  final costLabel = formatRuntimeCosts(estimatedCosts);
   return ThreadRuntimeView(
     model: usage.model,
     contextTokens: usage.latestContextTokens.toInt(),
@@ -420,12 +419,7 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     reasoningTokens: usage.reasoningTokens.toInt(),
     inferenceCount: usage.inferenceCount.toInt(),
     cacheHitRate: usage.cacheHitRate,
-    estimatedCosts: usage.estimatedCosts
-        .map(
-          (cost) =>
-              RuntimeCostView(currency: cost.currency, amount: cost.amount),
-        )
-        .toList(growable: false),
+    estimatedCosts: estimatedCosts,
     estimatedCacheSavings: usage.estimatedCacheSavings
         .map(
           (cost) =>

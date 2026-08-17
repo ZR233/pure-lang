@@ -128,7 +128,7 @@ void registerThreadStreamTests() {
           contextTokens: 42,
           contextWindow: 128000,
           totalTokens: 84,
-          costLabel: 'CNY 0.16',
+          costLabel: '￥0.16',
           activeSkills: ['new-skill'],
           activeMcpServers: ['new-mcp'],
           activeLspServers: ['new-lsp'],

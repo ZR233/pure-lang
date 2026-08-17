@@ -48,4 +48,4 @@ final class StudioApiProvider
   }
 }
 
-String _$studioApiHash() => r'43ebe5d51098809a5f0cefa9e43f5f68d031f058';
+String _$studioApiHash() => r'76547ebf8e78d85b4adbfa8e2905e2112437d3c7';

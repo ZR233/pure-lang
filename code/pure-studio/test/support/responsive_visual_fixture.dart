@@ -356,7 +356,7 @@ StudioState responsiveVisualState() {
           contextTokens: 42000,
           contextWindow: 100000,
           totalTokens: 128000,
-          costLabel: 'CNY 12.34',
+          costLabel: '￥12.34',
           activeSkills: ['flutter-ui'],
           activeMcpServers: ['dart'],
           activeLspServers: ['rust-analyzer'],
