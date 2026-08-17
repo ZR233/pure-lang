@@ -48,9 +48,11 @@ Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedA
 `listThreadsPage` keyset cursor 继续加载，目录增量事件按 ThreadId 原位合并（新会话前置、
 归档移除），未加载条目的增量直接忽略。
 
-`selectedThreadId` 是显式状态机，只在三种情况下变化：用户显式动作（选择/新建/跨项目切换）、
-该线程的目录 removal 增量、bootstrap 时为空。目录窗口（resync 快照首页）永不隐式改写选择；
-归档后清空选择通过显式传 null 的 reload 表达。
+`selectedThreadId` 是显式状态机，只在三种情况下变化：用户显式动作（选择/进入新会话起始页/
+跨项目切换）、归档 command 返回的选择建议、bootstrap。`null` 表示当前 Project 的未持久化
+新会话起始页，是稳定且 authoritative 的 UI 选择；目录窗口 resync、目录新增、Widget 重建和
+lag 恢复都不得把 null 隐式改写为任意 root Thread。bootstrap 和显式跨 Project 切换可以选择
+该 Project 最近的健康 root Thread；不存在 root 时进入起始页。
 
 Timeline items 使用单一合并规则（live 帧、snapshot、历史页共用）：身份 = itemId + threadId +
 turnId + kind；同 id 时仅当 incoming revision >= existing 才替换；新 id 插入后按
@@ -65,6 +67,10 @@ Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry�
 - 滚动、bottom-following 与未读计数；
 - reasoning/tool/Todo 展开状态；
 - subscription generation 与临时 delta overlay。
+
+新会话起始页的 Composer 同样是 UI 本地状态，但按 Project 隔离；它不伪造 ThreadId 或
+`ThreadWorkspace`。首次提交成功后，草稿和 submission revision 一次性转移到 Bridge 返回的
+新 Thread workspace，失败则留在起始页并恢复草稿。
 
 只保存 `selectedThreadId`。root、parent 和 child 关系从 Thread 字段派生。切换 Thread 时
 timeline、Todo、状态栏、interaction 和 Composer 同帧切换；未加载目标时显示空 loading
@@ -217,12 +223,14 @@ icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasonin
 状态栏和阅读流同宽。设置页替换整个聊天页，不作为悬浮层。
 
 侧栏底部在宽布局和 icon rail 中都提供“新会话”操作；只有选中了无阻断恢复问题的 Project 时
-可用。该命令创建一个 Simple 模式 root Thread，并采用 Bridge 返回的 canonical product snapshot
-原子选择新 Thread。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread 或其 child
-Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。归档保留完整 Turn/Item 历史，
-同时归档该 root Thread 的 child Thread；Bridge 在同一 canonical snapshot 中回退到仍可用的 root
-Thread，没有剩余 root Thread 时按产品默认规则创建并选择空会话。故障 Thread 的同一 trailing
-位置继续展示恢复清理操作，不能绕过 recovery issue 门禁。
+可用。该操作只清空 Thread 选择并进入按 Project 隔离的未持久化起始页，不创建空 Thread；首次
+提交调用 `startNewThread`，由 Bridge 在同一生命周期临界区创建 Simple root Thread、提交首个
+Turn，并返回 Thread 与 receipt。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread
+或其 child Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。归档保留完整
+Turn/Item 历史并事务性归档整棵 Thread 树；Bridge 返回 removed ids，以及同 Project 完整排序中
+优先下一项、否则上一项的 root Thread。没有剩余 root Thread 时 `selectedThreadId` 保持 null 并
+展示新会话起始页，绝不创建兜底 Thread。故障 Thread 的同一 trailing 位置继续展示恢复清理
+操作，不能绕过 recovery issue 门禁。
 
 Task failure 是 canonical runtime 的一部分。fatal failure 在根会话状态栏显示红色
 `error_outline` 与“任务失败”，Task detail 和 agent 菜单同时展示来源 role/agent、脱敏原因、
@@ -238,6 +246,8 @@ directory 增量更新和 selected agent 重建时必须保留。
 
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
+- 零 Thread、新会话起始页、未持久化草稿、首次发送创建与归档最后 Thread 回到起始页有
+  widget test 和 Flutter Driver 验收；
 - 侧栏分页窗口、触底加载与目录增量合并有 widget test；
 - 时间线窗口三迁移（快照重建、历史页扩展、上限裁剪）、锚点派生回源与跨代际响应丢弃有 widget test；
 - 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；

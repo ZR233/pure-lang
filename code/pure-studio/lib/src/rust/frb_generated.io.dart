@@ -103,6 +103,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  ArchiveThreadResult dco_decode_archive_thread_result(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
@@ -190,6 +193,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeTaskRecoveryRequestDto
   dco_decode_box_autoadd_bridge_task_recovery_request_dto(dynamic raw);
+
+  @protected
+  BridgeThread dco_decode_box_autoadd_bridge_thread(dynamic raw);
 
   @protected
   BridgeThreadDirectoryDelta
@@ -1096,6 +1102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThread? dco_decode_opt_box_autoadd_bridge_thread(dynamic raw);
+
+  @protected
   BridgeThreadMcpHealthSnapshot?
   dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(dynamic raw);
 
@@ -1192,6 +1201,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillsSettingsInput dco_decode_skills_settings_input(dynamic raw);
+
+  @protected
+  StartNewThreadResponse dco_decode_start_new_thread_response(dynamic raw);
 
   @protected
   StartTurnResponse dco_decode_start_turn_response(dynamic raw);
@@ -1294,6 +1306,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
+
+  @protected
+  ArchiveThreadResult sse_decode_archive_thread_result(
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
@@ -1401,6 +1418,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeTaskRecoveryRequestDto
   sse_decode_box_autoadd_bridge_task_recovery_request_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThread sse_decode_box_autoadd_bridge_thread(
     SseDeserializer deserializer,
   );
 
@@ -2519,6 +2541,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThread? sse_decode_opt_box_autoadd_bridge_thread(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadMcpHealthSnapshot?
   sse_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
     SseDeserializer deserializer,
@@ -2635,6 +2662,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillsSettingsInput sse_decode_skills_settings_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  StartNewThreadResponse sse_decode_start_new_thread_response(
     SseDeserializer deserializer,
   );
 
@@ -2762,6 +2794,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_archive_thread_result(
+    ArchiveThreadResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
@@ -2881,6 +2919,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_task_recovery_request_dto(
     BridgeTaskRecoveryRequestDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_thread(
+    BridgeThread self,
     SseSerializer serializer,
   );
 
@@ -4238,6 +4282,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_thread(
+    BridgeThread? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
     BridgeThreadMcpHealthSnapshot? self,
     SseSerializer serializer,
@@ -4378,6 +4428,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_skills_settings_input(
     SkillsSettingsInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_start_new_thread_response(
+    StartNewThreadResponse self,
     SseSerializer serializer,
   );
 

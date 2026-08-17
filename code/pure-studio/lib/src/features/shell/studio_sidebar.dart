@@ -159,7 +159,8 @@ class _SidebarDirectoryListState extends ConsumerState<_SidebarDirectoryList> {
             compact: compact,
             recoveryIssue: state.threadRecoveryIssues[thread.id],
             canArchive:
-                thread.id != state.selectedRootThreadId || !state.isBusy,
+                (thread.id != state.selectedRootThreadId || !state.isBusy) &&
+                !const {'queued', 'running', 'waiting'}.contains(thread.status),
           );
         }
         return _DirectoryLoadFooter(state: state);
@@ -385,9 +386,9 @@ class _ThreadTile extends ConsumerWidget {
           onAction: issue != null
               ? _recoveryAction(context, ref, issue)
               : canArchive
-              ? () => ref
-                    .read(studioControllerProvider.notifier)
-                    .archiveThread(thread.id)
+              ? () => unawaited(
+                  _archiveThreadFromSidebar(context, ref, thread.id),
+                )
               : null,
         ),
       );
@@ -431,15 +432,29 @@ class _ThreadTile extends ConsumerWidget {
         onPressed: issue != null
             ? _recoveryAction(context, ref, issue)
             : canArchive
-            ? () => ref
-                  .read(studioControllerProvider.notifier)
-                  .archiveThread(thread.id)
+            ? () =>
+                  unawaited(_archiveThreadFromSidebar(context, ref, thread.id))
             : null,
       ),
     );
     return KeyedSubtree(
       key: StudioDriverKeys.threadRow(thread.id),
       child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
+    );
+  }
+}
+
+Future<void> _archiveThreadFromSidebar(
+  BuildContext context,
+  WidgetRef ref,
+  String threadId,
+) async {
+  try {
+    await ref.read(studioControllerProvider.notifier).archiveThread(threadId);
+  } on Object {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.sidebarArchiveSessionFailed)),
     );
   }
 }
@@ -751,7 +766,9 @@ class _SidebarActions extends ConsumerWidget {
                   tooltip: context.l10n.sidebarNewSession,
                   icon: Icons.add_comment_outlined,
                   onPressed: canCreateThread
-                      ? ref.read(studioControllerProvider.notifier).createThread
+                      ? ref
+                            .read(studioControllerProvider.notifier)
+                            .beginNewThread
                       : null,
                 ),
                 const SizedBox(height: 4),
@@ -778,7 +795,9 @@ class _SidebarActions extends ConsumerWidget {
                   icon: Icons.add_comment_outlined,
                   tooltip: context.l10n.sidebarNewSession,
                   onPressed: canCreateThread
-                      ? ref.read(studioControllerProvider.notifier).createThread
+                      ? ref
+                            .read(studioControllerProvider.notifier)
+                            .beginNewThread
                       : null,
                 ),
                 const SizedBox(width: 4),

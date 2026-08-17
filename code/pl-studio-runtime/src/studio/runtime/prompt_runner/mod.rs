@@ -24,23 +24,24 @@ impl StudioRuntime {
         &self,
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
+        validate_prompt_content(&request.prompt, &request.attachment_ids)?;
+        // Serialize turn registration with the updater's final idle check.
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        self.submit_prompt_with_lifecycle_lock(request).await
+    }
+
+    pub(super) async fn submit_prompt_with_lifecycle_lock(
+        &self,
+        request: StudioSubmitPromptRequest,
+    ) -> Result<StudioSubmitPromptResponse> {
         let StudioSubmitPromptRequest {
             thread_id,
             prompt,
             attachment_ids,
             options,
         } = request;
-        if prompt.trim().is_empty() && attachment_ids.is_empty() {
-            bail!("prompt is empty");
-        }
-        // Serialize turn registration with the updater's final idle check.
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        if !matches!(
-            self.runtime_snapshot().await?.status,
-            crate::StudioRuntimeStatus::Ready
-        ) {
-            bail!("Studio runtime is not ready");
-        }
+        validate_prompt_content(&prompt, &attachment_ids)?;
+        self.ensure_prompt_runtime_ready().await?;
         let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
         let thread_record = self
             .store
@@ -75,6 +76,16 @@ impl StudioRuntime {
             turn_id: turn_id.into_string(),
             cursor,
         })
+    }
+
+    pub(super) async fn ensure_prompt_runtime_ready(&self) -> Result<()> {
+        if !matches!(
+            self.runtime_snapshot().await?.status,
+            crate::StudioRuntimeStatus::Ready
+        ) {
+            bail!("Studio runtime is not ready");
+        }
+        Ok(())
     }
 
     /// Resumes a paused Task after an explicit user action without projecting a
@@ -567,6 +578,13 @@ impl StudioRuntime {
         }
         Ok(())
     }
+}
+
+pub(super) fn validate_prompt_content(prompt: &str, attachment_ids: &[String]) -> Result<()> {
+    if prompt.trim().is_empty() && attachment_ids.is_empty() {
+        bail!("prompt is empty");
+    }
+    Ok(())
 }
 
 fn submit_metadata(

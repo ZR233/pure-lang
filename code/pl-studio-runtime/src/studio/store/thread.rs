@@ -3,6 +3,7 @@
 use anyhow::Result;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 
 use crate::StudioMode;
@@ -178,10 +179,11 @@ impl StudioStore {
         Ok(())
     }
 
-    pub async fn archive_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
+    pub async fn archive_thread(&self, thread_id: &str) -> Result<Option<ArchivedThreadTree>> {
         use entities::thread;
+        let transaction = self.db.begin().await?;
         let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
+            .one(&transaction)
             .await?
         else {
             return Ok(None);
@@ -190,19 +192,27 @@ impl StudioStore {
         let targets = if existing.parent_thread_id.is_none() {
             thread::Entity::find()
                 .filter(thread::Column::RootThreadId.eq(thread_id))
-                .all(&self.db)
+                .all(&transaction)
                 .await?
         } else {
             vec![existing]
         };
+        let removed_thread_ids = targets
+            .iter()
+            .map(|target| target.id.clone())
+            .collect::<Vec<_>>();
         let now = unix_seconds();
         for target in targets {
             let mut active: thread::ActiveModel = target.into();
             active.archived = Set(1);
             active.updated_at = Set(now);
-            active.update(&self.db).await?;
+            active.update(&transaction).await?;
         }
-        Ok(Some(archived))
+        transaction.commit().await?;
+        Ok(Some(ArchivedThreadTree {
+            root: archived,
+            removed_thread_ids,
+        }))
     }
 
     pub(in crate::studio) async fn update_thread_status(
@@ -241,6 +251,12 @@ impl StudioStore {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchivedThreadTree {
+    pub root: ThreadRecord,
+    pub removed_thread_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

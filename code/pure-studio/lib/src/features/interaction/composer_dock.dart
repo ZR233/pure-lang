@@ -61,6 +61,51 @@ class ComposerDock extends ConsumerWidget {
   }
 }
 
+class StartPageComposerDock extends ConsumerWidget {
+  const StartPageComposerDock({
+    required this.composer,
+    required this.permissionMode,
+    required this.enabled,
+    super.key,
+  });
+
+  final ComposerThreadState composer;
+  final PermissionMode permissionMode;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 7, 12, 12),
+        child: Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: StudioLayout.conversationWidth,
+            ),
+            child: _PromptComposerPanel(
+              composer: composer,
+              permissionMode: permissionMode,
+              enabled: enabled,
+              isBusy: false,
+              onChanged: ref
+                  .read(studioControllerProvider.notifier)
+                  .updateNewThreadComposer,
+              onSubmit: () => unawaited(
+                ref
+                    .read(studioControllerProvider.notifier)
+                    .submitNewThreadComposer(),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RuntimeDrivenAgentDock extends StatelessWidget {
   const _RuntimeDrivenAgentDock({required this.workspace});
 
@@ -175,28 +220,63 @@ class _TaskResumeDock extends ConsumerWidget {
   }
 }
 
-class _PromptComposer extends ConsumerStatefulWidget {
+class _PromptComposer extends ConsumerWidget {
   const _PromptComposer({required this.workspace});
 
   final AgentWorkspaceView workspace;
 
   @override
-  ConsumerState<_PromptComposer> createState() => _PromptComposerState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(studioControllerProvider.notifier);
+    return _PromptComposerPanel(
+      composer: workspace.composer,
+      permissionMode: workspace.permissionMode,
+      enabled: true,
+      isBusy: workspace.isBusy,
+      onChanged: (value) =>
+          controller.updateComposer(workspace.threadId, value),
+      onSubmit: () => unawaited(controller.submitComposer(workspace.threadId)),
+      onStop: () => unawaited(controller.stop(workspace.threadId)),
+    );
+  }
 }
 
-class _PromptComposerState extends ConsumerState<_PromptComposer> {
+class _PromptComposerPanel extends StatefulWidget {
+  const _PromptComposerPanel({
+    required this.composer,
+    required this.permissionMode,
+    required this.enabled,
+    required this.isBusy,
+    required this.onChanged,
+    required this.onSubmit,
+    this.onStop,
+  });
+
+  final ComposerThreadState composer;
+  final PermissionMode permissionMode;
+  final bool enabled;
+  final bool isBusy;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onSubmit;
+  final VoidCallback? onStop;
+
+  @override
+  State<_PromptComposerPanel> createState() => _PromptComposerPanelState();
+}
+
+class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   late final TextEditingController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.workspace.composer.draft);
+    _controller = TextEditingController(text: widget.composer.draft);
   }
 
   @override
-  void didUpdateWidget(covariant _PromptComposer oldWidget) {
+  void didUpdateWidget(covariant _PromptComposerPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextText = widget.workspace.composer.draft;
+    final nextText = widget.composer.draft;
     if (nextText != _controller.text) {
       _controller.value = TextEditingValue(
         text: nextText,
@@ -214,10 +294,11 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final composer = widget.workspace.composer;
+    final composer = widget.composer;
     final canSubmit =
+        widget.enabled &&
         composer.draft.trim().isNotEmpty &&
-        !widget.workspace.isBusy &&
+        !widget.isBusy &&
         !composer.isSubmissionPending;
     return StudioPanel(
       backgroundColor: colors.surfaceContainerLowest,
@@ -231,7 +312,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
           TextField(
             key: StudioDriverKeys.composerInput,
             controller: _controller,
-            enabled: !composer.isSubmissionPending,
+            enabled: widget.enabled && !composer.isSubmissionPending,
             minLines: 1,
             maxLines: 6,
             decoration: InputDecoration(
@@ -248,16 +329,10 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: 8),
             ),
-            onChanged: (value) => ref
-                .read(studioControllerProvider.notifier)
-                .updateComposer(widget.workspace.threadId, value),
+            onChanged: widget.onChanged,
             onSubmitted: (_) {
               if (canSubmit) {
-                unawaited(
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .submitComposer(widget.workspace.threadId),
-                );
+                widget.onSubmit();
               }
             },
           ),
@@ -277,16 +352,14 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
             ),
           Row(
             children: [
-              _PermissionSelector(mode: widget.workspace.permissionMode),
+              _PermissionSelector(mode: widget.permissionMode),
               const Spacer(),
-              if (widget.workspace.isBusy)
+              if (widget.isBusy)
                 IconButton.filledTonal(
                   key: StudioDriverKeys.composerStop,
                   tooltip: context.l10n.composerStop,
                   icon: const Icon(Icons.stop),
-                  onPressed: () => ref
-                      .read(studioControllerProvider.notifier)
-                      .stop(widget.workspace.threadId),
+                  onPressed: widget.onStop,
                 )
               else
                 IconButton.filled(
@@ -303,13 +376,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.arrow_upward),
-                  onPressed: canSubmit
-                      ? () => unawaited(
-                          ref
-                              .read(studioControllerProvider.notifier)
-                              .submitComposer(widget.workspace.threadId),
-                        )
-                      : null,
+                  onPressed: canSubmit ? widget.onSubmit : null,
                 ),
             ],
           ),

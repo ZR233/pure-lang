@@ -39,10 +39,15 @@ class _FakeStudioApi implements StudioApi {
   int activateCallCount = 0;
   String? activatedProjectId;
   String? createdThreadProjectId;
+  String? newThreadPrompt;
   String? archivedThreadId;
+  int archiveThreadCallCount = 0;
+  Object? archiveThreadError;
+  Completer<ArchiveThreadResult>? blockedArchiveThread;
   String? archiveSelectedThreadId;
   StudioState? createThreadState;
   StudioState? archiveThreadState;
+  ArchiveThreadResult? archiveThreadResult;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
   ({String threadId, StudioMode mode})? modeUpdate;
@@ -166,44 +171,90 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioThread> createThread(String projectId, {String? title}) async {
+  Future<StartNewThreadResult> startNewThread(
+    String projectId,
+    String prompt,
+    List<String> attachmentIds,
+  ) async {
     createdThreadProjectId = projectId;
+    newThreadPrompt = prompt;
+    submitPromptCount += 1;
+    submittedPrompts.add((threadId: '<new>', prompt: prompt));
+    if (submitPromptError case final error?) throw error;
+    final blocked = blockedPromptSubmit;
+    final receipt = blocked == null
+        ? SubmitPromptReceipt(
+            threadId: submitReceiptSessionId ?? 'session-created',
+            turnId: submitTurnId,
+            cursor: 1,
+          )
+        : await blocked.future;
+    late final StudioThread thread;
     if (createThreadState case final next?) {
       _currentState = _asNewerProductState(_currentState, next);
-      return next.threads
+      thread =
+          next.threads
               .where((thread) => !initialState.threads.contains(thread))
               .firstOrNull ??
           next.threads.last;
+    } else {
+      final now = DateTime.fromMillisecondsSinceEpoch(1);
+      thread = StudioThread(
+        id: 'session-created',
+        projectId: projectId,
+        title: 'New Session',
+        mode: StudioMode.simple,
+        role: 'executor',
+        createdAt: now,
+        updatedAt: now,
+      );
+      _currentState = _currentState.copyWith(
+        threadDirectory: _currentState.threadDirectory.copyWith(
+          threads: [..._currentState.threads, thread],
+        ),
+      );
     }
-    final now = DateTime.fromMillisecondsSinceEpoch(1);
-    final thread = StudioThread(
-      id: 'session-created',
-      projectId: projectId,
-      title: title ?? 'New Session',
-      mode: StudioMode.simple,
-      role: 'executor',
-      createdAt: now,
-      updatedAt: now,
-    );
-    _currentState = _currentState.copyWith(
-      threadDirectory: _currentState.threadDirectory.copyWith(
-        threads: [..._currentState.threads, thread],
+    return StartNewThreadResult(
+      thread: thread,
+      receipt: SubmitPromptReceipt(
+        threadId: receipt.threadId == 'session-created'
+            ? thread.id
+            : receipt.threadId,
+        turnId: receipt.turnId,
+        cursor: receipt.cursor,
       ),
-      selectedProjectId: projectId,
-      selectedThreadId: thread.id,
     );
-    return thread;
   }
 
   @override
-  Future<StudioThread> archiveThread(String threadId) async {
+  Future<ArchiveThreadResult> archiveThread(String threadId) async {
     archivedThreadId = threadId;
+    archiveThreadCallCount += 1;
+    if (archiveThreadError case final error?) {
+      throw error;
+    }
+    if (blockedArchiveThread case final gate?) {
+      return gate.future;
+    }
     final archived = _currentState.threads
         .where((thread) => thread.id == threadId)
         .first;
+    final removedThreadIds = _currentState.threads
+        .where((thread) => thread.effectiveRootThreadId == threadId)
+        .map((thread) => thread.id)
+        .toList();
+    if (archiveThreadResult case final result?) {
+      return result;
+    }
     if (archiveThreadState case final next?) {
       _currentState = _asNewerProductState(_currentState, next);
-      return archived;
+      return ArchiveThreadResult(
+        archivedRootId: threadId,
+        removedThreadIds: removedThreadIds,
+        nextRoot: next.rootThreads
+            .where((thread) => thread.id == next.selectedThreadId)
+            .firstOrNull,
+      );
     }
     final threads = _currentState.threads
         .where((thread) => thread.effectiveRootThreadId != threadId)
@@ -217,7 +268,13 @@ class _FakeStudioApi implements StudioApi {
       threadDirectory: _currentState.threadDirectory.copyWith(threads: threads),
       selectedThreadId: nextSelected,
     );
-    return archived;
+    return ArchiveThreadResult(
+      archivedRootId: archived.id,
+      removedThreadIds: removedThreadIds,
+      nextRoot: threads
+          .where((thread) => thread.id == nextSelected && thread.isRoot)
+          .firstOrNull,
+    );
   }
 
   @override

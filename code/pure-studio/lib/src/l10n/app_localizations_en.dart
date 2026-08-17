@@ -59,6 +59,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarArchiveSession => 'Archive session';
 
   @override
+  String get sidebarArchiveSessionFailed =>
+      'Could not archive this session. It may still be running.';
+
+  @override
   String get sidebarNewSession => 'New session';
 
   @override
@@ -154,7 +158,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarOpen => 'Open';
 
   @override
-  String get shellNoSession => 'No session';
+  String get shellNoSession => 'New session';
+
+  @override
+  String get startPageWelcome => 'What can I help you build?';
+
+  @override
+  String startPageProject(String project) {
+    return 'Working in $project';
+  }
+
+  @override
+  String get startPageOpenProjectTitle => 'Open a project to get started';
+
+  @override
+  String get startPageOpenProjectBody =>
+      'Choose a project from the sidebar before sending your first message.';
 
   @override
   String shellSessionUpdated(String mode, String time) {

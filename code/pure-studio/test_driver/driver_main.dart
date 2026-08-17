@@ -37,6 +37,18 @@ Future<String> _handleDriverData(String? message) async {
           .loadMoreThreads();
       _publishSidebarDirectory();
       return jsonEncode({'loaded': true});
+    case 'prepare-session-lifecycle-demo':
+      final api = _container.read(studioApiProvider);
+      if (api is! DriverDemoStudioApi) {
+        return jsonEncode({
+          'error': 'session lifecycle demo requires demo mode',
+        });
+      }
+      api.prepareSessionLifecycleScenario();
+      _container.invalidate(studioControllerProvider);
+      await _container.read(studioControllerProvider.future);
+      _publishSidebarDirectory();
+      return jsonEncode({'prepared': true});
     case 'shutdown':
       // 兼容旧 harness：启动关机并等待阶段序列完成（含落库排空）。
       await (_shutdownTask ??= _runShutdown());
@@ -46,6 +58,9 @@ Future<String> _handleDriverData(String? message) async {
       final count = int.tryParse(seed.substring('seed-threads:'.length)) ?? 0;
       if (_container.read(studioApiProvider) is FrbStudioApi) {
         final threads = await frb.seedDriverThreadFixtures(count: count);
+        _container.invalidate(studioControllerProvider);
+        await _container.read(studioControllerProvider.future);
+        _publishSidebarDirectory();
         return jsonEncode({'seeded': threads.length});
       }
       return jsonEncode({'error': 'seeding requires the real runtime bridge'});
@@ -70,9 +85,7 @@ void _publishSidebarDirectory() {
     _ => null,
   };
   if (state == null) return;
-  StudioDriverState.publishSidebarDirectory([
-    for (final thread in state.threads) thread.id,
-  ], state.threadDirectory.hasMore);
+  StudioDriverState.publishState(state);
 }
 
 Future<void> _runShutdown() {

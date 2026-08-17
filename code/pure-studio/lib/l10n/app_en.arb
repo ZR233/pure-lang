@@ -16,6 +16,7 @@
   "@shutdownPendingCommits": {"placeholders": {"count": {"type": "int"}}},
   "sidebarCloseProject": "Close project",
   "sidebarArchiveSession": "Archive session",
+  "sidebarArchiveSessionFailed": "Could not archive this session. It may still be running.",
   "sidebarNewSession": "New session",
   "sidebarOpenProject": "Open project",
   "sidebarSettings": "Settings",
@@ -48,7 +49,12 @@
   "projectCleanupConfirm": "Remove project and clean up",
   "sidebarNew": "New",
   "sidebarOpen": "Open",
-  "shellNoSession": "No session",
+  "shellNoSession": "New session",
+  "startPageWelcome": "What can I help you build?",
+  "startPageProject": "Working in {project}",
+  "@startPageProject": {"placeholders": {"project": {"type": "String"}}},
+  "startPageOpenProjectTitle": "Open a project to get started",
+  "startPageOpenProjectBody": "Choose a project from the sidebar before sending your first message.",
   "shellSessionUpdated": "{mode} · updated {time}",
   "@shellSessionUpdated": {
     "placeholders": {

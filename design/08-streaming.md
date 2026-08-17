@@ -53,6 +53,11 @@ Flutter 为每个 Thread 保存 canonical `ThreadWorkspace`，为本地交互保
 `WorkspaceUiState`。snapshot 直接替换 canonical workspace；旧 Turn/Item/runtime 不与新
 snapshot 混合。Composer、滚动、展开和 submission revision 不属于 canonical snapshot。
 
+`selectedThreadId = null` 是稳定的本地选择状态，表示当前 Project 的未持久化新会话起始页。
+该状态按 Project 保存独立 Composer 草稿；只有首次提交成功进入 `startNewThread` command 后
+才产生 durable Thread。product/thread resync、目录新增和 Widget 重建不得把 null 隐式改写为
+任意目录 Thread。
+
 Thread directory 是 Thread 元数据的唯一 canonical cache。snapshot 中携带的 Thread 只用于
 校验身份并重绑到当前 directory entry，不能反向覆盖 directory。这样 product stream 与 thread
 stream 即使并发到达，也不会用旧 workspace snapshot 回滚刚确认的 mode/role。

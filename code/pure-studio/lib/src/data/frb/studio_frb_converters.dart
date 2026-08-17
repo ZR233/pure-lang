@@ -286,21 +286,11 @@ McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
   );
 }
 
-StudioState studioStateFromFrbSnapshot(
-  frb.BridgeStudioStateSnapshot value, {
-  String? selectedProjectId,
-  String? selectedThreadId,
-}) {
+StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
   final projects = value.projectDirectory.projects
       .map(_projectFromFrb)
       .toList();
   final threads = value.threadDirectory.threads.map(_threadFromFrb).toList();
-  final selectedProject = _stableProjectSelection(projects, selectedProjectId);
-  final selectedThread = _stableThreadSelection(
-    threads,
-    selectedProject,
-    selectedThreadId,
-  );
   return StudioState(
     projectDirectory: ProjectDirectoryState(
       meta: _observedMetaFromFrb(value.projectDirectory.meta),
@@ -340,36 +330,9 @@ StudioState studioStateFromFrbSnapshot(
     },
     providerUsageState: _providerUsageStateFromFrb(value.providerUsage),
     updaterState: _updaterStateFromFrb(value.updater),
-    selectedProjectId: selectedProject,
-    selectedThreadId: selectedThread,
+    selectedProjectId: null,
+    selectedThreadId: null,
   );
-}
-
-String? _stableProjectSelection(
-  List<StudioProject> projects,
-  String? selectedProjectId,
-) {
-  if (projects.any((project) => project.id == selectedProjectId)) {
-    return selectedProjectId;
-  }
-  final sorted = [...projects]..sort((a, b) => a.id.compareTo(b.id));
-  return sorted.firstOrNull?.id;
-}
-
-String? _stableThreadSelection(
-  List<StudioThread> threads,
-  String? projectId,
-  String? selectedThreadId,
-) {
-  if (threads.any((thread) => thread.id == selectedThreadId)) {
-    return selectedThreadId;
-  }
-  final roots =
-      threads
-          .where((thread) => thread.projectId == projectId && thread.isRoot)
-          .toList()
-        ..sort((a, b) => a.id.compareTo(b.id));
-  return roots.firstOrNull?.id;
 }
 
 McpStateSnapshot _mcpStateFromFrb(frb.BridgeMcpStateSnapshot snapshot) {

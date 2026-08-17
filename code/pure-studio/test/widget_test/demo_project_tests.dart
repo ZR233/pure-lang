@@ -103,6 +103,13 @@ void registerDemoProjectTests() {
 
     expect(receipt.threadId, 'thread-main');
     expect(frames.first, isA<ThreadSnapshotFrame>());
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (DateTime.now().isBefore(deadline) &&
+        !frames.whereType<ThreadNotificationFrame>().any(
+          (frame) => frame.update is ThreadItemDeltaUpdate,
+        )) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
     expect(
       frames.whereType<ThreadNotificationFrame>().map((frame) => frame.update),
       containsAll([

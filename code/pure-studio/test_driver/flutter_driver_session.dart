@@ -197,6 +197,10 @@ class FlutterDriverSession {
     return _client.sendTextInputAction(action, timeout: timeout);
   }
 
+  Future<String> requestData(String message, {Duration? timeout}) {
+    return _client.requestData(message, timeout: timeout);
+  }
+
   Future<String> renderTree() => _client.renderTree();
 
   Future<List<int>> screenshot() => _client.screenshot();

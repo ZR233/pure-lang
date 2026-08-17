@@ -14,6 +14,30 @@ abstract final class StudioDriverState {
   static final List<StudioShutdownProgress> _shutdownProgress = [];
   static List<String> _sidebarDirectoryIds = const [];
   static bool _sidebarDirectoryHasMore = false;
+  static String? _selectedProjectId;
+  static String? _selectedThreadId;
+  static ComposerThreadState _newThreadComposer =
+      const ComposerThreadState.idle();
+
+  static void publishState(StudioState state) {
+    _selectedProjectId = state.selectedProjectId;
+    _selectedThreadId = state.selectedThreadId;
+    _newThreadComposer = state.newThreadComposer;
+    _project = state.projects
+        .where((project) => project.id == state.selectedProjectId)
+        .firstOrNull;
+    final workspace = state.selectedAgentWorkspace;
+    if (workspace == null) {
+      _workspace = null;
+      _task = null;
+    } else {
+      publishWorkspace(workspace);
+      _task = workspace.runtime.task;
+    }
+    publishSidebarDirectory([
+      for (final thread in state.rootThreads) thread.id,
+    ], state.threadDirectory.hasMore);
+  }
 
   static void publishTask(TaskRuntimeView? task) {
     _task = task;
@@ -73,6 +97,17 @@ abstract final class StudioDriverState {
         'count': _sidebarDirectoryIds.length,
         'hasMore': _sidebarDirectoryHasMore,
         'ids': _sidebarDirectoryIds,
+      },
+      'navigation': {
+        'selectedProjectId': _selectedProjectId,
+        'selectedThreadId': _selectedThreadId,
+        'isStartPage': _selectedThreadId == null,
+        'newThreadComposer': {
+          'draft': _newThreadComposer.draft,
+          'phase': _newThreadComposer.phase.name,
+          'submissionRevision': _newThreadComposer.submissionRevision,
+          'error': _newThreadComposer.error,
+        },
       },
       'shutdownPhases': <String>[
         for (final progress in _shutdownProgress)

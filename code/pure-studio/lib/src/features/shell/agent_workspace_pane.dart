@@ -18,12 +18,19 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   @override
   Widget build(BuildContext context) {
     final asyncLayout = ref.watch(selectedWorkspaceLayoutProvider);
+    final asyncStartPage = ref.watch(startPageProvider);
     return asyncLayout.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, stackTrace) => Center(child: Text(error.toString())),
       data: (layout) {
         if (layout == null) {
-          return const SizedBox.shrink();
+          return asyncStartPage.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, stackTrace) => Center(child: Text(error.toString())),
+            data: (startPage) => startPage.isStartPage
+                ? _StudioStartPage(view: startPage)
+                : const Center(child: CircularProgressIndicator()),
+          );
         }
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -122,6 +129,74 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
           },
         );
       },
+    );
+  }
+}
+
+class _StudioStartPage extends StatelessWidget {
+  const _StudioStartPage({required this.view});
+
+  final StartPageView view;
+
+  @override
+  Widget build(BuildContext context) {
+    final project = view.project;
+    return Scaffold(
+      key: StudioDriverKeys.startPage,
+      backgroundColor: context.studioPaper,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 32,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: StudioLayout.conversationWidth,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          project == null
+                              ? context.l10n.startPageOpenProjectTitle
+                              : context.l10n.startPageWelcome,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                color: context.studioInk,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          project == null
+                              ? context.l10n.startPageOpenProjectBody
+                              : context.l10n.startPageProject(project.name),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: context.studioInkSoft),
+                        ),
+                        const SizedBox(height: 28),
+                        StartPageComposerDock(
+                          composer: view.composer,
+                          permissionMode: view.permissionMode,
+                          enabled: view.canSubmit,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

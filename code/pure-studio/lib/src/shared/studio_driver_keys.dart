@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 abstract final class StudioDriverKeys {
   static const shell = ValueKey<String>('studio-shell');
+  static const startPage = ValueKey<String>('studio-start-page');
   static const sidebar = ValueKey<String>('studio-sidebar');
   static const timeline = ValueKey<String>('timeline-scrollable');
   static const newSession = ValueKey<String>('sidebar-new-session');

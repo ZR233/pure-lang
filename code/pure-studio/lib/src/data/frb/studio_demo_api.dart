@@ -48,6 +48,7 @@ class DemoStudioApi implements StudioApi {
   int _mcpRevision = 0;
   int _lspRevision = 0;
   String? _selectedThreadId;
+  DateTime? _fixtureNow;
 
   Duration get promptStartDelay => const Duration(milliseconds: 120);
 
@@ -151,12 +152,10 @@ class DemoStudioApi implements StudioApi {
         selectedThreadId: null,
       );
     }
-    final selectedThreadId =
-        threads
-            .where((thread) => thread.id == _selectedThreadId)
-            .firstOrNull
-            ?.id ??
-        threads.firstOrNull?.id;
+    final selectedThreadId = threads
+        .where((thread) => thread.id == _selectedThreadId)
+        .firstOrNull
+        ?.id;
     final directory = _sortedDirectoryThreads();
     final firstPage = directory.take(directoryPageSize).toList();
     return StudioState(
@@ -239,7 +238,7 @@ class DemoStudioApi implements StudioApi {
 
   ({StudioProject project, List<StudioThread> threads})
   _ensureWorkspaceFixture() {
-    final now = DateTime.now();
+    final now = _fixtureNow ??= DateTime.now();
     const project = StudioProject(
       id: 'project-local',
       name: 'pure-lang',
@@ -561,28 +560,37 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioThread> createThread(String projectId, {String? title}) async {
+  Future<StartNewThreadResult> startNewThread(
+    String projectId,
+    String prompt,
+    List<String> attachmentIds,
+  ) async {
     final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
       throw StateError('unknown demo project $projectId');
+    }
+    if (prompt.trim().isEmpty && attachmentIds.isEmpty) {
+      throw ArgumentError.value(prompt, 'prompt', 'empty');
     }
     final now = DateTime.now();
     final thread = StudioThread(
       id: 'thread-created-${++_threadSequence}',
       projectId: projectId,
-      title: title?.trim().isNotEmpty == true ? title!.trim() : 'New Session',
+      title: 'New Session',
       mode: StudioMode.simple,
       role: 'executor',
       createdAt: now,
       updatedAt: now,
     );
     _createdRootThreads.add(thread);
+    _ensureWorkspaceFixture();
     _selectedThreadId = thread.id;
-    return thread;
+    final receipt = await _submitPrompt(thread.id, prompt);
+    return StartNewThreadResult(thread: thread, receipt: receipt);
   }
 
   @override
-  Future<StudioThread> archiveThread(String threadId) async {
+  Future<ArchiveThreadResult> archiveThread(String threadId) async {
     final current = await readStudioState();
     final thread = current.threads
         .where((candidate) => candidate.id == threadId)
@@ -594,9 +602,28 @@ class DemoStudioApi implements StudioApi {
     if (workspace?.activeTurn?.state.isBusy ?? false) {
       throw StateError('thread tree has an active turn or pending input');
     }
+    final roots = _sortedDirectoryThreads()
+        .where((candidate) => candidate.isRoot)
+        .toList();
+    final index = roots.indexWhere((candidate) => candidate.id == threadId);
+    if (index < 0) throw StateError('unknown demo root Thread $threadId');
+    final nextRoot = index + 1 < roots.length
+        ? roots[index + 1]
+        : index > 0
+        ? roots[index - 1]
+        : null;
+    final removedThreadIds = <String>{
+      threadId,
+      for (final candidate in _ensureWorkspaceFixture().threads)
+        if (candidate.effectiveRootThreadId == threadId) candidate.id,
+    }.toList();
     _archivedThreadIds.add(threadId);
-    if (_selectedThreadId == threadId) _selectedThreadId = null;
-    return thread;
+    if (_selectedThreadId == threadId) _selectedThreadId = nextRoot?.id;
+    return ArchiveThreadResult(
+      archivedRootId: threadId,
+      removedThreadIds: removedThreadIds,
+      nextRoot: nextRoot,
+    );
   }
 
   @override
@@ -829,8 +856,27 @@ class DemoStudioApi implements StudioApi {
         ),
       ),
     );
+    unawaited(
+      _completePrompt(
+        threadId: threadId,
+        turnId: turnId,
+        trimmedPrompt: trimmed,
+        generation: generation,
+        startedAt: now,
+      ),
+    );
+    return receipt;
+  }
+
+  Future<void> _completePrompt({
+    required String threadId,
+    required String turnId,
+    required String trimmedPrompt,
+    required int generation,
+    required DateTime startedAt,
+  }) async {
     await Future<void>.delayed(promptStartDelay);
-    if (_promptGenerations[threadId] != generation) return receipt;
+    if (_promptGenerations[threadId] != generation) return;
     final reasoningId = '$turnId:reasoning';
     _emitThreadUpdate(
       threadId,
@@ -842,15 +888,15 @@ class DemoStudioApi implements StudioApi {
           ordinal: _nextOrdinal(threadId),
           revision: 0,
           status: 'streaming',
-          createdAt: now,
-          updatedAt: now,
+          createdAt: startedAt,
+          updatedAt: startedAt,
           kind: ThreadItemKind.reasoning,
           reasoningSummary: const ['## Inspecting the request'],
         ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[threadId] != generation) return receipt;
+    if (_promptGenerations[threadId] != generation) return;
     _emitThreadUpdate(
       threadId,
       ThreadItemDeltaUpdate(
@@ -863,7 +909,7 @@ class DemoStudioApi implements StudioApi {
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[threadId] != generation) return receipt;
+    if (_promptGenerations[threadId] != generation) return;
     final liveReasoning = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == reasoningId,
     );
@@ -902,8 +948,8 @@ class DemoStudioApi implements StudioApi {
           ordinal: _nextOrdinal(threadId),
           revision: 0,
           status: 'running',
-          createdAt: now,
-          updatedAt: now,
+          createdAt: startedAt,
+          updatedAt: startedAt,
           kind: ThreadItemKind.toolCall,
           tool: TimelineToolPart(
             toolCallId: '$turnId:tool-call',
@@ -916,7 +962,7 @@ class DemoStudioApi implements StudioApi {
       ),
     );
     await Future<void>.delayed(promptToolDelay);
-    if (_promptGenerations[threadId] != generation) return receipt;
+    if (_promptGenerations[threadId] != generation) return;
     final runningTool = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == toolId,
     );
@@ -943,7 +989,7 @@ class DemoStudioApi implements StudioApi {
           kind: ThreadItemKind.agentMessage,
           channel: AgentMessageChannel.finalAnswer,
           text:
-              'Demo response for: **$trimmed**\n\n'
+              'Demo response for: **$trimmedPrompt**\n\n'
               '- reasoning 与 tool 都直接来自 ThreadItem',
           createdAt: DateTime.now(),
         ),
@@ -960,7 +1006,6 @@ class DemoStudioApi implements StudioApi {
         ),
       ),
     );
-    return receipt;
   }
 
   @override
@@ -1334,6 +1379,14 @@ ThreadWorkspace _demoUpdateInteraction(
 class DriverDemoStudioApi extends DemoStudioApi {
   DriverDemoStudioApi({super.lspActivityLoop});
 
+  bool _sessionLifecycleScenario = false;
+
+  void prepareSessionLifecycleScenario() {
+    _sessionLifecycleScenario = true;
+    _pageFillThreads.clear();
+    _selectedThreadId = null;
+  }
+
   @override
   Duration get promptActivityDelay => const Duration(seconds: 3);
 
@@ -1348,11 +1401,12 @@ class DriverDemoStudioApi extends DemoStudioApi {
 
   /// Driver 目录分页验收需要大量历史会话。
   @override
-  int get directoryPageFillCount => 42;
+  int get directoryPageFillCount => _sessionLifecycleScenario ? 0 : 42;
 
   @override
   Future<StudioState> readStudioState() async {
     final state = await super.readStudioState();
+    if (_sessionLifecycleScenario) return state;
     const threadId = 'thread-main';
     final workspace = state.workspacesByThread[threadId];
     if (workspace == null) return state;

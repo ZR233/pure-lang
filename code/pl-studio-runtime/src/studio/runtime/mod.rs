@@ -45,6 +45,15 @@ pub struct StudioSubmitPromptRequest {
     pub options: StudioSubmitPromptOptions,
 }
 
+/// Creates a Simple root Thread and submits its first prompt as one product command.
+pub struct StudioStartNewThreadRequest {
+    pub project_id: String,
+    pub title: String,
+    pub prompt: String,
+    pub attachment_ids: Vec<String>,
+    pub options: StudioSubmitPromptOptions,
+}
+
 /// Studio UI 提交 prompt 的附加选项。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
@@ -66,6 +75,21 @@ pub struct StudioSubmitPromptResponse {
     pub thread_id: String,
     pub turn_id: String,
     pub cursor: u64,
+}
+
+/// Result of creating a root Thread and accepting its first Turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioStartNewThreadResponse {
+    pub thread: ThreadRecord,
+    pub submission: StudioSubmitPromptResponse,
+}
+
+/// Result of archiving a root Thread tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioArchiveThreadResult {
+    pub archived_root_id: String,
+    pub removed_thread_ids: Vec<String>,
+    pub next_root: Option<ThreadRecord>,
 }
 
 /// Studio UI 请求停止当前 Thread Turn 后的结果。

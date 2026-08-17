@@ -6,8 +6,12 @@ abstract class StudioApi {
   Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
   Future<void> activateProject(String projectId);
   Future<StudioProject> openProject(String path);
-  Future<StudioThread> createThread(String projectId, {String? title});
-  Future<StudioThread> archiveThread(String threadId);
+  Future<StartNewThreadResult> startNewThread(
+    String projectId,
+    String prompt,
+    List<String> attachmentIds,
+  );
+  Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
   Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId);
   Future<void> cleanupProject(String projectId, String expectedRevision);
@@ -224,20 +228,41 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioThread> createThread(String projectId, {String? title}) async {
+  Future<StartNewThreadResult> startNewThread(
+    String projectId,
+    String prompt,
+    List<String> attachmentIds,
+  ) async {
     await _ensureReady();
-    return _threadFromFrb(
-      await _bridgeCall(
-        () => frb.createThread(projectId: projectId, title: title),
+    final response = await _bridgeCall(
+      () => frb.startNewThread(
+        projectId: projectId,
+        prompt: prompt,
+        attachmentIds: attachmentIds,
+      ),
+    );
+    return StartNewThreadResult(
+      thread: _threadFromFrb(response.thread),
+      receipt: SubmitPromptReceipt(
+        threadId: response.receipt.threadId,
+        turnId: response.receipt.turnId,
+        cursor: response.receipt.revision.toInt(),
       ),
     );
   }
 
   @override
-  Future<StudioThread> archiveThread(String threadId) async {
+  Future<ArchiveThreadResult> archiveThread(String threadId) async {
     await _ensureReady();
-    return _threadFromFrb(
-      await _bridgeCall(() => frb.archiveThread(threadId: threadId)),
+    final response = await _bridgeCall(
+      () => frb.archiveThread(threadId: threadId),
+    );
+    return ArchiveThreadResult(
+      archivedRootId: response.archivedRootId,
+      removedThreadIds: response.removedThreadIds,
+      nextRoot: response.nextRoot == null
+          ? null
+          : _threadFromFrb(response.nextRoot!),
     );
   }
 

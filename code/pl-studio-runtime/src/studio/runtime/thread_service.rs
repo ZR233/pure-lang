@@ -3,31 +3,22 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioRole};
-use crate::studio::records::{ProjectRecord, ThreadRecord};
+use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
 use crate::{StudioMode, resolve_workspace_root};
 
-use super::StudioRuntime;
+use super::{
+    StudioArchiveThreadResult, StudioRuntime, StudioStartNewThreadRequest,
+    StudioStartNewThreadResponse, StudioSubmitPromptRequest,
+};
 
 impl StudioRuntime {
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
         let project = self.store.upsert_project(path).await?;
-        let mut created_ids = Vec::new();
-        if self.store.list_root_threads(&project.id).await?.is_empty() {
-            let thread = self
-                .store
-                .create_thread(&project.id, "新会话", StudioMode::Simple)
-                .await?;
-            created_ids.push(thread.id);
-        }
         self.agent_facility
             .product_events
             .emit_project_directory()
-            .await?;
-        self.agent_facility
-            .product_events
-            .emit_thread_delta_for(&created_ids)
             .await?;
         Ok(project)
     }
@@ -48,10 +39,60 @@ impl StudioRuntime {
         Ok(thread)
     }
 
-    pub async fn archive_thread(&self, thread_id: String) -> Result<Option<ThreadRecord>> {
+    pub async fn start_new_thread(
+        &self,
+        request: StudioStartNewThreadRequest,
+    ) -> Result<StudioStartNewThreadResponse> {
+        super::prompt_runner::validate_prompt_content(&request.prompt, &request.attachment_ids)?;
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        self.ensure_prompt_runtime_ready().await?;
+        self.store
+            .read_project(&request.project_id)
+            .await?
+            .context("selected Project not found")?;
+
+        let thread = self
+            .store
+            .create_thread(&request.project_id, &request.title, StudioMode::Simple)
+            .await?;
+        let submission = self
+            .submit_prompt_with_lifecycle_lock(StudioSubmitPromptRequest {
+                thread_id: thread.id.clone(),
+                prompt: request.prompt,
+                attachment_ids: request.attachment_ids,
+                options: request.options,
+            })
+            .await;
+        let submission = match submission {
+            Ok(submission) => submission,
+            Err(error) => {
+                if let Err(cleanup_error) = self.compensate_unstarted_thread(&thread.id).await {
+                    return Err(error.context(format!(
+                        "failed to compensate new Thread {}: {cleanup_error:#}",
+                        thread.id
+                    )));
+                }
+                return Err(error);
+            }
+        };
+        self.agent_facility
+            .product_events
+            .apply_thread_delta(vec![thread.clone().into()], Vec::new())
+            .await?;
+        Ok(StudioStartNewThreadResponse { thread, submission })
+    }
+
+    pub async fn archive_thread(
+        &self,
+        thread_id: String,
+    ) -> Result<Option<StudioArchiveThreadResult>> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let Some(thread) = self.store.read_thread(&thread_id).await? else {
             return Ok(None);
         };
+        if thread.visibility == ThreadVisibility::Archived {
+            return Ok(None);
+        }
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can be archived");
         }
@@ -63,6 +104,15 @@ impl StudioRuntime {
         {
             bail!("thread cannot be archived while a task is active");
         }
+        let roots = self.store.list_root_threads(&thread.project_id).await?;
+        let root_index = roots
+            .iter()
+            .position(|candidate| candidate.id == thread_id)
+            .context("selected root Thread not found")?;
+        let next_root = roots
+            .get(root_index + 1)
+            .or_else(|| root_index.checked_sub(1).and_then(|index| roots.get(index)))
+            .cloned();
         let thread_tree = self
             .store
             .list_threads(&thread.project_id)
@@ -82,30 +132,69 @@ impl StudioRuntime {
                 .cancel_thread(&candidate.id, "thread archived", emitter)
                 .await?;
         }
-        let archived = self.store.archive_thread(&thread_id).await?;
-        if let Some(thread) = &archived {
-            let mut delta_ids: Vec<String> = thread_tree
-                .iter()
-                .map(|candidate| candidate.id.clone())
-                .collect();
-            if self
-                .store
-                .list_root_threads(&thread.project_id)
-                .await?
-                .is_empty()
-            {
-                let fallback = self
-                    .store
-                    .create_thread(&thread.project_id, "新会话", StudioMode::Simple)
-                    .await?;
-                delta_ids.push(fallback.id);
+        let Some(archived) = self.store.archive_thread(&thread_id).await? else {
+            return Ok(None);
+        };
+        self.retire_archived_thread_tree(&archived.removed_thread_ids)
+            .await;
+        self.agent_facility
+            .product_events
+            .apply_thread_delta(Vec::new(), archived.removed_thread_ids.clone())
+            .await?;
+        Ok(Some(StudioArchiveThreadResult {
+            archived_root_id: archived.root.id,
+            removed_thread_ids: archived.removed_thread_ids,
+            next_root,
+        }))
+    }
+
+    async fn compensate_unstarted_thread(&self, thread_id: &str) -> Result<()> {
+        let actor_cleanup_error = self
+            .close_project_agent_trees(&[thread_id.to_string()])
+            .await
+            .err();
+        self.residency.remove(thread_id).await;
+        match self.store.archive_thread(thread_id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                let error = anyhow::anyhow!("new Thread disappeared before compensation");
+                if let Some(cleanup_error) = actor_cleanup_error {
+                    return Err(error).context(format!(
+                        "actor cleanup also failed for new Thread {thread_id}: {cleanup_error:#}"
+                    ));
+                }
+                return Err(error);
             }
-            self.agent_facility
-                .product_events
-                .emit_thread_delta_for(&delta_ids)
-                .await?;
+            Err(error) => {
+                if let Some(cleanup_error) = actor_cleanup_error {
+                    return Err(error).context(format!(
+                        "failed to archive new Thread {thread_id}; actor cleanup also failed: {cleanup_error:#}"
+                    ));
+                }
+                return Err(error).context(format!(
+                    "failed to archive new Thread {thread_id} during compensation"
+                ));
+            }
         }
-        Ok(archived)
+        if let Some(error) = actor_cleanup_error {
+            return Err(error).context(format!(
+                "new Thread {thread_id} was archived but its actor cleanup failed"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn retire_archived_thread_tree(&self, thread_ids: &[String]) {
+        if let Err(error) = self.close_project_agent_trees(thread_ids).await {
+            tracing::warn!(
+                root_thread_id = thread_ids.first().map(String::as_str).unwrap_or_default(),
+                error = %error,
+                "archived Thread actor cleanup deferred"
+            );
+        }
+        for thread_id in thread_ids {
+            self.residency.remove(thread_id).await;
+        }
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {

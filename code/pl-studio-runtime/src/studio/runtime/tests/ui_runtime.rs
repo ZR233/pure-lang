@@ -1,12 +1,227 @@
 use super::*;
-use crate::StudioProductEventKind;
 use crate::studio::task_coordinator::{
     CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource, TaskRunPhase,
     WorkUnitStatus,
 };
+use crate::{StudioProductEventKind, ThreadVisibility};
 use pl_protocol::ThreadItemContent;
 use pretty_assertions::assert_eq;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};
+
+#[tokio::test]
+async fn opening_a_project_keeps_an_empty_thread_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(workspace.path())),
+    )
+    .unwrap();
+
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn start_new_thread_creates_the_root_only_after_valid_input() {
+    let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(home.path()));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+
+    let empty_error = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "New Session".to_string(),
+            prompt: "   ".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert!(empty_error.to_string().contains("prompt is empty"));
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let invalid_project_error = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: "missing-project".to_string(),
+            title: "New Session".to_string(),
+            prompt: "hello".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        invalid_project_error
+            .to_string()
+            .contains("selected Project not found")
+    );
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let started = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "New Session".to_string(),
+            prompt: "hello from the start page".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(started.thread.project_id, project.id);
+    assert_eq!(started.submission.thread_id, started.thread.id);
+    assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    let _ = release_tx.send(());
+    runtime.shutdown().await;
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn start_new_thread_compensates_a_synchronous_submit_failure() {
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(home.path()));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+
+    let error = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "Compensated session".to_string(),
+            prompt: "must not become visible".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions {
+                turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
+                ..StudioSubmitPromptOptions::default()
+            },
+        })
+        .await
+        .expect_err("an idle new Thread cannot accept a steer-only first prompt");
+
+    assert!(
+        error
+            .to_string()
+            .contains("steerTurn requires an active Turn")
+    );
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
+    let all_thread_ids = store.list_project_thread_ids(&project.id).await.unwrap();
+    assert_eq!(all_thread_ids.len(), 1);
+    let compensated_id = &all_thread_ids[0];
+    assert_eq!(
+        store
+            .read_thread(compensated_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .visibility,
+        ThreadVisibility::Archived
+    );
+    assert!(!runtime.residency.snapshot().await.contains(compensated_id));
+    let (handle, agent_id) = runtime
+        .try_get_thread_handle(compensated_id)
+        .await
+        .unwrap()
+        .expect("the compensated actor remains queryable for diagnostics");
+    assert_eq!(
+        handle.snapshot(agent_id).await.unwrap().lifecycle,
+        pl_core::AgentLifecycleState::Closed
+    );
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn archive_thread_suggests_next_then_previous_in_directory_order() {
+    let workspace = tempfile::tempdir().unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(workspace.path())),
+    )
+    .unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+    for title in ["First", "Second", "Third"] {
+        store
+            .create_thread(&project.id, title, StudioMode::Simple)
+            .await
+            .unwrap();
+    }
+    let roots = store.list_root_threads(&project.id).await.unwrap();
+
+    let middle = runtime
+        .archive_thread(roots[1].id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        middle.next_root.as_ref().map(|thread| &thread.id),
+        Some(&roots[2].id)
+    );
+
+    let tail = runtime
+        .archive_thread(roots[2].id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        tail.next_root.as_ref().map(|thread| &thread.id),
+        Some(&roots[0].id)
+    );
+
+    let last = runtime
+        .archive_thread(roots[0].id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(last.next_root, None);
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
 
 #[tokio::test]
 async fn mode_switch_refreshes_authoritative_thread_snapshot() {
@@ -138,10 +353,9 @@ async fn thread_snapshot_does_not_register_an_inactive_actor() {
     .unwrap();
     let project = runtime.open_project(workspace.path()).await.unwrap();
     let thread = store
-        .list_root_threads(&project.id)
+        .create_thread(&project.id, "Snapshot", StudioMode::Simple)
         .await
-        .unwrap()
-        .remove(0);
+        .unwrap();
 
     let before = store
         .read_thread_runtime_revision(&thread.id)
@@ -345,10 +559,9 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
     .unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let root = store
-        .list_root_threads(&project.id)
+        .create_thread(&project.id, "Archive root", StudioMode::Simple)
         .await
-        .unwrap()
-        .remove(0);
+        .unwrap();
     let child_id = format!("{}-child", root.id);
     let child = store
         .create_child_thread(crate::studio::ChildThreadSpec {
@@ -360,9 +573,19 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
         })
         .await
         .unwrap();
+    runtime.ensure_thread_agent(&child.id).await.unwrap();
+    for thread_id in [&root.id, &child.id] {
+        assert!(
+            runtime
+                .try_get_thread_handle(thread_id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 
     let error = runtime
-        .archive_thread(child.id)
+        .archive_thread(child.id.clone())
         .await
         .expect_err("a child Thread must not be archived directly");
     assert!(error.to_string().contains("root Thread"));
@@ -374,11 +597,88 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(archived.id, root.id);
+    assert_eq!(archived.archived_root_id, root.id);
+    let mut removed = archived.removed_thread_ids;
+    removed.sort();
+    let mut expected_removed = vec![root.id.clone(), child.id.clone()];
+    expected_removed.sort();
+    assert_eq!(removed, expected_removed);
+    assert_eq!(archived.next_root, None);
     let roots = store.list_root_threads(&project.id).await.unwrap();
-    assert_eq!(roots.len(), 1);
-    assert_ne!(roots[0].id, root.id);
+    assert!(roots.is_empty());
+    for thread_id in [&root.id, &child.id] {
+        let (handle, agent_id) = runtime
+            .try_get_thread_handle(thread_id)
+            .await
+            .unwrap()
+            .expect("closed actor remains queryable for diagnostics");
+        assert_eq!(
+            handle.snapshot(agent_id).await.unwrap().lifecycle,
+            pl_core::AgentLifecycleState::Closed
+        );
+        assert!(!runtime.residency.snapshot().await.contains(thread_id));
+    }
     let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn concurrent_submit_and_archive_are_serialized_by_the_lifecycle_lock() {
+    let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(home.path()));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Serialized root", StudioMode::Simple)
+        .await
+        .unwrap();
+
+    let guard = runtime.lifecycle_lock.lock().await;
+    let submit_runtime = runtime.clone();
+    let submit_thread_id = thread.id.clone();
+    let mut submit = tokio::spawn(async move {
+        submit_runtime
+            .submit_prompt(StudioSubmitPromptRequest {
+                thread_id: submit_thread_id,
+                prompt: "start before archive".to_string(),
+                attachment_ids: Vec::new(),
+                options: StudioSubmitPromptOptions::default(),
+            })
+            .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), &mut submit)
+            .await
+            .is_err(),
+        "submit must wait while the lifecycle lock is held"
+    );
+    let archive_runtime = runtime.clone();
+    let archive_thread_id = thread.id.clone();
+    let archive =
+        tokio::spawn(async move { archive_runtime.archive_thread(archive_thread_id).await });
+    drop(guard);
+
+    submit.await.unwrap().unwrap();
+    let archive_error = archive
+        .await
+        .unwrap()
+        .expect_err("archive must observe the Turn registered by the earlier submit");
+    assert!(
+        archive_error
+            .to_string()
+            .contains("active turn or pending input")
+    );
+    assert!(store.read_thread(&thread.id).await.unwrap().is_some());
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    let _ = release_tx.send(());
+    runtime.shutdown().await;
+    server.await.unwrap();
 }
 
 #[tokio::test]
@@ -482,10 +782,9 @@ async fn active_turn_and_pending_input_prevent_thread_mutation() {
     let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
     let project = runtime.open_project(&workspace).await.unwrap();
     let thread = store
-        .list_root_threads(&project.id)
+        .create_thread(&project.id, "Busy root", StudioMode::Simple)
         .await
-        .unwrap()
-        .remove(0);
+        .unwrap();
 
     runtime
         .submit_prompt(StudioSubmitPromptRequest {

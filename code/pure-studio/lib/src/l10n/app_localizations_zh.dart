@@ -59,6 +59,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarArchiveSession => '归档会话';
 
   @override
+  String get sidebarArchiveSessionFailed => '无法归档该会话，它可能仍在运行。';
+
+  @override
   String get sidebarNewSession => '新建会话';
 
   @override
@@ -151,7 +154,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarOpen => '打开';
 
   @override
-  String get shellNoSession => '没有会话';
+  String get shellNoSession => '新会话';
+
+  @override
+  String get startPageWelcome => '想从哪里开始？';
+
+  @override
+  String startPageProject(String project) {
+    return '当前项目：$project';
+  }
+
+  @override
+  String get startPageOpenProjectTitle => '请先打开项目';
+
+  @override
+  String get startPageOpenProjectBody => '从侧栏打开一个项目后即可发送第一条消息。';
 
   @override
   String shellSessionUpdated(String mode, String time) {
@@ -1680,6 +1697,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get sidebarArchiveSession => '归档会话';
 
   @override
+  String get sidebarArchiveSessionFailed => '无法归档该会话，它可能仍在运行。';
+
+  @override
   String get sidebarNewSession => '新建会话';
 
   @override
@@ -1772,7 +1792,21 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get sidebarOpen => '打开';
 
   @override
-  String get shellNoSession => '没有会话';
+  String get shellNoSession => '新会话';
+
+  @override
+  String get startPageWelcome => '想从哪里开始？';
+
+  @override
+  String startPageProject(String project) {
+    return '当前项目：$project';
+  }
+
+  @override
+  String get startPageOpenProjectTitle => '请先打开项目';
+
+  @override
+  String get startPageOpenProjectBody => '从侧栏打开一个项目后即可发送第一条消息。';
 
   @override
   String shellSessionUpdated(String mode, String time) {

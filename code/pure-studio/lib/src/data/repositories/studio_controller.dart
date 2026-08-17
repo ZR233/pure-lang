@@ -20,6 +20,7 @@ class StudioController extends _$StudioController {
 
   late ProductStreamCoordinator _productCoordinator;
   late ThreadStreamCoordinator _threadCoordinator;
+  final Set<String> _archivingThreadIds = {};
 
   StudioApi get _api => ref.read(studioApiProvider);
 
@@ -36,9 +37,14 @@ class StudioController extends _$StudioController {
       unawaited(_threadCoordinator.dispose());
     });
     final catalog = await _api.loadProviderCatalog();
-    final bootstrapped = _attachProviderCatalog(
-      await _api.readStudioState(),
-      catalog,
+    final snapshot = await _api.readStudioState();
+    final bootstrapped = _resolveSelection(
+      _attachProviderCatalog(snapshot, catalog),
+      previous: null,
+      intent: _BootstrapSelection(
+        preferredProjectId: snapshot.selectedProjectId,
+        preferredThreadId: snapshot.selectedThreadId,
+      ),
     );
     _productCoordinator.start();
     unawaited(
@@ -82,7 +88,7 @@ class StudioController extends _$StudioController {
   Future<void> openProject(String path) async {
     final project = await _api.openProject(path);
     await _api.activateProject(project.id);
-    await _reloadProductState(selectedProjectId: project.id);
+    await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
   }
 
   Future<void> selectProject(String projectId) async {
@@ -97,10 +103,10 @@ class StudioController extends _$StudioController {
       return;
     }
     await _api.activateProject(projectId);
-    await _reloadProductState(selectedProjectId: projectId);
+    await _reloadProductState(selection: _ProjectDefaultSelection(projectId));
   }
 
-  Future<void> createThread() async {
+  Future<void> beginNewThread() async {
     final current = state.value;
     final projectId = current?.selectedProjectId;
     if (current == null ||
@@ -112,11 +118,16 @@ class StudioController extends _$StudioController {
             null) {
       return;
     }
-    final thread = await _api.createThread(projectId);
-    await _reloadProductState(
-      selectedProjectId: projectId,
-      selectedThreadId: thread.id,
+    state = AsyncData(
+      current.copyWith(
+        selectedThreadId: null,
+        newThreadComposerByProject: {
+          ...current.newThreadComposerByProject,
+          projectId: const ComposerThreadState.idle(),
+        },
+      ),
     );
+    await _subscribeThread(null);
   }
 
   Future<void> archiveThread(String threadId) async {
@@ -134,13 +145,21 @@ class StudioController extends _$StudioController {
         (current.isBusy && current.selectedRootThread?.id == threadId)) {
       return;
     }
-    await _api.archiveThread(threadId);
-    await _reloadProductState(
-      selectedProjectId: current.selectedProjectId,
-      selectedThreadId: current.selectedThreadId == threadId
-          ? null
-          : current.selectedThreadId,
-    );
+    if (!_archivingThreadIds.add(threadId)) return;
+    try {
+      final result = await _api.archiveThread(threadId);
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      final previousThreadId = latest.selectedThreadId;
+      final next = _applyArchiveResult(latest, result);
+      state = AsyncData(next);
+      if (previousThreadId != next.selectedThreadId) {
+        await _subscribeThread(next.selectedThreadId);
+      }
+    } finally {
+      _archivingThreadIds.remove(threadId);
+    }
   }
 
   Future<void> archiveProject(String projectId) async {
@@ -151,12 +170,9 @@ class StudioController extends _$StudioController {
     }
     await _api.archiveProject(projectId);
     await _reloadProductState(
-      selectedProjectId: current.selectedProjectId == projectId
-          ? null
-          : current.selectedProjectId,
-      selectedThreadId: current.selectedProjectId == projectId
-          ? null
-          : current.selectedThreadId,
+      selection: current.selectedProjectId == projectId
+          ? const _ProjectDefaultSelection(null)
+          : const _PreserveSelection(),
     );
   }
 
@@ -168,12 +184,9 @@ class StudioController extends _$StudioController {
     final current = state.value;
     await _api.cleanupProject(projectId, expectedRevision);
     await _reloadProductState(
-      selectedProjectId: current?.selectedProjectId == projectId
-          ? null
-          : current?.selectedProjectId,
-      selectedThreadId: current?.selectedProjectId == projectId
-          ? null
-          : current?.selectedThreadId,
+      selection: current?.selectedProjectId == projectId
+          ? const _ProjectDefaultSelection(null)
+          : const _PreserveSelection(),
     );
   }
 
@@ -331,6 +344,149 @@ class StudioController extends _$StudioController {
     );
   }
 
+  void updateNewThreadComposer(String value) {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (current == null ||
+        projectId == null ||
+        current.selectedThreadId != null) {
+      return;
+    }
+    final composer =
+        current.newThreadComposerByProject[projectId] ??
+        const ComposerThreadState.idle();
+    state = AsyncData(
+      current.copyWith(
+        newThreadComposerByProject: {
+          ...current.newThreadComposerByProject,
+          projectId: composer.updateDraft(value),
+        },
+      ),
+    );
+  }
+
+  Future<void> submitNewThreadComposer() async {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    final composer =
+        current?.newThreadComposer ?? const ComposerThreadState.idle();
+    final prompt = composer.draft.trim();
+    if (current == null ||
+        projectId == null ||
+        current.selectedThreadId != null ||
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.project,
+              projectId: projectId,
+            ) !=
+            null ||
+        prompt.isEmpty ||
+        composer.isSubmissionPending) {
+      return;
+    }
+
+    final submitting = composer.beginSubmission();
+    final submissionRevision = submitting.submissionRevision;
+    state = AsyncData(
+      current.copyWith(
+        newThreadComposerByProject: {
+          ...current.newThreadComposerByProject,
+          projectId: submitting,
+        },
+      ),
+    );
+
+    final StartNewThreadResult result;
+    try {
+      result = await _api.startNewThread(projectId, prompt, const []);
+    } catch (error) {
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      final active =
+          latest.newThreadComposerByProject[projectId] ??
+          const ComposerThreadState.idle();
+      final failed = active.fail(error, submissionRevision: submissionRevision);
+      state = AsyncData(
+        latest.copyWith(
+          newThreadComposerByProject: {
+            ...latest.newThreadComposerByProject,
+            projectId: failed,
+          },
+        ),
+      );
+      return;
+    }
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+
+    final active =
+        latest.newThreadComposerByProject[projectId] ??
+        const ComposerThreadState.idle();
+    Object? validationError;
+    if (result.thread.projectId != projectId) {
+      validationError = StateError(
+        'new Thread project ${result.thread.projectId} does not match $projectId',
+      );
+    } else if (result.receipt.threadId != result.thread.id) {
+      validationError = StateError(
+        'submit receipt thread ${result.receipt.threadId} does not match '
+        '${result.thread.id}',
+      );
+    }
+    if (validationError != null) {
+      final failed = active.fail(
+        validationError,
+        submissionRevision: submissionRevision,
+      );
+      state = AsyncData(
+        latest.copyWith(
+          newThreadComposerByProject: {
+            ...latest.newThreadComposerByProject,
+            projectId: failed,
+          },
+        ),
+      );
+      return;
+    }
+
+    final accepted = submitting.accept(
+      result.receipt,
+      submissionRevision: submissionRevision,
+    );
+    final shouldSelect =
+        latest.selectedProjectId == projectId &&
+        latest.selectedThreadId == null &&
+        active.phase == ComposerSubmissionPhase.submitting &&
+        active.submissionRevision == submissionRevision;
+    var next = applyThreadDirectoryDelta(
+      latest,
+      upserted: [result.thread],
+      removed: const [],
+    );
+    next = _withWorkspaceUi(
+      next,
+      result.thread.id,
+      (ui) => ui.copyWith(
+        composer: accepted,
+        syncState: AgentWorkspaceSyncState.loading,
+      ),
+    );
+    next = next.copyWith(
+      selectedThreadId: shouldSelect
+          ? result.thread.id
+          : latest.selectedThreadId,
+      newThreadComposerByProject: {
+        ...next.newThreadComposerByProject,
+        projectId: shouldSelect ? const ComposerThreadState.idle() : active,
+      },
+    );
+    state = AsyncData(next);
+    if (shouldSelect) {
+      await _subscribeThread(result.thread.id);
+    }
+  }
+
   Future<void> submitComposer(String threadId) async {
     final current = state.value;
     final composer = current == null
@@ -479,8 +635,10 @@ class StudioController extends _$StudioController {
     final latest = state.value;
     if (latest == null) return;
     await _reloadProductState(
-      selectedProjectId: latest.selectedProjectId,
-      selectedThreadId: thread.id,
+      selection: _ExactThreadSelection(
+        projectId: latest.selectedProjectId,
+        threadId: thread.id,
+      ),
     );
     if (latest.selectedThreadId == thread.id) {
       await _subscribeThread(thread.id);
@@ -654,12 +812,8 @@ class StudioController extends _$StudioController {
     String issueId,
     String expectedRevision,
   ) async {
-    final current = state.value;
     await _api.cleanupRecoveryIssue(issueId, expectedRevision);
-    await _reloadProductState(
-      selectedProjectId: current?.selectedProjectId,
-      selectedThreadId: current?.selectedThreadId,
-    );
+    await _reloadProductState(selection: const _PreserveSelection());
   }
 
   Future<void> retryRecoveryIssue(String issueId) async {
@@ -669,8 +823,14 @@ class StudioController extends _$StudioController {
     if (issue == null || !issue.canRetry) return;
     await _api.retryRecoveryIssue(issueId);
     await _reloadProductState(
-      selectedProjectId: issue.projectId ?? current.selectedProjectId,
-      selectedThreadId: issue.threadId ?? current.selectedThreadId,
+      selection: issue.threadId == null
+          ? _ProjectDefaultSelection(
+              issue.projectId ?? current.selectedProjectId,
+            )
+          : _ExactThreadSelection(
+              projectId: issue.projectId ?? current.selectedProjectId,
+              threadId: issue.threadId!,
+            ),
     );
   }
 
@@ -724,31 +884,15 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> _reloadProductState({
-    String? selectedProjectId,
-    Object? selectedThreadId = _selectionUnset,
+    _SelectionIntent selection = const _PreserveSelection(),
   }) async {
     try {
       final current = state.value;
-      final desiredProjectId = selectedProjectId ?? current?.selectedProjectId;
-      // 哨兵区分"未传（沿用当前选择）"与"显式传 null（归档后清空选择）"。
-      final desiredThreadId = identical(selectedThreadId, _selectionUnset)
-          ? current?.selectedThreadId
-          : selectedThreadId as String?;
-      // 选择只在 _withStableSelection 解析一次；desired 线程的已知项目用于
-      // 判断跨项目切换，窗口外未知项目视为同项目（保留选择）。
-      final desiredThreadProjectId = desiredThreadId == null
-          ? null
-          : current?.threads
-                    .where((thread) => thread.id == desiredThreadId)
-                    .firstOrNull
-                    ?.projectId ??
-                current?.workspacesByThread[desiredThreadId]?.thread.projectId;
       await _adoptProductState(
-        _withStableSelection(
+        _resolveSelection(
           await _api.readStudioState(),
-          selectedProjectId: desiredProjectId,
-          selectedThreadId: desiredThreadId,
-          selectedThreadProjectId: desiredThreadProjectId,
+          previous: current,
+          intent: selection,
         ),
       );
     } on Object {
@@ -857,7 +1001,7 @@ class StudioController extends _$StudioController {
   Future<void> _adoptProductState(StudioState incoming) async {
     final current = state.value;
     final previousThreadId = current?.selectedThreadId;
-    // 选择已在 _withStableSelection 解析并随 incoming 携带；这里不再改写。
+    // 选择已由显式 selection intent 解析并随 incoming 携带；这里不再改写。
     final next = current == null
         ? incoming
         : _mergeProductSnapshots(
@@ -871,14 +1015,13 @@ class StudioController extends _$StudioController {
   }
 }
 
-const Object _selectionUnset = Object();
-
 StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   var next = applyProjectDirectory(current, incoming.projectDirectory);
   // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口；选择采纳
-  // incoming 携带的解析结果（_withStableSelection 是唯一解析点）。
+  // incoming 携带的显式解析结果（_resolveSelection 是唯一解析点）。
   next = next.copyWith(
     threadDirectory: incoming.threadDirectory,
+    selectedProjectId: incoming.selectedProjectId,
     selectedThreadId: incoming.selectedThreadId,
   );
   next = applyTaskDirectory(next, incoming.taskDirectory);
@@ -935,31 +1078,136 @@ StudioState _attachProviderCatalog(
   return state.copyWith(providerCatalog: catalog);
 }
 
-StudioState _withStableSelection(
-  StudioState state, {
-  String? selectedProjectId,
-  String? selectedThreadId,
-  String? selectedThreadProjectId,
+sealed class _SelectionIntent {
+  const _SelectionIntent();
+}
+
+final class _BootstrapSelection extends _SelectionIntent {
+  const _BootstrapSelection({
+    required this.preferredProjectId,
+    required this.preferredThreadId,
+  });
+
+  final String? preferredProjectId;
+  final String? preferredThreadId;
+}
+
+final class _PreserveSelection extends _SelectionIntent {
+  const _PreserveSelection();
+}
+
+final class _ProjectDefaultSelection extends _SelectionIntent {
+  const _ProjectDefaultSelection(this.projectId);
+
+  final String? projectId;
+}
+
+final class _ExactThreadSelection extends _SelectionIntent {
+  const _ExactThreadSelection({
+    required this.projectId,
+    required this.threadId,
+  });
+
+  final String? projectId;
+  final String threadId;
+}
+
+StudioState _resolveSelection(
+  StudioState incoming, {
+  required StudioState? previous,
+  required _SelectionIntent intent,
 }) {
+  final requestedProjectId = switch (intent) {
+    _BootstrapSelection(:final preferredProjectId) => preferredProjectId,
+    _PreserveSelection() => previous?.selectedProjectId,
+    _ProjectDefaultSelection(:final projectId) => projectId,
+    _ExactThreadSelection(:final projectId) => projectId,
+  };
   final projectId =
-      state.projects.any((project) => project.id == selectedProjectId)
-      ? selectedProjectId
-      : state.selectedProjectId;
-  // 选择是显式状态（design/11）：desired 线程属于解析后的项目（或项目未知，
-  // 即窗口外线程）则保留——目录是分页窗口，"不在窗口内"不代表线程不存在。
-  // 跨项目切换与无选择时回退到该项目第一个 root；线程被归档/清理由目录
-  // removal 增量负责回退选择。
-  final sameProject =
-      selectedThreadProjectId == null || selectedThreadProjectId == projectId;
-  final threadId = selectedThreadId != null && sameProject
-      ? selectedThreadId
-      : state.threads
-            .where((thread) => thread.isRoot && thread.projectId == projectId)
-            .firstOrNull
-            ?.id;
-  return state.copyWith(
+      incoming.projects.any((project) => project.id == requestedProjectId)
+      ? requestedProjectId
+      : incoming.projects.firstOrNull?.id;
+  final firstRootId = incoming.threads
+      .where((thread) => thread.isRoot && thread.projectId == projectId)
+      .firstOrNull
+      ?.id;
+  final threadId = switch (intent) {
+    _BootstrapSelection(:final preferredThreadId) =>
+      incoming.threads.any(
+            (thread) =>
+                thread.id == preferredThreadId && thread.projectId == projectId,
+          )
+          ? preferredThreadId
+          : firstRootId,
+    _ProjectDefaultSelection() => firstRootId,
+    _ExactThreadSelection(:final threadId) => threadId,
+    _PreserveSelection() => _preservedThreadSelection(
+      incoming,
+      previous,
+      projectId,
+      firstRootId,
+    ),
+  };
+  return incoming.copyWith(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
+  );
+}
+
+String? _preservedThreadSelection(
+  StudioState incoming,
+  StudioState? previous,
+  String? projectId,
+  String? firstRootId,
+) {
+  if (previous == null || previous.selectedProjectId != projectId) {
+    return firstRootId;
+  }
+  final selectedThreadId = previous.selectedThreadId;
+  if (selectedThreadId == null) return null;
+  final knownProjectId =
+      previous.threads
+          .where((thread) => thread.id == selectedThreadId)
+          .firstOrNull
+          ?.projectId ??
+      previous.workspacesByThread[selectedThreadId]?.thread.projectId ??
+      incoming.threads
+          .where((thread) => thread.id == selectedThreadId)
+          .firstOrNull
+          ?.projectId;
+  return knownProjectId == null || knownProjectId == projectId
+      ? selectedThreadId
+      : firstRootId;
+}
+
+StudioState _applyArchiveResult(
+  StudioState current,
+  ArchiveThreadResult result,
+) {
+  final removed = result.removedThreadIds.toSet();
+  var next = applyThreadDirectoryDelta(
+    current,
+    upserted: const [],
+    removed: result.removedThreadIds,
+  );
+  final nextRoot = result.nextRoot;
+  if (nextRoot != null &&
+      !next.threadDirectory.threads.any((thread) => thread.id == nextRoot.id)) {
+    final threads = [...next.threadDirectory.threads, nextRoot]
+      ..sort((left, right) {
+        final updated = right.updatedAt.compareTo(left.updatedAt);
+        return updated != 0 ? updated : right.id.compareTo(left.id);
+      });
+    next = next.copyWith(
+      threadDirectory: next.threadDirectory.copyWith(threads: threads),
+    );
+  }
+  return next.copyWith(
+    selectedThreadId:
+        current.selectedThreadId != null &&
+            removed.contains(current.selectedThreadId)
+        ? nextRoot?.id
+        : current.selectedThreadId,
   );
 }
 

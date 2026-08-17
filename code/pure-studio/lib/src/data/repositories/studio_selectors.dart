@@ -20,6 +20,14 @@ typedef TimelinePaneView = ({
   bool isLoadingOlderHistory,
 });
 
+typedef StartPageView = ({
+  bool isStartPage,
+  StudioProject? project,
+  ComposerThreadState composer,
+  PermissionMode permissionMode,
+  bool canSubmit,
+});
+
 @riverpod
 AsyncValue<AgentWorkspaceView?> selectedAgentWorkspace(Ref ref) {
   return ref.watch(
@@ -94,6 +102,34 @@ AsyncValue<AgentWorkspaceView?> selectedWorkspaceControls(Ref ref) {
           todo: null,
         ),
       ),
+    ),
+  );
+}
+
+@riverpod
+AsyncValue<StartPageView> startPage(Ref ref) {
+  return ref.watch(
+    studioControllerProvider.select(
+      (state) => state.whenData((state) {
+        final projectId = state.selectedProjectId;
+        final project = state.projects
+            .where((project) => project.id == projectId)
+            .firstOrNull;
+        final healthy =
+            project != null &&
+            state.recoveryIssue(
+                  scope: RecoveryIssueScope.project,
+                  projectId: project.id,
+                ) ==
+                null;
+        return (
+          isStartPage: state.selectedThreadId == null,
+          project: project,
+          composer: state.newThreadComposer,
+          permissionMode: state.permissionMode,
+          canSubmit: healthy,
+        );
+      }),
     ),
   );
 }

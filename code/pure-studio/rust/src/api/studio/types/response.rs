@@ -161,6 +161,21 @@ pub struct StartTurnResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct StartNewThreadResponse {
+    pub thread: BridgeThread,
+    pub receipt: StartTurnResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveThreadResult {
+    pub archived_root_id: String,
+    pub removed_thread_ids: Vec<String>,
+    pub next_root: Option<BridgeThread>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct InterruptTurnResponse {
     pub thread_id: String,
     pub turn_id: String,

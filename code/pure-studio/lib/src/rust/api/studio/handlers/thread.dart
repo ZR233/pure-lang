@@ -5,26 +5,31 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
+import '../types/response.dart';
 import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Creates and selects a Simple-mode root Thread for a Project.
+/// Creates a Simple root Thread and accepts its first Turn.
 ///
 /// # Errors
 ///
-/// Returns an error when the Project does not exist or the canonical snapshot cannot be read.
-Future<BridgeThread> createThread({required String projectId, String? title}) =>
-    RustLib.instance.api.crateApiStudioHandlersThreadCreateThread(
-      projectId: projectId,
-      title: title,
-    );
+/// Returns an error when the Project does not exist, the prompt is empty, or the Turn is rejected.
+Future<StartNewThreadResponse> startNewThread({
+  required String projectId,
+  required String prompt,
+  required List<String> attachmentIds,
+}) => RustLib.instance.api.crateApiStudioHandlersThreadStartNewThread(
+  projectId: projectId,
+  prompt: prompt,
+  attachmentIds: attachmentIds,
+);
 
 /// Archives a root Thread and selects the next available Thread.
 ///
 /// # Errors
 ///
 /// Returns an error when the Thread does not exist, is a child Thread, or its tree is active.
-Future<BridgeThread> archiveThread({required String threadId}) => RustLib
+Future<ArchiveThreadResult> archiveThread({required String threadId}) => RustLib
     .instance
     .api
     .crateApiStudioHandlersThreadArchiveThread(threadId: threadId);

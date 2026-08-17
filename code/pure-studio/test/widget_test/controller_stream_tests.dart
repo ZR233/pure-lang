@@ -645,4 +645,282 @@ void registerControllerStreamTests() {
       );
     },
   );
+
+  test('explicit start page survives reload and directory upserts', () async {
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    await controller.beginNewThread();
+    controller.updateNewThreadComposer('project-local draft');
+    await controller.debugReloadForTest();
+    api.emitGlobal(
+      _threadDirectoryChangedEvent(
+        projectId: 'project-1',
+        threads: [
+          StudioThread(
+            id: 'session-late',
+            projectId: 'project-1',
+            title: 'Late directory entry',
+            mode: StudioMode.simple,
+            updatedAt: DateTime.now(),
+          ),
+        ],
+      ),
+    );
+    await pumpEventQueue();
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.selectedThreadId, isNull);
+    expect(after.newThreadComposer.draft, 'project-local draft');
+    expect(after.threads.map((thread) => thread.id), contains('session-late'));
+    expect(api.threadSubscriptions, isNot(contains('session-late')));
+  });
+
+  test('failed first send keeps the start page draft and error', () async {
+    final api = _FakeStudioApi(_emptyState())
+      ..submitPromptError = Exception('first send rejected');
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    await controller.beginNewThread();
+    controller.updateNewThreadComposer('keep this draft');
+    await controller.submitNewThreadComposer();
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.selectedThreadId, isNull);
+    expect(after.newThreadComposer.draft, 'keep this draft');
+    expect(after.newThreadComposer.error, contains('first send rejected'));
+    expect(after.threads.map((thread) => thread.id), ['session-1']);
+  });
+
+  test(
+    'first send inserts selects and subscribes the returned Thread',
+    () async {
+      final initial = _emptyState();
+      final created = StudioThread(
+        id: 'session-created',
+        projectId: 'project-1',
+        title: 'New Session',
+        mode: StudioMode.simple,
+        updatedAt: DateTime.now(),
+      );
+      final api = _FakeStudioApi(initial)
+        ..createThreadState = initial.copyWith(
+          threadDirectory: ThreadDirectoryWindow(
+            threads: [created, ...initial.threads],
+          ),
+        );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.beginNewThread();
+      controller.updateNewThreadComposer('start here');
+      await controller.submitNewThreadComposer();
+
+      final after = container.read(studioControllerProvider).requireValue;
+      expect(after.selectedThreadId, created.id);
+      expect(after.threads.map((thread) => thread.id), contains(created.id));
+      expect(
+        after.workspaceUiByThread[created.id]?.composer.phase,
+        ComposerSubmissionPhase.pendingStart,
+      );
+      expect(api.threadSubscriptions.last, created.id);
+    },
+  );
+
+  test(
+    'archive result can select a neighbor outside the loaded page',
+    () async {
+      final initial = _emptyState();
+      final outside = StudioThread(
+        id: 'session-outside-page',
+        projectId: 'project-1',
+        title: 'Outside page',
+        mode: StudioMode.simple,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
+      );
+      final api = _FakeStudioApi(initial)
+        ..archiveThreadResult = ArchiveThreadResult(
+          archivedRootId: 'session-1',
+          removedThreadIds: const ['session-1'],
+          nextRoot: outside,
+        );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      await container
+          .read(studioControllerProvider.notifier)
+          .archiveThread('session-1');
+
+      final after = container.read(studioControllerProvider).requireValue;
+      expect(after.selectedThreadId, outside.id);
+      expect(after.threads.map((thread) => thread.id), [outside.id]);
+      expect(api.threadSubscriptions.last, outside.id);
+    },
+  );
+
+  test('new Thread drafts stay isolated by Project', () async {
+    final initial = _twoProjectState(selectedProjectId: 'project-a');
+    final api = _FakeStudioApi(initial);
+    api.selectProjectStates['project-b'] = _twoProjectState(
+      selectedProjectId: 'project-b',
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    await controller.beginNewThread();
+    controller.updateNewThreadComposer('draft A');
+    await controller.selectProject('project-b');
+    await controller.beginNewThread();
+    controller.updateNewThreadComposer('draft B');
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.selectedProjectId, 'project-b');
+    expect(after.selectedThreadId, isNull);
+    expect(after.newThreadComposerByProject['project-a']?.draft, 'draft A');
+    expect(after.newThreadComposerByProject['project-b']?.draft, 'draft B');
+  });
+
+  test('a late first-send response never exits a reset start page', () async {
+    final initial = _emptyState();
+    final created = StudioThread(
+      id: 'session-created',
+      projectId: 'project-1',
+      title: 'New Session',
+      mode: StudioMode.simple,
+      updatedAt: DateTime.now(),
+    );
+    final gate = Completer<SubmitPromptReceipt>();
+    final api = _FakeStudioApi(initial)
+      ..blockedPromptSubmit = gate
+      ..createThreadState = initial.copyWith(
+        threadDirectory: ThreadDirectoryWindow(
+          threads: [created, ...initial.threads],
+        ),
+      );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    await controller.beginNewThread();
+    controller.updateNewThreadComposer('slow first send');
+    final sending = controller.submitNewThreadComposer();
+    await pumpEventQueue();
+    await controller.beginNewThread();
+    gate.complete(
+      const SubmitPromptReceipt(
+        threadId: 'session-created',
+        turnId: 'turn-created',
+        cursor: 1,
+      ),
+    );
+    await sending;
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.selectedThreadId, isNull);
+    expect(after.newThreadComposer.draft, isEmpty);
+    expect(after.threads.map((thread) => thread.id), contains(created.id));
+  });
+
+  test(
+    'archiving a non-selected root preserves selection then last clears it',
+    () async {
+      final initial = _emptyState();
+      final second = StudioThread(
+        id: 'session-2',
+        projectId: 'project-1',
+        title: 'Second',
+        mode: StudioMode.simple,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
+      );
+      final state = initial.copyWith(
+        threadDirectory: ThreadDirectoryWindow(
+          threads: [...initial.threads, second],
+        ),
+      );
+      final api = _FakeStudioApi(state)
+        ..archiveThreadResult = const ArchiveThreadResult(
+          archivedRootId: 'session-2',
+          removedThreadIds: ['session-2'],
+        );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.archiveThread(second.id);
+      expect(
+        container.read(studioControllerProvider).requireValue.selectedThreadId,
+        'session-1',
+      );
+      api.archiveThreadResult = const ArchiveThreadResult(
+        archivedRootId: 'session-1',
+        removedThreadIds: ['session-1'],
+      );
+      await controller.archiveThread('session-1');
+
+      final after = container.read(studioControllerProvider).requireValue;
+      expect(after.selectedThreadId, isNull);
+      expect(after.threads, isEmpty);
+    },
+  );
+
+  test(
+    'overlapping archive commands submit the same Thread only once',
+    () async {
+      final gate = Completer<ArchiveThreadResult>();
+      final api = _FakeStudioApi(_emptyState())..blockedArchiveThread = gate;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      final first = controller.archiveThread('session-1');
+      await pumpEventQueue();
+      final duplicate = controller.archiveThread('session-1');
+      await pumpEventQueue();
+
+      expect(api.archiveThreadCallCount, 1);
+      gate.complete(
+        const ArchiveThreadResult(
+          archivedRootId: 'session-1',
+          removedThreadIds: ['session-1'],
+        ),
+      );
+      await Future.wait([first, duplicate]);
+      expect(api.archiveThreadCallCount, 1);
+      expect(
+        container.read(studioControllerProvider).requireValue.threads,
+        isEmpty,
+      );
+    },
+  );
 }

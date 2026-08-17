@@ -195,6 +195,12 @@ abstract class AppLocalizations {
   /// **'Archive session'**
   String get sidebarArchiveSession;
 
+  /// No description provided for @sidebarArchiveSessionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not archive this session. It may still be running.'**
+  String get sidebarArchiveSessionFailed;
+
   /// No description provided for @sidebarNewSession.
   ///
   /// In en, this message translates to:
@@ -360,8 +366,32 @@ abstract class AppLocalizations {
   /// No description provided for @shellNoSession.
   ///
   /// In en, this message translates to:
-  /// **'No session'**
+  /// **'New session'**
   String get shellNoSession;
+
+  /// No description provided for @startPageWelcome.
+  ///
+  /// In en, this message translates to:
+  /// **'What can I help you build?'**
+  String get startPageWelcome;
+
+  /// No description provided for @startPageProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Working in {project}'**
+  String startPageProject(String project);
+
+  /// No description provided for @startPageOpenProjectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Open a project to get started'**
+  String get startPageOpenProjectTitle;
+
+  /// No description provided for @startPageOpenProjectBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a project from the sidebar before sending your first message.'**
+  String get startPageOpenProjectBody;
 
   /// No description provided for @shellSessionUpdated.
   ///

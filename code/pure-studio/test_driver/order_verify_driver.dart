@@ -29,16 +29,15 @@ Future<void> main(List<String> args) async {
   await client.checkHealth();
 
   await _openProject(client, workspace);
-  final first = await _newSession(client);
   final messages = ['第一条：hello', '第二条：world', '第三条：pure studio'];
-  for (final message in messages) {
+  final first = await _newSession(client, messages.first);
+  for (final message in messages.skip(1)) {
     await _submitAndWaitTurn(client, message);
   }
   final snapshot1 = await _snapshot(client);
   _assertUserMessagesOrdered(snapshot1, messages, first);
 
-  final second = await _newSession(client);
-  await _submitAndWaitTurn(client, '第二个会话的消息');
+  final second = await _newSession(client, '第二个会话的消息');
   // 往复切换：second → first → second。
   await _switchSession(client, first);
   await _switchSession(client, second);
@@ -66,14 +65,23 @@ Future<void> _openProject(FlutterDriverClient client, String workspace) async {
   );
 }
 
-Future<String> _newSession(FlutterDriverClient client) async {
+Future<String> _newSession(
+  FlutterDriverClient client,
+  String firstMessage,
+) async {
   await client.waitFor(find.byValueKey('sidebar-new-session'));
   await client.tap(find.byValueKey('sidebar-new-session'));
+  await client.waitFor(find.byValueKey('studio-start-page'));
   await client.waitFor(find.byValueKey('composer-input'));
+  final transient = await _snapshot(client);
+  if (transient['workspace'] != null) {
+    throw StateError('new session was persisted before its first message');
+  }
+  await _submitAndWaitTurn(client, firstMessage);
   final snapshot = await _snapshot(client);
   final workspaceView = snapshot['workspace'];
   if (workspaceView is! Map<String, dynamic>) {
-    throw StateError('no workspace after new session');
+    throw StateError('no workspace after first message');
   }
   return workspaceView['threadId'] as String;
 }

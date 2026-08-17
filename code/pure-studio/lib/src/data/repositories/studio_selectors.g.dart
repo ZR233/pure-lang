@@ -347,6 +347,53 @@ final class SelectedWorkspaceControlsProvider
 String _$selectedWorkspaceControlsHash() =>
     r'645c053de6ffcb48451d07298c17d6e0d7547141';
 
+@ProviderFor(startPage)
+final startPageProvider = StartPageProvider._();
+
+final class StartPageProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<StartPageView>,
+          AsyncValue<StartPageView>,
+          AsyncValue<StartPageView>
+        >
+    with $Provider<AsyncValue<StartPageView>> {
+  StartPageProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'startPageProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$startPageHash();
+
+  @$internal
+  @override
+  $ProviderElement<AsyncValue<StartPageView>> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  AsyncValue<StartPageView> create(Ref ref) {
+    return startPage(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(AsyncValue<StartPageView> value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<AsyncValue<StartPageView>>(value),
+    );
+  }
+}
+
+String _$startPageHash() => r'0c0f57136f1d156e8912dbee37c0baa80edf3305';
+
 @ProviderFor(statusBar)
 final statusBarProvider = StatusBarProvider._();
 

@@ -1,4 +1,5 @@
 import 'turn_models.dart';
+import 'thread_directory_models.dart';
 
 enum ComposerSubmissionPhase { idle, submitting, pendingStart }
 
@@ -12,6 +13,25 @@ class SubmitPromptReceipt {
   final String threadId;
   final String turnId;
   final int cursor;
+}
+
+class StartNewThreadResult {
+  const StartNewThreadResult({required this.thread, required this.receipt});
+
+  final StudioThread thread;
+  final SubmitPromptReceipt receipt;
+}
+
+class ArchiveThreadResult {
+  const ArchiveThreadResult({
+    required this.archivedRootId,
+    required this.removedThreadIds,
+    this.nextRoot,
+  });
+
+  final String archivedRootId;
+  final List<String> removedThreadIds;
+  final StudioThread? nextRoot;
 }
 
 class ComposerThreadState {

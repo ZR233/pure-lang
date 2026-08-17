@@ -46,6 +46,7 @@ class StudioState {
     required this.updaterState,
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
+    this.newThreadComposerByProject = const {},
     this.providerCatalog = const ProviderCatalogView.empty(),
     required this.selectedProjectId,
     required this.selectedThreadId,
@@ -53,6 +54,7 @@ class StudioState {
 
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
+  final Map<String, ComposerThreadState> newThreadComposerByProject;
   final ProviderCatalogView providerCatalog;
   final String? selectedProjectId;
   final String? selectedThreadId;
@@ -119,6 +121,14 @@ class StudioState {
   }
 
   ComposerThreadState get composer => selectedWorkspaceUi.composer;
+
+  ComposerThreadState get newThreadComposer {
+    final projectId = selectedProjectId;
+    return projectId == null
+        ? const ComposerThreadState.idle()
+        : newThreadComposerByProject[projectId] ??
+              const ComposerThreadState.idle();
+  }
 
   List<StudioThread> get rootThreads =>
       threads.where((thread) => thread.isRoot).toList();
@@ -271,6 +281,7 @@ class StudioState {
   StudioState copyWith({
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
+    Map<String, ComposerThreadState>? newThreadComposerByProject,
     ProviderCatalogView? providerCatalog,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
@@ -289,6 +300,8 @@ class StudioState {
     return StudioState(
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
       workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
+      newThreadComposerByProject:
+          newThreadComposerByProject ?? this.newThreadComposerByProject,
       providerCatalog: providerCatalog ?? this.providerCatalog,
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId

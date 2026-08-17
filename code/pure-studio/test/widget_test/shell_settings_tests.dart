@@ -1,7 +1,38 @@
 part of '../widget_test.dart';
 
 void registerShellSettingsTests() {
-  testWidgets('sidebar creates and selects a new root Thread', (tester) async {
+  testWidgets('zero sessions render the unpersisted start page', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final state = _emptyState().copyWith(
+      threadDirectory: const ThreadDirectoryWindow(),
+      workspacesByThread: const {},
+      workspaceUiByThread: const {},
+      selectedThreadId: null,
+    );
+    final api = _FakeStudioApi(state);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.composerSubmit), findsOneWidget);
+    expect(api.createdThreadProjectId, isNull);
+  });
+
+  testWidgets('new session stays transient until its first message', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -26,7 +57,24 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.newSession));
     await tester.pumpAndSettle();
 
+    expect(api.createdThreadProjectId, isNull);
+    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.threadRow('session-created')),
+      findsNothing,
+    );
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'create the first turn',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
     expect(api.createdThreadProjectId, 'project-1');
+    expect(api.newThreadPrompt, 'create the first turn');
     expect(
       find.byKey(StudioDriverKeys.threadRow('session-created')),
       findsOneWidget,
@@ -76,6 +124,35 @@ void registerShellSettingsTests() {
     expect(api.threadSubscriptions.last, second.id);
   });
 
+  testWidgets('sidebar shows a localized error when archive is rejected', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState())
+      ..archiveThreadError = StateError('Thread became busy');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
+    await tester.pumpAndSettle();
+
+    expect(api.archiveThreadCallCount, 1);
+    expect(
+      find.text('Could not archive this session. It may still be running.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
+  });
+
   testWidgets('compact rail keeps new and archive Thread actions', (
     tester,
   ) async {
@@ -100,7 +177,8 @@ void registerShellSettingsTests() {
     );
     await tester.tap(find.byKey(StudioDriverKeys.newSession));
     await tester.pumpAndSettle();
-    expect(api.createdThreadProjectId, 'project-1');
+    expect(api.createdThreadProjectId, isNull);
+    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
   });
 
   testWidgets('selected busy root Thread cannot be archived', (tester) async {
