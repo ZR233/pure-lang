@@ -398,6 +398,10 @@ LspStateSnapshot _lspStateFromFrb(frb.BridgeLspStateSnapshot snapshot) {
               : _dateFromUnix(server.lastCheckedAt!),
           lastError: server.lastError,
           diagnosticCount: server.diagnosticCount.toInt(),
+          activityKind: server.activityKind,
+          activityTitle: server.activityTitle,
+          activityMessage: server.activityMessage,
+          activityPercentage: server.activityPercentage,
         ),
     ],
   );

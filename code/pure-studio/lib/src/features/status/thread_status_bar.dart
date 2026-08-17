@@ -36,6 +36,18 @@ class ThreadStatusBar extends ConsumerWidget {
     StudioDriverState.publishTask(runtime.task);
     final thread = workspace.thread;
     final capabilityLabel = _runtimeCapabilityLabel(context, runtime);
+    final lspActiveServers = [
+      for (final server
+          in ref
+                  .watch(
+                    studioControllerProvider.select(
+                      (state) => state.value?.lspState,
+                    ),
+                  )
+                  ?.servers ??
+              const <LspServerStateView>[])
+        if (server.activityKind != 'idle') server,
+    ];
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.studioPaper,
@@ -53,6 +65,7 @@ class ThreadStatusBar extends ConsumerWidget {
                 final showEffort = constraints.maxWidth >= 720;
                 final showCost = constraints.maxWidth >= 790;
                 final showCapabilities = constraints.maxWidth >= 840;
+                final showLspActivity = constraints.maxWidth >= 850;
                 final hasOverflow =
                     (!showEffort &&
                         thread.isRoot &&
@@ -61,7 +74,8 @@ class ThreadStatusBar extends ConsumerWidget {
                           thread.mode,
                         ).isNotEmpty) ||
                     (!showCost && runtime.costLabel.isNotEmpty) ||
-                    (!showCapabilities && capabilityLabel.isNotEmpty);
+                    (!showCapabilities && capabilityLabel.isNotEmpty) ||
+                    (!showLspActivity && lspActiveServers.isNotEmpty);
                 return Row(
                   children: [
                     if (showTodo)
@@ -120,6 +134,8 @@ class ThreadStatusBar extends ConsumerWidget {
                     if (runtime.task case final task?)
                       _TaskRuntimeReadout(task: task),
                     ContextUsageReadout(runtime: runtime),
+                    if (showLspActivity && lspActiveServers.isNotEmpty)
+                      _LspActivityReadout(servers: lspActiveServers),
                     if (showCost && runtime.costLabel.isNotEmpty)
                       _StatusReadout(
                         label: runtime.costLabel,
@@ -147,6 +163,9 @@ class ThreadStatusBar extends ConsumerWidget {
                         cost: runtime.costLabel,
                         capabilities: capabilityLabel,
                         runtime: runtime,
+                        lspServers: showLspActivity
+                            ? const <LspServerStateView>[]
+                            : lspActiveServers,
                       ),
                     const Spacer(),
                     const SizedBox(width: 8),
@@ -157,6 +176,89 @@ class ThreadStatusBar extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _LspActivityReadout extends StatelessWidget {
+  const _LspActivityReadout({required this.servers});
+
+  final List<LspServerStateView> servers;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeServers = servers;
+    if (activeServers.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final first = activeServers.first;
+    final firstLabel = _lspActivityLabel(context, first.activityKind);
+    final percentage = first.activityPercentage;
+    final label = activeServers.length == 1
+        ? (percentage == null
+              ? firstLabel
+              : '$firstLabel ${context.l10n.statusLspActivityPercentage(percentage)}')
+        : '$firstLabel · ${context.l10n.statusLspCount(activeServers.length)}';
+    final tooltip = [
+      for (final server in activeServers)
+        '${server.displayName} · ${_lspServerActivitySummary(context, server)}',
+    ].join('\n');
+    return KeyedSubtree(
+      key: StudioDriverKeys.lspActivity(),
+      child: _StatusReadout(
+        key: StudioDriverKeys.lspActivityDetail(),
+        icon: Icons.terminal_outlined,
+        label: label,
+        tooltip: tooltip,
+        maxWidth: 120,
+        interactive: true,
+        detailBuilder: (context) => _LspActivityDetail(servers: activeServers),
+      ),
+    );
+  }
+}
+
+String _lspActivityLabel(BuildContext context, String activityKind) {
+  return switch (activityKind) {
+    'indexing' => context.l10n.statusLspIndexing,
+    'busy' => context.l10n.statusLspBusy,
+    final kind => kind,
+  };
+}
+
+String _lspServerActivitySummary(
+  BuildContext context,
+  LspServerStateView server,
+) {
+  return [
+    _lspActivityLabel(context, server.activityKind),
+    if (server.activityPercentage case final percentage?)
+      context.l10n.statusLspActivityPercentage(percentage),
+    if (server.activityTitle case final title? when title.isNotEmpty) title,
+    if (server.activityMessage case final message? when message.isNotEmpty)
+      message,
+  ].join(' · ');
+}
+
+class _LspActivityDetail extends StatelessWidget {
+  const _LspActivityDetail({required this.servers});
+
+  final List<LspServerStateView> servers;
+
+  @override
+  Widget build(BuildContext context) {
+    return StatusDetailPanel(
+      title: context.l10n.statusLspSection,
+      children: [
+        for (final server in servers)
+          StatusDetailIconRow(
+            icon: Icons.terminal_outlined,
+            title: server.displayName,
+            detail: _lspServerActivitySummary(context, server),
+            iconColor: StudioColors.ochre,
+            backgroundColor: StudioColors.ochre.withValues(alpha: 0.15),
+          ),
+      ],
     );
   }
 }
@@ -228,12 +330,14 @@ class _StatusOverflow extends StatelessWidget {
     required this.cost,
     required this.capabilities,
     required this.runtime,
+    this.lspServers = const <LspServerStateView>[],
   });
 
   final String? effort;
   final String cost;
   final String capabilities;
   final ThreadRuntimeView runtime;
+  final List<LspServerStateView> lspServers;
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +347,6 @@ class _StatusOverflow extends StatelessWidget {
       position: PopupMenuPosition.over,
       icon: const Icon(Icons.more_horiz, size: 18),
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
       onSelected: (action) => _showDetail(context, action),
       itemBuilder: (context) => [
         if (effort case final value?)
@@ -273,6 +376,16 @@ class _StatusOverflow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        if (lspServers.isNotEmpty)
+          PopupMenuItem<_StatusOverflowAction>(
+            key: StudioDriverKeys.lspActivityOverflow(),
+            value: _StatusOverflowAction.lsp,
+            child: Text(
+              _lspOverflowSummary(context, lspServers),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
       ],
     );
   }
@@ -281,20 +394,37 @@ class _StatusOverflow extends StatelessWidget {
     final detail = switch (action) {
       _StatusOverflowAction.cost => _CostDetail(runtime: runtime),
       _StatusOverflowAction.capabilities => _CapabilityDetail(runtime: runtime),
+      _StatusOverflowAction.lsp => _LspActivityDetail(servers: lspServers),
     };
     showDialog<void>(
       context: context,
       builder: (context) => Dialog(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560, maxHeight: 520),
-          child: Padding(padding: const EdgeInsets.all(16), child: detail),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(child: detail),
+          ),
         ),
       ),
     );
   }
 }
 
-enum _StatusOverflowAction { cost, capabilities }
+enum _StatusOverflowAction { cost, capabilities, lsp }
+
+String _lspOverflowSummary(
+  BuildContext context,
+  List<LspServerStateView> servers,
+) {
+  final first = servers.first;
+  final summary =
+      '${first.displayName} · ${_lspServerActivitySummary(context, first)}';
+  if (servers.length == 1) {
+    return summary;
+  }
+  return '$summary · ${context.l10n.statusLspCount(servers.length)}';
+}
 
 class _ThreadModeSelector extends ConsumerWidget {
   const _ThreadModeSelector({required this.workspace});

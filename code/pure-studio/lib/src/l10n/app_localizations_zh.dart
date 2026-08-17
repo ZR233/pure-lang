@@ -351,6 +351,17 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get statusLspIndexing => '索引中';
+
+  @override
+  String get statusLspBusy => '处理中';
+
+  @override
+  String statusLspActivityPercentage(int percentage) {
+    return '$percentage%';
+  }
+
+  @override
   String statusAgentsCount(int count) {
     return '$count 个 agent';
   }
@@ -1359,6 +1370,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsLspResetWorkspace => '重置工作区';
+
+  @override
+  String get settingsLspActivityIndexing => '正在索引';
+
+  @override
+  String get settingsLspActivityBusy => '忙碌';
 
   @override
   String get settingsLspEmptyTitle => '没有语言服务器';

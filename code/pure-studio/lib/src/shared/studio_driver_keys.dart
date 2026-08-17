@@ -118,6 +118,15 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> lspResetServer(String serverId) =>
       ValueKey<String>('lsp-reset-$serverId');
 
+  static ValueKey<String> lspActivity() =>
+      const ValueKey<String>('lsp-activity');
+
+  static ValueKey<String> lspActivityDetail() =>
+      const ValueKey<String>('lsp-activity-detail');
+
+  static ValueKey<String> lspActivityOverflow() =>
+      const ValueKey<String>('lsp-activity-overflow');
+
   static ValueKey<String> settingsRoleEffort(String role) =>
       ValueKey<String>('settings-role-$role-effort');
 
