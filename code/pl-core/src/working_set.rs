@@ -113,6 +113,9 @@ impl TurnWorkingSetHandle {
             }
             TurnWorkingSetChange::UpsertSection(section) => {
                 validate_section(&section)?;
+                if section.id.as_str() == CURRENT_TODO_SECTION_ID {
+                    validate_todo_section(&section)?;
+                }
                 if section.id.as_str() == EVIDENCE_LEDGER_SECTION_ID {
                     if section.content.len() > MAX_EVIDENCE_VISIBLE_BYTES {
                         return Err(PureError::ConfigError(format!(
@@ -162,6 +165,17 @@ impl TurnWorkingSetHandle {
             .values()
             .cloned()
             .collect()
+    }
+
+    /// 返回当前 todo list 快照；尚未建立时返回 `None`。
+    ///
+    /// 写入和会话恢复边界会拒绝损坏或违反 todo 约束的内置 section。
+    pub fn current_todo(&self) -> Option<TodoListSnapshot> {
+        let section = self
+            .sections()
+            .into_iter()
+            .find(|section| section.id.as_str() == CURRENT_TODO_SECTION_ID)?;
+        serde_json::from_str(&section.content).ok()
     }
 
     /// 返回当前会话笔记；尚未创建时返回 revision 为 0 的空快照。
@@ -390,6 +404,20 @@ fn validate_todo(snapshot: &TodoListSnapshot) -> Result<(), PureError> {
     Ok(())
 }
 
+fn validate_todo_section(section: &PinnedContextSection) -> Result<(), PureError> {
+    if section.content.len() > MAX_TODO_BYTES {
+        return Err(PureError::ConfigError(format!(
+            "todo working context exceeds {MAX_TODO_BYTES} bytes"
+        )));
+    }
+    let snapshot = serde_json::from_str::<TodoListSnapshot>(&section.content).map_err(|error| {
+        PureError::ConfigError(format!(
+            "current todo section contains invalid JSON: {error}"
+        ))
+    })?;
+    validate_todo(&snapshot)
+}
+
 fn bounded_evidence_content(evidence: &mut EvidenceLedgerDocument) -> Result<String, PureError> {
     loop {
         let content = serde_json::to_string_pretty(evidence)?;
@@ -487,6 +515,92 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID]
         );
+    }
+
+    #[test]
+    fn current_todo_round_trips_the_pinned_section() {
+        let handle = TurnWorkingSetHandle::default();
+        assert!(handle.current_todo().is_none());
+
+        handle
+            .apply(TurnWorkingSetChange::ReplaceTodo(TodoListSnapshot {
+                call_id: "todo-1".to_string(),
+                agent_id: None,
+                path: Some("/root".to_string()),
+                parent_path: None,
+                explanation: None,
+                items: vec![
+                    TodoItem {
+                        step: "Done".to_string(),
+                        status: TodoStatus::Completed,
+                    },
+                    TodoItem {
+                        step: "Left".to_string(),
+                        status: TodoStatus::Pending,
+                    },
+                ],
+            }))
+            .unwrap();
+
+        let todo = handle.current_todo().unwrap();
+        assert_eq!(todo.call_id, "todo-1");
+        assert_eq!(todo.items.len(), 2);
+        assert_eq!(todo.items[1].status, TodoStatus::Pending);
+    }
+
+    #[test]
+    fn upsert_rejects_a_malformed_current_todo_section() {
+        let handle = TurnWorkingSetHandle::default();
+        let section =
+            context_section(CURRENT_TODO_SECTION_ID, 1, "Current Todo", "not-json").unwrap();
+
+        let error = handle
+            .apply(TurnWorkingSetChange::UpsertSection(section))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PureError::ConfigError(message)
+                if message.contains("current todo section contains invalid JSON")
+        ));
+        assert!(handle.current_todo().is_none());
+    }
+
+    #[test]
+    fn upsert_applies_todo_constraints_to_the_current_todo_section() {
+        let handle = TurnWorkingSetHandle::default();
+        let snapshot = TodoListSnapshot {
+            call_id: "todo-1".to_string(),
+            agent_id: None,
+            path: Some("/root".to_string()),
+            parent_path: None,
+            explanation: None,
+            items: (0..=MAX_TODO_ITEMS)
+                .map(|index| TodoItem {
+                    step: format!("Item {index}"),
+                    status: TodoStatus::Pending,
+                })
+                .collect(),
+        };
+        let section = context_section(
+            CURRENT_TODO_SECTION_ID,
+            1,
+            "Current Todo",
+            serde_json::to_string(&snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let error = handle
+            .apply(TurnWorkingSetChange::UpsertSection(section))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == "update_todo_list"
+                    && error.contains("todo list may contain at most")
+        ));
+        assert!(handle.current_todo().is_none());
     }
 
     #[test]

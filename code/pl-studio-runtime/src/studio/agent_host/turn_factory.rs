@@ -97,7 +97,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let config = self.config_runtime.read()?.config;
         let skill_catalog = self.skills.read(&thread_record.project_id).await.catalog;
         let mode = StudioMode::from_label(&thread_record.mode);
-        ensure_root_role_matches_mode(&context.snapshot.identity, mode)?;
+        let is_root = context.snapshot.identity.parent_id.is_none();
+        // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
+        let root_role = is_root.then(|| mode.root_role());
         let active_task_run = if mode == StudioMode::Task {
             self.store
                 .find_active_task_run_for_root_thread(&thread_record.root_thread_id)
@@ -122,6 +124,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 "Task executor or reviewer has no active TaskRun",
             ));
         }
+
         let workspace = AgentWorkspaceResolver::new(self.store.clone())
             .resolve(
                 &context.snapshot.identity,
@@ -191,13 +194,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None
         };
         let input_message = context.input.payload.message.clone();
-        let model_role = if context.snapshot.identity.parent_id.is_none() {
-            match mode {
-                StudioMode::Simple => crate::config::StudioRole::Executor.id(),
-                StudioMode::Task => crate::config::StudioRole::Planner.id(),
-            }
-        } else {
-            context.snapshot.identity.role.clone()
+        let model_role = match root_role {
+            Some(role) => role.id(),
+            None => context.snapshot.identity.role.clone(),
         };
         let route = config.models.resolve(&model_role)?;
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
@@ -220,7 +219,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .get(&context.snapshot.identity.id)
             .await
             .map(|resource| resource.task_name)
-            .unwrap_or_else(|| context.snapshot.identity.role.to_string());
+            .unwrap_or_else(|| {
+                root_role
+                    .map(|role| role.key().to_string())
+                    .unwrap_or_else(|| context.snapshot.identity.role.to_string())
+            });
         let subagent_context = runtime_subagent_context(&context.snapshot.identity, task_name);
         let mut engine = builder.with_runtime_profile(profile).build();
         if let Some(subagent) = subagent_context {
@@ -308,7 +311,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             config: &config,
             model: &route.model,
             mode,
-            identity: &context.snapshot.identity,
+            role: model_role.as_str(),
+            is_root,
             workspace_root: &workspace_root,
             workspace_instructions: &workspace_instructions,
             skill_catalog: &skill_catalog,
@@ -333,7 +337,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         );
         let interaction_callback = self.interactions.callback(thread_id, emitter);
         let prompt_cache_namespace = context.snapshot.identity.id.to_string();
-        let prompt_scope = format!("{}:{}", mode.label(), context.snapshot.identity.role);
+        let prompt_role = root_role
+            .map(|role| role.key().to_string())
+            .unwrap_or_else(|| context.snapshot.identity.role.to_string());
+        let prompt_scope = format!("{}:{prompt_role}", mode.label());
         // Turn 冻结工具诊断在本 turn 的 prompt snapshot 重建前不可得；host 读取
         // session prompt metadata 中该 scope 的当前 slot（即最近一次冻结的
         // lease 代数与 deferred catalog 指纹）作为 runtime 诊断投影。
@@ -391,7 +398,8 @@ struct StudioInstructionContext<'a> {
     config: &'a crate::config::StudioConfig,
     model: &'a pl_model::ModelInfo,
     mode: StudioMode,
-    identity: &'a AgentIdentity,
+    role: &'a str,
+    is_root: bool,
     workspace_root: &'a Path,
     workspace_instructions: &'a str,
     skill_catalog: &'a pl_core::skill::SkillCatalog,
@@ -405,10 +413,7 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
         skill_catalog: Some(context.skill_catalog),
         execution_profile: Some(ExecutionInstructionProfile {
             label: context.mode.label(),
-            instructions: context.mode.instructions_for(
-                context.identity.role.as_str(),
-                context.identity.parent_id.is_none(),
-            ),
+            instructions: context.mode.instructions_for(context.role, context.is_root),
         }),
         model: context.model,
         workspace_root: context.workspace_root,
@@ -490,25 +495,6 @@ fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRunRecord
     Ok(())
 }
 
-fn ensure_root_role_matches_mode(identity: &AgentIdentity, mode: StudioMode) -> Result<()> {
-    if identity.parent_id.is_some() {
-        return Ok(());
-    }
-    let expected = match mode {
-        StudioMode::Simple => crate::config::StudioRole::Executor,
-        StudioMode::Task => crate::config::StudioRole::Planner,
-    };
-    if identity.role != expected.id() {
-        return Err(turn_error(format!(
-            "root Studio Thread role {} does not match {} mode role {}",
-            identity.role,
-            mode.label(),
-            expected.key()
-        )));
-    }
-    Ok(())
-}
-
 fn anyhow_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
 }
@@ -527,21 +513,20 @@ mod tests {
     }
 
     #[test]
-    fn task_root_rejects_stale_executor_identity() {
-        let identity = AgentIdentity {
-            id: pl_core::AgentId::new("root").unwrap(),
-            parent_id: None,
-            role: crate::config::StudioRole::Executor.id(),
-            depth: 0,
-        };
-
-        let error = ensure_root_role_matches_mode(&identity, StudioMode::Task).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("does not match task mode role planner")
-        );
+    fn root_role_is_derived_from_mode_regardless_of_stale_identity() {
+        let cases = [
+            (StudioMode::Simple, "executor"),
+            (StudioMode::Task, "planner"),
+        ];
+        for (mode, expected) in cases {
+            assert_eq!(mode.root_role().key(), expected);
+            assert_eq!(
+                mode.instructions_for("stale-role", true),
+                mode.instructions_for(mode.root_role().key(), true),
+                "{} root instructions must depend only on mode",
+                mode.label()
+            );
+        }
     }
 
     #[test]

@@ -71,7 +71,7 @@
   "statusModelLabel": "模型",
   "statusCapabilitiesTitle": "活动能力",
   "statusSessionMode": "会话模式",
-  "statusSessionModeLocked": "任务执行期间无法切换会话模式",
+  "statusSessionModeLocked": "会话运行或任务执行期间无法切换会话模式",
   "statusPlannerModel": "Planner 模型",
   "statusExecutorModel": "Executor 模型",
   "statusReasoningEffort": "思考等级",

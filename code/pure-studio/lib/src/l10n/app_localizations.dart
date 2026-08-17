@@ -528,7 +528,7 @@ abstract class AppLocalizations {
   /// No description provided for @statusSessionModeLocked.
   ///
   /// In en, this message translates to:
-  /// **'Session mode cannot change while a Task is active'**
+  /// **'Session mode cannot change while the session is running or a Task is active'**
   String get statusSessionModeLocked;
 
   /// No description provided for @statusPlannerModel.

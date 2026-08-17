@@ -32,6 +32,14 @@ impl StudioMode {
         }
     }
 
+    /// root Thread 的角色是 mode 的派生投影：Simple 对应 executor，Task 对应 planner。
+    pub const fn root_role(self) -> crate::config::StudioRole {
+        match self {
+            Self::Simple => crate::config::StudioRole::Executor,
+            Self::Task => crate::config::StudioRole::Planner,
+        }
+    }
+
     pub fn from_label(label: &str) -> Self {
         match label {
             "task" => Self::Task,

@@ -24,10 +24,6 @@ impl StudioStore {
         let now = unix_seconds();
         let id = new_id("thread");
         let usage_json = serde_json::to_string(&pl_model::TokenUsage::default())?;
-        let role = match mode {
-            StudioMode::Simple => "executor",
-            StudioMode::Task => "planner",
-        };
         let model = thread::ActiveModel {
             id: Set(id.clone()),
             project_id: Set(project_id.to_string()),
@@ -35,7 +31,7 @@ impl StudioStore {
             mode: Set(mode.label().to_string()),
             root_thread_id: Set(id.clone()),
             parent_thread_id: Set(None),
-            role: Set(role.to_string()),
+            role: Set(mode.root_role().key().to_string()),
             agent_path: Set(id),
             status: Set("idle".to_string()),
             revision: Set(0),
@@ -239,38 +235,11 @@ impl StudioStore {
         {
             let mut active: thread::ActiveModel = existing.into();
             active.mode = Set(mode.label().to_string());
-            active.role = Set(match mode {
-                StudioMode::Simple => "executor".to_string(),
-                StudioMode::Task => "planner".to_string(),
-            });
+            active.role = Set(mode.root_role().key().to_string());
             active.updated_at = Set(unix_seconds());
             active.update(&self.db).await?;
         }
         Ok(())
-    }
-
-    pub(in crate::studio) async fn repair_root_thread_roles(&self) -> Result<usize> {
-        use entities::thread;
-        let roots = thread::Entity::find()
-            .filter(thread::Column::ParentThreadId.is_null())
-            .filter(thread::Column::Mode.is_in(["simple", "task"]))
-            .all(&self.db)
-            .await?;
-        let mut repaired = 0;
-        for root in roots {
-            let expected_role = match StudioMode::from_label(&root.mode) {
-                StudioMode::Simple => "executor",
-                StudioMode::Task => "planner",
-            };
-            if root.role == expected_role {
-                continue;
-            }
-            let mut active: thread::ActiveModel = root.into();
-            active.role = Set(expected_role.to_string());
-            active.update(&self.db).await?;
-            repaired += 1;
-        }
-        Ok(repaired)
     }
 }
 

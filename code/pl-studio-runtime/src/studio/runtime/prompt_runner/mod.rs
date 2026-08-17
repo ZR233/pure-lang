@@ -42,6 +42,17 @@ impl StudioRuntime {
             bail!("Studio runtime is not ready");
         }
         let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
+        let thread_record = self
+            .store
+            .read_thread(&thread_id)
+            .await?
+            .context("selected Thread not found")?;
+        let snapshot = handle
+            .snapshot(agent_id.clone())
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
+            .await?;
         let thread = pl_core::ThreadId::new(thread_id.clone())?;
         let metadata = submit_metadata(&attachment_ids, &options);
         let presentation = options.presentation.clone();
@@ -103,6 +114,8 @@ impl StudioRuntime {
         {
             bail!("Task Planner is already active or has pending input");
         }
+        self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
+            .await?;
 
         let thread = pl_core::ThreadId::new(thread_id.clone())?;
         let resume_revision = thread_record
@@ -196,6 +209,36 @@ impl StudioRuntime {
             thread_id,
             stopped: true,
         })
+    }
+
+    /// 把 root actor 的 `identity.role` 对齐到 mode 派生角色。mode 目录记录是
+    /// canonical，actor 角色只是投影；切换后的短暂漂移在每次提交前自愈。
+    /// 非 root、已一致或 actor 非 idle 时是 no-op。
+    async fn reconcile_root_role(
+        &self,
+        handle: &pl_core::AgentRuntimeHandle,
+        agent_id: &pl_core::AgentId,
+        thread: &ThreadRecord,
+        snapshot: &pl_core::AgentSnapshot,
+    ) -> Result<()> {
+        if thread.parent_thread_id.is_some() {
+            return Ok(());
+        }
+        let desired = StudioMode::from_label(&thread.mode).root_role().id();
+        if snapshot.identity.role == desired {
+            return Ok(());
+        }
+        if snapshot.active_turn_id.is_some()
+            || snapshot.pending_inputs > 0
+            || snapshot.activity != pl_core::AgentActivityState::Idle
+        {
+            return Ok(());
+        }
+        handle
+            .reconfigure_idle_role(agent_id.clone(), desired)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        Ok(())
     }
 
     pub(in crate::studio) async fn ensure_thread_agent(
@@ -295,10 +338,7 @@ impl StudioRuntime {
                     "root Studio Thread {} has invalid canonical owner",
                     thread_record.id
                 );
-                let role = match StudioMode::from_label(&thread_record.mode) {
-                    StudioMode::Simple => StudioRole::Executor,
-                    StudioMode::Task => StudioRole::Planner,
-                };
+                let role = StudioMode::from_label(&thread_record.mode).root_role();
                 (None, role, 0)
             }
             ThreadKind::Agent => {

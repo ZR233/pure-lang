@@ -7,9 +7,13 @@ root Thread 模式只有 `simple | task`。
 - Simple：root 使用 executor role，可直接实现；只允许派生只读 explorer。
 - Task：root 使用 planner role。planner 负责计划、设计、executor、review、merge、冲突和完成。
 
-root 的 mode 与 role 是同一不变量，只能在没有活动 Turn、pending input 和活动 Task 时切换。
-启动恢复在创建 ThreadActor 前修复旧数据库中 `simple/planner` 或 `task/executor` 的 root 记录；
-child role 不参与该修复。Task root 永远不能进入 executor WorkUnit 生命周期。
+root Thread 的 `mode` 是唯一事实源；root role 只是运行时派生投影，不再是独立不变量。agent
+注册、Turn 构建时的 instructions、模型路由、workspace 与 execution policy 都按 mode 派生 root
+角色（Simple → executor，Task → planner）。切换 mode 只允许 root Thread、没有活动 Task、actor
+idle 且没有 pending input；StudioRuntime 持 lifecycle 临界区后单次原子持久化 mode/role 目录记录，
+再尽力把进程内 actor 角色同步为新值，失败只告警不回滚——提交 prompt 时 reconcile 会自愈残余
+漂移，Turn 构建也不因角色陈旧而拒绝。不存在启动修复步骤。Task root 永远不能进入 executor
+WorkUnit 生命周期。
 
 每个 agent 固定对应一个 Thread。child 通过 `rootThreadId`、`parentThreadId`、`role` 和
 `agentPath` 表达关系。TaskRun 只绑定 root Thread；executor 和 reviewer 直接由 WorkUnit、
@@ -268,11 +272,12 @@ clean workspace 且没有未结束的 Git operation；它不运行或补偿 Git�
 成功事务写 MergeRecord、推进 WorkUnit/TaskRun/BranchLease，并授权幂等清理源 worktree。
 Git 已变化但记账失败时保留现场并 scoped block，不 reset。
 
-所有 WorkUnit 均有 MergeRecord 或 NoDelivery、design 已与当前 HEAD 一致后，创建 fresh integrated
-reviewer，其 canonical workspace 是 TaskRun 主 workspace。findings 进入 reworking，由新 executor
-修复；pass 才允许 `task_complete`。合并后的 Integrated review 是独立的任务级门禁，不因各 Delivery
-round 已 pass 而省略；相同不可变 Task HEAD 仍受 pending review 与 provider call 幂等键约束，不重复
-创建 round。
+所有 WorkUnit 均有 MergeRecord 或 NoDelivery、design 已与当前 HEAD 一致后，若存在 source merge，
+创建 fresh integrated reviewer，其 canonical workspace 是 TaskRun 主 workspace。findings 进入
+reworking，由新 executor 修复；pass 才允许 `task_complete`。合并后的 Integrated review 是
+独立的任务级门禁，不因各 Delivery round 已 pass 而省略；相同不可变 Task HEAD 仍受
+pending review 与 provider call 幂等键约束，不重复创建 round。若没有任何 MergeRecord（全部
+WorkUnit 均为 NoDelivery），因没有可审查的集成 diff 而跳过 integrated review。
 
 ## 16.7 设计门禁
 
@@ -360,19 +365,26 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 
 - design 与当前 HEAD 一致；
 - 全部 WorkUnit 为 Merged 或 NoDelivery；
-- 最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
+- 存在 source merge 时，最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
+  无 merge record（即全部 NoDelivery）时不再要求 integrated review——空 diff 审查是纯仪式；
 - 当前分支、workspace、TaskRun 和 BranchLease expectedHead 精确一致；
-- 不存在 StopRequested。
-- Task root Thread 及全部后代 Thread 不存在 pending Interaction。
+- 不存在 StopRequested；
+- Task root Thread 自身不存在 pending Interaction。已结算子 Thread 的残留 Interaction
+  不阻塞完成——planner 没有取消它们的工具，树级门禁会把任务死锁到用户介入。
 
 pending Interaction 是可恢复的用户或工具边界，`task_complete` 不自动取消；它以
-`pendingInteraction` 拒绝完成，并返回总数及稳定 Thread/Interaction 预览。用户或 Agent 解决这些
+`pendingInteraction` 拒绝完成，并返回总数及稳定 Interaction 预览。用户或 Agent 解决这些
 Interaction 后可在同一 Reviewing phase 重试。完成事务必须在写入 terminal fact 与删除 lease 前
-原子重验该不变量，不能只依赖事务外 preflight，否则并发创建的 Interaction 可能穿透终态门禁。
+原子重验 root 自身的该不变量，不能只依赖事务外 preflight，否则并发创建的 Interaction 可能穿透
+终态门禁。
+
+planner 当前 todo list 存在未完成条目时，`task_complete` 以 `todoIncomplete` 拒绝，message
+列出每条未完成条目的状态与步骤，planner 需先用 `update_todo_list` 把条目标记完成（或按事实
+修订清单）后重试。没有 todo list 或全部条目 completed 时不拦截，不强制 planner 必须使用 todo。
 
 工具返回 tagged `TaskCompleteOutcome`：`completed { run }` 或
 `rejected { code, recoverable, message }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
-repositoryDrift、reviewMissing、deliveriesIncomplete、pendingInteraction）和用户可读说明。rejected 通过普通 tool
+repositoryDrift、reviewMissing、deliveriesIncomplete、pendingInteraction、todoIncomplete）和用户可读说明。rejected 通过普通 tool
 failure JSON 同时进入 Planner 上下文、SQLite Item 与 GUI；Task 保持 Reviewing，lease/review
 不变，且 Planner Turn 只有成功完成时才结束。
 

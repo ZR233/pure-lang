@@ -82,7 +82,7 @@
   "statusModelLabel": "Model",
   "statusCapabilitiesTitle": "Active capabilities",
   "statusSessionMode": "Session mode",
-  "statusSessionModeLocked": "Session mode cannot change while a Task is active",
+  "statusSessionModeLocked": "Session mode cannot change while the session is running or a Task is active",
   "statusPlannerModel": "Planner model",
   "statusExecutorModel": "Executor model",
   "statusReasoningEffort": "Reasoning effort",

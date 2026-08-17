@@ -470,6 +470,7 @@ class StudioController extends _$StudioController {
         thread == null ||
         !thread.isRoot ||
         thread.mode == mode ||
+        thread.status != 'idle' ||
         current.runtime.hasActiveTask) {
       return;
     }

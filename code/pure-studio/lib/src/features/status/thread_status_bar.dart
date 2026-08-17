@@ -411,7 +411,8 @@ class _ThreadModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = workspace.thread.mode;
-    final enabled = !workspace.runtime.hasActiveTask;
+    final enabled =
+        !workspace.runtime.hasActiveTask && workspace.thread.status == 'idle';
     return UpwardPopupMenu<StudioMode>(
       key: StudioDriverKeys.sessionMode,
       tooltip: enabled

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use pl_protocol::{TodoListSnapshot, TodoStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -66,13 +67,16 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<CompleteTaskInput>::new(
             "task_complete",
-            "Complete a fully merged, design-consistent and reviewer-approved task.",
+            "Complete a design-consistent task whose deliveries are merged or recorded as \
+             no-delivery. Requires a current integrated review when source merges exist and an \
+             all-completed todo list when one exists.",
         )
-        .registered(move |_: CompleteTaskInput, _context| {
+        .registered(move |_: CompleteTaskInput, context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             async move {
-                let outcome = coordinator.complete_task(&thread_id).await?;
+                let todo = context.working_set.current_todo();
+                let outcome = coordinator.complete_task(&thread_id, todo.as_ref()).await?;
                 let output = serde_json::to_string(&outcome)?;
                 Ok::<ToolExecutionResult<serde_json::Value>, anyhow::Error>(match outcome {
                     TaskCompleteOutcome::Completed(_) => {
@@ -186,7 +190,11 @@ impl TaskCoordinator {
         })
     }
 
-    async fn complete_task(&self, thread_id: &str) -> Result<TaskCompleteOutcome> {
+    async fn complete_task(
+        &self,
+        thread_id: &str,
+        todo: Option<&TodoListSnapshot>,
+    ) -> Result<TaskCompleteOutcome> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
         let run = self
@@ -208,6 +216,9 @@ impl TaskCoordinator {
                 "task_complete is unavailable after task_stop was requested",
             ));
         }
+        if let Some(message) = incomplete_todo_message(todo) {
+            return Ok(TaskCompleteOutcome::rejected("todoIncomplete", message));
+        }
         if run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
             return Ok(TaskCompleteOutcome::rejected(
                 "repositoryDrift",
@@ -226,35 +237,32 @@ impl TaskCoordinator {
                 "all executor deliveries must be merged or recorded as no-delivery",
             ));
         }
-        let latest_review = self.store.list_review_rounds(&run.id).await?.pop();
-        if !latest_review.is_some_and(|review| {
-            review.scope == ReviewScope::Integrated
-                && review.reviewed_head == run.expected_head
-                && review.verdict == ReviewVerdict::Pass
-        }) {
-            return Ok(TaskCompleteOutcome::rejected(
-                "reviewMissing",
-                "latest integrated review must pass for the current task HEAD",
-            ));
+        // 无 source merge（全部 NoDelivery）时没有可审查的集成 diff，
+        // 不再强制 integrated review。
+        let has_source_merge = !self.store.list_merge_records(&run.id).await?.is_empty();
+        if has_source_merge {
+            let latest_review = self.store.list_review_rounds(&run.id).await?.pop();
+            if !latest_review.is_some_and(|review| {
+                review.scope == ReviewScope::Integrated
+                    && review.reviewed_head == run.expected_head
+                    && review.verdict == ReviewVerdict::Pass
+            }) {
+                return Ok(TaskCompleteOutcome::rejected(
+                    "reviewMissing",
+                    "latest integrated review must pass for the current task HEAD",
+                ));
+            }
         }
-        let pending_interactions = self
-            .store
-            .list_pending_interactions_for_root_thread(thread_id)
-            .await?;
+        // 子 Thread 的 WorkUnit 已全部结算，其残留 Interaction 不再阻塞完成；
+        // 只有 root 自身的 pending Interaction 仍是未闭合的用户边界。
+        let pending_interactions = self.store.list_pending_interactions(thread_id).await?;
         if !pending_interactions.is_empty() {
             const PREVIEW_LIMIT: usize = 8;
             let total = pending_interactions.len();
             let preview = pending_interactions
                 .iter()
                 .take(PREVIEW_LIMIT)
-                .map(|interaction| {
-                    format!(
-                        "{}/{} ({})",
-                        interaction.scope.thread_id,
-                        interaction.interaction_id,
-                        interaction.kind.as_str()
-                    )
-                })
+                .map(|interaction| format!("{}/{}", thread_id, interaction.interaction_id))
                 .collect::<Vec<_>>()
                 .join(", ");
             let remaining = total.saturating_sub(PREVIEW_LIMIT);
@@ -266,7 +274,7 @@ impl TaskCoordinator {
             return Ok(TaskCompleteOutcome::rejected(
                 "pendingInteraction",
                 format!(
-                    "Task Thread 树仍有 {total} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete"
+                    "Task root Thread 仍有 {total} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete"
                 ),
             ));
         }
@@ -413,6 +421,28 @@ impl TaskCoordinator {
         }
         Ok(())
     }
+}
+
+/// 存在未完成条目时返回拒绝说明；无 todo 或全部 completed 返回 `None`。
+fn incomplete_todo_message(todo: Option<&TodoListSnapshot>) -> Option<String> {
+    let snapshot = todo?;
+    let unfinished = snapshot
+        .items
+        .iter()
+        .filter(|item| item.status != TodoStatus::Completed)
+        .collect::<Vec<_>>();
+    if unfinished.is_empty() {
+        return None;
+    }
+    let preview = unfinished
+        .iter()
+        .map(|item| format!("[{:?}] {}", item.status, item.step))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(format!(
+        "todo list has {} unfinished item(s): {preview}; mark them completed via update_todo_list before task_complete",
+        unfinished.len()
+    ))
 }
 
 async fn interrupt_task_agents(

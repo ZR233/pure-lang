@@ -146,6 +146,7 @@ impl StudioRuntime {
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let thread = self
             .store
             .read_thread(thread_id)
@@ -162,33 +163,29 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while a task is active");
         }
-        let desired_role = match mode {
-            StudioMode::Simple => StudioRole::Executor.id(),
-            StudioMode::Task => StudioRole::Planner.id(),
-        };
         let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
         let snapshot = handle
             .snapshot(agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        let previous_role = snapshot.identity.role;
-        let role_changed = previous_role != desired_role;
-        if role_changed {
-            handle
-                .reconfigure_idle_role(agent_id.clone(), desired_role)
-                .await
-                .map_err(|error| anyhow::anyhow!(error))?;
+        if snapshot.active_turn_id.is_some()
+            || snapshot.pending_inputs > 0
+            || snapshot.activity != pl_core::AgentActivityState::Idle
+        {
+            bail!("thread mode cannot change while the Thread is running or has pending input");
         }
-        if let Err(error) = self.store.set_thread_mode(thread_id, mode).await {
-            if role_changed
-                && let Err(rollback_error) =
-                    handle.reconfigure_idle_role(agent_id, previous_role).await
-            {
-                bail!(
-                    "failed to persist Thread mode: {error}; actor role rollback failed: {rollback_error}"
-                );
-            }
-            return Err(error);
+        self.store.set_thread_mode(thread_id, mode).await?;
+        let desired_role = mode.root_role().id();
+        if snapshot.identity.role != desired_role
+            && let Err(error) = handle.reconfigure_idle_role(agent_id, desired_role).await
+        {
+            // mode 目录记录是 canonical；actor 角色只是投影，漂移由下一次
+            // prompt 提交的 reconcile 和 Turn 构建时的 mode 派生自愈。
+            tracing::warn!(
+                thread_id,
+                error = %error,
+                "thread mode actor role sync deferred"
+            );
         }
         self.agent_facility
             .product_events

@@ -13,7 +13,7 @@ use crate::studio::task_coordinator::{
 };
 
 #[derive(Debug, thiserror::Error)]
-#[error("task thread tree still has {total} pending interactions")]
+#[error("task root thread still has {total} pending interactions")]
 pub(in crate::studio) struct PendingTaskInteractions {
     total: usize,
     preview: Vec<String>,
@@ -29,7 +29,7 @@ impl PendingTaskInteractions {
             format!("，另有 {remaining} 条")
         };
         format!(
-            "Task Thread 树仍有 {} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete",
+            "Task root Thread 仍有 {} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete",
             self.total
         )
     }
@@ -377,20 +377,11 @@ async fn validate_no_pending_interactions(
     root_thread_id: &str,
 ) -> Result<()> {
     const PREVIEW_LIMIT: usize = 8;
-    let thread_ids = entities::thread::Entity::find()
-        .filter(entities::thread::Column::RootThreadId.eq(root_thread_id.to_string()))
-        .all(tx)
-        .await?
-        .into_iter()
-        .map(|thread| thread.id)
-        .collect::<Vec<_>>();
-    if thread_ids.is_empty() {
-        return Ok(());
-    }
+    // 只校验 root 自身：子 Thread 的 WorkUnit 已在完成门禁中强制结算，
+    // 其残留 Interaction 不再阻塞完成。
     let pending = entities::interaction::Entity::find()
-        .filter(entities::interaction::Column::ThreadId.is_in(thread_ids))
+        .filter(entities::interaction::Column::ThreadId.eq(root_thread_id.to_string()))
         .filter(entities::interaction::Column::Status.eq("pending"))
-        .order_by_asc(entities::interaction::Column::ThreadId)
         .order_by_asc(entities::interaction::Column::CreatedAt)
         .order_by_asc(entities::interaction::Column::Id)
         .all(tx)
@@ -416,18 +407,6 @@ async fn validate_completion_children(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
 ) -> Result<()> {
-    let latest_review = entities::review_round::Entity::find()
-        .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-        .order_by_desc(entities::review_round::Column::Round)
-        .one(tx)
-        .await?
-        .context("task completion requires a review round")?;
-    if latest_review.scope != ReviewScope::Integrated.as_str()
-        || latest_review.reviewed_head != run.expected_head
-        || latest_review.status != ReviewVerdict::Pass.as_str()
-    {
-        bail!("latest review must pass for the current task HEAD");
-    }
     let units = entities::work_unit::Entity::find()
         .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
         .all(tx)
@@ -447,6 +426,26 @@ async fn validate_completion_children(
         )
     }) {
         bail!("all task agents must be terminal before completion");
+    }
+    // 无 source merge（全部 NoDelivery）时没有可审查的集成 diff，不要求 review。
+    let has_source_merge = !entities::merge_record::Entity::find()
+        .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
+        .all(tx)
+        .await?
+        .is_empty();
+    if has_source_merge {
+        let latest_review = entities::review_round::Entity::find()
+            .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
+            .order_by_desc(entities::review_round::Column::Round)
+            .one(tx)
+            .await?
+            .context("task completion requires a review round")?;
+        if latest_review.scope != ReviewScope::Integrated.as_str()
+            || latest_review.reviewed_head != run.expected_head
+            || latest_review.status != ReviewVerdict::Pass.as_str()
+        {
+            bail!("latest review must pass for the current task HEAD");
+        }
     }
     Ok(())
 }

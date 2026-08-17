@@ -72,9 +72,9 @@ pub(super) fn studio_execution_policy(
     }
 }
 
+/// plan_exit 只属于 Task root；root 角色由 mode 派生，无需比对 identity.role。
 fn may_submit_plan(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> bool {
     snapshot.identity.parent_id.is_none()
-        && snapshot.identity.role.as_str() == "planner"
         && context.mode == StudioMode::Task
         && matches!(
             context.task_phase,

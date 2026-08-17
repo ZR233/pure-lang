@@ -555,28 +555,16 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .await
         .unwrap();
 
-    let child_id = "completion-gate-child".to_string();
-    fixture
-        .store
-        .create_child_thread(crate::studio::ChildThreadSpec {
-            id: child_id.clone(),
-            parent_thread_id: fixture.root_thread_id.clone(),
-            agent_path: child_id.clone(),
-            role: "explorer".to_string(),
-            title: "Completion gate explorer".to_string(),
-        })
-        .await
-        .unwrap();
     let mut pending = InteractionRequest {
         interaction_id: "completion-gate-pending".to_string(),
         kind: InteractionKind::UserInput,
         status: InteractionStatus::Pending,
         scope: InteractionScope {
-            thread_id: child_id.clone(),
+            thread_id: fixture.root_thread_id.clone(),
             turn_id: "completion-gate-turn".to_string(),
             item_id: Some("completion-gate-item".to_string()),
             tool_id: None,
-            agent_path: Some(child_id),
+            agent_path: None,
         },
         payload: InteractionPayload::UserInput {
             questions: Vec::new(),
@@ -625,7 +613,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 }
 
 #[tokio::test]
-async fn task_complete_blocks_on_descendant_interaction_without_running_project_checks() {
+async fn task_complete_blocks_only_on_root_interaction_without_running_project_checks() {
     let fixture = DeliveryFixture::new(
         "task-completion-with-flutter-changes",
         vec!["code/pure-studio"],
@@ -728,6 +716,27 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
         .unwrap();
 
     let mut pending = InteractionRequest {
+        interaction_id: "pending-root-plan".to_string(),
+        kind: InteractionKind::PlanConfirmation,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            thread_id: fixture.root_thread_id.clone(),
+            turn_id: "turn-root-plan".to_string(),
+            item_id: Some("item-root-plan".to_string()),
+            tool_id: None,
+            agent_path: None,
+        },
+        payload: InteractionPayload::PlanConfirmation {
+            plan_id: "item-root-plan".to_string(),
+            content: "root must resolve its own interaction".to_string(),
+        },
+        created_at: 1,
+        updated_at: 1,
+        resolved_at: None,
+        resolution: None,
+    };
+    fixture.store.upsert_interaction(&pending).await.unwrap();
+    let child_pending = InteractionRequest {
         interaction_id: "pending-child-plan".to_string(),
         kind: InteractionKind::PlanConfirmation,
         status: InteractionStatus::Pending,
@@ -740,14 +749,18 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
         },
         payload: InteractionPayload::PlanConfirmation {
             plan_id: "item-child-plan".to_string(),
-            content: "child must not submit plans".to_string(),
+            content: "settled child interactions must not block completion".to_string(),
         },
         created_at: 1,
         updated_at: 1,
         resolved_at: None,
         resolution: None,
     };
-    fixture.store.upsert_interaction(&pending).await.unwrap();
+    fixture
+        .store
+        .upsert_interaction(&child_pending)
+        .await
+        .unwrap();
 
     let (pending_ends_turn, pending_json) =
         call_task_complete(&fixture, "call-complete-pending-interaction").await;
@@ -756,6 +769,12 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
     assert_eq!(pending_json["code"], "pendingInteraction");
     assert!(
         pending_json["message"]
+            .as_str()
+            .unwrap()
+            .contains("pending-root-plan")
+    );
+    assert!(
+        !pending_json["message"]
             .as_str()
             .unwrap()
             .contains("pending-child-plan")
@@ -781,7 +800,7 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
     assert_eq!(
         fixture
             .store
-            .list_pending_interactions_for_root_thread(&fixture.root_thread_id)
+            .list_pending_interactions(&fixture.root_thread_id)
             .await
             .unwrap(),
         vec![pending.clone()]
@@ -792,6 +811,7 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
     pending.resolved_at = Some(2);
     fixture.store.upsert_interaction(&pending).await.unwrap();
 
+    // root 自身 Interaction 已解决；已结算子 Thread 的残留 Interaction 不再阻塞完成。
     let (ends_turn, json) = call_task_complete(&fixture, "call-complete").await;
     assert!(ends_turn);
     assert_eq!(json["status"], "completed");
@@ -799,12 +819,82 @@ async fn task_complete_blocks_on_descendant_interaction_without_running_project_
     assert_eq!(json["run"]["statusMessage"], serde_json::Value::Null);
     assert!(json.get("verification").is_none());
     assert!(
+        !fixture
+            .store
+            .list_pending_interactions(&fixture.subagent.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
         fixture
             .store
             .read_branch_lease(&fixture.task_run_id)
             .await
             .unwrap()
             .is_none()
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_complete_rejects_unfinished_todo_and_reports_items() {
+    let fixture = DeliveryFixture::new("task-complete-todo-gate", vec!["src"]).await;
+    fixture.settle_no_delivery().await;
+
+    let unfinished = TurnWorkingSetHandle::default();
+    unfinished
+        .apply(crate::TurnWorkingSetChange::ReplaceTodo(todo_snapshot([
+            ("Done step", "completed"),
+            ("Pending step", "pending"),
+            ("Active step", "inProgress"),
+        ])))
+        .unwrap();
+    let (ends_turn, json) =
+        call_task_complete_with_working_set(&fixture, "call-todo-incomplete", unfinished).await;
+    assert!(!ends_turn);
+    assert_eq!(json["status"], "rejected");
+    assert_eq!(json["code"], "todoIncomplete");
+    let message = json["message"].as_str().unwrap();
+    assert!(message.contains("2 unfinished item(s)"));
+    assert!(message.contains("[Pending] Pending step"));
+    assert!(message.contains("[InProgress] Active step"));
+    assert!(!message.contains("Done step"));
+
+    let finished = TurnWorkingSetHandle::default();
+    finished
+        .apply(crate::TurnWorkingSetChange::ReplaceTodo(todo_snapshot([
+            ("Done step", "completed"),
+            ("Pending step", "completed"),
+            ("Active step", "completed"),
+        ])))
+        .unwrap();
+    let (ends_turn, json) =
+        call_task_complete_with_working_set(&fixture, "call-todo-complete", finished).await;
+    assert!(ends_turn);
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["run"]["phase"], "completed");
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_complete_skips_integrated_review_when_nothing_was_merged() {
+    let fixture = DeliveryFixture::new("task-complete-no-delivery", vec!["src"]).await;
+    fixture.settle_no_delivery().await;
+
+    let (ends_turn, json) = call_task_complete(&fixture, "call-no-delivery").await;
+    assert!(ends_turn);
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["run"]["phase"], "completed");
+    assert!(
+        fixture
+            .store
+            .list_review_rounds(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|round| round.scope != ReviewScope::Integrated)
     );
     fixture.cleanup();
 }
@@ -1657,6 +1747,60 @@ impl DeliveryFixture {
             .unwrap()
     }
 
+    async fn settle_no_delivery(&self) {
+        let completion = self
+            .store
+            .create_work_completion(
+                &self.work_unit_id,
+                WorkCompletionKind::NoDelivery,
+                None,
+                "nothing to deliver",
+            )
+            .await
+            .unwrap();
+        let requested_by_call_id = format!("review-{}", completion.id);
+        self.store
+            .begin_delivery_review(
+                &self.root_thread_id,
+                &self.subagent.id,
+                &requested_by_call_id,
+            )
+            .await
+            .unwrap();
+        let reviewer_agent_id = format!("reviewer-{}", completion.id);
+        let round = self
+            .store
+            .authorize_reviewer_spawn(
+                &self.root_thread_id,
+                &requested_by_call_id,
+                &reviewer_agent_id,
+            )
+            .await
+            .unwrap();
+        self.store
+            .activate_reviewer(&round.id, &reviewer_agent_id)
+            .await
+            .unwrap();
+        self.store
+            .complete_task_review(
+                &self.root_thread_id,
+                &reviewer_agent_id,
+                AgentReview {
+                    verdict: ReviewVerdict::Pass,
+                    summary: "no delivery accepted".to_string(),
+                    design_references: Vec::new(),
+                    findings: Vec::new(),
+                },
+                round.file_reviews.as_ref().unwrap().accepted_attempt(),
+            )
+            .await
+            .unwrap();
+        self.store
+            .transition_task_run(&self.task_run_id, TaskRunPhase::Reviewing, None)
+            .await
+            .unwrap();
+    }
+
     fn cleanup(self) {
         drop(self.coordinator);
         let worktree_text = self.worktree.to_string_lossy().to_string();
@@ -1724,6 +1868,14 @@ fn integrate_planner_delivery(
 }
 
 async fn call_task_complete(fixture: &DeliveryFixture, tool_id: &str) -> (bool, serde_json::Value) {
+    call_task_complete_with_working_set(fixture, tool_id, TurnWorkingSetHandle::default()).await
+}
+
+async fn call_task_complete_with_working_set(
+    fixture: &DeliveryFixture,
+    tool_id: &str,
+    working_set: TurnWorkingSetHandle,
+) -> (bool, serde_json::Value) {
     let tool = fixture
         .coordinator
         .task_complete_tool(fixture.root_thread_id.clone());
@@ -1747,7 +1899,7 @@ async fn call_task_complete(fixture: &DeliveryFixture, tool_id: &str) -> (bool, 
                 active_subagent: None,
                 lsp_runtime: None,
                 parent_session: Arc::new(AgentSession::from_messages(Vec::new())),
-                working_set: TurnWorkingSetHandle::default(),
+                working_set,
                 tool_cache: TurnToolCacheHandle::default(),
             },
         )
@@ -1756,6 +1908,28 @@ async fn call_task_complete(fixture: &DeliveryFixture, tool_id: &str) -> (bool, 
     let ends_turn = output.ends_turn();
     let json = serde_json::from_str(&output.into_model_output()).unwrap();
     (ends_turn, json)
+}
+
+fn todo_snapshot<const N: usize>(items: [(&str, &str); N]) -> pl_protocol::TodoListSnapshot {
+    pl_protocol::TodoListSnapshot {
+        call_id: "todo-gate".to_string(),
+        agent_id: None,
+        path: Some("/root".to_string()),
+        parent_path: None,
+        explanation: None,
+        items: items
+            .iter()
+            .map(|(step, status)| pl_protocol::TodoItem {
+                step: (*step).to_string(),
+                status: match *status {
+                    "completed" => pl_protocol::TodoStatus::Completed,
+                    "inProgress" => pl_protocol::TodoStatus::InProgress,
+                    "pending" => pl_protocol::TodoStatus::Pending,
+                    other => panic!("unknown todo status in test: {other}"),
+                },
+            })
+            .collect(),
+    }
 }
 
 async fn approve_delivery(

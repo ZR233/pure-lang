@@ -179,13 +179,6 @@ impl StudioRuntime {
         );
         // 记录 host 内部 repository 句柄，让 framework 被 take 后关机仍能排空 write-behind 队列。
         *self.agent_facility.persistence.lock().await = Some(host.persistence());
-        let repaired_roles = self.store.repair_root_thread_roles().await?;
-        if repaired_roles > 0 {
-            tracing::warn!(
-                repaired_roles,
-                "repaired root Thread roles before restoring Studio actors"
-            );
-        }
         let runtime = std::sync::Arc::new(
             StudioAgentRuntime::start(host, runtime_options())
                 .await

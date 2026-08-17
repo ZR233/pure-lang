@@ -84,6 +84,50 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
 }
 
 #[tokio::test]
+async fn mode_switch_is_rejected_while_a_task_is_active() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("pure-mode-switch-active-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
+    )
+    .unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Active task mode switch", StudioMode::Task)
+        .await
+        .unwrap();
+    store
+        .create_task_run_with_lease(CreateTaskRun {
+            root_thread_id: thread.id.clone(),
+            phase: TaskRunPhase::Implementing,
+            plan: "# Plan\n\nImplement the requested change.".to_string(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+            git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
+            branch: "main".to_string(),
+            head_commit: "1111111".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let error = runtime
+        .set_thread_mode(&thread.id, StudioMode::Simple)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("while a task is active"));
+    let unchanged = store.read_thread(&thread.id).await.unwrap().unwrap();
+    assert_eq!(unchanged.mode, "task");
+    assert_eq!(unchanged.role, "planner");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn thread_snapshot_does_not_register_an_inactive_actor() {
     let workspace = tempfile::tempdir().unwrap();
     let store = StudioStore::open_memory().await.unwrap();
@@ -125,12 +169,12 @@ async fn thread_snapshot_does_not_register_an_inactive_actor() {
 }
 
 #[tokio::test]
-async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
+async fn restored_task_root_derives_planner_role_from_mode_at_registration() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let workspace = std::env::temp_dir().join(format!("pure-role-repair-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-role-derive-{unique}"));
     std::fs::create_dir_all(&workspace).unwrap();
     let store = StudioStore::open_memory().await.unwrap();
     let runtime = StudioRuntime::new(
@@ -154,7 +198,8 @@ async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     active.update(store.database()).await.unwrap();
 
     runtime.start_runtime().await.unwrap();
-    // 惰性驻留：显式激活后按需注册，并复用启动时的 role 修复结果。
+    // 惰性驻留：显式激活后按需注册；root 角色按 mode 派生，目录 role 列
+    // 由 actor 投影回写，不再依赖启动修复。
     runtime.ensure_thread_agent(&thread.id).await.unwrap();
     let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
@@ -422,7 +467,7 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
 }
 
 #[tokio::test]
-async fn active_turn_prevents_thread_archival() {
+async fn active_turn_and_pending_input_prevent_thread_mutation() {
     let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -456,12 +501,48 @@ async fn active_turn_prevents_thread_archival() {
         .unwrap()
         .unwrap();
 
-    let error = runtime
+    let active_mode_error = runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .expect_err("an active Turn must prevent mode switching");
+    assert!(active_mode_error.to_string().contains("Thread is running"));
+
+    runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "queue this input behind the active turn".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    let framework = runtime.agent_framework().await.unwrap();
+    let snapshot = framework
+        .handle()
+        .snapshot(crate::studio::agent_host::root_agent_id(&thread.id))
+        .await
+        .unwrap();
+    assert!(snapshot.active_turn_id.is_some());
+    assert_eq!(snapshot.pending_inputs, 1);
+
+    let pending_mode_error = runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .expect_err("pending input must prevent mode switching");
+    let archive_error = runtime
         .archive_thread(thread.id.clone())
         .await
         .expect_err("an active Turn must prevent Thread archival");
 
-    assert!(error.to_string().contains("active turn or pending input"));
+    assert!(pending_mode_error.to_string().contains("pending input"));
+    assert!(
+        archive_error
+            .to_string()
+            .contains("active turn or pending input")
+    );
+    let unchanged = store.read_thread(&thread.id).await.unwrap().unwrap();
+    assert_eq!(unchanged.mode, "simple");
+    assert_eq!(unchanged.role, "executor");
     assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
     runtime.stop_prompt(thread.id).await.unwrap();
     let _ = release_tx.send(());

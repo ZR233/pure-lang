@@ -569,7 +569,9 @@ void registerShellSettingsTests() {
     );
     expect(tester.takeException(), isNull);
     expect(
-      find.byTooltip('Session mode cannot change while a Task is active'),
+      find.byTooltip(
+        'Session mode cannot change while the session is running or a Task is active',
+      ),
       findsOneWidget,
     );
     expect(find.text('Task'), findsOneWidget);
@@ -578,6 +580,47 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(
       find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.simple.name)),
+      findsNothing,
+    );
+    expect(api.modeUpdate, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('running thread locks the session mode selector', (tester) async {
+    tester.view.physicalSize = const Size(760, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _stateWithPlannerModels();
+    final thread = state.selectedThread!.copyWith(status: 'running');
+    final api = _FakeStudioApi(
+      state.copyWith(
+        threadDirectory: ThreadDirectoryWindow(threads: [thread]),
+        workspacesByThread: {
+          thread.id: state.selectedWorkspace!.copyWith(thread: thread),
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+    expect(
+      find.byTooltip(
+        'Session mode cannot change while the session is running or a Task is active',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
       findsNothing,
     );
     expect(api.modeUpdate, isNull);

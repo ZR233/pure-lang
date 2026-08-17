@@ -683,6 +683,11 @@ class DemoStudioApi implements StudioApi {
     if (!thread.isRoot) {
       throw StateError('only a root Thread can change mode');
     }
+    if (thread.status != 'idle') {
+      throw StateError(
+        'thread mode cannot change while the Thread is running or has pending input',
+      );
+    }
     if (current.tasksByRootThread[threadId]?.isActive ?? false) {
       throw StateError('thread mode cannot change while a task is active');
     }

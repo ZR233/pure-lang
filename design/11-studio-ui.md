@@ -156,10 +156,12 @@ LSP 活动指示是状态栏的运行时状态条目：任一 LSP server activit
 活动摘要与详情仍从菜单可达；详情内容超出高度约束时滚动展示。demo 构建按确定性周期推进索引
 活动（递增 revision 的 `LspStateChanged` 事件），供 GUI demo 与 Driver 验收动态显示。
 root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
-Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
-root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。
-模式切换只允许 actor idle 且没有 pending input；StudioRuntime 必须先持久更新 ThreadActor role，
-再提交 mode/role 目录记录，任一步失败时补偿回旧 role，不能留下数据库与进程内身份分叉。
+Thread 状态确认切换结果。活动 Task 或会话运行（Thread 非 idle）期间 selector 保持可见但禁用。
+child 只读展示实际运行模型。
+root-only、活动 Task 与会话运行锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller
+拦截。模式切换只允许 actor idle 且没有 pending input；StudioRuntime 持 lifecycle 临界区后单次
+原子持久化 mode/role 目录记录，再尽力同步进程内 actor 角色，失败只告警——提交 prompt 时的
+reconcile 与 Turn 构建时的 mode 派生保证不会留下行为分叉。
 
 agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
 child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。

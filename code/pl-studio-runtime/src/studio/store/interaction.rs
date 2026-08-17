@@ -97,34 +97,6 @@ impl StudioStore {
             .collect()
     }
 
-    pub async fn list_pending_interactions_for_root_thread(
-        &self,
-        root_thread_id: &str,
-    ) -> Result<Vec<InteractionRequest>> {
-        use entities::{interaction, thread};
-        let thread_ids = thread::Entity::find()
-            .filter(thread::Column::RootThreadId.eq(root_thread_id.to_string()))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|thread| thread.id)
-            .collect::<Vec<_>>();
-        if thread_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        interaction::Entity::find()
-            .filter(interaction::Column::ThreadId.is_in(thread_ids))
-            .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
-            .order_by_asc(interaction::Column::ThreadId)
-            .order_by_asc(interaction::Column::CreatedAt)
-            .order_by_asc(interaction::Column::Id)
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(interaction_record)
-            .collect()
-    }
-
     pub async fn list_threads_with_transient_pending_interactions(&self) -> Result<Vec<String>> {
         use entities::interaction;
         let rows = interaction::Entity::find()
