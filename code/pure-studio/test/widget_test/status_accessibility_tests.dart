@@ -195,6 +195,184 @@ void registerStatusAccessibilityTests() {
       await tester.pump(const Duration(milliseconds: 150));
       expect(find.text('42 / 100'), findsNothing);
     });
+
+    testWidgets('status bar shows LSP activity readout for active servers', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _emptyState();
+      final api = _FakeStudioApi(state);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            home: Scaffold(
+              body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.lspActivity()), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.lspActivityDetail()), findsOneWidget);
+      expect(find.text('Indexing 40%'), findsOneWidget);
+
+      await tester.tap(find.byKey(StudioDriverKeys.lspActivityDetail()));
+      await tester.pumpAndSettle();
+      expect(find.text('LSP'), findsWidgets);
+      expect(find.textContaining('rust-analyzer'), findsOneWidget);
+      expect(
+        find.textContaining('Indexing · 40% · Roots Scanned · 166/408'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('status bar hides LSP activity readout when idle', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _emptyState().copyWith(
+        lspState: const LspStateSnapshot(
+          servers: [
+            LspServerStateView(
+              id: 'rust-analyzer',
+              displayName: 'rust-analyzer',
+              availability: 'available',
+            ),
+          ],
+        ),
+      );
+      final api = _FakeStudioApi(state);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            home: Scaffold(
+              body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.lspActivity()), findsNothing);
+      expect(find.text('Indexing'), findsNothing);
+    });
+
+    testWidgets('status bar keeps LSP activity reachable at narrow widths', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _emptyState();
+      final api = _FakeStudioApi(state);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            home: Scaffold(
+              body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.lspActivity()), findsNothing);
+      final overflow = find.byKey(const ValueKey('status-overflow'));
+      expect(overflow, findsOneWidget);
+      await tester.tap(overflow);
+      await tester.pumpAndSettle();
+      final overflowItem = find.byKey(StudioDriverKeys.lspActivityOverflow());
+      expect(overflowItem, findsOneWidget);
+      expect(
+        find.textContaining('rust-analyzer · Indexing · 40%'),
+        findsOneWidget,
+      );
+
+      await tester.tap(overflowItem);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('rust-analyzer'), findsWidgets);
+      expect(
+        find.textContaining('Indexing · 40% · Roots Scanned · 166/408'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets(
+      'status bar overflow LSP detail scrolls with many active servers',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final state = _emptyState().copyWith(
+          lspState: LspStateSnapshot(
+            servers: [
+              for (var i = 0; i < 12; i++)
+                LspServerStateView(
+                  id: 'lsp-server-$i',
+                  displayName: 'lsp-server-$i',
+                  availability: 'available',
+                  activityKind: 'indexing',
+                  activityPercentage: i * 5,
+                ),
+            ],
+          ),
+        );
+        final api = _FakeStudioApi(state);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [studioApiProvider.overrideWithValue(api)],
+            child: _localizedApp(
+              home: Scaffold(
+                body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(StudioDriverKeys.lspActivity()), findsNothing);
+        final overflow = find.byKey(const ValueKey('status-overflow'));
+        expect(overflow, findsOneWidget);
+        await tester.tap(overflow);
+        await tester.pumpAndSettle();
+        final overflowItem = find.byKey(StudioDriverKeys.lspActivityOverflow());
+        expect(overflowItem, findsOneWidget);
+
+        await tester.tap(overflowItem);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        final lastServer = find.textContaining('lsp-server-11');
+        expect(lastServer, findsOneWidget);
+        await tester.scrollUntilVisible(
+          lastServer,
+          200,
+          scrollable: find.descendant(
+            of: find.byType(Dialog),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(lastServer.hitTestable(), findsOneWidget);
+      },
+    );
   });
 }
 

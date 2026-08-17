@@ -363,6 +363,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get statusLspIndexing => 'Indexing';
+
+  @override
+  String get statusLspBusy => 'Working';
+
+  @override
+  String statusLspActivityPercentage(int percentage) {
+    return '$percentage%';
+  }
+
+  @override
   String statusAgentsCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1411,6 +1422,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsLspResetWorkspace => 'Reset workspace';
+
+  @override
+  String get settingsLspActivityIndexing => 'Indexing';
+
+  @override
+  String get settingsLspActivityBusy => 'Busy';
 
   @override
   String get settingsLspEmptyTitle => 'No language servers';

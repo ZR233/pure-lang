@@ -140,6 +140,14 @@
     }
   },
   "statusLspCount": "{count} LSP",
+  "statusLspIndexing": "Indexing",
+  "statusLspBusy": "Working",
+  "statusLspActivityPercentage": "{percentage}%",
+  "@statusLspActivityPercentage": {
+    "placeholders": {
+      "percentage": { "type": "int" }
+    }
+  },
   "@statusLspCount": {
     "placeholders": {
       "count": { "type": "int" }
@@ -600,6 +608,8 @@
   "settingsLspRepair": "Repair",
   "settingsLspReset": "Reset",
   "settingsLspResetWorkspace": "Reset workspace",
+  "settingsLspActivityIndexing": "Indexing",
+  "settingsLspActivityBusy": "Busy",
   "settingsLspEmptyTitle": "No language servers",
   "settingsLspEmptyMessage": "Activate a supported project to create language server membership.",
   "settingsSecurityTitle": "Security",

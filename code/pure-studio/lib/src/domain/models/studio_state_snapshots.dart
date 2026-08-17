@@ -83,6 +83,10 @@ class LspServerStateView {
     this.lastCheckedAt,
     this.lastError,
     this.diagnosticCount = 0,
+    this.activityKind = 'idle',
+    this.activityTitle,
+    this.activityMessage,
+    this.activityPercentage,
   });
 
   final String id;
@@ -92,6 +96,10 @@ class LspServerStateView {
   final DateTime? lastCheckedAt;
   final String? lastError;
   final int diagnosticCount;
+  final String activityKind;
+  final String? activityTitle;
+  final String? activityMessage;
+  final int? activityPercentage;
 }
 
 class McpStateSnapshot {

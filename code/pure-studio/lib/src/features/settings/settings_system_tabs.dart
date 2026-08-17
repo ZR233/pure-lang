@@ -804,8 +804,19 @@ class _LspSettingsRow extends StatelessWidget {
                 icon: Icons.rule_outlined,
                 label: server.diagnosticCount.toString(),
               ),
+              if (server.activityKind != 'idle')
+                SettingsInfoPill(
+                  icon: server.activityKind == 'indexing'
+                      ? Icons.manage_search_outlined
+                      : Icons.sync_outlined,
+                  label: _lspActivityPillLabel(context, server),
+                ),
             ],
           ),
+          if (_lspActivityDetail(server) case final activityDetail?) ...[
+            const SizedBox(height: 8),
+            Text(activityDetail, style: context.text.bodySmall),
+          ],
           if (server.message case final message?) ...[
             const SizedBox(height: 8),
             Text(message, style: context.text.bodySmall),
@@ -823,6 +834,28 @@ class _LspSettingsRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _lspActivityPillLabel(BuildContext context, LspServerStateView server) {
+  final label = switch (server.activityKind) {
+    'indexing' => context.l10n.settingsLspActivityIndexing,
+    'busy' => context.l10n.settingsLspActivityBusy,
+    final kind => kind,
+  };
+  final percentage = server.activityPercentage;
+  return percentage == null
+      ? label
+      : '$label · ${context.l10n.statusLspActivityPercentage(percentage)}';
+}
+
+String? _lspActivityDetail(LspServerStateView server) {
+  final parts = [
+    if (server.activityTitle case final title?)
+      if (title.isNotEmpty) title,
+    if (server.activityMessage case final message?)
+      if (message.isNotEmpty) message,
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
 }
 
 class SecurityTab extends ConsumerWidget {

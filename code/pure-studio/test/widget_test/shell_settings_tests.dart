@@ -871,6 +871,40 @@ void registerShellSettingsTests() {
     expect(api.resetLspWorkspaceProjectId, 'project-1');
   });
 
+  testWidgets('LSP settings row shows activity pill and progress detail', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const servers = [
+      LspServerStateView(
+        id: 'rust-analyzer',
+        displayName: 'rust-analyzer',
+        availability: 'available',
+        activityKind: 'indexing',
+        activityTitle: 'Roots Scanned',
+        activityMessage: '166/408',
+        activityPercentage: 40,
+      ),
+      LspServerStateView(
+        id: 'dart',
+        displayName: 'dart',
+        availability: 'available',
+        activityKind: 'busy',
+      ),
+    ];
+    final state = _emptyState().copyWith(
+      lspState: LspStateSnapshot(meta: _testObservedMeta(1), servers: servers),
+    );
+    final api = _FakeStudioApi(state);
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('lsp')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Indexing · 40%'), findsOneWidget);
+    expect(find.text('Roots Scanned · 166/408'), findsOneWidget);
+    expect(find.text('Busy'), findsOneWidget);
+  });
+
   testWidgets('provider settings can add provider through typed save', (
     tester,
   ) async {

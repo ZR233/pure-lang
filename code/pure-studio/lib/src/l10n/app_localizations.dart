@@ -722,6 +722,24 @@ abstract class AppLocalizations {
   /// **'{count} LSP'**
   String statusLspCount(int count);
 
+  /// No description provided for @statusLspIndexing.
+  ///
+  /// In en, this message translates to:
+  /// **'Indexing'**
+  String get statusLspIndexing;
+
+  /// No description provided for @statusLspBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get statusLspBusy;
+
+  /// No description provided for @statusLspActivityPercentage.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}%'**
+  String statusLspActivityPercentage(int percentage);
+
   /// No description provided for @statusAgentsCount.
   ///
   /// In en, this message translates to:
@@ -2608,6 +2626,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reset workspace'**
   String get settingsLspResetWorkspace;
+
+  /// No description provided for @settingsLspActivityIndexing.
+  ///
+  /// In en, this message translates to:
+  /// **'Indexing'**
+  String get settingsLspActivityIndexing;
+
+  /// No description provided for @settingsLspActivityBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Busy'**
+  String get settingsLspActivityBusy;
 
   /// No description provided for @settingsLspEmptyTitle.
   ///

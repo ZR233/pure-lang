@@ -330,7 +330,19 @@ StudioState _studioStateFixture({
     ),
     recoveryState: RecoveryStateSnapshot(values: recoveryIssues),
     mcpState: const McpStateSnapshot(),
-    lspState: const LspStateSnapshot(),
+    lspState: const LspStateSnapshot(
+      servers: [
+        LspServerStateView(
+          id: 'rust-analyzer',
+          displayName: 'rust-analyzer',
+          availability: 'available',
+          activityKind: 'indexing',
+          activityTitle: 'Roots Scanned',
+          activityMessage: '166/408',
+          activityPercentage: 40,
+        ),
+      ],
+    ),
     skillsByProject: skillsByProject,
     providerUsageState: ProviderUsageStateSnapshot(usages: providerUsages),
     updaterState: const UpdaterStateSnapshot(),
