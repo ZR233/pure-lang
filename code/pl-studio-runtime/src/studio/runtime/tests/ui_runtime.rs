@@ -544,11 +544,9 @@ async fn active_turn_and_pending_input_prevent_thread_mutation() {
     assert_eq!(unchanged.mode, "simple");
     assert_eq!(unchanged.role, "executor");
     assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
-    runtime.stop_prompt(thread.id).await.unwrap();
     let _ = release_tx.send(());
-    wait_for_no_active_turn(&runtime).await;
-    handle.await.unwrap();
     runtime.shutdown().await;
+    handle.await.unwrap();
     let _ = tokio::fs::remove_dir_all(home).await;
     let _ = tokio::fs::remove_dir_all(workspace).await;
 }
