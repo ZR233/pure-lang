@@ -148,7 +148,8 @@ canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐 inference 或计费
 
 LSP 活动指示是状态栏的运行时状态条目：任一 LSP server activity 非 idle 时显示活动摘要
 （如“正在索引 40%”），详情列出各 server 的活动类型与 title/message；数据取自产品级
-`LspStateChanged`/`readLspState` 投影，不隐式触发 probe。
+`LspStateChanged`/`readLspState` 投影，不隐式触发 probe。窄宽度下直接条目收进溢出菜单，
+活动摘要与详情仍从菜单可达；详情内容超出高度约束时滚动展示。
 root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
 Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
 root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。
