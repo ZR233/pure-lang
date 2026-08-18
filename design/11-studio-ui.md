@@ -169,6 +169,10 @@ root-only、活动 Task 与会话运行锁定同时由 StudioRuntime 校验，�
 原子持久化 mode/role 目录记录，再尽力同步进程内 actor 角色，失败只告警——提交 prompt 时的
 reconcile 与 Turn 构建时的 mode 派生保证不会留下行为分叉。
 
+新会话起始页复用同一组 mode/model/effort 选择器组件：mode 选择写入按 Project 隔离的起始页
+草稿并随 `startNewThread` 请求生效，model/effort 直接写 role 配置。起始页没有 Thread 身份，
+不经过 root-only/idle 校验；首次提交创建的 Thread mode 即为所选值。
+
 agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
 child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。
 UI 展示固定 role 时按当前 locale 使用本地化名称（中文为探索者、计划者、执行者、审查者），
@@ -224,8 +228,12 @@ icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasonin
 
 侧栏底部在宽布局和 icon rail 中都提供“新会话”操作；只有选中了无阻断恢复问题的 Project 时
 可用。该操作只清空 Thread 选择并进入按 Project 隔离的未持久化起始页，不创建空 Thread；首次
-提交调用 `startNewThread`，由 Bridge 在同一生命周期临界区创建 Simple root Thread、提交首个
-Turn，并返回 Thread 与 receipt。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread
+提交调用 `startNewThread`，由 Bridge 在同一生命周期临界区按起始页所选 mode 创建 root Thread、
+提交首个 Turn，并返回 Thread 与 receipt。起始页 composer 在输入框下方提供模式（Simple/Task）、
+模型和思考等级选择器行，与根会话状态栏共用同一组选择器组件：模式是本次创建 Thread 的参数，
+按 Project 隔离并记住上次选择（仅内存，重启回到 Simple）；模型与思考等级沿用 role 级 Settings
+配置（Simple 映射 executor、Task 映射 planner），语义与状态栏 `setModelRole` 一致，切换模式后
+选择器跟随显示对应 role 的当前配置。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread
 或其 child Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。归档保留完整
 Turn/Item 历史并事务性归档整棵 Thread 树；Bridge 返回 removed ids，以及同 Project 完整排序中
 优先下一项、否则上一项的 root Thread。没有剩余 root Thread 时 `selectedThreadId` 保持 null 并
@@ -248,6 +256,8 @@ directory 增量更新和 selected agent 重建时必须保留。
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
 - 零 Thread、新会话起始页、未持久化草稿、首次发送创建与归档最后 Thread 回到起始页有
   widget test 和 Flutter Driver 验收；
+- 新会话起始页的模式/模型/思考等级选择器渲染、模式按 Project 记忆与首次提交携带所选
+  mode 有 widget test；
 - 侧栏分页窗口、触底加载与目录增量合并有 widget test；
 - 时间线窗口三迁移（快照重建、历史页扩展、上限裁剪）、锚点派生回源与跨代际响应丢弃有 widget test；
 - 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；

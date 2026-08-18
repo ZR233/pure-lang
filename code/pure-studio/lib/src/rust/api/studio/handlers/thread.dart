@@ -9,7 +9,9 @@ import '../types/response.dart';
 import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Creates a Simple root Thread and accepts its first Turn.
+// These functions are ignored because they are not marked as `pub`: `studio_mode`
+
+/// Creates a root Thread with the requested mode and accepts its first Turn.
 ///
 /// # Errors
 ///
@@ -18,10 +20,12 @@ Future<StartNewThreadResponse> startNewThread({
   required String projectId,
   required String prompt,
   required List<String> attachmentIds,
+  required BridgeThreadMode mode,
 }) => RustLib.instance.api.crateApiStudioHandlersThreadStartNewThread(
   projectId: projectId,
   prompt: prompt,
   attachmentIds: attachmentIds,
+  mode: mode,
 );
 
 /// Archives a root Thread and selects the next available Thread.

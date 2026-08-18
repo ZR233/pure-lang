@@ -53,7 +53,7 @@ impl StudioRuntime {
 
         let thread = self
             .store
-            .create_thread(&request.project_id, &request.title, StudioMode::Simple)
+            .create_thread(&request.project_id, &request.title, request.mode)
             .await?;
         let submission = self
             .submit_prompt_with_lifecycle_lock(StudioSubmitPromptRequest {

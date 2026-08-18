@@ -5,6 +5,7 @@ use anyhow::Result;
 use futures::FutureExt;
 
 use crate::McpRuntimeHandle;
+use crate::StudioMode;
 use crate::config::ConfigRuntime;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::ThreadRecord;
@@ -45,12 +46,13 @@ pub struct StudioSubmitPromptRequest {
     pub options: StudioSubmitPromptOptions,
 }
 
-/// Creates a Simple root Thread and submits its first prompt as one product command.
+/// Creates a root Thread with the requested mode and submits its first prompt as one product command.
 pub struct StudioStartNewThreadRequest {
     pub project_id: String,
     pub title: String,
     pub prompt: String,
     pub attachment_ids: Vec<String>,
+    pub mode: StudioMode,
     pub options: StudioSubmitPromptOptions,
 }
 

@@ -14,6 +14,7 @@ abstract final class StudioDriverKeys {
   static const settingsPage = ValueKey<String>('settings-page');
   static const settingsBack = ValueKey<String>('settings-back');
   static const sessionMode = ValueKey<String>('session-mode-selector');
+  static const startPageSelectors = ValueKey<String>('start-page-selectors');
   static const model = ValueKey<String>('model-selector');
   static const reasoningEffort = ValueKey<String>('reasoning-effort-selector');
   static const providerUsageCheck = ValueKey<String>('provider-usage-check');

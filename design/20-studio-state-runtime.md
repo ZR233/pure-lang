@@ -99,8 +99,8 @@ probe 和 Skills discovery；不创建 Thread。相同 project/fingerprint 重�
 
 Project 可以合法地没有 root Thread。`openProject`、归档、普通查询、刷新与 resync 都不创建
 默认 Thread。产品 UI 唯一的新 root 创建入口是首次提交使用的 `startNewThread` command；它在
-同一生命周期临界区校验 Project 与输入、创建 Simple root Thread、提交首个 Turn，并在成功后
-发布目录增量。若 Turn 同步提交失败，command 补偿归档尚未公开的空 Thread，客户端继续停留在
+同一生命周期临界区校验 Project 与输入、按请求 mode 创建 root Thread（起始页选择，缺省
+Simple）、提交首个 Turn，并在成功后发布目录增量。若 Turn 同步提交失败，command 补偿归档尚未公开的空 Thread，客户端继续停留在
 未持久化起始页。测试/Driver fixture 可以使用隔离的内部 seed 入口显式创建 Thread。
 
 ## 20.5 Settings 与 desired/live

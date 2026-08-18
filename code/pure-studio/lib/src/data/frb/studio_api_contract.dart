@@ -10,6 +10,7 @@ abstract class StudioApi {
     String projectId,
     String prompt,
     List<String> attachmentIds,
+    StudioMode mode,
   );
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
@@ -232,6 +233,7 @@ class FrbStudioApi implements StudioApi {
     String projectId,
     String prompt,
     List<String> attachmentIds,
+    StudioMode mode,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
@@ -239,6 +241,7 @@ class FrbStudioApi implements StudioApi {
         projectId: projectId,
         prompt: prompt,
         attachmentIds: attachmentIds,
+        mode: _bridgeThreadMode(mode),
       ),
     );
     return StartNewThreadResult(
@@ -375,14 +378,16 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     await _bridgeCall(
-      () => frb.setThreadMode(
-        threadId: threadId,
-        mode: switch (mode) {
-          StudioMode.simple => frb.BridgeThreadMode.simple,
-          StudioMode.task => frb.BridgeThreadMode.task,
-        },
-      ),
+      () =>
+          frb.setThreadMode(threadId: threadId, mode: _bridgeThreadMode(mode)),
     );
+  }
+
+  frb.BridgeThreadMode _bridgeThreadMode(StudioMode mode) {
+    return switch (mode) {
+      StudioMode.simple => frb.BridgeThreadMode.simple,
+      StudioMode.task => frb.BridgeThreadMode.task,
+    };
   }
 
   @override

@@ -338,6 +338,7 @@ abstract class RustLibApi extends BaseApi {
     required String projectId,
     required String prompt,
     required List<String> attachmentIds,
+    required BridgeThreadMode mode,
   });
 
   Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleStartStudioRuntime();
@@ -2258,6 +2259,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String projectId,
     required String prompt,
     required List<String> attachmentIds,
+    required BridgeThreadMode mode,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2266,6 +2268,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(projectId, serializer);
           sse_encode_String(prompt, serializer);
           sse_encode_list_String(attachmentIds, serializer);
+          sse_encode_bridge_thread_mode(mode, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -2278,7 +2281,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_bridge_error,
         ),
         constMeta: kCrateApiStudioHandlersThreadStartNewThreadConstMeta,
-        argValues: [projectId, prompt, attachmentIds],
+        argValues: [projectId, prompt, attachmentIds, mode],
         apiImpl: this,
       ),
     );
@@ -2287,7 +2290,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiStudioHandlersThreadStartNewThreadConstMeta =>
       const TaskConstMeta(
         debugName: "start_new_thread",
-        argNames: ["projectId", "prompt", "attachmentIds"],
+        argNames: ["projectId", "prompt", "attachmentIds", "mode"],
       );
 
   @override

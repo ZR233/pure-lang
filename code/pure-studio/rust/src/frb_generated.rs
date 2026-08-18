@@ -2174,6 +2174,9 @@ fn wire__crate__api__studio__handlers__thread__start_new_thread_impl(
             let api_project_id = <String>::sse_decode(&mut deserializer);
             let api_prompt = <String>::sse_decode(&mut deserializer);
             let api_attachment_ids = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_mode = <crate::api::studio::types::thread_stream::BridgeThreadMode>::sse_decode(
+                &mut deserializer,
+            );
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
@@ -2182,6 +2185,7 @@ fn wire__crate__api__studio__handlers__thread__start_new_thread_impl(
                             api_project_id,
                             api_prompt,
                             api_attachment_ids,
+                            api_mode,
                         )
                         .await?;
                         Ok(output_ok)

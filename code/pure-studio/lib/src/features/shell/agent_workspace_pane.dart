@@ -183,11 +183,7 @@ class _StudioStartPage extends StatelessWidget {
                               ?.copyWith(color: context.studioInkSoft),
                         ),
                         const SizedBox(height: 28),
-                        StartPageComposerDock(
-                          composer: view.composer,
-                          permissionMode: view.permissionMode,
-                          enabled: view.canSubmit,
-                        ),
+                        StartPageComposerDock(view: view),
                       ],
                     ),
                   ),

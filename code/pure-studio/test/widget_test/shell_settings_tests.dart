@@ -75,11 +75,108 @@ void registerShellSettingsTests() {
 
     expect(api.createdThreadProjectId, 'project-1');
     expect(api.newThreadPrompt, 'create the first turn');
+    expect(api.createdThreadMode, StudioMode.simple);
     expect(
       find.byKey(StudioDriverKeys.threadRow('session-created')),
       findsOneWidget,
     );
     expect(api.threadSubscriptions.last, 'session-created');
+  });
+
+  testWidgets('start page selectors route by draft mode and submit with it', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _stateWithPlannerModels().copyWith(
+      threadDirectory: const ThreadDirectoryWindow(),
+      workspacesByThread: const {},
+      workspaceUiByThread: const {},
+      selectedThreadId: null,
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.startPageSelectors), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.model), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
+    expect(find.text('Simple'), findsOneWidget);
+    expect(find.byTooltip('Executor model'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Task'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Executor model'), findsNothing);
+    expect(api.createdThreadProjectId, isNull);
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'plan the first turn',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.createdThreadMode, StudioMode.task);
+    expect(find.byKey(StudioDriverKeys.startPageSelectors), findsNothing);
+  });
+
+  testWidgets('start page keeps the per-project mode draft after leaving', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.startPageSelectors), findsNothing);
+
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pumpAndSettle();
+    expect(find.text('Simple'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Task'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.threadRow('session-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.startPageSelectors), findsNothing);
+
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.startPageSelectors), findsOneWidget);
+    expect(find.text('Task'), findsOneWidget);
+    expect(find.text('Simple'), findsNothing);
   });
 
   testWidgets('sidebar archives a root Thread and adopts canonical fallback', (

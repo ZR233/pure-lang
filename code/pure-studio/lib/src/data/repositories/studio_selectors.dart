@@ -26,6 +26,9 @@ typedef StartPageView = ({
   ComposerThreadState composer,
   PermissionMode permissionMode,
   bool canSubmit,
+  StudioMode mode,
+  List<ProviderSettingsView> providers,
+  List<RoleSettingsView> roles,
 });
 
 @riverpod
@@ -128,6 +131,9 @@ AsyncValue<StartPageView> startPage(Ref ref) {
           composer: state.newThreadComposer,
           permissionMode: state.permissionMode,
           canSubmit: healthy,
+          mode: state.newThreadMode,
+          providers: state.providers,
+          roles: state.roles,
         );
       }),
     ),

@@ -130,6 +130,25 @@ class StudioController extends _$StudioController {
     await _subscribeThread(null);
   }
 
+  void setNewThreadMode(StudioMode mode) {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (current == null ||
+        projectId == null ||
+        current.selectedThreadId != null ||
+        current.newThreadMode == mode) {
+      return;
+    }
+    state = AsyncData(
+      current.copyWith(
+        newThreadModeByProject: {
+          ...current.newThreadModeByProject,
+          projectId: mode,
+        },
+      ),
+    );
+  }
+
   Future<void> archiveThread(String threadId) async {
     final current = state.value;
     final thread = current?.threads
@@ -397,7 +416,12 @@ class StudioController extends _$StudioController {
 
     final StartNewThreadResult result;
     try {
-      result = await _api.startNewThread(projectId, prompt, const []);
+      result = await _api.startNewThread(
+        projectId,
+        prompt,
+        const [],
+        current.newThreadMode,
+      );
     } catch (error) {
       if (!ref.mounted) return;
       final latest = state.value;

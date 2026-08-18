@@ -47,6 +47,7 @@ class StudioState {
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
     this.newThreadComposerByProject = const {},
+    this.newThreadModeByProject = const {},
     this.providerCatalog = const ProviderCatalogView.empty(),
     required this.selectedProjectId,
     required this.selectedThreadId,
@@ -55,6 +56,7 @@ class StudioState {
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
   final Map<String, ComposerThreadState> newThreadComposerByProject;
+  final Map<String, StudioMode> newThreadModeByProject;
   final ProviderCatalogView providerCatalog;
   final String? selectedProjectId;
   final String? selectedThreadId;
@@ -128,6 +130,13 @@ class StudioState {
         ? const ComposerThreadState.idle()
         : newThreadComposerByProject[projectId] ??
               const ComposerThreadState.idle();
+  }
+
+  StudioMode get newThreadMode {
+    final projectId = selectedProjectId;
+    return projectId == null
+        ? StudioMode.simple
+        : newThreadModeByProject[projectId] ?? StudioMode.simple;
   }
 
   List<StudioThread> get rootThreads =>
@@ -282,6 +291,7 @@ class StudioState {
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
     Map<String, ComposerThreadState>? newThreadComposerByProject,
+    Map<String, StudioMode>? newThreadModeByProject,
     ProviderCatalogView? providerCatalog,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
@@ -302,6 +312,8 @@ class StudioState {
       workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
       newThreadComposerByProject:
           newThreadComposerByProject ?? this.newThreadComposerByProject,
+      newThreadModeByProject:
+          newThreadModeByProject ?? this.newThreadModeByProject,
       providerCatalog: providerCatalog ?? this.providerCatalog,
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId

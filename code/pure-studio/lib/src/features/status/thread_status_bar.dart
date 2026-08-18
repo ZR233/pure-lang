@@ -7,8 +7,8 @@ import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';
-import '../../shared/upward_popup_menu.dart';
 import 'context_usage_readout.dart';
+import 'session_selectors.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
 import 'task_runtime_detail.dart';
@@ -68,12 +68,19 @@ class ThreadStatusBar extends ConsumerWidget {
                 final hasOverflow =
                     (!showEffort &&
                         thread.isRoot &&
-                        _effortsForWorkspace(
-                          workspace,
+                        effortsFor(
+                          workspace.providers,
+                          workspace.roles,
                           thread.mode,
                         ).isNotEmpty) ||
                     (!showCapabilities && capabilityLabel.isNotEmpty) ||
                     (!showLspActivity && lspActiveServers.isNotEmpty);
+                final rootEffort = thread.isRoot
+                    ? roleByKey(
+                        workspace.roles,
+                        roleKeyForMode(thread.mode),
+                      )?.effort.trim()
+                    : null;
                 return Row(
                   children: [
                     if (showTodo)
@@ -105,12 +112,20 @@ class ThreadStatusBar extends ConsumerWidget {
                       maxWidth: 96,
                     ),
                     if (thread.isRoot)
-                      _ThreadModeSelector(workspace: workspace),
+                      SessionModeSelector(
+                        mode: thread.mode,
+                        enabled:
+                            !runtime.hasActiveTask && thread.status == 'idle',
+                        onSelected: (mode) => ref
+                            .read(studioControllerProvider.notifier)
+                            .setThreadMode(mode),
+                      ),
                     if (showModel &&
                         thread.isRoot &&
                         workspace.providers.isNotEmpty)
-                      _ModeModelSelector(
-                        workspace: workspace,
+                      ModelRoleSelector(
+                        providers: workspace.providers,
+                        roles: workspace.roles,
                         mode: thread.mode,
                       )
                     else if (showModel &&
@@ -124,9 +139,14 @@ class ThreadStatusBar extends ConsumerWidget {
                       ),
                     if (showEffort &&
                         thread.isRoot &&
-                        _effortsForWorkspace(workspace, thread.mode).isNotEmpty)
-                      _ReasoningEffortSelector(
-                        workspace: workspace,
+                        effortsFor(
+                          workspace.providers,
+                          workspace.roles,
+                          thread.mode,
+                        ).isNotEmpty)
+                      ReasoningEffortSelector(
+                        providers: workspace.providers,
+                        roles: workspace.roles,
                         mode: thread.mode,
                       ),
                     if (runtime.task case final task?)
@@ -147,9 +167,9 @@ class ThreadStatusBar extends ConsumerWidget {
                       ),
                     if (hasOverflow)
                       _StatusOverflow(
-                        effort: thread.isAgent
+                        effort: (rootEffort?.isEmpty ?? true)
                             ? null
-                            : _selectedEffort(workspace, thread.mode),
+                            : rootEffort,
                         capabilities: capabilityLabel,
                         runtime: runtime,
                         lspServers: showLspActivity
@@ -308,11 +328,6 @@ String _runtimeCapabilityLabel(
   return parts.join(' · ');
 }
 
-String? _selectedEffort(StatusBarView workspace, StudioMode mode) {
-  final effort = workspace.role(_roleKeyForMode(mode))?.effort.trim() ?? '';
-  return effort.isEmpty ? null : effort;
-}
-
 class _StatusOverflow extends StatelessWidget {
   const _StatusOverflow({
     required this.effort,
@@ -401,254 +416,6 @@ String _lspOverflowSummary(
     return summary;
   }
   return '$summary · ${context.l10n.statusLspCount(servers.length)}';
-}
-
-class _ThreadModeSelector extends ConsumerWidget {
-  const _ThreadModeSelector({required this.workspace});
-
-  final StatusBarView workspace;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mode = workspace.thread.mode;
-    final enabled =
-        !workspace.runtime.hasActiveTask && workspace.thread.status == 'idle';
-    return UpwardPopupMenu<StudioMode>(
-      key: StudioDriverKeys.sessionMode,
-      tooltip: enabled
-          ? context.l10n.statusSessionMode
-          : context.l10n.statusSessionModeLocked,
-      initialValue: mode,
-      enabled: enabled,
-      onSelected: (selected) {
-        ref.read(studioControllerProvider.notifier).setThreadMode(selected);
-      },
-      itemBuilder: (context) => [
-        for (final option in StudioMode.values)
-          PopupMenuItem<StudioMode>(
-            key: StudioDriverKeys.sessionModeOption(option.name),
-            value: option,
-            child: Row(
-              children: [
-                Icon(
-                  option == StudioMode.task
-                      ? Icons.route_outlined
-                      : Icons.flash_on,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(context.compileModeLabel(option)),
-              ],
-            ),
-          ),
-      ],
-      child: StatusBarItem(
-        icon: mode == StudioMode.task ? Icons.route_outlined : Icons.flash_on,
-        label: context.compileModeLabel(mode),
-        enabled: enabled,
-        trailingIcon: enabled ? Icons.keyboard_arrow_down : Icons.lock_outline,
-        maxWidth: 96,
-      ),
-    );
-  }
-}
-
-class _ModeModelSelector extends ConsumerWidget {
-  const _ModeModelSelector({required this.workspace, required this.mode});
-
-  final StatusBarView workspace;
-  final StudioMode mode;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final options = _modelOptions(workspace.providers);
-    if (options.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final roleKey = _roleKeyForMode(mode);
-    final role = workspace.role(roleKey);
-    final current = _modelFor(workspace, mode) ?? options.first;
-    return UpwardPopupMenu<String>(
-      key: StudioDriverKeys.model,
-      tooltip: mode == StudioMode.task
-          ? context.l10n.statusPlannerModel
-          : context.l10n.statusExecutorModel,
-      initialValue: current.key,
-      onSelected: (key) {
-        final option = options.firstWhere((option) => option.key == key);
-        final effort = option.reasoningEfforts.contains(role?.effort)
-            ? role?.effort
-            : option.reasoningEfforts.firstOrNull;
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: roleKey,
-              providerId: option.providerId,
-              model: option.model,
-              effort: effort,
-            );
-      },
-      itemBuilder: (context) => [
-        for (final option in options)
-          PopupMenuItem(
-            key: StudioDriverKeys.modelOption(option.providerId, option.model),
-            value: option.key,
-            child: SizedBox(
-              width: 260,
-              child: Row(
-                children: [
-                  const Icon(Icons.smart_toy_outlined, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(option.label, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-      child: _ControlItem(label: current.model, enabled: true),
-    );
-  }
-}
-
-class _ReasoningEffortSelector extends ConsumerWidget {
-  const _ReasoningEffortSelector({required this.workspace, required this.mode});
-
-  final StatusBarView workspace;
-  final StudioMode mode;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final roleKey = _roleKeyForMode(mode);
-    final role = workspace.role(roleKey);
-    final currentModel = _modelFor(workspace, mode);
-    final efforts = currentModel?.reasoningEfforts ?? const [];
-    if (role == null || currentModel == null || efforts.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final current = efforts.contains(role.effort) ? role.effort : efforts.first;
-    return UpwardPopupMenu<String>(
-      key: StudioDriverKeys.reasoningEffort,
-      tooltip: context.l10n.statusReasoningEffort,
-      initialValue: current,
-      onSelected: (effort) {
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: roleKey,
-              providerId: role.providerId,
-              model: role.model,
-              effort: effort,
-            );
-      },
-      itemBuilder: (context) => [
-        for (final effort in efforts)
-          PopupMenuItem(
-            key: StudioDriverKeys.reasoningEffortOption(effort),
-            value: effort,
-            child: Row(
-              children: [
-                const Icon(Icons.schedule_outlined, size: 18),
-                const SizedBox(width: 10),
-                Text(effort),
-              ],
-            ),
-          ),
-      ],
-      child: _ControlItem(label: current, enabled: true),
-    );
-  }
-}
-
-class _ControlItem extends StatelessWidget {
-  const _ControlItem({required this.label, required this.enabled});
-
-  final String label;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return StatusBarItem(
-      label: label,
-      enabled: enabled,
-      maxWidth: 140,
-      trailingIcon: Icons.keyboard_arrow_down,
-    );
-  }
-}
-
-class _ModeModelOption {
-  const _ModeModelOption({
-    required this.providerId,
-    required this.model,
-    required this.label,
-    required this.reasoningEfforts,
-  });
-
-  final String providerId;
-  final String model;
-  final String label;
-  final List<String> reasoningEfforts;
-
-  String get key => '$providerId::$model';
-}
-
-String _roleKeyForMode(StudioMode mode) {
-  return switch (mode) {
-    StudioMode.simple => 'executor',
-    StudioMode.task => 'planner',
-  };
-}
-
-_ModeModelOption? _modelFor(StatusBarView workspace, StudioMode mode) {
-  final role = workspace.role(_roleKeyForMode(mode));
-  if (role == null) {
-    return null;
-  }
-  final options = _modelOptions(workspace.providers);
-  if (options.isEmpty) {
-    return null;
-  }
-  return options.firstWhere(
-    (option) =>
-        option.providerId == role.providerId && option.model == role.model,
-    orElse: () => options.first,
-  );
-}
-
-List<String> _effortsForWorkspace(StatusBarView workspace, StudioMode mode) {
-  return _modelFor(workspace, mode)?.reasoningEfforts ?? const [];
-}
-
-List<_ModeModelOption> _modelOptions(List<ProviderSettingsView> providers) {
-  final options = <_ModeModelOption>[];
-  for (final provider in providers) {
-    final models = provider.models.isEmpty
-        ? [
-            ProviderModelView(
-              slug: provider.defaultModel,
-              displayName: provider.defaultModel,
-              reasoningEfforts: const [],
-            ),
-          ]
-        : provider.models;
-    for (final model in models) {
-      if (model.slug.isEmpty) {
-        continue;
-      }
-      options.add(
-        _ModeModelOption(
-          providerId: provider.id,
-          model: model.slug,
-          label:
-              '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-          reasoningEfforts: model.reasoningEfforts,
-        ),
-      );
-    }
-  }
-  return options;
 }
 
 class _StatusReadout extends StatelessWidget {

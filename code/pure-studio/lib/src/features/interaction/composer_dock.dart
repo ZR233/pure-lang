@@ -11,6 +11,7 @@ import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
+import '../status/session_selectors.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
 import 'task_recovery_dialog.dart';
@@ -62,19 +63,13 @@ class ComposerDock extends ConsumerWidget {
 }
 
 class StartPageComposerDock extends ConsumerWidget {
-  const StartPageComposerDock({
-    required this.composer,
-    required this.permissionMode,
-    required this.enabled,
-    super.key,
-  });
+  const StartPageComposerDock({required this.view, super.key});
 
-  final ComposerThreadState composer;
-  final PermissionMode permissionMode;
-  final bool enabled;
+  final StartPageView view;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(studioControllerProvider.notifier);
     return SafeArea(
       top: false,
       child: Padding(
@@ -86,18 +81,33 @@ class StartPageComposerDock extends ConsumerWidget {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: _PromptComposerPanel(
-              composer: composer,
-              permissionMode: permissionMode,
-              enabled: enabled,
+              composer: view.composer,
+              permissionMode: view.permissionMode,
+              enabled: view.canSubmit,
               isBusy: false,
-              onChanged: ref
-                  .read(studioControllerProvider.notifier)
-                  .updateNewThreadComposer,
-              onSubmit: () => unawaited(
-                ref
-                    .read(studioControllerProvider.notifier)
-                    .submitNewThreadComposer(),
+              selectorBar: Wrap(
+                key: StudioDriverKeys.startPageSelectors,
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  SessionModeSelector(
+                    mode: view.mode,
+                    onSelected: controller.setNewThreadMode,
+                  ),
+                  ModelRoleSelector(
+                    providers: view.providers,
+                    roles: view.roles,
+                    mode: view.mode,
+                  ),
+                  ReasoningEffortSelector(
+                    providers: view.providers,
+                    roles: view.roles,
+                    mode: view.mode,
+                  ),
+                ],
               ),
+              onChanged: controller.updateNewThreadComposer,
+              onSubmit: () => unawaited(controller.submitNewThreadComposer()),
             ),
           ),
         ),
@@ -250,6 +260,7 @@ class _PromptComposerPanel extends StatefulWidget {
     required this.onChanged,
     required this.onSubmit,
     this.onStop,
+    this.selectorBar,
   });
 
   final ComposerThreadState composer;
@@ -259,6 +270,7 @@ class _PromptComposerPanel extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final VoidCallback onSubmit;
   final VoidCallback? onStop;
+  final Widget? selectorBar;
 
   @override
   State<_PromptComposerPanel> createState() => _PromptComposerPanelState();
@@ -349,6 +361,11 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                   ).textTheme.bodySmall?.copyWith(color: colors.error),
                 ),
               ),
+            ),
+          if (widget.selectorBar case final selectorBar?)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(2, 4, 0, 8),
+              child: selectorBar,
             ),
           Row(
             children: [

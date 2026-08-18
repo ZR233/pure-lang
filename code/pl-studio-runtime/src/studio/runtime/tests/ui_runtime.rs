@@ -47,6 +47,7 @@ async fn start_new_thread_creates_the_root_only_after_valid_input() {
             title: "New Session".to_string(),
             prompt: "   ".to_string(),
             attachment_ids: Vec::new(),
+            mode: StudioMode::Simple,
             options: StudioSubmitPromptOptions::default(),
         })
         .await
@@ -66,6 +67,7 @@ async fn start_new_thread_creates_the_root_only_after_valid_input() {
             title: "New Session".to_string(),
             prompt: "hello".to_string(),
             attachment_ids: Vec::new(),
+            mode: StudioMode::Simple,
             options: StudioSubmitPromptOptions::default(),
         })
         .await
@@ -89,14 +91,56 @@ async fn start_new_thread_creates_the_root_only_after_valid_input() {
             title: "New Session".to_string(),
             prompt: "hello from the start page".to_string(),
             attachment_ids: Vec::new(),
+            mode: StudioMode::Simple,
             options: StudioSubmitPromptOptions::default(),
         })
         .await
         .unwrap();
 
     assert_eq!(started.thread.project_id, project.id);
+    assert_eq!(started.thread.mode, "simple");
+    assert_eq!(started.thread.role, "executor");
     assert_eq!(started.submission.thread_id, started.thread.id);
     assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    let _ = release_tx.send(());
+    runtime.shutdown().await;
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn start_new_thread_honors_the_requested_task_mode() {
+    let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(home.path()));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let project = runtime.open_project(workspace.path()).await.unwrap();
+
+    let started = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "New Session".to_string(),
+            prompt: "plan something for me".to_string(),
+            attachment_ids: Vec::new(),
+            mode: StudioMode::Task,
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(started.thread.mode, "task");
+    assert_eq!(started.thread.role, "planner");
+    let roots = store.list_root_threads(&project.id).await.unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].mode, "task");
+    assert_eq!(roots[0].role, "planner");
+
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
         .await
         .unwrap()
@@ -124,6 +168,7 @@ async fn start_new_thread_compensates_a_synchronous_submit_failure() {
             title: "Compensated session".to_string(),
             prompt: "must not become visible".to_string(),
             attachment_ids: Vec::new(),
+            mode: StudioMode::Simple,
             options: StudioSubmitPromptOptions {
                 turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
                 ..StudioSubmitPromptOptions::default()

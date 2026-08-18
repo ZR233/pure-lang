@@ -564,6 +564,7 @@ class DemoStudioApi implements StudioApi {
     String projectId,
     String prompt,
     List<String> attachmentIds,
+    StudioMode mode,
   ) async {
     final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
@@ -577,8 +578,8 @@ class DemoStudioApi implements StudioApi {
       id: 'thread-created-${++_threadSequence}',
       projectId: projectId,
       title: 'New Session',
-      mode: StudioMode.simple,
-      role: 'executor',
+      mode: mode,
+      role: mode == StudioMode.task ? 'planner' : 'executor',
       createdAt: now,
       updatedAt: now,
     );

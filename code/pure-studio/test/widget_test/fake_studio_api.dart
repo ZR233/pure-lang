@@ -39,6 +39,7 @@ class _FakeStudioApi implements StudioApi {
   int activateCallCount = 0;
   String? activatedProjectId;
   String? createdThreadProjectId;
+  StudioMode? createdThreadMode;
   String? newThreadPrompt;
   String? archivedThreadId;
   int archiveThreadCallCount = 0;
@@ -175,8 +176,10 @@ class _FakeStudioApi implements StudioApi {
     String projectId,
     String prompt,
     List<String> attachmentIds,
+    StudioMode mode,
   ) async {
     createdThreadProjectId = projectId;
+    createdThreadMode = mode;
     newThreadPrompt = prompt;
     submitPromptCount += 1;
     submittedPrompts.add((threadId: '<new>', prompt: prompt));
@@ -203,8 +206,8 @@ class _FakeStudioApi implements StudioApi {
         id: 'session-created',
         projectId: projectId,
         title: 'New Session',
-        mode: StudioMode.simple,
-        role: 'executor',
+        mode: mode,
+        role: mode == StudioMode.task ? 'planner' : 'executor',
         createdAt: now,
         updatedAt: now,
       );
