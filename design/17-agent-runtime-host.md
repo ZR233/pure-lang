@@ -59,6 +59,10 @@ ThreadEventBus 是 timeline 顺序的唯一分配者：新 item 的 ordinal 在�
 事件投影、trace 投影、observation 投影）不再自行计算 timeline ordinal，trace 的
 `started_sequence` 只作为 trace 事件自身的去重与批内排序键。
 
+`ProgressEmitter` 的 milestone 与模型 trace 共用同一 durable trace 入口，投影为 runtime source
+的 commentary Item。它不得只发送进程内 observation broadcast；Thread commit 成功后，订阅、
+历史与重启恢复必须看到同一 Item。heartbeat、百分比等瞬时 progress 继续只属于 runtime snapshot。
+
 TurnFactory 为每次 turn 提供 typed `AgentWorkspace { root, boundary, mutability }`。Studio 通过
 durable owner 解析 workspace：root/explorer 绑定 Project，executor 绑定 WorkUnit worktree，
 Delivery reviewer 绑定目标 Completion worktree，Integrated reviewer 绑定 TaskRun 主 workspace。

@@ -540,11 +540,7 @@ impl TurnEngine {
             }
         };
         let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
-        let mut progress = ProgressEmitter::new(
-            recorder.sender().clone(),
-            turn_id,
-            ProgressVerbosity::from_env(),
-        );
+        let mut progress = ProgressEmitter::new(turn_id, ProgressVerbosity::from_env());
         let outcome = maybe_compact_session(
             session,
             ContextCompactionRequest {
@@ -567,6 +563,7 @@ impl TurnEngine {
                 trigger: compaction_trigger,
                 phase: ContextCompactionPhase::Standalone,
                 event_tx: recorder.sender().clone(),
+                recorder,
                 progress: Some(&mut progress),
             },
         )

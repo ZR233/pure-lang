@@ -4,8 +4,12 @@ use crate::core::progress::ProgressEmitter;
 
 use super::ToolExecutionRecord;
 
-pub(super) fn emit_tool_progress(progress: &mut ProgressEmitter, record: &ToolExecutionRecord) {
-    progress.tool_detail(tool_terminal_progress_message(record));
+pub(super) fn emit_tool_progress(
+    progress: &mut ProgressEmitter,
+    recorder: &mut crate::TraceRecorder,
+    record: &ToolExecutionRecord,
+) {
+    progress.tool_detail(recorder, tool_terminal_progress_message(record));
 }
 
 pub(super) fn tool_start_progress_message(name: &str) -> String {

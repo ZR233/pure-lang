@@ -1,6 +1,7 @@
-use pl_trace::{AgentEvent, AgentEventSender, TracePart};
+use pl_trace::TracePart;
 
 use super::turn_result::unix_seconds;
+use crate::TraceRecorder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProgressVerbosity {
@@ -44,7 +45,6 @@ impl ProgressVerbosity {
 }
 
 pub(crate) struct ProgressEmitter {
-    event_tx: AgentEventSender,
     turn_id: String,
     item_prefix: String,
     next_ordinal: u64,
@@ -52,24 +52,18 @@ pub(crate) struct ProgressEmitter {
 }
 
 impl ProgressEmitter {
-    pub(crate) fn new(
-        event_tx: AgentEventSender,
-        turn_id: impl Into<String>,
-        verbosity: ProgressVerbosity,
-    ) -> Self {
+    pub(crate) fn new(turn_id: impl Into<String>, verbosity: ProgressVerbosity) -> Self {
         let turn_id = turn_id.into();
         let item_prefix = format!("{turn_id}:progress");
-        Self::new_scoped(event_tx, turn_id, item_prefix, verbosity)
+        Self::new_scoped(turn_id, item_prefix, verbosity)
     }
 
     pub(crate) fn new_scoped(
-        event_tx: AgentEventSender,
         turn_id: impl Into<String>,
         item_prefix: impl Into<String>,
         verbosity: ProgressVerbosity,
     ) -> Self {
         Self {
-            event_tx,
             turn_id: turn_id.into(),
             item_prefix: item_prefix.into(),
             next_ordinal: 0,
@@ -77,23 +71,28 @@ impl ProgressEmitter {
         }
     }
 
-    pub(crate) fn milestone(&mut self, text: impl Into<String>) {
-        self.emit(ProgressLevel::Milestone, text);
+    pub(crate) fn milestone(&mut self, recorder: &mut TraceRecorder, text: impl Into<String>) {
+        self.emit(recorder, ProgressLevel::Milestone, text);
     }
 
-    pub(crate) fn tool_detail(&mut self, text: impl Into<String>) {
-        self.emit(ProgressLevel::ToolDetail, text);
+    pub(crate) fn tool_detail(&mut self, recorder: &mut TraceRecorder, text: impl Into<String>) {
+        self.emit(recorder, ProgressLevel::ToolDetail, text);
     }
 
-    pub(crate) fn heartbeat(&mut self, text: impl Into<String>) {
-        self.emit(ProgressLevel::Heartbeat, text);
+    pub(crate) fn heartbeat(&mut self, recorder: &mut TraceRecorder, text: impl Into<String>) {
+        self.emit(recorder, ProgressLevel::Heartbeat, text);
     }
 
-    pub(crate) fn debug(&mut self, text: impl Into<String>) {
-        self.emit(ProgressLevel::Debug, text);
+    pub(crate) fn debug(&mut self, recorder: &mut TraceRecorder, text: impl Into<String>) {
+        self.emit(recorder, ProgressLevel::Debug, text);
     }
 
-    fn emit(&mut self, level: ProgressLevel, text: impl Into<String>) {
+    fn emit(
+        &mut self,
+        recorder: &mut TraceRecorder,
+        level: ProgressLevel,
+        text: impl Into<String>,
+    ) {
         if !self.verbosity.allows(level) {
             return;
         }
@@ -110,6 +109,6 @@ impl ProgressEmitter {
             text.into(),
             now,
         );
-        let _ = self.event_tx.send(AgentEvent::TracePartCompleted { item });
+        recorder.complete_item(item);
     }
 }

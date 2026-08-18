@@ -125,7 +125,6 @@ pub(super) async fn execute_tool_call_batch(
     let tool_cache_snapshot = context.tool_cache.snapshot();
     let sid = &context.session_id;
     let mut progress = ProgressEmitter::new_scoped(
-        recorder.sender().clone(),
         context.session_id.to_string(),
         format!("{sid}:tool-progress"),
         ProgressVerbosity::from_env(),
@@ -289,7 +288,7 @@ pub(super) async fn execute_tool_call_batch(
                 PermissionDecision::NeedsUserApproval { workspace_access } => {
                     emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
                     let name = &tool_call.name;
-                    progress.tool_detail(format!("工具 `{name}` 正在等待授权。"));
+                    progress.tool_detail(recorder, format!("工具 `{name}` 正在等待授权。"));
                     let decision = request_user_approval(
                         context.options,
                         &approval_request,
@@ -312,7 +311,7 @@ pub(super) async fn execute_tool_call_batch(
                 PermissionDecision::NeedsAiReview { workspace_access } => {
                     emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
                     let name = &tool_call.name;
-                    progress.tool_detail(format!("正在审查工具 `{name}`。"));
+                    progress.tool_detail(recorder, format!("正在审查工具 `{name}`。"));
                     let mut review_context = tool_context.clone();
                     review_context.workspace_access = workspace_access;
                     let decision = context
@@ -359,7 +358,7 @@ pub(super) async fn execute_tool_call_batch(
                 tool_context.workspace_access = execution_workspace_access;
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
-                progress.tool_detail(tool_start_progress_message(&tool_call.name));
+                progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
                 let _runtime_identity = (
@@ -620,7 +619,7 @@ async fn collect_scheduled_tools(
                         for (index, (tool_call, item)) in pending {
                             let record = interrupted_tool_execution_record(tool_call);
                             finalize_tool_item(recorder, item, &record);
-                            emit_tool_progress(progress, &record);
+                            emit_tool_progress(progress, recorder, &record);
                             ordered_records[index] = Some(record);
                         }
                         return Ok(tool_execution_batch(
@@ -651,7 +650,7 @@ async fn collect_scheduled_tools(
         };
         tool_execution_millis = tool_execution_millis.saturating_add(record.execution_millis);
         finalize_tool_item(recorder, item, &record);
-        emit_tool_progress(progress, &record);
+        emit_tool_progress(progress, recorder, &record);
         ordered_records[index] = Some(record);
     }
 

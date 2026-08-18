@@ -5,10 +5,10 @@ use pl_model::{
 use pl_protocol::{Message, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
 
-use crate::AgentExecutionPolicy;
 use crate::core::progress::ProgressEmitter;
 use crate::instruction::InstructionSnapshot;
 use crate::session::AgentSession;
+use crate::{AgentExecutionPolicy, TraceRecorder};
 
 mod history;
 mod local;
@@ -262,6 +262,7 @@ pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
     pub trigger: CompactionTrigger,
     pub phase: ContextCompactionPhase,
     pub event_tx: AgentEventSender,
+    pub recorder: &'a mut TraceRecorder,
     pub progress: Option<&'a mut ProgressEmitter>,
 }
 
@@ -283,6 +284,7 @@ pub(crate) async fn maybe_compact_session(
         trigger,
         phase,
         event_tx,
+        recorder,
         mut progress,
     } = request;
     if !has_compactable_history(session.items(), trigger) {
@@ -316,7 +318,7 @@ pub(crate) async fn maybe_compact_session(
     }
 
     if let Some(progress) = progress.as_mut() {
-        progress.milestone("上下文接近上限，正在压缩历史。");
+        progress.milestone(recorder, "上下文接近上限，正在压缩历史。");
     }
     let use_remote = model_info.transport.protocol == ProviderWireProtocol::Responses
         && config.openai_mode != OpenAiCompactionMode::Local;
@@ -352,6 +354,7 @@ pub(crate) async fn maybe_compact_session(
             session.items(),
             working_context_tail.as_ref(),
             event_tx,
+            recorder,
             &mut progress,
             model_info.max_output_tokens,
         )
@@ -384,7 +387,7 @@ pub(crate) async fn maybe_compact_session(
     };
     session.replace_compactable_items(replacement);
     if let Some(progress) = progress {
-        progress.milestone("上下文已压缩，继续准备模型调用。");
+        progress.milestone(recorder, "上下文已压缩，继续准备模型调用。");
     }
     Ok(CompactionOutcome::Compacted { usage, snapshot })
 }

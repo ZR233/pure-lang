@@ -6,6 +6,7 @@ use pl_trace::AgentEventSender;
 
 use super::ContextCompactionConfig;
 use super::history::build_compacted_history;
+use crate::TraceRecorder;
 use crate::core::progress::ProgressEmitter;
 
 #[allow(clippy::too_many_arguments)]
@@ -18,6 +19,7 @@ pub(super) async fn compact_local(
     session_items: &[ModelContextItem],
     working_context_tail: Option<&Message>,
     event_tx: AgentEventSender,
+    recorder: &mut TraceRecorder,
     progress: &mut Option<&mut ProgressEmitter>,
     max_output_tokens: Option<u64>,
 ) -> Result<(Vec<ModelContextItem>, TokenUsage, String)> {
@@ -58,6 +60,7 @@ pub(super) async fn compact_local(
                 max_tokens = None;
                 if let Some(progress) = progress.as_deref_mut() {
                     progress.milestone(
+                        recorder,
                         "模型不支持压缩请求的 max_output_tokens 参数，正在不带该参数重试。",
                     );
                 }
@@ -65,7 +68,7 @@ pub(super) async fn compact_local(
             }
             Err(error) if can_retry_context_items(&error, &mut input) => {
                 if let Some(progress) = progress.as_deref_mut() {
-                    progress.milestone("上下文压缩请求过大，正在缩小历史后重试。");
+                    progress.milestone(recorder, "上下文压缩请求过大，正在缩小历史后重试。");
                 }
                 continue;
             }

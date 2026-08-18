@@ -94,12 +94,8 @@ pub(super) async fn run_turn_with_trace(
     record_enabled_tools(recorder, &turn_id, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
-    let mut progress = ProgressEmitter::new(
-        recorder.sender().clone(),
-        turn_id.clone(),
-        ProgressVerbosity::from_env(),
-    );
-    progress.milestone("已接收请求，正在准备上下文。");
+    let mut progress = ProgressEmitter::new(turn_id.clone(), ProgressVerbosity::from_env());
+    progress.milestone(recorder, "已接收请求，正在准备上下文。");
     let mut last_content = String::new();
     let mut last_reasoning_content = None;
     let mut last_model = model.clone();
@@ -230,6 +226,7 @@ pub(super) async fn run_turn_with_trace(
                         ContextCompactionPhase::MidTurn
                     },
                     event_tx: recorder.sender().clone(),
+                    recorder,
                     progress: Some(&mut progress),
                 },
             )
@@ -355,9 +352,9 @@ pub(super) async fn run_turn_with_trace(
             .collect::<Vec<_>>();
         input.extend(history_items.clone());
         if iteration == 0 {
-            progress.milestone("上下文已整理，准备调用模型。");
+            progress.milestone(recorder, "上下文已整理，准备调用模型。");
         } else {
-            progress.tool_detail("工具结果已写入上下文，准备继续调用模型。");
+            progress.tool_detail(recorder, "工具结果已写入上下文，准备继续调用模型。");
         }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
@@ -384,8 +381,8 @@ pub(super) async fn run_turn_with_trace(
             }))
             .transport_session(session.transport_session())
             .build();
-        progress.heartbeat("正在等待模型响应。");
-        progress.debug(format!("模型 `{model}` 流式请求已发起。"));
+        progress.heartbeat(recorder, "正在等待模型响应。");
+        progress.debug(recorder, format!("模型 `{model}` 流式请求已发起。"));
 
         let response_result = match &cancellation_token {
             Some(token) => {
@@ -519,9 +516,10 @@ pub(super) async fn run_turn_with_trace(
                 provider_prompt_tokens_for_compaction = Some(response_total_tokens);
             }
             let loaded = client_search.resolution.loaded_tool_count;
-            progress.tool_detail(format!(
-                "工具搜索已加载 {loaded} 个候选 schema，准备继续调用模型。"
-            ));
+            progress.tool_detail(
+                recorder,
+                format!("工具搜索已加载 {loaded} 个候选 schema，准备继续调用模型。"),
+            );
             session_message_count = session.len();
             safe_message_count = session_message_count;
             inference::record(
@@ -551,7 +549,7 @@ pub(super) async fn run_turn_with_trace(
         last_model = actual_model;
 
         if tool_calls.is_empty() {
-            progress.milestone("模型已完成正文生成。");
+            progress.milestone(recorder, "模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
                 inference::record(
                     &options,
@@ -617,7 +615,7 @@ pub(super) async fn run_turn_with_trace(
             provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
         let count = tool_calls.len();
-        progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
+        progress.tool_detail(recorder, format!("模型请求调用 {count} 个工具。"));
 
         let tool_batch = match execute_tool_call_batch(
             &tool_calls,
@@ -691,7 +689,7 @@ pub(super) async fn run_turn_with_trace(
         };
         billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
-        progress.tool_detail("工具执行完成，准备回写结果。");
+        progress.tool_detail(recorder, "工具执行完成，准备回写结果。");
         record_plan_exit_items(recorder, &turn_id, &tool_results);
         let requested_interaction = tool_results.iter().any(|tool_result| {
             tool_result.runtime_events.iter().any(|event| {
@@ -821,7 +819,7 @@ pub(super) async fn run_turn_with_trace(
         ));
     }
 
-    progress.milestone("本轮已完成。");
+    progress.milestone(recorder, "本轮已完成。");
     if !terminal_checkpointed {
         checkpoint::persist(&options, session, crate::TurnCheckpointReason::Terminal).await?;
     }

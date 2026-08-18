@@ -45,7 +45,9 @@ commentary 只进入可见历史，不写成模型 assistant final；final agent
 `AgentWorkingState` 独立保存 pinned sections、Evidence Ledger、session note 与 prompt 状态；每次
 inference 只在 transcript 末尾物化一份最新 working-context tail，不创建 Item，也不向 Flutter
 暴露。`contextCompaction` 只保留为无正文内部审计 Item，并标记 transcript replacement。当前 Todo、
-usage、progress 等产品事实仍只由 `ThreadRuntimeSnapshot` 拥有，working state 不能反向驱动产品状态。
+usage 和瞬时 progress 等产品事实仍只由 `ThreadRuntimeSnapshot` 拥有，working state 不能反向驱动
+产品状态。`ProgressEmitter` 的 milestone 是用户可见的阶段 commentary，必须通过 durable trace
+投影为 `agentMessage { phase: commentary }`；历史读取、重启恢复与重新订阅都必须保留它。
 
 ### 3.2.1 工具批次执行与结果预算
 

@@ -92,14 +92,20 @@ async fn local_context_pressure_retry_emits_progress_and_preserves_summary_order
     let provider =
         FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure);
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
-    let mut progress =
-        ProgressEmitter::new(event_tx.clone(), "turn-compact", ProgressVerbosity::Normal);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
+    let mut progress = ProgressEmitter::new("turn-compact", ProgressVerbosity::Normal);
     let mut session = test_session();
     let config = ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local);
 
     let outcome = maybe_compact_session(
         &mut session,
-        compaction_request(&provider, &config, event_tx, Some(&mut progress)),
+        compaction_request(
+            &provider,
+            &config,
+            event_tx,
+            &mut recorder,
+            Some(&mut progress),
+        ),
     )
     .await
     .unwrap();
@@ -124,12 +130,13 @@ async fn local_retries_without_unsupported_max_output_tokens() {
         FakeCompactionFailure::UnsupportedMaxOutputTokens,
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
     let mut session = test_session();
     let config = ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local);
 
     maybe_compact_session(
         &mut session,
-        compaction_request(&provider, &config, event_tx, None),
+        compaction_request(&provider, &config, event_tx, &mut recorder, None),
     )
     .await
     .unwrap();
@@ -142,6 +149,7 @@ async fn local_retries_without_unsupported_max_output_tokens() {
 async fn local_empty_summary_preserves_session_history_and_revision() {
     let provider = FakeCompactionProvider::new(test_model(), FakeCompactionFailure::EmptySummary);
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
     let mut session = test_session();
     let original_items = session.items().to_vec();
     let original_revision = session.revision();
@@ -149,7 +157,7 @@ async fn local_empty_summary_preserves_session_history_and_revision() {
 
     let error = maybe_compact_session(
         &mut session,
-        compaction_request(&provider, &config, event_tx, None),
+        compaction_request(&provider, &config, event_tx, &mut recorder, None),
     )
     .await
     .unwrap_err();
@@ -171,10 +179,11 @@ async fn remote_failure_does_not_replace_session_history_or_revision() {
     let config =
         ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
 
     let error = maybe_compact_session(
         &mut session,
-        compaction_request(&provider, &config, event_tx, None),
+        compaction_request(&provider, &config, event_tx, &mut recorder, None),
     )
     .await
     .unwrap_err();
@@ -197,10 +206,11 @@ async fn chat_completions_provider_always_uses_local_compaction() {
     let config =
         ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
 
     let outcome = maybe_compact_session(
         &mut session,
-        compaction_request(&provider, &config, event_tx, None),
+        compaction_request(&provider, &config, event_tx, &mut recorder, None),
     )
     .await
     .unwrap();
@@ -271,6 +281,7 @@ fn compaction_request<'a>(
     provider: &'a FakeCompactionProvider,
     config: &'a ContextCompactionConfig,
     event_tx: AgentEventSender,
+    recorder: &'a mut TraceRecorder,
     progress: Option<&'a mut ProgressEmitter>,
 ) -> ContextCompactionRequest<'a, FakeCompactionProvider> {
     ContextCompactionRequest {
@@ -287,6 +298,7 @@ fn compaction_request<'a>(
         trigger: CompactionTrigger::EstimatedTokens,
         phase: ContextCompactionPhase::PreTurn,
         event_tx,
+        recorder,
         progress,
     }
 }

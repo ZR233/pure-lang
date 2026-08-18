@@ -114,11 +114,13 @@ Timeline 直接按 Item ordinal 排序。Item ordinal 首次插入后不可改�
 - file。
 
 `contextCompaction` 和 provider 私有内容不进入 Flutter。Todo、usage、context、capability 和
-progress 来自 runtime snapshot，不伪装成 timeline row。
+瞬时 progress 来自 runtime snapshot，不伪装成 timeline row。`ProgressEmitter` milestone 已是
+canonical commentary Item，按普通 commentary 展示并进入历史。
 
 工具相邻合并和连续 reasoning 折叠只属于 `TimelineRow` 视觉投影，不能改写 Item。commentary
-是明确的 agentMessage Item；普通 runtime progress 只显示在状态区域，不生成或折叠伪 timeline
-消息。text、plan、reasoning 和 tool delta 只写当前 Item overlay；terminal Item 到达后清除
+是明确的 agentMessage Item；瞬时 runtime progress 只显示在状态区域，不生成或折叠伪 timeline
+消息。阶段 milestone 使用 runtime source 的 commentary Item，不由 UI 根据 snapshot 伪造。
+text、plan、reasoning 和 tool delta 只写当前 Item overlay；terminal Item 到达后清除
 overlay并以完整 payload 为准。
 
 Timeline row key 使用 `threadId + itemId` 或稳定工具组首 Item identity。未知 Item union 变体

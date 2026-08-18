@@ -42,8 +42,8 @@ terminal Item 携带完整 authoritative payload并清除 UI overlay。
 每个订阅使用有界 mpsc：
 
 - transcript delta、Item terminal、Turn terminal 与 Interaction request 必须 lossless，发送方
-  等待通道容量。
-- 普通 progress/runtime 刷新是 best-effort，可用 try_send；丢弃数量在下一条 lossless 通知前
+  等待通道容量。阶段 milestone 已投影为 commentary Item，其 terminal 同样属于 lossless。
+- 瞬时 progress/runtime 刷新是 best-effort，可用 try_send；丢弃数量在下一条 lossless 通知前
   以 `lagged` 发送。
 - 不能丢弃需要客户端回答的 request；无法交付时后端取消 request，不能永久等待。
 
