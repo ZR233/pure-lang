@@ -320,10 +320,8 @@ fn tool_names(request: &Value) -> Vec<String> {
 }
 
 fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> StudioConfig {
-    let mut info = pl_model::ProviderInfo::openai(Some(model_base_url));
-    info.connection_mode = ProviderConnectionMode::Http;
+    let mut info = pl_model::ProviderEndpoint::openai(Some(model_base_url));
     info.bearer_token = Some("fixture-token".to_string());
-    info.default_model = MODEL.to_string();
     let mut model = pl_model::default_models()
         .into_iter()
         .find(|model| model.slug == MODEL)
@@ -345,7 +343,7 @@ fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> Studi
     config.models = AgentModelConfig {
         providers: BTreeMap::from([(
             provider_id,
-            ProviderConfig::from_provider_info(info, vec![model]),
+            ProviderConfig::from_endpoint(info, vec![model]),
         )]),
         routes: [
             StudioRole::Explorer,

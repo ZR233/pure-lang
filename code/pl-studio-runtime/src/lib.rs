@@ -36,7 +36,9 @@ pub use first_run::{
 };
 pub use protocol::*;
 pub use provider_usage::{
-    ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ProviderUsageData, ProviderUsageRecord,
+    ProviderUsageState, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
+    ZhipuToolUsageDetail, provider_usage_records, zhipu_limit_by_window,
 };
 pub use studio::*;
 pub use updater::*;

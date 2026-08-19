@@ -489,9 +489,8 @@ pub(super) async fn wait_for_turn(store: &StudioStore, turn_id: &str) -> Result<
 }
 
 fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> StudioConfig {
-    let mut info = pl_model::ProviderInfo::deepseek(Some(model_base_url));
+    let mut info = pl_model::ProviderEndpoint::deepseek(Some(model_base_url));
     info.bearer_token = Some("fixture-token".to_string());
-    info.default_model = MODEL.to_string();
     let model = pl_model::default_models()
         .into_iter()
         .find(|model| model.slug == MODEL)
@@ -507,7 +506,7 @@ fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> Studi
     config.models = AgentModelConfig {
         providers: BTreeMap::from([(
             provider_id,
-            ProviderConfig::from_provider_info(info, vec![model]),
+            ProviderConfig::from_endpoint(info, vec![model]),
         )]),
         routes: [
             StudioRole::Explorer,

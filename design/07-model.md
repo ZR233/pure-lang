@@ -2,24 +2,29 @@
 
 ## 7.1 职责
 
-`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 provider 无关的 `CompletionStreamEvent`、`pl-trace::AgentEvent` 和 `CompletionResponse`。
+`pl-model` 是模型目录、Provider endpoint 与模型协议适配层，负责把核心层的统一请求转为具体 API 请求，并把流式结果归一化为 provider 无关的模型事件和 `CompletionResponse`。`pl-core` 是宿主唯一使用的高层 runtime facade；产品不直接构造 provider、transport 或 stream accumulator。
 
 `pl-model` 不维护产品 agent/session 历史，不解析 CLI，也不决定产品阶段。它只维护
-`ModelTransportSession`：与一个 `AgentSession` 同生命周期的物理连接、脱敏 fingerprint 和
+`ModelSession`：与一个 `AgentSession` 同生命周期的物理连接、脱敏 fingerprint 和
 Responses continuation 状态。
 `pl-model` 可以消费已经解析好的自定义模型列表，但不读取配置文件。
 
-内部按三层组织：
+内部按四个职责组织：
 
-- `provider`：按 wire protocol 执行的通用 provider runtime，不按厂商枚举分发。
-- `protocol`：API 协议编解码，当前实现 OpenAI Responses / Chat Completions，Anthropic 仅保留占位。
-- `stream`：provider 无关的 public canonical stream event、工具调用合并、plan 提取和 timeline 投影。
+- `model`：模型元数据、能力、参数、transport、价格和内置目录。
+- `provider`：唯一的 Provider 配置、preset/catalog 与解析后的 endpoint。
+- `completion`：provider 无关的请求、响应、工具、usage、compaction 和 canonical model event。
+- `runtime`：绑定一个已解析模型的 `ModelRuntime`，以及唯一 OpenAI-compatible HTTP/SSE/WS adapter。
 
-`protocol` 只负责把 provider 私有流事件映射为 `stream` 的 canonical event。OpenAI Responses WebSocket、Responses HTTP/SSE、OpenAI Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入 accumulator 前必须统一为 response started/id、文本、思考、reasoning summary、工具参数、工具 ready/done、usage 和完成/失败事件。核心层、Studio timeline 和外部集成方不解析 provider 原始 JSON。
+`runtime` 内部的 OpenAI-compatible codec 只负责把 provider 私有 wire event 映射为
+`completion` 的 canonical event。OpenAI Responses WebSocket、Responses HTTP/SSE、OpenAI
+Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入唯一 accumulator 前必须统一为 response
+started/id、文本、思考、reasoning summary、工具参数、工具 ready/done、usage 和完成/失败事件。
+核心层、Studio timeline 和外部集成方不解析 provider 原始 JSON。
 
-`CompletionEventStream` 是 `pl-model` 的公开流式边界，元素类型为 `Result<CompletionStreamEvent>`。`ModelProvider::stream_events` 返回该流，供 `mai-team` 等调用方原生消费 provider 无关事件；`stream_complete` 保留为兼容 API，但必须通过同一条 public stream API 累计出 `CompletionResponse`，避免在核心层或外部仓库复刻 provider adapter。
+底层 event stream、decoder 和 accumulator 只服务 `ModelRuntime` 与 `pl-core` 的 trace projector，不是宿主 API。外部宿主通过 `pl-core::TurnEngineBuilder::from_route` 或 `pl-core::ModelTurnClient::from_route` 执行模型请求，避免复刻 provider adapter。
 
-`stream` 层负责稳定工具调用 identity。工具调用一经解码即具有必填的
+`completion` 内部 stream 状态机负责稳定工具调用 identity。工具调用一经解码即具有必填的
 `ToolCallIdentity { item_id, call_id }`：Responses 使用事件携带的 `item.id` 与 `call_id`，
 两者都缺失是协议错误；Chat Completions 以 chunk index 构造 `stream_id` / `item_id`，并确定性
 赋 `call_id = item_id`。不存在 optional `call_id` 或 id 与 call_id 互为 fallback 的规范化路径。
@@ -68,29 +73,13 @@ Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
 模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力、Responses profile 和官方 OpenAI Responses endpoint；OpenAI preset 覆盖自定义 `base_url` 后必须退回 eager/direct 工具，不能仅凭 OpenAI catalog 把 hosted tool type 发送给兼容代理。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
-## 7.4 Provider 抽象
+## 7.4 Provider 与 runtime
 
-`ModelProvider` 封装协议执行逻辑：
+当前所有支持的供应商共用一种 OpenAI-compatible 协议族，因此不建立 `ModelProvider` trait、厂商 runtime 子类或共享 provider wrapper。`ResolvedModelRoute` 解析出唯一的 `ProviderEndpoint + ModelInfo`，`ModelRuntime` 在构造时绑定该模型；后续请求不再携带 model，provider 也不保存 default model 或完整模型目录。
 
-- `info()`
-- `capabilities()`
-- `stream_events(...)`
-- `stream_complete(...)`
-- `auth_token()`
-- `model_info(...)`
-- `list_models()`
-- `effective_model_capabilities(...)`
-- `default_model()`
-
-异步 trait 方法使用原生 RPITIT，并显式声明 `Send` bound。
-
-`SharedModelProvider` 是 `Arc<OpenAiProvider>`。这里的 `OpenAiProvider` 是 Responses / Chat
-Completions 协议执行器，不代表供应商身份。每次请求选中的 `ModelInfo.transport` 决定 wire API
-和 WS/HTTP；endpoint、凭证、模型目录、wire policy 与服务能力来自 provider 实例。
-`ProviderInfo.protocol` 和 `connection_mode` 只是在 `ResolvedModelRoute` 构造 runtime 时生成的
-最终投影，不是配置或 catalog 的事实源。
+`ProviderConfig` 是持久化配置和 catalog binding 的唯一来源；`ProviderEndpoint` 只包含运行时 endpoint、解析后的凭证、headers、tool wire policy 与服务能力。protocol 和 connection mode 只来自绑定模型的 `ModelTransportProfile`，避免 provider 与 model 两份事实漂移。
 运行路径不匹配 OpenAI、DeepSeek、Zhipu、MiMo 等 ID，也不为这些厂商建立穷尽枚举分发。
-未来若引入协议真正不同的供应商（如 Anthropic），才新增独立 typed adapter。
+未来只有在实际支持第二种协议族时才引入新的 typed codec；当前不保留 Anthropic 占位或预先抽象。
 
 每个 provider 实例保存 preset 身份、endpoint override、凭证、headers、tool wire policy、
 服务能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider default model。
@@ -113,9 +102,9 @@ Zhipu Coding Plan 是 catalog preset，默认使用 `https://open.bigmodel.cn/ap
 - Responses API
 - Chat Completions API
 
-不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和 provider 无关的 timeline 事件流。
+不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到绑定模型的 runtime、精简后的 completion request/response 和 provider 无关的 model event。
 
-所有当前 preset 都复用 `protocol::openai` 的两种 wire API。协议与连接模式是正交维度：
+所有当前 preset 都复用 `runtime` 私有 OpenAI-compatible codec 的两种 wire API。协议与连接模式是正交维度：
 Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协议由模型的
 `ModelTransportProfile.protocol` 声明，不再由 provider 实例统一决定。内置 OpenAI preset 的所有模型
 使用 Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 `/responses` 并消费 SSE，
@@ -132,7 +121,7 @@ Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，�
 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。runtime 必须按当前模型选择对应
 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
-Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelTransportSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
+Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 持有的 `ModelSession`：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
 WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放请求。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因与来源连接模式。
 
@@ -140,11 +129,8 @@ effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不�
 
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
 
-核心层提交的 `CompletionRequest` 始终带完整 canonical input，且不计算 continuation。
-所有核心 agent、权限审查和本地压缩请求显式使用 `store: false`，避免把会话持久化到供应商侧；
-Chat Completions wire 忽略该 Responses 专属字段。低层 `pl-model` API 仍可表达显式 store 策略，
-但产品 runtime 不能依赖供应商存储来维持历史。
-`ModelTransportSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，在 transport
+核心层提交的 `CompletionRequest` 始终带完整 canonical input，且不携带 model、stream、store、previous response、trace 或 transport session。runtime 固定使用流式请求；Responses 固定 `store: false`。prompt cache 和 trace 属于单次 invocation context，continuation 只由 `ModelSession` 管理。`pl-core` 的宿主 façade 在 invocation 内创建事件 sink；`ModelTurnOptions` 只承载宿主可控的取消状态，不暴露 `pl-trace` 类型。
+`ModelSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，在 transport
 内部克隆请求并只对 Responses WebSocket 帧设置 `previous_response_id`。断线、取消、未完整消费、配置变化或无效 continuation
 都会关闭旧连接；只有首个 canonical 流事件前的瞬态失败可在新 WS 上用完整历史重试一次。该重试
 仍失败时，同一 session 从当前请求开始切换到 Responses HTTP，不再创建新的 WS full replay；已经
@@ -189,7 +175,7 @@ retryable。Studio 另行从 typed failure 派生 Task disposition，任何层�
 
 请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。
 
-`CompletionRequest.stream` 不改变 `stream_complete` 的 wire 行为；`stream_complete` 始终发起流式请求。该字段只保留为统一请求类型的一部分。
+`CompletionResponse` 只保留 canonical 内容、reasoning、tool calls、Responses context、usage、orchestration 和实际模型。raw text、finish reason、hosted-search 汇总、trace event 与 sequence 不再重复存入 response；trace 和 hosted-search 状态分别由 `pl-core` projector 与 canonical context/event 维护。
 
 ## 7.6 多模态消息
 
@@ -205,8 +191,9 @@ OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、
 ## 7.7 自定义模型
 
 产品宿主使用 serde 读取自己的完整配置，调用 `pl-core::AgentModelConfig::validate/resolve` 后，
-把 `ResolvedModelRoute` 中的 provider 信息和 effective model 传给 `pl-model`。`pl-core` 与
-`pl-model` 都不读取 `~/.pure/config.toml`。
+只把 `ResolvedModelRoute` 交给 `pl-core::TurnEngineBuilder::from_route` 或
+`pl-core::ModelTurnClient::from_route`。宿主不直接调用 `pl-model`；`pl-core` 与 `pl-model` 都不读取
+`~/.pure/config.toml`。
 
 Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 slug；完全自定义 provider
 使用 `Explicit { models }`。附加与显式模型都必须声明 transport；模型目录的
@@ -215,7 +202,7 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、历史保留、原子替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
 
-`CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。`ModelProvider::compact_context` 接收模型、instructions、有序上下文、工具、parallel tool calls、reasoning 和 prompt cache key，并返回经过 provider 解析的上下文项与可选 usage。远程协议能力由 `ProviderWireProtocol::Responses` 决定，不依赖 preset ID；远程 compaction 固定走独立 HTTP 请求。
+`CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。绑定单模型的 `ModelRuntime::compact_context` 接收 instructions、有序上下文、工具、parallel tool calls、reasoning 和 prompt cache key，并返回经过 provider 解析的上下文项与可选 usage。远程协议能力由绑定模型的 `ProviderWireProtocol::Responses` 决定，不依赖 preset ID；远程 compaction 固定走独立 HTTP 请求。
 
 ## 7.8 模型可调参数
 

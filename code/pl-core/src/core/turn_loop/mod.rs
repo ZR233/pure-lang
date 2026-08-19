@@ -1,4 +1,4 @@
-use pl_model::{CompletionRequest, ModelProvider};
+use pl_model::CompletionRequest;
 use pl_protocol::{
     ErrorSeverity, ModelContextItem, ResponsesContextItem, ResponsesContextItemKind, Result,
 };
@@ -51,9 +51,9 @@ pub(super) async fn run_turn_with_trace(
     recorder: &mut TraceRecorder,
     options: TurnOptions,
 ) -> Result<TurnResult> {
-    let provider = core.provider.clone();
-    let model = provider.default_model().to_string();
-    let model_info = provider.model_info(&model);
+    let runtime = core.runtime.clone();
+    let model_info = runtime.model().clone();
+    let model = model_info.slug.clone();
     ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
     let effort = core.effort.clone();
     let workspace = core.workspace.clone().unwrap_or_else(|| {
@@ -63,9 +63,9 @@ pub(super) async fn run_turn_with_trace(
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
-    let model_capabilities = provider.effective_model_capabilities(&model);
+    let model_capabilities = runtime.effective_model_capabilities();
     let orchestration_options =
-        orchestration::options(provider.info(), &model_info, &model_capabilities);
+        orchestration::options(runtime.endpoint(), &model_info, &model_capabilities);
     let lease = core.acquire_tool_lease()?;
     let tool_inventory = orchestrate_tool_inventory(
         lease.entries(),
@@ -106,7 +106,9 @@ pub(super) async fn run_turn_with_trace(
     let mut session_message_count = safe_message_count;
     let mut inference_count = 0_u64;
 
-    let prompt_cache_policy = provider.info().effective_prompt_cache_policy(&model_info);
+    let prompt_cache_policy = runtime
+        .endpoint()
+        .effective_prompt_cache_policy(&model_info);
     let instruction_snapshot =
         turn_setup::instruction_snapshot(core, &request, &model_info, &workspace_root)?;
     let turn_instruction_snapshot = instruction_snapshot.clone();
@@ -154,13 +156,13 @@ pub(super) async fn run_turn_with_trace(
         let iteration_tools = tool_schemas.clone();
         let iteration_snapshot = turn_instruction_snapshot.clone();
         let instruction_bundle = iteration_snapshot.to_bundle();
-        let model_capabilities = provider.effective_model_capabilities(&model);
+        let model_capabilities = runtime.effective_model_capabilities();
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
         if prepare_prompt_context(
             session,
             PromptCacheInput {
                 scope: &options.prompt_scope,
-                provider: provider.info(),
+                provider: runtime.endpoint(),
                 model: &model,
                 instructions: &instruction_bundle.instructions,
                 prelude_messages: &instruction_bundle.prelude_messages,
@@ -209,8 +211,7 @@ pub(super) async fn run_turn_with_trace(
             let compaction_result = maybe_compact_session(
                 session,
                 ContextCompactionRequest {
-                    provider: provider.as_ref(),
-                    model: &model,
+                    runtime: &runtime,
                     config: &core.context_compaction,
                     request_instructions: &assembled_context.instructions,
                     request_messages: &assembled_context.prelude_messages,
@@ -247,12 +248,12 @@ pub(super) async fn run_turn_with_trace(
                             .total_tokens
                             .max(usage.prompt_tokens.saturating_add(usage.completion_tokens));
                         inference_count = inference_count.saturating_add(1);
-                        let model_info = provider.model_info(&model);
+                        let model_info = runtime.model().clone();
                         let inference_id = format!("{turn_id}-compact-{iteration}");
                         let recorded_at = unix_seconds();
                         let billing = inference_billing_record(InferenceBillingInput {
                             inference_id,
-                            provider: &provider.info().name,
+                            provider: &runtime.endpoint().name,
                             model: &model,
                             usage: &usage,
                             model_info: &model_info,
@@ -269,7 +270,7 @@ pub(super) async fn run_turn_with_trace(
                         session,
                         PromptCacheInput {
                             scope: &options.prompt_scope,
-                            provider: provider.info(),
+                            provider: runtime.endpoint(),
                             model: &model,
                             instructions: &instruction_bundle.instructions,
                             prelude_messages: &instruction_bundle.prelude_messages,
@@ -362,32 +363,35 @@ pub(super) async fn run_turn_with_trace(
             crate::tool::estimate_tool_schema_tokens(&iteration_tools);
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
-        let completion_request = CompletionRequest::builder(model.clone())
+        let completion_request = CompletionRequest::builder()
             .instructions(assembled_context.instructions.clone())
             .input(input.clone())
             .tools(iteration_tools)
             .parallel_tool_calls(parallel_tool_calls)
-            .store(Some(false))
-            .prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
             .reasoning(reasoning.clone())
-            .trace(Some(pl_model::CompletionTraceContext {
-                session_id: recorder.session_id().to_string(),
-                turn_id: turn_id.clone(),
-                inference_id: inference_id.clone(),
-                plan_mode: tool_schemas
-                    .iter()
-                    .any(|schema| schema.name() == "plan_exit"),
-                trace_sequence_base: recorder.current_sequence(),
-            }))
-            .transport_session(session.transport_session())
             .build();
+        let invocation = pl_model::ModelInvocationContext::new(
+            session.model_session(),
+            recorder.sender().clone(),
+        )
+        .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
+        .with_trace(pl_model::CompletionTraceContext {
+            session_id: recorder.session_id().to_string(),
+            turn_id: turn_id.clone(),
+            inference_id: inference_id.clone(),
+            plan_mode: tool_schemas
+                .iter()
+                .any(|schema| schema.name() == "plan_exit"),
+            trace_sequence_base: recorder.current_sequence(),
+        });
+        let trace_output = invocation.clone();
         progress.heartbeat(recorder, "正在等待模型响应。");
         progress.debug(recorder, format!("模型 `{model}` 流式请求已发起。"));
 
         let response_result = match &cancellation_token {
             Some(token) => {
                 tokio::select! {
-                    result = provider.stream_complete(completion_request, recorder.sender().clone()) => result,
+                    result = runtime.complete(completion_request, invocation) => result,
                     _ = token.cancelled() => {
                         session.truncate_messages(safe_message_count);
                         return Ok(interrupted_turn_result(
@@ -403,12 +407,9 @@ pub(super) async fn run_turn_with_trace(
                     }
                 }
             }
-            None => {
-                provider
-                    .stream_complete(completion_request, recorder.sender().clone())
-                    .await
-            }
+            None => runtime.complete(completion_request, invocation).await,
         };
+        recorder.record_events(trace_output.take_trace_events());
         let mut response = match response_result {
             Ok(response) => response,
             Err(_) if is_cancelled(&options) => {
@@ -447,10 +448,6 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
 
-        recorder.record_events(response.trace_events.clone());
-        if recorder.current_sequence() < response.next_sequence {
-            recorder.advance_sequence(response.next_sequence);
-        }
         let actual_model = if response.model.is_empty() {
             model.clone()
         } else {
@@ -461,11 +458,11 @@ pub(super) async fn run_turn_with_trace(
         }
         let usage_snapshot = token_usage_snapshot(&response.usage);
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
-        let model_info = provider.model_info(&actual_model);
+        let model_info = runtime.model().clone();
         let recorded_at = unix_seconds();
         let mut billing = inference_billing_record(InferenceBillingInput {
             inference_id,
-            provider: &provider.info().name,
+            provider: &runtime.endpoint().name,
             model: &actual_model,
             usage: &response.usage,
             model_info: &model_info,

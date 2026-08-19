@@ -483,7 +483,7 @@ fn read_file_result_text(result: Option<&str>) -> String {
 #[tokio::test]
 async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(FailingApplyPatchTool {
         executions: std::sync::Arc::clone(&executions),
     });
@@ -549,7 +549,7 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
 #[tokio::test]
 async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(CountingSpawnAgentTool {
         executions: std::sync::Arc::clone(&executions),
     });
@@ -622,7 +622,7 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
 #[tokio::test]
 async fn identical_exec_arguments_with_distinct_call_ids_execute_independently() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(CountingExecTool {
         executions: std::sync::Arc::clone(&executions),
     });
@@ -716,7 +716,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
 #[tokio::test]
 async fn identical_cacheable_calls_return_compact_receipts_per_provider_response() {
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(CountingCacheableTool {
         executions: std::sync::Arc::clone(&executions),
     });
@@ -776,7 +776,7 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
 
 #[tokio::test]
 async fn tool_batch_reports_parallel_candidates_and_critical_path() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(
         crate::tool::RegisteredTool::new(
             "parallel_metric_read",
@@ -848,7 +848,7 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
 
 #[tokio::test]
 async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     let harness = crate::mcp::McpTestHarness::install_read_tool(&mut core).await;
     let calls = [
         ToolCall::function(
@@ -972,7 +972,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
 
 #[tokio::test]
 async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(crate::tool::RegisteredTool::new(
         "exclusive_metric_read",
         "Test-only exclusive metric tool",
@@ -1039,7 +1039,7 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
     let executions = std::sync::Arc::new(AtomicUsize::new(0));
     let first_started = std::sync::Arc::new(tokio::sync::Notify::new());
     let release_first = std::sync::Arc::new(tokio::sync::Notify::new());
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(BatchFailingReadTool {
         executions: std::sync::Arc::clone(&executions),
         first_started: std::sync::Arc::clone(&first_started),
@@ -1098,7 +1098,7 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
 
 #[tokio::test]
 async fn invalid_function_arguments_are_returned_to_the_model_without_running_the_tool() {
-    let core = TurnEngine::default_provider().unwrap();
+    let core = test_turn_engine();
     let tool_call = ToolCall::invalid_function(
         "call-1",
         "github_api_request",
@@ -1139,7 +1139,7 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
 
 #[tokio::test]
 async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(BudgetPausedWaitTool);
     let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), "wait-1");
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
@@ -1173,7 +1173,7 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
 
 #[tokio::test]
 async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(BudgetPausedWaitTool);
     core.register_test_tool(ProviderCallIdEchoTool);
     let calls = [
@@ -1216,7 +1216,7 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
 
 #[tokio::test]
 async fn chat_tool_call_replays_item_id_as_call_id() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(ProviderCallIdEchoTool);
     let tool_call = ToolCall::function(
         "chat-tool-call-1",
@@ -1280,7 +1280,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
     tokio::fs::write(workspace_root.join("note.txt"), "provider item reuse")
         .await
         .unwrap();
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -1376,7 +1376,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
     tokio::fs::write(workspace_root.join("note.txt"), "late provider id")
         .await
         .unwrap();
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -1476,7 +1476,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
 
 #[tokio::test]
 async fn tool_runtime_deltas_use_trace_part_id() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(DeltaEchoTool);
     let tool_call = ToolCall::function(
         "provider-item-1",

@@ -3,15 +3,15 @@
 use std::collections::BTreeSet;
 
 use pl_model::{
-    ProviderInfo, ProviderWireProtocol, StandaloneWebSearchDialect, WebSearchClient,
-    WebSearchConfig, WebSearchMode,
+    ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect, WebSearchConfig,
+    WebSearchMode,
 };
 use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
 use crate::ToolVisibilitySet;
 use crate::TurnEngine;
 use crate::model_config::{AgentModelConfig, ProviderConfig, ProviderId, ResolvedModelRoute};
-use crate::tool::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchTool};
+use crate::tool::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchClient, WebSearchTool};
 
 /// Web Search 工具对本轮其他工具的可见性约束。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub enum WebSearchAvailability {
 #[derive(Debug, Clone)]
 pub struct WebSearchBackend {
     pub provider_id: ProviderId,
-    pub provider_info: ProviderInfo,
+    pub endpoint: ProviderEndpoint,
     pub model: String,
     pub max_output_tokens: Option<u64>,
     pub dialect: StandaloneWebSearchDialect,
@@ -100,7 +100,7 @@ impl WebSearchPlan {
                 })?;
                 match backend.dialect {
                     StandaloneWebSearchDialect::OpenAiSearchApi => {
-                        let client = WebSearchClient::new(&backend.provider_info)?;
+                        let client = WebSearchClient::new(&backend.endpoint)?;
                         let tool = WebSearchTool::new(
                             client,
                             backend.model.clone(),
@@ -160,9 +160,9 @@ pub fn plan_web_search(
         ));
     }
 
-    let current_has_credential = current.provider_info.bearer_token.is_some();
+    let current_has_credential = current.endpoint.bearer_token.is_some();
     let hosted_declared = current
-        .provider_info
+        .endpoint
         .service_capabilities
         .web_search
         .hosted_responses;
@@ -249,10 +249,10 @@ fn standalone_backend(
             continue;
         }
         let model = selected_model(models, current, &provider_id, provider)?;
-        let provider_info = provider.to_provider_info(&model.slug)?;
+        let endpoint = provider.to_endpoint()?;
         selection.backend = Some(WebSearchBackend {
             provider_id,
-            provider_info,
+            endpoint,
             model: model.slug,
             max_output_tokens: model.max_output_tokens,
             dialect,

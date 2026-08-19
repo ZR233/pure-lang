@@ -3,11 +3,33 @@ use crate::ContextCompactionTrigger;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
 use crate::turn::PermissionMode;
 use futures::FutureExt;
-use pl_model::{OpenAiCompactionMode, ToolCall};
+use pl_model::{ModelInfo, OpenAiCompactionMode, ProviderEndpoint, ToolCall};
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+fn test_route(endpoint: ProviderEndpoint, model: ModelInfo) -> crate::ResolvedModelRoute {
+    crate::ResolvedModelRoute {
+        role: crate::AgentRoleId::new("test").unwrap(),
+        provider_id: crate::ProviderId::new("test").unwrap(),
+        endpoint,
+        model,
+        effort: None,
+    }
+}
+
+fn test_turn_engine_builder(endpoint: ProviderEndpoint, model: ModelInfo) -> TurnEngineBuilder {
+    TurnEngineBuilder::from_route(&test_route(endpoint, model)).unwrap()
+}
+
+fn test_turn_engine() -> TurnEngine {
+    test_turn_engine_builder(
+        ProviderEndpoint::deepseek(None),
+        ModelInfo::fallback("deepseek-v4-flash"),
+    )
+    .build()
+}
 
 fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
     ToolContext {

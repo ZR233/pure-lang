@@ -16,12 +16,14 @@ abstract final class StudioDriverState {
   static bool _sidebarDirectoryHasMore = false;
   static String? _selectedProjectId;
   static String? _selectedThreadId;
+  static StudioMode _newThreadMode = StudioMode.simple;
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
 
   static void publishState(StudioState state) {
     _selectedProjectId = state.selectedProjectId;
     _selectedThreadId = state.selectedThreadId;
+    _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
     _project = state.projects
         .where((project) => project.id == state.selectedProjectId)
@@ -102,6 +104,7 @@ abstract final class StudioDriverState {
         'selectedProjectId': _selectedProjectId,
         'selectedThreadId': _selectedThreadId,
         'isStartPage': _selectedThreadId == null,
+        'newThreadMode': _newThreadMode.name,
         'newThreadComposer': {
           'draft': _newThreadComposer.draft,
           'phase': _newThreadComposer.phase.name,

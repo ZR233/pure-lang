@@ -180,14 +180,9 @@ Future<_TaskObservationTarget> _startNewTask(
   File snapshots,
   String prompt,
 ) async {
-  final threadId = await _openWorkspace(
-    session,
-    snapshots,
-    options,
-    options.workspace!,
-  );
-  await _selectTaskMode(session, snapshots, options, threadId);
-  await _submitPrompt(session, snapshots, options, threadId, prompt);
+  await _openWorkspace(session, snapshots, options, options.workspace!);
+  await _selectTaskMode(session, snapshots, options);
+  final threadId = await _submitPrompt(session, snapshots, options, prompt);
   await _waitForSnapshot(
     session,
     'plan confirmation',
@@ -317,7 +312,7 @@ Future<void> _selectRecoveryMode(
   );
 }
 
-Future<String> _openWorkspace(
+Future<void> _openWorkspace(
   FlutterDriverSession session,
   File snapshots,
   _DriverOptions options,
@@ -364,15 +359,14 @@ Future<String> _openWorkspace(
     ),
     'project path dialog close',
   );
-  final openedWorkspace = await _waitForSnapshot(
+  await _waitForSnapshot(
     session,
-    'selected project workspace',
-    (snapshot) => isSelectedProjectWorkspace(snapshot, workspace),
+    'selected project',
+    (snapshot) => isSelectedProject(snapshot, workspace),
     deadline: DateTime.now().add(const Duration(minutes: 2)),
     output: snapshots,
     options: options,
   );
-  final openedThreadId = _snapshotThreadId(openedWorkspace);
   await _driverCommand(
     session.waitFor(
       find.byValueKey('sidebar-new-session'),
@@ -381,20 +375,15 @@ Future<String> _openWorkspace(
     'new session after project open',
     const Duration(minutes: 1),
   );
-  final freshWorkspace = await _sideEffectOnce(
+  await _sideEffectOnce(
     session,
     snapshots,
     options,
     description: 'new session after project open',
     action: () => session.tap(find.byValueKey('sidebar-new-session')),
-    postcondition: (snapshot) {
-      if (!isSelectedProjectWorkspace(snapshot, workspace)) return false;
-      final threadId = _snapshotThreadId(snapshot);
-      final workspaceState = snapshot['workspace'] as Map<String, dynamic>;
-      return threadId != openedThreadId &&
-          workspaceState['threadMode'] == 'simple' &&
-          workspaceState['turn'] == null;
-    },
+    postcondition: (snapshot) =>
+        isSelectedProjectStartPage(snapshot, workspace) &&
+        _newThreadComposer(snapshot)['phase'] == 'idle',
     deadline: DateTime.now().add(const Duration(minutes: 1)),
   );
   await _driverCommand(
@@ -405,14 +394,12 @@ Future<String> _openWorkspace(
     'composer after project open',
     const Duration(minutes: 1),
   );
-  return _snapshotThreadId(freshWorkspace);
 }
 
 Future<void> _selectTaskMode(
   FlutterDriverSession session,
   File snapshots,
   _DriverOptions options,
-  String threadId,
 ) async {
   await _driverCommand(
     session.tap(find.byValueKey('session-mode-selector')),
@@ -422,27 +409,32 @@ Future<void> _selectTaskMode(
     session.waitFor(find.byValueKey('session-mode-task')),
     'Task mode option',
   );
+  await _driverCommand(
+    session.waitUntilNoTransientCallbacks(timeout: const Duration(seconds: 5)),
+    'Task mode menu settled',
+    const Duration(seconds: 10),
+  );
   await _sideEffectOnce(
     session,
     snapshots,
     options,
     description: 'Task mode option tap',
     action: () => session.tap(find.byValueKey('session-mode-task')),
-    postcondition: (snapshot) => isTaskThread(snapshot, threadId),
+    postcondition: (snapshot) =>
+        isTransientTaskDraft(snapshot, options.workspace!),
   );
 }
 
-Future<void> _submitPrompt(
+Future<String> _submitPrompt(
   FlutterDriverSession session,
   File snapshots,
   _DriverOptions options,
-  String threadId,
   String prompt,
 ) async {
   await _waitForSnapshot(
     session,
-    'Task thread before prompt entry',
-    (snapshot) => isTaskThread(snapshot, threadId),
+    'transient Task draft before prompt entry',
+    (snapshot) => isTransientTaskDraft(snapshot, options.workspace!),
     deadline: DateTime.now().add(const Duration(seconds: 30)),
     output: snapshots,
     options: options,
@@ -476,13 +468,13 @@ Future<void> _submitPrompt(
   );
   await _waitForSnapshot(
     session,
-    'Task thread before prompt submit',
-    (snapshot) => isTaskThread(snapshot, threadId),
+    'transient Task draft before prompt submit',
+    (snapshot) => isTransientTaskDraft(snapshot, options.workspace!),
     deadline: DateTime.now().add(const Duration(seconds: 30)),
     output: snapshots,
     options: options,
   );
-  await _sideEffectOnce(
+  final submitted = await _sideEffectOnce(
     session,
     snapshots,
     options,
@@ -501,8 +493,11 @@ Future<void> _submitPrompt(
       }
     },
     postcondition: (snapshot) =>
-        hasSubmittedTaskPromptOnThread(snapshot, threadId),
+        isSelectedProjectWorkspace(snapshot, options.workspace!) &&
+        _workspaceMode(snapshot) == 'task' &&
+        hasSubmittedTaskPrompt(snapshot),
   );
+  return _snapshotThreadId(submitted);
 }
 
 Future<Map<String, dynamic>> _sideEffectOnce(
@@ -545,10 +540,51 @@ bool hasSubmittedTaskPrompt(Map<String, dynamic> snapshot) {
       interaction['kind'] == 'planConfirmation';
 }
 
-bool hasSubmittedTaskPromptOnThread(
+Map<String, dynamic> _navigation(Map<String, dynamic> snapshot) {
+  final navigation = snapshot['navigation'];
+  return navigation is Map<String, dynamic>
+      ? navigation
+      : const <String, dynamic>{};
+}
+
+Map<String, dynamic> _newThreadComposer(Map<String, dynamic> snapshot) {
+  final composer = _navigation(snapshot)['newThreadComposer'];
+  return composer is Map<String, dynamic>
+      ? composer
+      : const <String, dynamic>{};
+}
+
+String? _workspaceMode(Map<String, dynamic> snapshot) {
+  final workspace = snapshot['workspace'];
+  return workspace is Map<String, dynamic>
+      ? workspace['threadMode'] as String?
+      : null;
+}
+
+bool isSelectedProject(Map<String, dynamic> snapshot, String expectedPath) {
+  final project = snapshot['project'];
+  if (project is! Map<String, dynamic>) return false;
+  final projectId = project['id'];
+  final projectPath = project['path'];
+  return projectId is String &&
+      projectPath is String &&
+      _normalizedPath(projectPath) == _normalizedPath(expectedPath);
+}
+
+bool isSelectedProjectStartPage(
   Map<String, dynamic> snapshot,
-  String threadId,
-) => isTaskThread(snapshot, threadId) && hasSubmittedTaskPrompt(snapshot);
+  String expectedPath,
+) {
+  final navigation = _navigation(snapshot);
+  return isSelectedProject(snapshot, expectedPath) &&
+      navigation['selectedThreadId'] == null &&
+      navigation['isStartPage'] == true &&
+      snapshot['workspace'] == null;
+}
+
+bool isTransientTaskDraft(Map<String, dynamic> snapshot, String expectedPath) =>
+    isSelectedProjectStartPage(snapshot, expectedPath) &&
+    _navigation(snapshot)['newThreadMode'] == 'task';
 
 bool isSelectedProjectWorkspace(
   Map<String, dynamic> snapshot,
@@ -556,15 +592,13 @@ bool isSelectedProjectWorkspace(
 ) {
   final project = snapshot['project'];
   final workspace = snapshot['workspace'];
-  if (project is! Map<String, dynamic> || workspace is! Map<String, dynamic>) {
+  if (!isSelectedProject(snapshot, expectedPath) ||
+      project is! Map<String, dynamic> ||
+      workspace is! Map<String, dynamic>) {
     return false;
   }
   final projectId = project['id'];
-  final projectPath = project['path'];
-  return projectId is String &&
-      projectPath is String &&
-      workspace['projectId'] == projectId &&
-      _normalizedPath(projectPath) == _normalizedPath(expectedPath);
+  return projectId is String && workspace['projectId'] == projectId;
 }
 
 bool isTaskThread(Map<String, dynamic> snapshot, String threadId) {

@@ -1,5 +1,5 @@
 use pl_model::{
-    ModelCompactionRequest, ModelProvider, OpenAiCompactionMode, ReasoningConfig, TokenUsage,
+    ModelCompactionRequest, ModelRuntime, OpenAiCompactionMode, ReasoningConfig, TokenUsage,
     ToolSchema,
 };
 use pl_protocol::{
@@ -14,9 +14,8 @@ const RETAINED_REMOTE_V2_TOKEN_BUDGET: u64 = 64_000;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =
     "Output exceeded the available model context and was truncated";
 
-pub(super) struct RemoteCompactionRequest<'a, P: ModelProvider + ?Sized> {
-    pub provider: &'a P,
-    pub model: &'a str,
+pub(super) struct RemoteCompactionRequest<'a> {
+    pub runtime: &'a ModelRuntime,
     pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
@@ -29,11 +28,10 @@ pub(super) struct RemoteCompactionRequest<'a, P: ModelProvider + ?Sized> {
 
 pub(super) async fn compact_remote(
     session: &AgentSession,
-    request: RemoteCompactionRequest<'_, impl ModelProvider + ?Sized>,
+    request: RemoteCompactionRequest<'_>,
 ) -> Result<(Vec<ModelContextItem>, Option<TokenUsage>)> {
     let RemoteCompactionRequest {
-        provider,
-        model,
+        runtime,
         config,
         request_instructions,
         request_messages,
@@ -56,12 +54,11 @@ pub(super) async fn compact_remote(
     trim_tool_outputs_to_context_window(
         &mut input,
         request_instructions,
-        provider.model_info(model).resolved_context_window(),
+        runtime.model().resolved_context_window(),
     );
-    let response = provider
+    let response = runtime
         .compact_context(ModelCompactionRequest {
             mode: config.openai_mode,
-            model: model.to_string(),
             instructions: request_instructions.to_string(),
             input,
             tools: tools.to_vec(),

@@ -1,73 +1,38 @@
-mod capabilities;
-mod default_models;
-mod manager;
-mod model_family;
-mod model_info;
-mod parameter;
-mod protocol;
-mod provider;
-mod provider_info;
-mod provider_usage;
-mod request;
-mod stream;
-mod tool_arguments;
-mod transport_policy;
-mod transport_session;
-mod visible_text;
-mod web_search;
+//! 模型目录、provider endpoint、canonical completion 与单模型运行时。
 
-pub use capabilities::{
-    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ProviderCapabilities,
-    ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
+mod completion;
+mod model;
+mod provider;
+mod runtime;
+
+pub use completion::{
+    ClickOperation, CompletionRequest, CompletionRequestBuilder, CompletionResponse,
+    CompletionTraceContext, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType,
+    FinanceOperation, FindOperation, InvalidToolArguments, ModelCompactionRequest,
+    ModelCompactionResponse, OpenAiCompactionMode, OpenOperation, ReasoningConfig,
+    ReasoningSummary, ScreenshotOperation, SearchAllowedCaller, SearchCommands, SearchQuery,
+    SearchRequest, SearchResponse, SearchResponseLength, SearchSettings, SportsFunction,
+    SportsLeague, SportsOperation, SportsToolName, TimeOperation, TokenUsage, ToolCall,
+    ToolCallPayload, ToolCallerMode, ToolFormat, ToolSchema, WeatherOperation, WebSearchAction,
+    WebSearchConfig, WebSearchContextSize, WebSearchFilters, WebSearchLocation, WebSearchMode,
+    WebSearchUserLocation, WebSearchUserLocationType,
 };
-pub use default_models::{
-    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
-    openai_default_model_slugs, zhipu_default_model_slugs,
-};
-pub use manager::{DefaultModelsManager, ModelsManager};
-pub use model_family::{ModelFamily, ModelPricing};
-pub use model_info::{
-    MaxTokensField, ModelInfo, ModelRequestProfile, ModelTransportProfile, ResponsesMaxTokensField,
-    TruncationMode, TruncationPolicy,
-};
-pub use parameter::{
-    MissingCandidatePolicy, ModelParameter, ModelParameterCandidateError,
-    ModelParameterCandidateRequest, ParameterWire, WireAssignment, wire_assignments_from_value,
+pub use model::{
+    MaxTokensField, MissingCandidatePolicy, ModelCapabilities, ModelFamily, ModelInfo,
+    ModelModality, ModelParameter, ModelParameterCandidateError, ModelParameterCandidateRequest,
+    ModelPricing, ModelRequestProfile, ModelTransportProfile, ParameterWire,
+    PromptCacheModelCapabilities, ProviderCapabilities, ReasoningInterleaved,
+    ReasoningInterleavedField, ResponsesMaxTokensField, ToolCapabilities, TruncationMode,
+    TruncationPolicy, WireAssignment, deepseek_default_model_slugs, default_models,
+    mimo_default_model_slugs, openai_default_model_slugs, wire_assignments_from_value,
+    zhipu_default_model_slugs,
 };
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
-    ModelProvider, OpenAiProvider, SharedModelProvider, create_provider,
-    create_provider_with_catalog,
-};
-pub use provider_info::{
     ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
-    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderInfo,
+    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderEndpoint,
     ProviderServiceCapabilities, ProviderWireProtocol, ResponsesHostedToolCapabilities,
     StandaloneWebSearchDialect, ToolWirePolicy, WebSearchProviderCapabilities,
     ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
 };
-pub use provider_usage::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
-    ZhipuQuotaWindow, ZhipuToolUsageDetail, query_deepseek_balance, query_zhipu_coding_plan_usage,
-    zhipu_limit_by_window,
-};
-pub use request::{
-    CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
-    FinishReason, HostedWebSearchCall, InvalidToolArguments, ModelCompactionRequest,
-    ModelCompactionResponse, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, TokenUsage,
-    ToolCall, ToolCallPayload, ToolCallerMode, ToolFormat, ToolSchema,
-};
-pub use stream::{
-    CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
-    CompletionStreamAccumulator, CompletionStreamEvent, ToolInputDeltaPayload,
-    ToolInputPayloadKind, collect_completion_event_stream,
-};
-pub use transport_session::ModelTransportSession;
-pub use web_search::{
-    ClickOperation, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType, FinanceOperation,
-    FindOperation, OpenOperation, ScreenshotOperation, SearchAllowedCaller, SearchCommands,
-    SearchQuery, SearchRequest, SearchResponse, SearchResponseLength, SearchSettings,
-    SportsFunction, SportsLeague, SportsOperation, SportsToolName, TimeOperation, WeatherOperation,
-    WebSearchAction, WebSearchClient, WebSearchConfig, WebSearchContextSize, WebSearchFilters,
-    WebSearchLocation, WebSearchMode, WebSearchUserLocation, WebSearchUserLocationType,
-};
+pub use runtime::{ModelInvocationContext, ModelRuntime, ModelSession};

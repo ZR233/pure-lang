@@ -1,22 +1,20 @@
 use pl_model::{
-    CompletionRequest, CompletionResponse, ModelProvider, ReasoningConfig, SharedModelProvider,
+    CompletionRequest, CompletionResponse, ModelInvocationContext, ModelRuntime, ReasoningConfig,
     ToolSchema,
 };
-use pl_protocol::{Message, PureError, Result};
-use pl_trace::AgentEventSender;
+use pl_protocol::{PureError, Result};
 use tokio_util::sync::CancellationToken;
 
-use crate::AgentSession;
-use crate::message::completion_response_message_text;
+use crate::message::{
+    CompletionResponseSnapshot, completion_response_message_text, completion_response_snapshot,
+};
+use crate::{AgentSession, ResolvedModelRoute};
 
-/// 单次模型 completion 请求配置。
+/// 不需要完整 turn loop 的单次模型请求。
 ///
-/// 该结构覆盖不需要完整 `TurnEngine` turn loop 的宿主场景，例如只调用模型做
-/// context compaction。它始终提交 canonical history；协议级 continuation 由
-/// `pl-model` 的 session transport 负责。
-#[derive(Debug, Clone)]
-pub struct CoreModelTurnRequest {
-    model: String,
+/// 模型由 [`ModelTurnClient`] 绑定，请求只描述本次 invocation 的 canonical 输入。
+#[derive(Debug, Clone, Default)]
+pub struct ModelTurnRequest {
     instructions: Option<String>,
     tools: Vec<ToolSchema>,
     parallel_tool_calls: bool,
@@ -24,16 +22,9 @@ pub struct CoreModelTurnRequest {
     reasoning: Option<ReasoningConfig>,
 }
 
-impl CoreModelTurnRequest {
-    pub fn new(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-            instructions: None,
-            tools: Vec::new(),
-            parallel_tool_calls: false,
-            max_tokens: None,
-            reasoning: None,
-        }
+impl ModelTurnRequest {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
@@ -62,121 +53,80 @@ impl CoreModelTurnRequest {
     }
 }
 
-/// 单次模型 completion 执行选项。
+/// 单次模型调用的宿主执行选项。
 #[derive(Debug, Clone, Default)]
-pub struct CoreModelTurnOptions {
+pub struct ModelTurnOptions {
     cancellation_token: Option<CancellationToken>,
-    event_tx: Option<AgentEventSender>,
 }
 
-impl CoreModelTurnOptions {
+impl ModelTurnOptions {
     pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
         self.cancellation_token = Some(cancellation_token);
         self
     }
-
-    pub fn with_event_sender(mut self, event_tx: AgentEventSender) -> Self {
-        self.event_tx = Some(event_tx);
-        self
-    }
 }
 
-/// 复用 `AgentSession` transport 状态的轻量模型回合客户端。
-#[derive(Debug, Clone, Default)]
-pub struct CoreModelTurnClient;
+/// 绑定一个已解析模型路由的轻量宿主客户端。
+#[derive(Debug, Clone)]
+pub struct ModelTurnClient {
+    runtime: ModelRuntime,
+}
 
-impl CoreModelTurnClient {
-    pub fn new() -> Self {
-        Self
+impl ModelTurnClient {
+    /// 从 canonical 路由构造客户端。
+    pub fn from_route(route: &ResolvedModelRoute) -> Result<Self> {
+        Ok(Self {
+            runtime: ModelRuntime::new(route.endpoint.clone(), route.model.clone())?,
+        })
     }
 
-    pub async fn stream_session_completion_response(
+    /// 执行一次模型调用，并返回不暴露 provider/wire 类型的宿主快照。
+    pub async fn complete(
         &self,
-        provider: SharedModelProvider,
-        session: &mut AgentSession,
-        request: CoreModelTurnRequest,
-        options: CoreModelTurnOptions,
-    ) -> Result<CompletionResponse> {
-        stream_session_completion_response(provider, session, request, options).await
+        session: &AgentSession,
+        request: ModelTurnRequest,
+        options: ModelTurnOptions,
+    ) -> Result<CompletionResponseSnapshot> {
+        let response = self.complete_raw(session, request, options).await?;
+        Ok(completion_response_snapshot(&response))
     }
 
-    pub async fn stream_session_completion_message_text(
+    /// 执行一次模型调用并只返回 assistant 可见文本。
+    pub async fn complete_text(
         &self,
-        provider: SharedModelProvider,
-        session: &mut AgentSession,
-        request: CoreModelTurnRequest,
-        options: CoreModelTurnOptions,
+        session: &AgentSession,
+        request: ModelTurnRequest,
+        options: ModelTurnOptions,
     ) -> Result<String> {
-        let response = self
-            .stream_session_completion_response(provider, session, request, options)
-            .await?;
+        let response = self.complete_raw(session, request, options).await?;
         Ok(completion_response_message_text(&response))
     }
-}
 
-pub async fn stream_session_completion_response(
-    provider: SharedModelProvider,
-    session: &mut AgentSession,
-    request: CoreModelTurnRequest,
-    options: CoreModelTurnOptions,
-) -> Result<CompletionResponse> {
-    let request_body = completion_request(session, &request);
-    stream_completion(&provider, request_body, &options).await
-}
-
-pub async fn stream_session_completion_message_text(
-    provider: SharedModelProvider,
-    session: &mut AgentSession,
-    request: CoreModelTurnRequest,
-    options: CoreModelTurnOptions,
-) -> Result<String> {
-    let response = stream_session_completion_response(provider, session, request, options).await?;
-    Ok(completion_response_message_text(&response))
-}
-
-pub async fn stream_history_completion_message_text(
-    provider: SharedModelProvider,
-    history: Vec<Message>,
-    request: CoreModelTurnRequest,
-    options: CoreModelTurnOptions,
-) -> Result<String> {
-    let mut session = AgentSession::from_messages(history);
-    stream_session_completion_message_text(provider, &mut session, request, options).await
-}
-
-fn completion_request(session: &AgentSession, request: &CoreModelTurnRequest) -> CompletionRequest {
-    CompletionRequest::builder(request.model.clone())
-        .maybe_instructions(request.instructions.clone())
-        .input(session.items().to_vec())
-        .tools(request.tools.clone())
-        .parallel_tool_calls(request.parallel_tool_calls)
-        .maybe_max_tokens(request.max_tokens)
-        .store(Some(false))
-        .prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
-        .reasoning(request.reasoning.clone())
-        .transport_session(session.transport_session())
-        .build()
-}
-
-async fn stream_completion(
-    provider: &SharedModelProvider,
-    request: CompletionRequest,
-    options: &CoreModelTurnOptions,
-) -> Result<CompletionResponse> {
-    let event_tx = match &options.event_tx {
-        Some(event_tx) => event_tx.clone(),
-        None => {
-            let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-            event_tx
-        }
-    };
-    match &options.cancellation_token {
-        Some(token) => {
-            tokio::select! {
-                response = provider.stream_complete(request, event_tx) => response,
-                _ = token.cancelled() => Err(PureError::LlmError("model request cancelled".to_string())),
+    async fn complete_raw(
+        &self,
+        session: &AgentSession,
+        request: ModelTurnRequest,
+        options: ModelTurnOptions,
+    ) -> Result<CompletionResponse> {
+        let request = CompletionRequest::builder()
+            .maybe_instructions(request.instructions)
+            .input(session.items().to_vec())
+            .tools(request.tools)
+            .parallel_tool_calls(request.parallel_tool_calls)
+            .maybe_max_tokens(request.max_tokens)
+            .reasoning(request.reasoning)
+            .build();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let invocation = ModelInvocationContext::new(session.model_session(), event_tx)
+            .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string));
+        match options.cancellation_token {
+            Some(token) => {
+                tokio::select! {
+                    response = self.runtime.complete(request, invocation) => response,
+                    _ = token.cancelled() => Err(PureError::LlmError("model request cancelled".to_string())),
+                }
             }
+            None => self.runtime.complete(request, invocation).await,
         }
-        None => provider.stream_complete(request, event_tx).await,
     }
 }

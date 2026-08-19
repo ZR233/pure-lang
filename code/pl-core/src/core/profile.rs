@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
-use pl_model::{ProviderInfo, SharedModelProvider, create_provider, create_provider_with_catalog};
+use pl_model::ModelRuntime;
 use pl_protocol::Result;
 
+use crate::ResolvedModelRoute;
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::ContextCompactionConfig;
 use crate::instruction::InstructionProfile;
@@ -152,7 +153,7 @@ impl CoreRuntimeProfile {
 /// `TurnEngine` 构造器。
 #[derive(Debug, Clone)]
 pub struct TurnEngineBuilder {
-    provider: SharedModelProvider,
+    runtime: ModelRuntime,
     effort: Option<ReasoningEffort>,
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
@@ -163,33 +164,19 @@ pub struct TurnEngineBuilder {
 }
 
 impl TurnEngineBuilder {
-    pub fn new(provider: SharedModelProvider) -> Self {
-        Self {
-            provider,
-            effort: None,
+    /// 从已校验的角色路由构造绑定单一模型的 Turn runtime。
+    pub fn from_route(route: &ResolvedModelRoute) -> Result<Self> {
+        let runtime = ModelRuntime::new(route.endpoint.clone(), route.model.clone())?;
+        Ok(Self {
+            runtime,
+            effort: route.effort.clone(),
             tool_capabilities: ToolCapabilityConfig::default(),
             skills: None,
             skill_catalog: None,
             lsp_runtime: None,
             shared_tool_registry: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
-        }
-    }
-
-    pub fn from_provider_info(info: ProviderInfo) -> Result<Self> {
-        Ok(Self::new(create_provider(info)?))
-    }
-
-    pub fn from_provider_info_with_models(
-        info: ProviderInfo,
-        models: Vec<pl_model::ModelInfo>,
-    ) -> Result<Self> {
-        Ok(Self::new(create_provider_with_catalog(info, models)?))
-    }
-
-    pub fn with_effort(mut self, effort: ReasoningEffort) -> Self {
-        self.effort = Some(effort);
-        self
+        })
     }
 
     pub fn with_tool_capabilities(mut self, capabilities: ToolCapabilityConfig) -> Self {
@@ -238,7 +225,7 @@ impl TurnEngineBuilder {
             context_compaction,
         } = self.runtime_profile;
         TurnEngine {
-            provider: self.provider,
+            runtime: self.runtime,
             effort: self.effort,
             skills: self.skills,
             skill_catalog: self.skill_catalog,

@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pl_model::{
-    ModelInfo, ModelModality, ProviderConnectionMode, ProviderInfo, ProviderServiceCapabilities,
-    ProviderWireProtocol, deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
-    openai_default_model_slugs, provider_transport_profile_revision, zhipu_default_model_slugs,
+    ModelInfo, ModelModality, ProviderConnectionMode, ProviderEndpoint,
+    ProviderServiceCapabilities, ProviderWireProtocol, deepseek_default_model_slugs,
+    default_models, mimo_default_model_slugs, openai_default_model_slugs,
+    provider_transport_profile_revision, zhipu_default_model_slugs,
 };
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
@@ -63,7 +64,8 @@ impl ProviderCatalogRegistry {
         let presets = vec![
             preset(
                 "openai",
-                ProviderInfo::openai(None),
+                ProviderEndpoint::openai(None),
+                "gpt-5.6-sol",
                 "openai",
                 "OPENAI_API_KEY",
                 "OpenAI models served through the Responses API.",
@@ -71,7 +73,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "deepseek",
-                ProviderInfo::deepseek(None),
+                ProviderEndpoint::deepseek(None),
+                "deepseek-v4-flash",
                 "deepseek",
                 "DEEPSEEK_API_KEY",
                 "DeepSeek reasoning and coding models.",
@@ -79,7 +82,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "zhipu",
-                ProviderInfo::zhipu(None),
+                ProviderEndpoint::zhipu(None),
+                "glm-5.2",
                 "zhipu",
                 "ZAI_API_KEY",
                 "Zhipu BigModel API.",
@@ -87,7 +91,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "zhipu-coding-plan",
-                ProviderInfo::zhipu_coding_plan(None),
+                ProviderEndpoint::zhipu_coding_plan(None),
+                "glm-5.2",
                 "zhipu",
                 "ZAI_API_KEY",
                 "Zhipu Coding Plan endpoint.",
@@ -95,11 +100,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-api",
-                ProviderInfo::openai_compatible_chat(
-                    "MiMo API",
-                    MIMO_API_BASE_URL,
-                    "mimo-v2.5-pro",
-                ),
+                ProviderEndpoint::openai_compatible_chat("MiMo API", MIMO_API_BASE_URL),
+                "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_API_KEY",
                 "Xiaomi MiMo public API.",
@@ -107,11 +109,11 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-token-plan",
-                ProviderInfo::openai_compatible_chat(
+                ProviderEndpoint::openai_compatible_chat(
                     "MiMo Token Plan",
                     MIMO_TOKEN_PLAN_BASE_URL,
-                    "mimo-v2.5-pro",
                 ),
+                "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_TOKEN_PLAN_API_KEY",
                 "Xiaomi MiMo Token Plan endpoint.",
@@ -236,14 +238,14 @@ fn model_catalog(id: &str, slugs: &[&str]) -> ModelCatalog {
 
 fn preset(
     id: &str,
-    info: ProviderInfo,
+    info: ProviderEndpoint,
+    suggested_model: &str,
     catalog: &str,
     credential_env: &str,
     description: &str,
     icon_key: &str,
 ) -> ProviderPreset {
     let service_capabilities = info.service_capabilities.clone();
-    let suggested_model = info.default_model.clone();
     let display_name = info.name.clone();
     let model_catalog = ModelCatalogId::new(catalog).expect("static model catalog id is valid");
     let preset_id = ProviderPresetId::new(id).expect("static provider preset id is valid");
@@ -259,7 +261,7 @@ fn preset(
         credential_label: "API Key".to_string(),
         credential_env: Some(credential_env.to_string()),
         model_catalog,
-        suggested_model,
+        suggested_model: suggested_model.to_string(),
         icon_key: Some(icon_key.to_string()),
         service_capabilities,
     }

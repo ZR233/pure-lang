@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{InteractionKind, InteractionPayload, InteractionScope, InteractionStatus};
-use pl_model::{ModelInfo, ProviderConnectionMode, ProviderInfo};
+use pl_model::{ModelInfo, ProviderEndpoint};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -157,16 +157,15 @@ async fn serve_delayed_sse_body(
 
 fn test_config(base_url: String) -> StudioConfig {
     let mut model = ModelInfo::fallback("local-responses");
+    model.transport = pl_model::ModelTransportProfile::responses_http();
     model.parameters = vec![crate::ModelParameter {
         name: "effort".to_string(),
         label: None,
         candidates: vec!["none".to_string()],
         wire: std::collections::BTreeMap::new(),
     }];
-    let mut info = ProviderInfo::openai(Some(base_url));
-    info.connection_mode = ProviderConnectionMode::Http;
-    info.default_model = "local-responses".to_string();
-    let provider = crate::ProviderConfig::from_provider_info(info, vec![model]);
+    let info = ProviderEndpoint::openai(Some(base_url));
+    let provider = crate::ProviderConfig::from_endpoint(info, vec![model]);
     let provider_id = ProviderId::new("local").unwrap();
     let route = ModelRouteConfig {
         provider: provider_id.clone(),

@@ -4,15 +4,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pl_model::{
-    CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
-    SharedModelProvider, create_provider,
+    CompletionRequest, ModelInvocationContext, ModelRuntime, ReasoningConfig, ReasoningSummary,
 };
 #[cfg(test)]
 use pl_protocol::ErrorSeverity;
 use pl_protocol::{Message, MessageContent, MessageRole, PureError, Result};
-use pl_trace::AgentEventSender;
 #[cfg(test)]
-use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
+use pl_trace::{AgentEvent, AgentEventSender, TraceEvent, TracePartStatus};
 
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
@@ -69,7 +67,7 @@ fn generate_turn_id() -> String {
 /// 工具能力由调用方显式注册，并通过 `TurnOptions` 控制审批策略。
 #[derive(Debug)]
 pub struct TurnEngine {
-    provider: SharedModelProvider,
+    runtime: ModelRuntime,
     effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
     skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
@@ -93,58 +91,6 @@ pub struct TurnEngine {
 }
 
 impl TurnEngine {
-    pub fn new(provider: SharedModelProvider) -> Self {
-        Self {
-            provider,
-            effort: None,
-            skills: None,
-            skill_catalog: None,
-            lsp_runtime: None,
-            workspace: None,
-            workspace_instructions: None,
-            instruction_profile: None,
-            tool_profile: ToolProfile::Minimal,
-            tool_capabilities: ToolCapabilityConfig::default(),
-            runtime_options: CoreRuntimeOptions::default(),
-            context_compaction: ContextCompactionConfig::default(),
-            active_subagent: None,
-            tools: ToolRegistry::new(),
-            shared_tools: None,
-            local_sources: BTreeMap::new(),
-            tool_guards: BTreeMap::new(),
-        }
-    }
-
-    pub fn with_effort(provider: SharedModelProvider, effort: ReasoningEffort) -> Self {
-        Self {
-            provider,
-            effort: Some(effort),
-            skills: None,
-            skill_catalog: None,
-            lsp_runtime: None,
-            workspace: None,
-            workspace_instructions: None,
-            instruction_profile: None,
-            tool_profile: ToolProfile::Minimal,
-            tool_capabilities: ToolCapabilityConfig::default(),
-            runtime_options: CoreRuntimeOptions::default(),
-            context_compaction: ContextCompactionConfig::default(),
-            active_subagent: None,
-            tools: ToolRegistry::new(),
-            shared_tools: None,
-            local_sources: BTreeMap::new(),
-            tool_guards: BTreeMap::new(),
-        }
-    }
-
-    pub fn from_provider_info(info: ProviderInfo) -> Result<Self> {
-        Ok(Self::new(create_provider(info)?))
-    }
-
-    pub fn default_provider() -> Result<Self> {
-        Self::from_provider_info(ProviderInfo::default_provider())
-    }
-
     pub fn with_subagent_context(mut self, context: SubagentContext) -> Self {
         self.active_subagent = Some(context);
         self
@@ -351,7 +297,7 @@ impl TurnEngine {
         request: &ToolApprovalRequest,
         context: &ToolContext,
     ) -> ToolApprovalDecision {
-        let provider = self.provider.clone();
+        let provider = self.runtime.clone();
         let effort = self.effort.clone();
         let reasoning = effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
@@ -377,25 +323,19 @@ impl TurnEngine {
             tool_result: None,
             metadata: HashMap::new(),
         };
-        let completion_request = CompletionRequest::builder(provider.default_model())
+        let completion_request = CompletionRequest::builder()
             .instructions(include_str!("../../prompts/permission_review.md"))
             .messages(vec![message])
             .tool_choice("none")
             .temperature(Some(0.0))
             .max_tokens(512)
-            .store(Some(false))
             .reasoning(reasoning)
-            .stream(false)
             .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
-        match provider.stream_complete(completion_request, event_tx).await {
+        let invocation = ModelInvocationContext::new(Default::default(), event_tx);
+        match provider.complete(completion_request, invocation).await {
             Ok(response) => {
-                let content = response
-                    .raw_content
-                    .or(response.content)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
+                let content = response.content.unwrap_or_default().trim().to_string();
                 if content.is_empty() {
                     return ToolApprovalDecision::Denied {
                         reason: "AI reviewer returned an empty decision".to_string(),
@@ -412,27 +352,26 @@ impl TurnEngine {
         }
     }
 
-    pub fn run_turn<'a>(
-        &'a self,
-        session: &'a mut AgentSession,
+    pub async fn run_turn(
+        &self,
+        session: &mut AgentSession,
         request: TurnRequest,
-        event_tx: AgentEventSender,
-    ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
+    ) -> Result<TurnResult> {
         self.run_turn_with_options(
             session,
             request,
-            event_tx,
             self.runtime_options.default_turn_options.clone(),
         )
+        .await
     }
 
     pub async fn run_turn_with_options(
         &self,
         session: &mut AgentSession,
         request: TurnRequest,
-        event_tx: AgentEventSender,
         options: TurnOptions,
     ) -> Result<TurnResult> {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::disabled(event_tx);
         self.run_turn_with_trace(session, request, &mut recorder, options)
             .await
@@ -461,8 +400,8 @@ impl TurnEngine {
         &self,
         session: &mut AgentSession,
         request: ManualContextCompactionRequest,
-        event_tx: AgentEventSender,
     ) -> Result<Option<ContextCompactionSnapshot>> {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::disabled(event_tx);
         self.compact_session_with_trace(session, request, &mut recorder)
             .await
@@ -480,8 +419,7 @@ impl TurnEngine {
         recorder: &mut TraceRecorder,
     ) -> Result<Option<ContextCompactionSnapshot>> {
         let requested_trigger = request.trigger;
-        let model = self.provider.default_model().to_string();
-        let model_info = self.provider.model_info(&model);
+        let model_info = self.runtime.model().clone();
         let workspace_root = self
             .workspace
             .as_ref()
@@ -518,7 +456,7 @@ impl TurnEngine {
         )
         .request_schemas()
         .to_vec();
-        let capabilities = self.provider.effective_model_capabilities(&model);
+        let capabilities = self.runtime.effective_model_capabilities();
         let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
         let reasoning = self.effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
@@ -544,8 +482,7 @@ impl TurnEngine {
         let outcome = maybe_compact_session(
             session,
             ContextCompactionRequest {
-                provider: self.provider.as_ref(),
-                model: &model,
+                runtime: &self.runtime,
                 config: &self.context_compaction,
                 request_instructions: &bundle.instructions,
                 request_messages: &bundle.prelude_messages,

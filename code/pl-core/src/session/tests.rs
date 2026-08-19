@@ -1,5 +1,5 @@
 use super::tool_history::*;
-use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall};
+use pl_model::{CompletionResponse, TokenUsage, ToolCall};
 use pl_protocol::{ThreadPromptSnapshot, ToolCallCaller, ToolCallKind, ToolResultRecord};
 
 use super::*;
@@ -47,16 +47,11 @@ fn push_assistant_completion_response_adds_text_message() {
     let mut session = AgentSession::new();
     let response = CompletionResponse {
         content: Some("reply".to_string()),
-        raw_content: Some("reply".to_string()),
         reasoning_content: Some("thinking".to_string()),
         tool_calls: Vec::new(),
-        hosted_web_search_calls: Vec::new(),
         responses_context_items: Vec::new(),
         orchestration: Default::default(),
-        trace_events: Vec::new(),
-        next_sequence: 0,
         usage: TokenUsage::default(),
-        finish_reason: FinishReason::Stop,
         model: "test-model".to_string(),
         response_id: Some("resp-1".to_string()),
     };
@@ -87,16 +82,11 @@ fn push_assistant_completion_response_preserves_tool_call_history() {
     )];
     let response = CompletionResponse {
         content: Some("running".to_string()),
-        raw_content: Some("running".to_string()),
         reasoning_content: Some("thinking".to_string()),
         tool_calls: tool_calls.clone(),
-        hosted_web_search_calls: Vec::new(),
         responses_context_items: Vec::new(),
         orchestration: Default::default(),
-        trace_events: Vec::new(),
-        next_sequence: 0,
         usage: TokenUsage::default(),
-        finish_reason: FinishReason::ToolCalls,
         model: "test-model".to_string(),
         response_id: Some("resp-1".to_string()),
     };

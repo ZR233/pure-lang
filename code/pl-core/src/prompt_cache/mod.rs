@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::{EffectivePromptCachePolicy, ProviderInfo, ReasoningConfig, ToolSchema};
+use pl_model::{EffectivePromptCachePolicy, ProviderEndpoint, ReasoningConfig, ToolSchema};
 use pl_protocol::{
     Message, ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
 };
@@ -10,7 +10,7 @@ use crate::{AgentSession, canonical_json_hash};
 /// 计算 prompt generation 所需的固定请求属性。
 pub(crate) struct PromptCacheInput<'a> {
     pub scope: &'a str,
-    pub provider: &'a ProviderInfo,
+    pub provider: &'a ProviderEndpoint,
     pub model: &'a str,
     pub instructions: &'a str,
     pub prelude_messages: &'a [Message],
@@ -245,12 +245,10 @@ fn changed_instruction_section(
     PromptPrefixChangedReason::FixedPrefixChanged
 }
 
-fn provider_hash(provider: &ProviderInfo) -> Result<String, PureError> {
+fn provider_hash(provider: &ProviderEndpoint) -> Result<String, PureError> {
     let value = serde_json::json!({
         "name": provider.name,
         "baseUrl": provider.base_url,
-        "protocol": provider.protocol,
-        "connectionMode": provider.connection_mode,
         "toolWirePolicy": provider.tool_wire_policy,
         "applyPatchToolType": provider.apply_patch_tool_type,
         "serviceCapabilities": provider.service_capabilities,
@@ -331,7 +329,7 @@ fn canonicalize_json(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use pl_model::{ProviderInfo, ProviderWireProtocol, ReasoningSummary, ToolWirePolicy};
+    use pl_model::{ProviderEndpoint, ReasoningSummary, ToolWirePolicy};
     use pl_protocol::MessageRole;
     use pretty_assertions::assert_eq;
 
@@ -340,7 +338,7 @@ mod tests {
 
     fn input<'a>(
         scope: &'a str,
-        provider: &'a ProviderInfo,
+        provider: &'a ProviderEndpoint,
         model: &'a str,
         instructions: &'a str,
         tools: &'a [ToolSchema],
@@ -371,7 +369,7 @@ mod tests {
 
     #[test]
     fn context_changes_append_without_incrementing_generation() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         session.upsert_pinned_context(context_section("todo", 1, "Todo", "first").unwrap());
@@ -415,7 +413,7 @@ mod tests {
 
     #[test]
     fn compaction_creates_a_new_generation() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         let first = prepare_prompt_context(
@@ -467,7 +465,7 @@ mod tests {
 
     #[test]
     fn unsorted_tools_do_not_change_the_prompt_generation() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let first_tools = vec![
             ToolSchema::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
             ToolSchema::function("alpha", "", serde_json::json!({})),
@@ -509,7 +507,7 @@ mod tests {
 
     #[test]
     fn scope_switches_are_explicit_global_generation_boundaries() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         let first = prepare_prompt_context(
@@ -570,7 +568,7 @@ mod tests {
 
     #[test]
     fn fixed_provider_model_and_tool_changes_have_precise_reasons() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         prepare_prompt_context(
@@ -668,7 +666,7 @@ mod tests {
 
     #[test]
     fn provider_route_and_wire_policy_changes_have_provider_reason() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         prepare_prompt_context(
@@ -704,7 +702,6 @@ mod tests {
             PromptPrefixChangedReason::ProviderChanged
         );
 
-        routed.protocol = ProviderWireProtocol::Responses;
         routed.tool_wire_policy = ToolWirePolicy::NativeCustomTools;
         let wire_changed = prepare_prompt_context(
             &mut session,
@@ -727,7 +724,7 @@ mod tests {
 
     #[test]
     fn every_fixed_request_attribute_changes_the_generation() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let output_schema = serde_json::json!({"type": "object"});
         let reasoning = ReasoningConfig {
@@ -816,7 +813,7 @@ mod tests {
 
     #[test]
     fn every_fixed_instruction_layer_has_a_precise_change_reason() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let tools = Vec::new();
         let sections = BTreeMap::from([
             ("base".to_string(), "v1".to_string()),
@@ -880,7 +877,7 @@ mod tests {
 
     #[test]
     fn openai_cache_key_is_stable_within_generation_and_rotates_at_boundary() {
-        let provider = ProviderInfo::openai(None);
+        let provider = ProviderEndpoint::openai(None);
         let tools = Vec::new();
         let mut session = AgentSession::new();
         let prompt = prepare_prompt_context(
@@ -912,7 +909,7 @@ mod tests {
 
     #[test]
     fn recursive_schema_key_order_does_not_change_the_prompt_generation() {
-        let provider = ProviderInfo::deepseek(None);
+        let provider = ProviderEndpoint::deepseek(None);
         let first_tools = stable_tool_schemas(vec![ToolSchema::function(
             "lookup",
             "lookup",

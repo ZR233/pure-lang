@@ -261,6 +261,7 @@ pub struct ToolResultReceipt {
 #[serde(rename_all = "snake_case")]
 pub enum ResponsesContextItemKind {
     Reasoning,
+    WebSearchCall,
     ToolSearchCall,
     ToolSearchOutput,
     Program,
@@ -280,6 +281,7 @@ impl ResponsesContextItem {
     pub fn from_wire(value: serde_json::Value) -> Option<Self> {
         let kind = match value.get("type").and_then(serde_json::Value::as_str)? {
             "reasoning" => ResponsesContextItemKind::Reasoning,
+            "web_search_call" => ResponsesContextItemKind::WebSearchCall,
             "tool_search_call" => ResponsesContextItemKind::ToolSearchCall,
             "tool_search_output" => ResponsesContextItemKind::ToolSearchOutput,
             "program" => ResponsesContextItemKind::Program,
@@ -289,7 +291,6 @@ impl ResponsesContextItem {
             | "custom_tool_call"
             | "function_call_output"
             | "custom_tool_call_output"
-            | "web_search_call"
             | "file_search_call"
             | "computer_call"
             | "computer_call_output"

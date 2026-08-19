@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, TokenUsage};
+use pl_model::{
+    CompletionRequest, ModelInvocationContext, ModelRuntime, ReasoningConfig, TokenUsage,
+};
 use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
 
@@ -11,14 +13,14 @@ use crate::core::progress::ProgressEmitter;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn compact_local(
-    provider: &(impl ModelProvider + ?Sized),
-    model: &str,
+    runtime: &ModelRuntime,
     config: &ContextCompactionConfig,
     request_instructions: &str,
     request_messages: &[Message],
     session_items: &[ModelContextItem],
     working_context_tail: Option<&Message>,
     event_tx: AgentEventSender,
+    prompt_cache_key: Option<String>,
     recorder: &mut TraceRecorder,
     progress: &mut Option<&mut ProgressEmitter>,
     max_output_tokens: Option<u64>,
@@ -43,18 +45,16 @@ pub(super) async fn compact_local(
     }));
     let mut max_tokens = Some(max_output_tokens.unwrap_or(4096).min(4096));
     loop {
-        let completion_request = CompletionRequest::builder(model)
+        let completion_request = CompletionRequest::builder()
             .instructions(request_instructions.to_string())
             .input(input.clone())
             .tool_choice("none")
             .maybe_max_tokens(max_tokens)
-            .store(Some(false))
             .reasoning(None::<ReasoningConfig>)
             .build();
-        let response = match provider
-            .stream_complete(completion_request, event_tx.clone())
-            .await
-        {
+        let invocation = ModelInvocationContext::new(Default::default(), event_tx.clone())
+            .with_prompt_cache_key(prompt_cache_key.clone());
+        let response = match runtime.complete(completion_request, invocation).await {
             Ok(response) => response,
             Err(error) if max_tokens.is_some() && is_unsupported_max_output_tokens(&error) => {
                 max_tokens = None;

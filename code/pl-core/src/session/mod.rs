@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
+use pl_model::{CompletionResponse, ModelSession, ToolCall};
 use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
@@ -33,7 +33,7 @@ struct AgentSessionState {
     working_state: AgentWorkingState,
     revision: u64,
     prompt_cache_key: Option<String>,
-    transport_session: ModelTransportSession,
+    model_session: ModelSession,
 }
 
 /// child agent 从 parent canonical session 继承历史的策略。
@@ -220,7 +220,7 @@ impl AgentSession {
         let _ = self.replace_prompt_metadata(prompt);
         let state = Arc::make_mut(&mut self.state);
         state.prompt_cache_key = None;
-        state.transport_session = ModelTransportSession::default();
+        state.model_session = ModelSession::default();
     }
 
     pub fn session_note(&self) -> Option<&SessionNote> {
@@ -427,8 +427,8 @@ impl AgentSession {
         self.state.prompt_cache_key.as_deref()
     }
 
-    pub fn transport_session(&self) -> ModelTransportSession {
-        self.state.transport_session.clone()
+    pub fn model_session(&self) -> ModelSession {
+        self.state.model_session.clone()
     }
 
     fn push_message(&mut self, message: Message) {

@@ -24,7 +24,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
     tokio::fs::write(&outside_file, "external ok")
         .await
         .unwrap();
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "call-1",
@@ -100,7 +100,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
 
 #[tokio::test]
 async fn unknown_tool_records_one_terminal_event_and_tool_result() {
-    let core = TurnEngine::default_provider().unwrap();
+    let core = test_turn_engine();
     let tool_call = ToolCall::function(
         "provider-item-1",
         "missing_tool",
@@ -151,7 +151,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
 
 #[tokio::test]
 async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(WriteFileTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -227,7 +227,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
 
 #[tokio::test]
 async fn cancelling_running_tool_records_interrupted_terminal_event() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_test_tool(SleepingTool);
     let tool_call = ToolCall::function(
         "provider-item-1",

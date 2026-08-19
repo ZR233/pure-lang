@@ -248,7 +248,7 @@ fn assert_preserved_config(installed: &StudioConfig, copied: &StudioConfig) -> R
 fn validate_live_route_and_mcp(config: &StudioConfig) -> Result<()> {
     let route = config.resolve_role(StudioRole::Executor)?;
     ensure!(
-        route.provider_info.protocol == ProviderWireProtocol::ChatCompletions,
+        route.model.transport.protocol == ProviderWireProtocol::ChatCompletions,
         "executor provider does not use the DeepSeek Chat protocol"
     );
     ensure!(

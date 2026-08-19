@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use pl_model::{
-    CompletionEventStream, CompletionRequest, CompletionResponse, FinishReason, ModelCapabilities,
-    ModelInfo, ModelTransportProfile, OpenAiCompactionMode, ProviderCapabilities, ProviderInfo,
-    ProviderWireProtocol, TokenUsage,
+    ModelInfo, ModelRuntime, ModelTransportProfile, OpenAiCompactionMode, ProviderEndpoint,
+    ProviderWireProtocol,
 };
-use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
+use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem};
 use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
 use pretty_assertions::assert_eq;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 use super::history::{
     has_compactable_history, is_compaction_summary, message_text, recent_user_messages,
@@ -90,7 +91,7 @@ fn manual_compaction_accepts_one_real_message_but_auto_does_not() {
 #[tokio::test]
 async fn local_context_pressure_retry_emits_progress_and_preserves_summary_order() {
     let provider =
-        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure);
+        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure).await;
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::disabled(event_tx.clone());
     let mut progress = ProgressEmitter::new("turn-compact", ProgressVerbosity::Normal);
@@ -111,7 +112,8 @@ async fn local_context_pressure_retry_emits_progress_and_preserves_summary_order
     .unwrap();
 
     assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
-    assert_eq!(provider.recorded_input_counts(), vec![4, 3]);
+    // Chat wire messages include the compaction instruction as a system message.
+    assert_eq!(provider.recorded_wire_item_counts(), vec![5, 4]);
     assert!(session.messages().last().is_some_and(is_compaction_summary));
     assert_eq!(
         runtime_progress_texts(&mut event_rx),
@@ -128,7 +130,8 @@ async fn local_retries_without_unsupported_max_output_tokens() {
     let provider = FakeCompactionProvider::new(
         test_model(),
         FakeCompactionFailure::UnsupportedMaxOutputTokens,
-    );
+    )
+    .await;
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::disabled(event_tx.clone());
     let mut session = test_session();
@@ -141,13 +144,15 @@ async fn local_retries_without_unsupported_max_output_tokens() {
     .await
     .unwrap();
 
-    assert_eq!(provider.recorded_input_counts(), vec![4, 4]);
+    // Chat wire messages include the compaction instruction as a system message.
+    assert_eq!(provider.recorded_wire_item_counts(), vec![5, 5]);
     assert_eq!(provider.recorded_max_tokens(), vec![Some(4096), None]);
 }
 
 #[tokio::test]
 async fn local_empty_summary_preserves_session_history_and_revision() {
-    let provider = FakeCompactionProvider::new(test_model(), FakeCompactionFailure::EmptySummary);
+    let provider =
+        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::EmptySummary).await;
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::disabled(event_tx.clone());
     let mut session = test_session();
@@ -169,10 +174,9 @@ async fn local_empty_summary_preserves_session_history_and_revision() {
 
 #[tokio::test]
 async fn remote_failure_does_not_replace_session_history_or_revision() {
-    let provider = FakeCompactionProvider::new(
-        responses_test_model(),
-        FakeCompactionFailure::ContextPressure,
-    );
+    let provider =
+        FakeCompactionProvider::new(responses_test_model(), FakeCompactionFailure::RemoteFailure)
+            .await;
     let mut session = test_session();
     let original_items = session.items().to_vec();
     let original_revision = session.revision();
@@ -188,20 +192,15 @@ async fn remote_failure_does_not_replace_session_history_or_revision() {
     .await
     .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("does not support remote context compaction")
-    );
+    assert!(error.to_string().contains("remote compaction failed"));
     assert_eq!(session.items(), original_items.as_slice());
     assert_eq!(session.revision(), original_revision);
 }
 
 #[tokio::test]
 async fn chat_completions_provider_always_uses_local_compaction() {
-    let mut provider =
-        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure);
-    provider.info.protocol = ProviderWireProtocol::ChatCompletions;
+    let provider =
+        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure).await;
     let mut session = test_session();
     let config =
         ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
@@ -222,7 +221,8 @@ async fn chat_completions_provider_always_uses_local_compaction() {
         snapshot.implementation,
         ContextCompactionImplementation::Local
     );
-    assert_eq!(provider.recorded_input_counts(), vec![4, 3]);
+    // Chat wire messages include the compaction instruction as a system message.
+    assert_eq!(provider.recorded_wire_item_counts(), vec![5, 4]);
 }
 
 #[test]
@@ -283,10 +283,9 @@ fn compaction_request<'a>(
     event_tx: AgentEventSender,
     recorder: &'a mut TraceRecorder,
     progress: Option<&'a mut ProgressEmitter>,
-) -> ContextCompactionRequest<'a, FakeCompactionProvider> {
+) -> ContextCompactionRequest<'a> {
     ContextCompactionRequest {
-        provider,
-        model: "compact-test",
+        runtime: &provider.runtime,
         config,
         request_instructions: "",
         request_messages: &[],
@@ -322,134 +321,147 @@ enum FakeCompactionFailure {
     ContextPressure,
     UnsupportedMaxOutputTokens,
     EmptySummary,
+    RemoteFailure,
 }
 
 #[derive(Debug)]
 struct FakeCompactionProvider {
-    info: ProviderInfo,
-    model: ModelInfo,
-    calls: Arc<Mutex<Vec<CompletionRequest>>>,
-    first_failure: FakeCompactionFailure,
+    runtime: ModelRuntime,
+    requests: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
 impl FakeCompactionProvider {
-    fn new(model: ModelInfo, first_failure: FakeCompactionFailure) -> Self {
-        let mut info = ProviderInfo::openai(Some("http://example.invalid".to_string()));
-        info.default_model = model.slug.clone();
+    async fn new(model: ModelInfo, failure: FakeCompactionFailure) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&requests);
+        let protocol = model.transport.protocol;
+        tokio::spawn(async move {
+            let response_count = match failure {
+                FakeCompactionFailure::EmptySummary | FakeCompactionFailure::RemoteFailure => 1,
+                FakeCompactionFailure::ContextPressure
+                | FakeCompactionFailure::UnsupportedMaxOutputTokens => 2,
+            };
+            for attempt in 0..response_count {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_http_json_request(&mut socket).await;
+                captured.lock().unwrap().push(request);
+                let response = match (failure, attempt) {
+                    (FakeCompactionFailure::ContextPressure, 0) => {
+                        error_response("context token limit exceeded")
+                    }
+                    (FakeCompactionFailure::UnsupportedMaxOutputTokens, 0) => {
+                        error_response("Unsupported parameter: max_output_tokens")
+                    }
+                    (FakeCompactionFailure::RemoteFailure, 0) => {
+                        error_response("remote compaction failed")
+                    }
+                    (FakeCompactionFailure::RemoteFailure, _) => unreachable!(),
+                    (FakeCompactionFailure::EmptySummary, _) => {
+                        completion_response(protocol, "   ")
+                    }
+                    (FakeCompactionFailure::ContextPressure, _)
+                    | (FakeCompactionFailure::UnsupportedMaxOutputTokens, _) => {
+                        completion_response(protocol, "summary")
+                    }
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+            }
+        });
+        let endpoint = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
         Self {
-            info,
-            model,
-            calls: Arc::new(Mutex::new(Vec::new())),
-            first_failure,
+            runtime: ModelRuntime::new(endpoint, model).unwrap(),
+            requests,
         }
     }
 
-    fn recorded_input_counts(&self) -> Vec<usize> {
-        self.calls
+    fn recorded_wire_item_counts(&self) -> Vec<usize> {
+        self.requests
             .lock()
             .unwrap()
             .iter()
-            .map(|request| request.input.len())
+            .map(|request| {
+                request
+                    .get("input")
+                    .or_else(|| request.get("messages"))
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len)
+            })
             .collect()
     }
 
     fn recorded_max_tokens(&self) -> Vec<Option<u64>> {
-        self.calls
+        self.requests
             .lock()
             .unwrap()
             .iter()
-            .map(|request| request.max_tokens)
+            .map(|request| {
+                request
+                    .get("max_output_tokens")
+                    .or_else(|| request.get("max_completion_tokens"))
+                    .or_else(|| request.get("max_tokens"))
+                    .and_then(serde_json::Value::as_u64)
+            })
             .collect()
     }
 }
 
-impl ModelProvider for FakeCompactionProvider {
-    fn info(&self) -> &ProviderInfo {
-        &self.info
-    }
-
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::STREAMING
-    }
-
-    async fn stream_events(&self, _request: CompletionRequest) -> Result<CompletionEventStream> {
-        Err(PureError::LlmError(
-            "fake compaction provider does not stream events".to_string(),
-        ))
-    }
-
-    async fn stream_complete(
-        &self,
-        request: CompletionRequest,
-        _event_tx: AgentEventSender,
-    ) -> Result<CompletionResponse> {
-        let mut calls = self.calls.lock().unwrap();
-        calls.push(request);
-        if calls.len() == 1 {
-            match self.first_failure {
-                FakeCompactionFailure::ContextPressure => {
-                    return Err(PureError::LlmError(
-                        "context token limit exceeded".to_string(),
-                    ));
-                }
-                FakeCompactionFailure::UnsupportedMaxOutputTokens => {
-                    return Err(PureError::LlmError(
-                        "Unsupported parameter: max_output_tokens".to_string(),
-                    ));
-                }
-                FakeCompactionFailure::EmptySummary => {}
-            }
-        }
-        let content = match self.first_failure {
-            FakeCompactionFailure::EmptySummary => Some("   ".to_string()),
-            FakeCompactionFailure::ContextPressure
-            | FakeCompactionFailure::UnsupportedMaxOutputTokens => Some("summary".to_string()),
+async fn read_http_json_request(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = socket.read(&mut buffer).await.unwrap();
+        assert_ne!(read, 0);
+        bytes.extend_from_slice(&buffer[..read]);
+        let text = String::from_utf8_lossy(&bytes);
+        let Some((headers, body)) = text.split_once("\r\n\r\n") else {
+            continue;
         };
-        Ok(CompletionResponse {
-            response_id: None,
-            content: content.clone(),
-            raw_content: content,
-            reasoning_content: None,
-            tool_calls: Vec::new(),
-            hosted_web_search_calls: Vec::new(),
-            responses_context_items: Vec::new(),
-            orchestration: Default::default(),
-            trace_events: Vec::new(),
-            next_sequence: 0,
-            usage: TokenUsage {
-                prompt_tokens: 1,
-                completion_tokens: 2,
-                total_tokens: 3,
-                cached_prompt_tokens: 0,
-                cache_write_tokens: 0,
-                reasoning_tokens: 0,
-            },
-            finish_reason: FinishReason::Stop,
-            model: self.model.slug.clone(),
-        })
-    }
-
-    async fn auth_token(&self) -> Result<Option<String>> {
-        Ok(None)
-    }
-
-    fn model_info(&self, model: &str) -> ModelInfo {
-        if model == self.model.slug {
-            self.model.clone()
-        } else {
-            ModelInfo::fallback(model)
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or_default();
+        if body.len() >= content_length {
+            return serde_json::from_str(&body[..content_length]).unwrap();
         }
     }
+}
 
-    fn list_models(&self) -> Vec<ModelInfo> {
-        vec![self.model.clone()]
-    }
+fn error_response(message: &str) -> String {
+    let body = serde_json::json!({
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "code": "invalid_request"
+        }
+    })
+    .to_string();
+    format!(
+        "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
 
-    fn effective_model_capabilities(&self, model: &str) -> ModelCapabilities {
-        self.model_info(model).capabilities
-    }
-
-    fn default_model(&self) -> &str {
-        &self.info.default_model
-    }
+fn completion_response(protocol: ProviderWireProtocol, content: &str) -> String {
+    let body = match protocol {
+        ProviderWireProtocol::Responses => format!(
+            "data: {{\"type\":\"response.output_text.delta\",\"item_id\":\"msg-1\",\"delta\":{}}}\n\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp-1\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}}}}\n\ndata: [DONE]\n\n",
+            serde_json::to_string(content).unwrap()
+        ),
+        ProviderWireProtocol::ChatCompletions => format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":null}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}}}\n\ndata: [DONE]\n\n",
+            serde_json::to_string(content).unwrap()
+        ),
+    };
+    format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
 }

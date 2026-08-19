@@ -1,15 +1,17 @@
+mod client;
 mod input;
 
 use futures::FutureExt;
 use pl_model::{
-    SearchCommands, SearchRequest, SearchSettings, ToolSchema, WebSearchAction, WebSearchClient,
-    WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
+    SearchCommands, SearchRequest, SearchSettings, ToolSchema, WebSearchAction, WebSearchConfig,
+    WebSearchFilters, WebSearchMode, WebSearchUserLocation,
 };
 use pl_protocol::{MessageRole, PureError};
 use serde_json::{Value, json};
 
 use crate::turn::ToolEffect;
 
+pub(crate) use self::client::WebSearchClient;
 use self::input::parse_commands;
 use super::{
     BoxFuture, FunctionToolDefinition, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput,
@@ -30,7 +32,7 @@ pub struct WebSearchTool {
 }
 
 impl WebSearchTool {
-    pub fn new(
+    pub(crate) fn new(
         client: WebSearchClient,
         model: impl Into<String>,
         config: &WebSearchConfig,

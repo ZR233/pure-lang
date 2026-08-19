@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use pl_model::{
-    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo,
+    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderEndpoint,
     ProviderServiceCapabilities, ToolWirePolicy,
 };
 use pl_protocol::{PureError, Result};
@@ -69,7 +69,7 @@ impl ProviderConfig {
     /// 构造内置 DeepSeek provider preset，不附带任何产品角色默认值。
     pub fn deepseek_preset() -> Self {
         Self::from_bundled_catalog(
-            ProviderInfo::deepseek(None),
+            ProviderEndpoint::deepseek(None),
             ModelCatalogId::new("deepseek").expect("static model catalog id is valid"),
             Vec::new(),
         )
@@ -77,13 +77,13 @@ impl ProviderConfig {
     }
 
     /// 从运行时 provider 信息和显式模型目录创建配置。
-    pub fn from_provider_info(info: ProviderInfo, models: Vec<ModelInfo>) -> Self {
-        Self::from_explicit_models(info, models)
+    pub fn from_endpoint(endpoint: ProviderEndpoint, models: Vec<ModelInfo>) -> Self {
+        Self::from_explicit_models(endpoint, models)
     }
 
     /// 从 PL 内置模型目录创建 provider 配置。
     pub fn from_bundled_catalog(
-        info: ProviderInfo,
+        info: ProviderEndpoint,
         catalog: ModelCatalogId,
         additional_models: Vec<ModelInfo>,
     ) -> Self {
@@ -98,7 +98,7 @@ impl ProviderConfig {
     }
 
     /// 从完全显式的模型目录创建 provider 配置。
-    pub fn from_explicit_models(info: ProviderInfo, models: Vec<ModelInfo>) -> Self {
+    pub fn from_explicit_models(info: ProviderEndpoint, models: Vec<ModelInfo>) -> Self {
         Self::from_parts(
             info,
             ProviderModelCatalogConfig::Explicit {
@@ -108,7 +108,7 @@ impl ProviderConfig {
         )
     }
 
-    fn from_parts(info: ProviderInfo, catalog: ProviderModelCatalogConfig) -> Self {
+    fn from_parts(info: ProviderEndpoint, catalog: ProviderModelCatalogConfig) -> Self {
         let service_capabilities = info.service_capabilities.clone();
         Self {
             preset: None,
@@ -262,19 +262,11 @@ impl ProviderConfig {
         }
     }
 
-    /// 使用角色路由选中的模型创建 provider runtime 信息。
-    pub fn to_provider_info(&self, model: &str) -> Result<ProviderInfo> {
-        let model_info = self
-            .effective_models()?
-            .into_iter()
-            .find(|candidate| candidate.slug == model)
-            .ok_or_else(|| PureError::ConfigError(format!("unknown model: {model}")))?;
-        Ok(ProviderInfo {
-            protocol: model_info.transport.protocol,
-            connection_mode: model_info.transport.default_connection_mode,
+    /// 解析不包含模型与 transport 事实的 runtime endpoint。
+    pub fn to_endpoint(&self) -> Result<ProviderEndpoint> {
+        Ok(ProviderEndpoint {
             name: self.name.clone(),
             base_url: self.base_url.clone(),
-            default_model: model.to_string(),
             bearer_token: self.resolved_bearer_token(),
             http_headers: self.http_headers.clone(),
             tool_wire_policy: self.tool_wire_policy,

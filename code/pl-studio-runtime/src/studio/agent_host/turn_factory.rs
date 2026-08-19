@@ -16,7 +16,6 @@ use pl_core::{
     ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
     plan_web_search,
 };
-use pl_model::create_provider_with_catalog;
 
 use crate::config::ConfigRuntime;
 use crate::studio::runtime::SkillCatalogRuntime;
@@ -200,17 +199,13 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         };
         let route = config.models.resolve(&model_role)?;
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
-        let provider = create_provider_with_catalog(route.provider_info, route.models)?;
-        let mut builder = TurnEngineBuilder::new(provider)
+        let mut builder = TurnEngineBuilder::from_route(&route)?
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(config.skills.clone())
             .with_skill_catalog(skill_catalog.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
         if config.runtime.tool_capabilities.mcp {
             builder = builder.with_shared_tool_registry(self.mcp_shared_tools.clone());
-        }
-        if let Some(effort) = route.effort {
-            builder = builder.with_effort(effort);
         }
         let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
             .with_workspace_instructions(workspace_instructions.clone());

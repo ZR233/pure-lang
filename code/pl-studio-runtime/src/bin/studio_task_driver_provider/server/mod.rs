@@ -224,6 +224,7 @@ fn write_config(home: &Path, base_url: String) -> Result<()> {
     std::fs::create_dir_all(home)
         .with_context(|| format!("failed to create config home {}", home.display()))?;
     let mut model = ModelInfo::fallback("local-responses");
+    model.transport = pl_model::ModelTransportProfile::responses_http();
     model.context_window = Some(128_000);
     model.parameters = vec![ModelParameter {
         name: "effort".to_string(),
@@ -231,10 +232,8 @@ fn write_config(home: &Path, base_url: String) -> Result<()> {
         candidates: vec!["none".to_string()],
         wire: BTreeMap::new(),
     }];
-    let mut info = pl_model::ProviderInfo::openai(Some(base_url));
-    info.connection_mode = pl_model::ProviderConnectionMode::Http;
-    info.default_model = "local-responses".to_string();
-    let provider = ProviderConfig::from_provider_info(info, vec![model]);
+    let info = pl_model::ProviderEndpoint::openai(Some(base_url));
+    let provider = ProviderConfig::from_endpoint(info, vec![model]);
     let provider_id = ProviderId::new("local")?;
     let route = ModelRouteConfig {
         provider: provider_id.clone(),

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
 use pl_model::{
-    ModelInfo, ModelParameter, ModelTransportProfile, ProviderConnectionMode, ProviderInfo,
+    ModelInfo, ModelParameter, ModelTransportProfile, ProviderConnectionMode, ProviderEndpoint,
     ProviderWireProtocol,
 };
 
@@ -174,16 +174,9 @@ impl ProviderEdit {
                     )));
                 }
                 let current_custom = current.filter(|provider| provider.preset_id().is_none());
-                let representative_transport = custom_models
-                    .first()
-                    .map(|model| model.transport.clone())
-                    .unwrap_or_else(ModelTransportProfile::chat_completions_http);
-                let info = ProviderInfo {
-                    protocol: representative_transport.protocol,
-                    connection_mode: representative_transport.default_connection_mode,
+                let info = ProviderEndpoint {
                     name: name.clone(),
                     base_url: base_url.clone(),
-                    default_model: String::new(),
                     bearer_token: bearer_token.clone(),
                     http_headers: current_custom.and_then(|provider| provider.http_headers.clone()),
                     tool_wire_policy: current_custom
@@ -195,7 +188,7 @@ impl ProviderEdit {
                         .and_then(|provider| provider.service_capabilities().ok())
                         .unwrap_or_default(),
                 };
-                let mut config = ProviderConfig::from_provider_info(info, custom_models);
+                let mut config = ProviderConfig::from_endpoint(info, custom_models);
                 config.bearer_token_env =
                     current_custom.and_then(|provider| provider.bearer_token_env.clone());
                 config

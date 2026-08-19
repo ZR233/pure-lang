@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionResponse, CompletionTraceContext, ModelProvider, ProviderInfo,
-    ReasoningConfig, ReasoningSummary, create_provider,
+    CompletionRequest, CompletionResponse, CompletionTraceContext, ModelInvocationContext,
+    ModelRuntime, ModelSession, ProviderEndpoint, ReasoningConfig, ReasoningSummary,
+    default_models, zhipu_default_model_slugs,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 use pl_trace::{AgentEvent, TraceDelta};
@@ -36,58 +37,29 @@ fn live_api_key() -> Option<String> {
 }
 
 fn zhipu_disabled_request() -> CompletionRequest {
-    CompletionRequest {
-        model: ProviderInfo::zhipu(None).default_model,
-        instructions: Some("请用简短中文回答。".to_string()),
-        input: vec![user_message("请回答：2 + 2 等于几？").into()],
-        tools: Vec::new(),
-        tool_choice: "auto".to_string(),
-        parallel_tool_calls: false,
-        temperature: None,
-        max_tokens: Some(128),
-        store: None,
-        previous_response_id: None,
-        prompt_cache_key: None,
-        reasoning: Some(ReasoningConfig {
+    CompletionRequest::builder()
+        .instructions("请用简短中文回答。")
+        .messages(vec![user_message("请回答：2 + 2 等于几？")])
+        .max_tokens(128)
+        .reasoning(Some(ReasoningConfig {
             effort: Some("none".to_string()),
             summary: Some(ReasoningSummary::Disabled),
-        }),
-        stream: true,
-        trace: None,
-        transport_session: Default::default(),
-    }
+        }))
+        .build()
 }
 
 fn zhipu_thinking_request() -> CompletionRequest {
-    CompletionRequest {
-        model: ProviderInfo::zhipu(None).default_model,
-        instructions: Some(
+    CompletionRequest::builder()
+        .instructions(
             "请先思考，最后用一句中文简短作答。所有可见答案必须放在 <final>...</final> 中，不要输出标签之外的普通正文。"
-                .to_string(),
-        ),
-        input: vec![user_message("比较 9.11 和 9.8 哪个更大？").into()],
-        tools: Vec::new(),
-        tool_choice: "auto".to_string(),
-        parallel_tool_calls: false,
-        temperature: None,
-        max_tokens: Some(1024),
-        store: None,
-        previous_response_id: None,
-        prompt_cache_key: None,
-        reasoning: Some(ReasoningConfig {
+        )
+        .messages(vec![user_message("比较 9.11 和 9.8 哪个更大？")])
+        .max_tokens(1024)
+        .reasoning(Some(ReasoningConfig {
             effort: Some("enabled".to_string()),
             summary: Some(ReasoningSummary::Enabled),
-        }),
-        stream: true,
-        trace: Some(CompletionTraceContext {
-            session_id: "zhipu-live-session".to_string(),
-            turn_id: "zhipu-live-thinking-turn".to_string(),
-            inference_id: "zhipu-live-thinking-inference".to_string(),
-            plan_mode: false,
-            trace_sequence_base: 0,
-        }),
-        transport_session: Default::default(),
-    }
+        }))
+        .build()
 }
 
 async fn collect_trace_delta_counts(
@@ -118,13 +90,27 @@ async fn run_zhipu(
     api_key: String,
     request: CompletionRequest,
 ) -> Option<(CompletionResponse, TraceDeltaCounts)> {
-    let mut info = ProviderInfo::zhipu(None);
+    let mut info = ProviderEndpoint::zhipu(None);
     info.bearer_token = Some(api_key);
-    let provider = create_provider(info).unwrap();
+    let model_slug = zhipu_default_model_slugs()[0];
+    let model = default_models()
+        .into_iter()
+        .find(|model| model.slug == model_slug)
+        .expect("Zhipu default model catalog must contain its selected model");
+    let runtime = ModelRuntime::new(info, model).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
+    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
+        CompletionTraceContext {
+            session_id: "zhipu-live-session".to_string(),
+            turn_id: "zhipu-live-turn".to_string(),
+            inference_id: "zhipu-live-inference".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        },
+    );
 
-    let response = match provider.stream_complete(request, event_tx).await {
+    let response = match runtime.complete(request, context).await {
         Ok(response) => response,
         Err(error) if is_live_quota_error(&error.to_string()) => {
             eprintln!("skipping live Zhipu API test: {error}");

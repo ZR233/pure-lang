@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::{ModelInfo, ProviderConnectionMode, ProviderInfo};
+use pl_model::{ModelInfo, ProviderConnectionMode, ProviderEndpoint};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -31,7 +31,7 @@ fn resolve_uses_route_as_the_only_default_model_source() {
 
     assert_eq!(resolved.provider_id, ProviderId::new("deepseek").unwrap());
     assert_eq!(resolved.model.slug, "deepseek-v4-flash");
-    assert_eq!(resolved.provider_info.default_model, "deepseek-v4-flash");
+    assert_eq!(resolved.endpoint.name, "DeepSeek");
     assert_eq!(resolved.effort, Some(ReasoningEffort::new("high")));
 }
 
@@ -77,21 +77,38 @@ fn validate_rejects_missing_provider_model_and_effort() {
 }
 
 #[test]
-fn provider_runtime_info_is_created_only_after_route_selects_model() {
-    let provider = ProviderConfig::from_provider_info(
-        ProviderInfo::deepseek(None),
+fn route_resolution_binds_one_model_to_the_endpoint() {
+    let provider = ProviderConfig::from_endpoint(
+        ProviderEndpoint::deepseek(None),
         ProviderConfig::deepseek_preset()
             .effective_models()
             .unwrap(),
     );
-    let flash = provider.to_provider_info("deepseek-v4-flash").unwrap();
-    let info = provider.to_provider_info("deepseek-v4-pro").unwrap();
+    let provider_id = ProviderId::new("deepseek").unwrap();
+    let role = AgentRoleId::new("executor").unwrap();
+    let config = AgentModelConfig {
+        providers: BTreeMap::from([(provider_id.clone(), provider)]),
+        routes: BTreeMap::from([(
+            role.clone(),
+            ModelRouteConfig {
+                provider: provider_id,
+                model: "deepseek-v4-pro".to_string(),
+                effort: Some(ReasoningEffort::new("high")),
+            },
+        )]),
+    };
 
-    assert_eq!(info.default_model, "deepseek-v4-pro");
-    assert_eq!(flash.protocol, pl_model::ProviderWireProtocol::Responses);
-    assert_eq!(info.protocol, pl_model::ProviderWireProtocol::Responses);
-    assert_eq!(flash.connection_mode, ProviderConnectionMode::Http);
-    assert_eq!(info.connection_mode, ProviderConnectionMode::Http);
+    let resolved = config.resolve(&role).unwrap();
+    assert_eq!(resolved.endpoint.name, "DeepSeek");
+    assert_eq!(resolved.model.slug, "deepseek-v4-pro");
+    assert_eq!(
+        resolved.model.transport.protocol,
+        pl_model::ProviderWireProtocol::Responses
+    );
+    assert_eq!(
+        resolved.model.transport.default_connection_mode,
+        ProviderConnectionMode::Http
+    );
 }
 
 #[test]
@@ -165,18 +182,18 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
     };
 
     config.validate().unwrap();
+    let executor = config
+        .resolve(&AgentRoleId::new("executor").unwrap())
+        .unwrap();
+    let reviewer = config
+        .resolve(&AgentRoleId::new("reviewer").unwrap())
+        .unwrap();
     assert_eq!(
-        config.providers[&websocket_id]
-            .to_provider_info("gpt-5.6-sol")
-            .unwrap()
-            .connection_mode,
+        executor.model.transport.default_connection_mode,
         ProviderConnectionMode::WebSocket
     );
     assert_eq!(
-        config.providers[&http_id]
-            .to_provider_info("gpt-5.6-sol")
-            .unwrap()
-            .connection_mode,
+        reviewer.model.transport.default_connection_mode,
         ProviderConnectionMode::Http
     );
     assert_eq!(

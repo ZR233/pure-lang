@@ -56,7 +56,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     );
     let installed_route = installed_config.resolve_role(StudioRole::Executor)?;
     ensure!(
-        installed_route.provider_info.bearer_token.is_some(),
+        installed_route.endpoint.bearer_token.is_some(),
         "installed executor route has no resolved credential"
     );
     eprintln!(
@@ -78,7 +78,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         "isolated live config changed the executor route"
     );
     ensure!(
-        isolated_route.provider_info.bearer_token.is_some(),
+        isolated_route.endpoint.bearer_token.is_some(),
         "isolated live config did not retain the executor credential"
     );
     let store = StudioStore::open(&database_path).await?;

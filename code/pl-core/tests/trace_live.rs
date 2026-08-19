@@ -11,6 +11,8 @@ use pretty_assertions::{assert_eq, assert_ne};
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
 
+mod support;
+
 struct TempWorkspace {
     path: PathBuf,
 }
@@ -48,17 +50,12 @@ fn live_api_key() -> Option<String> {
 }
 
 async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
-    let mut provider = pl_model::ProviderInfo::deepseek(None);
-    provider.bearer_token = Some(api_key);
-    let model = pl_model::default_models()
-        .into_iter()
-        .find(|model| model.slug == provider.default_model)
-        .unwrap_or_else(|| pl_model::ModelInfo::fallback(&provider.default_model));
     let capabilities = ToolCapabilityConfig {
         skills: false,
         ..ToolCapabilityConfig::default()
     };
-    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
+    let route = support::deepseek_route(api_key);
+    let mut core = TurnEngineBuilder::from_route(&route)
         .unwrap()
         .with_tool_capabilities(capabilities)
         .build();

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionTraceContext, ModelProvider, ProviderInfo, ReasoningConfig,
-    ReasoningSummary, create_provider,
+    CompletionRequest, CompletionTraceContext, ModelInvocationContext, ModelRuntime, ModelSession,
+    ProviderEndpoint, ReasoningConfig, ReasoningSummary, deepseek_default_model_slugs,
+    default_models,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 use pl_trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
@@ -42,51 +43,36 @@ fn live_api_key() -> Option<String> {
     }
 }
 
-fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest {
-    CompletionRequest {
-        model: ProviderInfo::deepseek(None).default_model,
-        instructions: Some(
+fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
+    CompletionRequest::builder()
+        .instructions(
             "请用简短中文回答。所有可见答案必须放在 <final>...</final> 中，不要输出标签之外的普通正文。"
-                .to_string(),
-        ),
-        input: messages.into_iter().map(Into::into).collect(),
-        tools: Vec::new(),
-        tool_choice: "auto".to_string(),
-        parallel_tool_calls: false,
-        temperature: None,
-        max_tokens: Some(2048),
-        store: None,
-        previous_response_id: None,
-        prompt_cache_key: None,
-        reasoning: Some(ReasoningConfig {
+        )
+        .messages(messages)
+        .max_tokens(2048)
+        .reasoning(Some(ReasoningConfig {
             effort: Some("high".to_string()),
             summary: Some(ReasoningSummary::Enabled),
-        }),
-        stream: true,
-        trace: Some(CompletionTraceContext {
-            session_id: "live-session".to_string(),
-            turn_id: turn_id.to_string(),
-            inference_id: format!("{turn_id}-inference"),
-            plan_mode: false,
-            trace_sequence_base: 0,
-        }),
-        transport_session: Default::default(),
-    }
+        }))
+        .build()
 }
 
 struct TurnOutcome {
     content: String,
     reasoning_content: String,
     text_delta_count: usize,
-    #[allow(dead_code)]
-    next_sequence: u64,
     trace_events: Vec<TraceEvent>,
 }
 
 async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnOutcome {
-    let mut info = ProviderInfo::deepseek(None);
+    let mut info = ProviderEndpoint::deepseek(None);
     info.bearer_token = Some(api_key.to_string());
-    let provider = create_provider(info).unwrap();
+    let model_slug = deepseek_default_model_slugs()[0];
+    let model = default_models()
+        .into_iter()
+        .find(|model| model.slug == model_slug)
+        .expect("DeepSeek default model catalog must contain its selected model");
+    let runtime = ModelRuntime::new(info, model).unwrap();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(256);
 
     let event_counter = tokio::spawn(async move {
@@ -109,8 +95,17 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         text_delta_count
     });
 
-    let response = provider
-        .stream_complete(deepseek_request(messages, turn_id), event_tx)
+    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
+        CompletionTraceContext {
+            session_id: "live-session".to_string(),
+            turn_id: turn_id.to_string(),
+            inference_id: format!("{turn_id}-inference"),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        },
+    );
+    let response = runtime
+        .complete(deepseek_request(messages), context.clone())
         .await
         .unwrap();
     let text_delta_count = event_counter.await.unwrap();
@@ -118,8 +113,7 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         content: response.content.unwrap_or_default(),
         reasoning_content: response.reasoning_content.unwrap_or_default(),
         text_delta_count,
-        next_sequence: response.next_sequence,
-        trace_events: response.trace_events,
+        trace_events: context.take_trace_events(),
     }
 }
 

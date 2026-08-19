@@ -1,88 +1,83 @@
 ---
 name: add-provider
-description: Use when adding a new LLM provider/vendor to Pure-Lang. Covers cross-crate registration chain, ProviderKind/ProviderInfo/ProviderRuntime patterns, protocol choice, and default models.
+description: Use when adding an LLM provider or preset to Pure-Lang's single route, catalog, and ModelRuntime architecture.
 category: guides
 platforms: ["windows", "linux", "macos"]
 ---
 
-# Add a New LLM Provider
+# Add an LLM Provider or Preset
 
-在 Pure-Lang 中添加新供应商时，必须按顺序修改以下所有 crate 中的对应位置。
+Pure-Lang 当前只有一条模型执行路径：`ResolvedModelRoute -> ModelRuntime`。新增兼容供应商时通过
+endpoint、catalog、model profile 和 preset 数据表达差异，不新增 provider class、runtime trait、
+factory dispatch 或兼容 wrapper。
 
 ## 前置确认
 
-1. **确定 API 协议族**：OpenAI-compatible Chat Completions（走 `OpenAiTransportProvider` + `OpenAiProtocol::chat(…)`）、OpenAI Responses API（走 `OpenAiProtocol::responses()`），或全新协议（需要新 transport + protocol 实现）。
-2. **确定基础 URL**：供应商的 API 入口。
-3. **确定默认模型列表**：至少一个默认模型 slug。
-4. **确定 reasoning/thinking 风格**：是否需要 `ChatReasoningStyle` 变体，序列化格式是否兼容现有三种（Plain / DeepSeek / Zhipu）。
-5. **确定 tool wire policy**：`NativeCustomTools`（原生工具调用）还是 `FunctionFallback`（函数回退）。
-6. **确定命名约定**：ProviderKind 变体名（PascalCase）、ProviderTemplateKind key（snake_case）、UI 显示名。
+1. 确定 wire API：Responses 或 Chat Completions。
+2. 确定模型 transport：Responses 可声明 HTTP/WS；Chat 只允许 HTTP。
+3. 确定 endpoint：base URL、headers、凭据、tool wire policy 与服务能力。
+4. 确定模型目录：slug、能力、价格、上下文、request profile、参数 wire 和基础指令。
+5. 确定是否只是新增 preset。共享同一 endpoint 形态和 catalog 的产品套餐通常只需新 preset。
+6. 只有现有 OpenAI-compatible codec 无法表达 wire 时，才设计第二种 typed codec；先同步
+   `design/07-model.md` 与 `design/10-config.md`。
 
 ## 修改清单
 
-### 1. `pl-model/src/provider_info.rs` — ProviderKind + ProviderInfo 工厂
+### 1. `pl-model/src/model/catalog/` — canonical 模型目录
 
-- 向 `ProviderKind` 枚举添加新变体。
-- 添加 `ProviderInfo::new_provider(base_url: Option<String>) -> Self` 工厂方法。
-- 更新测试（验证 base_url、default_model、provider_kind）。
+- 优先复用 `ModelFamily`，单模型只声明 slug、显示信息、窗口、价格等差异字段。
+- 用 `ModelTransportProfile` 声明 protocol、支持的连接模式与默认连接模式。
+- 用 `ModelRequestProfile`、`ModelParameter` 和 `ParameterWire` 表达 body/header/effort 差异。
+- 更新参数化 catalog 测试，覆盖能力、transport、价格和 request profile。
 
-### 2. `pl-model/src/default_models.rs` — 默认模型列表
+### 2. `pl-model/src/provider/mod.rs` — endpoint 数据
 
-- 添加模型 slugs 常量（`NEW_PROVIDER_DEFAULT_MODEL_SLUGS`）。
-- 添加 `new_provider_default_model_slugs()` 访问函数。
-- 添加 `new_provider_reasoning_efforts` 常量（如果适用）。
-- 在 `default_models()` 中添加模型条目（`ModelInfo::new(…)` 或 `ModelInfo::text(…)` 等工厂）。
-- 在测试中验证新模型列表。
+- 只有出现新的 canonical endpoint 默认值或服务能力时才增加构造函数。
+- `ProviderEndpoint` 不保存默认模型、完整模型目录、protocol 或 connection mode。
+- 不按 provider ID、preset ID、slug 或 URL 在 runtime 中推断能力。
 
-### 3. `pl-model/src/provider/<new_provider>.rs` — Provider 运行时
+### 3. `pl-core/src/model_config/catalog.rs` — preset/catalog 注册
 
-- 创建新 provider 模块文件，例如 `provider/zhipu_coding_plan.rs`。
-- 如果复用 `OpenAiTransportProvider`：包装为结构体，所有方法委托给 `inner`。
-- 初始化时传入：
-  - `bundled_models(new_provider_default_model_slugs())`
-  - `configured_models`（由外部注入）
-  - 对应的 `OpenAiProtocol` 模式
-  - `ProviderCapabilities::all()` 或按需位组合
-- 如果使用全新协议：实现 `ModelProvider` trait 的所有方法（`info`、`capabilities`、`stream_complete`、`auth_token`、`model_info`、`list_models`、`effective_model_capabilities`、`default_model`）。
+- 注册 `ProviderPreset` 和其绑定的 `ModelCatalogId`。
+- 多个套餐可共享同一个模型 catalog，不增加执行分支。
+- 确认 custom endpoint override 后 hosted-tool 能力按设计关闭或由显式配置提供。
 
-### 4. `pl-model/src/provider.rs` — ProviderRuntime 枚举 + 工厂 dispatch
+### 4. `pl-core` 配置与规划
 
-- 向 `ProviderRuntime` 枚举添加新变体。
-- 在 `create_provider` / `create_provider_with_models` 的 `match provider_kind` 中添加新分支。
-- 实现所有 trait 方法的 match 分支（`info`、`capabilities`、`stream_complete`、`auth_token`、`model_info`、`list_models`、`effective_model_capabilities`、`default_model`）。
-- 更新测试。
+- 使用 `ProviderConfig::effective_models()` 作为唯一目录解析入口。
+- 使用 `AgentModelConfig::resolve()` 生成 `ResolvedModelRoute`。
+- Web Search 只扩展 `plan_web_search()` 的数据输入或能力矩阵，不在 Studio 复制 resolver。
 
-### 5. `pl-model/src/lib.rs` — 公开导出
+### 5. `pl-studio-runtime` 与 Flutter
 
-- 添加 `pub use provider::NewProvider;`。
-- 添加 `pub use default_models::new_provider_default_model_slugs;`（如果适用）。
+- Studio first-run/config editor 只消费 canonical preset/catalog snapshot。
+- `default_model` 仅是 Studio 新建/编辑 provider 时生成角色 route 的投影，不进入 runtime provider。
+- Flutter 只渲染 bridge 返回的 transport、能力、价格和参数候选，不按 preset ID 推断。
 
-### 6. `pl-core/src/first_run.rs` — ProviderTemplateKind
+### 6. 新 wire API（仅确有需要时）
 
-- 向 `ProviderTemplateKind` 枚举添加新变体。
-- 更新 `all()` 的返回数组大小（`[Self; N+1]`）。
-- 在 `from_key()`、`key()`、`key_prefix()`、`display_name()`、`provider_info()`、`default_model_slugs()` 中添加新分支。
-- 更新相关测试。
+- 在 `pl-model/src/runtime/` 增加私有 typed codec，并先归一化为同一 raw event/error。
+- 继续复用 canonical request/history/tool 转换、stream lifecycle、tool identity、accumulator、
+  error classification、retry budget 和凭证脱敏。
+- 协议差异通过穷尽的 `ProviderWireProtocol` / `ProviderConnectionMode` 分派；不要建立厂商 runtime。
 
-### 7. `pl-core/src/config_editor.rs` — 模板推断
+## 禁止事项
 
-- 在 `infer_provider_template_kind()` 和所有测试 mock/构造中添加新变体的 match 分支。
+- 不新增 `ModelProvider`、`SharedModelProvider`、`ProviderRuntime` 或厂商 provider class。
+- 不新增 `create_provider*` 工厂或 provider-specific decoder。
+- 不把 model、stream、store、continuation、trace 或 transport session 放回 `CompletionRequest`。
+- 不把 raw content、finish reason、trace events 或 sequence 放回 `CompletionResponse`。
+- 不为旧配置或旧 API 增加 alias、shim 或双轨实现。
 
-### 8. Flutter provider settings mapping
+## 验证
 
-- 确认 `pl-studio-bridge` 返回的 provider/template JSON 与 Flutter Settings 页使用的字符串映射一致。
+```powershell
+cargo check -p pl-model --tests
+cargo check -p pl-core --tests
+cargo test -p pl-model
+cargo test -p pl-core
+cargo xtask verify-gui
+```
 
-### 9. `design/10-config.md` — 文档
-
-- 在 `provider_kind` 可选值列表中添加新值。
-- 在配置模板示例部分添加新供应商模板示例。
-
-## 跨 crate 协调提示
-
-- 所有 match 语句必须穷尽，否则编译失败。建议用 `cargo check -p pl-model -p pl-core` 验证所有 match 覆盖完整。
-- `ProviderRuntime` 是 `Arc` 包装的动态分发；新变体必须实现 `Debug + Send + Sync`。
-- 如果新供应商的 API wire 格式与现有 `OpenAiProtocol` 不兼容，需要新增 `OpenAiProtocol` 变体或在 `protocol/` 下新建子模块。
-
-## 参考
-
-- 项目记忆：crate 命名（`pl-` 前缀）、参数设计（避免裸 bool）、模块导出（`pub use`）、API 边界序列化（`camelCase`）、文档同步流程。
+需要真实服务时再显式启用 `live-tests`；Studio 可见变更还要使用隔离数据目录运行
+`cargo xtask run-gui --driver`，核对配置、模型选择、usage/billing/cache 与运行时错误。

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::{ModelInfo, ProviderInfo};
+use pl_model::{ModelInfo, ProviderEndpoint};
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -49,8 +49,7 @@ pub struct AgentModelConfig {
 pub struct ResolvedModelRoute {
     pub role: AgentRoleId,
     pub provider_id: ProviderId,
-    pub provider_info: ProviderInfo,
-    pub models: Vec<ModelInfo>,
+    pub endpoint: ProviderEndpoint,
     pub model: ModelInfo,
     pub effort: Option<ReasoningEffort>,
 }
@@ -130,8 +129,7 @@ impl AgentModelConfig {
         Ok(ResolvedModelRoute {
             role: role.clone(),
             provider_id: route.provider.clone(),
-            provider_info: provider.to_provider_info(&route.model)?,
-            models,
+            endpoint: provider.to_endpoint()?,
             model,
             effort: route.effort.clone(),
         })

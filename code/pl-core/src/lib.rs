@@ -42,11 +42,9 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreRuntimeOptions,
-    CoreRuntimeProfile, SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet,
-    TurnEngine, TurnEngineBuilder, WorkspaceProfile, shared_tool_names, shared_tool_schemas,
-    stream_history_completion_message_text, stream_session_completion_message_text,
-    stream_session_completion_response,
+    CoreRuntimeOptions, CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
+    SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet, TurnEngine,
+    TurnEngineBuilder, WorkspaceProfile, shared_tool_names, shared_tool_schemas,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
@@ -75,13 +73,15 @@ pub use pl_lsp::{
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
-    ModelParameter, ModelRequestProfile, OpenAiCompactionMode, PromptCacheDialect,
-    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderServiceCapabilities,
-    ProviderWireProtocol, ReasoningInterleaved, ReasoningInterleavedField,
-    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy,
-    TruncationMode, WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
-    ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    ModelCapabilities, ModelInfo, ModelModality, ModelParameter, ModelRequestProfile,
+    OpenAiCompactionMode, PromptCacheDialect, PromptCacheProviderCapabilities,
+    ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
+    ReasoningConfig, ReasoningInterleaved, ReasoningInterleavedField, ReasoningSummary,
+    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolSchema,
+    ToolWirePolicy, TruncationMode, WebSearchConfig, WebSearchContextSize, WebSearchFilters,
+    WebSearchMode, WebSearchProviderCapabilities, WebSearchUserLocation,
+    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
+    openai_default_model_slugs, zhipu_default_model_slugs,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,

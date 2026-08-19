@@ -1,13 +1,15 @@
 use pl_core::{
-    AgentSession, ContextCompactionImplementation, CoreRuntimeProfile, ModelInfo, TurnBudget,
-    TurnEngineBuilder, TurnRequest, TurnResultStatus,
+    AgentSession, ContextCompactionImplementation, CoreRuntimeProfile, ModelInfo, ProviderEndpoint,
+    TurnBudget, TurnEngineBuilder, TurnRequest, TurnResultStatus, default_models,
+    openai_default_model_slugs,
 };
-use pl_model::{ProviderInfo, default_models};
 use pl_protocol::{MessageRole, ModelContextItem};
 
 const OPENAI_LIVE_ENV_KEY: &str = "API_KEY_OPENAI";
 const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
 const OPENAI_LIVE_MODEL_ENV_KEY: &str = "API_MODEL_OPENAI";
+
+mod support;
 
 fn live_api_key() -> Option<String> {
     match std::env::var(OPENAI_LIVE_ENV_KEY) {
@@ -50,15 +52,14 @@ async fn openai_responses_compacts_context_live() {
         return;
     };
 
-    let mut info = ProviderInfo::openai(live_base_url());
+    let mut info = ProviderEndpoint::openai(live_base_url());
     info.bearer_token = Some(api_key);
-    let model = live_model(&info.default_model);
-    info.default_model = model.clone();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(info, vec![compacting_model(&model)])
-            .unwrap()
-            .with_runtime_profile(CoreRuntimeProfile::minimal())
-            .build();
+    let model = live_model(openai_default_model_slugs()[0]);
+    let route = support::route("openai", info, compacting_model(&model), Some("medium"));
+    let core = TurnEngineBuilder::from_route(&route)
+        .unwrap()
+        .with_runtime_profile(CoreRuntimeProfile::minimal())
+        .build();
 
     let mut session = AgentSession::new();
     session.push_user_prompt(

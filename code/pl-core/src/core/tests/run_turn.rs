@@ -13,14 +13,9 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -78,14 +73,9 @@ async fn run_turn_emits_runtime_progress_commentary() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -128,14 +118,9 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -185,14 +170,11 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     )
     .to_string();
     let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse, answer_sse]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
     let mut model = local_responses_model();
     model.auto_compact_token_limit = Some(1);
-    let core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
-        .unwrap()
+    let core = test_turn_engine_builder(endpoint, model)
         .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
             ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
         ))
@@ -254,17 +236,13 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
     )
     .to_string();
     let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
-                ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
-            ))
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
+            ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
+        ))
+        .build();
     let mut session = AgentSession::from_messages(vec![Message {
         role: MessageRole::User,
         content: MessageContent::Text("only message".to_string()),
@@ -274,14 +252,9 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
         metadata: HashMap::new(),
     }]);
     let original_revision = session.revision();
-    let (event_tx, _) = tokio::sync::broadcast::channel(16);
 
     let snapshot = core
-        .compact_session(
-            &mut session,
-            ManualContextCompactionRequest::new(),
-            event_tx,
-        )
+        .compact_session(&mut session, ManualContextCompactionRequest::new())
         .await
         .unwrap()
         .unwrap();
@@ -300,7 +273,7 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
 
 #[tokio::test]
 async fn enabled_tools_snapshot_remains_internal_trace_event() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
     let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
@@ -358,11 +331,9 @@ async fn client_tool_search_call_records_tool_item_with_structured_summary() {
     .to_string();
     let (base_url, _bodies, handle) =
         serve_sse_sequence(vec![search_sse, final_sse("search-done", "loaded")]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "gpt-5.6-sol".to_string();
-    provider.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    endpoint.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
         tool_search: true,
         programmatic_tool_calling: false,
     };
@@ -371,9 +342,7 @@ async fn client_tool_search_call_records_tool_item_with_structured_summary() {
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
     model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
-    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
-        .unwrap()
-        .build();
+    let mut core = test_turn_engine_builder(endpoint, model).build();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
     // git_status 进入 git 命名空间，随 client tool_search 延迟加载。
@@ -458,14 +427,9 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     )
     .to_string();
     let (base_url, bodies, handle) = serve_sse_sequence(vec![first_sse, second_sse]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -522,27 +486,21 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
     )
     .to_string();
     let (base_url, bodies, handle) = serve_sse_sequence(vec![sse_body]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
     let runtime = CoreRuntimeProfile::minimal().with_runtime_options(
         CoreRuntimeOptions::default()
             .with_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache")),
     );
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .with_runtime_profile(runtime)
-            .build();
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_runtime_profile(runtime)
+        .build();
     let mut session = AgentSession::new();
 
     core.run_turn(
         &mut session,
         TurnRequest::new("profile prompt".to_string())
             .with_budget(crate::turn::TurnBudget::new(60_000)),
-        event_tx,
     )
     .await
     .unwrap();
@@ -569,14 +527,9 @@ async fn run_turn_http_sends_full_history_without_a_retry_path() {
     .to_string();
     let (base_url, bodies, handle) =
         serve_http_sequence(vec![TestHttpResponse::sse(retry_sse)]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -618,29 +571,27 @@ async fn model_turn_helper_http_sends_full_history_once() {
     .to_string();
     let (base_url, bodies, handle) =
         serve_http_sequence(vec![TestHttpResponse::sse(retry_sse)]).await;
-    let mut provider_info = ProviderInfo::openai(Some(base_url));
-    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider_info.bearer_token = Some("test-token".to_string());
-    provider_info.default_model = "local-responses".to_string();
-    let provider =
-        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
-            .unwrap();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let client =
+        ModelTurnClient::from_route(&test_route(endpoint, local_responses_model())).unwrap();
     let mut session = AgentSession::new();
     session.push_user_prompt("old prompt".to_string());
     session.push_assistant_response("old answer".to_string(), None);
     session.set_prompt_cache_key("cache-session".to_string());
 
-    let response = stream_session_completion_response(
-        provider,
-        &mut session,
-        CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
-        CoreModelTurnOptions::default(),
-    )
-    .await
-    .unwrap();
+    let response = client
+        .complete(
+            &session,
+            ModelTurnRequest::new().with_instructions("reply briefly"),
+            ModelTurnOptions::default(),
+        )
+        .await
+        .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(response.content.as_deref(), Some("retry ok"));
+    assert_eq!(response.output()[0].as_message(), Some("retry ok"));
+    assert_eq!(response.usage().total_tokens(), 6);
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 1);
     assert!(bodies[0].get("previous_response_id").is_none());
@@ -660,24 +611,21 @@ async fn model_turn_text_helper_returns_assistant_message_text() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let mut provider_info = ProviderInfo::openai(Some(base_url));
-    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider_info.bearer_token = Some("test-token".to_string());
-    provider_info.default_model = "local-responses".to_string();
-    let provider =
-        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
-            .unwrap();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let client =
+        ModelTurnClient::from_route(&test_route(endpoint, local_responses_model())).unwrap();
     let mut session = AgentSession::new();
     session.push_user_prompt("summarize this".to_string());
 
-    let text = stream_session_completion_message_text(
-        provider,
-        &mut session,
-        CoreModelTurnRequest::new("local-responses").with_instructions("title only"),
-        CoreModelTurnOptions::default(),
-    )
-    .await
-    .unwrap();
+    let text = client
+        .complete_text(
+            &session,
+            ModelTurnRequest::new().with_instructions("title only"),
+            ModelTurnOptions::default(),
+        )
+        .await
+        .unwrap();
     handle.await.unwrap();
 
     assert_eq!(text, "title");
@@ -706,44 +654,38 @@ async fn model_turn_client_keeps_independent_http_sessions_full_history() {
         TestHttpResponse::sse(second_sse),
     ])
     .await;
-    let mut provider_info = ProviderInfo::openai(Some(base_url));
-    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider_info.bearer_token = Some("test-token".to_string());
-    provider_info.default_model = "local-responses".to_string();
-    let provider =
-        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
-            .unwrap();
-    let client = CoreModelTurnClient::new();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let client =
+        ModelTurnClient::from_route(&test_route(endpoint, local_responses_model())).unwrap();
 
     let mut first_session = AgentSession::new();
     first_session.push_user_prompt("old prompt".to_string());
     first_session.push_assistant_response("old answer".to_string(), None);
     let first = client
-        .stream_session_completion_response(
-            provider.clone(),
-            &mut first_session,
-            CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
-            CoreModelTurnOptions::default(),
+        .complete(
+            &first_session,
+            ModelTurnRequest::new().with_instructions("reply briefly"),
+            ModelTurnOptions::default(),
         )
         .await
         .unwrap();
-    assert_eq!(first.content.as_deref(), Some("retry ok"));
+    assert_eq!(first.output()[0].as_message(), Some("retry ok"));
 
     let mut second_session = AgentSession::new();
     second_session.push_user_prompt("new prompt".to_string());
     second_session.push_assistant_response("new answer".to_string(), None);
     let second = client
-        .stream_session_completion_response(
-            provider,
-            &mut second_session,
-            CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
-            CoreModelTurnOptions::default(),
+        .complete(
+            &second_session,
+            ModelTurnRequest::new().with_instructions("reply briefly"),
+            ModelTurnOptions::default(),
         )
         .await
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(second.content.as_deref(), Some("second ok"));
+    assert_eq!(second.output()[0].as_message(), Some("second ok"));
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 2);
     assert!(bodies[0].get("previous_response_id").is_none());
@@ -768,14 +710,9 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
         final_sse("history-complete", "history checked"),
     ];
     let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let mut core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     core.register_test_tool(HistoryMarkerTool);
     core.register_test_tool(ParentHistoryProbeTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
@@ -839,14 +776,9 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
         final_sse("large-artifact-complete", "artifact checked"),
     ];
     let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "local-responses".to_string();
-    let mut core =
-        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
-            .unwrap()
-            .build();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     core.register_test_tool(LargeArtifactTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-large-artifact".to_string(), event_tx, 0);
@@ -884,12 +816,10 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
 async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json::Value {
     let (base_url, bodies, handle) =
         serve_sse_sequence(vec![final_sse("hosted-tools", "ok")]).await;
-    let mut provider = ProviderInfo::openai(Some(base_url));
-    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
-    provider.bearer_token = Some("test-token".to_string());
-    provider.default_model = "gpt-5.6-sol".to_string();
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
     if enable_hosted_tools {
-        provider.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
+        endpoint.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
             tool_search: true,
             programmatic_tool_calling: true,
         };
@@ -899,9 +829,7 @@ async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json:
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
     model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
-    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
-        .unwrap()
-        .build();
+    let mut core = test_turn_engine_builder(endpoint, model).build();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
     // HostedToolProbe 命名为 git_status；启用检索时归入 git 命名空间进入延迟 catalog。

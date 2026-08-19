@@ -48,7 +48,7 @@ provider 凭据，也不会清理系统凭据库；替换后的初始配置只�
 
 - `AgentModelConfig`、`ProviderConfig`、`ModelRouteConfig`。
 - 校验动态角色到 provider/model/effort 的路由。
-- 将路由解析为运行时 `ProviderInfo` 和模型列表。
+- 将路由解析为运行时 `ProviderEndpoint` 和唯一选中的不可变 `ModelInfo`。
 
 `pl-studio-runtime` 负责：
 
@@ -206,7 +206,8 @@ OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url`
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
 preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mimo` catalog。
 
-Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider runtime 前不能写入配置。
+当前不保留 Anthropic 占位；只有实现第二种协议族的 typed codec、能力模型与测试后，才可写入
+配置或 catalog。
 
 `pl-model` canonical catalog 与自定义/附加模型使用同一个 `ModelInfo`，可表达：
 
@@ -356,7 +357,7 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 
 ## 10.10 配置草稿
 
-通用 provider/model 值对象和解析属于 `pl-core`，`StudioConfig`、schema、默认角色和配置文件 IO
+通用 provider/model 值对象、preset/catalog 和 endpoint 解析属于 `pl-model`，`pl-core` 只维护动态角色路由并作为宿主 runtime facade 重新导出必要类型；`StudioConfig`、schema、默认角色和配置文件 IO
 属于 `pl-studio-runtime`。`pure-studio` 设置页先加载 canonical provider catalog，再构造产品草稿：
 
 - 默认选中 Studio 产品默认 preset，也可选择 catalog 返回的任意 preset 或 Custom provider。
@@ -366,7 +367,8 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 - preset、endpoint、凭证提示、协议、允许连接模式、suggested model 和 bundled catalog 全部来自
   `ProviderCatalogSnapshot`；Flutter 不保存生产目录副本。
 - preset provider 引用只读 bundled catalog，并可追加不冲突的模型；Custom provider 使用 explicit models。
-- 用户选择一个默认 provider；四个模型角色默认都指向创建时选择的 suggested/default model 和该模型声明的默认 effort。
+- Studio 草稿选择一个默认 provider；四个模型角色初始化为创建时选择的 suggested/default model
+  和该模型声明的默认 effort。该选择只投影为四条 route，不写入 provider runtime。
 
 设置项写入前必须完成本地校验：
 
@@ -385,7 +387,7 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 
 - catalog 中的全部 preset 与 Custom Responses/Chat provider。
 - API key、base URL、provider key 和显示名。
-- provider 默认模型和自定义模型。
+- Studio 路由编辑投影中的 provider 默认模型和自定义模型；runtime provider 不保存默认模型。
 - 四个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
 - Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 `pl-core` 校验并即时写入配置。

@@ -53,7 +53,7 @@ effect、权限、审批、并行、缓存、trace、Timeline 与历史机制。
 
 需要影响 turn、session、store 或编译阶段时扩展 `pl-core`。
 
-上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `AgentSession` 有序上下文项，并由宿主同步持久化。`pl-model::ModelProvider::compact_context` 只暴露统一压缩请求/响应，provider runtime 内部封装私有 wire。远程压缩能力由 `ProviderWireProtocol::Responses` 与显式 compaction 配置共同决定，不依赖 preset 或厂商 ID；Chat Completions 始终使用本地摘要。
+上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `AgentSession` 有序上下文项，并由宿主同步持久化。绑定单模型的 `pl-model::ModelRuntime::compact_context` 只暴露统一压缩请求/响应，runtime 内部封装私有 wire。远程压缩能力由绑定模型的 `ProviderWireProtocol::Responses` 与显式 compaction 配置共同决定，不依赖 preset 或厂商 ID；Chat Completions 始终使用本地摘要。
 
 OpenAI 远程模式只使用 v2 `compaction_trigger`；本地模式使用摘要压缩，两者由显式配置选择，不做运行期自动回退。扩展压缩 wire 时必须保持 `ModelContextItem::Compaction` 的 provider 无关边界，不得把加密 checkpoint 伪装成普通 system/user 消息，也不得让 Chat Completions 消费该项。
 

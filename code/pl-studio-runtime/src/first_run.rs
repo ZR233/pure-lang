@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
-use pl_model::{ModelInfo, ModelParameter, ProviderInfo};
+use pl_model::{ModelInfo, ModelParameter, ProviderEndpoint};
 
 use crate::config::{
     ModelRouteConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
@@ -52,11 +52,11 @@ impl ProviderTemplateKind {
         self.preset().display_name
     }
 
-    pub(crate) fn provider_info(&self) -> ProviderInfo {
+    pub(crate) fn provider_endpoint(&self) -> ProviderEndpoint {
         let preset = self.preset();
         preset
             .provider
-            .to_provider_info(&preset.suggested_model)
+            .to_endpoint()
             .expect("builtin provider preset must resolve")
     }
 
@@ -126,14 +126,15 @@ pub struct FirstRunProviderDraft {
 
 impl FirstRunProviderDraft {
     pub fn from_template(key: impl Into<String>, kind: ProviderTemplateKind) -> Self {
-        let info = kind.provider_info();
+        let endpoint = kind.provider_endpoint();
+        let default_model = kind.preset().suggested_model;
         Self {
             key: key.into(),
             kind,
-            name: info.name,
-            base_url: Some(info.base_url),
+            name: endpoint.name,
+            base_url: Some(endpoint.base_url),
             bearer_token: String::new(),
-            default_model: info.default_model,
+            default_model,
             models: Vec::new(),
         }
     }

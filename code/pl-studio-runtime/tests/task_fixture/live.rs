@@ -45,7 +45,7 @@ impl LiveTaskFixture {
                     role.key(),
                     route.provider_id,
                     route.model.slug,
-                    route.provider_info.connection_mode
+                    route.model.transport.default_connection_mode
                 ))
             })
             .collect::<Result<Vec<_>>>()?

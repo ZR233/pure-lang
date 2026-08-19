@@ -33,9 +33,9 @@ pure-studio
 异步 trait 方法使用原生 RPITIT，并显式声明 `Send` bound：
 
 ```rust
-pub trait ModelProvider: Send + Sync {
-    fn stream_complete(&self, request: CompletionRequest, event_tx: AgentEventSender)
-        -> impl std::future::Future<Output = Result<CompletionResponse>> + Send;
+pub trait HealthProbe: Send + Sync {
+    fn check(&self)
+        -> impl std::future::Future<Output = Result<HealthSnapshot>> + Send;
 }
 ```
 

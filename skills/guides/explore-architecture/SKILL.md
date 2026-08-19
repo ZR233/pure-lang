@@ -41,9 +41,10 @@ design/02-crates.md     # 每个 crate 的职责和边界
 
 同时读取 `Cargo.toml` 确认 workspace members 列表。
 
-### 2. 按 crate 分配 explorer agent
+### 2. 按 crate 分配只读子代理
 
-为每个 crate 创建一个 `spawn_agent`，使用 `agentType: "explorer"`。每个 agent 的任务应包含：
+为每个 crate 创建一个 `spawn_agent`，使用 `agent_type: "default"` 和
+`fork_turns: "none"`。每个 agent 的任务应包含：
 
 - 明确的目录路径
 - 需要回答的具体问题（目录结构、lib.rs 导出、关键类型、模块职责）
@@ -55,7 +56,7 @@ design/02-crates.md     # 每个 crate 的职责和边界
 |-------|-------|----------|
 | 1 | `code/pl-protocol` | 公共类型、module 结构、serde 约定 |
 | 2 | `code/pl-trace` | AgentEvent/TracePart、与 pl-protocol 关系 |
-| 3 | `code/pl-model` | ModelProvider trait、ProviderKind、支持的供应商 |
+| 3 | `code/pl-model` | model/provider/completion/runtime 四层、catalog、ResolvedModelRoute 与单模型 ModelRuntime |
 | 4 | `code/pl-lsp` | LSP client、语言服务器管理、查询能力 |
 | 5 | `code/pl-core` | 所有模块、领域模型、Studio 运行时、SQLite 存储、工具系统 |
 | 6 | `code/pure-studio/rust` | FRB API 表面、事件订阅、brige 函数 |
@@ -64,14 +65,13 @@ design/02-crates.md     # 每个 crate 的职责和边界
 
 ### 3. 订阅式收集结果
 
-启动所有 agent 后继续处理父代理手上的独立工作。没有其他可执行工作时直接结束当前轮，
-runtime 会在 direct-child 出现有意义更新或无活动超时时，通过合并 continuation 唤醒父代理：
+在同一轮启动所有独立 agent 后立即等待，直到本批结果返回，再沿它们给出的 `file:line` 做小范围
+复核；不要在等待期间同时修改文件：
 
 ```rust
 spawn_all_agents();
-continue_parent_work();
-finish_turn_when_only_child_work_remains();
-// 下一轮从 typed wake batch 与 canonical direct-child snapshots 继续。
+wait_for_agent_batch();
+verify_reported_locations();
 ```
 
 ### 4. 回退策略（重要）
@@ -85,9 +85,9 @@ finish_turn_when_only_child_work_remains();
    - `list_files(depth: 2)` 查看 `code/pl-core/src/` 的模块结构
    - 按需补充读取设计文档
 
-### 5. 删除已完成的 agent
+### 5. 清理已完成的 agent
 
-汇总完成后调用 `close_agent` 清理所有 agent。
+工具提供关闭能力时，汇总完成后关闭所有已完成 agent；否则不复用本轮探子。
 
 ## 输出格式
 

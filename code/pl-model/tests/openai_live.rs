@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionTraceContext, ModelProvider, ProviderInfo, ReasoningConfig,
-    ReasoningSummary, create_provider,
+    CompletionRequest, CompletionTraceContext, ModelInfo, ModelInvocationContext, ModelRuntime,
+    ModelSession, ProviderEndpoint, ReasoningConfig, ReasoningSummary, default_models,
+    openai_default_model_slugs,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 use pl_trace::{AgentEvent, TraceDelta};
@@ -38,36 +39,29 @@ fn user_message(content: &str) -> Message {
     }
 }
 
-fn openai_request(model: String) -> CompletionRequest {
-    CompletionRequest {
-        model,
-        instructions: Some(
+fn openai_request() -> CompletionRequest {
+    CompletionRequest::builder()
+        .instructions(
             "Answer briefly. Use the provider's native visible output channels when available. Reply with exactly: ok."
-                .to_string(),
-        ),
-        input: vec![user_message("Reply with exactly: ok").into()],
-        tools: Vec::new(),
-        tool_choice: "auto".to_string(),
-        parallel_tool_calls: false,
-        temperature: None,
-        max_tokens: Some(128),
-        store: None,
-        previous_response_id: None,
-        prompt_cache_key: None,
-        reasoning: Some(ReasoningConfig {
+        )
+        .messages(vec![user_message("Reply with exactly: ok")])
+        .max_tokens(128)
+        .reasoning(Some(ReasoningConfig {
             effort: Some("medium".to_string()),
             summary: Some(ReasoningSummary::Enabled),
-        }),
-        stream: true,
-        trace: Some(CompletionTraceContext {
-            session_id: "openai-live-session".to_string(),
-            turn_id: "openai-live-turn".to_string(),
-            inference_id: "openai-live-inference".to_string(),
-            plan_mode: false,
-            trace_sequence_base: 0,
-        }),
-        transport_session: Default::default(),
-    }
+        }))
+        .build()
+}
+
+fn live_model(slug: &str) -> ModelInfo {
+    let template_slug = openai_default_model_slugs()[0];
+    let mut model = default_models()
+        .into_iter()
+        .find(|model| model.slug == template_slug)
+        .expect("OpenAI default model catalog must contain its template model");
+    model.slug = slug.to_string();
+    model.display_name = slug.to_string();
+    model
 }
 
 async fn collect_trace_delta_counts(
@@ -104,20 +98,26 @@ async fn openai_responses_smoke() {
     let base_url = std::env::var(OPENAI_LIVE_BASE_URL_ENV_KEY)
         .ok()
         .filter(|value| !value.trim().is_empty());
-    let mut info = ProviderInfo::openai(base_url);
+    let mut info = ProviderEndpoint::openai(base_url);
     info.bearer_token = Some(api_key);
-    let model = std::env::var(OPENAI_LIVE_MODEL_ENV_KEY)
+    let model_slug = std::env::var(OPENAI_LIVE_MODEL_ENV_KEY)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| info.default_model.clone());
-    let provider = create_provider(info).unwrap();
+        .unwrap_or_else(|| openai_default_model_slugs()[0].to_string());
+    let runtime = ModelRuntime::new(info, live_model(&model_slug)).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
+    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
+        CompletionTraceContext {
+            session_id: "openai-live-session".to_string(),
+            turn_id: "openai-live-turn".to_string(),
+            inference_id: "openai-live-inference".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        },
+    );
 
-    let response = match provider
-        .stream_complete(openai_request(model), event_tx)
-        .await
-    {
+    let response = match runtime.complete(openai_request(), context).await {
         Ok(response) => response,
         Err(error) if is_live_auth_or_quota_error(&error.to_string()) => {
             eprintln!("skipping live OpenAI API test: {error}");

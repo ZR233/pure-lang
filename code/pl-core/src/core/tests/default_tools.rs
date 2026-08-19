@@ -120,7 +120,7 @@ fn shared_tool_schemas_keep_exec_and_git_opt_in() {
 
 #[tokio::test]
 async fn default_tools_register_shared_tools_without_product_collaboration() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
 
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
@@ -152,7 +152,7 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
 
 #[tokio::test]
 async fn default_tool_builder_exposes_only_framework_independent_names() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
     let workspace_root = std::env::temp_dir();
 
@@ -229,7 +229,7 @@ fn workspace_file_tool_kind_rejects_dot_aliases() {
 
 #[tokio::test]
 async fn tool_set_builder_can_disable_exec() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     let capabilities = crate::config::ToolCapabilityConfig {
         exec: false,
         ..Default::default()
@@ -248,7 +248,7 @@ async fn tool_set_builder_can_disable_exec() {
 
 #[test]
 fn register_git_tools_exposes_git_pack_explicitly() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
 
     core.register_git_tools(
         crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
@@ -272,7 +272,7 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
         git: true,
         ..Default::default()
     };
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
@@ -280,7 +280,7 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
 
     assert!(!has_tool(&core, "git_status"));
 
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     ToolSetBuilder::from_capabilities(capabilities)
         .with_git_tools(
             crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
@@ -336,7 +336,7 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
     let schema_names_without_backend =
         ToolSetBuilder::host_provided(capabilities.clone()).shared_tool_names();
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
 
     ToolSetBuilder::host_provided(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
@@ -352,7 +352,7 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(!has_tool(&core, "list_files"));
     assert!(!has_tool(&core, "apply_patch"));
 
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     ToolSetBuilder::host_provided(capabilities)
         .with_command_backend(std::sync::Arc::new(crate::tool::LocalCommandBackend::new(
             std::env::temp_dir(),
@@ -376,7 +376,7 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
 #[tokio::test]
 async fn tool_set_builder_respects_allowed_tools() {
     let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
 
     let builder = ToolSetBuilder::host_provided(capabilities)
         .with_allowed_tools([
@@ -434,10 +434,12 @@ async fn tool_set_builder_respects_allowed_tools() {
 async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");
-    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-        .unwrap()
-        .with_runtime_profile(runtime)
-        .build();
+    let mut core = test_turn_engine_builder(
+        pl_model::ProviderEndpoint::deepseek(None),
+        pl_model::ModelInfo::fallback("deepseek-v4-flash"),
+    )
+    .with_runtime_profile(runtime)
+    .build();
 
     core.register_profile_tools().await;
 
@@ -452,10 +454,12 @@ async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
 async fn profiled_host_tools_do_not_register_local_workspace_tools() {
     let runtime = CoreRuntimeProfile::host_provided(std::env::temp_dir())
         .with_workspace_instructions("rules");
-    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-        .unwrap()
-        .with_runtime_profile(runtime)
-        .build();
+    let mut core = test_turn_engine_builder(
+        pl_model::ProviderEndpoint::deepseek(None),
+        pl_model::ModelInfo::fallback("deepseek-v4-flash"),
+    )
+    .with_runtime_profile(runtime)
+    .build();
 
     core.register_profile_tools().await;
 
@@ -465,9 +469,7 @@ async fn profiled_host_tools_do_not_register_local_workspace_tools() {
 #[tokio::test]
 async fn default_tools_register_lsp_query_when_runtime_is_shared() {
     let registry = pl_lsp::LspRuntimeRegistry::new();
-    let mut core = TurnEngine::default_provider()
-        .unwrap()
-        .with_lsp_runtime(registry.clone());
+    let mut core = test_turn_engine().with_lsp_runtime(registry.clone());
 
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
@@ -482,7 +484,7 @@ async fn default_tools_register_lsp_query_when_runtime_is_shared() {
 
 #[tokio::test]
 async fn enabled_tools_snapshot_records_registered_tools() {
-    let mut core = TurnEngine::default_provider().unwrap();
+    let mut core = test_turn_engine();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
@@ -500,9 +502,7 @@ async fn enabled_tools_snapshot_records_registered_tools() {
 #[tokio::test]
 async fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
     let registry = pl_lsp::LspRuntimeRegistry::new();
-    let mut core = TurnEngine::default_provider()
-        .unwrap()
-        .with_lsp_runtime(registry);
+    let mut core = test_turn_engine().with_lsp_runtime(registry);
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 

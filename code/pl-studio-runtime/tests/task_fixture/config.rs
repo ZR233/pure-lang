@@ -16,10 +16,8 @@ pub(super) fn task_test_config(base_url: String) -> StudioConfig {
         wire: BTreeMap::new(),
     }];
 
-    let mut info = pl_model::ProviderInfo::openai(Some(base_url));
-    info.connection_mode = pl_model::ProviderConnectionMode::Http;
-    info.default_model = "local-responses".to_string();
-    let provider = ProviderConfig::from_provider_info(info, vec![model]);
+    let info = pl_model::ProviderEndpoint::openai(Some(base_url));
+    let provider = ProviderConfig::from_endpoint(info, vec![model]);
     let provider_id = ProviderId::new("local").unwrap();
     let route = ModelRouteConfig {
         provider: provider_id.clone(),

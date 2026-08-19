@@ -75,10 +75,7 @@ void main() {
     expect(isTaskThread(targetProjectSimpleThread, 'thread-target'), isFalse);
     expect(isTaskThread(staleTaskThread, 'thread-target'), isFalse);
     expect(isTaskThread(targetProjectTaskThread, 'thread-target'), isTrue);
-    expect(
-      hasSubmittedTaskPromptOnThread(targetProjectTaskThread, 'thread-target'),
-      isTrue,
-    );
+    expect(hasSubmittedTaskPrompt(targetProjectTaskThread), isTrue);
     expect(
       isTaskRunOnTarget(
         targetProjectTaskThread,
@@ -108,6 +105,23 @@ void main() {
         runId: 'task-run-target',
       ),
       isFalse,
+    );
+  });
+
+  test('task acceptance recognizes a transient Task draft', () {
+    final transientTaskDraft = {
+      'navigation': {
+        'selectedThreadId': null,
+        'isStartPage': true,
+        'newThreadMode': 'task',
+      },
+      'project': {'id': 'project-target', 'path': r'C:\Temp\task-validation'},
+      'workspace': null,
+    };
+
+    expect(
+      isTransientTaskDraft(transientTaskDraft, r'c:/temp/task-validation/'),
+      isTrue,
     );
   });
 

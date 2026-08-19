@@ -1,5 +1,5 @@
 pub(super) fn options(
-    provider: &pl_model::ProviderInfo,
+    provider: &pl_model::ProviderEndpoint,
     model: &pl_model::ModelInfo,
     capabilities: &pl_model::ModelCapabilities,
 ) -> crate::tool::ToolOrchestrationOptions {
@@ -26,8 +26,9 @@ mod tests {
             .find(|model| model.slug == "gpt-5.6-sol")
             .unwrap();
         let capabilities = model.capabilities.clone();
-        let provider =
-            pl_model::ProviderInfo::openai(Some("https://responses-proxy.example/v1".to_string()));
+        let provider = pl_model::ProviderEndpoint::openai(Some(
+            "https://responses-proxy.example/v1".to_string(),
+        ));
 
         let options = super::options(&provider, &model, &capabilities);
 
@@ -42,7 +43,7 @@ mod tests {
             .find(|model| model.slug == "gpt-5.6-sol")
             .unwrap();
         let capabilities = model.capabilities.clone();
-        let provider = pl_model::ProviderInfo::openai(None);
+        let provider = pl_model::ProviderEndpoint::openai(None);
 
         let options = super::options(&provider, &model, &capabilities);
 

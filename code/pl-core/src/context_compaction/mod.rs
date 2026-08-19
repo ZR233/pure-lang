@@ -1,5 +1,5 @@
 use pl_model::{
-    ModelProvider, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage,
+    ModelRuntime, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage,
     ToolSchema,
 };
 use pl_protocol::{Message, ModelContextItem, PureError, Result};
@@ -248,9 +248,8 @@ pub(crate) enum CompactionOutcome {
     },
 }
 
-pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
-    pub provider: &'a P,
-    pub model: &'a str,
+pub(crate) struct ContextCompactionRequest<'a> {
+    pub runtime: &'a ModelRuntime,
     pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
@@ -268,11 +267,10 @@ pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
 
 pub(crate) async fn maybe_compact_session(
     session: &mut AgentSession,
-    request: ContextCompactionRequest<'_, impl ModelProvider + ?Sized>,
+    request: ContextCompactionRequest<'_>,
 ) -> Result<CompactionOutcome> {
     let ContextCompactionRequest {
-        provider,
-        model,
+        runtime,
         config,
         request_instructions,
         request_messages,
@@ -290,7 +288,7 @@ pub(crate) async fn maybe_compact_session(
     if !has_compactable_history(session.items(), trigger) {
         return Ok(CompactionOutcome::Skipped);
     }
-    let model_info = provider.model_info(model);
+    let model_info = runtime.model();
     ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
     let limit = match (trigger, model_info.resolved_auto_compact_limit()) {
         (CompactionTrigger::Manual | CompactionTrigger::WallClockRollover, limit) => {
@@ -326,8 +324,7 @@ pub(crate) async fn maybe_compact_session(
         let (replacement, usage) = remote::compact_remote(
             session,
             remote::RemoteCompactionRequest {
-                provider,
-                model,
+                runtime,
                 config,
                 request_instructions,
                 request_messages,
@@ -346,14 +343,14 @@ pub(crate) async fn maybe_compact_session(
         (replacement, usage, None, implementation, None)
     } else {
         let (replacement, usage, summary) = compact_local(
-            provider,
-            model,
+            runtime,
             config,
             request_instructions,
             request_messages,
             session.items(),
             working_context_tail.as_ref(),
             event_tx,
+            prompt_cache_key,
             recorder,
             &mut progress,
             model_info.max_output_tokens,

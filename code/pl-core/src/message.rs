@@ -63,6 +63,7 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompletionResponseSnapshot {
     id: Option<String>,
+    model: String,
     output: Vec<CompletionResponseOutputSnapshot>,
     usage: ModelTokenUsageSnapshot,
 }
@@ -74,6 +75,10 @@ impl CompletionResponseSnapshot {
 
     pub fn output(&self) -> &[CompletionResponseOutputSnapshot] {
         &self.output
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
     }
 
     pub fn usage(&self) -> &ModelTokenUsageSnapshot {
@@ -224,6 +229,7 @@ pub fn completion_response_snapshot(
 
     CompletionResponseSnapshot {
         id: response.response_id.clone(),
+        model: response.model.clone(),
         output,
         usage: ModelTokenUsageSnapshot::from(&response.usage),
     }
@@ -482,7 +488,6 @@ mod tests {
         let response = pl_model::CompletionResponse {
             response_id: Some("resp_1".to_string()),
             content: Some("answer".to_string()),
-            raw_content: None,
             reasoning_content: Some("thinking".to_string()),
             tool_calls: vec![pl_model::ToolCall::function(
                 "call_item",
@@ -490,13 +495,9 @@ mod tests {
                 serde_json::json!({"path": "Cargo.toml"}),
                 "call_1",
             )],
-            hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
-            trace_events: Vec::new(),
-            next_sequence: 0,
             usage: pl_model::TokenUsage::default(),
-            finish_reason: pl_model::FinishReason::Stop,
             model: "test-model".to_string(),
         };
 
@@ -511,7 +512,6 @@ mod tests {
         let response = pl_model::CompletionResponse {
             response_id: Some("resp_1".to_string()),
             content: Some("answer".to_string()),
-            raw_content: None,
             reasoning_content: Some("thinking".to_string()),
             tool_calls: vec![
                 pl_model::ToolCall::function(
@@ -527,11 +527,8 @@ mod tests {
                     "custom_item",
                 ),
             ],
-            hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
-            trace_events: Vec::new(),
-            next_sequence: 0,
             usage: pl_model::TokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
@@ -540,7 +537,6 @@ mod tests {
                 reasoning_tokens: 2,
                 total_tokens: 13,
             },
-            finish_reason: pl_model::FinishReason::ToolCalls,
             model: "test-model".to_string(),
         };
 
@@ -577,7 +573,6 @@ mod tests {
         let response = pl_model::CompletionResponse {
             response_id: Some("resp_1".to_string()),
             content: Some("Task title".to_string()),
-            raw_content: None,
             reasoning_content: Some("hidden chain of thought".to_string()),
             tool_calls: vec![pl_model::ToolCall::function(
                 "call_item",
@@ -585,13 +580,9 @@ mod tests {
                 serde_json::json!({"path": "Cargo.toml"}),
                 "call_1",
             )],
-            hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
-            trace_events: Vec::new(),
-            next_sequence: 0,
             usage: pl_model::TokenUsage::default(),
-            finish_reason: pl_model::FinishReason::ToolCalls,
             model: "test-model".to_string(),
         };
 
@@ -606,16 +597,11 @@ mod tests {
         let response = pl_model::CompletionResponse {
             response_id: None,
             content: Some("你".repeat(200)),
-            raw_content: None,
             reasoning_content: None,
             tool_calls: Vec::new(),
-            hosted_web_search_calls: Vec::new(),
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
-            trace_events: Vec::new(),
-            next_sequence: 0,
             usage: pl_model::TokenUsage::default(),
-            finish_reason: pl_model::FinishReason::Stop,
             model: "test-model".to_string(),
         };
 
