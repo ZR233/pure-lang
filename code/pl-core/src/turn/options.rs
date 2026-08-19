@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -106,9 +107,44 @@ pub struct TurnOptions {
     pub execution_policy: Option<crate::AgentExecutionPolicy>,
     pub(crate) checkpoint: Option<crate::AgentTurnCheckpointHandle>,
     pub(crate) mailbox: Option<crate::agent_runtime::AgentTurnMailboxHandle>,
+    pub(crate) budget_refresh: Option<crate::agent_runtime::TurnBudgetRefreshReceiver>,
+    #[cfg(any(test, debug_assertions))]
+    debug_context_compaction_timeout: Option<Duration>,
 }
 
 impl TurnOptions {
+    pub(crate) fn apply_budget_refresh(&self, tracker: &mut super::budget::BudgetTracker) {
+        if let Some(accepted_at) = self
+            .budget_refresh
+            .as_ref()
+            .and_then(crate::agent_runtime::TurnBudgetRefreshReceiver::take_latest)
+        {
+            tracker.refresh_at(accepted_at);
+        }
+    }
+
+    pub(crate) fn context_compaction_control(
+        &self,
+    ) -> crate::context_compaction::ContextCompactionControl {
+        let control = crate::context_compaction::ContextCompactionControl::default()
+            .with_optional_cancellation(self.cancellation_token.clone());
+        #[cfg(any(test, debug_assertions))]
+        let control = self
+            .debug_context_compaction_timeout
+            .map_or(control.clone(), |timeout| control.with_timeout(timeout));
+        control
+    }
+
+    /// 覆盖 debug/test 构建中的 context compaction 硬超时。
+    ///
+    /// 仅供 scripted runtime 验收夹具缩短等待；release 构建始终使用固定的生产超时。
+    #[cfg(any(test, debug_assertions))]
+    #[doc(hidden)]
+    pub fn with_debug_context_compaction_timeout(mut self, timeout: Duration) -> Self {
+        self.debug_context_compaction_timeout = Some(timeout);
+        self
+    }
+
     pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
         self.cancellation_token = Some(cancellation_token);
         self
@@ -178,6 +214,9 @@ impl Default for TurnOptions {
             execution_policy: None,
             checkpoint: None,
             mailbox: None,
+            budget_refresh: None,
+            #[cfg(any(test, debug_assertions))]
+            debug_context_compaction_timeout: None,
         }
     }
 }
@@ -202,6 +241,7 @@ impl std::fmt::Debug for TurnOptions {
             .field("execution_policy", &self.execution_policy)
             .field("checkpoint", &self.checkpoint)
             .field("mailbox", &self.mailbox)
+            .field("budget_refresh", &self.budget_refresh)
             .finish()
     }
 }

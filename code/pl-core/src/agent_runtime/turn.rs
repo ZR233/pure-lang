@@ -1,11 +1,13 @@
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use pl_protocol::{
     AgentRuntimeDelta, InferenceBillingRecord, McpHealthSnapshot, ThreadRuntimeSnapshot,
     ThreadRuntimeUsage, ThreadSnapshot,
 };
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{AgentSession, TurnEngine, TurnOptions, TurnRequest};
@@ -14,6 +16,46 @@ use super::{
     AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, DurableMailboxEnvelope, ThreadId,
     TurnId,
 };
+
+#[derive(Debug, Clone)]
+pub(crate) struct TurnBudgetRefreshHandle {
+    sender: watch::Sender<Option<Instant>>,
+}
+
+impl TurnBudgetRefreshHandle {
+    pub(crate) fn refresh(&self) {
+        self.sender.send_replace(Some(Instant::now()));
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TurnBudgetRefreshReceiver {
+    receiver: Arc<StdMutex<watch::Receiver<Option<Instant>>>>,
+}
+
+impl TurnBudgetRefreshReceiver {
+    pub(crate) fn take_latest(&self) -> Option<Instant> {
+        let mut receiver = match self.receiver.lock() {
+            Ok(receiver) => receiver,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if !receiver.has_changed().unwrap_or(false) {
+            return None;
+        }
+        *receiver.borrow_and_update()
+    }
+}
+
+pub(crate) fn turn_budget_refresh_channel() -> (TurnBudgetRefreshHandle, TurnBudgetRefreshReceiver)
+{
+    let (sender, receiver) = watch::channel(None);
+    (
+        TurnBudgetRefreshHandle { sender },
+        TurnBudgetRefreshReceiver {
+            receiver: Arc::new(StdMutex::new(receiver)),
+        },
+    )
+}
 
 /// turn 完成后对 canonical Thread 的提交策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -38,6 +80,7 @@ pub struct AgentTurnPreparationContext {
     pub runtime: AgentRuntimeHandle,
     pub cancellation_token: CancellationToken,
     pub(crate) mailbox: AgentTurnMailboxHandle,
+    pub(crate) budget_refresh: TurnBudgetRefreshReceiver,
 }
 
 struct AgentTurnMailboxState {
@@ -162,12 +205,14 @@ impl PreparedAgentTurn {
         cancellation: CancellationToken,
         checkpoint: AgentTurnCheckpointHandle,
         mailbox: AgentTurnMailboxHandle,
+        budget_refresh: TurnBudgetRefreshReceiver,
     ) -> Self {
         self.request.turn_id = Some(turn_id.to_string());
         self.options.cancellation_token = Some(cancellation);
         self.options.execution_policy = Some(self.policy.clone());
         self.options.checkpoint = Some(checkpoint);
         self.options.mailbox = Some(mailbox);
+        self.options.budget_refresh = Some(budget_refresh);
         self
     }
 }

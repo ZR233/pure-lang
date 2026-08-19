@@ -72,6 +72,13 @@ impl BudgetTracker {
         usage
     }
 
+    /// 以 runtime 接受 parent 消息的时刻开始新的预算 tranche。
+    pub(crate) fn refresh_at(&mut self, accepted_at: Instant) {
+        self.usage = BudgetUsage::default();
+        self.started_at = accepted_at;
+        self.excluded_wall_clock = Duration::ZERO;
+    }
+
     /// 记录一次模型推理（仅追踪，不限制）。
     pub fn record_model_step(&mut self) {
         self.usage.model_steps += 1;

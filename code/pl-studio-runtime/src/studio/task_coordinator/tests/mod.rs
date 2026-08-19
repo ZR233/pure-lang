@@ -1081,6 +1081,32 @@ async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
         .expect("idempotent continuation request");
     assert_eq!(duplicate, continuation);
     assert_eq!(fixture.work_unit().await.budget_slice_count, 2);
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Preserve)
+        .await
+        .unwrap();
+    let automatic = fixture.work_unit().await;
+    assert_eq!(automatic.budget_slice_count, 2);
+    assert_eq!(
+        automatic.continuation_state,
+        ExecutorContinuationState::None
+    );
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .await
+        .unwrap();
+    let refreshed = fixture.work_unit().await;
+    assert_eq!(refreshed.id, fixture.work_unit_id);
+    assert_eq!(refreshed.status, WorkUnitStatus::Running);
+    assert_eq!(refreshed.execution_status, ThreadExecutionStatus::Running);
+    assert_eq!(refreshed.budget_slice_count, 1);
+    assert_eq!(refreshed.budget_limit, None);
+    assert_eq!(refreshed.execution_error, None);
+    assert_eq!(refreshed.continuation_source_turn_id, None);
     fixture.cleanup();
 }
 
@@ -1099,7 +1125,10 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
         assert_eq!(continuation.slice_count, source_slice + 1);
         fixture
             .store
-            .mark_executor_turn_started(&fixture.subagent.id)
+            .mark_executor_turn_started(
+                &fixture.subagent.id,
+                pl_core::MailboxBudgetAction::Preserve,
+            )
             .await
             .unwrap();
     }
@@ -1121,6 +1150,46 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
     assert_eq!(
         exhausted.continuation_state,
         ExecutorContinuationState::NeedsAttention
+    );
+
+    let wakes = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(wakes.len(), 1);
+    assert!(matches!(
+        &wakes[0].source,
+        TaskPlannerWakeSource::ExecutorTerminal {
+            work_unit_id,
+            executor_thread_id,
+            source_turn_id,
+        } if work_unit_id == &fixture.work_unit_id
+            && executor_thread_id == &fixture.subagent.id
+            && source_turn_id == "turn-budget-4"
+    ));
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .await
+        .unwrap();
+    let resumed = fixture.work_unit().await;
+    assert_eq!(resumed.id, fixture.work_unit_id);
+    assert_eq!(resumed.status, WorkUnitStatus::Running);
+    assert_eq!(resumed.execution_status, ThreadExecutionStatus::Running);
+    assert_eq!(resumed.budget_slice_count, 1);
+    assert_eq!(resumed.budget_limit, None);
+    assert_eq!(resumed.execution_error, None);
+    assert_eq!(resumed.continuation_state, ExecutorContinuationState::None);
+    assert_eq!(resumed.continuation_source_turn_id, None);
+    assert!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .is_empty()
     );
 
     fixture.cleanup();
@@ -1167,8 +1236,44 @@ async fn non_wall_clock_and_rollover_failure_do_not_auto_continue() {
             ExecutorContinuationState::NeedsAttention
         );
         assert_eq!(work_unit.execution_error.as_deref(), Some(expected_error));
+        assert_eq!(
+            fixture
+                .store
+                .list_pending_task_planner_wakes()
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         fixture.cleanup();
     }
+}
+
+#[tokio::test]
+async fn non_budget_needs_attention_rejects_message_recovery() {
+    let fixture = DeliveryFixture::new("handoff-needs-attention", vec!["src"]).await;
+    fixture
+        .store
+        .mark_executor_handoff_needs_attention(&fixture.subagent.id, "handoff is invalid")
+        .await
+        .unwrap();
+
+    let error = fixture
+        .store
+        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("executor cannot start a turn while work unit is needsAttention")
+    );
+    let unchanged = fixture.work_unit().await;
+    assert_eq!(unchanged.status, WorkUnitStatus::NeedsAttention);
+    assert_eq!(unchanged.execution_status, ThreadExecutionStatus::Failed);
+    assert_eq!(unchanged.budget_limit, None);
+    fixture.cleanup();
 }
 
 #[tokio::test]

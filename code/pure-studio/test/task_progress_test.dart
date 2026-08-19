@@ -115,7 +115,70 @@ void main() {
       throwsA(isA<StateError>()),
     );
   });
+
+  test(
+    'budget recovery preserves executor identity and returns to slice one',
+    () {
+      final evidence = BudgetRecoveryEvidence();
+      evidence.observe(_budgetRecoverySnapshot(needsAttention: true));
+      evidence.observe(_budgetRecoverySnapshot(needsAttention: false));
+
+      final result = evidence.validate();
+
+      expect(result['limited'], containsPair('budgetSliceCount', 1));
+      expect(result['resumed'], containsPair('budgetSliceCount', 1));
+      expect(
+        (result['limited'] as Map<String, Object?>)['workUnitId'],
+        (result['resumed'] as Map<String, Object?>)['workUnitId'],
+      );
+    },
+  );
+
+  test('budget recovery rejects a replacement executor identity', () {
+    final evidence = BudgetRecoveryEvidence();
+    evidence.observe(_budgetRecoverySnapshot(needsAttention: true));
+    final resumed = _budgetRecoverySnapshot(needsAttention: false);
+    final task = resumed['task'] as Map<String, dynamic>;
+    final unit = (task['workUnits'] as List<dynamic>).single;
+    (unit as Map<String, dynamic>)['agentId'] = 'replacement-agent';
+    evidence.observe(resumed);
+
+    expect(evidence.validate, throwsA(isA<StateError>()));
+  });
 }
+
+Map<String, dynamic> _budgetRecoverySnapshot({required bool needsAttention}) =>
+    {
+      'task': {
+        'phase': 'implementing',
+        'workUnits': [
+          {
+            'id': 'work-unit-1',
+            'agentId': 'executor-1',
+            'worktreePath': r'C:\work\executor-1',
+            'branch': 'pure-task-executor-1',
+            'status': needsAttention ? 'needsAttention' : 'running',
+            'executionStatus': needsAttention ? 'budgetLimited' : 'running',
+            'executionError': needsAttention ? 'rollover timed out' : null,
+            'budgetLimit': needsAttention
+                ? {
+                    'kind': 'wallClock',
+                    'usage': {
+                      'modelSteps': 0,
+                      'toolCalls': 0,
+                      'waitCalls': 0,
+                      'elapsedMs': '0',
+                    },
+                  }
+                : null,
+            'budgetSliceCount': 1,
+            'continuationState': needsAttention ? 'needsAttention' : 'none',
+            'continuationSourceTurnId': needsAttention ? 'turn-budget' : null,
+            'continuationRevision': needsAttention ? '2' : '3',
+          },
+        ],
+      },
+    };
 
 Map<String, dynamic> _snapshot({required String activity}) => {
   'workspace': {

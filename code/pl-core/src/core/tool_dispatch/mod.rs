@@ -131,6 +131,7 @@ pub(super) async fn execute_tool_call_batch(
     );
 
     for tool_call in tool_calls {
+        context.options.apply_budget_refresh(budget_tracker);
         if is_cancelled(context.options) {
             break;
         }
@@ -513,6 +514,7 @@ pub(super) async fn execute_tool_call_batch(
     )
     .then(Instant::now);
     let result = collect_scheduled_tools(scheduled, recorder, context.options, &mut progress).await;
+    context.options.apply_budget_refresh(budget_tracker);
     if let Some(started_at) = pause_started_at {
         budget_tracker.exclude_wall_clock(started_at.elapsed());
     }

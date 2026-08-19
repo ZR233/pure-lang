@@ -1,8 +1,12 @@
 use std::path::Path;
 use std::sync::Arc;
+#[cfg(debug_assertions)]
+use std::time::Duration;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
 use futures::FutureExt;
+#[cfg(debug_assertions)]
+use pl_core::TurnBudget;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
@@ -108,6 +112,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None
         };
         let task_phase = active_task_run.as_ref().map(|run| run.phase);
+        #[cfg(debug_assertions)]
+        let task_driver_budget = debug_task_driver_budget_fixture()?;
         if let Some(run) = active_task_run.as_ref() {
             ensure_task_accepts_turn(run)?;
         }
@@ -185,7 +191,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 }
             };
             self.store
-                .mark_executor_turn_started(context.snapshot.identity.id.as_str())
+                .mark_executor_turn_started(
+                    context.snapshot.identity.id.as_str(),
+                    context.input.budget_action,
+                )
                 .await
                 .map_err(anyhow_error)?;
             Some(section)
@@ -318,13 +327,22 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
         })?;
-        let request = TurnRequest::new(input_message)
+        let mut request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
             .with_user_content(user_content)
             .with_materialized_attachments(materialized)
             .with_trace_attachments(trace_attachments)
             .with_workspace_instructions(workspace_instructions)
             .with_instruction_snapshot(instruction_snapshot);
+        #[cfg(debug_assertions)]
+        if let Some(fixture) = task_driver_budget
+            && mode == StudioMode::Task
+            && context.snapshot.identity.parent_id.is_some()
+            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
+            && context.input.budget_action == pl_core::MailboxBudgetAction::Preserve
+        {
+            request = request.with_budget(TurnBudget::new(fixture.executor_wall_clock_ms));
+        }
         let emitter = interaction_emitter(
             context.runtime,
             thread_id.clone(),
@@ -345,13 +363,23 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .slots
             .get(&prompt_scope)
             .map(|prompt| (prompt.registry_revision, prompt.tool_catalog_hash.clone()));
-        let options = studio_turn_options(
+        let mut options = studio_turn_options(
             TurnOptions::default()
                 .with_permission_mode(config.runtime.permission_mode)
                 .with_prompt_cache_namespace(prompt_cache_namespace)
                 .with_prompt_scope(prompt_scope)
                 .with_interaction_callback(interaction_callback),
         );
+        #[cfg(debug_assertions)]
+        if let Some(fixture) = task_driver_budget
+            && mode == StudioMode::Task
+            && context.snapshot.identity.parent_id.is_some()
+            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
+        {
+            options = options.with_debug_context_compaction_timeout(Duration::from_millis(
+                fixture.compaction_timeout_ms,
+            ));
+        }
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)
             .with_mcp_health(mcp_health)
@@ -387,6 +415,65 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
 
 fn studio_turn_options(options: TurnOptions) -> TurnOptions {
     options.with_user_input_end_turn()
+}
+
+#[cfg(debug_assertions)]
+const TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV: &str = "PURE_STUDIO_TASK_DRIVER_EXECUTOR_WALL_CLOCK_MS";
+#[cfg(debug_assertions)]
+const TASK_DRIVER_COMPACTION_TIMEOUT_ENV: &str = "PURE_STUDIO_TASK_DRIVER_COMPACTION_TIMEOUT_MS";
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DebugTaskDriverBudgetFixture {
+    executor_wall_clock_ms: u64,
+    compaction_timeout_ms: u64,
+}
+
+#[cfg(debug_assertions)]
+fn debug_task_driver_budget_fixture() -> Result<Option<DebugTaskDriverBudgetFixture>> {
+    parse_debug_task_driver_budget_fixture(
+        std::env::var(TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV)
+            .ok()
+            .as_deref(),
+        std::env::var(TASK_DRIVER_COMPACTION_TIMEOUT_ENV)
+            .ok()
+            .as_deref(),
+    )
+}
+
+#[cfg(debug_assertions)]
+fn parse_debug_task_driver_budget_fixture(
+    wall_clock_ms: Option<&str>,
+    compaction_timeout_ms: Option<&str>,
+) -> Result<Option<DebugTaskDriverBudgetFixture>> {
+    let (Some(wall_clock_ms), Some(compaction_timeout_ms)) = (wall_clock_ms, compaction_timeout_ms)
+    else {
+        if wall_clock_ms.is_none() && compaction_timeout_ms.is_none() {
+            return Ok(None);
+        }
+        return Err(turn_error(format!(
+            "{TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV} and {TASK_DRIVER_COMPACTION_TIMEOUT_ENV} must be set together"
+        )));
+    };
+    let executor_wall_clock_ms = wall_clock_ms.parse::<u64>().map_err(|error| {
+        turn_error(format!(
+            "invalid {TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV}: {error}"
+        ))
+    })?;
+    let compaction_timeout_ms = compaction_timeout_ms.parse::<u64>().map_err(|error| {
+        turn_error(format!(
+            "invalid {TASK_DRIVER_COMPACTION_TIMEOUT_ENV}: {error}"
+        ))
+    })?;
+    if compaction_timeout_ms == 0 {
+        return Err(turn_error(format!(
+            "{TASK_DRIVER_COMPACTION_TIMEOUT_ENV} must be greater than zero"
+        )));
+    }
+    Ok(Some(DebugTaskDriverBudgetFixture {
+        executor_wall_clock_ms,
+        compaction_timeout_ms,
+    }))
 }
 
 struct StudioInstructionContext<'a> {
@@ -542,6 +629,25 @@ mod tests {
                 role.key()
             );
         }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_task_driver_budget_requires_a_complete_typed_pair() {
+        assert_eq!(
+            parse_debug_task_driver_budget_fixture(None, None).unwrap(),
+            None
+        );
+        assert!(parse_debug_task_driver_budget_fixture(Some("0"), None).is_err());
+        assert!(parse_debug_task_driver_budget_fixture(None, Some("250")).is_err());
+        assert!(parse_debug_task_driver_budget_fixture(Some("0"), Some("0")).is_err());
+        assert_eq!(
+            parse_debug_task_driver_budget_fixture(Some("0"), Some("250")).unwrap(),
+            Some(DebugTaskDriverBudgetFixture {
+                executor_wall_clock_ms: 0,
+                compaction_timeout_ms: 250,
+            })
+        );
     }
 
     fn stopped_run() -> TaskRunRecord {

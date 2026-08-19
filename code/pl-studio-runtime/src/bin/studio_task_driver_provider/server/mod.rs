@@ -17,8 +17,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
 use script::{
-    RECOVERY_INTERRUPTION_ACTION, ScriptProgress, ScriptRole, next_step, observe_request, response,
-    role,
+    BUDGET_COMPACTION_ACTION, BUDGET_RECOVERY_ACTION, BUDGET_RESUMED_ACTION,
+    RECOVERY_INTERRUPTION_ACTION, ScriptProgress, ScriptRole, is_compaction_request, next_step,
+    observe_request, response, role,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,7 @@ pub(super) struct ServerOptions {
     request_log: PathBuf,
     state_file: PathBuf,
     exercise_recovery: bool,
+    exercise_budget_recovery: bool,
     failure_mode: FailureMode,
 }
 
@@ -54,6 +56,7 @@ impl ServerOptions {
         let mut request_log = None;
         let mut state_file = None;
         let mut exercise_recovery = false;
+        let mut exercise_budget_recovery = false;
         let mut failure_mode = FailureMode::None;
         while let Some(name) = arguments.next() {
             let value = arguments
@@ -70,6 +73,12 @@ impl ServerOptions {
                         .parse::<bool>()
                         .context("--exercise-recovery must be true or false")?;
                 }
+                "--exercise-budget-recovery" => {
+                    exercise_budget_recovery = value
+                        .to_string_lossy()
+                        .parse::<bool>()
+                        .context("--exercise-budget-recovery must be true or false")?;
+                }
                 "--failure-mode" => {
                     failure_mode = FailureMode::parse(&value.to_string_lossy())?;
                 }
@@ -82,6 +91,7 @@ impl ServerOptions {
             request_log: request_log.context("missing --request-log")?,
             state_file: state_file.context("missing --state-file")?,
             exercise_recovery,
+            exercise_budget_recovery,
             failure_mode,
         };
         options.validate()?;
@@ -102,6 +112,12 @@ impl ServerOptions {
         if !self.workspace.is_dir() {
             bail!("workspace does not exist: {}", self.workspace.display());
         }
+        if self.exercise_recovery && self.exercise_budget_recovery {
+            bail!("recovery and budget-recovery fixtures are mutually exclusive");
+        }
+        if self.exercise_budget_recovery && self.failure_mode != FailureMode::None {
+            bail!("budget-recovery and provider-failure fixtures are mutually exclusive");
+        }
         Ok(())
     }
 }
@@ -111,6 +127,7 @@ struct ServerState {
     request_log: PathBuf,
     state_file: PathBuf,
     exercise_recovery: bool,
+    exercise_budget_recovery: bool,
     failure_mode: FailureMode,
     progress: Mutex<ScriptProgress>,
 }
@@ -129,6 +146,7 @@ pub(super) async fn run(options: ServerOptions) -> Result<()> {
         request_log: options.request_log,
         state_file: options.state_file,
         exercise_recovery: options.exercise_recovery,
+        exercise_budget_recovery: options.exercise_budget_recovery,
         failure_mode: options.failure_mode,
         progress: Mutex::new(progress),
     });
@@ -147,6 +165,25 @@ pub(super) async fn run(options: ServerOptions) -> Result<()> {
 async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
     let result = async {
         let request = read_json_request(&mut socket).await?;
+        if state.exercise_budget_recovery && is_compaction_request(&request) {
+            let mut progress = state.progress.lock().await;
+            let step = progress.compaction_trigger_count;
+            progress.compaction_trigger_count += 1;
+            progress.compaction_hung = true;
+            append_request_log(
+                &state.request_log,
+                "executor-rollover",
+                step,
+                BUDGET_COMPACTION_ACTION,
+                &request,
+            )?;
+            save_script_progress(&state.state_file, &progress)?;
+            println!("SCRIPTED_TASK_PROVIDER executor-rollover[{step}] {BUDGET_COMPACTION_ACTION}");
+            std::io::stdout().flush()?;
+            drop(progress);
+            std::future::pending::<()>().await;
+            return Ok(());
+        }
         let mut progress = state.progress.lock().await;
         let role = role(&request)?;
         observe_request(&mut progress, &request);
@@ -179,6 +216,7 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
             role,
             step,
             state.exercise_recovery,
+            state.exercise_budget_recovery,
         )?;
         append_request_log(&state.request_log, role.label(), step, action, &request)?;
         save_script_progress(&state.state_file, &progress)?;
@@ -187,6 +225,8 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
         drop(progress);
         if action == RECOVERY_INTERRUPTION_ACTION {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        } else if action == BUDGET_RECOVERY_ACTION || action == BUDGET_RESUMED_ACTION {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
         write_response(&mut socket, "200 OK", "text/event-stream", &body).await
     }

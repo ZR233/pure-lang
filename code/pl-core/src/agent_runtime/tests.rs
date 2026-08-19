@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::pending;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,11 +9,16 @@ use pl_protocol::{
     TurnBillingRecord,
 };
 use pretty_assertions::assert_eq;
-use tokio::sync::Notify;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::{Notify, Semaphore};
 
 use super::host::ThreadContextMutation;
 use super::*;
-use crate::{AgentSession, Message};
+use crate::{
+    AgentSession, Message, ModelInfo, ProviderEndpoint, ResolvedModelRoute, TurnBudget,
+    TurnEngineBuilder, TurnOptions, TurnRequest,
+};
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{0}")]
@@ -22,6 +28,7 @@ struct TestError(String);
 enum FactoryMode {
     Fail,
     Block,
+    BudgetLimited,
 }
 
 #[derive(Clone)]
@@ -29,6 +36,7 @@ struct TestRepository {
     states: Arc<Mutex<BTreeMap<AgentId, ThreadActorState>>>,
     mutations: Arc<Mutex<Vec<ThreadMutation>>>,
     contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
+    commits: Arc<Mutex<Vec<ThreadCommit>>>,
     submissions: Arc<Mutex<BTreeMap<AgentId, Vec<AgentSubmissionRecord>>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
@@ -45,6 +53,7 @@ impl TestRepository {
             states: Arc::new(Mutex::new(BTreeMap::new())),
             mutations: Arc::new(Mutex::new(Vec::new())),
             contexts: Arc::new(Mutex::new(Vec::new())),
+            commits: Arc::new(Mutex::new(Vec::new())),
             submissions: Arc::new(Mutex::new(BTreeMap::new())),
             fail_trace: Arc::new(Mutex::new(false)),
             fail_terminal: Arc::new(Mutex::new(false)),
@@ -96,6 +105,10 @@ impl TestRepository {
 
     fn last_context(&self) -> Option<ThreadContextMutation> {
         self.contexts.lock().unwrap().last().cloned().flatten()
+    }
+
+    fn commits(&self) -> Vec<ThreadCommit> {
+        self.commits.lock().unwrap().clone()
     }
 }
 
@@ -200,6 +213,7 @@ impl ThreadRepository for TestRepository {
                 actual_revision: actual,
             });
         }
+        self.commits.lock().unwrap().push(commit.clone());
         self.mutations.lock().unwrap().push(commit.mutation.clone());
         self.contexts
             .lock()
@@ -282,7 +296,10 @@ struct TestTurnFactory {
     prepared_messages: Arc<Mutex<Vec<String>>>,
     prepared_batches: Arc<Mutex<Vec<Vec<String>>>>,
     prepared_sessions: Arc<Mutex<Vec<Vec<Message>>>>,
+    budget_refreshes: Arc<Mutex<Vec<TurnBudgetRefreshReceiver>>>,
     blocker: Arc<Notify>,
+    rollover_base_url: Option<String>,
+    rollover_timeout: Duration,
 }
 
 impl TestTurnFactory {
@@ -292,7 +309,19 @@ impl TestTurnFactory {
             prepared_messages: Arc::new(Mutex::new(Vec::new())),
             prepared_batches: Arc::new(Mutex::new(Vec::new())),
             prepared_sessions: Arc::new(Mutex::new(Vec::new())),
+            budget_refreshes: Arc::new(Mutex::new(Vec::new())),
             blocker: Arc::new(Notify::new()),
+            rollover_base_url: None,
+            rollover_timeout: Duration::from_secs(120),
+        }
+    }
+
+    fn budget_limited(base_url: String, rollover_timeout: Duration) -> Self {
+        Self {
+            mode: FactoryMode::BudgetLimited,
+            rollover_base_url: Some(base_url),
+            rollover_timeout,
+            ..Self::new(FactoryMode::BudgetLimited)
         }
     }
 }
@@ -304,6 +333,10 @@ impl AgentTurnFactory for TestTurnFactory {
         &self,
         context: AgentTurnPreparationContext,
     ) -> std::result::Result<PreparedAgentTurn, Self::Error> {
+        self.budget_refreshes
+            .lock()
+            .unwrap()
+            .push(context.budget_refresh.clone());
         self.prepared_sessions
             .lock()
             .unwrap()
@@ -318,12 +351,37 @@ impl AgentTurnFactory for TestTurnFactory {
         self.prepared_messages
             .lock()
             .unwrap()
-            .push(context.input.payload.message);
+            .push(context.input.payload.message.clone());
         match self.mode {
             FactoryMode::Fail => Err(TestError("prepared turn failed".to_string())),
             FactoryMode::Block => {
                 self.blocker.notified().await;
                 Err(TestError("blocker released".to_string()))
+            }
+            FactoryMode::BudgetLimited => {
+                let route = ResolvedModelRoute {
+                    role: crate::AgentRoleId::new("test").unwrap(),
+                    provider_id: crate::ProviderId::new("test").unwrap(),
+                    endpoint: ProviderEndpoint::openai_compatible_chat(
+                        "rollover-test",
+                        self.rollover_base_url
+                            .clone()
+                            .expect("budget rollover test requires an endpoint"),
+                    ),
+                    model: ModelInfo::fallback("rollover-test"),
+                    effort: None,
+                };
+                let engine = TurnEngineBuilder::from_route(&route).unwrap().build();
+                let request =
+                    TurnRequest::new(context.input.payload.message).with_budget(TurnBudget::new(0));
+                let options = TurnOptions::default()
+                    .with_debug_context_compaction_timeout(self.rollover_timeout);
+                Ok(PreparedAgentTurn::new(
+                    engine,
+                    request,
+                    options,
+                    AgentExecutionPolicy::default(),
+                ))
             }
         }
     }
@@ -479,6 +537,19 @@ impl TestHost {
             events: TestEvents::default(),
         }
     }
+
+    fn budget_limited(
+        repository: TestRepository,
+        base_url: String,
+        rollover_timeout: Duration,
+    ) -> Self {
+        Self {
+            repository,
+            turn_factory: TestTurnFactory::budget_limited(base_url, rollover_timeout),
+            lifecycle: TestLifecycle::default(),
+            events: TestEvents::default(),
+        }
+    }
 }
 
 impl AgentRuntimeHost for TestHost {
@@ -594,6 +665,93 @@ fn test_options() -> AgentRuntimeOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TestCompactionResponse {
+    Hang,
+    Summary,
+}
+
+struct TestCompactionServer {
+    base_url: String,
+    accepted: Arc<Semaphore>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl TestCompactionServer {
+    async fn start(response: TestCompactionResponse) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(Semaphore::new(0));
+        let accepted_for_task = Arc::clone(&accepted);
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            accepted_for_task.add_permits(1);
+            read_test_http_request(&mut socket).await;
+            match response {
+                TestCompactionResponse::Hang => pending::<()>().await,
+                TestCompactionResponse::Summary => {
+                    let body = concat!(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"rollover summary\"},\"finish_reason\":null}]}\n\n",
+                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+                        "data: [DONE]\n\n"
+                    );
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.shutdown().await.unwrap();
+                }
+            }
+        });
+        Self {
+            base_url: format!("http://{address}/v1"),
+            accepted,
+            task,
+        }
+    }
+
+    async fn wait_until_accepted(&self) {
+        let permit = tokio::time::timeout(Duration::from_secs(5), self.accepted.acquire())
+            .await
+            .expect("rollover compaction request should reach the provider")
+            .unwrap();
+        permit.forget();
+    }
+}
+
+impl Drop for TestCompactionServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn read_test_http_request(socket: &mut tokio::net::TcpStream) {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = socket.read(&mut buffer).await.unwrap();
+        assert_ne!(read, 0, "provider request closed before the body arrived");
+        bytes.extend_from_slice(&buffer[..read]);
+        let text = String::from_utf8_lossy(&bytes);
+        let Some((headers, body)) = text.split_once("\r\n\r\n") else {
+            continue;
+        };
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or_default();
+        if body.len() >= content_length {
+            return;
+        }
+    }
+}
+
 fn child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
     AgentSpawnRequest {
         thread_id: ThreadId::new("child-chat").unwrap(),
@@ -620,7 +778,15 @@ async fn wait_for_prepared_messages(factory: &TestTurnFactory, expected: usize) 
 }
 
 async fn wait_for_idle(handle: &AgentRuntimeHandle, agent_id: AgentId) -> AgentWaitResult {
-    tokio::time::timeout(Duration::from_secs(1), handle.wait_until_idle(agent_id))
+    wait_for_idle_with_timeout(handle, agent_id, Duration::from_secs(1)).await
+}
+
+async fn wait_for_idle_with_timeout(
+    handle: &AgentRuntimeHandle,
+    agent_id: AgentId,
+    timeout: Duration,
+) -> AgentWaitResult {
+    tokio::time::timeout(timeout, handle.wait_until_idle(agent_id))
         .await
         .expect("agent should become idle")
         .unwrap()
@@ -964,9 +1130,258 @@ async fn wait_agents_observes_turn_that_finished_before_subscription() {
     assert_eq!(result.messages.len(), 1);
     assert_eq!(result.messages[0].identity.id, agent_id);
     assert_eq!(result.messages[0].lifecycle, AgentLifecycleState::Active);
+    let outcome = result.messages[0]
+        .last_turn_outcome
+        .as_ref()
+        .expect("terminal wait result must include the canonical turn outcome");
+    assert_eq!(outcome.kind, TurnOutcomeKind::Failed);
+    assert_eq!(outcome.thread_id, ThreadId::new("root").unwrap());
+    assert!(outcome.reason.is_some());
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn rollover_timeout_commits_budget_outcome_and_wakes_wait_agents() {
+    let server = TestCompactionServer::start(TestCompactionResponse::Hang).await;
+    let repository = TestRepository::empty();
+    let host = TestHost::budget_limited(
+        repository.clone(),
+        server.base_url.clone(),
+        Duration::from_secs(2),
+    );
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let mut registration = registration("root", "chat");
+    registration
+        .session
+        .session
+        .push_user_prompt("existing context".to_string());
+    handle.register(registration).await.unwrap();
+
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "budgeted input"),
+        )
+        .await
+        .unwrap();
+    wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(10)).await;
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        handle.wait_agents(vec![agent_id.clone()]),
+    )
+    .await
+    .expect("budget terminal outcome must wake wait_agents")
+    .unwrap();
+    assert_eq!(result.reason, AgentDirectoryWaitReason::Terminal);
+    let outcome = result.messages[0]
+        .last_turn_outcome
+        .as_ref()
+        .expect("wait_agents must return the canonical budget outcome");
+    assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
+    let budget_limit = outcome
+        .budget_limit
+        .as_ref()
+        .expect("budget terminal must preserve measured usage");
+    assert_eq!(budget_limit.kind, pl_protocol::BudgetLimitKind::WallClock);
+    assert_eq!(budget_limit.usage.model_steps, 0);
+    assert_eq!(budget_limit.usage.tool_calls, 0);
+    assert_eq!(budget_limit.usage.wait_calls, 0);
     assert_eq!(
-        result.messages[0].turn_outcome,
-        Some(TurnOutcomeKind::Failed)
+        repository.state(&agent_id).snapshot.last_turn.as_ref(),
+        Some(outcome),
+        "wait_agents must return the complete persisted outcome, including measured elapsed time"
+    );
+    assert_eq!(outcome.reason.as_deref(), Some("budgetLimited"));
+    assert!(!outcome.rollover_compacted);
+    assert!(
+        outcome
+            .rollover_compaction_error
+            .as_deref()
+            .is_some_and(|error| error.contains("timed out after 2000ms"))
+    );
+    assert_eq!(outcome.usage, pl_model::TokenUsage::default());
+    assert_eq!(
+        repository.state(&agent_id).session.session.messages().len(),
+        2
+    );
+    assert_eq!(server.accepted.available_permits(), 1);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn stopping_during_rollover_commits_cancelled_without_partial_replacement() {
+    let server = TestCompactionServer::start(TestCompactionResponse::Hang).await;
+    let repository = TestRepository::empty();
+    let host = TestHost::budget_limited(
+        repository.clone(),
+        server.base_url.clone(),
+        Duration::from_secs(5),
+    );
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let mut registration = registration("root", "chat");
+    registration
+        .session
+        .session
+        .push_user_prompt("existing context".to_string());
+    handle.register(registration).await.unwrap();
+    let turn_id = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "budgeted input"),
+        )
+        .await
+        .unwrap();
+    server.wait_until_accepted().await;
+
+    tokio::time::timeout(
+        Duration::from_millis(250),
+        handle.cancel_turn(agent_id.clone(), turn_id),
+    )
+    .await
+    .expect("rollover cancellation must settle within the cancellation grace")
+    .unwrap();
+    let waited = wait_for_idle(&handle, agent_id.clone()).await;
+
+    let outcome = waited
+        .last_turn
+        .expect("cancelled turn outcome is required");
+    assert_eq!(outcome.kind, TurnOutcomeKind::Cancelled);
+    assert_eq!(outcome.budget_limit, None);
+    assert!(!outcome.rollover_compacted);
+    assert_eq!(outcome.rollover_compaction_error, None);
+    assert_eq!(
+        repository.state(&agent_id).session.session.messages().len(),
+        1
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn successful_rollover_replacement_and_turn_finished_share_immediate_commit() {
+    let server = TestCompactionServer::start(TestCompactionResponse::Summary).await;
+    let repository = TestRepository::empty();
+    let host = TestHost::budget_limited(
+        repository.clone(),
+        server.base_url.clone(),
+        Duration::from_secs(5),
+    );
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let mut registration = registration("root", "chat");
+    registration
+        .session
+        .session
+        .push_user_prompt("existing context".to_string());
+    handle.register(registration).await.unwrap();
+
+    let turn_id = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "budgeted input"),
+        )
+        .await
+        .unwrap();
+    let waited =
+        wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(10)).await;
+    let outcome = waited.last_turn.expect("budget outcome is required");
+    assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
+    assert!(outcome.rollover_compacted);
+    assert_eq!(outcome.rollover_compaction_error, None);
+
+    let commits = repository.commits();
+    let terminal_commits = commits
+        .iter()
+        .filter(|commit| {
+            commit
+                .facts
+                .runtime_events
+                .iter()
+                .any(|event| matches!(event.kind, AgentRuntimeEventKind::TurnFinished { .. }))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(terminal_commits.len(), 1);
+    let terminal = terminal_commits[0];
+    assert_eq!(terminal.durability, CommitDurability::Immediate);
+    let trace_parts = commits
+        .iter()
+        .flat_map(|commit| commit.facts.trace_events.iter())
+        .filter_map(|event| match &event.kind {
+            pl_trace::TraceEventKind::TracePartStarted { item }
+            | pl_trace::TraceEventKind::TracePartCompleted { item }
+            | pl_trace::TraceEventKind::TracePartFailed { item, .. } => Some(item),
+            pl_trace::TraceEventKind::TracePartDelta { .. }
+            | pl_trace::TraceEventKind::PlanLifecycleChanged { .. }
+            | pl_trace::TraceEventKind::InteractionChanged { .. }
+            | pl_trace::TraceEventKind::SkillActivated { .. }
+            | pl_trace::TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!trace_parts.is_empty());
+    assert!(
+        trace_parts
+            .iter()
+            .all(|item| item.turn_id == turn_id.as_str()),
+        "attached rollover trace items must remain owned by the persisted Turn"
+    );
+    assert!(trace_parts.iter().any(|item| {
+        item.item_id
+            .starts_with(&format!("{turn_id}:rollover-compaction:progress:"))
+    }));
+    let context = terminal
+        .facts
+        .context
+        .as_ref()
+        .expect("rollover transcript must be persisted with the terminal event");
+    match context {
+        ThreadContextMutation::Append { items } => {
+            assert!(terminal.next_state.session.session.items().ends_with(items))
+        }
+        ThreadContextMutation::Replace { items } => {
+            assert_eq!(items, terminal.next_state.session.session.items())
+        }
+    }
+    assert!(
+        terminal
+            .next_state
+            .session
+            .session
+            .messages()
+            .iter()
+            .any(|message| crate::message_content_text(&message.content)
+                .contains("rollover summary"))
+    );
+    let event_outcome = terminal
+        .facts
+        .runtime_events
+        .iter()
+        .find_map(|event| match &event.kind {
+            AgentRuntimeEventKind::TurnFinished { outcome, .. } => Some(outcome),
+            AgentRuntimeEventKind::Registered { .. }
+            | AgentRuntimeEventKind::StateChanged { .. }
+            | AgentRuntimeEventKind::TurnQueued { .. }
+            | AgentRuntimeEventKind::TurnStarted { .. }
+            | AgentRuntimeEventKind::ThreadOpened { .. }
+            | AgentRuntimeEventKind::TurnActivityChanged { .. }
+            | AgentRuntimeEventKind::RecoveryCancelledTurn { .. }
+            | AgentRuntimeEventKind::Faulted { .. } => None,
+        })
+        .expect("terminal commit must carry TurnFinished");
+    assert!(event_outcome.rollover_compacted);
+    assert_eq!(
+        terminal.next_state.snapshot.last_turn.as_ref(),
+        Some(event_outcome)
+    );
+    let durable = repository.state(&agent_id);
+    assert_eq!(durable.snapshot, terminal.next_state.snapshot);
+    assert_eq!(
+        durable.session.session.items(),
+        terminal.next_state.session.session.items()
     );
     runtime.shutdown().await.unwrap();
 }
@@ -1157,6 +1572,82 @@ async fn concurrent_start_only_submits_allow_one_turn_and_steer_is_atomic() {
         .unwrap();
     assert_eq!(steered_turn, started_turn);
 
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn active_refresh_messages_reset_budget_without_replacing_the_turn() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let active_turn = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id, "active"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let refresh_receiver = host.turn_factory.budget_refreshes.lock().unwrap()[0].clone();
+
+    let first = handle
+        .submit_current_session(
+            agent_id.clone(),
+            AgentCurrentSessionSubmitRequest::start("first")
+                .with_budget_action(MailboxBudgetAction::Refresh),
+        )
+        .await
+        .unwrap();
+    let second = handle
+        .submit_current_session(
+            agent_id.clone(),
+            AgentCurrentSessionSubmitRequest::start("second")
+                .with_budget_action(MailboxBudgetAction::Refresh),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(first, active_turn);
+    assert_eq!(second, active_turn);
+    assert!(refresh_receiver.take_latest().is_some());
+    assert!(refresh_receiver.take_latest().is_none());
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn preserve_message_does_not_refresh_an_active_turn_budget() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id, "active"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let refresh_receiver = host.turn_factory.budget_refreshes.lock().unwrap()[0].clone();
+
+    handle
+        .submit_current_session(
+            agent_id,
+            AgentCurrentSessionSubmitRequest::start("preserve"),
+        )
+        .await
+        .unwrap();
+
+    assert!(refresh_receiver.take_latest().is_none());
     runtime.shutdown().await.unwrap();
 }
 
@@ -1723,6 +2214,7 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
             thread_id: session_id.clone(),
             payload: MailboxInputPayload::user(message),
             queue_coalescing_key: None,
+            budget_action: MailboxBudgetAction::Preserve,
             delivery_state: Default::default(),
             queued_at: index as i64,
         });
@@ -1760,6 +2252,7 @@ async fn restored_inputs_wait_for_host_resource_activation() {
         thread_id: session_id,
         payload: MailboxInputPayload::user("after-resources-ready"),
         queue_coalescing_key: None,
+        budget_action: MailboxBudgetAction::Preserve,
         delivery_state: Default::default(),
         queued_at: 1,
     });

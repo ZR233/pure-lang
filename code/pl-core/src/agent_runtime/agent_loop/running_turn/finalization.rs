@@ -24,6 +24,7 @@ pub(in crate::agent_runtime::agent_loop) struct RunningTurn {
     pub(in crate::agent_runtime::agent_loop) checkpoint_sequence: u64,
     pub(in crate::agent_runtime::agent_loop) steer_sender:
         mpsc::UnboundedSender<super::super::DurableMailboxEnvelope>,
+    pub(in crate::agent_runtime::agent_loop) budget_refresh: super::super::TurnBudgetRefreshHandle,
 }
 
 impl<H> AgentLoop<H>
@@ -88,6 +89,7 @@ where
                 |snapshot| AgentRuntimeEventKind::TurnStarted {
                     turn_id: input.turn_id.clone(),
                     thread_id: input.thread_id.clone(),
+                    input: input.clone(),
                     claimed_inputs: leading_inputs.clone(),
                     snapshot: Box::new(snapshot),
                 },
@@ -110,6 +112,7 @@ where
                 .map(|input| input.mail_id.clone())
                 .collect(),
         );
+        let (budget_refresh, budget_refresh_receiver) = super::super::turn_budget_refresh_channel();
         let thread_id = self.state.snapshot.identity.id.clone();
         let context = AgentTurnPreparationContext {
             snapshot: self.state.snapshot.clone(),
@@ -122,6 +125,7 @@ where
             runtime: self.runtime.clone(),
             cancellation_token: cancellation.clone(),
             mailbox,
+            budget_refresh: budget_refresh_receiver,
         };
         let start_revision = self.state.snapshot.revision;
         let identity = Arc::new(());
@@ -189,6 +193,7 @@ where
             kind: ActiveKind::Running,
             checkpoint_sequence: 0,
             steer_sender,
+            budget_refresh,
         });
     }
 

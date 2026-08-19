@@ -14,9 +14,9 @@ use pl_trace::{AgentEvent, AgentEventSender, TraceEvent, TracePartStatus};
 
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
-    CompactionOutcome, CompactionTrigger, ContextCompactionConfig, ContextCompactionPhase,
-    ContextCompactionRequest, ContextCompactionSnapshot, ContextCompactionTrigger,
-    ManualContextCompactionRequest, maybe_compact_session,
+    CompactionOutcome, CompactionTrigger, ContextCompactionConfig, ContextCompactionControl,
+    ContextCompactionPhase, ContextCompactionRequest, ContextCompactionSnapshot,
+    ContextCompactionTrigger, ManualContextCompactionRequest, maybe_compact_session,
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
@@ -418,6 +418,22 @@ impl TurnEngine {
         request: ManualContextCompactionRequest,
         recorder: &mut TraceRecorder,
     ) -> Result<Option<ContextCompactionSnapshot>> {
+        self.compact_session_with_trace_control(
+            session,
+            request,
+            recorder,
+            ContextCompactionControl::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn compact_session_with_trace_control(
+        &self,
+        session: &mut AgentSession,
+        request: ManualContextCompactionRequest,
+        recorder: &mut TraceRecorder,
+        control: ContextCompactionControl,
+    ) -> Result<Option<ContextCompactionSnapshot>> {
         let requested_trigger = request.trigger;
         let model_info = self.runtime.model().clone();
         let workspace_root = self
@@ -478,7 +494,18 @@ impl TurnEngine {
             }
         };
         let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
-        let mut progress = ProgressEmitter::new(turn_id, ProgressVerbosity::from_env());
+        let progress_scope = match requested_trigger {
+            ContextCompactionTrigger::Manual => format!("{turn_id}:manual-compaction:progress"),
+            ContextCompactionTrigger::WallClockRollover => {
+                format!("{turn_id}:rollover-compaction:progress")
+            }
+            ContextCompactionTrigger::EstimatedTokens
+            | ContextCompactionTrigger::ProviderPromptTokens => {
+                unreachable!("standalone compaction trigger was validated above")
+            }
+        };
+        let mut progress =
+            ProgressEmitter::new_scoped(turn_id, progress_scope, ProgressVerbosity::from_env());
         let outcome = maybe_compact_session(
             session,
             ContextCompactionRequest {
@@ -502,6 +529,7 @@ impl TurnEngine {
                 event_tx: recorder.sender().clone(),
                 recorder,
                 progress: Some(&mut progress),
+                control,
             },
         )
         .await?;

@@ -54,6 +54,9 @@ Future<void> main(List<String> arguments) async {
         if (recoveryApplied) await progressState.resetAfterRecovery();
     }
 
+    final budgetRecoveryEvidence = options.expectBudgetRecovery
+        ? BudgetRecoveryEvidence()
+        : null;
     final finalSnapshot = await _waitForTaskCompletion(
       session,
       snapshots,
@@ -62,6 +65,7 @@ Future<void> main(List<String> arguments) async {
       deadline: options.taskDeadline,
       stallTimeout: options.stallTimeout,
       options: options,
+      budgetRecoveryEvidence: budgetRecoveryEvidence,
     );
     if (options.stopAtRecoveryPause &&
         _hasFailedExecutorRecoveryCandidate(finalSnapshot)) {
@@ -90,6 +94,16 @@ Future<void> main(List<String> arguments) async {
       await _openFatalTaskFailureDetail(session, finalSnapshot);
     } else {
       validateTaskCompletion(finalSnapshot);
+    }
+    if (budgetRecoveryEvidence != null) {
+      stdout.writeln(
+        jsonEncode({
+          'event': 'budgetRecoveryObserved',
+          'attempt': options.attempt,
+          'capturedAt': DateTime.now().toUtc().toIso8601String(),
+          'evidence': budgetRecoveryEvidence.validate(),
+        }),
+      );
     }
     await File(
       '${options.snapshotOutput}.png',
@@ -711,10 +725,12 @@ Future<Map<String, dynamic>> _waitForTaskCompletion(
   required DateTime deadline,
   required Duration stallTimeout,
   required _DriverOptions options,
+  BudgetRecoveryEvidence? budgetRecoveryEvidence,
 }) async {
   final progress = await progressState.load();
   while (DateTime.now().isBefore(deadline)) {
     final snapshot = await _snapshot(session, snapshots, options);
+    budgetRecoveryEvidence?.observe(snapshot);
     if (!target.matches(snapshot)) {
       throw StateError(
         'Flutter Driver selection moved away from Task '
@@ -897,6 +913,7 @@ class _DriverOptions {
     required this.recoveryMode,
     required this.injectSnapshotDisconnect,
     required this.stopAtRecoveryPause,
+    required this.expectBudgetRecovery,
     required this.expectedTaskPhase,
   });
 
@@ -914,6 +931,7 @@ class _DriverOptions {
   final AcceptanceRecoveryMode recoveryMode;
   final bool injectSnapshotDisconnect;
   final bool stopAtRecoveryPause;
+  final bool expectBudgetRecovery;
   final String expectedTaskPhase;
 
   static _DriverOptions parse(List<String> arguments) {
@@ -982,6 +1000,7 @@ class _DriverOptions {
       ),
       injectSnapshotDisconnect: boolean('inject-snapshot-disconnect'),
       stopAtRecoveryPause: boolean('stop-at-recovery-pause'),
+      expectBudgetRecovery: boolean('expect-budget-recovery'),
       expectedTaskPhase: expectedTaskPhase,
     );
   }

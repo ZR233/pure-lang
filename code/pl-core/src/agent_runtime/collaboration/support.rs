@@ -167,7 +167,7 @@ pub(super) fn send_message_schema() -> Value {
             "target",
             json!({
                 "type": "string",
-                "description": "Id of a direct child agent to steer. Only parent-to-direct-child insertion is allowed."
+                "description": "Id of a direct child agent to steer without interruption while refreshing its current turn budget. Only parent-to-direct-child insertion is allowed."
             }),
             true,
         ),

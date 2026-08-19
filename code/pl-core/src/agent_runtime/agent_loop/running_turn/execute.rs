@@ -56,6 +56,7 @@ where
         context.thread_id.clone(),
     );
     let mailbox = context.mailbox.clone();
+    let budget_refresh = context.budget_refresh.clone();
     let mut session = context.session.clone();
     let (result, session_commit, finalized_with_tool) = match host
         .turn_factory()
@@ -63,13 +64,19 @@ where
         .await
     {
         Ok(prepared) => {
-            let prepared =
-                prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint, mailbox);
+            let prepared = prepared.with_runtime_context(
+                &turn_id,
+                cancellation.clone(),
+                checkpoint,
+                mailbox,
+                budget_refresh,
+            );
             for section in &prepared.pinned_context {
                 session.upsert_pinned_context(section.clone());
             }
             let policy = prepared.policy.clone();
             let session_commit = prepared.session_commit;
+            let context_compaction_control = prepared.options.context_compaction_control();
             let session_runtime_result = if let Some(runtime) = &prepared.session_runtime {
                 match activity_runtime.thread_snapshot(&framework_thread_id) {
                     Ok(current) => {
@@ -157,15 +164,16 @@ where
                 {
                     let rollover = prepared
                         .engine
-                        .compact_session_with_trace(
+                        .compact_session_with_trace_control(
                             &mut session,
                             ManualContextCompactionRequest {
-                                turn_id: Some(format!("{turn_id}-rollover")),
+                                turn_id: Some(turn_id.to_string()),
                                 execution_policy: Some(policy.clone()),
                                 trigger: ContextCompactionTrigger::WallClockRollover,
                                 ..ManualContextCompactionRequest::default()
                             },
                             &mut recorder,
+                            context_compaction_control,
                         )
                         .await;
                     match rollover {

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::future::pending;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use pl_model::{
     ModelInfo, ModelRuntime, ModelTransportProfile, OpenAiCompactionMode, ProviderEndpoint,
@@ -299,7 +301,108 @@ fn compaction_request<'a>(
         event_tx,
         recorder,
         progress,
+        control: super::ContextCompactionControl::default(),
     }
+}
+
+#[tokio::test]
+async fn remote_compaction_succeeds_through_the_shared_controller() {
+    let provider =
+        FakeCompactionProvider::new(responses_test_model(), FakeCompactionFailure::Success).await;
+    let mut session = test_session();
+    let config =
+        ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
+
+    let outcome = maybe_compact_session(
+        &mut session,
+        compaction_request(&provider, &config, event_tx, &mut recorder, None),
+    )
+    .await
+    .unwrap();
+
+    let CompactionOutcome::Compacted { snapshot, .. } = outcome else {
+        panic!("expected compaction");
+    };
+    assert_eq!(
+        snapshot.implementation,
+        ContextCompactionImplementation::RemoteV2
+    );
+    assert!(session.revision() > 0);
+}
+
+#[tokio::test]
+async fn local_compaction_timeout_preserves_session_atomically() {
+    let provider = FakeCompactionProvider::new(test_model(), FakeCompactionFailure::Hang).await;
+    let mut session = test_session();
+    let original_items = session.items().to_vec();
+    let original_revision = session.revision();
+    let config = ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local);
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
+    let mut request = compaction_request(&provider, &config, event_tx, &mut recorder, None);
+    request.control = ContextCompactionControl::default().with_timeout(Duration::from_millis(20));
+
+    let error = maybe_compact_session(&mut session, request)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("timed out after 20ms"));
+    assert_eq!(session.items(), original_items.as_slice());
+    assert_eq!(session.revision(), original_revision);
+}
+
+#[tokio::test]
+async fn remote_compaction_timeout_preserves_session_atomically() {
+    let provider =
+        FakeCompactionProvider::new(responses_test_model(), FakeCompactionFailure::Hang).await;
+    let mut session = test_session();
+    let original_items = session.items().to_vec();
+    let original_revision = session.revision();
+    let config =
+        ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
+    let mut request = compaction_request(&provider, &config, event_tx, &mut recorder, None);
+    request.control = ContextCompactionControl::default().with_timeout(Duration::from_millis(20));
+
+    let error = maybe_compact_session(&mut session, request)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("timed out after 20ms"));
+    assert_eq!(session.items(), original_items.as_slice());
+    assert_eq!(session.revision(), original_revision);
+}
+
+#[tokio::test]
+async fn compaction_cancellation_preserves_session_atomically() {
+    let provider = FakeCompactionProvider::new(test_model(), FakeCompactionFailure::Hang).await;
+    let mut session = test_session();
+    let original_items = session.items().to_vec();
+    let original_revision = session.revision();
+    let config = ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local);
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::disabled(event_tx.clone());
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let mut request = compaction_request(&provider, &config, event_tx, &mut recorder, None);
+    request.control = ContextCompactionControl::default()
+        .with_timeout(Duration::from_secs(1))
+        .with_cancellation(cancellation);
+
+    let error = maybe_compact_session(&mut session, request)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("cancelled with the current turn")
+    );
+    assert_eq!(session.items(), original_items.as_slice());
+    assert_eq!(session.revision(), original_revision);
 }
 
 fn runtime_progress_texts(
@@ -316,12 +419,14 @@ fn runtime_progress_texts(
     texts
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FakeCompactionFailure {
+    Success,
     ContextPressure,
     UnsupportedMaxOutputTokens,
     EmptySummary,
     RemoteFailure,
+    Hang,
 }
 
 #[derive(Debug)]
@@ -339,7 +444,10 @@ impl FakeCompactionProvider {
         let protocol = model.transport.protocol;
         tokio::spawn(async move {
             let response_count = match failure {
-                FakeCompactionFailure::EmptySummary | FakeCompactionFailure::RemoteFailure => 1,
+                FakeCompactionFailure::Success
+                | FakeCompactionFailure::EmptySummary
+                | FakeCompactionFailure::RemoteFailure
+                | FakeCompactionFailure::Hang => 1,
                 FakeCompactionFailure::ContextPressure
                 | FakeCompactionFailure::UnsupportedMaxOutputTokens => 2,
             };
@@ -347,7 +455,11 @@ impl FakeCompactionProvider {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = read_http_json_request(&mut socket).await;
                 captured.lock().unwrap().push(request);
+                if failure == FakeCompactionFailure::Hang {
+                    pending::<()>().await;
+                }
                 let response = match (failure, attempt) {
+                    (FakeCompactionFailure::Success, _) => remote_compaction_response(),
                     (FakeCompactionFailure::ContextPressure, 0) => {
                         error_response("context token limit exceeded")
                     }
@@ -365,6 +477,7 @@ impl FakeCompactionProvider {
                     | (FakeCompactionFailure::UnsupportedMaxOutputTokens, _) => {
                         completion_response(protocol, "summary")
                     }
+                    (FakeCompactionFailure::Hang, _) => unreachable!(),
                 };
                 socket.write_all(response.as_bytes()).await.unwrap();
                 socket.shutdown().await.unwrap();
@@ -460,6 +573,18 @@ fn completion_response(protocol: ProviderWireProtocol, content: &str) -> String 
             serde_json::to_string(content).unwrap()
         ),
     };
+    format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn remote_compaction_response() -> String {
+    let body = concat!(
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"encrypted-v2\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    );
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()

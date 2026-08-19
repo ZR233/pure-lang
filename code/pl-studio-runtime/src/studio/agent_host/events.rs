@@ -5,8 +5,8 @@ use crate::{
 use pl_core::{
     ActiveKind, AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId,
     AgentLifecycleState, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentSnapshot, AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxPresentation, ThreadId,
-    TurnOutcomeKind,
+    AgentSnapshot, AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxBudgetAction,
+    MailboxPresentation, ThreadId, TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -206,12 +206,26 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnQueued {
-                input: _, snapshot, ..
+                input, snapshot, ..
             } => {
+                let is_task_executor = snapshot.identity.role.as_str()
+                    == StudioRole::Executor.key()
+                    && self.resources.get(&snapshot.identity.id).await.is_some();
+                if is_task_executor && input.budget_action == MailboxBudgetAction::Refresh {
+                    self.store
+                        .mark_executor_turn_started(
+                            event.agent_id.as_str(),
+                            MailboxBudgetAction::Refresh,
+                        )
+                        .await
+                        .at("refreshExecutorBudgetTranche")?;
+                }
                 self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
-            AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
+            AgentRuntimeEventKind::TurnStarted {
+                input, snapshot, ..
+            } => {
                 if let Some(thread_id) = thread_id.as_deref() {
                     self.store
                         .resolve_recoverable_task_failures(thread_id)
@@ -223,7 +237,7 @@ impl StudioAgentEventProjector {
                     && self.resources.get(&snapshot.identity.id).await.is_some();
                 if is_task_executor {
                     self.store
-                        .mark_executor_turn_started(event.agent_id.as_str())
+                        .mark_executor_turn_started(event.agent_id.as_str(), input.budget_action)
                         .await
                         .at("markExecutorTurnStarted")?;
                 }
@@ -526,7 +540,7 @@ async fn recover_executor_continuation(
             .is_some_and(|active| active.as_str() == turn_id)
         {
             store
-                .mark_executor_turn_started(&continuation.agent_id)
+                .mark_executor_turn_started(&continuation.agent_id, MailboxBudgetAction::Preserve)
                 .await?;
             return Ok(());
         }

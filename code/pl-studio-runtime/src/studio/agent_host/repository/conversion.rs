@@ -34,7 +34,8 @@ impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
             },
             other => return Err(store_error(format!("cannot restore input state {other}"))),
         };
-        let (metadata, queue_coalescing_key) = deserialize_input_metadata(&model.metadata_json)?;
+        let (metadata, queue_coalescing_key, budget_action) =
+            deserialize_input_metadata(&model.metadata_json)?;
         Ok(Self {
             mail_id: model.mail_id,
             turn_id: TurnId::new(model.turn_id)?,
@@ -45,6 +46,7 @@ impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
                 metadata,
             },
             queue_coalescing_key,
+            budget_action,
             delivery_state,
             queued_at: model.queued_at,
         })

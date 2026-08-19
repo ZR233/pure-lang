@@ -1,6 +1,78 @@
 import 'dart:convert';
 import 'dart:io';
 
+class BudgetRecoveryEvidence {
+  Map<String, Object?>? _limited;
+  Map<String, Object?>? _resumed;
+
+  void observe(Map<String, dynamic> snapshot) {
+    final task = snapshot['task'];
+    if (task is! Map<String, dynamic>) return;
+    final workUnits = task['workUnits'];
+    if (workUnits is! List<dynamic>) return;
+    for (final unit in workUnits.whereType<Map<String, dynamic>>()) {
+      final budget = unit['budgetLimit'];
+      if (_limited == null &&
+          unit['status'] == 'needsAttention' &&
+          unit['executionStatus'] == 'budgetLimited' &&
+          unit['continuationState'] == 'needsAttention' &&
+          budget is Map<String, dynamic> &&
+          budget['kind'] == 'wallClock') {
+        _limited = _identity(unit, includeBudget: true);
+        continue;
+      }
+      final limited = _limited;
+      if (limited != null &&
+          _resumed == null &&
+          unit['id'] == limited['workUnitId'] &&
+          unit['status'] == 'running' &&
+          unit['executionStatus'] == 'running' &&
+          unit['executionError'] == null &&
+          unit['budgetLimit'] == null &&
+          unit['budgetSliceCount'] == 1) {
+        _resumed = _identity(unit, includeBudget: false);
+      }
+    }
+  }
+
+  Map<String, Object?> validate() {
+    final limited = _limited;
+    final resumed = _resumed;
+    if (limited == null) {
+      throw StateError('budget recovery never exposed NeedsAttention');
+    }
+    if (resumed == null) {
+      throw StateError('budget recovery never resumed at slice one');
+    }
+    for (final field in ['workUnitId', 'agentId', 'worktreePath', 'branch']) {
+      if (limited[field] != resumed[field]) {
+        throw StateError(
+          'budget recovery changed executor identity field $field',
+        );
+      }
+    }
+    return {'limited': limited, 'resumed': resumed};
+  }
+
+  Map<String, Object?> _identity(
+    Map<String, dynamic> unit, {
+    required bool includeBudget,
+  }) => {
+    'workUnitId': unit['id'],
+    'agentId': unit['agentId'],
+    'worktreePath': unit['worktreePath'],
+    'branch': unit['branch'],
+    'status': unit['status'],
+    'executionStatus': unit['executionStatus'],
+    'executionError': unit['executionError'],
+    'budgetLimit': includeBudget ? unit['budgetLimit'] : null,
+    'budgetSliceCount': unit['budgetSliceCount'],
+    'continuationState': unit['continuationState'],
+    'continuationSourceTurnId': unit['continuationSourceTurnId'],
+    'continuationRevision': unit['continuationRevision'],
+  };
+}
+
 String taskProgressFingerprint(Map<String, dynamic> snapshot) {
   final task = snapshot['task'];
   if (task is! Map<String, dynamic>) {

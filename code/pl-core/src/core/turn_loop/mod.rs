@@ -127,6 +127,7 @@ pub(super) async fn run_turn_with_trace(
             safe_message_count = session.len();
             session_message_count = safe_message_count;
         }
+        options.apply_budget_refresh(&mut budget_tracker);
         if working_set.sync_session(session)? {
             checkpoint::persist(
                 &options,
@@ -229,6 +230,7 @@ pub(super) async fn run_turn_with_trace(
                     event_tx: recorder.sender().clone(),
                     recorder,
                     progress: Some(&mut progress),
+                    control: options.context_compaction_control(),
                 },
             )
             .await;
@@ -311,6 +313,19 @@ pub(super) async fn run_turn_with_trace(
                     }
                 }
                 Err(error) => {
+                    if is_cancelled(&options) {
+                        session.truncate_messages(safe_message_count);
+                        return Ok(interrupted_turn_result(
+                            recorder,
+                            &turn_id,
+                            last_content,
+                            last_reasoning_content,
+                            last_model,
+                            total_usage,
+                            safe_message_count,
+                            cancellation_reason(),
+                        ));
+                    }
                     let (error, severity, failure) =
                         normalize_provider_error(active_subagent.as_ref(), error);
                     return Ok(failed_turn_result(
@@ -328,6 +343,7 @@ pub(super) async fn run_turn_with_trace(
                 }
             }
         }
+        options.apply_budget_refresh(&mut budget_tracker);
         if let Err(limit) = budget_tracker.check_wall_clock() {
             budget_limit = Some(limit);
             break;
@@ -443,6 +459,7 @@ pub(super) async fn run_turn_with_trace(
             }
         };
         response.orchestration.tool_schema_estimated_tokens = tool_schema_estimated_tokens;
+        options.apply_budget_refresh(&mut budget_tracker);
         if let Err(limit) = budget_tracker.check_wall_clock() {
             budget_limit = Some(limit);
             break;
@@ -501,6 +518,7 @@ pub(super) async fn run_turn_with_trace(
                 session,
                 &client_search,
                 &mut budget_tracker,
+                &options,
                 &mut billing.orchestration,
             );
             record_client_tool_search_items(recorder, &turn_id, &client_search);
@@ -959,10 +977,12 @@ fn apply_client_tool_search(
     session: &mut AgentSession,
     batch: &ClientToolSearchBatch,
     budget_tracker: &mut BudgetTracker,
+    options: &TurnOptions,
     orchestration: &mut pl_protocol::InferenceOrchestrationMetrics,
 ) {
     let output_count = batch.resolution.outputs.len();
     for _ in 0..output_count {
+        options.apply_budget_refresh(budget_tracker);
         budget_tracker.record_tool_call("tool_search");
     }
     let output_texts = batch

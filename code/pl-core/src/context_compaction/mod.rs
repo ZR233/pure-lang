@@ -18,6 +18,9 @@ mod remote;
 use history::build_compacted_history;
 use history::{estimate_text_tokens, has_compactable_history};
 use local::compact_local;
+use std::future::Future;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_COMPACT_PROMPT: &str = include_str!("../../prompts/compact.md");
 const DEFAULT_SUMMARY_REQUEST: &str = "请根据以上完整上下文生成压缩摘要。";
@@ -27,6 +30,7 @@ pub(crate) const SUMMARY_METADATA_KEY: &str = "context_compaction";
 pub(crate) const SUMMARY_METADATA_VALUE: &str = "summary";
 const DEFAULT_SUMMARY_PREFIX: &str = "以下是此前对话的压缩摘要。";
 const DEFAULT_EMPTY_SUMMARY_ERROR: &str = "context compaction returned an empty summary";
+const CONTEXT_COMPACTION_TIMEOUT: Duration = Duration::from_secs(120);
 const RETAINED_FULL_TOOL_RESULTS_FOR_COMPACTION: usize = 3;
 
 fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
@@ -263,6 +267,44 @@ pub(crate) struct ContextCompactionRequest<'a> {
     pub event_tx: AgentEventSender,
     pub recorder: &'a mut TraceRecorder,
     pub progress: Option<&'a mut ProgressEmitter>,
+    pub control: ContextCompactionControl,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextCompactionControl {
+    cancellation_token: Option<CancellationToken>,
+    timeout: Duration,
+}
+
+impl ContextCompactionControl {
+    #[cfg(test)]
+    pub(crate) fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
+        self.cancellation_token = Some(cancellation_token);
+        self
+    }
+
+    pub(crate) fn with_optional_cancellation(
+        mut self,
+        cancellation_token: Option<CancellationToken>,
+    ) -> Self {
+        self.cancellation_token = cancellation_token;
+        self
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+}
+
+impl Default for ContextCompactionControl {
+    fn default() -> Self {
+        Self {
+            cancellation_token: None,
+            timeout: CONTEXT_COMPACTION_TIMEOUT,
+        }
+    }
 }
 
 pub(crate) async fn maybe_compact_session(
@@ -284,6 +326,7 @@ pub(crate) async fn maybe_compact_session(
         event_tx,
         recorder,
         mut progress,
+        control,
     } = request;
     if !has_compactable_history(session.items(), trigger) {
         return Ok(CompactionOutcome::Skipped);
@@ -320,57 +363,61 @@ pub(crate) async fn maybe_compact_session(
     }
     let use_remote = model_info.transport.protocol == ProviderWireProtocol::Responses
         && config.openai_mode != OpenAiCompactionMode::Local;
-    let (replacement, usage, summary, implementation, replacement_tokens) = if use_remote {
-        let (replacement, usage) = remote::compact_remote(
-            session,
-            remote::RemoteCompactionRequest {
+    let operation = async {
+        if use_remote {
+            let (replacement, usage) = remote::compact_remote(
+                session,
+                remote::RemoteCompactionRequest {
+                    runtime,
+                    config,
+                    request_instructions,
+                    request_messages,
+                    working_context_tail: working_context_tail.clone(),
+                    tools,
+                    parallel_tool_calls,
+                    reasoning,
+                    prompt_cache_key,
+                },
+            )
+            .await?;
+            let implementation = match config.openai_mode {
+                OpenAiCompactionMode::RemoteV2 => ContextCompactionImplementation::RemoteV2,
+                OpenAiCompactionMode::Local => unreachable!("local mode was excluded"),
+            };
+            Ok((replacement, usage, None, implementation, None))
+        } else {
+            let (replacement, usage, summary) = compact_local(
                 runtime,
                 config,
                 request_instructions,
                 request_messages,
-                working_context_tail: working_context_tail.clone(),
-                tools,
-                parallel_tool_calls,
-                reasoning,
+                session.items(),
+                working_context_tail.as_ref(),
+                event_tx,
                 prompt_cache_key,
-            },
-        )
-        .await?;
-        let implementation = match config.openai_mode {
-            OpenAiCompactionMode::RemoteV2 => ContextCompactionImplementation::RemoteV2,
-            OpenAiCompactionMode::Local => unreachable!("local mode was excluded"),
-        };
-        (replacement, usage, None, implementation, None)
-    } else {
-        let (replacement, usage, summary) = compact_local(
-            runtime,
-            config,
-            request_instructions,
-            request_messages,
-            session.items(),
-            working_context_tail.as_ref(),
-            event_tx,
-            prompt_cache_key,
-            recorder,
-            &mut progress,
-            model_info.max_output_tokens,
-        )
-        .await?;
-        let replacement_tokens = Some(estimate_context_request_tokens(
-            request_instructions,
-            request_messages,
-            &replacement,
-            working_context_tail.as_ref(),
-            tools,
-        ));
-        (
-            replacement,
-            Some(usage),
-            Some(summary),
-            ContextCompactionImplementation::Local,
-            replacement_tokens,
-        )
+                recorder,
+                &mut progress,
+                model_info.max_output_tokens,
+            )
+            .await?;
+            let replacement_tokens = Some(estimate_context_request_tokens(
+                request_instructions,
+                request_messages,
+                &replacement,
+                working_context_tail.as_ref(),
+                tools,
+            ));
+            Ok((
+                replacement,
+                Some(usage),
+                Some(summary),
+                ContextCompactionImplementation::Local,
+                replacement_tokens,
+            ))
+        }
     };
+    let (replacement, usage, summary, implementation, replacement_tokens) =
+        run_compaction_operation(control, operation).await?;
     let snapshot = ContextCompactionSnapshot {
         trigger: public_trigger(trigger),
         tokens_before: provider_prompt_tokens(trigger).unwrap_or(estimated_tokens),
@@ -387,6 +434,32 @@ pub(crate) async fn maybe_compact_session(
         progress.milestone(recorder, "上下文已压缩，继续准备模型调用。");
     }
     Ok(CompactionOutcome::Compacted { usage, snapshot })
+}
+
+async fn run_compaction_operation<T>(
+    control: ContextCompactionControl,
+    operation: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    let timed = tokio::time::timeout(control.timeout, operation);
+    let outcome = match control.cancellation_token {
+        Some(cancellation_token) => {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => {
+                    return Err(PureError::MemoryError(
+                        "context compaction cancelled with the current turn".to_string(),
+                    ));
+                }
+                outcome = timed => outcome,
+            }
+        }
+        None => timed.await,
+    };
+    outcome.map_err(|_| {
+        PureError::transient_model_transport(format!(
+            "context compaction timed out after {}ms",
+            control.timeout.as_millis()
+        ))
+    })?
 }
 
 fn public_trigger(trigger: CompactionTrigger) -> ContextCompactionTrigger {

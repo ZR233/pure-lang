@@ -41,7 +41,13 @@ where
             (request.turn_policy != AgentTurnSubmitPolicy::StartOrQueue
                 && !active.cancelling
                 && active.thread_id == request.thread_id)
-                .then(|| (active.turn_id.clone(), active.steer_sender.clone()))
+                .then(|| {
+                    (
+                        active.turn_id.clone(),
+                        active.steer_sender.clone(),
+                        active.budget_refresh.clone(),
+                    )
+                })
         });
         match request.turn_policy {
             AgentTurnSubmitPolicy::StartOnly if self.active.is_some() => {
@@ -61,7 +67,7 @@ where
         }
         let turn_id = live_turn
             .as_ref()
-            .map_or_else(TurnId::generate, |(turn_id, _)| turn_id.clone());
+            .map_or_else(TurnId::generate, |(turn_id, _, _)| turn_id.clone());
         let mail_id = request
             .mail_id
             .unwrap_or_else(|| format!("mail:{}", TurnId::generate()));
@@ -72,6 +78,7 @@ where
             thread_id: request.thread_id,
             payload: request.payload,
             queue_coalescing_key: request.queue_coalescing_key,
+            budget_action: request.budget_action,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
         };
@@ -87,9 +94,11 @@ where
             }
         })
         .await?;
-        if let Some((_, steer_sender)) = live_turn {
+        if let Some((_, steer_sender, budget_refresh)) = live_turn {
             if steer_sender.send(input.clone()).is_err() {
                 self.release_undelivered_steer(&input.mail_id).await?;
+            } else if input.budget_action == super::super::MailboxBudgetAction::Refresh {
+                budget_refresh.refresh();
             }
             return Ok(turn_id);
         }
@@ -148,6 +157,7 @@ where
             queue_coalescing_key: None,
             mail_id: request.mail_id,
             turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
+            budget_action: request.budget_action,
         })
         .await
     }
@@ -246,6 +256,7 @@ where
             thread_id: thread_id.clone(),
             payload: request.input.payload,
             queue_coalescing_key: None,
+            budget_action: request.input.budget_action,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
         };

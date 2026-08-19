@@ -1,4 +1,5 @@
 use pretty_assertions::assert_eq;
+use std::time::{Duration, Instant};
 
 use super::*;
 
@@ -57,4 +58,40 @@ fn budget_tracker_stops_when_active_wall_clock_reaches_limit() {
     let tracker = BudgetTracker::new(TurnBudget::new(0));
 
     assert!(tracker.check_wall_clock().is_err());
+}
+
+#[test]
+fn budget_refresh_resets_time_exclusions_and_tranche_counts() {
+    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    tracker.record_model_step();
+    tracker.record_tool_call("exec");
+    tracker.record_tool_call("wait_agents");
+    tracker.exclude_wall_clock(Duration::from_secs(30));
+
+    tracker.refresh_at(Instant::now() - Duration::from_millis(5));
+
+    let usage = tracker.usage();
+    assert_eq!(usage.model_steps, 0);
+    assert_eq!(usage.tool_calls, 0);
+    assert_eq!(usage.wait_calls, 0);
+    assert!(usage.elapsed_ms >= 5);
+    assert!(usage.elapsed_ms < 1_000);
+}
+
+#[test]
+fn turn_options_consumes_only_the_latest_budget_refresh_once() {
+    let (refresh, receiver) = crate::agent_runtime::turn_budget_refresh_channel();
+    let mut options = TurnOptions::default();
+    options.budget_refresh = Some(receiver);
+    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    tracker.record_model_step();
+
+    refresh.refresh();
+    refresh.refresh();
+    options.apply_budget_refresh(&mut tracker);
+    assert_eq!(tracker.usage().model_steps, 0);
+
+    tracker.record_model_step();
+    options.apply_budget_refresh(&mut tracker);
+    assert_eq!(tracker.usage().model_steps, 1);
 }

@@ -71,10 +71,23 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 
 ## 17.3 取消与恢复
 
-RunningTurn 包含 turnId、进程内 identity、当前 ActiveKind、CancellationToken、abort handle、done
-和 steer sender。
+RunningTurn 包含 turnId、进程内 identity、当前 ActiveKind、CancellationToken、abort handle、done、
+steer sender 与单一 budget-refresh signal。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
 abort；Turn 终态的 Immediate flush 完成后才能广播 turnCompleted。
+
+parent→direct-child `send_message` 是唯一预算刷新 mailbox。runtime 在 durable `TurnQueued` 提交且
+steer 被活动 Turn 接受后，以消息接受时刻推进 refresh signal；TurnEngine 在每个预算检查点应用
+最新 epoch，重置 wall-clock、等待排除与本 tranche 的 model/tool/wait 计数，不取消或替换活动
+Turn。消息送到 idle child 时 fresh Turn 自带新预算。该语义以 typed mailbox budget action 表达，
+并复用 `$plAgentRuntime` metadata 持久化；不得根据 hidden presentation、自然语言或 tool 名称反推。
+Interaction continuation、Planner wake 与产品自动 continuation 固定 Preserve。
+
+所有 local、remote、automatic、manual 与 rollover compaction 共用一个 execution controller。
+attached Turn 传入同一 CancellationToken，provider-backed operation 固定 120 秒硬超时；取消和超时
+均 drop 未完成 future，且 session replacement 只在完整成功后安装。rollover 的失败被保存为
+BudgetLimited outcome 的 compaction error，不能卡在预算 Item 与 TurnFinished 之间；用户 stop
+取消 compaction 后仍按 interrupt/cancelled 终态收束。
 
 产品提交的 `StartOrQueue` 输入可以携带通用 queue coalescing key。Thread idle 并准备下一 Turn
 时，只合并队首连续、key 相同且仍为 pending 的输入：最后一条决定新 Turn identity，较早输入作为
@@ -159,4 +172,6 @@ ThreadId。Thread directory 保存 root/parent/role/path/status/progress，不�
 `wait_agents` 订阅 directory watch 后重读 snapshot，只因 progress、interaction 或 terminal
 变化返回，并只返回本次变化 agent 的最新 progress message 和精简状态；没有 timer、轮询或
 自动续轮。`list_agents` 保留完整目录查询，不作为 wait 后的重复刷新。child 内部 Item 只
-进入 child Thread。
+进入 child Thread。terminal/idle 的 canonical 判定必须同时要求没有 `activeTurnId`、activity 为
+idle 且 pending input 为零；fresh Turn 已分配 ID 但尚未发布首个 activity 的窗口不能泄漏上一
+Turn 的 `lastTurnOutcome`。`wait_until_idle` 与 `wait_agents` 共用该判定。

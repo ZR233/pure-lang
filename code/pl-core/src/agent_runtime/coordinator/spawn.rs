@@ -128,6 +128,7 @@ where
                 metadata: request.metadata,
             },
             queue_coalescing_key: None,
+            budget_action: super::super::MailboxBudgetAction::Preserve,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
         });

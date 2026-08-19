@@ -32,8 +32,11 @@ pub use policy::{
 };
 pub use runtime::{AgentRuntime, AgentRuntimeOptions, RestoredInputPolicy};
 pub use state::*;
-pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{
     AgentInferenceCommit, AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
     AgentTurnPreparationContext, PreparedAgentTurn, PreparedSessionRuntime, TurnCheckpointReason,
+};
+pub(crate) use turn::{
+    AgentTurnMailboxHandle, TurnBudgetRefreshHandle, TurnBudgetRefreshReceiver,
+    turn_budget_refresh_channel,
 };

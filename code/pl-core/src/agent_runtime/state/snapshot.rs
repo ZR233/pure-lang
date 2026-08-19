@@ -180,7 +180,7 @@ pub struct AgentDirectoryWaitMessage {
     pub lifecycle: AgentLifecycleState,
     pub activity: AgentActivityState,
     pub message: Option<AgentProgressCheckpoint>,
-    pub turn_outcome: Option<TurnOutcomeKind>,
+    pub last_turn_outcome: Option<AgentTurnOutcome>,
 }
 
 /// `wait_agents` 的 canonical 增量结果。

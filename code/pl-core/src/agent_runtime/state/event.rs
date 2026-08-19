@@ -35,6 +35,7 @@ pub enum AgentRuntimeEventKind {
     TurnStarted {
         turn_id: TurnId,
         thread_id: ThreadId,
+        input: DurableMailboxEnvelope,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         claimed_inputs: Vec<DurableMailboxEnvelope>,
         snapshot: Box<AgentSnapshot>,

@@ -746,15 +746,29 @@ async fn next_input_ordinal(
 
 const RUNTIME_INPUT_METADATA_KEY: &str = "$plAgentRuntime";
 const INPUT_METADATA_PAYLOAD_KEY: &str = "payload";
+const INPUT_METADATA_BUDGET_ACTION_KEY: &str = "budgetAction";
 
 fn serialize_input_metadata(input: &DurableMailboxEnvelope) -> Result<String, PureError> {
-    let Some(key) = input.queue_coalescing_key.as_deref() else {
+    if input.queue_coalescing_key.is_none()
+        && input.budget_action == pl_core::MailboxBudgetAction::Preserve
+    {
         return Ok(serde_json::to_string(&input.payload.metadata)?);
-    };
+    }
+    let mut runtime = serde_json::Map::new();
+    if let Some(key) = input.queue_coalescing_key.as_deref() {
+        runtime.insert(
+            "queueCoalescingKey".to_string(),
+            serde_json::Value::String(key.to_string()),
+        );
+    }
+    if input.budget_action != pl_core::MailboxBudgetAction::Preserve {
+        runtime.insert(
+            INPUT_METADATA_BUDGET_ACTION_KEY.to_string(),
+            serde_json::Value::String(input.budget_action.as_str().to_string()),
+        );
+    }
     let value = serde_json::json!({
-        RUNTIME_INPUT_METADATA_KEY: {
-            "queueCoalescingKey": key,
-        },
+        RUNTIME_INPUT_METADATA_KEY: runtime,
         INPUT_METADATA_PAYLOAD_KEY: input.payload.metadata,
     });
     Ok(serde_json::to_string(&value)?)
@@ -762,23 +776,37 @@ fn serialize_input_metadata(input: &DurableMailboxEnvelope) -> Result<String, Pu
 
 fn deserialize_input_metadata(
     input: &str,
-) -> Result<(serde_json::Value, Option<String>), PureError> {
+) -> Result<
+    (
+        serde_json::Value,
+        Option<String>,
+        pl_core::MailboxBudgetAction,
+    ),
+    PureError,
+> {
     let mut value: serde_json::Value = serde_json::from_str(input)?;
     let Some(object) = value.as_object_mut() else {
-        return Ok((value, None));
+        return Ok((value, None, pl_core::MailboxBudgetAction::Preserve));
     };
-    let Some(key) = object
-        .get(RUNTIME_INPUT_METADATA_KEY)
-        .and_then(|runtime| runtime.get("queueCoalescingKey"))
+    let Some(runtime) = object.get(RUNTIME_INPUT_METADATA_KEY) else {
+        return Ok((value, None, pl_core::MailboxBudgetAction::Preserve));
+    };
+    let key = runtime
+        .get("queueCoalescingKey")
         .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
-    else {
-        return Ok((value, None));
+        .map(ToOwned::to_owned);
+    let budget_action = match runtime
+        .get(INPUT_METADATA_BUDGET_ACTION_KEY)
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(value) => pl_core::MailboxBudgetAction::from_persisted_str(value)
+            .ok_or_else(|| store_error(format!("unknown mailbox budget action {value}")))?,
+        None => pl_core::MailboxBudgetAction::Preserve,
     };
     let payload = object
         .remove(INPUT_METADATA_PAYLOAD_KEY)
         .unwrap_or(serde_json::Value::Null);
-    Ok((payload, Some(key)))
+    Ok((payload, key, budget_action))
 }
 
 fn delivery_identity(state: &MailboxDeliveryState) -> Option<(TurnId, u64)> {
@@ -1300,23 +1328,51 @@ mod outcome_tests {
                 metadata: serde_json::json!({"kind": "taskWake"}),
             },
             queue_coalescing_key: Some("task-run:wakes".to_string()),
+            budget_action: pl_core::MailboxBudgetAction::Preserve,
             delivery_state: MailboxDeliveryState::Pending,
             queued_at: 1,
         };
 
         let stored = serialize_input_metadata(&input).unwrap();
-        let (metadata, key) = deserialize_input_metadata(&stored).unwrap();
+        let (metadata, key, budget_action) = deserialize_input_metadata(&stored).unwrap();
 
         assert_eq!(metadata, input.payload.metadata);
         assert_eq!(key, input.queue_coalescing_key);
+        assert_eq!(budget_action, pl_core::MailboxBudgetAction::Preserve);
+    }
+
+    #[test]
+    fn input_metadata_round_trips_budget_refresh_without_queue_key() {
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail:refresh".to_string(),
+            turn_id: TurnId::new("turn-refresh").unwrap(),
+            thread_id: ThreadId::new("thread-refresh").unwrap(),
+            payload: pl_core::MailboxInputPayload {
+                message: "continue".to_string(),
+                presentation: MailboxPresentation::Hidden,
+                metadata: serde_json::json!({"kind": "plannerMessage"}),
+            },
+            queue_coalescing_key: None,
+            budget_action: pl_core::MailboxBudgetAction::Refresh,
+            delivery_state: MailboxDeliveryState::Pending,
+            queued_at: 1,
+        };
+
+        let stored = serialize_input_metadata(&input).unwrap();
+        let (metadata, key, budget_action) = deserialize_input_metadata(&stored).unwrap();
+
+        assert_eq!(metadata, input.payload.metadata);
+        assert_eq!(key, None);
+        assert_eq!(budget_action, pl_core::MailboxBudgetAction::Refresh);
     }
 
     #[test]
     fn legacy_input_metadata_remains_unwrapped() {
         let stored = r#"{"kind":"legacy"}"#;
-        let (metadata, key) = deserialize_input_metadata(stored).unwrap();
+        let (metadata, key, budget_action) = deserialize_input_metadata(stored).unwrap();
 
         assert_eq!(metadata, serde_json::json!({"kind": "legacy"}));
         assert_eq!(key, None);
+        assert_eq!(budget_action, pl_core::MailboxBudgetAction::Preserve);
     }
 }

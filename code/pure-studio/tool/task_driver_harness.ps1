@@ -7,6 +7,8 @@ param(
 
     [switch]$ExerciseRecovery,
 
+    [switch]$ExerciseBudgetRecovery,
+
     [ValidateSet('Auto', 'RewindTail', 'RebuildThread')]
     [string]$RecoveryMode = 'Auto',
 
@@ -553,6 +555,7 @@ $manifestPath = Join-Path $DriverHome 'acceptance-manifest.json'
 $manifest = $null
 $isScripted = [bool]$Scripted
 $exerciseRecoveryEnabled = [bool]$ExerciseRecovery
+$exerciseBudgetRecoveryEnabled = [bool]$ExerciseBudgetRecovery
 $recoveryModeValue = $RecoveryMode
 $providerFailureModeValue = $ProviderFailureMode
 if (-not $isScripted -and $providerFailureModeValue -ne 'None') {
@@ -560,6 +563,13 @@ if (-not $isScripted -and $providerFailureModeValue -ne 'None') {
 }
 if ($exerciseRecoveryEnabled -and $providerFailureModeValue -ne 'None') {
     throw 'ProviderFailureMode cannot be combined with ExerciseRecovery'
+}
+if ($exerciseBudgetRecoveryEnabled -and -not $isScripted) {
+    throw 'ExerciseBudgetRecovery requires -Scripted'
+}
+if ($exerciseBudgetRecoveryEnabled -and
+    ($exerciseRecoveryEnabled -or $providerFailureModeValue -ne 'None')) {
+    throw 'ExerciseBudgetRecovery cannot be combined with ExerciseRecovery or ProviderFailureMode'
 }
 if ($Mode -eq 'New' -and (Test-Path -LiteralPath $DriverHome)) {
     $existing = @(Get-ChildItem -LiteralPath $DriverHome -Force)
@@ -577,6 +587,12 @@ elseif ($Mode -ne 'New') {
     $PromptFile = [string]$manifest['promptFile']
     $isScripted = [bool]$manifest['scripted']
     $exerciseRecoveryEnabled = [bool]$manifest['exerciseRecovery']
+    $exerciseBudgetRecoveryEnabled = if ($manifest.ContainsKey('exerciseBudgetRecovery')) {
+        [bool]$manifest['exerciseBudgetRecovery']
+    }
+    else {
+        $false
+    }
     $recoveryModeValue = if ($manifest.ContainsKey('recoveryMode')) {
         [string]$manifest['recoveryMode']
     }
@@ -641,6 +657,7 @@ $attemptRecord = [ordered]@{
     status = 'running'
     recoveryMode = $recoveryModeValue
     providerFailureMode = $providerFailureModeValue
+    exerciseBudgetRecovery = $exerciseBudgetRecoveryEnabled
     logDirectory = $attemptDir
     driverExitCode = $null
     recoveryApplied = $false
@@ -701,6 +718,7 @@ try {
             globalDeadlineUtc = [DateTime]::UtcNow.AddSeconds($TaskTimeoutSeconds).ToString('O')
             scripted = $isScripted
             exerciseRecovery = $exerciseRecoveryEnabled
+            exerciseBudgetRecovery = $exerciseBudgetRecoveryEnabled
             recoveryMode = $recoveryModeValue
             providerFailureMode = $providerFailureModeValue
             promptFile = $PromptFile
@@ -735,6 +753,7 @@ try {
                 '--request-log', $providerRequests,
                 '--state-file', (Join-Path $DriverHome 'provider-state.json'),
                 '--exercise-recovery', $exerciseRecoveryEnabled.ToString().ToLowerInvariant()
+                '--exercise-budget-recovery', $exerciseBudgetRecoveryEnabled.ToString().ToLowerInvariant()
                 '--failure-mode', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'invalid-api-key-planner' } else { 'none' })
             ) `
             -WorkingDirectory $repoRoot `
@@ -763,6 +782,10 @@ try {
     }
     if ($env:PUB_CACHE) {
         $guiEnvironment['PUB_CACHE'] = $env:PUB_CACHE
+    }
+    if ($exerciseBudgetRecoveryEnabled) {
+        $guiEnvironment['PURE_STUDIO_TASK_DRIVER_EXECUTOR_WALL_CLOCK_MS'] = '0'
+        $guiEnvironment['PURE_STUDIO_TASK_DRIVER_COMPACTION_TIMEOUT_MS'] = '250'
     }
     $guiProcess = Start-LoggedProcess `
         -FilePath 'cargo' `
@@ -805,6 +828,7 @@ try {
         '--task-timeout-seconds', $TaskTimeoutSeconds.ToString(),
         '--stall-timeout-seconds', $StallTimeoutSeconds.ToString()
         '--expected-task-phase', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'failed' } else { 'completed' })
+        '--expect-budget-recovery', $exerciseBudgetRecoveryEnabled.ToString().ToLowerInvariant()
     )
     if ($isScripted -and $Mode -eq 'New') {
         $driverArguments += @('--inject-snapshot-disconnect', 'true')
@@ -877,6 +901,17 @@ try {
         $manifest['driverReconnects'] = $driverReconnects
     }
     $reconnectEventsRecorded = $true
+    $budgetRecoveryEvents = @(Get-JsonLogEvents -Path $driverStdout -Event 'budgetRecoveryObserved')
+    if ($budgetRecoveryEvents.Count -gt 1) {
+        throw 'a single Driver attempt observed budget recovery more than once'
+    }
+    if ($exerciseBudgetRecoveryEnabled -and $Mode -eq 'New') {
+        if ($budgetRecoveryEvents.Count -ne 1) {
+            throw 'budget recovery acceptance did not capture NeedsAttention and resumed slice one'
+        }
+        $manifest['budgetRecovery'] = $budgetRecoveryEvents[0]['evidence']
+        $attemptRecord['budgetRecoveryObserved'] = $true
+    }
     Update-ManifestFromSnapshots -Manifest $manifest -Path $snapshots
     $manifest['latestWorkspaceGit'] = Get-GitIdentity -WorkingDirectory $Workspace
     if ($driverProcess.ExitCode -ne 0) {

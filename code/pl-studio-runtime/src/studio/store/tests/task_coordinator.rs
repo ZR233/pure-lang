@@ -488,7 +488,7 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id)
+        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
         .await
         .unwrap();
     let started = fixture.work_unit().await;
@@ -499,7 +499,7 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id)
+        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
         .await
         .unwrap();
     assert_eq!(fixture.work_unit().await.continuation_revision, 4);
@@ -593,7 +593,7 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
         );
         fixture
             .store
-            .mark_executor_turn_started(&fixture.agent_id)
+            .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
             .await
             .unwrap();
         assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Running);
@@ -830,7 +830,7 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
         .await;
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id)
+        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
         .await
         .unwrap();
 
@@ -917,7 +917,7 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id)
+        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
         .await
         .unwrap();
     let resumed = fixture.work_unit().await;

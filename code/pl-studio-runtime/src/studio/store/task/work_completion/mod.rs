@@ -12,7 +12,7 @@ use crate::studio::task_coordinator::{
     ExecutorContinuationState, MAX_EXECUTOR_BUDGET_SLICES, TaskRunPhase, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitStatus,
 };
-use pl_core::{AgentTurnOutcome, TurnOutcomeKind};
+use pl_core::{AgentTurnOutcome, MailboxBudgetAction, TurnOutcomeKind};
 use pl_protocol::BudgetLimitKind;
 
 use super::task_run_record;
@@ -165,23 +165,16 @@ impl StudioStore {
         finish_transaction(tx, result).await
     }
 
-    pub(crate) async fn mark_executor_turn_started(&self, agent_id: &str) -> Result<()> {
+    pub(crate) async fn mark_executor_turn_started(
+        &self,
+        agent_id: &str,
+        budget_action: MailboxBudgetAction,
+    ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
             let work_unit = executor_work_unit(&tx, agent_id).await?;
             let work_status = WorkUnitStatus::from_str(&work_unit.status)
                 .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-            if !matches!(
-                work_status,
-                WorkUnitStatus::Running
-                    | WorkUnitStatus::AwaitingCompletion
-                    | WorkUnitStatus::ChangesRequested
-            ) {
-                bail!(
-                    "executor cannot start a turn while work unit is {}",
-                    work_unit.status
-                );
-            }
             let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
                 .with_context(|| {
                     format!(
@@ -189,8 +182,41 @@ impl StudioStore {
                         work_unit.execution_status
                     )
                 })?;
-            if work_status == WorkUnitStatus::Running
+            let continuation_state = ExecutorContinuationState::from_str(
+                &work_unit.continuation_state,
+            )
+            .with_context(|| {
+                format!(
+                    "invalid executor continuation state: {}",
+                    work_unit.continuation_state
+                )
+            })?;
+            let budget_attention = work_status == WorkUnitStatus::NeedsAttention
+                && execution_status == ThreadExecutionStatus::BudgetLimited
+                && work_unit.budget_limit_json.is_some()
+                && continuation_state == ExecutorContinuationState::NeedsAttention;
+            if !matches!(
+                work_status,
+                WorkUnitStatus::Running
+                    | WorkUnitStatus::AwaitingCompletion
+                    | WorkUnitStatus::ChangesRequested
+            ) && !(budget_action == MailboxBudgetAction::Refresh && budget_attention)
+            {
+                bail!(
+                    "executor cannot start a turn while work unit is {}",
+                    work_unit.status
+                );
+            }
+            let already_running = work_status == WorkUnitStatus::Running
                 && execution_status == ThreadExecutionStatus::Running
+                && continuation_state == ExecutorContinuationState::None;
+            let already_refreshed = already_running
+                && work_unit.budget_slice_count == 1
+                && work_unit.budget_limit_json.is_none()
+                && work_unit.execution_error.is_none()
+                && work_unit.continuation_source_turn_id.is_none();
+            if (budget_action == MailboxBudgetAction::Preserve && already_running)
+                || (budget_action == MailboxBudgetAction::Refresh && already_refreshed)
             {
                 return Ok(());
             }
@@ -200,6 +226,11 @@ impl StudioStore {
             active.execution_status = Set(ThreadExecutionStatus::Running.as_str().to_string());
             active.execution_error = Set(None);
             active.continuation_state = Set(ExecutorContinuationState::None.as_str().to_string());
+            if budget_action == MailboxBudgetAction::Refresh {
+                active.budget_limit_json = Set(None);
+                active.budget_slice_count = Set(1);
+                active.continuation_source_turn_id = Set(None);
+            }
             active.continuation_revision = Set(continuation_revision);
             active.updated_at = Set(unix_seconds());
             active.update(&tx).await?;

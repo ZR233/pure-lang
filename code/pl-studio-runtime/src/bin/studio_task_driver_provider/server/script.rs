@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::sse::{final_text, tool_call};
 
 pub(super) const RECOVERY_INTERRUPTION_ACTION: &str = "hold Planner Turn for harness interruption";
+pub(super) const BUDGET_COMPACTION_ACTION: &str = "hang executor rollover compaction";
+pub(super) const BUDGET_RECOVERY_ACTION: &str = "hold budget NeedsAttention before send_message";
+pub(super) const BUDGET_RESUMED_ACTION: &str = "hold resumed executor at budget slice one";
 
 const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 *** Add File: design/task-flow.md
@@ -51,11 +54,16 @@ impl ScriptRole {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub(super) struct ScriptProgress {
     pub(super) planner: usize,
     pub(super) executor: usize,
     pub(super) reviewer: usize,
     pub(super) executor_agent_id: Option<String>,
+    pub(super) compaction_trigger_count: usize,
+    pub(super) compaction_hung: bool,
+    pub(super) budget_recovery_message_sent: bool,
+    pub(super) budget_resumed_turn_seen: bool,
     expected_previous_head: Option<String>,
 }
 
@@ -102,12 +110,36 @@ pub(super) fn response(
     role: ScriptRole,
     step: usize,
     exercise_recovery: bool,
+    exercise_budget_recovery: bool,
 ) -> Result<(&'static str, String)> {
     match role {
-        ScriptRole::Planner => planner_response(progress, workspace, step, exercise_recovery),
-        ScriptRole::Executor => executor_response(workspace, step, exercise_recovery),
+        ScriptRole::Planner => planner_response(
+            progress,
+            workspace,
+            step,
+            exercise_recovery,
+            exercise_budget_recovery,
+        ),
+        ScriptRole::Executor => executor_response(
+            progress,
+            workspace,
+            step,
+            exercise_recovery,
+            exercise_budget_recovery,
+        ),
         ScriptRole::Reviewer => reviewer_response(step),
     }
+}
+
+pub(super) fn is_compaction_request(request: &serde_json::Value) -> bool {
+    request
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(serde_json::Value::as_str) == Some("compaction_trigger")
+            })
+        })
 }
 
 fn planner_response(
@@ -115,6 +147,7 @@ fn planner_response(
     workspace: &Path,
     mut step: usize,
     exercise_recovery: bool,
+    exercise_budget_recovery: bool,
 ) -> Result<(&'static str, String)> {
     if exercise_recovery {
         match step {
@@ -162,6 +195,88 @@ fn planner_response(
             }
             11.. => step -= 5,
             0..=6 => {}
+        }
+    }
+    if exercise_budget_recovery {
+        match step {
+            6 => {
+                return Ok((
+                    "final(budget NeedsAttention observed)",
+                    final_text(
+                        "budget-needs-attention-observed",
+                        "The executor budget terminal is durable. Waiting for the queued Planner wake before recovering the same executor.",
+                    ),
+                ));
+            }
+            7 => {
+                return Ok((
+                    "task_status(budget NeedsAttention)",
+                    tool_call(
+                        "status-budget-needs-attention",
+                        "task_status",
+                        serde_json::json!({}),
+                    ),
+                ));
+            }
+            8 => {
+                progress.budget_recovery_message_sent = true;
+                let executor_id = executor_id(progress)?;
+                return Ok((
+                    BUDGET_RECOVERY_ACTION,
+                    tool_call(
+                        "refresh-budgeted-executor",
+                        "send_message",
+                        serde_json::json!({
+                            "target": executor_id,
+                            "message": "Resume the same WorkUnit and worktree. This message refreshes your budget; continue the original implementation and report completion without spawning replacement work."
+                        }),
+                    ),
+                ));
+            }
+            9 => {
+                return Ok((
+                    "task_status(recovered running)",
+                    tool_call(
+                        "status-recovered-running",
+                        "task_status",
+                        serde_json::json!({}),
+                    ),
+                ));
+            }
+            10..=13 => {
+                let executor_id = executor_id(progress)?;
+                return Ok((
+                    "wait_agents(recovered executor)",
+                    tool_call(
+                        &format!("wait-recovered-executor-{step}"),
+                        "wait_agents",
+                        serde_json::json!({"targets": [executor_id]}),
+                    ),
+                ));
+            }
+            14 => {
+                return Ok((
+                    "task_status(recovered completion)",
+                    tool_call(
+                        "status-recovered-completion",
+                        "task_status",
+                        serde_json::json!({}),
+                    ),
+                ));
+            }
+            15 => {
+                let executor_id = executor_id(progress)?;
+                return Ok((
+                    "task_request_delivery_review",
+                    tool_call(
+                        "request-recovered-delivery-review",
+                        "task_request_delivery_review",
+                        serde_json::json!({"executorAgentId": executor_id}),
+                    ),
+                ));
+            }
+            16.. => step -= 5,
+            0..=5 => {}
         }
     }
     let response = match step {
@@ -352,16 +467,26 @@ fn planner_response(
 }
 
 fn executor_response(
+    script_progress: &mut ScriptProgress,
     workspace: &Path,
     step: usize,
     exercise_recovery: bool,
+    exercise_budget_recovery: bool,
 ) -> Result<(&'static str, String)> {
     let response = match step {
-        0 => progress(
-            "exploring",
-            "Located the durable handoff and design contract.",
-            "Create the required feature file.",
-        ),
+        0 => {
+            let (_, body) = self::progress(
+                "exploring",
+                "Located the durable handoff and design contract.",
+                "Create the required feature file.",
+            );
+            if exercise_budget_recovery {
+                script_progress.budget_resumed_turn_seen = true;
+                (BUDGET_RESUMED_ACTION, body)
+            } else {
+                ("report_progress", body)
+            }
+        }
         1 => (
             "exec(expected failure)",
             tool_call(
@@ -616,6 +741,36 @@ fn git_output(workspace: &Path, args: &[&str]) -> Result<String> {
 mod tests {
     use super::*;
 
+    fn function_call(body: &str) -> (String, serde_json::Value) {
+        body.lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|line| *line != "[DONE]")
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find_map(|event| {
+                (event.get("type").and_then(serde_json::Value::as_str)
+                    == Some("response.output_item.done"))
+                .then(|| event.get("item").cloned())
+                .flatten()
+                .filter(|item| {
+                    item.get("type").and_then(serde_json::Value::as_str) == Some("function_call")
+                })
+            })
+            .map(|item| {
+                let name = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap()
+                    .to_string();
+                let arguments = item
+                    .get("arguments")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|arguments| serde_json::from_str(arguments).unwrap())
+                    .unwrap();
+                (name, arguments)
+            })
+            .unwrap()
+    }
+
     #[test]
     fn observes_executor_id_from_responses_function_call_output() {
         let request = serde_json::json!({
@@ -648,5 +803,83 @@ mod tests {
         observe_request(&mut progress, &request);
 
         assert_eq!(progress.executor_agent_id.as_deref(), Some("agent-chat"));
+    }
+
+    #[test]
+    fn identifies_remote_compaction_without_consuming_a_role_step() {
+        let request = serde_json::json!({
+            "input": [
+                {"type": "message", "role": "user", "content": "context"},
+                {"type": "compaction_trigger"}
+            ],
+            "tools": []
+        });
+        let mut progress = ScriptProgress::default();
+
+        assert!(is_compaction_request(&request));
+        assert_eq!(progress.executor, 0);
+        assert_eq!(next_step(&mut progress, ScriptRole::Executor), 0);
+    }
+
+    #[test]
+    fn budget_recovery_ends_waiting_turn_then_resumes_from_planner_wake() {
+        let mut progress = ScriptProgress {
+            executor_agent_id: Some("executor-original".to_string()),
+            ..ScriptProgress::default()
+        };
+
+        let (action, body) =
+            planner_response(&mut progress, Path::new("."), 6, false, true).unwrap();
+        assert_eq!(action, "final(budget NeedsAttention observed)");
+        assert!(body.contains("Waiting for the queued Planner wake"));
+
+        let expected = [
+            (7, "task_status", serde_json::json!({})),
+            (
+                8,
+                "send_message",
+                serde_json::json!({
+                    "target": "executor-original",
+                    "message": "Resume the same WorkUnit and worktree. This message refreshes your budget; continue the original implementation and report completion without spawning replacement work."
+                }),
+            ),
+            (9, "task_status", serde_json::json!({})),
+            (
+                10,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (
+                11,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (
+                12,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (
+                13,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (14, "task_status", serde_json::json!({})),
+            (
+                15,
+                "task_request_delivery_review",
+                serde_json::json!({"executorAgentId": "executor-original"}),
+            ),
+            (16, "list_agents", serde_json::json!({})),
+        ];
+
+        for (step, expected_name, expected_arguments) in expected {
+            let (_, body) =
+                planner_response(&mut progress, Path::new("."), step, false, true).unwrap();
+            let (name, arguments) = function_call(&body);
+            assert_eq!(name, expected_name);
+            assert_eq!(arguments, expected_arguments);
+        }
+        assert!(progress.budget_recovery_message_sent);
     }
 }

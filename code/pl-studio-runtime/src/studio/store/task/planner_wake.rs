@@ -76,16 +76,25 @@ impl StudioStore {
 
     async fn pending_executor_terminal_wakes(&self) -> Result<Vec<TaskPlannerWakeRequest>> {
         let units = entities::work_unit::Entity::find()
-            .filter(
-                entities::work_unit::Column::ContinuationState
-                    .eq(ExecutorContinuationState::PlannerWakePending.as_str()),
-            )
+            .filter(entities::work_unit::Column::ContinuationState.is_in([
+                ExecutorContinuationState::PlannerWakePending.as_str(),
+                ExecutorContinuationState::NeedsAttention.as_str(),
+            ]))
             .order_by_asc(entities::work_unit::Column::UpdatedAt)
             .order_by_asc(entities::work_unit::Column::Id)
             .all(&self.db)
             .await?;
         let mut wakes = Vec::with_capacity(units.len());
         for unit in units {
+            let continuation_state = ExecutorContinuationState::from_str(&unit.continuation_state)
+                .context("invalid executor continuation state")?;
+            if continuation_state == ExecutorContinuationState::NeedsAttention
+                && (ThreadExecutionStatus::from_str(&unit.execution_status)
+                    != Some(ThreadExecutionStatus::BudgetLimited)
+                    || unit.budget_limit_json.is_none())
+            {
+                continue;
+            }
             let Some(run) = self.read_task_run(&unit.task_run_id).await? else {
                 bail!("executor terminal wake task run not found");
             };

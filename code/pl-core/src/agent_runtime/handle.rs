@@ -373,9 +373,7 @@ impl AgentRuntimeHandle {
         let mut subscription = self.directory.subscribe();
         loop {
             let snapshot = self.directory.snapshot(&agent_id)?;
-            if snapshot.lifecycle != AgentLifecycleState::Active
-                || (snapshot.activity == AgentActivityState::Idle && snapshot.pending_inputs == 0)
-            {
+            if is_settled(&snapshot) {
                 return Ok(AgentWaitResult {
                     last_turn: snapshot.last_turn.clone(),
                     snapshot,
@@ -478,12 +476,7 @@ fn current_wait_result<'a>(
     let snapshots = snapshots.cloned().collect::<Vec<_>>();
     let terminal = snapshots
         .iter()
-        .filter(|snapshot| {
-            snapshot.lifecycle != AgentLifecycleState::Active
-                || (snapshot.activity == AgentActivityState::Idle
-                    && snapshot.pending_inputs == 0
-                    && snapshot.last_turn.is_some())
-        })
+        .filter(|snapshot| is_settled(snapshot) && snapshot.last_turn.is_some())
         .cloned()
         .collect::<Vec<_>>();
     if !terminal.is_empty() {
@@ -548,10 +541,8 @@ fn changed_wait_result(
 }
 
 fn wait_message(snapshot: AgentSnapshot) -> AgentDirectoryWaitMessage {
-    let turn_outcome = if snapshot.lifecycle != AgentLifecycleState::Active
-        || snapshot.activity == AgentActivityState::Idle
-    {
-        snapshot.last_turn.map(|outcome| outcome.kind)
+    let last_turn_outcome = if is_settled(&snapshot) {
+        snapshot.last_turn
     } else {
         None
     };
@@ -560,8 +551,15 @@ fn wait_message(snapshot: AgentSnapshot) -> AgentDirectoryWaitMessage {
         lifecycle: snapshot.lifecycle,
         activity: snapshot.activity,
         message: snapshot.progress,
-        turn_outcome,
+        last_turn_outcome,
     }
+}
+
+fn is_settled(snapshot: &AgentSnapshot) -> bool {
+    snapshot.lifecycle != AgentLifecycleState::Active
+        || (snapshot.active_turn_id.is_none()
+            && snapshot.activity == AgentActivityState::Idle
+            && snapshot.pending_inputs == 0)
 }
 
 async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {
@@ -603,4 +601,50 @@ fn root_agent_id_for(
         }
     }
     Ok(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_model::TokenUsage;
+
+    use super::*;
+    use crate::agent_runtime::{AgentIdentity, AgentTurnOutcome, TurnOutcomeKind};
+
+    #[test]
+    fn fresh_active_turn_hides_the_previous_terminal_outcome() {
+        let thread_id = ThreadId::new("child").unwrap();
+        let previous_turn_id = TurnId::new("previous").unwrap();
+        let active_turn_id = TurnId::new("active").unwrap();
+        let mut snapshot = AgentRegistration::new(AgentIdentity {
+            id: AgentId::new("child").unwrap(),
+            parent_id: Some(AgentId::new("root").unwrap()),
+            role: AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        })
+        .into_durable_state()
+        .snapshot;
+        snapshot.last_turn = Some(AgentTurnOutcome {
+            turn_id: previous_turn_id,
+            thread_id,
+            kind: TurnOutcomeKind::BudgetLimited,
+            reason: Some("budgetLimited".to_string()),
+            failure: None,
+            budget_limit: None,
+            rollover_compacted: false,
+            rollover_compaction_error: Some("timed out".to_string()),
+            usage: TokenUsage::default(),
+            finished_at: 1,
+        });
+        snapshot.active_turn_id = Some(active_turn_id);
+
+        assert!(!is_settled(&snapshot));
+        assert!(current_wait_result(std::iter::once(&snapshot)).is_none());
+        assert_eq!(wait_message(snapshot.clone()).last_turn_outcome, None);
+
+        snapshot.active_turn_id = None;
+        assert!(is_settled(&snapshot));
+        let result = current_wait_result(std::iter::once(&snapshot)).unwrap();
+        assert_eq!(result.reason, AgentDirectoryWaitReason::Terminal);
+        assert_eq!(result.messages[0].last_turn_outcome, snapshot.last_turn);
+    }
 }

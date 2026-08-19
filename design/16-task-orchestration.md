@@ -90,9 +90,12 @@ child 或身份不匹配的 Plan trace 仅保留为 trace，不创建 Interactio
 必须持久化产生它的 agent identity，恢复扫描复用同一资格校验，不能把历史 child trace 补投为确认。
 
 `wait_agents` 订阅 Thread directory watch 后读取 snapshot，只因 progress、interaction 或
-terminal 变化返回，并以 `messages` 返回本次最新增量；planner 直接消费该结果，不在 wait
-之后调用 `list_agents` 重复刷新完整目录。没有轮询、自动续轮或超时中断。五分钟仅允许
-planner 读取有界 child Thread 诊断，不是失败判据。
+terminal 变化返回，并以 `messages` 返回本次最新增量；terminal 消息直接携带 canonical
+`lastTurnOutcome`，包含 budget kind/usage、reason、rollover 结果和 Turn identity，不复制只含枚举
+的 outcome 字段。planner 直接消费该结果，不在 wait 之后调用 `list_agents` 重复刷新完整目录。
+child 已有新的 `activeTurnId` 时，即使瞬态 activity 尚为 idle，也必须视为正在运行并隐藏上一 Turn
+的 terminal outcome；否则恢复消息后的首次 wait 会把旧 BudgetLimited 误当成新 Turn 已结束。
+没有轮询、自动续轮或超时中断。五分钟仅允许 planner 读取有界 child Thread 诊断，不是失败判据。
 
 该 wait 输出协议不迁移旧历史；旧会话或 fixture 不兼容时直接重建。
 
@@ -201,16 +204,23 @@ discard disposition，不再次推进 revision。ReadyForReview、Reviewing 或 
 completion review 仍禁止关闭。
 
 executor 的单个 Turn 保持 30 分钟 wall-clock 上限。前三个 `WallClock` budget terminal 不把
-executor 或 WorkUnit 标记为失败：runtime 先对同一 Thread 强制执行 `WallClockRollover`
-compaction，再以 `workUnitId + sourceTurnId` 生成确定性 hidden continuation input，在同一
-worktree 开启下一切片。一个 tranche 最多四个切片；第四次 wall-clock 耗尽进入
-NeedsAttention 并保留 executor/worktree，等待 Planner 停止或拆分。planner 用统一的
-`send_message`（parent→direct-child）向子代理下发调度消息；不再有 Task 专用的 send_message，
-也不再在发消息时隐式重置 WorkUnit tranche（NeedsAttention 的恢复由 planner 显式停止/拆分/
-重新 spawn 驱动）。非 wall-clock budget、用户停止、Task 取消和 rollover compaction 失败都不
-自动续轮；pending continuation 在重启时按幂等键对账已有 active/terminal Turn，禁止重复增加切片。
-rollover replacement transcript 必须先与 TurnFinished 在 repository 提交链上持久化成功，再允许
-hidden continuation 入队；提交失败时 actor 不推进内存 session，也不启动下一 Turn。
+executor 或 WorkUnit 标记为失败：runtime 通过唯一 compaction controller 对同一 Thread 强制执行
+`WallClockRollover`。attached Turn 复用原 CancellationToken，provider-backed compaction 受 120 秒
+硬超时约束；取消、超时或错误不得阻止当前 Turn 提交 terminal。成功后以
+`workUnitId + sourceTurnId` 生成确定性 hidden continuation input，在同一 worktree 开启下一切片。
+一个自动 tranche 最多四个切片；第四次 wall-clock 耗尽、非 wall-clock budget 或 rollover 失败
+进入 NeedsAttention，保留 executor/worktree，并形成稳定 Planner wake。pending continuation 与
+Planner wake 在重启时分别按幂等键对账已有 active/terminal Turn 和 queued/claimed/active/consumed
+mail，禁止重复增加切片或启动 Turn。rollover replacement transcript 必须先与 TurnFinished 在
+repository 提交链上持久化成功，再允许 hidden continuation 入队；提交失败时 actor 不推进内存
+session，也不启动下一 Turn。
+
+planner 用统一的 `send_message`（parent→direct-child）向子代理下发调度或恢复消息；不增加 Task
+专用恢复工具。每次成功接受的消息都刷新 child budget。活动 Turn 不被中断，但 wall-clock 和
+本 tranche 的 model/tool/wait 计数从消息接受时重新开始；idle child 开启 fresh Turn。对应 WorkUnit
+的 budget tranche 重置为第一片，清除上一 tranche 的 budget/error/source。预算型 NeedsAttention
+可由该消息恢复为同一 executor/Thread/WorkUnit/worktree 的 `Running/Running`；handoff、ownership
+或其他非预算 NeedsAttention 继续拒绝恢复。自动 `PendingStart` continuation 不刷新 tranche。
 
 UserInput 的 fresh-turn 边界不扩大上述预算续轮范围。普通 Planner、reviewer、Simple 或 child
 `budgetLimited` 仍是 terminal 事实，不自动合成 continuation；只有这里定义的 executor
@@ -412,3 +422,9 @@ WorkUnit 的状态机与 follow-up 处理，不得在 harness、工具 schema、
 和全局 deadline，重新取得 VM URL，但不再次提交 prompt 或确认计划。每次 attempt 使用独立日志
 目录；只有成功的 Task recovery 才重置 stall 窗口。一次验收最多应用三次 conversation recovery，
 第四次直接判定恢复循环；stale preview 的重新生成不计数。
+
+预算恢复验收只允许 debug scripted fixture 注入短 wall-clock 与短 compaction timeout；生产默认
+仍固定为 30 分钟和 120 秒。fixture 必须先观察 budget `NeedsAttention`，让当前 Planner Turn 结束
+并由稳定 wake 开启 fresh Turn，再向原 executor 执行 `send_message`。Driver 必须记录恢复后的
+`budgetSliceCount == 1`，并证明 WorkUnit、agent、worktree 与 branch identity 均未变化；同一隔离
+Studio 数据目录重启后还必须验证 wake、恢复消息和 continuation 没有重复物化。

@@ -117,7 +117,7 @@ impl CollaborationToolKind {
                 "Record the caller's current execution stage, concise summary, next step, and optional detailed report. Appends a durable submission the orchestrator can read later; never creates a completion or review authorization."
             }
             Self::SendMessage => {
-                "Insert a steering message into a direct child agent's session without interrupting its active turn. Only parent-to-direct-child is allowed."
+                "Insert a steering message into a direct child agent's session without interrupting its active turn, and refresh the child's current turn budget. Only parent-to-direct-child is allowed."
             }
             Self::Interrupt => "Interrupt an accessible agent's current turn.",
             Self::List => {
@@ -331,7 +331,8 @@ impl CollaborationTool {
             .submit_current_session(
                 target.clone(),
                 super::AgentCurrentSessionSubmitRequest::start(args.message)
-                    .with_presentation(super::MailboxPresentation::Hidden),
+                    .with_presentation(super::MailboxPresentation::Hidden)
+                    .with_budget_action(super::MailboxBudgetAction::Refresh),
             )
             .await
             .map_err(|error| tool_error(TOOL_SEND_MESSAGE, error.to_string()))?;
@@ -570,7 +571,7 @@ fn compact_wait_message(message: &AgentDirectoryWaitMessage, all: &[AgentSnapsho
         "state": {
             "lifecycle": message.lifecycle,
             "activity": message.activity,
-            "turnOutcome": message.turn_outcome,
+            "lastTurnOutcome": message.last_turn_outcome,
         },
     })
 }
@@ -719,7 +720,7 @@ mod tests {
                 },
                 updated_at: 123,
             }),
-            turn_outcome: None,
+            last_turn_outcome: None,
         };
 
         let output = compact_wait_message(&message, &[]);
@@ -730,18 +731,41 @@ mod tests {
         assert_eq!(output["message"]["summary"], "验证完成");
         assert!(output["message"].get("revision").is_none());
         assert!(output.get("agents").is_none());
-        assert!(output["state"]["turnOutcome"].is_null());
+        assert!(output["state"]["lastTurnOutcome"].is_null());
+        assert!(output["state"].get("turnOutcome").is_none());
 
         let terminal = AgentDirectoryWaitMessage {
             identity: message.identity,
             lifecycle: AgentLifecycleState::Closed,
             activity: AgentActivityState::Idle,
             message: None,
-            turn_outcome: Some(super::super::TurnOutcomeKind::Failed),
+            last_turn_outcome: Some(super::super::AgentTurnOutcome {
+                turn_id: TurnId::new("turn-failed").unwrap(),
+                thread_id: ThreadId::new("executor").unwrap(),
+                kind: super::super::TurnOutcomeKind::Failed,
+                reason: Some("provider unavailable".to_string()),
+                failure: None,
+                budget_limit: None,
+                rollover_compacted: false,
+                rollover_compaction_error: None,
+                usage: pl_model::TokenUsage::default(),
+                finished_at: 124,
+            }),
         };
         let terminal_output = compact_wait_message(&terminal, &[]);
         assert!(terminal_output["message"].is_null());
-        assert_eq!(terminal_output["state"]["turnOutcome"], "failed");
+        assert_eq!(
+            terminal_output["state"]["lastTurnOutcome"]["turnId"],
+            "turn-failed"
+        );
+        assert_eq!(
+            terminal_output["state"]["lastTurnOutcome"]["kind"],
+            "failed"
+        );
+        assert_eq!(
+            terminal_output["state"]["lastTurnOutcome"]["reason"],
+            "provider unavailable"
+        );
     }
 
     #[test]

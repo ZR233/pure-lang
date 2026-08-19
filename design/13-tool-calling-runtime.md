@@ -246,12 +246,24 @@ wall-clock、各调用执行时长之和、最长执行时长、模型可见结�
 这些指标只用于推导批处理节省和 token 收益，不影响调度顺序、结果预算或 retry 决策。
 
 Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当前 Turn 的 typed terminal 保存，
-但 WorkUnit 不立即失败。Task coordinator 对同一 executor、Thread 和 worktree 强制执行一次
-`WallClockRollover` compaction，并用确定性 hidden input 开启下一 Turn。一个 tranche 最多四个
-30 分钟切片；第四次耗尽后 WorkUnit 进入 `needsAttention`，由 Planner 停止或拆分恢复。planner
-用统一的 `send_message`（parent→direct-child）向子代理下发调度消息；不再有 Task 专用 send_message，
-也不在发消息时隐式重置 WorkUnit tranche。非 wall-clock budget、用户停止、Task 取消和压缩失败
-都不自动续轮。pending continuation 必须持久化并使用 WorkUnit/来源 Turn 组成的幂等键恢复。
+但 WorkUnit 不立即失败。runtime 使用与自动、手动压缩相同的 compaction controller，对同一
+executor、Thread 和 worktree 执行 `WallClockRollover`：attached Turn 复用原 CancellationToken，
+provider-backed 压缩统一受 120 秒硬超时约束。取消、超时或 provider 错误不得阻止 Turn 终态；
+失败不安装部分 replacement session，并把原因写入 typed rollover outcome。成功 replacement 必须
+先与 TurnFinished 在 Immediate flush 边界提交，之后才能用确定性 hidden input 开启下一 Turn。
+attached rollover 的 trace item 继续归属当前 durable Turn，只使用独立的 compaction item scope
+避免与主调用进度 ID 冲突；不得伪造没有 Turn 行的 synthetic turn ID。
+一个自动 tranche 最多四个 30 分钟切片；第四次耗尽、非 wall-clock budget 或 rollover 失败都进入
+`needsAttention`，并形成可重启对账的 Planner wake。
+
+planner 继续只使用统一的 `send_message`（parent→direct-child）下发调度消息，不增加 Task 专用
+恢复工具。每次 runtime 成功接受该消息都刷新目标 child 的预算：活动 Turn 保持同一身份、不中断，
+但以该消息的接受时刻重置 wall-clock、等待排除和本 tranche 的 model/tool/wait 计数；idle child
+开启 fresh Turn。Task executor 同时把 WorkUnit budget tranche 重置为第一片。预算型
+`needsAttention` 允许由该消息恢复原 executor、Thread、WorkUnit 与 worktree；其他 NeedsAttention
+原因继续 fail closed。普通 mailbox、Interaction resolution、Planner wake 和自动 rollover
+continuation 都不刷新预算。pending continuation 与 Planner wake 分别使用稳定业务键恢复，
+queued、claimed、active 或 consumed mail 均不得重复物化。
 
 一般 `budgetLimited` 不因 UserInput fresh-turn 机制获得自动续轮；只有上述 Task executor
 `WallClockRollover` 状态机可以创建预算 continuation，避免把死循环或永久预算耗尽掩盖成无界 Turn。
@@ -395,8 +407,10 @@ directory。`list_agents` 保留完整 canonical 目录查询，仅用于目标�
 该 owner 主动执行的协作 Item，Todo 作为 `ThreadRuntimeSnapshot` 的完整 replacement，不伪装成
 Timeline Item。
 
-`wait_agents` 的 `messages` 是破坏性新协议；旧模型历史、工具结果和派生缓存不做迁移或兼容
-转换，协议切换后由产品重建新会话和相关 fixture。
+`wait_agents` 的 `messages` 是破坏性新协议；terminal 增量直接携带 canonical
+`lastTurnOutcome`，包含 Turn identity、typed failure、budget、rollover 和 usage，不再复制一个只含
+枚举的 `turnOutcome`。旧模型历史、工具结果和派生缓存不做迁移或兼容转换，协议切换后由产品
+重建新会话和相关 fixture。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
 `task_spawn_executor` 接收 required `taskName/message` 与 optional `scopeHints`；hint 只描述

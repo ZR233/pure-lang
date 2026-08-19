@@ -36,6 +36,36 @@ pub enum MailboxPresentation {
     Hidden,
 }
 
+/// mailbox 输入对目标 Turn 预算的影响。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxBudgetAction {
+    #[default]
+    Preserve,
+    Refresh,
+}
+
+impl MailboxBudgetAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Preserve => "preserve",
+            Self::Refresh => "refresh",
+        }
+    }
+
+    pub fn from_persisted_str(value: &str) -> Option<Self> {
+        match value {
+            "preserve" => Some(Self::Preserve),
+            "refresh" => Some(Self::Refresh),
+            _ => None,
+        }
+    }
+
+    pub const fn is_preserve(&self) -> bool {
+        matches!(self, Self::Preserve)
+    }
+}
+
 /// mailbox 请求与持久化 envelope 共享的输入内容。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +100,8 @@ pub struct DurableMailboxEnvelope {
     /// 只合并队首连续 pending 输入的通用 key；不会进入模型提示词。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_coalescing_key: Option<String>,
+    #[serde(default, skip_serializing_if = "MailboxBudgetAction::is_preserve")]
+    pub budget_action: MailboxBudgetAction,
     #[serde(default)]
     pub delivery_state: MailboxDeliveryState,
     pub queued_at: i64,
@@ -99,6 +131,7 @@ pub struct AgentSubmitRequest {
     pub queue_coalescing_key: Option<String>,
     pub mail_id: Option<String>,
     pub turn_policy: AgentTurnSubmitPolicy,
+    pub budget_action: MailboxBudgetAction,
 }
 
 /// 限定一次输入必须启动新 Turn、steer 活动 Turn，或由 actor 自动选择。
@@ -214,6 +247,7 @@ impl AgentSubmitRequest {
             queue_coalescing_key: None,
             mail_id: None,
             turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
+            budget_action: MailboxBudgetAction::Preserve,
         }
     }
 
@@ -246,6 +280,12 @@ impl AgentSubmitRequest {
         self.turn_policy = turn_policy;
         self
     }
+
+    /// 设置输入被 runtime 接受时如何处理目标 Turn 的预算。
+    pub fn with_budget_action(mut self, budget_action: MailboxBudgetAction) -> Self {
+        self.budget_action = budget_action;
+        self
+    }
 }
 
 /// 提交到目标 agent 当前 session 的输入；session 身份只能由 runtime resolver 填充。
@@ -253,6 +293,7 @@ impl AgentSubmitRequest {
 pub struct AgentCurrentSessionSubmitRequest {
     pub payload: MailboxInputPayload,
     pub mail_id: Option<String>,
+    pub budget_action: MailboxBudgetAction,
 }
 
 /// 将 resolved Interaction 与后续 mailbox 输入作为一个原子 continuation 提交。
@@ -279,6 +320,7 @@ impl AgentCurrentSessionSubmitRequest {
         Self {
             payload: MailboxInputPayload::user(message),
             mail_id: None,
+            budget_action: MailboxBudgetAction::Preserve,
         }
     }
 
@@ -297,6 +339,12 @@ impl AgentCurrentSessionSubmitRequest {
     /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
     pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
         self.mail_id = Some(mail_id.into());
+        self
+    }
+
+    /// 设置输入被 runtime 接受时如何处理目标 Turn 的预算。
+    pub fn with_budget_action(mut self, budget_action: MailboxBudgetAction) -> Self {
+        self.budget_action = budget_action;
         self
     }
 }
@@ -319,6 +367,7 @@ mod tests {
                 metadata: json!({"kind": "test"}),
             },
             queue_coalescing_key: None,
+            budget_action: MailboxBudgetAction::Refresh,
             delivery_state: MailboxDeliveryState::Pending,
             queued_at: 7,
         };
@@ -326,6 +375,7 @@ mod tests {
         assert_eq!(envelope_json["message"], "hello");
         assert_eq!(envelope_json["presentation"], json!({"type": "hidden"}));
         assert_eq!(envelope_json["metadata"], json!({"kind": "test"}));
+        assert_eq!(envelope_json["budgetAction"], "refresh");
         assert!(envelope_json.get("payload").is_none());
         assert_eq!(
             serde_json::from_value::<DurableMailboxEnvelope>(envelope_json).unwrap(),
@@ -372,6 +422,7 @@ mod tests {
         assert_eq!(envelope.payload.message, "hello");
         assert_eq!(envelope.payload.presentation, MailboxPresentation::Hidden);
         assert_eq!(envelope.payload.metadata, json!({"kind": "test"}));
+        assert_eq!(envelope.budget_action, MailboxBudgetAction::Preserve);
 
         let result = serde_json::from_value::<ConversationRecoveryResult>(json!({
             "recoveryId": "recovery-1",
