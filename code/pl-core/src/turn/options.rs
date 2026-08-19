@@ -1,4 +1,5 @@
 use std::sync::Arc;
+#[cfg(any(test, debug_assertions))]
 use std::time::Duration;
 
 use futures::future::BoxFuture;

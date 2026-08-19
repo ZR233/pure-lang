@@ -327,6 +327,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
         })?;
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
             .with_user_content(user_content)
@@ -363,6 +364,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .slots
             .get(&prompt_scope)
             .map(|prompt| (prompt.registry_revision, prompt.tool_catalog_hash.clone()));
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut options = studio_turn_options(
             TurnOptions::default()
                 .with_permission_mode(config.runtime.permission_mode)
