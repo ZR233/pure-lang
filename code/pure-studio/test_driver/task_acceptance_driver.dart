@@ -105,9 +105,8 @@ Future<void> main(List<String> arguments) async {
         }),
       );
     }
-    await File(
-      '${options.snapshotOutput}.png',
-    ).writeAsBytes(await session.screenshot(), flush: true);
+    await File('${options.snapshotOutput}.png')
+        .writeAsBytes(await session.screenshot(), flush: true);
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
@@ -131,16 +130,14 @@ Future<void> main(List<String> arguments) async {
           session.renderTree(),
           'render tree capture',
         );
-        await File(
-          '${options.snapshotOutput}.render-tree.txt',
-        ).writeAsString(tree, flush: true);
+        await File('${options.snapshotOutput}.render-tree.txt')
+            .writeAsString(tree, flush: true);
       } on Object {
         // Preserve the original Driver failure.
       }
       try {
-        await File(
-          '${options.snapshotOutput}.failure.png',
-        ).writeAsBytes(await session.screenshot(), flush: true);
+        await File('${options.snapshotOutput}.failure.png')
+            .writeAsBytes(await session.screenshot(), flush: true);
       } on Object {
         // Preserve the original Driver failure.
       }
@@ -710,11 +707,16 @@ String _snapshotThreadId(Map<String, dynamic> snapshot) {
 }
 
 String _normalizedPath(String path) {
-  var normalized = File(path).absolute.path.replaceAll('\\', '/');
+  final lexical = path.replaceAll('\\', '/');
+  final windowsPath =
+      RegExp(r'^[A-Za-z]:/').hasMatch(lexical) || lexical.startsWith('//');
+  var normalized = windowsPath ? lexical : File(lexical).absolute.path;
   while (normalized.length > 1 && normalized.endsWith('/')) {
     normalized = normalized.substring(0, normalized.length - 1);
   }
-  return Platform.isWindows ? normalized.toLowerCase() : normalized;
+  return Platform.isWindows || windowsPath
+      ? normalized.toLowerCase()
+      : normalized;
 }
 
 Future<Map<String, dynamic>> _waitForTaskCompletion(

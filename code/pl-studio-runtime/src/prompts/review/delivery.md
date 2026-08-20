@@ -22,6 +22,14 @@ Delivery
 {{COMPLETION_JSON}}
 ```
 
+### 执行者与审查者共享的完整实施蓝图
+
+按 `acceptanceCriteria[].id` 逐项核对对应步骤、实现结果和 `verification` 检查标识；不得用自由文本摘要替代任何验收条件。
+
+```json
+{{HANDOFF_JSON}}
+```
+
 ### 冻结 changed-files
 
 ```json

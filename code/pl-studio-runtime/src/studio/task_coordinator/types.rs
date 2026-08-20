@@ -163,7 +163,7 @@ impl TaskRunPhase {
             Self::DesignUpdating => matches!(next, Self::Implementing | Self::Failed),
             Self::Implementing => matches!(
                 next,
-                Self::Merging | Self::Reviewing | Self::Blocked | Self::Failed
+                Self::Merging | Self::Reviewing | Self::Completed | Self::Blocked | Self::Failed
             ),
             Self::Merging => matches!(
                 next,
@@ -175,7 +175,10 @@ impl TaskRunPhase {
                     Self::Reworking | Self::Completed | Self::Blocked | Self::Failed
                 )
             }
-            Self::Reworking => matches!(next, Self::Implementing | Self::Blocked | Self::Failed),
+            Self::Reworking => matches!(
+                next,
+                Self::Implementing | Self::Completed | Self::Blocked | Self::Failed
+            ),
             Self::Stopping => false,
             Self::Completed | Self::Blocked | Self::Failed | Self::Cancelled => false,
         }

@@ -57,6 +57,8 @@ mod tests {
     fn task_root_and_child_roles_receive_isolated_prompts() {
         let planner = StudioMode::Task.instructions_for("planner", true);
         assert!(planner.contains("通过 `plan_exit` 提交可执行计划"));
+        assert!(planner.contains("不会提供 `exec` / `write_stdin`"));
+        assert!(planner.contains("不得创建项目、写文件、初始化 Git、提交代码"));
 
         let explorer = StudioMode::Task.instructions_for("explorer", false);
         assert!(explorer.contains("只读探索"));

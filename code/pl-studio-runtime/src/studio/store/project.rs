@@ -35,7 +35,14 @@ impl StudioStore {
         .await?;
         initialize_studio_schema(&db).await?;
         validate_database(&db).await?;
-        Ok(Self { db })
+        let attachments_dir = tempfile::Builder::new()
+            .prefix("pure-studio-memory-attachments-")
+            .tempdir()?
+            .keep();
+        Ok(Self {
+            db,
+            attachments_dir,
+        })
     }
 
     pub(super) async fn open_database(path: &Path) -> Result<Self> {
@@ -96,7 +103,14 @@ impl StudioStore {
                 )),
             };
         }
-        Ok(Self { db })
+        let attachments_dir = path
+            .parent()
+            .context("Studio database path has no parent directory")?
+            .join("attachments");
+        Ok(Self {
+            db,
+            attachments_dir,
+        })
     }
 
     pub async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {

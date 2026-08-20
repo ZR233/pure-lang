@@ -104,6 +104,17 @@ async fn assert_task_invariants(
                 unit.status
             );
         }
+        if unit.implementation_step_count < 2
+            || unit.acceptance_criterion_count == 0
+            || unit.verification_count == 0
+            || unit.blueprint_fingerprint.is_none()
+            || unit.objective.as_deref().is_none_or(str::is_empty)
+        {
+            bail!(
+                "work unit `{}` did not preserve a concrete covered implementation blueprint",
+                unit.id
+            );
+        }
         if Path::new(&unit.worktree_path).exists() {
             bail!(
                 "merged work unit `{}` retained worktree `{}`",
@@ -120,7 +131,7 @@ async fn assert_task_invariants(
             .read_thread(executor_thread_id)
             .await?
             .context("merged work unit references a missing executor Thread")?;
-        if executor.status != "completed" {
+        if executor.status != "closed" {
             bail!(
                 "executor Thread `{executor_thread_id}` finished with status `{}`",
                 executor.status
@@ -235,32 +246,57 @@ async fn assert_task_invariants(
         bail!("Task contains an approved but unmerged delivery");
     }
 
-    let review = task.reviews.last().context("Task has no reviewer result")?;
-    if review.scope != "integrated" {
-        bail!(
-            "latest reviewer scope is `{}` instead of `integrated`",
-            review.scope
-        );
+    match &task.integrated_review_gate {
+        pl_studio_runtime::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            ..
+        } => {
+            if task.work_units.len() != 1
+                || task
+                    .reviews
+                    .iter()
+                    .any(|review| review.scope == "integrated")
+            {
+                bail!("single-executor equivalent task unexpectedly created integrated review");
+            }
+        }
+        pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {
+            review_round_id,
+            reviewed_head,
+        } => {
+            let review = task
+                .reviews
+                .iter()
+                .find(|review| review.id == *review_round_id)
+                .context("satisfied review gate references a missing round")?;
+            if review.scope != "integrated"
+                || review.verdict != "pass"
+                || review.reviewed_head != *reviewed_head
+                || reviewed_head != &task.expected_head
+            {
+                bail!("integrated review gate does not match a passing current review");
+            }
+        }
+        other => bail!("completed delivery task has invalid review gate: {other:?}"),
     }
-    if review.verdict != "pass" {
-        bail!("latest reviewer verdict is `{}`", review.verdict);
+    if !task.reviews.iter().all(|review| {
+        review
+            .design_references
+            .iter()
+            .any(|reference| reference.path == "design/shooter.md")
+    }) {
+        bail!("not every review cited design/shooter.md");
     }
-    if review.reviewed_head != task.expected_head {
-        bail!(
-            "latest reviewer checked `{}` instead of expected HEAD `{}`",
-            review.reviewed_head,
-            task.expected_head
-        );
-    }
-    if !review
-        .design_references
-        .iter()
-        .any(|reference| reference.path == "design/shooter.md")
-    {
-        bail!(
-            "latest reviewer did not cite design/shooter.md: {:?}",
-            review.design_references
-        );
+    if !task.completions.iter().all(|completion| {
+        completion.status != "approved"
+            || task.reviews.iter().any(|review| {
+                review.scope == "delivery"
+                    && review.completion_id.as_deref() == Some(completion.id.as_str())
+                    && review.completion_revision == Some(completion.revision)
+                    && review.reviewed_head == completion.head_commit.as_deref().unwrap_or_default()
+                    && review.verdict == "pass"
+            })
+    }) {
+        bail!("an approved completion has no matching passing delivery review");
     }
 
     if !fixture
@@ -365,6 +401,6 @@ Keep deterministic gameplay rules in game-core.mjs so verify.mjs can import them
 verify.mjs must use node:assert to verify movement boundaries, shooting, collision, scoring, and restart, then print exactly this success marker on its own line:
 {LIVE_VERIFY_MARKER}
 
-In Task mode, update and commit design/shooter.md, then spawn at least one executor with scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Request integrated review against the current design and HEAD, repair any review failures through the normal Task workflow, and only call task_complete after the reviewer passes. The final Git worktree must be clean."#
+In Task mode, update and commit design/shooter.md, then spawn one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps, repository targets, stable acceptance criteria, and command or inspection checks that cover every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Synchronize the final design, read the shared integrated review gate, and do not create an integrated reviewer when it reports the single-executor equivalent exemption. If it reports required, request integrated review and repair failures through the normal Task workflow. Only call task_complete when the gate permits it. The final Git worktree must be clean."#
     )
 }

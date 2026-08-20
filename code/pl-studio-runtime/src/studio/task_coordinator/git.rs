@@ -258,6 +258,19 @@ pub(super) async fn resolve_commit_oid(
     .context("git commit resolution task failed")?
 }
 
+pub(super) async fn resolve_tree_oid(path: impl AsRef<Path>, commit: &str) -> Result<String> {
+    let path = path.as_ref().to_path_buf();
+    let revision = format!("{}^{{tree}}", commit.trim());
+    tokio::task::spawn_blocking(move || {
+        git_output(
+            &path,
+            &["rev-parse", "--verify", "--end-of-options", &revision],
+        )
+    })
+    .await
+    .context("Git tree resolution task failed")?
+}
+
 pub(super) async fn inspect_worktree_changes(
     path: impl AsRef<Path>,
     base_commit: &str,

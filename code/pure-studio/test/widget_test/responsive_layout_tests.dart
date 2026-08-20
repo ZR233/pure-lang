@@ -171,9 +171,9 @@ void registerResponsiveLayoutTests() {
         expect(providerTitle.maxLines, 1);
         expect(providerTitle.overflow, TextOverflow.ellipsis);
         expect(
-          _renderParagraphs(
-            find.text(responsiveVisualProviderName),
-          ).single.didExceedMaxLines,
+          _renderParagraphs(find.text(responsiveVisualProviderName))
+              .single
+              .didExceedMaxLines,
           isTrue,
         );
         final providerSubtitle = tester.widget<Text>(
@@ -182,9 +182,9 @@ void registerResponsiveLayoutTests() {
         expect(providerSubtitle.maxLines, 1);
         expect(providerSubtitle.overflow, TextOverflow.ellipsis);
         expect(
-          _renderParagraphs(
-            find.text(responsiveVisualProviderSubtitle),
-          ).single.didExceedMaxLines,
+          _renderParagraphs(find.text(responsiveVisualProviderSubtitle))
+              .single
+              .didExceedMaxLines,
           isTrue,
         );
         final titleRect = tester.getRect(

@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
 
-typedef FlutterDriverConnector =
-    Future<FlutterDriverClient> Function(String vmServiceUrl);
-typedef SnapshotReconnectObserver =
-    FutureOr<void> Function(SnapshotReconnectEvent event);
+typedef FlutterDriverConnector = Future<FlutterDriverClient> Function(
+  String vmServiceUrl,
+);
+typedef SnapshotReconnectObserver = FutureOr<void> Function(
+  SnapshotReconnectEvent event,
+);
 
 abstract interface class FlutterDriverClient {
   Future<void> checkHealth();
@@ -91,9 +93,8 @@ class FlutterDriverSession {
     Future<void> Function(Duration) delay = Future<void>.delayed,
     SnapshotReconnectObserver? onReconnect,
   }) async {
-    final client = await connector(
-      vmServiceUrl,
-    ).timeout(const Duration(seconds: 30));
+    final client = await connector(vmServiceUrl)
+        .timeout(const Duration(seconds: 30));
     await client.checkHealth().timeout(const Duration(seconds: 15));
     await client.setFrameSync(false).timeout(const Duration(seconds: 15));
     return FlutterDriverSession._(
@@ -131,9 +132,8 @@ class FlutterDriverSession {
       await _closeClientBestEffort();
       await _delay(backoff);
       try {
-        final replacement = await _connector(
-          _vmServiceUrl,
-        ).timeout(const Duration(seconds: 30));
+        final replacement = await _connector(_vmServiceUrl)
+            .timeout(const Duration(seconds: 30));
         await replacement.checkHealth().timeout(const Duration(seconds: 15));
         await replacement
             .setFrameSync(false)

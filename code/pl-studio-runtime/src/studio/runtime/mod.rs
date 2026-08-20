@@ -11,7 +11,7 @@ use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_a
 use crate::studio::records::ThreadRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioActiveTurn, StudioProductEventRuntime, StudioRecoveryCleanupPreview,
+    InteractionService, ProductEventBus, StudioActiveTurn, StudioRecoveryCleanupPreview,
     StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
 };
 
@@ -24,16 +24,21 @@ mod plan_confirmation;
 mod prompt_runner;
 mod provider_usage;
 mod residency;
+mod settings_api;
 mod shutdown_progress;
 mod skill_catalog;
+mod state_query;
 mod task_recovery;
 mod thread_service;
 mod updater;
 
-pub use provider_usage::{ProviderUsageRuntime, ProviderUsageStateSnapshot};
-pub use shutdown_progress::StudioShutdownProgressRuntime;
-pub use skill_catalog::{SkillCatalogRuntime, SkillsStateSnapshot};
-pub use updater::{StudioUpdateRuntime, StudioUpdateStateSnapshot};
+pub(crate) use provider_usage::ProviderUsageRuntime;
+pub use provider_usage::ProviderUsageStateSnapshot;
+pub(crate) use shutdown_progress::ShutdownProgressBus;
+pub(crate) use skill_catalog::SkillCatalogRuntime;
+pub use skill_catalog::SkillsStateSnapshot;
+pub(crate) use updater::StudioUpdateRuntime;
+pub use updater::StudioUpdateStateSnapshot;
 
 /// Studio UI 提交 prompt 的请求。
 ///
@@ -72,7 +77,8 @@ pub struct StudioPlanImplementationLifecycle {
 }
 
 /// Studio UI 提交 prompt 后得到的 framework turn 信息。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudioSubmitPromptResponse {
     pub thread_id: String,
     pub turn_id: String,
@@ -80,14 +86,16 @@ pub struct StudioSubmitPromptResponse {
 }
 
 /// Result of creating a root Thread and accepting its first Turn.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudioStartNewThreadResponse {
     pub thread: ThreadRecord,
     pub submission: StudioSubmitPromptResponse,
 }
 
 /// Result of archiving a root Thread tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudioArchiveThreadResult {
     pub archived_root_id: String,
     pub removed_thread_ids: Vec<String>,
@@ -95,14 +103,25 @@ pub struct StudioArchiveThreadResult {
 }
 
 /// Studio UI 请求停止当前 Thread Turn 后的结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudioStopPromptResponse {
     pub thread_id: String,
     pub stopped: bool,
 }
 
+/// Result of validating and interrupting the expected active Turn.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioInterruptPromptResponse {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub interrupted: bool,
+}
+
 /// Studio UI resolve interaction 后的核心响应。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudioResolveInteractionResponse {
     pub thread_id: String,
     pub interaction: InteractionRequest,
@@ -111,12 +130,13 @@ pub struct StudioResolveInteractionResponse {
 
 #[derive(Clone)]
 pub struct StudioRuntime {
+    instance_lock: super::runtime_lock::RuntimeLockOwner,
     store: StudioStore,
     config_runtime: ConfigRuntime,
     external_runtimes: StudioExternalRuntimes,
     agent_facility: StudioAgentFacility,
     residency: residency::ThreadResidency,
-    shutdown_progress: StudioShutdownProgressRuntime,
+    shutdown_progress: ShutdownProgressBus,
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
     skills: SkillCatalogRuntime,
@@ -146,8 +166,8 @@ struct StudioExternalRuntimes {
 struct StudioAgentFacility {
     framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     resources: StudioAgentResources,
-    interactions: InteractionRuntime,
-    product_events: StudioProductEventRuntime,
+    interactions: InteractionService,
+    product_events: ProductEventBus,
     /// agent framework 的 write-behind writer 句柄；framework 被 take 后关机仍能排空。
     persistence: std::sync::Arc<
         tokio::sync::Mutex<Option<crate::studio::agent_host::StudioAgentRepository>>,

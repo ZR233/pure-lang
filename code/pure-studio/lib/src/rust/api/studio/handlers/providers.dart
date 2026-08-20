@@ -7,9 +7,10 @@ import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `provider_usage_state`, `skills_state`
+// These functions are ignored because they are not marked as `pub`: `owned_skills_state`, `provider_usage_state`, `skills_state`
 
 Future<BridgeProviderUsageStateSnapshot> readProviderUsageState() => RustLib
     .instance

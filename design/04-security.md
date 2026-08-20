@@ -69,7 +69,17 @@ Flutter 桌面端的安全边界集中在本地工具策略、配置凭据和 Fl
 - 只通过 `pl-studio-bridge` 调用本地 runtime。
 - 文件选择、路径访问和工具执行仍由 `pl-core` 策略校验。
 
-## 4.6 数据切换安全
+## 4.6 本机 HTTP 边界
+
+`pl-studio-server` 不提供远程鉴权能力，因此只允许绑定 loopback 地址。请求 Host 必须解析为
+loopback IP 或 `localhost`；带 `Origin` 的请求必须与当前 Host 同源，其他 Origin 一律拒绝。
+server 不发送 CORS 许可头，不接受把 wildcard、LAN 或公网地址作为 listen 参数。
+
+HTTP 与 FRB 统一返回脱敏 `StudioError { code, message, retryable, correlationId, details }`；日志可
+按 correlation ID 记录内部诊断，但响应不得包含 token、配置正文、绝对私有路径、provider 原始
+错误或数据库语句。OpenAPI 与 Swagger UI 是静态协议展示，不启动第二个 runtime。
+
+## 4.7 数据切换安全
 
 Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 14，provider API token
 保存在系统凭据库。不兼容配置不迁移、不导入其中的凭据，直接原子替换为当前初始配置；系统

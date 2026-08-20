@@ -9,10 +9,11 @@ import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
 import '../types/thread_stream.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_project_recovery_available`, `general_settings`, `observed_ready`, `read_studio_state_inner`, `settings_snapshot`
+// These functions are ignored because they are not marked as `pub`: `read_studio_state_inner`
 
-/// 读取完整 Studio canonical state；不得触发生命周期命令。
+/// Reads the complete canonical Studio state without lifecycle side effects.
 Future<BridgeStudioStateSnapshot> readStudioState() =>
     RustLib.instance.api.crateApiStudioHandlersSnapshotReadStudioState();

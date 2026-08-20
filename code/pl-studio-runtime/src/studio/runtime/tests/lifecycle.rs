@@ -9,6 +9,7 @@ use sea_orm::{
 };
 
 use crate::studio::entity::{item, thread, thread_session_state, turn};
+use crate::studio::task_coordinator::TaskRunPhase;
 
 #[tokio::test]
 async fn initialize_runtime_isolates_unavailable_registered_project() {
@@ -1043,13 +1044,13 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
         .unwrap();
     let request = requests.recv().await.unwrap();
     let tool_names = response_tool_names(&request);
-    for required in ["exec", "write_stdin", "plan_exit"] {
-        assert!(
-            tool_names.contains(&required),
-            "planning request omitted {required}: {tool_names:?}"
-        );
-    }
+    assert!(
+        tool_names.contains(&"plan_exit"),
+        "planning request omitted plan_exit: {tool_names:?}"
+    );
     for unavailable in [
+        "exec",
+        "write_stdin",
         "search_files",
         "task_status",
         "task_spawn_executor",
@@ -1090,13 +1091,20 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
 }
 
 #[tokio::test]
-async fn fresh_task_run_turn_installs_task_status_and_process_tools() {
-    let (base_url, server, mut requests) =
-        serve_http_sequence_recording(vec![TestHttpResponse::sse(responses_final_text_sse(
-            "active-task-tools",
-            "TaskRun tools observed",
-        ))])
-        .await;
+async fn fresh_task_run_turn_installs_task_tools_without_process_tools() {
+    let design_update = responses_function_tool_sse(
+        "active-task-design",
+        "task_update_design",
+        serde_json::json!({
+            "patch": "*** Begin Patch\n*** Add File: design/task.md\n+Active Task design.\n*** End Patch"
+        }),
+    );
+    let design_ack = responses_final_text_sse("active-task-design-ack", "TaskRun design updated");
+    let (base_url, server, mut requests) = serve_http_sequence_recording(vec![
+        TestHttpResponse::sse(design_update),
+        TestHttpResponse::sse(design_ack),
+    ])
+    .await;
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -1165,16 +1173,32 @@ async fn fresh_task_run_turn_installs_task_status_and_process_tools() {
 
     let request = requests.recv().await.unwrap();
     let tool_names = response_tool_names(&request);
-    for required in ["exec", "write_stdin", "task_status", "task_update_design"] {
+    for required in ["task_status", "task_update_design", "task_spawn_executor"] {
         assert!(
             tool_names.contains(&required),
             "active Task request omitted {required}: {tool_names:?}"
         );
     }
+    for unavailable in ["exec", "write_stdin"] {
+        assert!(
+            !tool_names.contains(&unavailable),
+            "active Task request exposed {unavailable}: {tool_names:?}"
+        );
+    }
     assert!(!tool_names.contains(&"search_files"));
+    let acknowledgement = requests.recv().await.unwrap();
+    let acknowledgement_tools = response_tool_names(&acknowledgement);
+    assert!(!acknowledgement_tools.contains(&"exec"));
+    assert!(!acknowledgement_tools.contains(&"write_stdin"));
     let durable = store.read_task_run(&run.id).await.unwrap().unwrap();
     assert_eq!(durable.id, run.id);
     assert_eq!(durable.root_thread_id, thread.id);
+    assert_eq!(durable.phase, TaskRunPhase::Implementing);
+    assert!(durable.design_commit.is_some());
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("design/task.md")).unwrap(),
+        "Active Task design.\n"
+    );
 
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -1189,13 +1213,21 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         serde_json::json!({ "content": plan_content }),
     );
     let initial_ack = responses_final_text_sse("implementation-plan-ack", "计划已提交确认");
-    let implementation_ack = responses_final_text_sse(
+    let implementation_design = responses_function_tool_sse(
         "implementation-fresh-turn",
-        "已在 fresh Task planner Turn 中继续。",
+        "task_update_design",
+        serde_json::json!({
+            "patch": "*** Begin Patch\n*** Add File: design/task.md\n+Fresh Task implementation design.\n*** End Patch"
+        }),
+    );
+    let implementation_ack = responses_final_text_sse(
+        "implementation-fresh-turn-ack",
+        "已在 fresh Task planner Turn 中提交设计并继续。",
     );
     let (base_url, server, mut requests) = serve_http_sequence_recording(vec![
         TestHttpResponse::sse(initial_plan_response),
         TestHttpResponse::sse(initial_ack),
+        TestHttpResponse::sse(implementation_design),
         TestHttpResponse::sse(implementation_ack),
     ])
     .await;
@@ -1294,13 +1326,14 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
             .await
             .unwrap()
             .unwrap(),
-        3
+        4
     );
     wait_for_no_active_turn(&runtime).await;
 
     let planning_request = requests.recv().await.unwrap();
     let planning_ack_request = requests.recv().await.unwrap();
     let implementation_request = requests.recv().await.unwrap();
+    let implementation_ack_request = requests.recv().await.unwrap();
     for request in [&planning_request, &planning_ack_request] {
         let tool_names = response_tool_names(request);
         assert!(!tool_names.contains(&"task_update_design"));
@@ -1312,6 +1345,15 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
             implementation_tools.contains(&required),
             "fresh Task request omitted {required}: {implementation_tools:?}"
         );
+    }
+    for request in [&implementation_request, &implementation_ack_request] {
+        let tool_names = response_tool_names(request);
+        for unavailable in ["exec", "write_stdin"] {
+            assert!(
+                !tool_names.contains(&unavailable),
+                "fresh Task request exposed {unavailable}: {tool_names:?}"
+            );
+        }
     }
 
     let turns = turn::Entity::find()
@@ -1325,6 +1367,14 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         .iter()
         .find(|turn| turn.id != submitted.turn_id)
         .expect("implementation should use a fresh planner Turn");
+    assert_eq!(fresh_turn.status, "completed");
+
+    let durable_run = store
+        .read_active_task_run_for_root_thread(&thread.id)
+        .await
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
+    assert!(durable_run.design_commit.is_some());
 
     let owner = crate::studio::agent_host::root_agent_id(&thread.id);
     let mail_id =

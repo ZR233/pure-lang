@@ -4,7 +4,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::{paths, process};
+use crate::{paths, process, pubspec_lock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StudioTool {
@@ -19,7 +19,13 @@ pub(crate) fn run(tool: StudioTool, args: Vec<OsString>) -> Result<()> {
 
     let program = tool.program();
     let display = process::display_command(program, &args);
-    process::run_checked(&mut command, &display)
+    let result = process::run_checked(&mut command, &display);
+    let canonicalization = pubspec_lock::rewrite_hosted_urls(
+        &app_dir.join("pubspec.lock"),
+        pubspec_lock::CANONICAL_HOSTED_URL,
+    );
+    result?;
+    canonicalization
 }
 
 fn studio_command(tool: StudioTool, args: &[OsString], app_dir: &Path) -> Command {

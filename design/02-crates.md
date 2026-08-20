@@ -2,14 +2,16 @@
 
 ## 2.1 总体形态
 
-本仓库是模块化单体，不新增常驻进程。依赖方向保持单向：
+Studio runtime 仍是模块化单体业务核心，同时提供一个可单独运行的 HTTP 宿主。依赖方向保持
+单向，两个 transport 适配器互不依赖：
 
 ```text
-pure-studio → pl-studio-bridge → pl-studio-runtime → pl-core
-                                      │               │
-                                      └── pl-protocol ←┘
-                                              ↑
-                              pl-model / pl-trace / pl-lsp
+pure-studio → pl-studio-bridge ─┐
+                               ├→ pl-studio-runtime → pl-core
+pl-studio-server ───────────────┘          │             │
+                                          └→ pl-protocol ←┘
+                                                  ↑
+                                  pl-model / pl-trace / pl-lsp
 ```
 
 Studio 的会话主线统一使用 `Thread → Turn → Item`。`Session`、`Message/Part`、durable event
@@ -23,6 +25,8 @@ journal 和双库 projection 不再是公共或内部架构边界。
 - `ThreadSnapshot`、`ThreadRuntimeSnapshot`、历史分页结果；
 - `ThreadNotification`：Turn、Item、Interaction 和 runtime 的 typed 通知；
 - provider catalog、capability、MCP/LSP health、usage 与公共错误。
+- `studio` 命名空间中的 transport-neutral command/query DTO、`StudioOperation`、
+  `StudioError` 与产品/SSE 事件。
 
 `ThreadItem` 是穷尽 union。协议中未知 union 变体必须失败，不能降级成文本。只有工具参数、
 工具结果 artifact 等明确开放的叶子允许动态 JSON。
@@ -83,6 +87,14 @@ owned snapshot。单一所有者的大字段或大 enum 变体使用 `Box` 降�
 - `TaskService` 及 TaskRun、WorkUnit、Delivery、ReviewRound、MergeRecord、BranchLease；
 - worktree、冲突恢复、安全清理和产品事件。
 
+`StudioRuntime` 是唯一业务 façade。聚合状态、Settings CAS/重载/reconcile、active-turn 校验、
+MCP/LSP scope 解析、Project recovery 门禁、Skills/Provider 投影和完整生命周期只在这里实现。
+transport 不得取得 Store、ConfigRuntime、event owner 或 skill catalog 等底层 accessor。
+
+runtime 在打开 SQLite 或配置前取得 Studio home 下 `runtime.lock` 的跨进程独占 OS 文件锁；
+锁由所有 runtime clone 共享，直到完整 shutdown/drop 才释放。同一 Studio home 不能同时由 GUI
+与 server 占用。
+
 Task 直接引用 executor/reviewer Thread，不把 Task phase 或 agent outcome 复制进 Thread stream。
 Thread runtime 状态从 Thread/Turn 读取，Task 产品状态从 Task 表即时组成 `TaskSnapshot`。
 
@@ -91,9 +103,9 @@ Thread runtime 状态从 Thread/Turn 读取，Task 产品状态从 Task 表即�
 `pl-studio-bridge` 位于 `code/pure-studio/rust`。它只做 Rust protocol 与 FRB DTO 的机械映射，
 不保存状态、不投影 timeline、不拥有 Tokio runtime。
 
-会话 API 统一为：
+FRB 共享会话 API 统一为：
 
-- `listThreads`
+- `listThreadsPage`
 - `readThread`
 - `listThreadTurns`
 - `startTurn`
@@ -108,7 +120,22 @@ Thread runtime 状态从 Thread/Turn 读取，Task 产品状态从 Task 表即�
 `subscribeThread` 先注册监听，再返回 authoritative `ThreadSnapshot`；后续只发送 typed
 notification。订阅 handle 显式取消，runtime shutdown 会等待所有 handle 退出。
 
-## 2.7 pure-studio
+只有 FRB 无法直接表达的 union、stream sink 和桌面宿主参数保留在 `frb_wire`，并使用 `Frb*`
+命名。初始化、远程关机、关机进度、Driver fixture 与更新安装是桌面宿主专属入口，不进入共享
+operation 清单。
+
+## 2.7 pl-studio-server
+
+`pl-studio-server` 是独立二进制与可测试库。`main.rs` 只解析 CLI、初始化 tracing、绑定 listener、
+处理系统信号并驱动 shutdown；router、handler、SSE、OpenAPI 和错误映射位于库模块。业务路由
+固定在 `/api/v1`，健康检查、OpenAPI 3.1 与 Swagger UI 分别位于 `/health`、`/openapi.json`、
+`/docs`。spec 由 canonical DTO 和同一批路由生成，不提交生成 JSON。
+
+server 只允许 loopback bind，不启用 CORS；Host 必须是 loopback/localhost，带 Origin 的请求
+必须与 Host 同源。普通请求与 SSE 各有独立的 64 并发上限，JSON body 上限 4 MiB。它不提供
+runtime 远程 shutdown 或桌面更新安装，也不进入打包、Release Please 或产物上传流程。
+
+## 2.8 pure-studio
 
 Flutter 数据路径为：
 
@@ -123,7 +150,7 @@ submission revision 和 stream generation 位于独立 `WorkspaceUiState`。Widg
 选中身份只有 `selectedThreadId`；root 通过 Thread 的 `rootThreadId` 派生。timeline、Todo、状态栏、
 interaction 和 Composer 必须从同一个 workspace 原子切换。
 
-## 2.8 pl-xtask
+## 2.9 pl-xtask
 
 `pl-xtask` 只提供开发、生成、构建和运行命令：
 
@@ -143,7 +170,7 @@ Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责
 并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库
 但禁止手改。
 
-## 2.9 数据版本
+## 2.10 数据版本
 
 新 `studio.sqlite` 使用 `PRAGMA user_version = 1`。首次启动新架构时先生成只读 manifest，再把
 `studio_state.sqlite`、`studio_history.sqlite`、`studio_2.sqlite`、它们的 WAL/SHM 和旧

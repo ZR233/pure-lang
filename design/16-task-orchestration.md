@@ -76,10 +76,19 @@ explorer 只读探索并向父 Agent 汇报，不创建、提交或确认 Task �
 创建 TaskRun 后启动的 fresh Turn 根据 active run 与最新 phase 获得相应工具集合；已经开始的 Turn
 持有固定工具 lease，不在运行中动态增删工具。
 
-Studio 的 Simple root、Task planner、explorer、reviewer 和 executor 在所有 Task 阶段都允许
-`ToolEffect::Process`，因此 `exec` / `write_stdin` 始终可见。workspace mutability 不限制 shell，
-runtime 也不分析命令正文是否写入；Planner、Explorer、Reviewer 是否应修改现场由角色职责与提示词
-约束，而不是 Process effect 或 shell 内容检查。
+Studio 的 Simple root、explorer、reviewer 和 executor 允许 `ToolEffect::Process`。Task root planner
+只在 `Merging` 阶段允许 Process；规划与待确认阶段不暴露 `exec` / `write_stdin`，只能使用受路径
+边界约束的只读文件工具，或把明确问题交给只读 explorer。TaskRun 处于 `DesignUpdating`、
+`Implementing`、`Reviewing`、`Reworking` 或其他非合并阶段时同样不暴露 `exec` / `write_stdin`。
+runtime 不分析 shell 命令正文，因而不能靠提示词区分只读命令与绕过 TaskService 的 workspace/Git
+写入；禁止规划阶段 Process 是防止 planner 在用户确认前直接实施的运行时门禁。活动 Task 的
+planner 必须通过 Task 生命周期工具与 child Agent 推进，只有 Merging 获得主 workspace 的
+Process 与 WorkspaceWrite 能力。Explorer、Reviewer 是否修改现场仍由角色职责与提示词约束；
+executor 只拥有自己的 canonical worktree。
+
+`DesignUpdating` Turn 必须以成功的 `task_update_design` 作为 required finalization tool。普通 final
+文本、`exec` 或其他工具结果不能把该 Turn 标成成功；模型未提交设计时形成 typed validation
+failure，TaskRun 保持可恢复的 `DesignUpdating`，不能静默停在看似成功的 idle 状态。
 
 ## 16.4 Planner 与等待
 
@@ -88,6 +97,11 @@ Task root 只允许 planner 创建 explorer；executor 通过 `task_spawn_execut
 role、agent identity 与持久化 Thread 记录一致的 planner Plan trace 才能投影为 PlanConfirmation；
 child 或身份不匹配的 Plan trace 仅保留为 trace，不创建 Interaction。PlanConfirmation 的 scope
 必须持久化产生它的 agent identity，恢复扫描复用同一资格校验，不能把历史 child trace 补投为确认。
+启动恢复以 `plan-confirmation-{planId}` 为稳定身份，在访问短命 runtime actor 前先读取持久化
+Interaction 与活动 TaskRun：任何状态的既有 Interaction 都表示投影已发生，活动 TaskRun 也表示该
+计划已进入实施，两者都直接跳过。只有确实缺少 Interaction 且没有活动 TaskRun 的最新 root plan
+才需要检查 idle agent 并补投 pending confirmation；已 resolved 的历史计划或 terminal Task 不得因
+agent 不驻留而产生伪恢复 warning。
 
 `wait_agents` 订阅 Thread directory watch 后读取 snapshot，只因 progress、interaction 或
 terminal 变化返回，并以 `messages` 返回本次最新增量；terminal 消息直接携带 canonical
@@ -102,8 +116,9 @@ child 已有新的 `activeTurnId` 时，即使瞬态 activity 尚为 idle，也�
 review request 成功创建 reviewer 后必须结束当前 planner Turn。reviewer 提交 durable verdict 后，
 Runtime 以稳定 mail ID 提交一次隐藏 continuation；root Thread 已 idle 时立即启动，仍有活动 Turn 时
 只排入下一 Turn，绝不 steer 旧 Turn。新的 planner Turn 从最新 Task phase 重新解析 canonical
-workspace 与 tool policy。Process effect 在所有阶段可用，但主 workspace 的产品写入、Git 合并和
-记账职责仍只在相应 phase 执行；旧 Turn 的固定 lease 不能取得新 phase 才安装的 Task 生命周期工具。
+workspace 与 tool policy。活动 Task 的 Process effect 只在 Merging 可用，主 workspace 的产品写入、
+Git 合并和记账职责也只在该 phase 执行；旧 Turn 的固定 lease 不能取得新 phase 才安装的 Task
+生命周期工具。
 
 review verdict、reviewer terminal failure 和 executor completed/failed terminal outcome 都先提交到 Task
 repository，再派生稳定 ID 的 Planner wake。executor failure 只唤醒 planner 读取 `task_status` 并
@@ -149,24 +164,38 @@ finalization policy。
 
 ## 16.5 Executor 与交付
 
-`task_spawn_executor` 必须提供 taskName、message；scopeHints 可省略或为空。TaskService 在创建
-child Thread 前只校验 hint 是规范仓库相对路径，再校验并发上限、phase 和 branch lease并准备
-专属 worktree。hint 重叠只形成提示，不拒绝并发。
+`task_spawn_executor` 接收一份自包含的实施蓝图：`taskName`、`objective`、分组的 `scope`、
+`implementationSteps`、`acceptanceCriteria`、`dependencies`、`evidence` 和 `verification`。
+每个 WorkUnit 只承担一个可独立验证的成果。planner 必须先完成足以形成蓝图的探索；关键方案仍
+未知时继续探索或自行处理，不能用空泛说明把方案发现转嫁给 executor。下一步立即依赖的关键工作
+不应派发后原地等待；可并行工作尽量使用不重叠的预计修改面，存在依赖或明显重叠时串行派发。
+scope path 用于拆分、审查和冲突提示，不是 executor worktree 的硬性写入权限。
 
-每次 executor allocation 同时生成 `TaskExecutorHandoffV1`。handoff 固定 TaskRun/WorkUnit、parent
-Thread、requestedByCallId、确认计划、assignment、base/design/expected HEAD、scope、验收条件、
-依赖、证据、验证契约与交付契约，并作为 `studio.task_executor_handoff` pinned section 随 fresh child session
-持久化。后续 Turn 从 durable WorkUnit 与该 section 交叉校验；缺失、损坏或 HEAD/owner 不一致时
-进入 NeedsAttention。相同 TaskRun 的相同 requestedByCallId 是强幂等键；Implementing 阶段中，
-规范化 taskName 与 scopeHints 相同且仍为 active 的 allocation 即使来自新的 provider call ID，
-也必须返回首个 WorkUnit、executor Thread 与 canonical call ID，不重复分配 worktree、BranchLease
-或 Thread。只有原 WorkUnit 已 terminal，或 TaskRun 已明确进入 Reworking，才允许创建新的 attempt。
+`scope.inScope`、`scope.scopeHints`、实施步骤、验收条件和至少一条命令验证均非空；
+`scope.outOfScope` 必须显式出现但可为空。每个步骤包含唯一 ID、具体指令、至少一个仓库相对
+目标路径（可带 symbol）、预期结果和验收条件引用；每条验收条件必须同时被至少一个实施步骤和
+至少一项命令或检查覆盖。命令验证固定唯一 ID、命令、仓库相对 cwd、目的、预期结果和验收条件
+引用；只读检查同样固定 ID、指令、目标、预期结果和引用。所有标识唯一、引用有效且不得重复，
+路径与 cwd 必须是规范仓库相对路径，整个 handoff 受固定上下文预算约束，输入拒绝未知字段。
+这些校验以及 pinned section 大小验证必须在分配 worktree、BranchLease、WorkUnit 或 child Thread
+之前完成，失败不得留下任何资源或子对话。
 
-验证契约是非空的 typed command 列表，每项固定命令、仓库相对 cwd 与验证目的。
-planner 在 allocation 时必须提交已核对的项目入口；executor 每轮从 durable handoff
-读取，不得从 planner transcript 或短命 mailbox metadata 重建。TaskService 只校验字段、大小与
-cwd 的仓库相对路径边界，不根据 assignment、scope 或命令文本推断项目知识；命令语义错误作为
-普通 executor 验证失败处理，由同一 WorkUnit 修正。
+每次 executor allocation 同时生成第二版且唯一命名的 `TaskExecutorHandoff`。handoff 按运行归属、
+仓库事实、确认计划、实施蓝图和交付规则分组，固定 TaskRun/WorkUnit、parent Thread、
+requestedByCallId、确认计划、base/design/expected HEAD、完整蓝图和交付契约，并作为
+`studio.task_executor_handoff` pinned section 随 fresh child session 持久化。运行时对规范化蓝图
+计算稳定内容指纹；同一 provider call 或新重试只有完整指纹一致时才复用既有 WorkUnit。taskName、
+scope 相同但步骤、验收或验证不同是稳定冲突，不能复用或重新分配。后续 Turn 从 durable WorkUnit
+与该 section 交叉校验；缺失、损坏、旧版 handoff 或 HEAD/owner 不一致时进入 NeedsAttention，
+不迁移或兼容第一版。只有原 WorkUnit 已 terminal，或 TaskRun 已明确进入 Reworking，才允许创建
+新的 attempt。
+
+executor 使用全新上下文，初始消息由 runtime 固定生成，只要求读取 pinned handoff 并按顺序开始；
+不得复制一份可能漂移的自由文本 assignment。executor 可调整不改变目标与验收语义的低层实现；
+若现场事实与蓝图冲突或必须扩大任务语义，必须保留证据并通知 planner。planner、恢复流程和
+delivery reviewer 均通过只读 `read_work_unit_handoff` 从持久化 working state 取得同一份 handoff，
+不能依赖活动 actor 或对话历史。通用只读 explorer 仍使用通用派发协议，但必须获得明确问题、
+检索范围、期望证据和返回格式，不扩展为 Task 实施蓝图协议。
 
 executor 只能写自己的 worktree，并以以下工具结束可交付工作：
 
@@ -174,19 +203,23 @@ executor 只能写自己的 worktree，并以以下工具结束可交付工作�
 report_completion {
   kind: delivery,
   headCommit,
-  verificationSummary
+  verificationResults: [{ checkId, summary }]
 }
 | report_completion {
   kind: noDelivery,
-  verificationSummary
+  verificationResults: [{ checkId, summary }]
 }
 ```
 
-完成结果使用顶层 tagged object；`kind`、`headCommit` 与 `verificationSummary` 都是工具的
+完成结果使用顶层 tagged object；`kind`、`headCommit` 与 `verificationResults` 都是工具的
 顶层字段，不再包在 `result` 对象中。对 provider 暴露的 JSON Schema 保持单一 object +
 properties 形状，不在根节点使用 `oneOf`；`headCommit` 在 schema 中可选，运行时再按 `kind`
 穷尽执行条件校验：delivery 必须提供，noDelivery 必须省略。这样既避免嵌套 union 被编码成
 JSON 字符串，也兼容不能稳定生成根 `oneOf` 参数的 provider，并继续拒绝未知字段。
+
+`verificationResults` 必须恰好覆盖 handoff 中全部 command 与 inspection ID；缺失、重复或未知 ID
+均拒绝。summary 非空，结果按 handoff 的稳定顺序生成现有 WorkCompletion 人类可读验证摘要，
+不修改数据库格式。任何检查失败时 executor 只能继续修复或报告阻塞，不能提交 completion。
 
 delivery 要求 worktree clean、HEAD 相对固定 base 推进、commit 身份一致，并记录完整
 base-to-HEAD changed files；worktree 内变更不受 scopeHints 限制。成功事务创建不可变
@@ -282,12 +315,32 @@ clean workspace 且没有未结束的 Git operation；它不运行或补偿 Git�
 成功事务写 MergeRecord、推进 WorkUnit/TaskRun/BranchLease，并授权幂等清理源 worktree。
 Git 已变化但记账失败时保留现场并 scoped block，不 reset。
 
-所有 WorkUnit 均有 MergeRecord 或 NoDelivery、design 已与当前 HEAD 一致后，若存在 source merge，
-创建 fresh integrated reviewer，其 canonical workspace 是 TaskRun 主 workspace。findings 进入
-reworking，由新 executor 修复；pass 才允许 `task_complete`。合并后的 Integrated review 是
-独立的任务级门禁，不因各 Delivery round 已 pass 而省略；相同不可变 Task HEAD 仍受
-pending review 与 provider call 幂等键约束，不重复创建 round。若没有任何 MergeRecord（全部
-WorkUnit 均为 NoDelivery），因没有可审查的集成 diff 而跳过 integrated review。
+delivery reviewer 的 prompt 必须直接包含完整实施蓝图、验收条件和 executor 的全部验证结果，
+按验收 ID 逐项核对，并继续满足完整 changed-files 覆盖门禁。reviewer 与 executor 消费同一份
+持久化契约，不从 planner transcript 重述或猜测目标。
+
+所有 WorkUnit 均有 MergeRecord 或 NoDelivery、design 已与当前 HEAD 一致后，TaskService 计算统一、
+transport-neutral 的综合审查门禁：`Required`、`SatisfiedByReview { reviewRoundId, reviewedHead }`、
+`NotRequiredNoDelivery` 或
+`NotRequiredSingleExecutorEquivalent { workUnitId, completionRevision, mergeRecordId }`。同一结果用于
+`task_status`、Studio 产品任务状态、模型工具、桌面桥接、HTTP `/state` 和最终完成事务；适配器不得
+重复推断。
+
+“始终只有一个 executor”要求整个 TaskRun 只有一个 WorkUnit 和一个 executor identity；允许该
+executor 多次返修并产生多个不可变 completion revision，但最终只能有一个获准 delivery、对应的
+pass delivery review 和一个 MergeRecord。只要曾创建第二个 WorkUnit/executor，或者已存在任何
+integrated review round，就不能事后走免审。单 executor 复用 delivery review 还必须在 branch
+mutation lock 内证明：获准 completion base 等于 merge 前 Task HEAD；MergeRecord delivery head
+等于被 delivery review 通过的 head；delivery head 与 merge resulting head 的完整 Git tree object
+完全相同；resulting head 到当前 Task HEAD 的变更只位于 `design/**`；design commit 等于当前 HEAD；
+主 workspace clean、没有未结束 Git operation；所有 Task agent 已 terminal。该证明只比较内容，
+因此 merge、cherry-pick、squash、rebase 或 manual 都可免审；任一提交不可读、tree 不同、冲突解决
+改变实现、planner 额外修改实现或其他证明失败都保守返回 `Required`。
+
+`NotRequiredNoDelivery` 与 `NotRequiredSingleExecutorEquivalent` 可在 Implementing/Reworking 阶段完成
+最终设计同步后直接调用 `task_complete`。`Required` 必须创建 fresh integrated reviewer，其 canonical
+workspace 是 TaskRun 主 workspace；findings 进入 reworking，pass 后门禁为 `SatisfiedByReview`。
+相同不可变 Task HEAD 仍受 pending review 与 provider call 幂等键约束，不重复创建 round。
 
 ## 16.7 设计门禁
 
@@ -375,8 +428,9 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 
 - design 与当前 HEAD 一致；
 - 全部 WorkUnit 为 Merged 或 NoDelivery；
-- 存在 source merge 时，最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
-  无 merge record（即全部 NoDelivery）时不再要求 integrated review——空 diff 审查是纯仪式；
+- 综合审查门禁为 `SatisfiedByReview`、`NotRequiredNoDelivery` 或
+  `NotRequiredSingleExecutorEquivalent`；`Required` 以 `reviewRequired` 拒绝并说明无法复用 delivery
+  review 的稳定原因；
 - 当前分支、workspace、TaskRun 和 BranchLease expectedHead 精确一致；
 - 不存在 StopRequested；
 - Task root Thread 自身不存在 pending Interaction。已结算子 Thread 的残留 Interaction
@@ -394,9 +448,16 @@ planner 当前 todo list 存在未完成条目时，`task_complete` 以 `todoInc
 
 工具返回 tagged `TaskCompleteOutcome`：`completed { run }` 或
 `rejected { code, recoverable, message }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
-repositoryDrift、reviewMissing、deliveriesIncomplete、pendingInteraction、todoIncomplete）和用户可读说明。rejected 通过普通 tool
+repositoryDrift、reviewRequired、deliveriesIncomplete、pendingInteraction、todoIncomplete）和用户可读说明。rejected 通过普通 tool
 failure JSON 同时进入 Planner 上下文、SQLite Item 与 GUI；Task 保持 Reviewing，lease/review
 不变，且 Planner Turn 只有成功完成时才结束。
+
+完成事务接收上述强类型门禁依据，并在同一 SQLite immediate 事务重新校验 WorkUnit 数量与
+executor identity、completion revision、delivery review、MergeRecord、design commit、BranchLease
+和 pending Interaction。Git tree、路径 diff、workspace 与未结束 operation 的证明在同一 branch
+mutation lock 内紧邻事务完成；任何 durable 事实漂移使事务拒绝。任务状态同时发布门禁和原因，
+WorkUnit 概览仅发布蓝图指纹、目标及步骤/验收/验证数量；完整 handoff 只由
+`read_work_unit_handoff` 按需读取，避免挤占默认状态上下文。
 
 `task_complete` 只提交通用 Task 生命周期事实，不选择或执行任何项目命令。项目验证由 executor
 按照 durable handoff 中的 typed command 契约完成，并通过 WorkCompletion 保存验证摘要；reviewer

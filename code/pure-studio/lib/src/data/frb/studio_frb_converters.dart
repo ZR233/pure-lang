@@ -71,6 +71,30 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
     stopRequestedOrigin: task.stopRequestedOrigin,
     stopRequestedReason: task.stopRequestedReason,
     taskGeneration: task.taskGeneration.toInt(),
+    integratedReviewGate: switch (task.integratedReviewGate) {
+      frb.BridgeIntegratedReviewGateDto_Required(:final reason) =>
+        IntegratedReviewGateView.required(reason: reason),
+      frb.BridgeIntegratedReviewGateDto_SatisfiedByReview(
+        :final reviewRoundId,
+        :final reviewedHead,
+      ) =>
+        IntegratedReviewGateView.satisfiedByReview(
+          reviewRoundId: reviewRoundId,
+          reviewedHead: reviewedHead,
+        ),
+      frb.BridgeIntegratedReviewGateDto_NotRequiredNoDelivery() =>
+        const IntegratedReviewGateView.notRequiredNoDelivery(),
+      frb.BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent(
+        :final workUnitId,
+        :final completionRevision,
+        :final mergeRecordId,
+      ) =>
+        IntegratedReviewGateView.notRequiredSingleExecutorEquivalent(
+          workUnitId: workUnitId,
+          completionRevision: completionRevision,
+          mergeRecordId: mergeRecordId,
+        ),
+    },
     failures: task.failures.map(_taskFailureFromFrb).toList(),
     terminalFailure: task.terminalFailure == null
         ? null
@@ -103,6 +127,11 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           continuationSourceTurnId: unit.continuationSourceTurnId,
           continuationRevision: unit.continuationRevision,
           executorProgressRevision: unit.executorProgressRevision,
+          blueprintFingerprint: unit.blueprintFingerprint,
+          objective: unit.objective,
+          implementationStepCount: unit.implementationStepCount.toInt(),
+          acceptanceCriterionCount: unit.acceptanceCriterionCount.toInt(),
+          verificationCount: unit.verificationCount.toInt(),
         ),
     ],
     completions: [

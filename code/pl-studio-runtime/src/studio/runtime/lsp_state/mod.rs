@@ -4,18 +4,18 @@ use anyhow::Error;
 use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateError, StateOperation};
 use tokio::sync::{Mutex, RwLock};
 
-use crate::{StudioLspHealth, StudioLspServer, StudioLspStateSnapshot, StudioProductEventRuntime};
+use crate::{ProductEventBus, StudioLspHealth, StudioLspServer, StudioLspStateSnapshot};
 
 /// LSP published state 的唯一 owner。
 #[derive(Clone)]
 pub(super) struct LspStateRuntime {
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<StudioLspStateSnapshot>>,
-    events: StudioProductEventRuntime,
+    events: ProductEventBus,
 }
 
 impl LspStateRuntime {
-    pub(super) fn new(events: StudioProductEventRuntime) -> Self {
+    pub(super) fn new(events: ProductEventBus) -> Self {
         Self {
             command_lock: Arc::new(Mutex::new(())),
             state: Arc::new(RwLock::new(StudioLspStateSnapshot {

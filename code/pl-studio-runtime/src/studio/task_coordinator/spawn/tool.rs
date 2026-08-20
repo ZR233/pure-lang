@@ -5,8 +5,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    StudioSpawnIntent, StudioTaskExecutorIntent, TaskExecutorDependencyV1, TaskExecutorEvidenceV1,
-    TaskExecutorVerificationCommandV1, normalize_scope_hints,
+    StudioSpawnIntent, StudioTaskExecutorIntent, TaskExecutorAcceptanceCriterion,
+    TaskExecutorBlueprint, TaskExecutorDependency, TaskExecutorEvidence,
+    TaskExecutorImplementationStep, TaskExecutorScope, TaskExecutorVerificationContract,
 };
 use crate::studio::task_coordinator::{AllocateExecutor, TaskCoordinator};
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -16,32 +17,48 @@ use crate::{
 };
 
 const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
-const MAX_EXECUTOR_VERIFICATION_BYTES: usize = 16 * 1024;
+const EXECUTOR_INITIAL_MESSAGE: &str =
+    "读取固定的 Task executor handoff，按实施步骤顺序开始工作；不要依赖 planner 对话历史。";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskSpawnExecutorInput {
-    /// Stable task name for the new executor assignment.
+    /// Stable task name for this independently verifiable work unit.
     #[schemars(length(min = 1))]
     task_name: String,
-    /// Complete executor assignment.
+    /// Concrete outcome this work unit must deliver.
     #[schemars(length(min = 1))]
-    message: String,
-    /// Repository-relative focus paths; they do not restrict writes.
-    #[serde(default)]
-    scope_hints: Vec<String>,
-    /// Acceptance criteria for the assignment.
-    #[serde(default)]
-    acceptance_criteria: Vec<String>,
+    objective: String,
+    /// Explicit semantic and repository scope.
+    scope: TaskExecutorScope,
+    /// Ordered implementation blueprint with repository targets.
+    #[schemars(length(min = 1))]
+    implementation_steps: Vec<TaskExecutorImplementationStep>,
+    /// Stable, referenced acceptance criteria.
+    #[schemars(length(min = 1))]
+    acceptance_criteria: Vec<TaskExecutorAcceptanceCriterion>,
     /// Structured dependencies known to the planner.
-    #[serde(default)]
-    dependencies: Vec<TaskExecutorDependencyV1>,
+    dependencies: Vec<TaskExecutorDependency>,
     /// Stable repository evidence already collected.
-    #[serde(default)]
-    evidence: Vec<TaskExecutorEvidenceV1>,
-    /// Commands the executor must use to verify its work.
-    #[schemars(length(min = 1))]
-    verification_commands: Vec<TaskExecutorVerificationCommandV1>,
+    evidence: Vec<TaskExecutorEvidence>,
+    /// Commands and inspections that prove every acceptance criterion.
+    verification: TaskExecutorVerificationContract,
+}
+
+impl TaskSpawnExecutorInput {
+    fn into_blueprint(self) -> Result<TaskExecutorBlueprint> {
+        TaskExecutorBlueprint {
+            task_name: self.task_name,
+            objective: self.objective,
+            scope: self.scope,
+            implementation_steps: self.implementation_steps,
+            acceptance_criteria: self.acceptance_criteria,
+            dependencies: self.dependencies,
+            evidence: self.evidence,
+            verification: self.verification,
+        }
+        .normalize_and_validate()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +68,7 @@ struct TaskSpawnExecutorOutput {
     thread_id: String,
     turn_id: String,
     scope_hints: Vec<String>,
+    blueprint_fingerprint: String,
     reused: bool,
 }
 
@@ -64,107 +82,120 @@ impl TaskCoordinator {
         let coordinator = Arc::clone(self);
         FunctionToolDefinition::<TaskSpawnExecutorInput>::new(
             "task_spawn_executor",
-            "Spawn one Task executor with a fresh session and optional repository-relative scope hints.",
+            "Spawn one Task executor from a concrete, self-contained implementation blueprint.",
         )
         .registered(move |arguments: TaskSpawnExecutorInput, context| {
-                let runtime = runtime.clone();
-                let thread_id = thread_id.clone();
-                let coordinator = Arc::clone(&coordinator);
-                async move {
-                    let task_name = arguments.task_name.trim();
-                    if task_name.is_empty() {
-                        bail!("taskName must not be empty");
-                    }
-                    if arguments.message.trim().is_empty() {
-                        bail!("message must not be empty");
-                    }
-                    let scope_hints = normalize_scope_hints(&arguments.scope_hints)?;
-                    let acceptance_criteria = normalize_non_empty(arguments.acceptance_criteria)?;
-                    let dependencies = normalize_dependencies(arguments.dependencies)?;
-                    let evidence = normalize_evidence(arguments.evidence)?;
-                    let verification_commands =
-                        normalize_verification_commands(arguments.verification_commands)?;
-                    let constraint = executor_constraint(&scope_hints)?;
-                    let call_id = context
-                        .provider_call_id
-                        .as_deref()
-                        .context("task_spawn_executor requires a provider call id")?
-                        .to_string();
-                    let (requested_thread_id, _) =
-                        executor_runtime_ids(&thread_id, &call_id)?;
-                    let allocation = coordinator
-                        .reserve_executor_spawn(AllocateExecutor {
-                            thread_id: thread_id.clone(),
-                            title: task_name.to_string(),
-                            scope_hints: scope_hints.clone(),
-                            agent_id: requested_thread_id.to_string(),
-                            requested_by_call_id: call_id.clone(),
-                        })
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                    let canonical_call_id = allocation.work_unit.requested_by_call_id.clone();
-                    let (child_thread_id, initial_turn_id) =
-                        executor_runtime_ids(&thread_id, &canonical_call_id)?;
-                    if allocation.work_unit.executor_thread_id.as_deref()
-                        != Some(child_thread_id.as_str())
-                    {
-                        bail!(
-                            "durable executor identity does not match its canonical allocation"
-                        );
-                    }
-                    if runtime.snapshot(child_thread_id.clone()).await.is_ok() {
-                        return ToolExecutionResult::<serde_json::Value>::json(
-                            TaskSpawnExecutorOutput {
-                                agent_id: child_thread_id.to_string(),
-                                thread_id: child_thread_id.to_string(),
-                                turn_id: initial_turn_id.to_string(),
-                                scope_hints,
-                                reused: true,
-                            },
-                        )
-                        .map_err(anyhow::Error::from);
-                    }
-                    let assignment = arguments.message;
-                    let intent = StudioSpawnIntent::task_executor(StudioTaskExecutorIntent {
+            let runtime = runtime.clone();
+            let thread_id = thread_id.clone();
+            let coordinator = Arc::clone(&coordinator);
+            async move {
+                // Blueprint validation and context budgeting must precede every durable allocation.
+                let blueprint = arguments.into_blueprint()?;
+                let blueprint_fingerprint = blueprint.fingerprint()?;
+                let scope_hints = blueprint.scope.scope_hints.clone();
+                let constraint = executor_constraint(&scope_hints)?;
+                let call_id = context
+                    .provider_call_id
+                    .as_deref()
+                    .context("task_spawn_executor requires a provider call id")?
+                    .to_string();
+                let (requested_thread_id, _) = executor_runtime_ids(&thread_id, &call_id)?;
+                let allocation = coordinator
+                    .reserve_executor_spawn(AllocateExecutor {
                         thread_id: thread_id.clone(),
-                        task_name: task_name.to_string(),
+                        title: blueprint.task_name.clone(),
                         scope_hints: scope_hints.clone(),
-                        requesting_tool_call_id: canonical_call_id,
-                        subagent_constraint: constraint,
-                        assignment: assignment.clone(),
-                        acceptance_criteria,
-                        dependencies,
-                        evidence,
-                        verification_commands,
-                    });
-                    let result = runtime
-                        .spawn(AgentSpawnRequest {
-                            thread_id: child_thread_id.clone(),
-                            parent_id: crate::studio::agent_host::root_agent_id(&thread_id),
-                            role: AgentRoleId::new("executor")
-                                .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                            session: ThreadContextState::empty(),
-                            initial_turn_id: Some(initial_turn_id),
-                            initial_message: Some(assignment),
-                            metadata: serde_json::to_value(intent)?,
-                        })
-                        .await
-                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                    let turn_id = result
-                        .initial_turn_id
-                        .context("task executor spawn did not create an initial turn")?;
-                    ToolExecutionResult::<serde_json::Value>::json(TaskSpawnExecutorOutput {
-                        agent_id: result.snapshot.identity.id.to_string(),
-                        thread_id: child_thread_id.to_string(),
-                        turn_id: turn_id.to_string(),
-                        scope_hints,
-                        reused: allocation.reused,
+                        agent_id: requested_thread_id.to_string(),
+                        requested_by_call_id: call_id,
                     })
-                    .map_err(anyhow::Error::from)
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                if allocation.reused {
+                    let (_, existing) = coordinator
+                        .store
+                        .read_work_unit_handoff(&allocation.work_unit.id)
+                        .await?
+                        .context("reused executor allocation has no durable handoff")?;
+                    ensure_reused_blueprint_matches(
+                        &existing.blueprint_fingerprint,
+                        &blueprint_fingerprint,
+                    )?;
                 }
-            })
+                let canonical_call_id = allocation.work_unit.requested_by_call_id.clone();
+                let (child_thread_id, initial_turn_id) =
+                    executor_runtime_ids(&thread_id, &canonical_call_id)?;
+                if allocation.work_unit.executor_thread_id.as_deref()
+                    != Some(child_thread_id.as_str())
+                {
+                    bail!("durable executor identity does not match its canonical allocation");
+                }
+                if runtime.snapshot(child_thread_id.clone()).await.is_ok() {
+                    return spawn_output(
+                        child_thread_id,
+                        initial_turn_id,
+                        scope_hints,
+                        blueprint_fingerprint,
+                        true,
+                    );
+                }
+                let intent = StudioSpawnIntent::task_executor(StudioTaskExecutorIntent {
+                    thread_id: thread_id.clone(),
+                    requesting_tool_call_id: canonical_call_id,
+                    subagent_constraint: constraint,
+                    blueprint,
+                });
+                let result = runtime
+                    .spawn(AgentSpawnRequest {
+                        thread_id: child_thread_id.clone(),
+                        parent_id: crate::studio::agent_host::root_agent_id(&thread_id),
+                        role: AgentRoleId::new("executor")
+                            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+                        session: ThreadContextState::empty(),
+                        initial_turn_id: Some(initial_turn_id),
+                        initial_message: Some(EXECUTOR_INITIAL_MESSAGE.to_string()),
+                        metadata: serde_json::to_value(intent)?,
+                    })
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let turn_id = result
+                    .initial_turn_id
+                    .context("task executor spawn did not create an initial turn")?;
+                spawn_output(
+                    child_thread_id,
+                    turn_id,
+                    scope_hints,
+                    blueprint_fingerprint,
+                    allocation.reused,
+                )
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
+}
+
+fn ensure_reused_blueprint_matches(existing: &str, requested: &str) -> Result<()> {
+    if existing != requested {
+        bail!("executor allocation conflicts with the existing implementation blueprint")
+    }
+    Ok(())
+}
+
+fn spawn_output(
+    child_thread_id: ThreadId,
+    turn_id: TurnId,
+    scope_hints: Vec<String>,
+    blueprint_fingerprint: String,
+    reused: bool,
+) -> Result<ToolExecutionResult<serde_json::Value>> {
+    ToolExecutionResult::<serde_json::Value>::json(TaskSpawnExecutorOutput {
+        agent_id: child_thread_id.to_string(),
+        thread_id: child_thread_id.to_string(),
+        turn_id: turn_id.to_string(),
+        scope_hints,
+        blueprint_fingerprint,
+        reused,
+    })
+    .map_err(anyhow::Error::from)
 }
 
 fn executor_constraint(scope_hints: &[String]) -> Result<String> {
@@ -173,25 +204,20 @@ fn executor_constraint(scope_hints: &[String]) -> Result<String> {
         .map(|path| format!("- {path}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let paths = if paths.is_empty() {
-        "- （未提供；以完整任务说明为准）".to_string()
-    } else {
-        paths
-    };
     let constraint = format!(
         "你是 Task executor，只能在系统分配给你的独立 worktree 中工作。\
-\n以下 scopeHints 仅用于理解任务拆分和审查重点，不是文件写入边界；worktree 内的必要修改均允许：\n{paths}\
-\n完成定位、开始实现、开始验证、遇到阻塞和准备提交完成报告时，调用 \
-report_progress 记录准确摘要与下一步；它不是心跳。准备提交时使用 readyForCompletion，\
-该 checkpoint 不表示已完成或可审查。完成后必须自行验证、提交所有变更，并调用 \
-report_completion 提交实际 HEAD 与验证摘要；delivery 调用必须直接使用顶层 kind、headCommit、\
-verificationSummary 字段，不要把对象编码到 result 字符串中。只有该工具成功才产生 readyForReview，\
-普通文本回复不算完成。\
+\n先读取 studio.task_executor_handoff；它是目标、范围、步骤、验收和验证的唯一契约，\
+不要依赖 planner 对话历史。按步骤顺序工作，可调整不改变任务语义的低层实现细节。\
+若仓库事实与蓝图冲突，或必须扩大目标、范围或验收语义，保留证据并通知 planner。\
+\n以下 scopeHints 用于拆分、审查和冲突提示，不是文件写入边界：\n{paths}\
+\n开始实现、开始验证、遇到阻塞和准备提交完成报告时，用 report_progress 记录准确摘要。\
+完成后必须执行 handoff 的全部验证、提交所有变更，并调用 report_completion；\
+verificationResults 必须按 checkId 恰好覆盖全部命令和检查。普通文本回复不算完成。\
 \n不得派生代理、合并分支、切换/创建/删除分支、操作 planner 或用户工作区，\
 也不得自行把提交合入任务分支。"
     );
     if constraint.len() > MAX_EXECUTOR_CONSTRAINT_BYTES {
-        bail!("scopeHints are too large for executor instructions");
+        bail!("scope.scopeHints are too large for executor instructions");
     }
     Ok(constraint)
 }
@@ -209,72 +235,6 @@ fn executor_runtime_ids(thread_id: &str, call_id: &str) -> Result<(ThreadId, Tur
     let turn = TurnId::new(format!("turn-task-{}", &digest[16..32]))
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok((thread, turn))
-}
-
-fn normalize_non_empty(values: Vec<String>) -> Result<Vec<String>> {
-    values
-        .into_iter()
-        .map(|value| {
-            let value = value.trim();
-            if value.is_empty() {
-                bail!("acceptanceCriteria must not contain empty values")
-            }
-            Ok(value.to_string())
-        })
-        .collect()
-}
-
-fn normalize_dependencies(
-    mut dependencies: Vec<TaskExecutorDependencyV1>,
-) -> Result<Vec<TaskExecutorDependencyV1>> {
-    for dependency in &mut dependencies {
-        dependency.kind = dependency.kind.trim().to_string();
-        dependency.id = dependency.id.trim().to_string();
-        if dependency.kind.is_empty() || dependency.id.is_empty() {
-            bail!("executor dependencies require non-empty kind and id")
-        }
-    }
-    Ok(dependencies)
-}
-
-fn normalize_evidence(
-    mut evidence: Vec<TaskExecutorEvidenceV1>,
-) -> Result<Vec<TaskExecutorEvidenceV1>> {
-    for item in &mut evidence {
-        item.path = normalize_scope_hints(std::slice::from_ref(&item.path))?
-            .into_iter()
-            .next()
-            .context("executor evidence path is missing")?;
-    }
-    Ok(evidence)
-}
-
-fn normalize_verification_commands(
-    mut commands: Vec<TaskExecutorVerificationCommandV1>,
-) -> Result<Vec<TaskExecutorVerificationCommandV1>> {
-    if commands.is_empty() {
-        bail!("verificationCommands must not be empty")
-    }
-    for item in &mut commands {
-        item.command = item.command.trim().to_string();
-        item.purpose = item.purpose.trim().to_string();
-        let cwd = item.cwd.trim();
-        item.cwd = if cwd == "." {
-            cwd.to_string()
-        } else {
-            normalize_scope_hints(&[cwd.to_string()])?
-                .into_iter()
-                .next()
-                .context("verification command cwd is missing")?
-        };
-        if item.command.is_empty() || item.purpose.is_empty() {
-            bail!("verificationCommands require non-empty command and purpose")
-        }
-    }
-    if serde_json::to_vec(&commands)?.len() > MAX_EXECUTOR_VERIFICATION_BYTES {
-        bail!("verificationCommands are too large for executor handoff")
-    }
-    Ok(commands)
 }
 
 #[cfg(test)]
@@ -301,32 +261,73 @@ mod tests {
     }
 
     #[test]
-    fn verification_commands_are_non_empty_and_repository_relative() {
-        let normalized = normalize_verification_commands(vec![
-            TaskExecutorVerificationCommandV1 {
-                command: " cargo test --workspace ".to_string(),
-                cwd: ".".to_string(),
-                purpose: " run workspace tests ".to_string(),
-            },
-            TaskExecutorVerificationCommandV1 {
-                command: "cargo test".to_string(),
-                cwd: "code\\example".to_string(),
-                purpose: "run component tests".to_string(),
-            },
-        ])
-        .unwrap();
+    fn vague_legacy_executor_assignment_is_rejected_before_allocation() {
+        let legacy = serde_json::json!({
+            "taskName": "do it",
+            "message": "fix the code",
+            "scopeHints": [],
+            "verificationCommands": [{
+                "command": "cargo test",
+                "cwd": ".",
+                "purpose": "test"
+            }]
+        });
+        assert!(serde_json::from_value::<TaskSpawnExecutorInput>(legacy).is_err());
+    }
 
-        assert_eq!(normalized[0].command, "cargo test --workspace");
-        assert_eq!(normalized[0].cwd, ".");
-        assert_eq!(normalized[1].cwd, "code/example");
-        assert!(normalize_verification_commands(Vec::new()).is_err());
+    #[test]
+    fn structured_executor_assignment_rejects_unknown_legacy_fields() {
+        let mut input = serde_json::json!({
+            "taskName": "implement transport",
+            "objective": "use one canonical transport",
+            "scope": {
+                "inScope": ["model routing"],
+                "outOfScope": [],
+                "scopeHints": ["code/pl-model"]
+            },
+            "implementationSteps": [{
+                "id": "step-1",
+                "instruction": "update routing",
+                "targets": [{"path": "code/pl-model/src/lib.rs", "symbol": "route"}],
+                "expectedOutcome": "one canonical route",
+                "criterionIds": ["criterion-1"]
+            }],
+            "acceptanceCriteria": [{
+                "id": "criterion-1",
+                "requirement": "routing is canonical"
+            }],
+            "dependencies": [],
+            "evidence": [],
+            "verification": {
+                "commands": [{
+                    "id": "check-1",
+                    "command": "cargo test -p pl-model",
+                    "cwd": ".",
+                    "purpose": "test routing",
+                    "expectedOutcome": "tests pass",
+                    "criterionIds": ["criterion-1"]
+                }],
+                "inspections": []
+            }
+        });
         assert!(
-            normalize_verification_commands(vec![TaskExecutorVerificationCommandV1 {
-                command: "cargo test".to_string(),
-                cwd: "../outside".to_string(),
-                purpose: "verify".to_string(),
-            }],)
-            .is_err()
+            serde_json::from_value::<TaskSpawnExecutorInput>(input.clone())
+                .unwrap()
+                .into_blueprint()
+                .is_ok()
+        );
+        input["message"] = serde_json::json!("legacy duplicate instructions");
+        assert!(serde_json::from_value::<TaskSpawnExecutorInput>(input).is_err());
+    }
+
+    #[test]
+    fn executor_reuse_requires_the_complete_blueprint_fingerprint() {
+        assert!(ensure_reused_blueprint_matches("sha256:same", "sha256:same").is_ok());
+        assert_eq!(
+            ensure_reused_blueprint_matches("sha256:steps-a", "sha256:steps-b")
+                .unwrap_err()
+                .to_string(),
+            "executor allocation conflicts with the existing implementation blueprint"
         );
     }
 }

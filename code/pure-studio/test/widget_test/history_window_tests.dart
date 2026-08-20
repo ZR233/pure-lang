@@ -157,11 +157,11 @@ void registerHistoryWindowTests() {
     staleGate.complete();
     await pumpEventQueue();
     var state = container.read(studioControllerProvider).requireValue;
-    expect(
-      state.workspacesByThread['thread-a']!.items.map((item) => item.id),
-      ['a-item-0', 'a-item-1', 'a-item-2'],
-      reason: '跨重建的历史响应属于旧窗口，必须整体丢弃',
-    );
+    expect(state.workspacesByThread['thread-a']!.items.map((item) => item.id), [
+      'a-item-0',
+      'a-item-1',
+      'a-item-2',
+    ], reason: '跨重建的历史响应属于旧窗口，必须整体丢弃');
     expect(state.selectedWorkspaceUi.history.isLoading, isTrue);
 
     rebuildGate.complete();

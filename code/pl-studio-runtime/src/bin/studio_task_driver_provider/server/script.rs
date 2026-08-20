@@ -281,11 +281,11 @@ fn planner_response(
     }
     let response = match step {
         0 => (
-            "exec(planner rg --files)",
+            "list_files(planner workspace)",
             tool_call(
                 "planner-explore-files",
-                "exec",
-                serde_json::json!({"command": "rg --files"}),
+                "list_files",
+                serde_json::json!({"path": ".", "limit": 100}),
             ),
         ),
         1 => (
@@ -723,7 +723,7 @@ fn task_worktree(workspace: &Path) -> Result<TaskWorktree> {
 fn git_output(workspace: &Path, args: &[&str]) -> Result<String> {
     let mut command = Command::new("git");
     command.arg("-C").arg(workspace).args(args);
-    pl_studio_runtime::process::configure_background_std_command(&mut command);
+    pl_core::process::configure_background_std_command(&mut command);
     let output = command
         .output()
         .with_context(|| format!("failed to execute git {:?}", args))?;

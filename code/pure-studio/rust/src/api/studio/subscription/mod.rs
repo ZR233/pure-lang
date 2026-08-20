@@ -273,7 +273,7 @@ pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscripti
 
 pub async fn create_product_subscription() -> Result<BridgeEventSubscription, BridgeError> {
     let bridge = active_bridge().await?;
-    let mut events = bridge.studio.product_events().subscribe();
+    let mut events = bridge.studio.subscribe_product();
     let cancel = bridge.shutdown.child_token();
     let producer_cancel = cancel.clone();
     let (sender, receiver) = mpsc::channel(64);

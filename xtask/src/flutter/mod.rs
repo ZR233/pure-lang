@@ -347,7 +347,8 @@ fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<
         }
         Ok(())
     })();
-    let restore_result = pubspec_lock::restore_optional(&lock_path, original_lock.as_deref());
+    let restore_result =
+        pubspec_lock::restore_canonical_optional(&lock_path, original_lock.as_deref());
     match (resolution_result, restore_result) {
         (Err(error), _) => return Err(error),
         (Ok(()), Err(error)) => return Err(error),

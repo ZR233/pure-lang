@@ -164,9 +164,8 @@ class _PlanResolutionError extends StatelessWidget {
           Expanded(
             child: SelectableText(
               message,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.onErrorContainer),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: colors.onErrorContainer),
             ),
           ),
         ],
@@ -192,9 +191,8 @@ class _PlanDecisionActions extends StatelessWidget {
       ),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: context.studioInkSoft.withValues(alpha: 0.66),
-      ),
+      style: Theme.of(context).textTheme.labelSmall
+          ?.copyWith(color: context.studioInkSoft.withValues(alpha: 0.66)),
     );
     final actions = DockActions(
       children: [

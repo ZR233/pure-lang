@@ -70,6 +70,11 @@ impl ConfigPaths {
 
     pub fn from_home(home: impl Into<PathBuf>) -> Self {
         let config_dir = home.into().join(STUDIO_CONFIG_DIR_NAME);
+        Self::from_config_dir(config_dir)
+    }
+
+    pub fn from_config_dir(config_dir: impl Into<PathBuf>) -> Self {
+        let config_dir = config_dir.into();
         let config_file = config_dir.join(STUDIO_CONFIG_FILE_NAME);
         Self {
             config_dir,
@@ -92,6 +97,13 @@ impl ConfigStore {
             ConfigPaths::for_current_user()?,
             Arc::new(SystemCredentialStore),
         ))
+    }
+
+    pub fn for_studio_home(studio_home: impl Into<PathBuf>) -> Self {
+        Self::with_credential_store(
+            ConfigPaths::from_config_dir(studio_home),
+            Arc::new(SystemCredentialStore),
+        )
     }
 
     /// 创建使用进程内凭据存储的隔离配置实例。

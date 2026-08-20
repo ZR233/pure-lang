@@ -42,7 +42,7 @@ discover/check/probe 更新 `lastCheckedAt`。
 
 ## 20.3 聚合查询与事件
 
-`readStudioState()` 返回 `BridgeStudioStateSnapshot`，字段按领域保存完整快照：runtime、
+`StudioRuntime::read_state()` 返回 `StudioStateSnapshot`，字段按领域保存完整快照：runtime、
 projectDirectory、threadDirectory、taskDirectory、agentDirectory、settings、recovery、mcp、lsp、
 skillsByProject、providerUsage 和 updater。它不接收 selected project/thread，不解析 workspace，
 不创建会话，不加载磁盘配置，也不执行外部检查。
@@ -76,9 +76,14 @@ Flutter 对每个领域分别保存 canonical snapshot。新 revision 才整体�
 忽略，旧 revision 丢弃；空 list、空 map 和 null 都是 authoritative value，不能解释为缺省。
 Product lag 只调用 `readStudioState`；Thread lag 只重订阅并调用 `readThreadSnapshot`。
 
+FRB 的 `readStudioState` 与 HTTP 的 `GET /api/v1/state` 都只机械调用该 query。共享操作由
+`StudioOperation` 穷尽声明，FRB export 与 HTTP route/spec 测试必须分别覆盖全部共享项；初始化、
+宿主 shutdown/进度、Driver fixture 和桌面 updater 安装另列为 host-only，不伪装成共享命令。
+
 ## 20.4 启动、Project 与 Thread
 
-`startStudioRuntime` 是唯一启动 command，顺序固定为：打开并校验 SQLite；加载
+每个宿主只允许一次启动，顺序固定为：解析绝对 Studio home；取得 `runtime.lock` 独占锁；打开并
+校验 SQLite；加载
 `ConfigRuntime`；加载 Usage/Updater last-known cache；执行启动恢复；修复 root Thread role；
 启动 Thread framework；建立全部未归档 durable Thread 的内存目录索引；只为钉住集合（queued
 input、pending Interaction、活动 Task 引用）恢复 ThreadActor 并 materialize pending wake，其余
@@ -87,6 +92,11 @@ owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 sy
 ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
 或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
 降级为启动失败。
+
+HTTP server 还必须成功绑定 loopback listener 才算 ready。`openapi` 子命令只生成规范，不构造
+runtime、不取得实例锁。Ctrl-C/SIGTERM 首次触发停止接受请求、终止 SSE、完整 runtime shutdown
+并等待 persistence/MCP/LSP 收束；第二次信号才允许强制退出。FRB 的桌面生命周期使用同一个
+runtime 状态机，不保留第二套 `BridgeLifecycle`。
 
 注册 durable child Thread 时，其运行时身份就是该 child 的 `ThreadId`；只校验它不等于所属
 `rootThreadId`，不能把 child 自己的合法 `ThreadId` 误判成 root 身份。历史 closed child 也必须能

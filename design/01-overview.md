@@ -2,8 +2,9 @@
 
 ## 1.1 系统定位
 
-Pure-Lang 是一个自然语言编译器。Pure Studio 是当前唯一桌面产品入口，由 Flutter UI、
-flutter_rust_bridge、Studio 产品运行时和产品无关的 Thread runtime 组成。
+Pure-Lang 是一个自然语言编译器。Pure Studio 的业务核心只有
+`pl-studio-runtime::StudioRuntime`；桌面 Flutter/FRB 与独立 HTTP server 是两种 API
+适配器，不拥有业务状态或产品规则。
 
 系统只使用四个会话概念：
 
@@ -19,13 +20,12 @@ flutter_rust_bridge、Studio 产品运行时和产品无关的 Thread runtime �
 ## 1.2 运行路径
 
 ```text
-Flutter ThreadWorkspace
-        ↕ typed FRB
-StudioRuntime ── TaskService
-        ↓
-ThreadManager → ThreadActor → TurnEngine
-        ↓              ↓ typed live notifications
-       studio.sqlite
+Flutter ThreadWorkspace ── typed FRB ─┐
+                                     ├─ StudioRuntime ── TaskService
+pl-studio-server ─ REST / typed SSE ─┘        ↓
+                                      ThreadManager → ThreadActor → TurnEngine
+                                             ↓              ↓ typed notifications
+                                            studio.sqlite
 ```
 
 - `ThreadManager` 维护 Thread registry、父子关系和 spawn/close。
@@ -53,8 +53,10 @@ watermark。UI snapshot 由 canonical 表与活动 actor overlay 组成；历史
 - `pl-trace`：模型和工具内部诊断事件，不作为 UI 协议或持久化事实源。
 - `pl-model`：provider 与 transport 适配。
 - `pl-core`：ThreadManager、ThreadActor、TurnEngine、通用工具与 agent control plane。
-- `pl-studio-runtime`：单库 StudioStore、项目、Task、worktree、配置与产品事件。
-- `pl-studio-bridge`：protocol 到 FRB DTO 的机械映射。
+- `pl-studio-runtime`：唯一 Studio 业务实现，拥有单库 StudioStore、项目、Task、worktree、
+  配置、生命周期与产品事件。
+- `pl-studio-bridge`：Studio protocol 到 FRB wire 的机械映射与桌面宿主能力。
+- `pl-studio-server`：可单独运行的 loopback HTTP/OpenAPI/SSE 适配器。
 - `pure-studio`：ThreadWorkspace reducer、timeline、interaction、状态栏和设置 UI。
 
 模块默认私有；产品层不能反写 Thread turn 状态，Flutter 不能从 Item、Interaction 或 Task

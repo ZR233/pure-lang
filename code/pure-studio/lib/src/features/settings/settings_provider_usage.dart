@@ -54,9 +54,8 @@ class ProviderUsagePanel extends StatelessWidget {
               ),
               Text(
                 usageUpdatedLabel(context, usage?.updatedAt),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+                style: Theme.of(context).textTheme.labelSmall
+                    ?.copyWith(color: colors.onSurfaceVariant),
               ),
               const SizedBox(width: 4),
               IconButton(
@@ -149,9 +148,8 @@ class _DeepSeekUsage extends StatelessWidget {
                 usage.isAvailable
                     ? context.l10n.settingsUsageAvailableBalance
                     : context.l10n.settingsUsageBalanceUnavailable,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+                style: Theme.of(context).textTheme.labelMedium
+                    ?.copyWith(color: colors.onSurfaceVariant),
               ),
             ),
             Text(
@@ -266,16 +264,14 @@ class _QuotaCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     quotaTitle(context, limit),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelLarge?.copyWith(color: context.studioInk),
+                    style: Theme.of(context).textTheme.labelLarge
+                        ?.copyWith(color: context.studioInk),
                   ),
                 ),
                 Text(
                   quotaResetLabel(context, limit.nextResetAt),
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: context.studioInkSoft,
-                  ),
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: context.studioInkSoft),
                 ),
               ],
             ),
@@ -289,9 +285,8 @@ class _QuotaCard extends StatelessWidget {
             ),
             Text(
               quotaDetail(context, limit),
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: context.studioInkSoft),
             ),
             const SizedBox(height: 8),
             ClipRRect(

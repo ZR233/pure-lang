@@ -3,18 +3,20 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use pl_studio_runtime::{
-    ConfigPaths, ConfigStore, InteractionKind, InteractionRequest, StudioMode, StudioRuntime,
-    StudioStore, StudioTaskRuntime,
+    ConfigPaths, ConfigStore, InteractionKind, InteractionRequest, StudioHostKind, StudioMode,
+    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime,
 };
 use tokio::net::TcpListener;
 
 use super::config::task_test_config;
 use super::git::git_output;
-use super::server::ScriptedModelServer;
+use super::server::{ScriptMode, ScriptedModelServer};
 
 pub const DESIGN_PATH: &str = "design/task-flow.md";
 pub const FEATURE_PATH: &str = "src/feature.txt";
 pub const FEATURE_CONTENT: &str = "offline integration verified\n";
+pub const PLANNER_FOLLOWUP_PATH: &str = "src/planner-followup.txt";
+pub const PLANNER_FOLLOWUP_CONTENT: &str = "planner merge adjustment verified\n";
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -29,6 +31,10 @@ pub struct TaskFlowFixture {
 
 impl TaskFlowFixture {
     pub async fn new() -> Result<Self> {
+        Self::new_with_mode(ScriptMode::SingleExecutorEquivalent).await
+    }
+
+    pub async fn new_with_mode(mode: ScriptMode) -> Result<Self> {
         let root = unique_temp_path("pure-task-orchestration-integration");
         let home = root.join("home");
         let workspace = root.join("workspace");
@@ -40,9 +46,15 @@ impl TaskFlowFixture {
         let base_url = format!("http://{}", listener.local_addr()?);
         let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
         config_store.save(&task_test_config(base_url))?;
-
-        let store = StudioStore::open(home.join("studio.sqlite")).await?;
-        let runtime = StudioRuntime::new(store.clone(), config_store)?;
+        let studio_home = config_store.paths().config_dir().to_path_buf();
+        let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(studio_home.clone()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .map_err(anyhow::Error::new)?;
+        runtime.start_runtime().await?;
+        let store = StudioStore::open(studio_home.join("studio/studio.sqlite")).await?;
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
             .create_thread(&project.id, "Offline task orchestration")
@@ -50,12 +62,12 @@ impl TaskFlowFixture {
         runtime
             .set_thread_mode(&session.id, StudioMode::Task)
             .await?;
-        runtime.start_runtime().await?;
         let server = ScriptedModelServer::start(
             listener,
             runtime.clone(),
             session.id.clone(),
             workspace.clone(),
+            mode,
         );
 
         Ok(Self {

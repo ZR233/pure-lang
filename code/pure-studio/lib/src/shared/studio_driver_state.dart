@@ -257,6 +257,9 @@ abstract final class StudioDriverState {
     'expectedHead': task.expectedHead,
     'statusMessage': task.statusMessage,
     'taskGeneration': task.taskGeneration,
+    'integratedReviewGate': _integratedReviewGateJson(
+      task.integratedReviewGate,
+    ),
     'failures': [
       for (final failure in task.failures) _taskFailureJson(failure),
     ],
@@ -291,6 +294,11 @@ abstract final class StudioDriverState {
           'continuationSourceTurnId': unit.continuationSourceTurnId,
           'continuationRevision': unit.continuationRevision.toString(),
           'executorProgressRevision': unit.executorProgressRevision.toString(),
+          'blueprintFingerprint': unit.blueprintFingerprint,
+          'objective': unit.objective,
+          'implementationStepCount': unit.implementationStepCount,
+          'acceptanceCriterionCount': unit.acceptanceCriterionCount,
+          'verificationCount': unit.verificationCount,
         },
     ],
     'completions': [
@@ -342,6 +350,29 @@ abstract final class StudioDriverState {
           'updatedAt': review.updatedAt.toUtc().toIso8601String(),
         },
     ],
+  };
+
+  static Map<String, Object?> _integratedReviewGateJson(
+    IntegratedReviewGateView gate,
+  ) => switch (gate.kind) {
+    IntegratedReviewGateKind.required => {
+      'status': 'required',
+      'reason': gate.reason,
+    },
+    IntegratedReviewGateKind.satisfiedByReview => {
+      'status': 'satisfiedByReview',
+      'reviewRoundId': gate.reviewRoundId,
+      'reviewedHead': gate.reviewedHead,
+    },
+    IntegratedReviewGateKind.notRequiredNoDelivery => {
+      'status': 'notRequiredNoDelivery',
+    },
+    IntegratedReviewGateKind.notRequiredSingleExecutorEquivalent => {
+      'status': 'notRequiredSingleExecutorEquivalent',
+      'workUnitId': gate.workUnitId,
+      'completionRevision': gate.completionRevision,
+      'mergeRecordId': gate.mergeRecordId,
+    },
   };
 
   static Map<String, Object?> _taskFailureJson(TaskFailureView failure) => {

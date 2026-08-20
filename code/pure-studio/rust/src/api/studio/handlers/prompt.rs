@@ -8,7 +8,6 @@ use crate::api::studio::types::{
 use pl_protocol::{
     InteractionResolution, PlanConfirmationResolution, ToolApprovalResolution, UserInputAnswer,
 };
-use pl_studio_runtime::{StudioSubmitPromptOptions, StudioSubmitPromptRequest};
 use std::collections::HashMap;
 // ── Prompt / Interaction ──
 
@@ -20,15 +19,13 @@ pub async fn start_turn(
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
-        .submit_prompt(StudioSubmitPromptRequest {
+        .start_turn(
             thread_id,
-            prompt,
-            attachment_ids,
-            options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
-                ..StudioSubmitPromptOptions::default()
+            pl_protocol::studio::StartTurnRequest {
+                prompt,
+                attachment_ids,
             },
-        })
+        )
         .await?;
     Ok(StartTurnResponse {
         thread_id: response.thread_id,
@@ -45,15 +42,13 @@ pub async fn steer_turn(
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
-        .submit_prompt(StudioSubmitPromptRequest {
+        .steer_turn(
             thread_id,
-            prompt,
-            attachment_ids,
-            options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
-                ..StudioSubmitPromptOptions::default()
+            pl_protocol::studio::SteerTurnRequest {
+                prompt,
+                attachment_ids,
             },
-        })
+        )
         .await?;
     Ok(SteerTurnResponse {
         thread_id: response.thread_id,
@@ -67,18 +62,11 @@ pub async fn interrupt_turn(
     turn_id: String,
 ) -> Result<InterruptTurnResponse, BridgeError> {
     let bridge = active_bridge().await?;
-    let snapshot = bridge.studio.thread_snapshot(&thread_id).await?;
-    let active_turn_id = snapshot.active_turn.as_ref().map(|turn| turn.id.as_str());
-    if active_turn_id.is_some_and(|active| active != turn_id) {
-        return Err(BridgeError::invalid_argument(
-            "interruptTurn turnId does not match the active Turn",
-        ));
-    }
-    let response = bridge.studio.stop_prompt(thread_id).await?;
+    let response = bridge.studio.interrupt_prompt(thread_id, turn_id).await?;
     Ok(InterruptTurnResponse {
         thread_id: response.thread_id,
-        turn_id,
-        interrupted: response.stopped,
+        turn_id: response.turn_id,
+        interrupted: response.interrupted,
     })
 }
 

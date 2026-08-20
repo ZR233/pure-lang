@@ -139,9 +139,8 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
           Expanded(
             child: Text(
               context.l10n.composerAgentRuntimeDriven,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: context.studioInkSoft),
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: context.studioInkSoft),
             ),
           ),
           if (workspace.isBusy) _StopButton(threadId: workspace.threadId),
@@ -188,9 +187,8 @@ class _TaskResumeDock extends ConsumerWidget {
                     const SizedBox(height: 2),
                     Text(
                       context.l10n.taskResumeBody,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
-                      ),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: context.studioInkSoft),
                     ),
                   ],
                 ),
@@ -219,9 +217,8 @@ class _TaskResumeDock extends ConsumerWidget {
               child: Text(
                 error,
                 key: StudioDriverKeys.composerError,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: colors.error),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: colors.error),
               ),
             ),
         ],
@@ -356,9 +353,8 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 child: Text(
                   error,
                   key: StudioDriverKeys.composerError,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: colors.error),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: colors.error),
                 ),
               ),
             ),
@@ -455,9 +451,8 @@ class _PermissionSelector extends ConsumerWidget {
               const SizedBox(width: 6),
               Text(
                 context.permissionModeLabel(mode),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelMedium?.copyWith(color: context.studioInkSoft),
+                style: Theme.of(context).textTheme.labelMedium
+                    ?.copyWith(color: context.studioInkSoft),
               ),
               const SizedBox(width: 4),
               Icon(

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use pl_protocol::AgentWorkingState;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
@@ -10,8 +11,9 @@ use crate::studio::store::StudioStore;
 #[cfg(test)]
 use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationRequest, ExecutorContinuationState, TaskWorktreeDisposition,
-    ThreadExecutionStatus, WorkUnitRecord, WorkUnitStatus,
+    ExecutorContinuationRequest, ExecutorContinuationState, TASK_EXECUTOR_HANDOFF_SECTION_ID,
+    TaskExecutorHandoff, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitRecord,
+    WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -66,7 +68,6 @@ impl StudioStore {
         work_unit_record(active.update(&self.db).await?)
     }
 
-    #[cfg(test)]
     pub(crate) async fn read_work_unit(
         &self,
         work_unit_id: &str,
@@ -76,6 +77,43 @@ impl StudioStore {
             .await?
             .map(work_unit_record)
             .transpose()
+    }
+
+    pub(crate) async fn read_work_unit_handoff(
+        &self,
+        work_unit_id: &str,
+    ) -> Result<Option<(WorkUnitRecord, TaskExecutorHandoff)>> {
+        let Some(work_unit) = self.read_work_unit(work_unit_id).await? else {
+            return Ok(None);
+        };
+        let executor_thread_id = work_unit
+            .executor_thread_id
+            .as_deref()
+            .context("executor work unit has no executor Thread identity")?;
+        let row =
+            entities::thread_session_state::Entity::find_by_id(executor_thread_id.to_string())
+                .one(&self.db)
+                .await?
+                .context("executor session state is missing")?;
+        let state =
+            AgentWorkingState::try_from(row).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let sections = state
+            .sections
+            .iter()
+            .filter(|section| section.id.as_str() == TASK_EXECUTOR_HANDOFF_SECTION_ID)
+            .collect::<Vec<_>>();
+        let section = match sections.as_slice() {
+            [section] => *section,
+            [] => anyhow::bail!("executor session has no Task handoff"),
+            _ => anyhow::bail!("executor session has duplicate Task handoff sections"),
+        };
+        let handoff = TaskExecutorHandoff::from_context_section(section)?;
+        let run = self
+            .read_task_run(&work_unit.task_run_id)
+            .await?
+            .context("Task run for executor handoff is missing")?;
+        handoff.validate_owner(&run, &work_unit, executor_thread_id)?;
+        Ok(Some((work_unit, handoff)))
     }
 
     pub(crate) async fn list_work_units(&self, task_run_id: &str) -> Result<Vec<WorkUnitRecord>> {

@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // coverage:ignore-file
-// ignore_for_file: type=lint
+// ignore_for_file: type=lint, type=warning, deprecated_member_use, deprecated_member_use_from_same_package
 // ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
 
 part of 'agent_workspace_view.dart';
@@ -9,6 +9,7 @@ part of 'agent_workspace_view.dart';
 // FreezedGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
@@ -63,7 +64,7 @@ class _$AgentWorkspaceViewCopyWithImpl<$Res>
 /// Create a copy of AgentWorkspaceView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? thread = null,Object? rootThread = null,Object? syncState = null,Object? timelineRows = null,Object? todo = freezed,Object? runtime = null,Object? turn = freezed,Object? activeInteraction = freezed,Object? composer = null,Object? composerMode = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? agents = null,}) {
-  return _then(_self.copyWith(
+  return _then(AgentWorkspaceView(
 thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
 as StudioThread,rootThread: null == rootThread ? _self.rootThread : rootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread,syncState: null == syncState ? _self.syncState : syncState // ignore: cast_nullable_to_non_nullable
@@ -219,7 +220,7 @@ return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows
 
 
 class _AgentWorkspaceView extends AgentWorkspaceView {
-  const _AgentWorkspaceView({required this.thread, required this.rootThread, required this.syncState, required final  List<TimelineRow> timelineRows, required this.todo, required this.runtime, required this.turn, required this.activeInteraction, required this.composer, required this.composerMode, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required final  List<StudioAgentView> agents}): _timelineRows = timelineRows,_providers = providers,_roles = roles,_agents = agents,super._();
+  const _AgentWorkspaceView({required this.thread, required this.rootThread, required this.syncState, required  List<TimelineRow> timelineRows, required this.todo, required this.runtime, required this.turn, required this.activeInteraction, required this.composer, required this.composerMode, required this.permissionMode, required  List<ProviderSettingsView> providers, required  List<RoleSettingsView> roles, required  List<StudioAgentView> agents}): _timelineRows = timelineRows,_providers = providers,_roles = roles,_agents = agents,super._();
 
 
 @override final  StudioThread thread;

@@ -4,11 +4,13 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_anyhow`, `invalid_argument`, `new`, `next_correlation_id`, `not_initialized`, `runtime_stopped`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `invalid_argument`, `not_initialized`, `runtime_stopped`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
+/// FRB-only wire representation of [`pl_protocol::studio::StudioError`].
 class BridgeError {
   final BridgeErrorCode code;
   final String message;
@@ -44,9 +46,11 @@ class BridgeError {
           detailsJson == other.detailsJson;
 }
 
+/// FRB wire projection of the transport-neutral Studio error code.
 enum BridgeErrorCode {
   notInitialized,
   runtimeStopped,
+  instanceBusy,
   invalidArgument,
   notFound,
   busy,
@@ -55,6 +59,7 @@ enum BridgeErrorCode {
   permissionDenied,
   cancelled,
   cancellationTooLate,
+  overloaded,
   unavailable,
   protocol,
   storage,

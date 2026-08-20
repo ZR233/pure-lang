@@ -81,11 +81,14 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 即使会话权限是 `full-access` 也不能逃逸。只有 `boundary=hostPermitted` 且权限策略明确放行时，
 本地 backend 才能解析 workspace 外路径。
 
+项目路径向上解析 Git 工作区时，只把包含 `HEAD` 的 `.git` 目录或含非空 `gitdir:` 指针的
+`.git` 文件视为仓库标记；空目录、残留占位符和损坏标记不能把临时项目错误提升到祖先目录。
+
 模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`list_files` 和 `apply_patch` 等通用入口。模型没有独立的内容搜索文件工具；文本搜索优先通过 `exec` 运行 `rg`，文件名或文件列表搜索优先运行 `rg --files`，当前平台没有 ripgrep 时才使用等价的平台命令。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
-主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只解析并约束 `cwd`，不分析命令正文的读写行为；`WorkspaceMutability::ReadOnly` 不阻止 shell 启动。因此 shell 技术上可以写 workspace，或在 permission mode 允许时访问 `cwd` 之外的显式路径；角色提示负责约束 Planner、Explorer 和 Reviewer 遵守各自职责。cwd 解析、permission mode、超时、取消和进程回收语义不变。
+主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只解析并约束 `cwd`，不分析命令正文的读写行为；`WorkspaceMutability::ReadOnly` 不阻止 shell 启动。因此 shell 技术上可以写 workspace，或在 permission mode 允许时访问 `cwd` 之外的显式路径；角色提示负责约束 Explorer 和 Reviewer 遵守只读职责，Task root Planner 的规划与待确认阶段则直接移除 Process effect，避免依赖提示词阻止确认前实施。cwd 解析、permission mode、超时、取消和进程回收语义不变。
 
 本地 `list_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次遍历失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
 
@@ -412,21 +415,26 @@ Timeline Item。
 枚举的 `turnOutcome`。旧模型历史、工具结果和派生缓存不做迁移或兼容转换，协议切换后由产品
 重建新会话和相关 fixture。
 
-产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
-`task_spawn_executor` 接收 required `taskName/message` 与 optional `scopeHints`；hint 只描述
-关注路径，不限制 worktree 内合法修改，也不阻止并发或 completion。runtime spawn 前只校验
-hint 是规范仓库相对路径，并将可信内部 intent 交给 Studio lifecycle；
+产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的 `task_spawn_executor` 使用
+破坏性的结构化实施蓝图协议，包含目标、分组范围、带目标路径与验收引用的实施步骤、验收条件、
+依赖、证据，以及带 ID、预期结果和验收引用的命令/检查验证。runtime 在分配任何 WorkUnit、
+worktree、lease 或 child Thread 前校验完整性、唯一引用、规范仓库相对路径、未知字段和固定上下文
+预算。范围只用于拆分、审查和冲突提示，不限制 worktree 内合法修改；
 `task_request_delivery_review` 与 `task_request_integrated_review` 分别固定 completion
 revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 child Thread，
 不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、
 Turn 启动与失败补偿。
 
 Task executor 使用 fresh session，不复制 planner transcript。Task harness 在 allocation 后构造
-版本化 `TaskExecutorHandoffV1`，把确认后的 Task plan、assignment、WorkUnit/HEAD、scope、验收
-条件、依赖、带定位信息的证据、typed 验证命令和交付契约写入
+线上第二版且唯一命名的 `TaskExecutorHandoff`，按运行归属、仓库事实、确认计划、实施蓝图和
+交付规则分组，把 WorkUnit/HEAD 与完整结构化蓝图写入
 `studio.task_executor_handoff` pinned section；该
 section 与 child 初始 session 一起持久化。后续 Turn 必须从 durable session 和 WorkUnit 校验该
-handoff，缺失、损坏或 owner/HEAD 不匹配时 fail closed，不回退到重新读取 planner 历史。
+handoff，缺失、损坏、第一版或 owner/HEAD 不匹配时 fail closed，不回退到重新读取 planner 历史。
+规范蓝图指纹决定幂等复用，任一步骤、验收或验证变化都形成冲突。child 初始消息由 runtime 固定
+生成，只要求读取 pinned handoff 并执行。`report_completion` 提交与 handoff 中全部命令/检查 ID
+恰好对应的验证结果；运行时按 handoff 顺序生成持久化摘要。delivery review prompt 读取同一份
+完整 handoff，按验收 ID 核对，不复制自由文本契约。
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，
 且不代表 Plan Item。工具输入是完整快照：`explanation?: string` 与

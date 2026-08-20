@@ -86,12 +86,16 @@ pub async fn check_studio_update() -> Result<BridgeUpdaterStateSnapshot, BridgeE
     Ok(bridge_update_state(state))
 }
 
+pub async fn read_studio_update_state() -> Result<BridgeUpdaterStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_update_state(bridge.studio.read_update_state().await))
+}
+
 pub async fn install_studio_update(
     expected_revision: u64,
     version: String,
 ) -> Result<BridgeStudioUpdateOperation, BridgeError> {
     let bridge = active_bridge().await?;
-    let updater = bridge.studio.update_runtime().updater();
     if bridge.studio.is_busy_for_update().await? {
         return Err(StudioUpdateError::new(
             StudioUpdateErrorCode::RuntimeBusy,
@@ -101,8 +105,7 @@ pub async fn install_studio_update(
     }
     let update = bridge
         .studio
-        .update_runtime()
-        .verified_update(expected_revision, &version)
+        .verified_studio_update(expected_revision, &version)
         .await?;
     let cancellation = StudioUpdateCancellation::new();
     let (bridge_progress_tx, bridge_progress_rx) = mpsc::channel(64);
@@ -122,8 +125,9 @@ pub async fn install_studio_update(
             }
         });
         let progress_for_install = progress_tx.clone();
-        let _ = updater
-            .install_after(update, progress_for_install, cancellation, || async {
+        let _ = bridge
+            .studio
+            .install_studio_update_after(update, progress_for_install, cancellation, || async {
                 if !shutdown_runtime_for_update(bridge)
                     .await
                     .map_err(runtime_error)?

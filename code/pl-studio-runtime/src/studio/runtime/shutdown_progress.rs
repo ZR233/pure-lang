@@ -11,17 +11,17 @@ use crate::{StudioShutdownPhase, StudioShutdownProgress};
 
 /// 关机进度通道 owner；随 `StudioRuntime` clone 共享。
 #[derive(Clone)]
-pub struct StudioShutdownProgressRuntime {
+pub struct ShutdownProgressBus {
     tx: Arc<broadcast::Sender<StudioShutdownProgress>>,
 }
 
-impl Default for StudioShutdownProgressRuntime {
+impl Default for ShutdownProgressBus {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StudioShutdownProgressRuntime {
+impl ShutdownProgressBus {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(32);
         Self { tx: Arc::new(tx) }

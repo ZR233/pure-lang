@@ -23,13 +23,27 @@ pub async fn read_skills_state(
     project_id: String,
 ) -> Result<BridgeSkillsStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
-    Ok(skills_state(
-        bridge
-            .studio
-            .skill_catalog_runtime()
-            .read(&project_id)
-            .await,
+    Ok(owned_skills_state(
+        bridge.studio.read_skills_state(&project_id).await,
     ))
+}
+
+fn owned_skills_state(
+    state: pl_studio_runtime::StudioSkillsStateSnapshot,
+) -> BridgeSkillsStateSnapshot {
+    BridgeSkillsStateSnapshot {
+        meta: state.meta.into(),
+        project_id: state.project_id,
+        config_fingerprint: state.config_fingerprint,
+        catalog_revision: state.catalog_revision,
+        skills: state
+            .catalog
+            .skills
+            .into_iter()
+            .map(|skill| SkillSummaryDto { name: skill.name })
+            .collect(),
+        warnings: state.catalog.warnings,
+    }
 }
 
 pub async fn discover_skills(project_id: String) -> Result<BridgeSkillsStateSnapshot, BridgeError> {

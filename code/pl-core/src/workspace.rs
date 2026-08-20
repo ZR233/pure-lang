@@ -49,12 +49,42 @@ pub fn resolve_workspace_root(project_dir: &Path) -> Result<PathBuf> {
 
     let mut cursor = Some(canonical.as_path());
     while let Some(dir) = cursor {
-        if dir.join(".git").exists() {
+        if is_git_worktree_marker(&dir.join(".git")) {
             return Ok(dir.to_path_buf());
         }
         cursor = dir.parent();
     }
     Ok(canonical)
+}
+
+fn is_git_worktree_marker(path: &Path) -> bool {
+    if path.is_dir() {
+        return path.join("HEAD").is_file();
+    }
+    if !path.is_file() {
+        return false;
+    }
+    let Some(git_dir) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| content.lines().next().map(str::trim).map(str::to_string))
+        .and_then(|line| {
+            line.strip_prefix("gitdir:")
+                .map(str::trim)
+                .map(str::to_string)
+        })
+        .filter(|git_dir| !git_dir.is_empty())
+    else {
+        return false;
+    };
+    let git_dir = Path::new(&git_dir);
+    let git_dir = if git_dir.is_absolute() {
+        git_dir.to_path_buf()
+    } else {
+        path.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(git_dir)
+    };
+    git_dir.join("HEAD").is_file()
 }
 
 /// 读取工作区项目记忆。
@@ -314,11 +344,38 @@ mod tests {
         let dir = temp_dir("git-root");
         let child = dir.join("code").join("crate");
         fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::write(dir.join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
         fs::create_dir_all(&child).unwrap();
 
         let result = resolve_workspace_root(&child).unwrap();
 
         assert_eq!(result, fs::canonicalize(&dir).unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_an_empty_git_directory_in_an_ancestor() {
+        let dir = temp_dir("invalid-git-root");
+        let child = dir.join("project");
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(&child).unwrap();
+
+        let result = resolve_workspace_root(&child).unwrap();
+
+        assert_eq!(result, fs::canonicalize(&child).unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_a_dangling_gitdir_pointer_in_an_ancestor() {
+        let dir = temp_dir("dangling-gitdir-root");
+        let child = dir.join("project");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(dir.join(".git"), "gitdir: missing-metadata\n").unwrap();
+
+        let result = resolve_workspace_root(&child).unwrap();
+
+        assert_eq!(result, fs::canonicalize(&child).unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
 }

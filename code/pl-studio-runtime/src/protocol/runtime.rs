@@ -11,6 +11,7 @@ pub struct StudioTaskRuntime {
     pub stop_requested_origin: Option<String>,
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
+    pub integrated_review_gate: StudioIntegratedReviewGate,
     pub failures: Vec<StudioTaskFailureRuntime>,
     pub terminal_failure: Option<StudioTaskFailureRuntime>,
     pub work_units: Vec<StudioTaskWorkUnitRuntime>,
@@ -54,6 +55,30 @@ pub struct StudioTaskWorkUnitRuntime {
     pub continuation_revision: u64,
     #[serde(default)]
     pub executor_progress_revision: u64,
+    pub blueprint_fingerprint: Option<String>,
+    pub objective: Option<String>,
+    pub implementation_step_count: usize,
+    pub acceptance_criterion_count: usize,
+    pub verification_count: usize,
+}
+
+/// 当前任务是否还需要综合审查，以及已满足门禁时的可审计依据。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum StudioIntegratedReviewGate {
+    Required {
+        reason: String,
+    },
+    SatisfiedByReview {
+        review_round_id: String,
+        reviewed_head: String,
+    },
+    NotRequiredNoDelivery,
+    NotRequiredSingleExecutorEquivalent {
+        work_unit_id: String,
+        completion_revision: u32,
+        merge_record_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

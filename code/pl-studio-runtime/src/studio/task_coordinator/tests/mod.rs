@@ -3,8 +3,16 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use pl_core::canonical_content_hash;
+use pl_protocol::AgentWorkingState;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
 use super::merge::TaskRecordMergeInput;
-use super::spawn::TaskExecutorVerificationCommandV1;
+use super::spawn::{
+    TaskExecutorAcceptanceCriterion, TaskExecutorBlueprint, TaskExecutorImplementationStep,
+    TaskExecutorScope, TaskExecutorTarget, TaskExecutorVerificationCommand,
+    TaskExecutorVerificationContract,
+};
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
@@ -13,6 +21,45 @@ use crate::{
     StudioStore, TurnOptions, TurnWorkingSetHandle,
 };
 use pl_core::tool::cache::TurnToolCacheHandle;
+
+fn executor_blueprint(task_name: &str, scope_hint: &str) -> TaskExecutorBlueprint {
+    TaskExecutorBlueprint {
+        task_name: task_name.to_string(),
+        objective: "move transport selection to ModelInfo".to_string(),
+        scope: TaskExecutorScope {
+            in_scope: vec!["model transport routing".to_string()],
+            out_of_scope: Vec::new(),
+            scope_hints: vec![scope_hint.to_string()],
+        },
+        implementation_steps: vec![TaskExecutorImplementationStep {
+            id: "step-1".to_string(),
+            instruction: "move transport selection to ModelInfo".to_string(),
+            targets: vec![TaskExecutorTarget {
+                path: scope_hint.to_string(),
+                symbol: Some("ModelInfo".to_string()),
+            }],
+            expected_outcome: "model transport uses one canonical selector".to_string(),
+            criterion_ids: vec!["criterion-1".to_string()],
+        }],
+        acceptance_criteria: vec![TaskExecutorAcceptanceCriterion {
+            id: "criterion-1".to_string(),
+            requirement: "model-level routing is tested".to_string(),
+        }],
+        dependencies: Vec::new(),
+        evidence: Vec::new(),
+        verification: TaskExecutorVerificationContract {
+            commands: vec![TaskExecutorVerificationCommand {
+                id: "check-1".to_string(),
+                command: "cargo test -p pl-model".to_string(),
+                cwd: ".".to_string(),
+                purpose: "verify model transport".to_string(),
+                expected_outcome: "pl-model tests pass".to_string(),
+                criterion_ids: vec!["criterion-1".to_string()],
+            }],
+            inspections: Vec::new(),
+        },
+    }
+}
 
 #[tokio::test]
 async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
@@ -36,15 +83,10 @@ async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
         scope_hints: vec!["code/pl-model".to_string()],
         requested_by_call_id: "call-stable".to_string(),
         review_round_id: None,
-        assignment: Some("move transport selection to ModelInfo".to_string()),
-        acceptance_criteria: vec!["model-level routing is tested".to_string()],
-        dependencies: Vec::new(),
-        evidence: Vec::new(),
-        verification_commands: vec![TaskExecutorVerificationCommandV1 {
-            command: "cargo test -p pl-model".to_string(),
-            cwd: ".".to_string(),
-            purpose: "verify model transport".to_string(),
-        }],
+        blueprint: Some(executor_blueprint(
+            "implement model transport",
+            "code/pl-model",
+        )),
     };
 
     let first = coordinator.prepare_agent_spawn(&request).await.unwrap();
@@ -72,16 +114,57 @@ async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
     );
     assert_eq!(store.list_work_units(&run.id).await.unwrap().len(), 1);
     let section = first.initial_context().first().expect("handoff section");
-    let handoff = TaskExecutorHandoffV1::from_context_section(section).unwrap();
-    assert_eq!(handoff.task_run_id, run.id);
-    assert_eq!(handoff.requesting_call_id, "call-stable");
-    assert_eq!(handoff.assignment, "move transport selection to ModelInfo");
-    assert_eq!(handoff.scope_hints, vec!["code/pl-model"]);
+    let handoff = TaskExecutorHandoff::from_context_section(section).unwrap();
+    assert_eq!(handoff.ownership.task_run_id, run.id);
+    assert_eq!(handoff.ownership.requesting_call_id, "call-stable");
     assert_eq!(
-        handoff.verification.commands[0].command,
+        handoff.blueprint.objective,
+        "move transport selection to ModelInfo"
+    );
+    assert_eq!(handoff.blueprint.scope.scope_hints, vec!["code/pl-model"]);
+    assert_eq!(
+        handoff.blueprint.verification.commands[0].command,
         "cargo test -p pl-model"
     );
 
+    coordinator.suspend();
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn invalid_executor_blueprint_is_rejected_before_durable_allocation() {
+    let repository = init_repository("executor-spawn-invalid-blueprint-preflight");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+    let run = coordinator
+        .start_confirmed_task(&session.id, "confirmed plan", &repository)
+        .await
+        .unwrap();
+    store
+        .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
+        .await
+        .unwrap();
+    let mut blueprint = executor_blueprint("implement model transport", "code/pl-model");
+    blueprint.verification.commands.clear();
+    let request = StudioTaskSpawnRequest {
+        agent_id: "thread-task-invalid".to_string(),
+        root_thread_id: session.id,
+        task_name: "implement model transport".to_string(),
+        role: "executor".to_string(),
+        scope_hints: vec!["code/pl-model".to_string()],
+        requested_by_call_id: "call-invalid".to_string(),
+        review_round_id: None,
+        blueprint: Some(blueprint),
+    };
+
+    let error = coordinator
+        .prepare_agent_spawn(&request)
+        .await
+        .expect_err("invalid blueprint must fail before allocation");
+
+    assert!(error.to_string().contains("verification.commands"));
+    assert!(store.list_work_units(&run.id).await.unwrap().is_empty());
     coordinator.suspend();
     remove_repository(repository);
 }
@@ -98,11 +181,7 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
         scope_hints: Vec::new(),
         review_round_id: Some(round.id.clone()),
         requested_by_call_id: "call-review".to_string(),
-        assignment: None,
-        acceptance_criteria: Vec::new(),
-        dependencies: Vec::new(),
-        evidence: Vec::new(),
-        verification_commands: Vec::new(),
+        blueprint: None,
     };
     let preparation = fixture
         .coordinator
@@ -510,10 +589,17 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap();
     let error = fixture
         .store
-        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
+        .complete_task(
+            &fixture.root_thread_id,
+            &run.expected_head,
+            &crate::StudioIntegratedReviewGate::SatisfiedByReview {
+                review_round_id: "missing".to_string(),
+                reviewed_head: run.expected_head.clone(),
+            },
+        )
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("reviewing task run"));
+    assert!(error.to_string().contains("final design"));
     fixture
         .store
         .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
@@ -577,7 +663,14 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
     fixture.store.upsert_interaction(&pending).await.unwrap();
     let pending_error = fixture
         .store
-        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
+        .complete_task(
+            &fixture.root_thread_id,
+            &run.expected_head,
+            &crate::StudioIntegratedReviewGate::SatisfiedByReview {
+                review_round_id: round.id.clone(),
+                reviewed_head: run.expected_head.clone(),
+            },
+        )
         .await
         .unwrap_err();
     let pending_error = pending_error
@@ -595,7 +688,14 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 
     let completed = fixture
         .store
-        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
+        .complete_task(
+            &fixture.root_thread_id,
+            &run.expected_head,
+            &crate::StudioIntegratedReviewGate::SatisfiedByReview {
+                review_round_id: round.id,
+                reviewed_head: run.expected_head.clone(),
+            },
+        )
         .await
         .unwrap();
 
@@ -693,7 +793,7 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
         call_task_complete(&fixture, "call-complete-before-review").await;
     assert!(!rejected_ends_turn);
     assert_eq!(rejected_json["status"], "rejected");
-    assert_eq!(rejected_json["code"], "reviewMissing");
+    assert_eq!(rejected_json["code"], "reviewRequired");
     assert!(rejected_json.get("verification").is_none());
 
     fixture
@@ -887,6 +987,10 @@ async fn task_complete_skips_integrated_review_when_nothing_was_merged() {
     assert!(ends_turn);
     assert_eq!(json["status"], "completed");
     assert_eq!(json["run"]["phase"], "completed");
+    assert_eq!(
+        json["integratedReviewGate"]["status"],
+        "notRequiredNoDelivery"
+    );
     assert!(
         fixture
             .store
@@ -1330,8 +1434,201 @@ async fn planner_git_methods_are_recorded_and_cleanup_is_idempotent() {
             .await
             .unwrap();
         assert_eq!(retried.id, record.id);
+        assert!(
+            fixture
+                .store
+                .advance_task_design_head(&fixture.task_run_id, &resulting_head, &resulting_head,)
+                .await
+                .unwrap()
+        );
+        let run = fixture
+            .store
+            .read_task_run(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let work_units = fixture.store.list_work_units(&run.id).await.unwrap();
+        let completions = fixture.store.list_work_completions(&run.id).await.unwrap();
+        let merges = fixture.store.list_merge_records(&run.id).await.unwrap();
+        let reviews = fixture.store.list_review_rounds(&run.id).await.unwrap();
+        let gate = super::review::integrated_review_gate(
+            &run,
+            &work_units,
+            &completions,
+            &merges,
+            &reviews,
+        )
+        .await;
+        assert_eq!(
+            gate,
+            crate::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+                work_unit_id: fixture.work_unit_id.clone(),
+                completion_revision: 1,
+                merge_record_id: record.id,
+            },
+            "{} should reuse its delivery review when the full tree is equivalent",
+            method.as_str()
+        );
+        let (ends_turn, completed) = call_task_complete(&fixture, "complete-equivalent").await;
+        assert!(ends_turn);
+        assert_eq!(completed["status"], "completed");
+        assert_eq!(
+            completed["integratedReviewGate"]["status"],
+            "notRequiredSingleExecutorEquivalent"
+        );
         fixture.cleanup();
     }
+}
+
+#[tokio::test]
+async fn single_executor_equivalence_rejects_extra_executor_or_unreadable_delivery() {
+    let fixture = DeliveryFixture::new("single-equivalence-conservative", vec!["src"]).await;
+    let (run, work_units, completions, merges, reviews) =
+        prepare_equivalent_single_executor(&fixture).await;
+
+    let mut two_work_units = work_units.clone();
+    let mut second = work_units[0].clone();
+    second.id = "second-work-unit".to_string();
+    second.executor_thread_id = Some("agent-2".to_string());
+    second.scope_hints = vec!["tests".to_string()];
+    two_work_units.push(second);
+    assert!(matches!(
+        super::review::integrated_review_gate(
+            &run,
+            &two_work_units,
+            &completions,
+            &merges,
+            &reviews,
+        )
+        .await,
+        crate::StudioIntegratedReviewGate::Required { .. }
+    ));
+
+    let mut missing_commit = completions.clone();
+    missing_commit[0].head_commit = Some("0000000000000000000000000000000000000000".to_string());
+    let mut missing_commit_merge = merges.clone();
+    missing_commit_merge[0].delivery_head = "0000000000000000000000000000000000000000".to_string();
+    let mut missing_commit_reviews = reviews.clone();
+    missing_commit_reviews[0].reviewed_head =
+        "0000000000000000000000000000000000000000".to_string();
+    assert!(matches!(
+        super::review::integrated_review_gate(
+            &run,
+            &work_units,
+            &missing_commit,
+            &missing_commit_merge,
+            &missing_commit_reviews,
+        )
+        .await,
+        crate::StudioIntegratedReviewGate::Required { .. }
+    ));
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn same_executor_rework_versions_keep_the_final_equivalent_delivery_exempt() {
+    let fixture = DeliveryFixture::new("single-equivalence-rework", vec!["src"]).await;
+    let (run, work_units, mut completions, mut merges, mut reviews) =
+        prepare_equivalent_single_executor(&fixture).await;
+
+    let mut rejected_completion = completions[0].clone();
+    rejected_completion.id = "completion-revision-1".to_string();
+    rejected_completion.revision = 1;
+    rejected_completion.status = WorkCompletionStatus::ChangesRequired;
+    completions[0].id = "completion-revision-2".to_string();
+    completions[0].revision = 2;
+    merges[0].completion_id = completions[0].id.clone();
+    merges[0].completion_revision = 2;
+    let mut rejected_review = reviews[0].clone();
+    rejected_review.id = "delivery-review-revision-1".to_string();
+    rejected_review.completion_id = Some(rejected_completion.id.clone());
+    rejected_review.completion_revision = Some(1);
+    rejected_review.verdict = ReviewVerdict::ChangesRequired;
+    reviews[0].completion_id = Some(completions[0].id.clone());
+    reviews[0].completion_revision = Some(2);
+    completions.insert(0, rejected_completion);
+    reviews.insert(0, rejected_review);
+
+    assert_eq!(
+        super::review::integrated_review_gate(&run, &work_units, &completions, &merges, &reviews,)
+            .await,
+        crate::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id: fixture.work_unit_id.clone(),
+            completion_revision: 2,
+            merge_record_id: merges[0].id.clone(),
+        }
+    );
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn implementation_change_after_equivalent_merge_requires_integrated_review() {
+    let fixture = DeliveryFixture::new("single-equivalence-extra-change", vec!["src"]).await;
+    let (mut run, work_units, completions, merges, reviews) =
+        prepare_equivalent_single_executor(&fixture).await;
+    std::fs::write(fixture.repository.join("extra.txt"), "planner change\n").unwrap();
+    git(&fixture.repository, &["add", "extra.txt"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "planner implementation change"],
+    );
+    let changed_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    run.expected_head = changed_head.clone();
+    run.design_commit = Some(changed_head);
+
+    assert!(matches!(
+        super::review::integrated_review_gate(&run, &work_units, &completions, &merges, &reviews,)
+            .await,
+        crate::StudioIntegratedReviewGate::Required { .. }
+    ));
+
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn final_design_only_commit_preserves_single_executor_equivalence() {
+    let fixture = DeliveryFixture::new("single-equivalence-design-only", vec!["src"]).await;
+    let (run, work_units, completions, merges, reviews) =
+        prepare_equivalent_single_executor(&fixture).await;
+    std::fs::create_dir_all(fixture.repository.join("design")).unwrap();
+    std::fs::write(
+        fixture.repository.join("design/final.md"),
+        "# Final design\n",
+    )
+    .unwrap();
+    git(&fixture.repository, &["add", "design/final.md"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "document final design"],
+    );
+    let design_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    assert!(
+        fixture
+            .store
+            .advance_task_design_head(&fixture.task_run_id, &run.expected_head, &design_head)
+            .await
+            .unwrap()
+    );
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        super::review::integrated_review_gate(&run, &work_units, &completions, &merges, &reviews,)
+            .await,
+        crate::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id: fixture.work_unit_id.clone(),
+            completion_revision: 1,
+            merge_record_id: merges[0].id.clone(),
+        }
+    );
+
+    fixture.cleanup();
 }
 
 #[tokio::test]
@@ -1452,10 +1749,59 @@ async fn task_status_exposes_only_relative_worktree_locators() {
         json["completions"][0]["relativeWorktreePath"],
         expected_locator
     );
+    assert_eq!(
+        json["workUnits"][0]["objective"],
+        "move transport selection to ModelInfo"
+    );
+    assert_eq!(json["workUnits"][0]["implementationStepCount"], 1);
+    assert_eq!(json["workUnits"][0]["acceptanceCriterionCount"], 1);
+    assert_eq!(json["workUnits"][0]["verificationCount"], 1);
+    assert!(json["workUnits"][0]["blueprintFingerprint"].is_string());
+    assert_eq!(json["integratedReviewGate"]["status"], "required");
     assert!(
         !json
             .to_string()
             .contains(&fixture.worktree.to_string_lossy().to_string())
+    );
+
+    let handoff_tool = fixture
+        .coordinator
+        .read_work_unit_handoff_tool(fixture.root_thread_id.clone());
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let handoff = handoff_tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({"workUnitId": fixture.work_unit_id}),
+                session_id: fixture.root_thread_id.clone(),
+                tool_id: "call-read-handoff".to_string(),
+                revision_base: 0,
+            },
+            ToolContext {
+                event_tx,
+                options: TurnOptions::default(),
+                workspace_access: WorkspaceAccess::WorkspaceOnly,
+                workspace: pl_core::AgentWorkspace::local(fixture.repository.clone()),
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                provider_call_id: Some("call-read-handoff".to_string()),
+                active_subagent: None,
+                lsp_runtime: None,
+                parent_session: Arc::new(AgentSession::from_messages(Vec::new())),
+                working_set: TurnWorkingSetHandle::default(),
+                tool_cache: TurnToolCacheHandle::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let handoff: serde_json::Value = serde_json::from_str(&handoff.into_model_output()).unwrap();
+    assert_eq!(handoff["version"], 2);
+    assert_eq!(handoff["ownership"]["workUnitId"], fixture.work_unit_id);
+    assert_eq!(
+        handoff["blueprint"]["implementationSteps"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     fixture.cleanup();
 }
@@ -1551,6 +1897,18 @@ async fn delivery_review_prompt_uses_relative_locator_without_absolute_workspace
     );
 
     assert!(prompt.contains(&expected_locator));
+    let (_, handoff) = fixture
+        .store
+        .read_work_unit_handoff(&fixture.work_unit_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(prompt.contains(&handoff.blueprint_fingerprint));
+    assert!(prompt.contains(&handoff.blueprint.objective));
+    assert!(prompt.contains(&handoff.blueprint.implementation_steps[0].id));
+    assert!(prompt.contains(&handoff.blueprint.acceptance_criteria[0].id));
+    assert!(prompt.contains(&handoff.blueprint.verification.commands[0].id));
+    assert!(prompt.contains("focused checks passed"));
     assert!(!prompt.contains(&fixture.worktree.to_string_lossy().to_string()));
     assert!(!prompt.contains(&fixture.repository.to_string_lossy().to_string()));
     fixture.cleanup();
@@ -1730,6 +2088,10 @@ impl DeliveryFixture {
         attempt: u32,
         _link_work_unit: bool,
     ) -> Self {
+        let scope_hints = scope_hints
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         let repository = init_repository(name);
         let store = task_store(&repository).await;
         let session = task_session(&store, &repository).await;
@@ -1766,7 +2128,7 @@ impl DeliveryFixture {
             .create_work_unit(CreateWorkUnit {
                 task_run_id: run.id.clone(),
                 title: "Implement delivery".to_string(),
-                scope_hints: scope_hints.into_iter().map(str::to_string).collect(),
+                scope_hints: scope_hints.clone(),
                 base_commit: run.expected_head.clone(),
                 worktree_path: std::fs::canonicalize(&worktree)
                     .unwrap()
@@ -1798,6 +2160,40 @@ impl DeliveryFixture {
             .activate_executor(&work_unit.id, &subagent.id)
             .await
             .unwrap();
+        store
+            .create_child_thread(crate::studio::ChildThreadSpec {
+                id: subagent.id.clone(),
+                parent_thread_id: session.id.clone(),
+                agent_path: subagent.id.clone(),
+                role: "executor".to_string(),
+                title: subagent.task.clone(),
+            })
+            .await
+            .unwrap();
+        let blueprint = executor_blueprint(
+            &subagent.task,
+            scope_hints.first().map(String::as_str).unwrap_or("."),
+        );
+        let handoff = TaskExecutorHandoff::new(&run, &work_unit, session.id.clone(), blueprint)
+            .unwrap()
+            .to_context_section()
+            .unwrap();
+        let state = AgentWorkingState {
+            sections: vec![handoff],
+            revision: 1,
+            ..AgentWorkingState::default()
+        };
+        let state_json = serde_json::to_string(&state).unwrap();
+        crate::studio::entity::thread_session_state::ActiveModel {
+            thread_id: Set(subagent.id.clone()),
+            revision: Set(1),
+            state_hash: Set(canonical_content_hash(state_json.as_bytes())),
+            state_json: Set(state_json),
+            updated_at: Set(crate::studio::ids::unix_seconds()),
+        }
+        .insert(store.database())
+        .await
+        .unwrap();
         Self {
             coordinator,
             store,
@@ -1970,6 +2366,62 @@ fn integrate_planner_delivery(
         }
     }
     git_output(&fixture.repository, &["rev-parse", "HEAD"])
+}
+
+async fn prepare_equivalent_single_executor(
+    fixture: &DeliveryFixture,
+) -> (
+    TaskRunRecord,
+    Vec<WorkUnitRecord>,
+    Vec<WorkCompletionRecord>,
+    Vec<MergeRecord>,
+    Vec<ReviewRoundRecord>,
+) {
+    fixture.commit_file("src/delivery.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let resulting_head =
+        integrate_planner_delivery(fixture, MergeMethod::CherryPick, &delivery.head_commit);
+    fixture
+        .coordinator
+        .record_planner_merge(
+            &fixture.root_thread_id,
+            TaskRecordMergeInput {
+                executor_agent_id: fixture.subagent.id.clone(),
+                completion_revision: 1,
+                expected_previous_head: run.expected_head,
+                resulting_head: resulting_head.clone(),
+                method: MergeMethod::CherryPick,
+                summary: "record equivalent integration".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .store
+            .advance_task_design_head(&fixture.task_run_id, &resulting_head, &resulting_head,)
+            .await
+            .unwrap()
+    );
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let work_units = fixture.store.list_work_units(&run.id).await.unwrap();
+    let completions = fixture.store.list_work_completions(&run.id).await.unwrap();
+    let merges = fixture.store.list_merge_records(&run.id).await.unwrap();
+    let reviews = fixture.store.list_review_rounds(&run.id).await.unwrap();
+    (run, work_units, completions, merges, reviews)
 }
 
 async fn call_task_complete(fixture: &DeliveryFixture, tool_id: &str) -> (bool, serde_json::Value) {

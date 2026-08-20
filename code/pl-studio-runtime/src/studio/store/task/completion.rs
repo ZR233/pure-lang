@@ -4,6 +4,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
+use crate::StudioIntegratedReviewGate;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
@@ -212,25 +213,30 @@ impl StudioStore {
         finish_transaction(tx, result).await
     }
 
-    pub(crate) async fn complete_reviewed_task(
+    pub(crate) async fn complete_task(
         &self,
         thread_id: &str,
         expected_head: &str,
+        gate: &StudioIntegratedReviewGate,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_run_for_session(&tx, thread_id).await?;
-            if run.phase != TaskRunPhase::Reviewing.as_str()
-                || run.expected_head != expected_head
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            if !matches!(
+                phase,
+                TaskRunPhase::Implementing | TaskRunPhase::Reworking | TaskRunPhase::Reviewing
+            ) || run.expected_head != expected_head
                 || run.design_commit.as_deref() != Some(expected_head)
             {
-                bail!("task completion requires reviewed design at the current HEAD");
+                bail!("task completion requires final design at the current HEAD");
             }
             if run.stop_requested != 0 {
                 bail!("task completion is unavailable after stop was requested");
             }
             validate_lease(&tx, &run, expected_head).await?;
-            validate_completion_children(&tx, &run).await?;
+            validate_completion_children(&tx, &run, phase, gate).await?;
             validate_no_pending_interactions(&tx, &run.root_thread_id).await?;
             let completed =
                 super::write_task_terminal_fact(&tx, run, TaskRunPhase::Completed, None, None)
@@ -406,6 +412,8 @@ async fn validate_no_pending_interactions(
 async fn validate_completion_children(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
+    phase: TaskRunPhase,
+    gate: &StudioIntegratedReviewGate,
 ) -> Result<()> {
     let units = entities::work_unit::Entity::find()
         .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
@@ -427,25 +435,146 @@ async fn validate_completion_children(
     }) {
         bail!("all task agents must be terminal before completion");
     }
-    // 无 source merge（全部 NoDelivery）时没有可审查的集成 diff，不要求 review。
-    let has_source_merge = !entities::merge_record::Entity::find()
+    let merges = entities::merge_record::Entity::find()
         .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
         .all(tx)
-        .await?
-        .is_empty();
-    if has_source_merge {
-        let latest_review = entities::review_round::Entity::find()
-            .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-            .order_by_desc(entities::review_round::Column::Round)
-            .one(tx)
-            .await?
-            .context("task completion requires a review round")?;
-        if latest_review.scope != ReviewScope::Integrated.as_str()
-            || latest_review.reviewed_head != run.expected_head
-            || latest_review.status != ReviewVerdict::Pass.as_str()
-        {
-            bail!("latest review must pass for the current task HEAD");
+        .await?;
+    let reviews = entities::review_round::Entity::find()
+        .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
+        .all(tx)
+        .await?;
+    if reviews.iter().any(|review| {
+        matches!(
+            ThreadExecutionStatus::from_str(&review.reviewer_status),
+            Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
+        )
+    }) {
+        bail!("all task reviewers must be terminal before completion");
+    }
+    match gate {
+        StudioIntegratedReviewGate::Required { .. } => {
+            bail!("integrated review is still required")
         }
+        StudioIntegratedReviewGate::SatisfiedByReview {
+            review_round_id,
+            reviewed_head,
+        } => {
+            if phase != TaskRunPhase::Reviewing || reviewed_head != &run.expected_head {
+                bail!("integrated review gate no longer matches task phase or HEAD")
+            }
+            let review = reviews
+                .iter()
+                .find(|review| review.id == *review_round_id)
+                .context("integrated review gate round disappeared")?;
+            if review.scope != ReviewScope::Integrated.as_str()
+                || review.status != ReviewVerdict::Pass.as_str()
+                || review.reviewed_head != run.expected_head
+            {
+                bail!("integrated review gate no longer identifies a passing current review")
+            }
+        }
+        StudioIntegratedReviewGate::NotRequiredNoDelivery => {
+            if !merges.is_empty()
+                || units
+                    .iter()
+                    .any(|unit| unit.status != WorkUnitStatus::NoDelivery.as_str())
+            {
+                bail!("no-delivery review exemption no longer matches task children")
+            }
+        }
+        StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id,
+            completion_revision,
+            merge_record_id,
+        } => {
+            validate_single_executor_gate(SingleExecutorGateValidation {
+                tx,
+                run,
+                units: &units,
+                merges: &merges,
+                reviews: &reviews,
+                work_unit_id,
+                completion_revision: *completion_revision,
+                merge_record_id,
+            })
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+struct SingleExecutorGateValidation<'a> {
+    tx: &'a sea_orm::DatabaseTransaction,
+    run: &'a entities::task_run::Model,
+    units: &'a [entities::work_unit::Model],
+    merges: &'a [entities::merge_record::Model],
+    reviews: &'a [entities::review_round::Model],
+    work_unit_id: &'a str,
+    completion_revision: u32,
+    merge_record_id: &'a str,
+}
+
+async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<'_>) -> Result<()> {
+    let SingleExecutorGateValidation {
+        tx,
+        run,
+        units,
+        merges,
+        reviews,
+        work_unit_id,
+        completion_revision,
+        merge_record_id,
+    } = validation;
+    let [unit] = units else {
+        bail!("single-executor review exemption requires exactly one work unit")
+    };
+    let [merge] = merges else {
+        bail!("single-executor review exemption requires exactly one merge record")
+    };
+    if unit.id != work_unit_id
+        || unit.status != WorkUnitStatus::Merged.as_str()
+        || merge.id != merge_record_id
+        || merge.work_unit_id != unit.id
+        || merge.completion_revision != i32::try_from(completion_revision)?
+    {
+        bail!("single-executor review exemption identity changed before completion")
+    }
+    if reviews
+        .iter()
+        .any(|review| review.scope == ReviewScope::Integrated.as_str())
+    {
+        bail!("an integrated review round already exists")
+    }
+    let completion = entities::work_completion::Entity::find_by_id(merge.completion_id.clone())
+        .one(tx)
+        .await?
+        .context("single-executor approved completion disappeared")?;
+    if completion.task_run_id != run.id
+        || completion.work_unit_id != unit.id
+        || completion.revision != i32::try_from(completion_revision)?
+        || completion.kind != "delivery"
+        || completion.status != "approved"
+        || completion.base_commit != merge.expected_previous_head
+        || completion.head_commit.as_deref() != Some(merge.delivery_head.as_str())
+    {
+        bail!("single-executor approved completion changed before completion")
+    }
+    let passing_delivery_reviews = reviews
+        .iter()
+        .filter(|review| {
+            review.scope == ReviewScope::Delivery.as_str()
+                && review.status == ReviewVerdict::Pass.as_str()
+        })
+        .collect::<Vec<_>>();
+    let [review] = passing_delivery_reviews.as_slice() else {
+        bail!("single-executor review exemption requires exactly one passing delivery review")
+    };
+    if review.work_unit_id.as_deref() != Some(unit.id.as_str())
+        || review.completion_id.as_deref() != Some(completion.id.as_str())
+        || review.completion_revision != Some(i32::try_from(completion_revision)?)
+        || review.reviewed_head != merge.delivery_head
+    {
+        bail!("passing delivery review changed before completion")
     }
     Ok(())
 }
@@ -456,13 +585,17 @@ async fn active_run_for_session(
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
         .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
-        .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Reviewing.as_str()))
+        .filter(entities::task_run::Column::Phase.is_in([
+            TaskRunPhase::Implementing.as_str(),
+            TaskRunPhase::Reworking.as_str(),
+            TaskRunPhase::Reviewing.as_str(),
+        ]))
         .all(tx)
         .await?;
     match runs.as_slice() {
         [run] => Ok(run.clone()),
-        [] => bail!("reviewing task run not found for completion"),
-        _ => bail!("multiple reviewing task runs found for completion"),
+        [] => bail!("completable task run not found"),
+        _ => bail!("multiple completable task runs found"),
     }
 }
 

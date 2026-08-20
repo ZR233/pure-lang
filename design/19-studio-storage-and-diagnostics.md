@@ -7,6 +7,12 @@ Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v8；测试和隔
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
 
+打开、检查、删除或重建 SQLite 之前，`StudioRuntime` 必须取得 Studio home 下
+`runtime.lock` 的跨进程独占 OS 文件锁。锁文件只记录 PID、宿主类型和启动时间供诊断，占用
+状态只以 OS 锁为准；文件内容不是 lease。所有 runtime clone 共享同一 lock owner，完整
+shutdown/drop 后才释放。取得失败返回 typed `InstanceBusy`，不进入任何 SQLite/config IO。
+该文件不属于数据 schema，不触发数据库或配置迁移。
+
 所有 `read*` 查询严格无 mutation；测试注入 SQLite mutation counter 并验证重复 read 为零。
 Provider Usage 与 Updater 的 last-known cache 复用现有 `app_settings`，键分别为
 `observed:providerUsage:v1` 和 `observed:studioUpdate:v1`，不新增 migration。内存 owner snapshot

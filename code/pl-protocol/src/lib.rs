@@ -9,6 +9,7 @@ mod model_context;
 mod observed_state;
 mod permission;
 mod provider_catalog;
+pub mod studio;
 mod thread;
 mod turn_failure;
 

@@ -271,12 +271,31 @@ pub struct BridgeTaskRuntimeDto {
     pub stop_requested_origin: Option<String>,
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
+    pub integrated_review_gate: BridgeIntegratedReviewGateDto,
     pub failures: Vec<BridgeTaskFailureDto>,
     pub terminal_failure: Option<BridgeTaskFailureDto>,
     pub work_units: Vec<BridgeTaskWorkUnitDto>,
     pub completions: Vec<BridgeTaskCompletionDto>,
     pub merges: Vec<BridgeTaskMergeDto>,
     pub reviews: Vec<BridgeTaskReviewDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum BridgeIntegratedReviewGateDto {
+    Required {
+        reason: String,
+    },
+    SatisfiedByReview {
+        review_round_id: String,
+        reviewed_head: String,
+    },
+    NotRequiredNoDelivery,
+    NotRequiredSingleExecutorEquivalent {
+        work_unit_id: String,
+        completion_revision: u32,
+        merge_record_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -318,6 +337,11 @@ pub struct BridgeTaskWorkUnitDto {
     pub continuation_source_turn_id: Option<String>,
     pub continuation_revision: u64,
     pub executor_progress_revision: u64,
+    pub blueprint_fingerprint: Option<String>,
+    pub objective: Option<String>,
+    pub implementation_step_count: usize,
+    pub acceptance_criterion_count: usize,
+    pub verification_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

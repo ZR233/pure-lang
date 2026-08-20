@@ -85,6 +85,7 @@ String taskProgressFingerprint(Map<String, dynamic> snapshot) {
     'statusMessage': task['statusMessage'],
     'taskGeneration': task['taskGeneration'],
     'expectedHead': task['expectedHead'],
+    'integratedReviewGate': task['integratedReviewGate'],
     'workUnits': _normalized(
       task['workUnits'],
       (unit) => {
@@ -99,6 +100,11 @@ String taskProgressFingerprint(Map<String, dynamic> snapshot) {
         'continuationSourceTurnId': unit['continuationSourceTurnId'],
         'continuationRevision': unit['continuationRevision'],
         'executorProgressRevision': unit['executorProgressRevision'],
+        'blueprintFingerprint': unit['blueprintFingerprint'],
+        'objective': unit['objective'],
+        'implementationStepCount': unit['implementationStepCount'],
+        'acceptanceCriterionCount': unit['acceptanceCriterionCount'],
+        'verificationCount': unit['verificationCount'],
       },
     ),
     'completions': _normalized(
@@ -169,17 +175,44 @@ void validateTaskCompletion(
       .cast<Map<String, dynamic>>();
   final reviews = (task['reviews'] as List<dynamic>? ?? const [])
       .cast<Map<String, dynamic>>();
-  if (workUnits.isEmpty || completions.length < workUnits.length) {
+  if (completions.length < workUnits.length) {
     throw StateError('not every WorkUnit has a completion');
   }
-  if (merges.length != workUnits.length) {
-    throw StateError('merge records are incomplete or duplicated');
+  final gate = task['integratedReviewGate'] as Map<String, dynamic>?;
+  if (gate == null) {
+    throw StateError('completed task has no integrated review gate');
+  }
+  final gateStatus = gate['status'];
+  final noDelivery = gateStatus == 'notRequiredNoDelivery';
+  if (noDelivery ? merges.isNotEmpty : merges.length != workUnits.length) {
+    throw StateError('merge records do not match the integrated review gate');
   }
   final pathExists = worktreeExists ?? (path) => Directory(path).existsSync();
   for (final unit in workUnits) {
     final workUnitId = unit['id'];
-    if (unit['status'] != 'merged') {
-      throw StateError('WorkUnit $workUnitId is not merged: ${unit['status']}');
+    final expectedStatus = noDelivery ? 'noDelivery' : 'merged';
+    if (unit['status'] != expectedStatus) {
+      throw StateError(
+        'WorkUnit $workUnitId is not $expectedStatus: ${unit['status']}',
+      );
+    }
+    final worktreePath = unit['worktreePath'] as String?;
+    if (worktreePath == null ||
+        worktreePath.isEmpty ||
+        pathExists(worktreePath)) {
+      throw StateError('WorkUnit $workUnitId left a worktree behind');
+    }
+    if (noDelivery) {
+      final unitCompletions = completions
+          .where((completion) => completion['workUnitId'] == workUnitId)
+          .toList();
+      if (unitCompletions.isEmpty ||
+          unitCompletions.any(
+            (completion) => completion['kind'] != 'noDelivery',
+          )) {
+        throw StateError('WorkUnit $workUnitId has no noDelivery completion');
+      }
+      continue;
     }
     final matchingMerges = merges
         .where((merge) => merge['workUnitId'] == workUnitId)
@@ -209,20 +242,48 @@ void validateTaskCompletion(
         'WorkUnit $workUnitId merge does not match its completion revision',
       );
     }
-    final worktreePath = unit['worktreePath'] as String?;
-    if (worktreePath == null ||
-        worktreePath.isEmpty ||
-        pathExists(worktreePath)) {
-      throw StateError('WorkUnit $workUnitId left a worktree behind');
-    }
   }
-  if (!reviews.any(
-    (review) =>
-        review['scope'] == 'integrated' &&
-        review['verdict'] == 'pass' &&
-        review['reviewedHead'] == task['expectedHead'],
-  )) {
-    throw StateError('integrated pass review does not match expected HEAD');
+  switch (gateStatus) {
+    case 'required':
+      throw StateError('completed task still requires integrated review');
+    case 'satisfiedByReview':
+      final matchingReviews = reviews
+          .where(
+            (review) =>
+                review['id'] == gate['reviewRoundId'] &&
+                review['scope'] == 'integrated' &&
+                review['verdict'] == 'pass' &&
+                review['reviewedHead'] == gate['reviewedHead'] &&
+                review['reviewedHead'] == task['expectedHead'],
+          )
+          .toList();
+      if (matchingReviews.length != 1) {
+        throw StateError('integrated review gate does not match a pass round');
+      }
+      break;
+    case 'notRequiredNoDelivery':
+      if (reviews.any((review) => review['scope'] == 'integrated')) {
+        throw StateError('no-delivery task unexpectedly has integrated review');
+      }
+      break;
+    case 'notRequiredSingleExecutorEquivalent':
+      if (workUnits.length != 1 || merges.length != 1) {
+        throw StateError('single-executor gate has multiple deliveries');
+      }
+      final merge = merges.single;
+      if (merge['workUnitId'] != gate['workUnitId'] ||
+          merge['completionRevision'] != gate['completionRevision'] ||
+          merge['id'] != gate['mergeRecordId']) {
+        throw StateError('single-executor gate does not match its merge');
+      }
+      if (reviews.any((review) => review['scope'] == 'integrated')) {
+        throw StateError(
+          'single-executor task unexpectedly has integrated review',
+        );
+      }
+      break;
+    default:
+      throw StateError('unknown integrated review gate: $gateStatus');
   }
   final workspace = snapshot['workspace'] as Map<String, dynamic>?;
   if (workspace == null ||

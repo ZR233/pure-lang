@@ -4,8 +4,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use pl_studio_runtime::{
-    ConfigStore, InteractionKind, InteractionRequest, StudioMode, StudioRole, StudioRuntime,
-    StudioStore, StudioTaskRuntime,
+    ConfigStore, InteractionKind, InteractionRequest, StudioHostKind, StudioMode, StudioRole,
+    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime,
 };
 
 use super::git::git_output;
@@ -54,7 +54,14 @@ impl LiveTaskFixture {
             .context("Node.js is required before starting the live model test")?;
 
         let root = TempRoot::new("pure-task-live-integration")?;
+        let studio_home = root.path.join("home");
         let workspace = root.path.join("workspace");
+        tokio::fs::create_dir_all(&studio_home).await?;
+        tokio::fs::write(
+            studio_home.join("config.toml"),
+            &installed_config.original_bytes,
+        )
+        .await?;
         tokio::fs::create_dir_all(&workspace).await?;
         tokio::fs::write(
             workspace.join("README.md"),
@@ -62,8 +69,14 @@ impl LiveTaskFixture {
         )
         .await?;
 
-        let store = StudioStore::open(root.path.join("studio.sqlite")).await?;
-        let runtime = StudioRuntime::new(store.clone(), installed_config.store.clone())?;
+        let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(studio_home.clone()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .map_err(anyhow::Error::new)?;
+        runtime.start_runtime().await?;
+        let store = StudioStore::open(studio_home.join("studio/studio.sqlite")).await?;
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
             .create_thread(&project.id, "Live headless shooter task")
@@ -71,7 +84,6 @@ impl LiveTaskFixture {
         runtime
             .set_thread_mode(&session.id, StudioMode::Task)
             .await?;
-        runtime.start_runtime().await?;
 
         eprintln!("live Task model routes:\n{route_diagnostics}");
         eprintln!("Node.js: {node_version}");
@@ -241,31 +253,12 @@ impl LiveTaskFixture {
                 }
                 _ => None,
             })
-            .map(|(arguments, result)| {
-                let result: serde_json::Value = serde_json::from_str(&result)
-                    .context("successful task_spawn_executor result is not JSON")?;
-                if result
-                    .get("agentId")
-                    .and_then(serde_json::Value::as_str)
-                    .is_none()
-                {
-                    bail!("task_spawn_executor result does not contain agentId");
+            .filter_map(|(arguments, result)| {
+                match successful_executor_scope_hints(&arguments, &result) {
+                    Ok(Some(scope_hints)) => Some(Ok(scope_hints)),
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error)),
                 }
-                let arguments: serde_json::Value = serde_json::from_str(&arguments)
-                    .context("task_spawn_executor arguments are not JSON")?;
-                let Some(scope_hints) = arguments.get("scopeHints") else {
-                    return Ok(Vec::new());
-                };
-                scope_hints
-                    .as_array()
-                    .context("task_spawn_executor scopeHints is not an array")?
-                    .iter()
-                    .map(|path| {
-                        path.as_str()
-                            .map(ToOwned::to_owned)
-                            .context("task_spawn_executor scopeHints contains a non-string value")
-                    })
-                    .collect::<Result<Vec<_>>>()
             })
             .collect()
     }
@@ -357,6 +350,38 @@ impl LiveTaskFixture {
     pub fn assert_config_unchanged(&self) -> Result<()> {
         self.installed_config.assert_unchanged()
     }
+}
+
+fn successful_executor_scope_hints(arguments: &str, result: &str) -> Result<Option<Vec<String>>> {
+    let Ok(result) = serde_json::from_str::<serde_json::Value>(result) else {
+        return Ok(None);
+    };
+    if result
+        .get("agentId")
+        .and_then(serde_json::Value::as_str)
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let arguments: serde_json::Value = serde_json::from_str(arguments)
+        .context("successful task_spawn_executor arguments are not JSON")?;
+    let Some(scope_hints) = arguments
+        .get("scope")
+        .and_then(|scope| scope.get("scopeHints"))
+    else {
+        return Ok(Some(Vec::new()));
+    };
+    let scope_hints = scope_hints
+        .as_array()
+        .context("task_spawn_executor scopeHints is not an array")?
+        .iter()
+        .map(|path| {
+            path.as_str()
+                .map(ToOwned::to_owned)
+                .context("task_spawn_executor scopeHints contains a non-string value")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(scope_hints))
 }
 
 struct InstalledConfigGuard {
@@ -504,4 +529,25 @@ pub fn normalized_text(path: &Path) -> Result<String> {
     std::fs::read_to_string(path)
         .with_context(|| format!("failed to read `{}`", path.display()))
         .map(|content| content.replace("\r\n", "\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::successful_executor_scope_hints;
+
+    #[test]
+    fn rejected_executor_spawn_is_not_collected_as_a_success() {
+        assert_eq!(
+            successful_executor_scope_hints("{}", "executor blueprint is invalid").unwrap(),
+            None
+        );
+        assert_eq!(
+            successful_executor_scope_hints(
+                r#"{"scope":{"scopeHints":["game-core.mjs"]}}"#,
+                r#"{"agentId":"executor-1"}"#,
+            )
+            .unwrap(),
+            Some(vec!["game-core.mjs".to_string()])
+        );
+    }
 }

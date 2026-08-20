@@ -185,9 +185,8 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                         _agentShortStatus(thread),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: context.studioInkSoft,
-                    ),
+                    style: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(color: context.studioInkSoft),
                   ),
                 ],
               ),

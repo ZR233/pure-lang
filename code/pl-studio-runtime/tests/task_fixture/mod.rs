@@ -4,7 +4,11 @@ mod git;
 mod server;
 mod sse;
 
-pub use fixture::{DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, TaskFlowFixture, normalized_text};
+pub use fixture::{
+    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PLANNER_FOLLOWUP_CONTENT, PLANNER_FOLLOWUP_PATH,
+    TaskFlowFixture, normalized_text,
+};
 pub use git::git_output;
+pub use server::ScriptMode;
 
 pub const PARENT_HISTORY_MARKER: &str = "planner-history-marker-must-not-reach-task-children";

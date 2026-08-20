@@ -1,4 +1,5 @@
 use sea_orm::DatabaseConnection;
+use std::path::PathBuf;
 
 mod agent_framework;
 pub(super) mod attachment;
@@ -14,6 +15,7 @@ mod thread;
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
+    attachments_dir: PathBuf,
 }
 
 pub(in crate::studio) use agent_framework::RecoverablePlan;
@@ -23,6 +25,10 @@ pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db
+    }
+
+    pub(crate) fn attachments_dir(&self) -> &std::path::Path {
+        &self.attachments_dir
     }
 
     #[cfg(test)]

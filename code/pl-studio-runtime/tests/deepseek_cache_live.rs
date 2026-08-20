@@ -4,9 +4,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail, ensure};
 use pl_studio_runtime::{
     AgentMessageChannel, ConfigPaths, ConfigStore, McpServerStatusKind, ProviderWireProtocol,
-    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioRole, StudioRuntime, StudioStore,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest, ThreadItemContent, TurnBillingRecord,
-    TurnState,
+    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind, StudioRole, StudioRuntime,
+    StudioRuntimeOptions, StudioStore, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    ThreadItemContent, TurnBillingRecord, TurnState,
 };
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
 
@@ -50,7 +50,6 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     );
     let home = root.join("home");
     let workspace = root.join("workspace");
-    let database_path = root.join("studio.sqlite");
     tokio::fs::create_dir_all(&home).await?;
     tokio::fs::create_dir_all(&workspace).await?;
     tokio::fs::write(
@@ -60,6 +59,8 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     .await?;
 
     let config_store = copy_config_to_temp_home(&installed_config, &home)?;
+    let studio_home = config_store.paths().config_dir().to_path_buf();
+    let database_path = studio_home.join("studio/studio.sqlite");
     let config = config_store.load()?;
     assert_preserved_config(&installed_config, &config)?;
     validate_live_route_and_mcp(&config)?;
@@ -73,13 +74,18 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     )
     .await?;
 
+    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(studio_home.clone()),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
+    runtime.start_runtime().await?;
     let store = StudioStore::open(&database_path).await?;
-    let runtime = StudioRuntime::new(store.clone(), config_store.clone())?;
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime
         .create_thread(&project.id, "Installed DeepSeek cache live")
         .await?;
-    runtime.start_runtime().await?;
 
     let prompts = std::iter::once(
         "Execute this exact verification flow: call skill_view for cache-live; call read_file for README.md; call one read-only tool whose name begins mcp__zhipu_search__; call apply_patch to create live-cache-result.txt containing exactly installed cache verified; then give a final response.".to_string(),
@@ -175,8 +181,12 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     drop(runtime);
     drop(store);
 
-    let reopened_store = StudioStore::open(&database_path).await?;
-    let reopened = StudioRuntime::new(reopened_store, config_store)?;
+    let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(studio_home),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
     reopened.start_runtime().await?;
     let restored = reopened.thread_snapshot(&thread.id).await?;
     let restored_usage = &restored

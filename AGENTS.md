@@ -141,8 +141,10 @@
 - 测试名称表达场景和期望；优先比较完整对象并使用 `pretty_assertions::assert_eq!` 获得清晰 diff。
 - 测试 helper 只服务测试时放在测试模块或专用测试模块，不为测试方便扩大生产 API。
 - 避免在测试中修改进程环境变量；确需修改时必须隔离并恢复。
+- `code/pure-studio/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
+  Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
 - 提交前在本地执行与 CI 门禁一致的检查清单（只需保证当前环境通过；
-  `PUB_HOSTED_URL` 镜像导致的 pubspec.lock hosted URL 差异由 xtask 自动
+  `PUB_HOSTED_URL` 镜像导致的已跟踪 pubspec.lock hosted URL 差异由 xtask 自动
   规范化为 pub.dev canonical，无需手工处理）：
 
   ```powershell

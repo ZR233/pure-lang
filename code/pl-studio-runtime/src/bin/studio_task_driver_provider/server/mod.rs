@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use pl_studio_runtime::{
-    AgentModelConfig, AgentRoleId, ConfigPaths, ConfigStore, ModelInfo, ModelParameter,
-    ModelRouteConfig, PermissionMode, ProviderConfig, ProviderId, ReasoningEffort, StudioConfig,
+use pl_core::{
+    AgentModelConfig, AgentRoleId, ModelInfo, ModelParameter, ModelRouteConfig, PermissionMode,
+    ProviderConfig, ProviderId, ReasoningEffort,
 };
+use pl_studio_runtime::{ConfigPaths, ConfigStore, StudioConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;

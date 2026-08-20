@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // coverage:ignore-file
-// ignore_for_file: type=lint
+// ignore_for_file: type=lint, type=warning, deprecated_member_use, deprecated_member_use_from_same_package
 // ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
 
 part of 'thread_stream.dart';
@@ -9,6 +9,7 @@ part of 'thread_stream.dart';
 // FreezedGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
@@ -181,7 +182,7 @@ return planConfirmation(_that.planId,_that.content);case _:
 
 
 class BridgeInteractionPayload_UserInput extends BridgeInteractionPayload {
-  const BridgeInteractionPayload_UserInput({required final  List<BridgeUserQuestion> questions}): _questions = questions,super._();
+  const BridgeInteractionPayload_UserInput({required  List<BridgeUserQuestion> questions}): _questions = questions,super._();
 
 
  final  List<BridgeUserQuestion> _questions;
@@ -559,7 +560,7 @@ return planConfirmation(_that.decision,_that.content,_that.reason);case _:
 
 
 class BridgeInteractionResolution_UserInput extends BridgeInteractionResolution {
-  const BridgeInteractionResolution_UserInput({required final  List<BridgeUserInputAnswer> answers}): _answers = answers,super._();
+  const BridgeInteractionResolution_UserInput({required  List<BridgeUserInputAnswer> answers}): _answers = answers,super._();
 
 
  final  List<BridgeUserInputAnswer> _answers;
@@ -953,7 +954,7 @@ return file(_that.path,_that.mediaType);case _:
 
 
 class BridgeThreadItemContent_UserMessage extends BridgeThreadItemContent {
-  const BridgeThreadItemContent_UserMessage({required this.text, required final  List<BridgeThreadAttachment> attachments}): _attachments = attachments,super._();
+  const BridgeThreadItemContent_UserMessage({required this.text, required  List<BridgeThreadAttachment> attachments}): _attachments = attachments,super._();
 
 
  final  String text;
@@ -1095,7 +1096,7 @@ as String,
 
 
 class BridgeThreadItemContent_Reasoning extends BridgeThreadItemContent {
-  const BridgeThreadItemContent_Reasoning({required final  List<String> summary, required final  List<String> content}): _summary = summary,_content = content,super._();
+  const BridgeThreadItemContent_Reasoning({required  List<String> summary, required  List<String> content}): _summary = summary,_content = content,super._();
 
 
  final  List<String> _summary;

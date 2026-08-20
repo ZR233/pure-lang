@@ -24,7 +24,7 @@ use pl_core::{
 use crate::config::ConfigRuntime;
 use crate::studio::runtime::SkillCatalogRuntime;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionRuntime, StudioStore};
+use crate::studio::{InteractionService, StudioStore};
 use crate::{McpRuntimeHandle, StudioMode};
 
 use super::policy::{StudioPolicyContext, studio_execution_policy};
@@ -40,7 +40,7 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     /// 与 MCP worker 共享的工具注册表；MCP 工具按 generation 发布于此。
     mcp_shared_tools: std::sync::Arc<ToolRegistry>,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
-    interactions: InteractionRuntime,
+    interactions: InteractionService,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
     skills: SkillCatalogRuntime,
@@ -54,7 +54,7 @@ impl StudioAgentTurnFactory {
         mcp_runtime: McpRuntimeHandle,
         mcp_shared_tools: std::sync::Arc<ToolRegistry>,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
-        interactions: InteractionRuntime,
+        interactions: InteractionService,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         skills: SkillCatalogRuntime,
@@ -166,9 +166,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             let validated = section
                 .ok_or_else(|| anyhow::anyhow!("Task executor handoff is missing"))
                 .and_then(|section| {
-                    let handoff = crate::studio::task_coordinator::TaskExecutorHandoffV1::from_context_section(
-                        &section,
-                    )?;
+                    let handoff =
+                        crate::studio::task_coordinator::TaskExecutorHandoff::from_context_section(
+                            &section,
+                        )?;
                     handoff.validate_owner(
                         run,
                         &work_unit,

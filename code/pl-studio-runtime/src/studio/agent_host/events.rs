@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, watch};
 use crate::studio::task_coordinator::{
     RecordTaskAgentFailure, TaskPlannerWakeRequest, TaskPlannerWakeSource,
 };
-use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
+use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 
 use super::resources::StudioAgentResources;
 use super::{StudioPlanConfirmationProjector, wait_for_runtime};
@@ -31,7 +31,7 @@ pub(in crate::studio) struct StudioAgentCommitObserver {
 struct StudioAgentEventProjector {
     store: StudioStore,
     resources: StudioAgentResources,
-    product_events: StudioProductEventRuntime,
+    product_events: ProductEventBus,
     plan_confirmations: StudioPlanConfirmationProjector,
     coordinator: std::sync::Arc<crate::studio::task_coordinator::TaskCoordinator>,
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
@@ -62,10 +62,10 @@ where
 impl StudioAgentCommitObserver {
     pub(super) fn new(
         store: StudioStore,
-        interactions: InteractionRuntime,
+        interactions: InteractionService,
         coordinator: std::sync::Arc<crate::studio::task_coordinator::TaskCoordinator>,
         resources: StudioAgentResources,
-        product_events: StudioProductEventRuntime,
+        product_events: ProductEventBus,
     ) -> Self {
         let (runtime, runtime_receiver) = watch::channel(None);
         let (sender, mut receiver) = mpsc::unbounded_channel();

@@ -1381,6 +1381,14 @@ class DriverDemoStudioApi extends DemoStudioApi {
   DriverDemoStudioApi({super.lspActivityLoop});
 
   bool _sessionLifecycleScenario = false;
+  int _pagingFixtureCount = 42;
+
+  void preparePagingScenario(int count) {
+    _sessionLifecycleScenario = false;
+    _pagingFixtureCount = count;
+    _pageFillThreads.clear();
+    _selectedThreadId = null;
+  }
 
   void prepareSessionLifecycleScenario() {
     _sessionLifecycleScenario = true;
@@ -1402,7 +1410,8 @@ class DriverDemoStudioApi extends DemoStudioApi {
 
   /// Driver 目录分页验收需要大量历史会话。
   @override
-  int get directoryPageFillCount => _sessionLifecycleScenario ? 0 : 42;
+  int get directoryPageFillCount =>
+      _sessionLifecycleScenario ? 0 : _pagingFixtureCount;
 
   @override
   Future<StudioState> readStudioState() async {

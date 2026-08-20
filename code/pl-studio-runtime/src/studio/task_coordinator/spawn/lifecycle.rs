@@ -4,7 +4,7 @@ use crate::{PureError, Result as PureResult, WorktreeCreateSpec};
 use anyhow::Result;
 
 use super::super::{AllocateExecutor, ExecutorAllocation, TaskCoordinator};
-use super::{TaskExecutorHandoffInput, TaskExecutorHandoffV1};
+use super::{TaskExecutorBlueprint, TaskExecutorHandoff};
 use crate::studio::task_coordinator::scope_hint::ScopeHint;
 
 /// Studio Task 产品层为一次 child spawn 固定的业务输入。
@@ -17,11 +17,7 @@ pub(crate) struct StudioTaskSpawnRequest {
     pub(crate) scope_hints: Vec<String>,
     pub(crate) requested_by_call_id: String,
     pub(crate) review_round_id: Option<String>,
-    pub(crate) assignment: Option<String>,
-    pub(crate) acceptance_criteria: Vec<String>,
-    pub(crate) dependencies: Vec<super::TaskExecutorDependencyV1>,
-    pub(crate) evidence: Vec<super::TaskExecutorEvidenceV1>,
-    pub(crate) verification_commands: Vec<super::TaskExecutorVerificationCommandV1>,
+    pub(crate) blueprint: Option<TaskExecutorBlueprint>,
 }
 
 /// Studio Task 在 framework saga prepare 阶段预留的资源事实。
@@ -113,11 +109,22 @@ impl TaskCoordinator {
     ) -> PureResult<StudioTaskSpawnPreparation> {
         let scope_hints = normalize_scope_hints(&request.scope_hints)
             .map_err(|error| spawn_error(error.to_string()))?;
+        let blueprint = request
+            .blueprint
+            .clone()
+            .ok_or_else(|| spawn_error("executor spawn has no implementation blueprint"))?
+            .normalize_and_validate()
+            .map_err(|error| spawn_error(error.to_string()))?;
+        if blueprint.task_name != request.task_name || blueprint.scope.scope_hints != scope_hints {
+            return Err(spawn_error(
+                "executor blueprint does not match its canonical spawn allocation",
+            ));
+        }
         let allocation = self
             .reserve_executor_spawn(AllocateExecutor {
                 thread_id: request.root_thread_id.clone(),
                 title: request.task_name.clone(),
-                scope_hints,
+                scope_hints: scope_hints.clone(),
                 agent_id: request.agent_id.clone(),
                 requested_by_call_id: request.requested_by_call_id.clone(),
             })
@@ -128,22 +135,13 @@ impl TaskCoordinator {
             ));
         }
         let work_unit_id = allocation.work_unit.id.clone();
-        let assignment = request
-            .assignment
-            .clone()
-            .ok_or_else(|| spawn_error("executor spawn has no structured assignment"))?;
-        let handoff = TaskExecutorHandoffV1::new(
+        let handoff = TaskExecutorHandoff::new(
             &allocation.run,
             &allocation.work_unit,
-            TaskExecutorHandoffInput {
-                parent_thread_id: request.root_thread_id.clone(),
-                assignment,
-                acceptance_criteria: request.acceptance_criteria.clone(),
-                dependencies: request.dependencies.clone(),
-                evidence: request.evidence.clone(),
-                verification_commands: request.verification_commands.clone(),
-            },
+            request.root_thread_id.clone(),
+            blueprint,
         )
+        .map_err(|error| spawn_error(error.to_string()))?
         .to_context_section()
         .map_err(|error| spawn_error(error.to_string()))?;
         Ok(StudioTaskSpawnPreparation::with_worktree_and_token(

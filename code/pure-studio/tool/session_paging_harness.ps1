@@ -1,18 +1,13 @@
-﻿# 会话分页 + write-behind 关机落库的真实 runtime Driver 验收。
+# 会话分页 + 关机阶段的确定性 Driver demo 验收。
 #
-# 两轮启动同一隔离 PURE_STUDIO_HOME：
-#   第一轮：PURE_STUDIO_SEED_FIXTURES=1 + run-gui --driver（真实 SQLite），
-#     seeding 40 条会话 → 验收侧栏翻页 → shutdown 阶段序列（含落库 pending=0）；
-#   第二轮：重启读取同一数据库，断言落库数据完整（目录数量一致）。
+# Fixture 只存在于 DriverDemoStudioApi，不进入生产 FRB 或 StudioRuntime。
+# 启动 demo 后填充会话目录，验收侧栏翻页与 shutdown 阶段序列。
 #
 # 用法：
 #   pwsh tool/session_paging_harness.ps1 [-SeedCount 40]
 
 [CmdletBinding()]
 param(
-    # Demo 模式：使用 DriverDemoStudioApi 的确定性数据（42 条历史会话）单轮验收。
-    [switch]$Demo,
-
     [string]$ArtifactsDirectory,
 
     [ValidateRange(60, 1800)]
@@ -22,7 +17,7 @@ param(
     [int]$DriverTimeoutSeconds = 300,
 
     [ValidateRange(10, 200)]
-    # 默认 64：超过快照首页（50），真实 runtime 下必须触底翻页才能加载完。
+    # 默认 64：超过快照首页（50），必须触底翻页才能加载完。
     [int]$SeedCount = 64
 )
 
@@ -40,13 +35,10 @@ if ([string]::IsNullOrWhiteSpace($ArtifactsDirectory)) {
 }
 $ArtifactsDirectory = [System.IO.Path]::GetFullPath($ArtifactsDirectory)
 New-Item -ItemType Directory -Path $ArtifactsDirectory -Force | Out-Null
-$studioHome = Join-Path $ArtifactsDirectory 'studio-home'
 
 function Invoke-Round {
     param(
-        [Parameter(Mandatory = $true)][string]$Label,
-        [Parameter(Mandatory = $true)][bool]$Seed,
-        [Parameter(Mandatory = $true)][int]$ExpectedCount
+        [Parameter(Mandatory = $true)][string]$Label
     )
     $guiStdout = Join-Path $ArtifactsDirectory "$Label-gui.stdout.log"
     $guiStderr = Join-Path $ArtifactsDirectory "$Label-gui.stderr.log"
@@ -56,16 +48,9 @@ function Invoke-Round {
     $driverProcess = $null
     try {
         $environment = @{
-            'PURE_STUDIO_HOME' = $studioHome
             'PURE_STUDIO_NATIVE_LIFECYCLE_LOG' = Join-Path $ArtifactsDirectory "$Label-native-window.log"
         }
-        if ($Seed) {
-            $environment['PURE_STUDIO_SEED_FIXTURES'] = '1'
-        }
-        $guiArguments = @('xtask', 'run-gui', '--driver', '--log-level', 'debug')
-        if ($Demo) {
-            $guiArguments = @('xtask', 'run-gui', '--demo', '--driver', '--log-level', 'debug')
-        }
+        $guiArguments = @('xtask', 'run-gui', '--demo', '--driver', '--log-level', 'debug')
         $guiProcess = Start-LoggedProcess `
             -FilePath 'cargo' `
             -Arguments $guiArguments `
@@ -84,9 +69,7 @@ function Invoke-Round {
             'run', 'test_driver/session_paging_acceptance_driver.dart',
             '--vm-service-url', $vmServiceUrl
         )
-        if ($Seed) {
-            $driverArguments += @('--seed-threads', "$SeedCount")
-        }
+        $driverArguments += @('--seed-threads', "$SeedCount")
         $driverProcess = Start-LoggedProcess `
             -FilePath 'dart' `
             -Arguments $driverArguments `
@@ -119,12 +102,6 @@ function Invoke-Round {
     }
 }
 
-if ($Demo) {
-    Invoke-Round -Label 'demo' -Seed $false -ExpectedCount 42 | Out-Null
-}
-else {
-    Invoke-Round -Label 'round-1' -Seed $true -ExpectedCount $SeedCount | Out-Null
-    Invoke-Round -Label 'round-2' -Seed $false -ExpectedCount $SeedCount | Out-Null
-}
-Write-Output 'Session paging + persistence Driver harness completed successfully.'
+Invoke-Round -Label 'demo' | Out-Null
+Write-Output 'Session paging Driver demo harness completed successfully.'
 Write-Output "Artifacts: $ArtifactsDirectory"

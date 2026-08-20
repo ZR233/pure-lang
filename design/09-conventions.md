@@ -101,9 +101,17 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 
 ## 9.9 Studio 生成文件约定
 
+- `code/pure-studio/pubspec.lock` 是应用级 canonical 依赖快照，必须由 Git 跟踪且不得被任何仓库
+  ignore 规则排除。Flutter 直接依赖允许跨 major 升级，默认采用当前 stable SDK 可解析的稳定版本；
+  prerelease 必须有独立需求，或由已选择的稳定直接依赖求解强制要求，并经过完整生成与测试验证。
+  当前 `freezed 4.0.0-dev.3` 是后者：稳定的 `build_runner 2.16` 需要 analyzer 13，而最新稳定
+  Freezed 3 只接受更早的 analyzer；待两者稳定约束重新相交后应回到稳定 Freezed。
+  升级时同步更新 Flutter SDK pin、重新解析 lockfile、运行全部生成器，并迁移上游 breaking API 后
+  再提交源码与生成输出。
 - Riverpod、Freezed、Flutter l10n 和 FRB 输出只由 `cargo xtask generate-gui` 管理，
   不得手工修改。生成流程必须覆盖依赖解析、所有生成器、生成文件规范化和格式化，
-  使本地手工改动由生成器恢复为 canonical 内容。当前锁定的 build_runner 会始终删除冲突
+  使本地手工改动由生成器恢复为 canonical 内容。生成流程中的依赖解析与 build_runner 都必须
+  在返回前恢复已跟踪 lockfile 的 canonical hosted URL，并拒绝生成器改变依赖解析。当前锁定的 build_runner 会始终删除冲突
   输出，不得继续传递已移除的 `--delete-conflicting-outputs` 参数。
 - `cargo xtask run-gui` 和 `cargo xtask build-gui` 在运行或构建前自动执行同一生成流程，
   并以覆盖 Dart、Rust API、生成输出和生成配置的内容指纹跳过无变化的重复生成，确保 GUI
@@ -118,7 +126,7 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
   `cargo xtask verify-gui`、Conventional PR 标题和发布配置校验。Flutter Driver
   smoke、任务流 harness 与 live 模型验收不在 CI 中运行，交付前在本地 Windows
   环境执行；AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
-  可通过（pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
+  可通过（已跟踪的 pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
 - xtask 中的生成输出规则是 Git 一致性检查和生成文件规范化的共同事实来源。新增生成器或
   输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。
 

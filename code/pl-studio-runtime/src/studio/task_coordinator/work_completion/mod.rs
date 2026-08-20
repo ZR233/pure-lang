@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
+use super::spawn::{TaskExecutorBlueprint, verification_result_map};
 use super::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRunRecord,
     ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
@@ -33,18 +34,26 @@ struct CompletionResultInput {
     /// Full Git commit id or an unambiguous abbreviation of at least 7 hex characters.
     /// Required for delivery and forbidden for noDelivery.
     head_commit: Option<String>,
-    /// Commands run and their outcomes, or evidence that no delivery was required.
-    verification_summary: String,
+    /// Successful outcomes for every command and inspection in the durable handoff.
+    #[schemars(length(min = 1))]
+    verification_results: Vec<VerificationResultInput>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VerificationResultInput {
+    check_id: String,
+    summary: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum ValidatedCompletionResultInput {
     Delivery {
         head_commit: String,
-        verification_summary: String,
+        verification_results: Vec<VerificationResultInput>,
     },
     NoDelivery {
-        verification_summary: String,
+        verification_results: Vec<VerificationResultInput>,
     },
 }
 
@@ -55,7 +64,7 @@ impl TryFrom<CompletionResultInput> for ValidatedCompletionResultInput {
         match (input.kind, input.head_commit) {
             (CompletionResultKindInput::Delivery, Some(head_commit)) => Ok(Self::Delivery {
                 head_commit,
-                verification_summary: input.verification_summary,
+                verification_results: input.verification_results,
             }),
             (CompletionResultKindInput::Delivery, None) => {
                 bail!("delivery requires headCommit")
@@ -64,7 +73,7 @@ impl TryFrom<CompletionResultInput> for ValidatedCompletionResultInput {
                 bail!("noDelivery must not include headCommit")
             }
             (CompletionResultKindInput::NoDelivery, None) => Ok(Self::NoDelivery {
-                verification_summary: input.verification_summary,
+                verification_results: input.verification_results,
             }),
         }
     }
@@ -127,6 +136,10 @@ impl TaskCoordinator {
                 metadata(),
             ));
             entries.push(ToolEntry::new(
+                self.read_work_unit_handoff_tool(thread_id),
+                metadata(),
+            ));
+            entries.push(ToolEntry::new(
                 self.read_review_round_tool(thread_id),
                 metadata(),
             ));
@@ -174,7 +187,7 @@ impl TaskCoordinator {
         let coordinator = self.clone();
         FunctionToolDefinition::<CompletionResultInput>::new(
             "report_completion",
-            "Report a clean executor result with top-level kind, headCommit, and verificationSummary fields, then end the current turn for mandatory delivery review.",
+            "Report a clean executor result with verificationResults that exactly cover every handoff check, then end the current turn for delivery review.",
         )
         .registered(move |result: CompletionResultInput, context| {
                 let coordinator = coordinator.clone();
@@ -239,11 +252,19 @@ impl TaskCoordinator {
             .await?
             .context("active completion scope not found for this executor worktree")?;
         ensure_completion_scope_is_open(&scope)?;
+        let (_, handoff) = self
+            .store
+            .read_work_unit_handoff(&scope.work_unit.id)
+            .await?
+            .context("Task executor handoff is missing")?;
+        handoff.validate_owner(&scope.run, &scope.work_unit, &subagent.id)?;
         match ValidatedCompletionResultInput::try_from(result)? {
             ValidatedCompletionResultInput::Delivery {
                 head_commit,
-                verification_summary,
+                verification_results,
             } => {
+                let verification_summary =
+                    validated_verification_summary(&handoff.blueprint, verification_results)?;
                 let delivery = self
                     .validate_delivery(
                         CompletionValidation {
@@ -265,8 +286,10 @@ impl TaskCoordinator {
                     .await
             }
             ValidatedCompletionResultInput::NoDelivery {
-                verification_summary,
+                verification_results,
             } => {
+                let verification_summary =
+                    validated_verification_summary(&handoff.blueprint, verification_results)?;
                 let verification_summary = validate_common(
                     CompletionValidation {
                         scope: &scope,
@@ -392,6 +415,35 @@ fn normalized_path(path: &Path) -> String {
     }
 }
 
+fn validated_verification_summary(
+    blueprint: &TaskExecutorBlueprint,
+    mut results: Vec<VerificationResultInput>,
+) -> Result<String> {
+    for result in &mut results {
+        result.check_id = result.check_id.trim().to_string();
+        result.summary = result.summary.trim().to_string();
+        if result.check_id.is_empty() || result.summary.is_empty() {
+            bail!("verificationResults require non-empty checkId and summary")
+        }
+    }
+    let by_id = verification_result_map(
+        blueprint,
+        results
+            .iter()
+            .map(|result| (result.check_id.as_str(), result.summary.clone())),
+    )?;
+    let lines = blueprint
+        .verification_ids()
+        .map(|id| {
+            by_id
+                .get(id)
+                .map(|summary| format!("{id}: {summary}"))
+                .context("validated verification result is missing")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(lines.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,11 +459,11 @@ mod tests {
         let properties = schema["properties"].as_object().expect("input properties");
         assert!(properties.contains_key("kind"));
         assert!(properties.contains_key("headCommit"));
-        assert!(properties.contains_key("verificationSummary"));
+        assert!(properties.contains_key("verificationResults"));
         assert!(!properties.contains_key("result"));
         let required = schema["required"].as_array().expect("required fields");
         assert!(required.iter().any(|field| field == "kind"));
-        assert!(required.iter().any(|field| field == "verificationSummary"));
+        assert!(required.iter().any(|field| field == "verificationResults"));
         assert!(!required.iter().any(|field| field == "headCommit"));
     }
 
@@ -422,7 +474,7 @@ mod tests {
             serde_json::json!({
                 "kind": "delivery",
                 "headCommit": "0123456789abcdef",
-                "verificationSummary": "tests passed"
+                "verificationResults": [{"checkId": "check-1", "summary": "tests passed"}]
             }),
         )
         .expect("flat delivery input");
@@ -431,7 +483,10 @@ mod tests {
             CompletionResultInput {
                 kind: CompletionResultKindInput::Delivery,
                 head_commit: Some("0123456789abcdef".to_string()),
-                verification_summary: "tests passed".to_string(),
+                verification_results: vec![VerificationResultInput {
+                    check_id: "check-1".to_string(),
+                    summary: "tests passed".to_string(),
+                }],
             }
         );
 
@@ -439,7 +494,10 @@ mod tests {
             "report_completion",
             serde_json::json!({
                 "kind": "noDelivery",
-                "verificationSummary": "no repository change required"
+                "verificationResults": [{
+                    "checkId": "check-1",
+                    "summary": "no repository change required"
+                }]
             }),
         )
         .expect("flat no-delivery input");
@@ -448,7 +506,10 @@ mod tests {
             CompletionResultInput {
                 kind: CompletionResultKindInput::NoDelivery,
                 head_commit: None,
-                verification_summary: "no repository change required".to_string(),
+                verification_results: vec![VerificationResultInput {
+                    check_id: "check-1".to_string(),
+                    summary: "no repository change required".to_string(),
+                }],
             }
         );
     }
@@ -459,7 +520,7 @@ mod tests {
             ValidatedCompletionResultInput::try_from(CompletionResultInput {
                 kind: CompletionResultKindInput::Delivery,
                 head_commit: None,
-                verification_summary: "tests passed".to_string(),
+                verification_results: vec![],
             })
             .expect_err("delivery without headCommit must fail");
         assert_eq!(
@@ -471,12 +532,112 @@ mod tests {
             ValidatedCompletionResultInput::try_from(CompletionResultInput {
                 kind: CompletionResultKindInput::NoDelivery,
                 head_commit: Some("0123456789abcdef".to_string()),
-                verification_summary: "no repository change required".to_string(),
+                verification_results: vec![],
             })
             .expect_err("noDelivery with headCommit must fail");
         assert_eq!(
             unexpected_no_delivery_head.to_string(),
             "noDelivery must not include headCommit"
         );
+    }
+
+    #[test]
+    fn completion_verification_results_are_exact_and_stably_ordered() {
+        let blueprint: TaskExecutorBlueprint = serde_json::from_value(serde_json::json!({
+            "taskName": "implement transport",
+            "objective": "use one canonical transport",
+            "scope": {
+                "inScope": ["model routing"],
+                "outOfScope": [],
+                "scopeHints": ["code/pl-model"]
+            },
+            "implementationSteps": [{
+                "id": "step-1",
+                "instruction": "update routing",
+                "targets": [{"path": "code/pl-model/src/lib.rs"}],
+                "expectedOutcome": "one canonical route",
+                "criterionIds": ["criterion-1"]
+            }],
+            "acceptanceCriteria": [{
+                "id": "criterion-1",
+                "requirement": "routing is canonical"
+            }],
+            "dependencies": [],
+            "evidence": [],
+            "verification": {
+                "commands": [{
+                    "id": "check-command",
+                    "command": "cargo test -p pl-model",
+                    "cwd": ".",
+                    "purpose": "test routing",
+                    "expectedOutcome": "tests pass",
+                    "criterionIds": ["criterion-1"]
+                }],
+                "inspections": [{
+                    "id": "check-inspection",
+                    "instruction": "inspect the final routing table",
+                    "targets": [{"path": "code/pl-model/src/lib.rs"}],
+                    "expectedOutcome": "one canonical route remains",
+                    "criterionIds": ["criterion-1"]
+                }]
+            }
+        }))
+        .unwrap();
+        let blueprint = blueprint.normalize_and_validate().unwrap();
+        let summary = validated_verification_summary(
+            &blueprint,
+            vec![
+                VerificationResultInput {
+                    check_id: "check-inspection".to_string(),
+                    summary: "confirmed".to_string(),
+                },
+                VerificationResultInput {
+                    check_id: "check-command".to_string(),
+                    summary: "passed".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            summary,
+            "check-command: passed\ncheck-inspection: confirmed"
+        );
+
+        for (results, expected) in [
+            (
+                vec![VerificationResultInput {
+                    check_id: "check-command".to_string(),
+                    summary: "passed".to_string(),
+                }],
+                "missing checks: check-inspection",
+            ),
+            (
+                vec![
+                    VerificationResultInput {
+                        check_id: "check-command".to_string(),
+                        summary: "passed".to_string(),
+                    },
+                    VerificationResultInput {
+                        check_id: "check-command".to_string(),
+                        summary: "passed twice".to_string(),
+                    },
+                ],
+                "repeats check `check-command`",
+            ),
+            (
+                vec![VerificationResultInput {
+                    check_id: "unknown".to_string(),
+                    summary: "passed".to_string(),
+                }],
+                "unknown check `unknown`",
+            ),
+        ] {
+            assert!(
+                validated_verification_summary(&blueprint, results)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(expected)
+            );
+        }
     }
 }

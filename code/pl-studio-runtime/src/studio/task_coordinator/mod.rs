@@ -17,7 +17,7 @@ pub(crate) use recovery::MERGE_RECOVERY_BLOCK_PREFIX;
 pub(crate) use recovery::is_retryable_merge_recovery_message;
 pub(crate) use spawn::{
     StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
-    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoffV1,
+    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
 };
 pub(crate) use types::*;
 

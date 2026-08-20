@@ -11,7 +11,6 @@ use sea_orm::{
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::attachment_record;
-use crate::studio::paths::default_attachments_dir;
 use crate::studio::records::{AttachmentRecord, MaterializedAttachment};
 use crate::studio::store::StudioStore;
 
@@ -28,7 +27,7 @@ impl StudioStore {
         let normalized = normalize_image_attachment(media_type, bytes, decoded_image)?;
         let attachment_id = new_id("attachment");
         let extension = extension_for_media_type(normalized.media_type)?;
-        let dir = default_attachments_dir()?.join(thread_id);
+        let dir = self.attachments_dir().join(thread_id);
         tokio::fs::create_dir_all(&dir).await?;
         let storage_path = dir.join(format!("{attachment_id}.{extension}"));
         tokio::fs::write(&storage_path, &normalized.bytes).await?;

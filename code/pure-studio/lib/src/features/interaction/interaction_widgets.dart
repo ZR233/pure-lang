@@ -285,9 +285,8 @@ class DockOptionRow extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         subtitle!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: context.studioInkSoft,
-                        ),
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: context.studioInkSoft),
                       ),
                     ],
                   ],

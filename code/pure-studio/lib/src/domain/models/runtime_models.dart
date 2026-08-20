@@ -248,6 +248,9 @@ class TaskRuntimeView {
     required this.stopRequestedOrigin,
     required this.stopRequestedReason,
     required this.taskGeneration,
+    this.integratedReviewGate = const IntegratedReviewGateView.required(
+      reason: 'review gate unavailable',
+    ),
     this.failures = const [],
     this.terminalFailure,
     required this.workUnits,
@@ -264,6 +267,7 @@ class TaskRuntimeView {
   final String? stopRequestedOrigin;
   final String? stopRequestedReason;
   final int taskGeneration;
+  final IntegratedReviewGateView integratedReviewGate;
   final List<TaskFailureView> failures;
   final TaskFailureView? terminalFailure;
   final List<TaskWorkUnitView> workUnits;
@@ -294,6 +298,58 @@ class TaskRuntimeView {
     );
     return hasFailedExecutor && !hasInFlightWork;
   }
+}
+
+enum IntegratedReviewGateKind {
+  required,
+  satisfiedByReview,
+  notRequiredNoDelivery,
+  notRequiredSingleExecutorEquivalent,
+}
+
+class IntegratedReviewGateView {
+  const IntegratedReviewGateView.required({required this.reason})
+    : kind = IntegratedReviewGateKind.required,
+      reviewRoundId = null,
+      reviewedHead = null,
+      workUnitId = null,
+      completionRevision = null,
+      mergeRecordId = null;
+
+  const IntegratedReviewGateView.satisfiedByReview({
+    required this.reviewRoundId,
+    required this.reviewedHead,
+  }) : kind = IntegratedReviewGateKind.satisfiedByReview,
+       reason = null,
+       workUnitId = null,
+       completionRevision = null,
+       mergeRecordId = null;
+
+  const IntegratedReviewGateView.notRequiredNoDelivery()
+    : kind = IntegratedReviewGateKind.notRequiredNoDelivery,
+      reason = null,
+      reviewRoundId = null,
+      reviewedHead = null,
+      workUnitId = null,
+      completionRevision = null,
+      mergeRecordId = null;
+
+  const IntegratedReviewGateView.notRequiredSingleExecutorEquivalent({
+    required this.workUnitId,
+    required this.completionRevision,
+    required this.mergeRecordId,
+  }) : kind = IntegratedReviewGateKind.notRequiredSingleExecutorEquivalent,
+       reason = null,
+       reviewRoundId = null,
+       reviewedHead = null;
+
+  final IntegratedReviewGateKind kind;
+  final String? reason;
+  final String? reviewRoundId;
+  final String? reviewedHead;
+  final String? workUnitId;
+  final int? completionRevision;
+  final String? mergeRecordId;
 }
 
 class TaskFailureView {
@@ -353,6 +409,11 @@ class TaskWorkUnitView {
     required this.continuationSourceTurnId,
     required this.continuationRevision,
     required this.executorProgressRevision,
+    this.blueprintFingerprint,
+    this.objective,
+    this.implementationStepCount = 0,
+    this.acceptanceCriterionCount = 0,
+    this.verificationCount = 0,
   });
 
   final String id;
@@ -370,6 +431,11 @@ class TaskWorkUnitView {
   final String? continuationSourceTurnId;
   final BigInt continuationRevision;
   final BigInt executorProgressRevision;
+  final String? blueprintFingerprint;
+  final String? objective;
+  final int implementationStepCount;
+  final int acceptanceCriterionCount;
+  final int verificationCount;
 }
 
 class TaskBudgetLimitView {

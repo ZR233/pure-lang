@@ -40,6 +40,7 @@ url = { workspace = true }
 keyring = { workspace = true }
 tempfile = { workspace = true }
 minisign-verify = { workspace = true }
+fs4 = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

@@ -1,10 +1,10 @@
 use anyhow::Result;
 
 use crate::{
-    StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioTaskCompletionRuntime,
-    StudioTaskDesignReferenceRuntime, StudioTaskFailureRuntime, StudioTaskMergeRuntime,
-    StudioTaskReviewFindingRuntime, StudioTaskReviewRuntime, StudioTaskRuntime,
-    StudioTaskWorkUnitRuntime,
+    StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioIntegratedReviewGate,
+    StudioTaskCompletionRuntime, StudioTaskDesignReferenceRuntime, StudioTaskFailureRuntime,
+    StudioTaskMergeRuntime, StudioTaskReviewFindingRuntime, StudioTaskReviewRuntime,
+    StudioTaskRuntime, StudioTaskWorkUnitRuntime,
 };
 
 use super::{
@@ -24,7 +24,7 @@ pub(crate) async fn load_task_runtime(
     };
     let work_units = store.list_work_units(&run.id).await?;
     let mut work_unit_runtimes = Vec::with_capacity(work_units.len());
-    for unit in work_units {
+    for unit in &work_units {
         let executor_progress_revision = if let Some(executor_thread_id) = &unit.executor_thread_id
         {
             store
@@ -33,15 +33,21 @@ pub(crate) async fn load_task_runtime(
         } else {
             0
         };
+        let handoff = store
+            .read_work_unit_handoff(&unit.id)
+            .await
+            .ok()
+            .flatten()
+            .map(|(_, handoff)| handoff);
         work_unit_runtimes.push(StudioTaskWorkUnitRuntime {
-            id: unit.id,
-            title: unit.title,
+            id: unit.id.clone(),
+            title: unit.title.clone(),
             status: unit.status.as_str().to_string(),
-            worktree_path: unit.worktree_path,
-            branch: unit.branch,
-            agent_id: unit.executor_thread_id,
+            worktree_path: unit.worktree_path.clone(),
+            branch: unit.branch.clone(),
+            agent_id: unit.executor_thread_id.clone(),
             execution_status: unit.execution_status.as_str().to_string(),
-            execution_error: unit.execution_error,
+            execution_error: unit.execution_error.clone(),
             budget_limit: unit.budget_limit.map(|limit| StudioBudgetLimitRuntime {
                 kind: limit.kind.as_str().to_string(),
                 usage: StudioBudgetUsageRuntime {
@@ -54,14 +60,37 @@ pub(crate) async fn load_task_runtime(
             budget_slice_count: unit.budget_slice_count,
             budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
             continuation_state: unit.continuation_state.as_str().to_string(),
-            continuation_source_turn_id: unit.continuation_source_turn_id,
+            continuation_source_turn_id: unit.continuation_source_turn_id.clone(),
             continuation_revision: unit.continuation_revision,
             executor_progress_revision,
+            blueprint_fingerprint: handoff
+                .as_ref()
+                .map(|handoff| handoff.blueprint_fingerprint.clone()),
+            objective: handoff
+                .as_ref()
+                .map(|handoff| handoff.blueprint.objective.clone()),
+            implementation_step_count: handoff
+                .as_ref()
+                .map_or(0, |handoff| handoff.blueprint.implementation_steps.len()),
+            acceptance_criterion_count: handoff
+                .as_ref()
+                .map_or(0, |handoff| handoff.blueprint.acceptance_criteria.len()),
+            verification_count: handoff
+                .as_ref()
+                .map_or(0, |handoff| handoff.blueprint.verification_count()),
         });
     }
     let completions = store.list_work_completions(&run.id).await?;
     let merges = store.list_merge_records(&run.id).await?;
     let reviews = store.list_review_rounds(&run.id).await?;
+    let integrated_review_gate = super::task_coordinator::review::integrated_review_gate(
+        &run,
+        &work_units,
+        &completions,
+        &merges,
+        &reviews,
+    )
+    .await;
     let failures = store.list_task_failures(&run.id).await?;
     Ok(Some(studio_task_runtime(
         run,
@@ -70,6 +99,7 @@ pub(crate) async fn load_task_runtime(
         merges,
         reviews,
         failures,
+        integrated_review_gate,
     )))
 }
 
@@ -80,6 +110,7 @@ fn studio_task_runtime(
     merges: Vec<MergeRecord>,
     reviews: Vec<ReviewRoundRecord>,
     failures: Vec<super::task_coordinator::TaskFailureRecord>,
+    integrated_review_gate: StudioIntegratedReviewGate,
 ) -> StudioTaskRuntime {
     let terminal_failure_id = run.terminal_failure_id.clone();
     let all_failures = failures
@@ -119,6 +150,7 @@ fn studio_task_runtime(
             .stop_requested_reason
             .map(|reason| reason.as_str().to_string()),
         task_generation: run.task_generation,
+        integrated_review_gate,
         failures,
         terminal_failure,
         work_units,

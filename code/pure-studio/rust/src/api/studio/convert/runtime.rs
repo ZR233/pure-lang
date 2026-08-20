@@ -348,6 +348,30 @@ pub(crate) fn bridge_task_runtime(
         stop_requested_origin: task.stop_requested_origin,
         stop_requested_reason: task.stop_requested_reason,
         task_generation: task.task_generation,
+        integrated_review_gate: match task.integrated_review_gate {
+            pl_studio_runtime::StudioIntegratedReviewGate::Required { reason } => {
+                BridgeIntegratedReviewGateDto::Required { reason }
+            }
+            pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {
+                review_round_id,
+                reviewed_head,
+            } => BridgeIntegratedReviewGateDto::SatisfiedByReview {
+                review_round_id,
+                reviewed_head,
+            },
+            pl_studio_runtime::StudioIntegratedReviewGate::NotRequiredNoDelivery => {
+                BridgeIntegratedReviewGateDto::NotRequiredNoDelivery
+            }
+            pl_studio_runtime::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+                work_unit_id,
+                completion_revision,
+                merge_record_id,
+            } => BridgeIntegratedReviewGateDto::NotRequiredSingleExecutorEquivalent {
+                work_unit_id,
+                completion_revision,
+                merge_record_id,
+            },
+        },
         failures: task.failures.into_iter().map(bridge_task_failure).collect(),
         terminal_failure: task.terminal_failure.map(bridge_task_failure),
         work_units: task
@@ -377,6 +401,11 @@ pub(crate) fn bridge_task_runtime(
                 continuation_source_turn_id: unit.continuation_source_turn_id,
                 continuation_revision: unit.continuation_revision,
                 executor_progress_revision: unit.executor_progress_revision,
+                blueprint_fingerprint: unit.blueprint_fingerprint,
+                objective: unit.objective,
+                implementation_step_count: unit.implementation_step_count,
+                acceptance_criterion_count: unit.acceptance_criterion_count,
+                verification_count: unit.verification_count,
             })
             .collect(),
         completions: task

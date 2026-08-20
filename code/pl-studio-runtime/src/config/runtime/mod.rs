@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{PureError, Result};
+use serde::{Deserialize, Serialize};
 
 use super::{ConfigStore, StudioConfig};
 
@@ -15,16 +16,39 @@ pub struct ConfigRuntime {
 }
 
 /// 已校验 Studio 配置及其单调 revision。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigRuntimeSnapshot {
     pub revision: u64,
     pub updated_at: i64,
     pub config: StudioConfig,
 }
 
+/// Stable Settings owner failures used by transport adapters.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigRuntimeError {
+    #[error("settings revision conflict: expected {expected}, actual {actual}")]
+    StaleRevision { expected: u64, actual: u64 },
+    #[error(transparent)]
+    Core(#[from] PureError),
+}
+
+type ConfigRuntimeResult<T> = std::result::Result<T, ConfigRuntimeError>;
+
+impl From<ConfigRuntimeError> for PureError {
+    fn from(error: ConfigRuntimeError) -> Self {
+        match error {
+            ConfigRuntimeError::Core(error) => error,
+            ConfigRuntimeError::StaleRevision { expected, actual } => PureError::ConfigError(
+                format!("settings revision conflict: expected {expected}, actual {actual}"),
+            ),
+        }
+    }
+}
+
 impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
-    pub fn initialize(store: ConfigStore) -> Result<Self> {
+    pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
         let config = store.load_or_default()?;
         Ok(Self {
             store,
@@ -38,7 +62,7 @@ impl ConfigRuntime {
     }
 
     /// 返回内存 canonical snapshot，不访问磁盘。
-    pub fn read(&self) -> Result<ConfigRuntimeSnapshot> {
+    pub fn read(&self) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         self.state
             .read()
             .map(|state| state.clone())
@@ -50,7 +74,7 @@ impl ConfigRuntime {
         &self,
         expected_revision: u64,
         config: StudioConfig,
-    ) -> Result<ConfigRuntimeSnapshot> {
+    ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         self.update(expected_revision, |_| Ok(config))
     }
 
@@ -59,7 +83,7 @@ impl ConfigRuntime {
         &self,
         expected_revision: u64,
         edit: impl FnOnce(&StudioConfig) -> Result<StudioConfig>,
-    ) -> Result<ConfigRuntimeSnapshot> {
+    ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         let _command = self
             .command_lock
             .lock()
@@ -82,7 +106,10 @@ impl ConfigRuntime {
     }
 
     /// 显式从磁盘重新加载配置；普通 read 永不调用此方法。
-    pub fn reload_from_disk(&self, expected_revision: u64) -> Result<ConfigRuntimeSnapshot> {
+    pub fn reload_from_disk(
+        &self,
+        expected_revision: u64,
+    ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         let _command = self
             .command_lock
             .lock()
@@ -99,22 +126,21 @@ impl ConfigRuntime {
         Ok(next)
     }
 
-    pub fn store(&self) -> &ConfigStore {
+    #[cfg(test)]
+    pub(crate) fn store(&self) -> &ConfigStore {
         &self.store
     }
 }
 
-fn ensure_revision(expected: u64, actual: u64) -> Result<()> {
+fn ensure_revision(expected: u64, actual: u64) -> ConfigRuntimeResult<()> {
     if expected != actual {
-        return Err(PureError::ConfigError(format!(
-            "settings revision conflict: expected {expected}, actual {actual}"
-        )));
+        return Err(ConfigRuntimeError::StaleRevision { expected, actual });
     }
     Ok(())
 }
 
-fn config_runtime_poisoned() -> PureError {
-    PureError::ConfigError("ConfigRuntime state lock is poisoned".to_string())
+fn config_runtime_poisoned() -> ConfigRuntimeError {
+    PureError::ConfigError("ConfigRuntime state lock is poisoned".to_string()).into()
 }
 
 fn unix_seconds() -> i64 {

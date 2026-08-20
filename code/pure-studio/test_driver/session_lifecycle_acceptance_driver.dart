@@ -21,21 +21,12 @@ Future<void> main(List<String> args) async {
       find.byValueKey('studio-shell'),
       timeout: const Duration(minutes: 3),
     );
-    switch (options.mode) {
-      case 'demo':
-        await _acceptDemo(session, snapshots, artifacts);
-      case 'runtime-seed':
-        await _acceptRuntimeSeed(session, snapshots, artifacts, options);
-      case 'runtime-restart':
-        await _acceptRuntimeRestart(session, snapshots, artifacts);
-      default:
-        throw ArgumentError.value(options.mode, 'mode', 'unsupported');
-    }
+    await _acceptDemo(session, snapshots, artifacts);
     await session.requestData(
       'shutdown-await',
       timeout: const Duration(minutes: 2),
     );
-    stdout.writeln('session lifecycle acceptance (${options.mode}): ok');
+    stdout.writeln('session lifecycle demo acceptance: ok');
   } catch (error, stackTrace) {
     await _screenshot(session, File('${artifacts.path}/failure.png'));
     stderr.writeln(error);
@@ -51,9 +42,9 @@ Future<void> _acceptDemo(
   File snapshots,
   Directory artifacts,
 ) async {
-  final prepared =
-      jsonDecode(await session.requestData('prepare-session-lifecycle-demo'))
-          as Map<String, dynamic>;
+  final prepared = jsonDecode(
+    await session.requestData('prepare-session-lifecycle-demo'),
+  ) as Map<String, dynamic>;
   if (prepared['prepared'] != true) {
     throw StateError('demo scenario was not prepared: $prepared');
   }
@@ -106,26 +97,18 @@ Future<void> _acceptDemo(
     timeout: const Duration(seconds: 45),
   );
   final createdId = _selectedThreadId(created)!;
-  await _waitForSnapshot(
-    session,
-    snapshots,
-    'demo-first-turn-completed',
-    (snapshot) {
-      final workspace = snapshot['workspace'];
-      if (workspace is! Map<String, dynamic> ||
-          workspace['threadId'] != createdId) {
-        return false;
-      }
-      final lastTurn = workspace['lastTurn'];
-      return lastTurn is Map<String, dynamic> &&
-          const {
-            'completed',
-            'failed',
-            'cancelled',
-          }.contains(lastTurn['status']);
-    },
-    timeout: const Duration(seconds: 45),
-  );
+  await _waitForSnapshot(session, snapshots, 'demo-first-turn-completed', (
+    snapshot,
+  ) {
+    final workspace = snapshot['workspace'];
+    if (workspace is! Map<String, dynamic> ||
+        workspace['threadId'] != createdId) {
+      return false;
+    }
+    final lastTurn = workspace['lastTurn'];
+    return lastTurn is Map<String, dynamic> &&
+        const {'completed', 'failed', 'cancelled'}.contains(lastTurn['status']);
+  }, timeout: const Duration(seconds: 45));
   await _screenshot(session, File('${artifacts.path}/after-first-send.png'));
 
   final afterCreatedArchive = await _archiveSelected(
@@ -170,101 +153,6 @@ Future<void> _acceptDemo(
     throw StateError('empty session state lost its selected project');
   }
   await _screenshot(session, File('${artifacts.path}/final-empty.png'));
-}
-
-Future<void> _acceptRuntimeSeed(
-  FlutterDriverSession session,
-  File snapshots,
-  Directory artifacts,
-  _Options options,
-) async {
-  final workspace = options.workspace;
-  if (workspace == null) {
-    throw ArgumentError('--workspace is required for runtime-seed');
-  }
-  await session.tap(find.byValueKey('sidebar-open-project'));
-  await session.waitFor(find.byValueKey('project-path-dialog'));
-  await session.tap(find.byValueKey('project-path-input'));
-  await session.enterText(workspace);
-  await session.sendTextInputAction(TextInputAction.done);
-  await session.waitForAbsent(
-    find.byValueKey('project-path-dialog'),
-    timeout: const Duration(seconds: 30),
-  );
-  final empty = await _waitForSnapshot(
-    session,
-    snapshots,
-    'runtime-open-empty-project',
-    (snapshot) =>
-        _selectedProjectId(snapshot) != null &&
-        _isStartPage(snapshot) &&
-        _directoryIds(snapshot).isEmpty,
-  );
-  if (empty['workspace'] != null) {
-    throw StateError('opening an empty project retained a workspace snapshot');
-  }
-  await _screenshot(session, File('${artifacts.path}/opened-empty.png'));
-
-  final seeded =
-      jsonDecode(await session.requestData('seed-threads:${options.seedCount}'))
-          as Map<String, dynamic>;
-  if (seeded['seeded'] != options.seedCount) {
-    throw StateError('runtime fixture seeding failed: $seeded');
-  }
-  var snapshot = await _waitForSnapshot(
-    session,
-    snapshots,
-    'runtime-seeded',
-    (candidate) => _directoryIds(candidate).length == options.seedCount,
-  );
-  while (_directoryIds(snapshot).isNotEmpty) {
-    final selected = _selectedThreadId(snapshot);
-    if (selected == null) {
-      throw StateError('seeded roots have no selected Thread: $snapshot');
-    }
-    snapshot = await _archiveSelected(
-      session,
-      snapshots,
-      selected,
-      'runtime-archive-$selected',
-    );
-  }
-  final finalEmpty = await _waitForSnapshot(
-    session,
-    snapshots,
-    'runtime-final-empty',
-    (candidate) =>
-        _isStartPage(candidate) &&
-        _directoryIds(candidate).isEmpty &&
-        candidate['workspace'] == null,
-  );
-  if (_selectedProjectId(finalEmpty) == null) {
-    throw StateError('runtime final empty state lost its Project');
-  }
-  await _screenshot(session, File('${artifacts.path}/final-empty.png'));
-}
-
-Future<void> _acceptRuntimeRestart(
-  FlutterDriverSession session,
-  File snapshots,
-  Directory artifacts,
-) async {
-  final snapshot = await _waitForSnapshot(
-    session,
-    snapshots,
-    'runtime-restart-empty',
-    (candidate) =>
-        _selectedProjectId(candidate) != null &&
-        _isStartPage(candidate) &&
-        _directoryIds(candidate).isEmpty &&
-        candidate['workspace'] == null,
-    timeout: const Duration(minutes: 2),
-  );
-  if (_newComposer(snapshot)['phase'] != 'idle') {
-    throw StateError('restart restored a stale transient draft: $snapshot');
-  }
-  await session.waitFor(find.byValueKey('studio-start-page'));
-  await _screenshot(session, File('${artifacts.path}/restart-empty.png'));
 }
 
 Future<Map<String, dynamic>> _archiveSelected(
@@ -368,19 +256,10 @@ bool _isStartPage(Map<String, dynamic> snapshot) =>
     _navigation(snapshot)['isStartPage'] == true;
 
 class _Options {
-  const _Options({
-    required this.vmServiceUrl,
-    required this.mode,
-    required this.artifacts,
-    required this.workspace,
-    required this.seedCount,
-  });
+  const _Options({required this.vmServiceUrl, required this.artifacts});
 
   final String vmServiceUrl;
-  final String mode;
   final String artifacts;
-  final String? workspace;
-  final int seedCount;
 
   static _Options parse(List<String> args) {
     final values = <String, String>{};
@@ -393,10 +272,7 @@ class _Options {
         values[name] ?? (throw ArgumentError('missing --$name'));
     return _Options(
       vmServiceUrl: required('vm-service-url'),
-      mode: required('mode'),
       artifacts: required('artifacts'),
-      workspace: values['workspace'],
-      seedCount: int.tryParse(values['seed-count'] ?? '') ?? 3,
     );
   }
 }

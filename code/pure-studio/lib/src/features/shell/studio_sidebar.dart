@@ -208,17 +208,15 @@ class _DirectoryLoadFooter extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Text(
                     context.l10n.sidebarLoadingMore,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: context.studioInkSoft,
-                    ),
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: context.studioInkSoft),
                   ),
                 ],
               )
             : Text(
                 context.l10n.sidebarLoadError,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.error,
-                ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.error),
               ),
       ),
     );

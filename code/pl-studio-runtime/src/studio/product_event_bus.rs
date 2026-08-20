@@ -29,7 +29,7 @@ const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
 /// `ThreadDirectoryChanged` 事件都从索引派生，不重读数据库。其余目录只持有单调
 /// revision、agent live directory 与 transport。所有 `read_*` 都是纯查询。
 #[derive(Clone)]
-pub struct StudioProductEventRuntime {
+pub struct ProductEventBus {
     store: StudioStore,
     tx: broadcast::Sender<StudioProductEventEnvelope>,
     sequence: Arc<AtomicU64>,
@@ -55,7 +55,7 @@ struct DomainRevision {
     updated_at: AtomicI64,
 }
 
-impl StudioProductEventRuntime {
+impl ProductEventBus {
     pub fn new(store: StudioStore) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
@@ -327,7 +327,7 @@ impl StudioProductEventRuntime {
     }
 
     pub fn emit_skills_state(&self, state: SkillsStateSnapshot) -> StudioProductEventEnvelope {
-        self.emit(StudioProductEventKind::SkillsStateChanged(state))
+        self.emit(StudioProductEventKind::SkillsStateChanged(state.into()))
     }
 
     pub fn emit_provider_usage_state(
@@ -409,9 +409,9 @@ fn decode_thread_cursor(cursor: &str) -> Option<ThreadCursorKey> {
 mod tests {
     use super::*;
 
-    async fn seed_directory_threads(count: i64) -> StudioProductEventRuntime {
+    async fn seed_directory_threads(count: i64) -> ProductEventBus {
         let store = StudioStore::open_memory().await.expect("memory store");
-        let runtime = StudioProductEventRuntime::new(store.clone());
+        let runtime = ProductEventBus::new(store.clone());
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

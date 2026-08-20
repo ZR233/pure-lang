@@ -3,6 +3,8 @@ use serde_norway::Value;
 use std::fs;
 use std::path::Path;
 
+pub(crate) const CANONICAL_HOSTED_URL: &str = "https://pub.dev";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LockfileChange {
     Unchanged,
@@ -32,20 +34,100 @@ pub(crate) fn restore_optional(path: &Path, content: Option<&str>) -> Result<()>
     Ok(())
 }
 
+pub(crate) fn restore_canonical_optional(path: &Path, content: Option<&str>) -> Result<()> {
+    restore_optional(path, content)?;
+    rewrite_hosted_urls(path, CANONICAL_HOSTED_URL)
+}
+
 pub(crate) fn rewrite_hosted_urls(path: &Path, hosted_url: &str) -> Result<()> {
     let Some(content) = read_optional(path)? else {
         return Ok(());
     };
-    let mut value: Value =
+    let value: Value =
         serde_norway::from_str(&content).context("failed to parse pubspec.lock as YAML")?;
-    if !set_hosted_urls(&mut value, hosted_url) {
+    let expected_hosted_packages = hosted_package_count(&value);
+    let (rewritten, visited_hosted_packages) = rewrite_hosted_url_lines(&content, hosted_url);
+    if visited_hosted_packages != expected_hosted_packages {
+        bail!(
+            "pubspec.lock hosted package layout is unsupported: expected {expected_hosted_packages}, found {visited_hosted_packages}"
+        );
+    }
+    if rewritten == content {
         return Ok(());
     }
-
-    let content =
-        serde_norway::to_string(&value).context("failed to serialize pubspec.lock as YAML")?;
-    fs::write(path, content)
+    fs::write(path, rewritten)
         .with_context(|| format!("failed to rewrite hosted URLs in {}", path.display()))
+}
+
+fn hosted_package_count(value: &Value) -> usize {
+    let Value::Mapping(root) = value else {
+        return 0;
+    };
+    let Some(Value::Mapping(packages)) = root.get("packages") else {
+        return 0;
+    };
+    packages
+        .values()
+        .filter(|package| {
+            let Value::Mapping(package) = package else {
+                return false;
+            };
+            matches!(
+                package.get("source"),
+                Some(Value::String(source)) if source == "hosted"
+            )
+        })
+        .count()
+}
+
+fn rewrite_hosted_url_lines(content: &str, hosted_url: &str) -> (String, usize) {
+    let lines = content.split_inclusive('\n').collect::<Vec<_>>();
+    let package_starts = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let body = line.trim_end_matches(['\r', '\n']);
+            (body.starts_with("  ") && !body.starts_with("    ") && body.trim_end().ends_with(':'))
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let mut rewritten = lines
+        .iter()
+        .map(|line| (*line).to_string())
+        .collect::<Vec<_>>();
+    let mut visited_hosted_packages = 0;
+
+    for (offset, start) in package_starts.iter().copied().enumerate() {
+        let end = package_starts
+            .get(offset + 1)
+            .copied()
+            .unwrap_or(lines.len());
+        if !lines[start..end]
+            .iter()
+            .any(|line| line.trim() == "source: hosted")
+        {
+            continue;
+        }
+        visited_hosted_packages += 1;
+        if let Some((relative_index, line)) = lines[start..end]
+            .iter()
+            .enumerate()
+            .find(|(_, line)| line.trim_start().starts_with("url:"))
+        {
+            let newline = if line.ends_with("\r\n") {
+                "\r\n"
+            } else if line.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            let indent_len = line.len() - line.trim_start().len();
+            rewritten[start + relative_index] =
+                format!("{}url: \"{hosted_url}\"{newline}", &line[..indent_len]);
+        }
+    }
+
+    (rewritten.concat(), visited_hosted_packages)
 }
 
 pub(crate) fn classify_change(path: &Path, original: Option<&str>) -> Result<LockfileChange> {
@@ -105,28 +187,8 @@ fn normalized_lockfile(content: Option<&str>) -> Result<Option<Value>> {
     };
     let mut value: Value =
         serde_norway::from_str(content).context("failed to parse pubspec.lock as YAML")?;
-    normalize_urls(&mut value);
+    set_hosted_urls(&mut value, "<hosted-url>");
     Ok(Some(value))
-}
-
-fn normalize_urls(value: &mut Value) {
-    match value {
-        Value::Sequence(sequence) => {
-            for item in sequence {
-                normalize_urls(item);
-            }
-        }
-        Value::Mapping(mapping) => {
-            if let Some(url) = mapping.get_mut("url") {
-                *url = Value::String("<hosted-url>".to_owned());
-            }
-            for child in mapping.values_mut() {
-                normalize_urls(child);
-            }
-        }
-        Value::Tagged(tagged) => normalize_urls(&mut tagged.value),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-    }
 }
 
 #[cfg(test)]
@@ -144,6 +206,7 @@ packages:
     description:
       name: async
       url: "https://pub.dev"
+    source: hosted
 "#;
         let current = r#"
 packages:
@@ -151,6 +214,7 @@ packages:
     description:
       name: async
       url: "https://mirror.example"
+    source: hosted
 "#;
         fs::write(&path, current)?;
         assert_eq!(
@@ -215,6 +279,33 @@ packages:
         assert_eq!(
             classify_change(&path, Some(original))?,
             LockfileChange::HostedUrlsOnly
+        );
+        let _ = fs::remove_file(path);
+        Ok(())
+    }
+
+    #[test]
+    fn restoring_a_mirror_snapshot_produces_the_canonical_hosted_url() -> Result<()> {
+        let path = temp_lockfile_path("restore-canonical-hosted-url");
+        let mirror = r#"# Generated by pub
+packages:
+  async:
+    description:
+      name: async
+      url: "https://mirror.example"
+    source: hosted
+    version: "2.13.0"
+"#;
+
+        restore_canonical_optional(&path, Some(mirror))?;
+
+        let restored = fs::read_to_string(&path)?;
+        assert!(restored.starts_with("# Generated by pub\n"));
+        assert!(restored.contains("    version: \"2.13.0\""));
+        let value: Value = serde_norway::from_str(&restored)?;
+        assert_eq!(
+            value["packages"]["async"]["description"]["url"],
+            CANONICAL_HOSTED_URL
         );
         let _ = fs::remove_file(path);
         Ok(())

@@ -11,37 +11,77 @@ use crate::studio::agent_host::{
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRecoveryIssue, StudioRecoveryIssueAction,
+    InteractionService, ProductEventBus, StudioRecoveryIssue, StudioRecoveryIssueAction,
     StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRuntimeSnapshot,
     StudioRuntimeState, StudioRuntimeStatus, StudioStore,
 };
-use crate::{McpConnector, McpRuntime, McpRuntimeHandle};
+use crate::{McpConnector, McpRuntime};
 
 use super::StudioRuntime;
 
 impl StudioRuntime {
-    pub async fn default_app() -> Result<Self> {
-        let store = StudioStore::default_app().await?;
-        Self::with_runtime_state(
-            store,
-            ConfigStore::default_app()?,
-            StudioRuntimeState::new(),
-        )
+    pub async fn default_app() -> pl_protocol::studio::StudioResult<Self> {
+        Self::with_options(crate::StudioRuntimeOptions::desktop()).await
     }
 
-    pub fn new(store: StudioStore, config_store: ConfigStore) -> Result<Self> {
+    /// Creates the one Studio runtime owning the resolved home and its process lock.
+    pub async fn with_options(
+        options: crate::StudioRuntimeOptions,
+    ) -> pl_protocol::studio::StudioResult<Self> {
+        let resolved = options.resolve()?;
+        let lock_path = resolved.paths.runtime_lock();
+        let host = resolved.host;
+        let instance_lock = tokio::task::spawn_blocking(move || {
+            super::super::runtime_lock::RuntimeLock::acquire(&lock_path, host)
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "Studio runtime lock task failed");
+            pl_protocol::studio::StudioError::internal()
+        })??;
+        let store = StudioStore::open(resolved.paths.database())
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "failed to open Studio storage");
+                pl_protocol::studio::StudioError::storage()
+            })?;
+        let config_store = ConfigStore::for_studio_home(resolved.paths.home().to_path_buf());
+        Self::with_runtime_state_and_lock(
+            store,
+            config_store,
+            StudioRuntimeState::new(),
+            Some(instance_lock),
+        )
+        .map_err(|error| {
+            tracing::error!(error = %error, "failed to initialize Studio runtime");
+            pl_protocol::studio::StudioError::internal()
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(store: StudioStore, config_store: ConfigStore) -> Result<Self> {
         Self::with_runtime_state(store, config_store, StudioRuntimeState::ready())
     }
 
+    #[cfg(test)]
     pub(super) fn with_runtime_state(
         store: StudioStore,
         config_store: ConfigStore,
         runtime_state: StudioRuntimeState,
     ) -> Result<Self> {
+        Self::with_runtime_state_and_lock(store, config_store, runtime_state, None)
+    }
+
+    fn with_runtime_state_and_lock(
+        store: StudioStore,
+        config_store: ConfigStore,
+        runtime_state: StudioRuntimeState,
+        instance_lock: Option<super::super::runtime_lock::RuntimeLock>,
+    ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
         let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
-        let interactions = InteractionRuntime::new(store.clone());
-        let product_events = StudioProductEventRuntime::new(store.clone());
+        let interactions = InteractionService::new(store.clone());
+        let product_events = ProductEventBus::new(store.clone());
         let provider_usage =
             super::ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = super::StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
@@ -49,9 +89,10 @@ impl StudioRuntime {
         let mcp_state = super::mcp_health::McpStateRuntime::new();
         let lsp_state = super::lsp_state::LspStateRuntime::new(product_events.clone());
         Ok(Self {
+            instance_lock: super::super::runtime_lock::RuntimeLockOwner::new(instance_lock),
             store,
             residency: super::residency::ThreadResidency::new(),
-            shutdown_progress: super::StudioShutdownProgressRuntime::new(),
+            shutdown_progress: super::ShutdownProgressBus::new(),
             config_runtime,
             external_runtimes: super::StudioExternalRuntimes {
                 mcp: McpRuntime::new(McpConnector::default(), Some(mcp_shared_tools.clone()))
@@ -84,41 +125,33 @@ impl StudioRuntime {
         })
     }
 
-    pub fn store(&self) -> &StudioStore {
-        &self.store
-    }
-
-    pub fn interactions(&self) -> &InteractionRuntime {
+    #[cfg(test)]
+    pub(crate) fn interactions(&self) -> &InteractionService {
         &self.agent_facility.interactions
     }
 
-    pub fn product_events(&self) -> &StudioProductEventRuntime {
+    #[cfg(test)]
+    pub(crate) fn product_events(&self) -> &ProductEventBus {
         &self.agent_facility.product_events
     }
 
-    pub fn config_runtime(&self) -> &ConfigRuntime {
+    #[cfg(test)]
+    pub(crate) fn config_runtime(&self) -> &ConfigRuntime {
         &self.config_runtime
     }
 
-    pub fn settings_state(&self) -> Result<ConfigRuntimeSnapshot> {
-        Ok(self.config_runtime.read()?)
-    }
-
-    pub fn publish_settings_state(&self, settings: ConfigRuntimeSnapshot) {
+    pub(crate) fn publish_settings_state(&self, settings: ConfigRuntimeSnapshot) -> Result<()> {
+        let canonical = super::settings_api::settings_snapshot(settings)?;
         self.agent_facility.product_events.emit_settings_state(
             crate::StudioSettingsStateSnapshot {
-                meta: pl_protocol::ObservedStateMeta::ready(settings.revision, settings.updated_at),
-                settings,
+                meta: pl_protocol::ObservedStateMeta::ready(
+                    canonical.revision,
+                    canonical.updated_at,
+                ),
+                settings: canonical.settings,
             },
         );
-    }
-
-    pub fn mcp_runtime(&self) -> &McpRuntimeHandle {
-        &self.external_runtimes.mcp
-    }
-
-    pub fn lsp_runtime(&self) -> &pl_lsp::LspRuntimeRegistry {
-        &self.external_runtimes.lsp
+        Ok(())
     }
 
     pub(super) async fn start_lsp_state_watcher(&self) {
@@ -260,7 +293,8 @@ impl StudioRuntime {
         Ok(snapshot)
     }
 
-    pub fn skill_catalog_runtime(&self) -> &super::SkillCatalogRuntime {
+    #[cfg(test)]
+    pub(crate) fn skill_catalog_runtime(&self) -> &super::SkillCatalogRuntime {
         &self.skills
     }
 
@@ -288,16 +322,41 @@ impl StudioRuntime {
         self.updater.check().await
     }
 
+    /// Resolves the exact verified update selected by the desktop host.
+    pub async fn verified_studio_update(
+        &self,
+        expected_revision: u64,
+        version: &str,
+    ) -> Result<crate::StudioUpdate> {
+        self.updater
+            .verified_update(expected_revision, version)
+            .await
+    }
+
+    /// Downloads and installs a verified desktop update after the host's final shutdown check.
+    pub async fn install_studio_update_after<F, Fut>(
+        &self,
+        update: crate::StudioUpdate,
+        progress: tokio::sync::mpsc::UnboundedSender<crate::StudioUpdateEvent>,
+        cancellation: crate::StudioUpdateCancellation,
+        before_launch: F,
+    ) -> Result<(), crate::StudioUpdateError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<(), crate::StudioUpdateError>>,
+    {
+        self.updater
+            .updater()
+            .install_after(update, progress, cancellation, before_launch)
+            .await
+    }
+
     pub async fn read_lsp_state(&self) -> crate::StudioLspStateSnapshot {
         self.external_runtimes.lsp_state.read().await
     }
 
-    pub fn update_runtime(&self) -> &super::StudioUpdateRuntime {
-        &self.updater
-    }
-
     /// 返回已存在 actor 的 handle；查询路径不得初始化 framework 或注册 actor。
-    pub async fn try_get_thread_handle(
+    pub(crate) async fn try_get_thread_handle(
         &self,
         thread_id: &str,
     ) -> Result<Option<(pl_core::AgentRuntimeHandle, pl_core::AgentId)>> {
@@ -319,7 +378,10 @@ impl StudioRuntime {
         Ok(is_registered.then_some((handle, agent_id)))
     }
 
-    async fn read_protocol_thread(&self, thread_id: &str) -> Result<pl_protocol::Thread> {
+    pub(super) async fn read_protocol_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<pl_protocol::Thread> {
         Ok(self
             .store
             .read_thread(thread_id)
@@ -409,7 +471,7 @@ impl StudioRuntime {
         if settings.config.skills.system.enabled {
             let _ = pl_core::skill::install_system_skills(&settings.config.skills)?;
         }
-        self.publish_settings_state(settings);
+        self.publish_settings_state(settings)?;
         self.agent_facility
             .product_events
             .emit_recovery_state(self.recovery.snapshot());
@@ -576,6 +638,7 @@ impl StudioRuntime {
         // 阶段 7：终态。
         self.shutdown_progress
             .emit(crate::StudioShutdownPhase::Stopped, 0);
+        self.instance_lock.release();
         self.runtime_snapshot().await
     }
 
@@ -610,6 +673,12 @@ impl StudioRuntime {
     }
 
     pub async fn activate_project(&self, project_id: &str) -> Result<()> {
+        if self.recovery_issues().iter().any(|issue| {
+            issue.scope == crate::StudioRecoveryIssueScope::Project
+                && issue.project_id.as_deref() == Some(project_id)
+        }) {
+            anyhow::bail!("selected project is blocked by a recovery issue");
+        }
         let project = self
             .store
             .read_project(project_id)
@@ -758,7 +827,30 @@ impl StudioRuntime {
         }
     }
 
-    pub async fn project_workspace_root(&self, project_id: &str) -> Result<std::path::PathBuf> {
+    /// Resolves transport-neutral Project identities into an internal LSP reset scope.
+    pub async fn reset_lsp_request(
+        &self,
+        request: pl_protocol::studio::LspResetRequest,
+    ) -> Result<()> {
+        let scope = match request {
+            pl_protocol::studio::LspResetRequest::Server {
+                project_id,
+                server_id,
+            } => pl_lsp::LspScope::Server {
+                workspace_root: self.project_workspace_root(&project_id).await?,
+                server_id,
+            },
+            pl_protocol::studio::LspResetRequest::Workspace { project_id } => {
+                pl_lsp::LspScope::Workspace {
+                    workspace_root: self.project_workspace_root(&project_id).await?,
+                }
+            }
+            pl_protocol::studio::LspResetRequest::All => pl_lsp::LspScope::All,
+        };
+        self.reset_lsp(scope).await
+    }
+
+    async fn project_workspace_root(&self, project_id: &str) -> Result<std::path::PathBuf> {
         let project = self
             .store
             .read_project(project_id)

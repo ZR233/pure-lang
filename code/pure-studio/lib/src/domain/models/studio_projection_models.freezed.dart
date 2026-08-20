@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // coverage:ignore-file
-// ignore_for_file: type=lint
+// ignore_for_file: type=lint, type=warning, deprecated_member_use, deprecated_member_use_from_same_package
 // ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
 
 part of 'studio_projection_models.dart';
@@ -9,6 +9,7 @@ part of 'studio_projection_models.dart';
 // FreezedGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
@@ -63,7 +64,7 @@ class _$ShellChromeViewCopyWithImpl<$Res>
 /// Create a copy of ShellChromeView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? applicationRecoveryIssues = null,}) {
-  return _then(_self.copyWith(
+  return _then(ShellChromeView(
 applicationRecoveryIssues: null == applicationRecoveryIssues ? _self.applicationRecoveryIssues : applicationRecoveryIssues // ignore: cast_nullable_to_non_nullable
 as List<StudioRecoveryIssue>,
   ));
@@ -206,7 +207,7 @@ return $default(_that.applicationRecoveryIssues);case _:
 
 
 class _ShellChromeView implements ShellChromeView {
-  const _ShellChromeView({required final  List<StudioRecoveryIssue> applicationRecoveryIssues}): _applicationRecoveryIssues = applicationRecoveryIssues;
+  const _ShellChromeView({required  List<StudioRecoveryIssue> applicationRecoveryIssues}): _applicationRecoveryIssues = applicationRecoveryIssues;
 
 
  final  List<StudioRecoveryIssue> _applicationRecoveryIssues;
@@ -326,7 +327,7 @@ class _$SidebarViewCopyWithImpl<$Res>
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? projectRecoveryIssues = null,Object? threadRecoveryIssues = null,Object? directoryHasMore = null,Object? directoryIsLoading = null,}) {
-  return _then(_self.copyWith(
+  return _then(SidebarView(
 projects: null == projects ? _self.projects : projects // ignore: cast_nullable_to_non_nullable
 as List<StudioProject>,rootThreads: null == rootThreads ? _self.rootThreads : rootThreads // ignore: cast_nullable_to_non_nullable
 as List<StudioThread>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
@@ -477,7 +478,7 @@ return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.s
 
 
 class _SidebarView extends SidebarView {
-  const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioThread> rootThreads, required this.selectedProjectId, required this.selectedRootThreadId, required this.isBusy, required final  Map<String, StudioRecoveryIssue> projectRecoveryIssues, required final  Map<String, StudioRecoveryIssue> threadRecoveryIssues, this.directoryHasMore = false, this.directoryIsLoading = false}): _projects = projects,_rootThreads = rootThreads,_projectRecoveryIssues = projectRecoveryIssues,_threadRecoveryIssues = threadRecoveryIssues,super._();
+  const _SidebarView({required  List<StudioProject> projects, required  List<StudioThread> rootThreads, required this.selectedProjectId, required this.selectedRootThreadId, required this.isBusy, required  Map<String, StudioRecoveryIssue> projectRecoveryIssues, required  Map<String, StudioRecoveryIssue> threadRecoveryIssues, this.directoryHasMore = false, this.directoryIsLoading = false}): _projects = projects,_rootThreads = rootThreads,_projectRecoveryIssues = projectRecoveryIssues,_threadRecoveryIssues = threadRecoveryIssues,super._();
 
 
  final  List<StudioProject> _projects;
@@ -631,7 +632,7 @@ class _$HeaderViewCopyWithImpl<$Res>
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
-  return _then(_self.copyWith(
+  return _then(HeaderView(
 selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
 as StudioProject?,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
@@ -781,7 +782,7 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 
 
 class _HeaderView implements HeaderView {
-  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required final  List<StudioThread> workspaceThreads, required final  List<StudioAgentView> agents, required this.selectedThreadId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_agents = agents,_pendingInteractions = pendingInteractions;
+  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required  List<StudioThread> workspaceThreads, required  List<StudioAgentView> agents, required this.selectedThreadId, required this.runtime, required  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_agents = agents,_pendingInteractions = pendingInteractions;
 
 
 @override final  StudioThread? selectedRootThread;
@@ -927,7 +928,7 @@ class _$SettingsPageViewCopyWithImpl<$Res>
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? catalogSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
-  return _then(_self.copyWith(
+  return _then(SettingsPageView(
 providers: null == providers ? _self.providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,providerCatalog: null == providerCatalog ? _self.providerCatalog : providerCatalog // ignore: cast_nullable_to_non_nullable
 as ProviderCatalogView,defaultProviderId: freezed == defaultProviderId ? _self.defaultProviderId : defaultProviderId // ignore: cast_nullable_to_non_nullable
@@ -1085,7 +1086,7 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 
 
 class _SettingsPageView implements SettingsPageView {
-  const _SettingsPageView({required final  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required final  List<RoleSettingsView> roles, required this.instructions, required this.skills, required final  List<String> activeSkills, required final  List<String> catalogSkills, required this.selectedProjectId, required final  List<McpServerSettingsView> mcpServers, required this.mcpState, required this.lspState, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_catalogSkills = catalogSkills,_mcpServers = mcpServers;
+  const _SettingsPageView({required  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required  List<RoleSettingsView> roles, required this.instructions, required this.skills, required  List<String> activeSkills, required  List<String> catalogSkills, required this.selectedProjectId, required  List<McpServerSettingsView> mcpServers, required this.mcpState, required this.lspState, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_catalogSkills = catalogSkills,_mcpServers = mcpServers;
 
 
  final  List<ProviderSettingsView> _providers;
@@ -1259,7 +1260,7 @@ class _$StatusBarViewCopyWithImpl<$Res>
 /// Create a copy of StatusBarView
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? thread = null,Object? runtime = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? isBusy = null,}) {
-  return _then(_self.copyWith(
+  return _then(StatusBarView(
 thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
 as StudioThread,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
 as ThreadRuntimeView,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
@@ -1407,7 +1408,7 @@ return $default(_that.thread,_that.runtime,_that.permissionMode,_that.providers,
 
 
 class _StatusBarView extends StatusBarView {
-  const _StatusBarView({required this.thread, required this.runtime, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required this.isBusy}): _providers = providers,_roles = roles,super._();
+  const _StatusBarView({required this.thread, required this.runtime, required this.permissionMode, required  List<ProviderSettingsView> providers, required  List<RoleSettingsView> roles, required this.isBusy}): _providers = providers,_roles = roles,super._();
 
 
 @override final  StudioThread thread;

@@ -1,15 +1,12 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::{Deserialize, Serialize};
 
-static NEXT_CORRELATION_ID: AtomicU64 = AtomicU64::new(1);
-
+/// FRB wire projection of the transport-neutral Studio error code.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum BridgeErrorCode {
     NotInitialized,
     RuntimeStopped,
+    InstanceBusy,
     InvalidArgument,
     NotFound,
     Busy,
@@ -18,6 +15,7 @@ pub enum BridgeErrorCode {
     PermissionDenied,
     Cancelled,
     CancellationTooLate,
+    Overloaded,
     Unavailable,
     Protocol,
     Storage,
@@ -25,6 +23,7 @@ pub enum BridgeErrorCode {
     Internal,
 }
 
+/// FRB-only wire representation of [`pl_protocol::studio::StudioError`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
 #[error("{message} (correlation id: {correlation_id})")]
@@ -38,189 +37,88 @@ pub struct BridgeError {
 
 impl BridgeError {
     pub(crate) fn not_initialized() -> Self {
-        Self::new(
-            BridgeErrorCode::NotInitialized,
+        pl_protocol::studio::StudioError::new(
+            pl_protocol::studio::StudioErrorCode::NotInitialized,
             "Studio runtime is not initialized",
             true,
         )
+        .into()
     }
 
     pub(crate) fn runtime_stopped() -> Self {
-        Self::new(
-            BridgeErrorCode::RuntimeStopped,
+        pl_protocol::studio::StudioError::new(
+            pl_protocol::studio::StudioErrorCode::RuntimeStopped,
             "Studio runtime has stopped; restart the application",
             false,
         )
+        .into()
     }
 
     pub(crate) fn invalid_argument(message: impl Into<String>) -> Self {
-        Self::new(BridgeErrorCode::InvalidArgument, message, false)
+        pl_protocol::studio::StudioError::invalid_argument(message).into()
     }
+}
 
-    fn new(code: BridgeErrorCode, message: impl Into<String>, retryable: bool) -> Self {
+impl From<pl_protocol::studio::StudioError> for BridgeError {
+    fn from(error: pl_protocol::studio::StudioError) -> Self {
         Self {
-            code,
-            message: message.into(),
-            retryable,
-            correlation_id: next_correlation_id(),
-            details_json: None,
+            code: error.code.into(),
+            message: error.message,
+            retryable: error.retryable,
+            correlation_id: error.correlation_id,
+            details_json: error.details.map(|details| details.to_string()),
         }
     }
+}
 
-    fn from_anyhow(error: anyhow::Error) -> Self {
-        let diagnostic = format!("{error:#}");
-        let normalized = diagnostic.to_ascii_lowercase();
-        let (code, message, retryable) = if error
-            .downcast_ref::<pl_studio_runtime::StudioDatabaseError>()
-            .is_some()
-        {
-            (
-                BridgeErrorCode::Storage,
-                "Studio storage is unavailable",
-                false,
-            )
-        } else if normalized.contains("not initialized") {
-            (
-                BridgeErrorCode::NotInitialized,
-                "Studio runtime is not initialized",
-                true,
-            )
-        } else if normalized.contains("not found") {
-            (
-                BridgeErrorCode::NotFound,
-                "The requested Studio resource was not found",
-                false,
-            )
-        } else if normalized.contains("permission") || normalized.contains("access denied") {
-            (
-                BridgeErrorCode::PermissionDenied,
-                "Studio does not have permission to complete this operation",
-                false,
-            )
-        } else if normalized.contains("busy") || normalized.contains("active turn") {
-            (
-                BridgeErrorCode::Busy,
-                "Studio is busy with another operation",
-                true,
-            )
-        } else if normalized.contains("revision") || normalized.contains("stale") {
-            (
-                BridgeErrorCode::StaleRevision,
-                "Studio data changed; reload and try again",
-                true,
-            )
-        } else if normalized.contains("cancel") {
-            (
-                BridgeErrorCode::Cancelled,
-                "The Studio operation was cancelled",
-                true,
-            )
-        } else if normalized.contains("sqlite")
-            || normalized.contains("database")
-            || normalized.contains("storage")
-            || normalized.contains("数据库")
-        {
-            (
-                BridgeErrorCode::Storage,
-                "Studio storage is unavailable",
-                true,
-            )
-        } else if normalized.contains("protocol") || normalized.contains("serialize") {
-            (
-                BridgeErrorCode::Protocol,
-                "Studio received incompatible protocol data",
-                false,
-            )
-        } else if normalized.contains("unavailable")
-            || normalized.contains("connection")
-            || normalized.contains("timeout")
-        {
-            (
-                BridgeErrorCode::Unavailable,
-                "A required Studio service is unavailable",
-                true,
-            )
-        } else {
-            (
-                BridgeErrorCode::Internal,
-                "Studio could not complete the operation",
-                false,
-            )
-        };
-        let bridge_error = Self::new(code, message, retryable);
-        tracing::error!(
-            correlation_id = %bridge_error.correlation_id,
-            bridge_code = ?bridge_error.code,
-            retryable = bridge_error.retryable,
-            diagnostic_bytes = diagnostic.len(),
-            "Studio bridge operation failed"
-        );
-        bridge_error
+impl From<pl_protocol::studio::StudioErrorCode> for BridgeErrorCode {
+    fn from(code: pl_protocol::studio::StudioErrorCode) -> Self {
+        use pl_protocol::studio::StudioErrorCode;
+
+        match code {
+            StudioErrorCode::NotInitialized => Self::NotInitialized,
+            StudioErrorCode::RuntimeStopped => Self::RuntimeStopped,
+            StudioErrorCode::InstanceBusy => Self::InstanceBusy,
+            StudioErrorCode::InvalidArgument => Self::InvalidArgument,
+            StudioErrorCode::NotFound => Self::NotFound,
+            StudioErrorCode::Busy => Self::Busy,
+            StudioErrorCode::Conflict => Self::Conflict,
+            StudioErrorCode::StaleRevision => Self::StaleRevision,
+            StudioErrorCode::PermissionDenied => Self::PermissionDenied,
+            StudioErrorCode::Cancelled => Self::Cancelled,
+            StudioErrorCode::CancellationTooLate => Self::CancellationTooLate,
+            StudioErrorCode::Overloaded => Self::Overloaded,
+            StudioErrorCode::Unavailable => Self::Unavailable,
+            StudioErrorCode::Protocol => Self::Protocol,
+            StudioErrorCode::Storage => Self::Storage,
+            StudioErrorCode::Update => Self::Update,
+            StudioErrorCode::Internal => Self::Internal,
+        }
     }
 }
 
 impl From<anyhow::Error> for BridgeError {
     fn from(error: anyhow::Error) -> Self {
-        Self::from_anyhow(error)
+        pl_studio_runtime::studio_error_from_anyhow(error).into()
     }
 }
 
 impl From<serde_json::Error> for BridgeError {
     fn from(error: serde_json::Error) -> Self {
-        Self::from_anyhow(error.into())
+        Self::from(anyhow::Error::new(error))
     }
 }
 
 impl From<pl_protocol::PureError> for BridgeError {
     fn from(error: pl_protocol::PureError) -> Self {
-        Self::from_anyhow(anyhow::Error::new(error))
+        Self::from(anyhow::Error::new(error))
     }
 }
 
 impl From<pl_studio_runtime::StudioUpdateError> for BridgeError {
     fn from(error: pl_studio_runtime::StudioUpdateError) -> Self {
-        use pl_studio_runtime::StudioUpdateErrorCode;
-
-        let code = error.code();
-        let retryable = matches!(
-            code,
-            StudioUpdateErrorCode::Network
-                | StudioUpdateErrorCode::RuntimeBusy
-                | StudioUpdateErrorCode::InstallInProgress
-                | StudioUpdateErrorCode::Io
-        );
-        let bridge_code = if matches!(code, StudioUpdateErrorCode::RuntimeBusy) {
-            BridgeErrorCode::Busy
-        } else if matches!(code, StudioUpdateErrorCode::Cancelled) {
-            BridgeErrorCode::Cancelled
-        } else if matches!(code, StudioUpdateErrorCode::CancellationTooLate) {
-            BridgeErrorCode::CancellationTooLate
-        } else {
-            BridgeErrorCode::Update
-        };
-        let bridge_error = Self::new(
-            bridge_code,
-            "Studio update could not be completed",
-            retryable,
-        );
-        tracing::error!(
-            correlation_id = %bridge_error.correlation_id,
-            bridge_code = ?bridge_error.code,
-            retryable = bridge_error.retryable,
-            diagnostic_bytes = error.to_string().len(),
-            update_code = code.as_str(),
-            "Studio update operation failed"
-        );
-        bridge_error
+        Self::from(anyhow::Error::new(error))
     }
-}
-
-fn next_correlation_id() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs());
-    let sequence = NEXT_CORRELATION_ID.fetch_add(1, Ordering::Relaxed);
-    format!("bridge-{timestamp:x}-{sequence:x}")
 }
 
 #[cfg(test)]
@@ -228,7 +126,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn internal_error_hides_sensitive_cause_and_has_correlation_id() {
+    fn wire_error_preserves_shared_category_and_correlation_id() {
+        let source = pl_protocol::studio::StudioError::instance_busy();
+        let expected_correlation_id = source.correlation_id.clone();
+        let error = BridgeError::from(source);
+
+        assert_eq!(error.code, BridgeErrorCode::InstanceBusy);
+        assert_eq!(error.correlation_id, expected_correlation_id);
+    }
+
+    #[test]
+    fn unclassified_error_is_redacted_by_runtime_mapping() {
         let error = BridgeError::from(anyhow::anyhow!(
             "provider token secret-token at C:\\private\\config.toml"
         ));
@@ -236,48 +144,5 @@ mod tests {
         assert_eq!(error.code, BridgeErrorCode::Internal);
         assert!(!error.message.contains("secret-token"));
         assert!(!error.message.contains("config.toml"));
-        assert!(error.correlation_id.starts_with("bridge-"));
-    }
-
-    #[test]
-    fn retryable_categories_are_stable() {
-        let storage = BridgeError::from(anyhow::anyhow!("sqlite database locked"));
-        let not_found = BridgeError::from(anyhow::anyhow!("session not found"));
-
-        assert_eq!(storage.code, BridgeErrorCode::Storage);
-        assert!(storage.retryable);
-        assert_eq!(not_found.code, BridgeErrorCode::NotFound);
-        assert!(!not_found.retryable);
-    }
-
-    #[test]
-    fn startup_storage_failure_is_not_misclassified_as_uninitialized() {
-        let source = pl_studio_runtime::StudioDatabaseError::UnsupportedSchema {
-            found: 11,
-            supported: 10,
-        };
-        let error = BridgeError::from(
-            anyhow::Error::new(source).context("Studio bridge runtime was not initialized"),
-        );
-
-        assert_eq!(error.code, BridgeErrorCode::Storage);
-        assert!(!error.retryable);
-        assert_ne!(error.message, "Studio runtime is not initialized");
-    }
-
-    #[test]
-    fn update_cancellation_codes_remain_typed() {
-        let cancelled = BridgeError::from(pl_studio_runtime::StudioUpdateError::new(
-            pl_studio_runtime::StudioUpdateErrorCode::Cancelled,
-            "cancelled before launch",
-        ));
-        let too_late = BridgeError::from(pl_studio_runtime::StudioUpdateError::new(
-            pl_studio_runtime::StudioUpdateErrorCode::CancellationTooLate,
-            "installer already launched",
-        ));
-
-        assert_eq!(cancelled.code, BridgeErrorCode::Cancelled);
-        assert_eq!(too_late.code, BridgeErrorCode::CancellationTooLate);
-        assert!(!too_late.retryable);
     }
 }

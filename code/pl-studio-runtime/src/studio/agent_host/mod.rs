@@ -15,7 +15,7 @@ use crate::McpRuntimeHandle;
 use crate::config::ConfigRuntime;
 use crate::studio::runtime::SkillCatalogRuntime;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
+use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 
 use events::StudioAgentCommitObserver;
 pub(in crate::studio) use events::{
@@ -44,10 +44,10 @@ impl StudioAgentHost {
         mcp_runtime: McpRuntimeHandle,
         mcp_shared_tools: std::sync::Arc<pl_core::ToolRegistry>,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
-        interactions: InteractionRuntime,
+        interactions: InteractionService,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
-        product_events: StudioProductEventRuntime,
+        product_events: ProductEventBus,
         skills: SkillCatalogRuntime,
     ) -> Self {
         Self {

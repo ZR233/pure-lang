@@ -315,9 +315,8 @@ class _QuestionProgress extends StatelessWidget {
         children: [
           Text(
             context.l10n.interactionQuestionProgress(currentIndex + 1, total),
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium?.copyWith(color: colors.onSurfaceVariant),
+            style: Theme.of(context).textTheme.labelMedium
+                ?.copyWith(color: colors.onSurfaceVariant),
           ),
           const SizedBox(width: 10),
           for (var index = 0; index < questions.length; index++)
@@ -335,9 +334,8 @@ class _QuestionProgress extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             context.l10n.interactionAnsweredCount(answeredCount),
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
+            style: Theme.of(context).textTheme.labelSmall
+                ?.copyWith(color: colors.onSurfaceVariant),
           ),
         ],
       ),

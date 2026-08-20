@@ -57,26 +57,23 @@ void main() {
     );
   });
 
-  test(
-    'completed task requires successful cleanup and exact merge revision',
-    () {
-      final snapshot = _completedSnapshot();
+  test('completed single-executor task accepts equivalent delivery without integrated review', () {
+    final snapshot = _completedSnapshot();
 
-      expect(
-        () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
-        returnsNormally,
-      );
+    expect(
+      () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
+      returnsNormally,
+    );
 
-      final task = snapshot['task'] as Map<String, dynamic>;
-      final merge =
-          (task['merges'] as List<dynamic>).single as Map<String, dynamic>;
-      merge['cleanupStatus'] = 'failed';
-      expect(
-        () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
-        throwsA(isA<StateError>()),
-      );
-    },
-  );
+    final task = snapshot['task'] as Map<String, dynamic>;
+    final merge =
+        (task['merges'] as List<dynamic>).single as Map<String, dynamic>;
+    merge['cleanupStatus'] = 'failed';
+    expect(
+      () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
+      throwsA(isA<StateError>()),
+    );
+  });
 
   test('completed task rejects a residual executor worktree', () {
     expect(
@@ -94,6 +91,47 @@ void main() {
     final merge =
         (task['merges'] as List<dynamic>).single as Map<String, dynamic>;
     merge['completionRevision'] = 2;
+
+    expect(
+      () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('completed task accepts a matching integrated review gate', () {
+    final snapshot = _completedSnapshot();
+    final task = snapshot['task'] as Map<String, dynamic>;
+    task['integratedReviewGate'] = {
+      'status': 'satisfiedByReview',
+      'reviewRoundId': 'review-1',
+      'reviewedHead': 'head-2',
+    };
+    task['reviews'] = [
+      {
+        'id': 'review-1',
+        'scope': 'integrated',
+        'verdict': 'pass',
+        'reviewedHead': 'head-2',
+      },
+    ];
+
+    expect(
+      () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
+      returnsNormally,
+    );
+  });
+
+  test('single-executor exemption rejects an unexpected integrated review', () {
+    final snapshot = _completedSnapshot();
+    final task = snapshot['task'] as Map<String, dynamic>;
+    task['reviews'] = [
+      {
+        'id': 'review-1',
+        'scope': 'integrated',
+        'verdict': 'pass',
+        'reviewedHead': 'head-2',
+      },
+    ];
 
     expect(
       () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
@@ -224,6 +262,12 @@ Map<String, dynamic> _completedSnapshot() => {
     'runId': 'task-run-1',
     'phase': 'completed',
     'expectedHead': 'head-2',
+    'integratedReviewGate': {
+      'status': 'notRequiredSingleExecutorEquivalent',
+      'workUnitId': 'work-unit-1',
+      'completionRevision': 1,
+      'mergeRecordId': 'merge-1',
+    },
     'workUnits': [
       {
         'id': 'work-unit-1',
@@ -243,14 +287,7 @@ Map<String, dynamic> _completedSnapshot() => {
         'cleanupStatus': 'discarded',
       },
     ],
-    'reviews': [
-      {
-        'id': 'review-1',
-        'scope': 'integrated',
-        'verdict': 'pass',
-        'reviewedHead': 'head-2',
-      },
-    ],
+    'reviews': <dynamic>[],
   },
 };
 

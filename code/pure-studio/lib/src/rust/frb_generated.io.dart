@@ -22,10 +22,13 @@ import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
 import 'api/studio/types/thread_stream.dart';
 import 'api/studio/types/updater.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -378,6 +381,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeInstructionsSettingsDto dco_decode_bridge_instructions_settings_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeIntegratedReviewGateDto dco_decode_bridge_integrated_review_gate_dto(
     dynamic raw,
   );
 
@@ -1645,6 +1653,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeInstructionsSettingsDto sse_decode_bridge_instructions_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeIntegratedReviewGateDto sse_decode_bridge_integrated_review_gate_dto(
     SseDeserializer deserializer,
   );
 
@@ -3189,6 +3202,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_instructions_settings_dto(
     BridgeInstructionsSettingsDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_integrated_review_gate_dto(
+    BridgeIntegratedReviewGateDto self,
     SseSerializer serializer,
   );
 

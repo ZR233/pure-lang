@@ -206,9 +206,9 @@ class StudioState {
   PendingInteraction? get activeInteraction {
     final interactions = [...(selectedWorkspace?.interactions ?? const [])]
       ..sort(
-        (left, right) => interactionPriority(
-          left.kind,
-        ).compareTo(interactionPriority(right.kind)),
+        (left, right) =>
+            interactionPriority(left.kind)
+                .compareTo(interactionPriority(right.kind)),
       );
     return interactions.firstOrNull;
   }

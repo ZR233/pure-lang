@@ -8,12 +8,42 @@ const STUDIO_DIR_NAME: &str = "studio";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
 const STUDIO_HOME_ENV: &str = "PURE_STUDIO_HOME";
 
-pub fn default_db_path() -> Result<PathBuf> {
-    Ok(studio_dir()?.join(DATABASE_FILE_NAME))
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioPaths {
+    home: PathBuf,
+    data_dir: PathBuf,
 }
 
-pub fn default_attachments_dir() -> Result<PathBuf> {
-    Ok(studio_dir()?.join("attachments"))
+impl StudioPaths {
+    pub fn resolve(explicit_home: Option<PathBuf>) -> Result<Self> {
+        let home = match explicit_home {
+            Some(home) => validate_studio_home(home, "--studio-home")?,
+            None => match std::env::var_os(STUDIO_HOME_ENV) {
+                Some(home) => validate_studio_home(PathBuf::from(home), STUDIO_HOME_ENV)?,
+                None => user_home_dir()?.join(CONFIG_DIR_NAME),
+            },
+        };
+        Ok(Self {
+            data_dir: home.join(STUDIO_DIR_NAME),
+            home,
+        })
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
+    pub fn database(&self) -> PathBuf {
+        self.data_dir.join(DATABASE_FILE_NAME)
+    }
+
+    pub fn runtime_lock(&self) -> PathBuf {
+        self.data_dir.join("runtime.lock")
+    }
+}
+
+pub fn default_db_path() -> Result<PathBuf> {
+    Ok(StudioPaths::resolve(None)?.database())
 }
 
 fn user_home_dir() -> Result<PathBuf> {
@@ -30,18 +60,14 @@ fn user_home_dir() -> Result<PathBuf> {
         .context("could not resolve user home directory")
 }
 
-fn studio_dir() -> Result<PathBuf> {
-    if let Some(value) = std::env::var_os(STUDIO_HOME_ENV) {
-        let path = PathBuf::from(value);
-        if path.as_os_str().is_empty() {
-            anyhow::bail!("{STUDIO_HOME_ENV} must not be empty when configured");
-        }
-        if !path.is_absolute() {
-            anyhow::bail!("{STUDIO_HOME_ENV} must be an absolute path");
-        }
-        return Ok(path);
+fn validate_studio_home(path: PathBuf, source: &str) -> Result<PathBuf> {
+    if path.as_os_str().is_empty() {
+        anyhow::bail!("{source} must not be empty when configured");
     }
-    Ok(user_home_dir()?.join(CONFIG_DIR_NAME).join(STUDIO_DIR_NAME))
+    if !path.is_absolute() {
+        anyhow::bail!("{source} must be an absolute path");
+    }
+    Ok(path)
 }
 
 pub fn sqlite_url(path: &Path) -> String {
@@ -88,6 +114,23 @@ mod tests {
         assert_eq!(
             sqlite_read_only_url(Path::new(r"\\?\UNC\server\share\studio\studio.sqlite")),
             "sqlite:////server/share/studio/studio.sqlite?mode=ro"
+        );
+    }
+
+    #[test]
+    fn explicit_home_keeps_config_and_runtime_under_one_root() {
+        let root = if cfg!(windows) {
+            PathBuf::from(r"C:\isolated\.pure")
+        } else {
+            PathBuf::from("/tmp/isolated/.pure")
+        };
+        let paths = StudioPaths::resolve(Some(root.clone())).unwrap();
+
+        assert_eq!(paths.home(), root);
+        assert_eq!(paths.database(), root.join("studio").join("studio.sqlite"));
+        assert_eq!(
+            paths.runtime_lock(),
+            root.join("studio").join("runtime.lock")
         );
     }
 }

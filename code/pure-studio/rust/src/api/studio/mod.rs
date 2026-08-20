@@ -10,11 +10,12 @@ pub use self::handlers::{
     BridgeStudioUpdateOperation, activate_project, apply_task_recovery, archive_project,
     archive_thread, check_provider_usage, check_studio_update, cleanup_project,
     cleanup_recovery_issue, discover_skills, init_app, install_studio_update, interrupt_turn,
-    list_thread_turns, list_threads, load_provider_catalog, open_project, preview_project_cleanup,
-    preview_recovery_issue_cleanup, preview_task_recovery, probe_lsp_server, read_lsp_state,
-    read_mcp_state, read_provider_usage_state, read_settings_state, read_skills_state,
-    read_studio_state, read_thread, read_web_search_settings, reload_settings_from_disk,
-    repair_lsp_server, reset_lsp, reset_mcp, respond_interaction, save_general_settings,
+    list_thread_turns, list_threads_page, load_provider_catalog, open_project,
+    preview_project_cleanup, preview_recovery_issue_cleanup, preview_task_recovery,
+    probe_lsp_server, read_lsp_state, read_mcp_state, read_provider_usage_state,
+    read_settings_state, read_skills_state, read_studio_state, read_studio_update_state,
+    read_thread, read_web_search_settings, reload_settings_from_disk, repair_lsp_server, reset_lsp,
+    reset_mcp, respond_interaction, retry_recovery_issue, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, set_model_role,
     set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, start_turn,
@@ -28,11 +29,74 @@ pub use self::types::*;
 
 #[cfg(test)]
 mod tests {
-    use pl_studio_runtime::McpServerTransport;
     use pl_studio_runtime::StudioProductEventKind;
     use pretty_assertions::assert_eq;
 
     use super::BridgeProductEventPayload;
+
+    #[test]
+    fn frb_exports_cover_every_shared_studio_operation() {
+        use pl_protocol::studio::StudioOperation;
+
+        macro_rules! exported {
+            ($($operation:ident => $symbol:ident),+ $(,)?) => {{
+                let operations = [$(StudioOperation::$operation),+];
+                $(let _ = super::$symbol;)+
+                operations
+            }};
+        }
+
+        let operations = exported![
+            ReadState => read_studio_state,
+            OpenProject => open_project,
+            ActivateProject => activate_project,
+            ArchiveProject => archive_project,
+            ListThreadsPage => list_threads_page,
+            StartNewThread => start_new_thread,
+            ReadThread => read_thread,
+            ArchiveThread => archive_thread,
+            SetThreadMode => set_thread_mode,
+            ListThreadTurns => list_thread_turns,
+            StartTurn => start_turn,
+            SteerTurn => steer_turn,
+            InterruptTurn => interrupt_turn,
+            RespondInteraction => respond_interaction,
+            LoadProviderCatalog => load_provider_catalog,
+            ReadSettings => read_settings_state,
+            ReloadSettings => reload_settings_from_disk,
+            SaveWebSearchSettings => save_web_search_settings,
+            SavePermissionSettings => save_runtime_permission_mode,
+            SaveProviderSettings => save_provider_settings,
+            SaveInstructionsSettings => save_instructions_settings,
+            SaveSkillsSettings => save_skills_settings,
+            SaveMcpSettings => save_mcp_settings,
+            SaveGeneralSettings => save_general_settings,
+            SetModelRole => set_model_role,
+            ReadProviderUsage => read_provider_usage_state,
+            CheckProviderUsage => check_provider_usage,
+            ReadSkills => read_skills_state,
+            DiscoverSkills => discover_skills,
+            ReadMcp => read_mcp_state,
+            ResetMcp => reset_mcp,
+            ReadLsp => read_lsp_state,
+            ProbeLsp => probe_lsp_server,
+            RepairLsp => repair_lsp_server,
+            ResetLsp => reset_lsp,
+            ReadUpdate => read_studio_update_state,
+            CheckUpdate => check_studio_update,
+            PreviewTaskRecovery => preview_task_recovery,
+            ApplyTaskRecovery => apply_task_recovery,
+            PreviewRecoveryCleanup => preview_recovery_issue_cleanup,
+            CleanupRecoveryIssue => cleanup_recovery_issue,
+            RetryRecoveryIssue => retry_recovery_issue,
+            PreviewProjectCleanup => preview_project_cleanup,
+            CleanupProject => cleanup_project,
+            SubscribeProduct => create_product_subscription,
+            SubscribeThread => subscribe_thread,
+        ];
+
+        assert_eq!(operations, StudioOperation::ALL);
+    }
 
     #[test]
     fn bridge_product_event_uses_typed_payload() {
@@ -64,10 +128,8 @@ mod tests {
 
     #[test]
     fn provider_catalog_bridge_projects_the_canonical_pl_snapshot() {
-        let canonical = pl_studio_runtime::builtin_provider_catalog()
-            .snapshot()
-            .unwrap();
-        let bridge = super::load_provider_catalog().unwrap();
+        let canonical = pl_core::builtin_provider_catalog().snapshot().unwrap();
+        let bridge = super::BridgeProviderCatalogSnapshot::from(canonical.clone());
 
         assert_eq!(bridge.schema_version, canonical.schema_version);
         assert_eq!(bridge.revision, canonical.revision);
@@ -167,18 +229,5 @@ mod tests {
                 ))
                 .collect::<Vec<_>>()
         );
-    }
-
-    #[test]
-    fn mcp_transport_label_accepts_only_canonical_ui_values() {
-        assert_eq!(
-            super::convert::settings::mcp_transport_from_label("streamableHttp").unwrap(),
-            McpServerTransport::StreamableHttp
-        );
-        assert_eq!(
-            super::convert::settings::mcp_transport_from_label("stdio").unwrap(),
-            McpServerTransport::Stdio
-        );
-        assert!(super::convert::settings::mcp_transport_from_label("streamable_http").is_err());
     }
 }

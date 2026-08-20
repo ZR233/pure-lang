@@ -35,9 +35,8 @@ Future<void> main(List<String> arguments) async {
     await _submitCompletedTurn(session, snapshots, options.promptFile);
 
     final finalSnapshot = await _snapshot(session, snapshots);
-    await File(
-      options.screenshotOutput,
-    ).writeAsBytes(await session.screenshot(), flush: true);
+    await File(options.screenshotOutput)
+        .writeAsBytes(await session.screenshot(), flush: true);
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
@@ -55,9 +54,8 @@ Future<void> main(List<String> arguments) async {
         // Preserve the original acceptance failure.
       }
       try {
-        await File(
-          '${options.screenshotOutput}.failure.png',
-        ).writeAsBytes(await session.screenshot(), flush: true);
+        await File('${options.screenshotOutput}.failure.png')
+            .writeAsBytes(await session.screenshot(), flush: true);
       } on Object {
         // Preserve the original acceptance failure.
       }

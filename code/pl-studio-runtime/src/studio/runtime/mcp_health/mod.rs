@@ -162,7 +162,13 @@ impl StudioRuntime {
         }
     }
 
-    pub async fn reset_mcp(&self, scope: crate::McpResetScope) -> Result<()> {
+    pub async fn reset_mcp(&self, request: pl_protocol::studio::McpResetRequest) -> Result<()> {
+        let scope = match request {
+            pl_protocol::studio::McpResetRequest::Server { server_id } => {
+                crate::McpResetScope::Server { server_id }
+            }
+            pl_protocol::studio::McpResetRequest::All => crate::McpResetScope::All,
+        };
         let config = self.config_runtime.read()?.config;
         let servers = effective_mcp_servers(&config);
         let effective_fingerprint = effective_mcp_fingerprint(&servers);

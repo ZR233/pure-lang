@@ -1,6 +1,8 @@
 pub use crate::attachment::MaterializedAttachment;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectRecord {
     pub id: String,
     pub name: String,
@@ -8,7 +10,8 @@ pub struct ProjectRecord {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadRecord {
     pub id: String,
     pub project_id: String,
@@ -57,7 +60,8 @@ impl From<ThreadRecord> for pl_protocol::Thread {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum ThreadKind {
     Root,
     Agent,
@@ -72,7 +76,8 @@ impl ThreadKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum ThreadVisibility {
     Active,
     Archived,

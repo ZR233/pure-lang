@@ -8,6 +8,7 @@ import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/updater.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update_state`, `cancel_all_update_operations`, `runtime_error`, `update_operations`, `wait`
@@ -16,6 +17,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<BridgeUpdaterStateSnapshot> checkStudioUpdate() =>
     RustLib.instance.api.crateApiStudioHandlersUpdaterCheckStudioUpdate();
+
+Future<BridgeUpdaterStateSnapshot> readStudioUpdateState() =>
+    RustLib.instance.api.crateApiStudioHandlersUpdaterReadStudioUpdateState();
 
 Future<BridgeStudioUpdateOperation> installStudioUpdate({
   required BigInt expectedRevision,

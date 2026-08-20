@@ -33,7 +33,7 @@ pub type InteractionEmitter =
     Arc<dyn Fn(InteractionRequest) -> InteractionEmitterFuture + Send + Sync>;
 
 #[derive(Clone)]
-pub struct InteractionRuntime {
+pub struct InteractionService {
     store: StudioStore,
     waiters: Arc<Mutex<HashMap<String, InteractionWaiter>>>,
 }
@@ -42,7 +42,7 @@ struct InteractionWaiter {
     sender: oneshot::Sender<InteractionResolution>,
 }
 
-impl InteractionRuntime {
+impl InteractionService {
     pub fn new(store: StudioStore) -> Self {
         Self {
             store,
@@ -370,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn callback_persists_pending_and_waits_for_resolution() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionRuntime::new(store.clone());
+        let runtime = InteractionService::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
         let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
@@ -413,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_thread_marks_pending_and_releases_waiters() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionRuntime::new(store.clone());
+        let runtime = InteractionService::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
         let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(tool_approval_interaction(&session_id, "call-1")));
@@ -452,7 +452,7 @@ mod tests {
     #[tokio::test]
     async fn restart_cancellation_preserves_user_input_and_plan_confirmation() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionRuntime::new(store.clone());
+        let runtime = InteractionService::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut user_input = user_input_interaction("ask-1");
         user_input.scope.thread_id = session_id.clone();

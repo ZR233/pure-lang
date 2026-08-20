@@ -118,10 +118,12 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
             StudioMode::Task => {
                 let mut effects = vec![
                     ToolEffect::Read,
-                    ToolEffect::Process,
                     ToolEffect::AgentControl,
                     ToolEffect::BranchControl,
                 ];
+                if context.task_phase == Some(TaskRunPhase::Merging) {
+                    effects.push(ToolEffect::Process);
+                }
                 if context.task_phase == Some(TaskRunPhase::Merging) {
                     effects.push(ToolEffect::WorkspaceWrite);
                 }
@@ -168,10 +170,10 @@ fn finalization(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> TurnF
         None | Some(TaskRunPhase::Planning | TaskRunPhase::PendingConfirmation) => {
             TurnFinalizationPolicy::Direct
         }
+        Some(TaskRunPhase::DesignUpdating) => required_tool("task_update_design"),
         Some(TaskRunPhase::Reviewing) => required_tool("task_complete"),
         Some(
-            TaskRunPhase::DesignUpdating
-            | TaskRunPhase::Implementing
+            TaskRunPhase::Implementing
             | TaskRunPhase::Merging
             | TaskRunPhase::Reworking
             | TaskRunPhase::Stopping
@@ -198,20 +200,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn process_effect_is_available_to_every_studio_role_and_task_phase() {
+    fn task_root_process_effect_is_limited_to_merging() {
         let visible = ToolVisibilitySet::from_tool_names(["exec", "write_stdin"]);
         let root = snapshot("planner", true);
         let task_phases = [
-            None,
-            Some(TaskRunPhase::Planning),
-            Some(TaskRunPhase::PendingConfirmation),
-            Some(TaskRunPhase::DesignUpdating),
-            Some(TaskRunPhase::Implementing),
-            Some(TaskRunPhase::Merging),
-            Some(TaskRunPhase::Reviewing),
-            Some(TaskRunPhase::Reworking),
+            (None, false),
+            (Some(TaskRunPhase::Planning), false),
+            (Some(TaskRunPhase::PendingConfirmation), false),
+            (Some(TaskRunPhase::DesignUpdating), false),
+            (Some(TaskRunPhase::Implementing), false),
+            (Some(TaskRunPhase::Merging), true),
+            (Some(TaskRunPhase::Reviewing), false),
+            (Some(TaskRunPhase::Reworking), false),
         ];
-        for task_phase in task_phases {
+        for (task_phase, process_allowed) in task_phases {
             let policy = studio_execution_policy(
                 &root,
                 StudioPolicyContext {
@@ -220,11 +222,27 @@ mod tests {
                 },
                 visible.clone(),
             );
-            assert!(policy.allowed_effects.contains(ToolEffect::Process));
-            assert!(policy.visible_tools.contains("exec"));
-            assert!(policy.visible_tools.contains("write_stdin"));
+            assert_eq!(
+                policy.allowed_effects.contains(ToolEffect::Process),
+                process_allowed,
+                "unexpected Process policy for {task_phase:?}"
+            );
+            assert_eq!(
+                policy.allows_tool("exec", Some(ToolEffect::Process)),
+                process_allowed,
+                "unexpected exec policy for {task_phase:?}"
+            );
+            assert_eq!(
+                policy.allows_tool("write_stdin", Some(ToolEffect::Process)),
+                process_allowed,
+                "unexpected write_stdin policy for {task_phase:?}"
+            );
         }
+    }
 
+    #[test]
+    fn process_effect_remains_available_to_child_roles() {
+        let visible = ToolVisibilitySet::from_tool_names(["exec", "write_stdin"]);
         for role in ["planner", "explorer", "reviewer", "executor"] {
             let policy = studio_execution_policy(
                 &snapshot(role, false),
@@ -289,6 +307,19 @@ mod tests {
             visible.clone(),
         );
         assert!(!reviewing.visible_tools.contains("plan_exit"));
+
+        let design_updating = studio_execution_policy(
+            &snapshot("planner", true),
+            StudioPolicyContext {
+                mode: StudioMode::Task,
+                task_phase: Some(TaskRunPhase::DesignUpdating),
+            },
+            ToolVisibilitySet::from_tool_names(["task_update_design"]),
+        );
+        assert_eq!(
+            design_updating.finalization,
+            required_tool("task_update_design")
+        );
 
         let simple = studio_execution_policy(
             &snapshot("executor", true),

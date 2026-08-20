@@ -6,6 +6,7 @@ use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 use serde::Serialize;
 
 use super::super::git::{GitDiffSelection, diff_between};
+use super::super::spawn::TaskExecutorBlueprint;
 use super::super::{
     ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnitRecord, WorkUnitStatus,
 };
@@ -22,6 +23,13 @@ struct ReviewFocus {
     title: String,
     status: WorkUnitStatus,
     scope_hints: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewBlueprint<'a> {
+    blueprint_fingerprint: &'a str,
+    blueprint: &'a TaskExecutorBlueprint,
 }
 
 pub(crate) async fn build_review_prompt(
@@ -58,6 +66,11 @@ pub(crate) async fn build_review_prompt(
                 .iter()
                 .find(|work_unit| work_unit.id == completion.work_unit_id)
                 .context("delivery review work unit not found")?;
+            let (_, handoff) = coordinator
+                .store
+                .read_work_unit_handoff(&target_work_unit.id)
+                .await?
+                .context("delivery review work unit has no durable handoff")?;
             let target_focus = ReviewFocus::from(target_work_unit);
             let sibling_focus = work_units
                 .iter()
@@ -92,6 +105,13 @@ pub(crate) async fn build_review_prompt(
                         serde_json::to_string_pretty(&ModelCompletion::new(&run, &completion))?,
                     ),
                     (
+                        "HANDOFF_JSON",
+                        serde_json::to_string_pretty(&ReviewBlueprint {
+                            blueprint_fingerprint: &handoff.blueprint_fingerprint,
+                            blueprint: &handoff.blueprint,
+                        })?,
+                    ),
+                    (
                         "CHANGED_FILES_JSON",
                         serde_json::to_string_pretty(&changed_files)?,
                     ),
@@ -119,7 +139,7 @@ pub(crate) async fn build_review_prompt(
                 .list_work_units(&run.id)
                 .await?
                 .iter()
-                .map(|work_unit| ModelWorkUnit::new(&run, work_unit))
+                .map(|work_unit| ModelWorkUnit::new(&run, work_unit, None))
                 .collect::<Vec<_>>();
             render_template(
                 INTEGRATED_TEMPLATE,
@@ -291,6 +311,7 @@ mod tests {
                 ("TARGET_FOCUS_JSON", "target".to_string()),
                 ("SIBLING_FOCUS_JSON", "siblings".to_string()),
                 ("COMPLETION_JSON", "completion".to_string()),
+                ("HANDOFF_JSON", "handoff".to_string()),
                 ("CHANGED_FILES_JSON", "files".to_string()),
                 ("DIFF", "diff".to_string()),
             ],

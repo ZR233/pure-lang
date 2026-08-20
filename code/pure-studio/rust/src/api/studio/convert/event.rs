@@ -4,9 +4,8 @@ use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 use super::runtime::{
     bridge_agent_directory_entry, bridge_mcp_health, bridge_recovery_issue, bridge_task_runtime,
 };
-use super::settings::{provider_usage_dto, studio_settings_dto};
+use super::settings::{bridge_settings, provider_usage_dto};
 use super::thread_stream::bridge_thread;
-use crate::api::studio::handlers::snapshot::general_settings;
 use crate::api::studio::types::*;
 
 pub(crate) fn bridge_product_event(
@@ -54,15 +53,10 @@ pub(crate) fn bridge_product_event(
                 })
             }
             StudioProductEventKind::SettingsStateChanged(state) => {
-                let settings = studio_settings_dto(
-                    &state.settings.config,
-                    general_settings(&state.settings.config),
-                    pl_studio_runtime::StudioRole::Executor,
-                )?;
                 BridgeProductEventPayload::SettingsStateChanged(Box::new(
                     BridgeSettingsStateSnapshot {
                         meta: state.meta.into(),
-                        settings,
+                        settings: bridge_settings(state.settings),
                     },
                 ))
             }

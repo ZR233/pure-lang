@@ -20,6 +20,42 @@ use super::{
 const TASK_RESUME_MESSAGE: &str = "Resume the active Task from canonical durable state. Read task_status and list_agents before choosing the next state-machine transition. Do not recreate completed work or infer review outcomes from pre-restart context.";
 
 impl StudioRuntime {
+    /// Starts a new active Turn for a Thread.
+    pub async fn start_turn(
+        &self,
+        thread_id: String,
+        request: pl_protocol::studio::StartTurnRequest,
+    ) -> Result<StudioSubmitPromptResponse> {
+        self.submit_prompt(StudioSubmitPromptRequest {
+            thread_id,
+            prompt: request.prompt,
+            attachment_ids: request.attachment_ids,
+            options: StudioSubmitPromptOptions {
+                turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
+                ..StudioSubmitPromptOptions::default()
+            },
+        })
+        .await
+    }
+
+    /// Steers the currently active Turn for a Thread.
+    pub async fn steer_turn(
+        &self,
+        thread_id: String,
+        request: pl_protocol::studio::SteerTurnRequest,
+    ) -> Result<StudioSubmitPromptResponse> {
+        self.submit_prompt(StudioSubmitPromptRequest {
+            thread_id,
+            prompt: request.prompt,
+            attachment_ids: request.attachment_ids,
+            options: StudioSubmitPromptOptions {
+                turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
+                ..StudioSubmitPromptOptions::default()
+            },
+        })
+        .await
+    }
+
     pub async fn submit_prompt(
         &self,
         request: StudioSubmitPromptRequest,
@@ -219,6 +255,29 @@ impl StudioRuntime {
         Ok(StudioStopPromptResponse {
             thread_id,
             stopped: true,
+        })
+    }
+
+    /// Interrupts a Turn only when the caller's expected identity still matches the active Turn.
+    pub async fn interrupt_prompt(
+        &self,
+        thread_id: String,
+        expected_turn_id: String,
+    ) -> Result<super::StudioInterruptPromptResponse> {
+        let snapshot = self.thread_snapshot(&thread_id).await?;
+        let active_turn_id = snapshot.active_turn.as_ref().map(|turn| turn.id.as_str());
+        if active_turn_id.is_some_and(|active| active != expected_turn_id) {
+            return Err(anyhow::Error::new(
+                pl_protocol::studio::StudioError::invalid_argument(
+                    "expected Turn does not match the active Turn",
+                ),
+            ));
+        }
+        let response = self.stop_prompt(thread_id).await?;
+        Ok(super::StudioInterruptPromptResponse {
+            thread_id: response.thread_id,
+            turn_id: expected_turn_id,
+            interrupted: response.stopped,
         })
     }
 

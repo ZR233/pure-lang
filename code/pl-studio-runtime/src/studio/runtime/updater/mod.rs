@@ -17,16 +17,16 @@ pub struct StudioUpdateStateSnapshot {
 }
 
 #[derive(Clone)]
-pub struct StudioUpdateRuntime {
+pub(crate) struct StudioUpdateRuntime {
     store: StudioStore,
     updater: StudioUpdater,
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<StudioUpdateStateSnapshot>>,
-    events: crate::StudioProductEventRuntime,
+    events: crate::ProductEventBus,
 }
 
 impl StudioUpdateRuntime {
-    pub fn new(store: StudioStore, events: crate::StudioProductEventRuntime) -> Result<Self> {
+    pub(crate) fn new(store: StudioStore, events: crate::ProductEventBus) -> Result<Self> {
         Ok(Self {
             store,
             updater: StudioUpdater::new_default()?,
@@ -39,7 +39,7 @@ impl StudioUpdateRuntime {
         })
     }
 
-    pub async fn load_cache(&self) -> Result<()> {
+    pub(crate) async fn load_cache(&self) -> Result<()> {
         let Some(value) = self.store.load_setting(CACHE_KEY).await? else {
             return Ok(());
         };
@@ -48,12 +48,12 @@ impl StudioUpdateRuntime {
     }
 
     /// 只读已验证 last-known update，不访问网络。
-    pub async fn read(&self) -> StudioUpdateStateSnapshot {
+    pub(crate) async fn read(&self) -> StudioUpdateStateSnapshot {
         self.state.read().await.clone()
     }
 
     /// 使用编译时应用版本检查更新并持久化已验证结果。
-    pub async fn check(&self) -> Result<StudioUpdateStateSnapshot> {
+    pub(crate) async fn check(&self) -> Result<StudioUpdateStateSnapshot> {
         let _command = self.command_lock.lock().await;
         let previous = self.read().await;
         let running = StudioUpdateStateSnapshot {
@@ -129,7 +129,7 @@ impl StudioUpdateRuntime {
         Ok(next)
     }
 
-    pub async fn verified_update(
+    pub(crate) async fn verified_update(
         &self,
         expected_revision: u64,
         version: &str,
@@ -150,7 +150,7 @@ impl StudioUpdateRuntime {
             .context("requested update is not the cached verified update")
     }
 
-    pub fn updater(&self) -> StudioUpdater {
+    pub(crate) fn updater(&self) -> StudioUpdater {
         self.updater.clone()
     }
 

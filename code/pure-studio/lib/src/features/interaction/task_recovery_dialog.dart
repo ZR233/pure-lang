@@ -213,9 +213,8 @@ class _TaskRecoveryFormState extends ConsumerState<_TaskRecoveryForm> {
           const SizedBox(height: 6),
           Text(
             context.l10n.taskRecoveryDialogBody,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: context.studioInkSoft),
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(color: context.studioInkSoft),
           ),
           const SizedBox(height: 18),
           Expanded(
@@ -502,9 +501,8 @@ class _RecoveryWarning extends StatelessWidget {
                     const SizedBox(height: 4),
                     SelectableText(
                       detail,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
-                      ),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: context.studioInkSoft),
                     ),
                   ],
                 ],

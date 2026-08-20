@@ -25,11 +25,11 @@ pub struct ProviderUsageRuntime {
     store: StudioStore,
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<ProviderUsageStateSnapshot>>,
-    events: crate::StudioProductEventRuntime,
+    events: crate::ProductEventBus,
 }
 
 impl ProviderUsageRuntime {
-    pub fn new(store: StudioStore, events: crate::StudioProductEventRuntime) -> Self {
+    pub fn new(store: StudioStore, events: crate::ProductEventBus) -> Self {
         Self {
             store,
             command_lock: Arc::new(Mutex::new(())),

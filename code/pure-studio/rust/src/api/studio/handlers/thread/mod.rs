@@ -6,7 +6,7 @@ use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::{
     ArchiveThreadResult, BridgeError, BridgeThreadMode, StartNewThreadResponse, StartTurnResponse,
 };
-use pl_studio_runtime::{StudioMode, StudioStartNewThreadRequest, StudioSubmitPromptOptions};
+use pl_studio_runtime::StudioMode;
 
 fn studio_mode(mode: BridgeThreadMode) -> StudioMode {
     match mode {
@@ -30,17 +30,15 @@ pub async fn start_new_thread(
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
-        .start_new_thread(StudioStartNewThreadRequest {
+        .create_thread_command(
             project_id,
-            title: "New Session".to_string(),
-            prompt,
-            attachment_ids,
-            mode,
-            options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
-                ..StudioSubmitPromptOptions::default()
+            pl_protocol::studio::CreateThreadRequest {
+                title: "New Session".to_string(),
+                prompt,
+                attachment_ids,
+                mode: mode.label().to_string(),
             },
-        })
+        )
         .await?;
     Ok(StartNewThreadResponse {
         thread: bridge_thread(thread_from_record(response.thread)),

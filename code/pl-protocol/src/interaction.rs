@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::event::{UserInputAnswer, UserQuestion};
 use crate::labeled::LabeledEnum;
@@ -85,7 +86,7 @@ pub struct InteractionRequest {
     pub resolution: Option<InteractionResolution>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum InteractionResolution {
     UserInput {
@@ -105,14 +106,14 @@ pub enum InteractionResolution {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolApprovalResolution {
     Approved,
     Denied,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PlanConfirmationResolution {
     ImplementFreshContext,

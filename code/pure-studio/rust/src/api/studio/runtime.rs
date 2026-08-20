@@ -1,6 +1,6 @@
 use anyhow::Result;
-use pl_studio_runtime::StudioRuntime;
-use tokio::sync::{Mutex, Notify, OnceCell};
+use pl_studio_runtime::{StudioRuntime, StudioRuntimeStatus};
+use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use super::subscription::BridgeTaskRegistry;
@@ -8,20 +8,10 @@ use super::types::BridgeError;
 
 static BRIDGE: OnceCell<BridgeRuntime> = OnceCell::const_new();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BridgeLifecycle {
-    Initialized,
-    Started,
-    ShuttingDown,
-    Stopped,
-}
-
 pub(crate) struct BridgeRuntime {
     pub(crate) studio: StudioRuntime,
     pub(crate) subscriptions: BridgeTaskRegistry,
     pub(crate) shutdown: CancellationToken,
-    pub(crate) shutdown_complete: Notify,
-    pub(crate) lifecycle: Mutex<BridgeLifecycle>,
 }
 
 impl BridgeRuntime {
@@ -30,8 +20,6 @@ impl BridgeRuntime {
             studio: StudioRuntime::default_app().await?,
             subscriptions: BridgeTaskRegistry::new(),
             shutdown: CancellationToken::new(),
-            shutdown_complete: Notify::new(),
-            lifecycle: Mutex::new(BridgeLifecycle::Initialized),
         })
     }
 }
@@ -47,12 +35,14 @@ pub(crate) fn installed_bridge() -> Result<&'static BridgeRuntime, BridgeError> 
 
 pub(crate) async fn active_bridge() -> Result<&'static BridgeRuntime, BridgeError> {
     let bridge = installed_bridge()?;
-    match *bridge.lifecycle.lock().await {
-        BridgeLifecycle::Started => Ok(bridge),
-        BridgeLifecycle::Initialized => Err(BridgeError::not_initialized()),
-        BridgeLifecycle::ShuttingDown | BridgeLifecycle::Stopped => {
-            Err(BridgeError::runtime_stopped())
+    match bridge.studio.runtime_snapshot().await?.status {
+        StudioRuntimeStatus::Ready => Ok(bridge),
+        StudioRuntimeStatus::Uninitialized | StudioRuntimeStatus::Initializing => {
+            Err(BridgeError::not_initialized())
         }
+        StudioRuntimeStatus::ShuttingDown
+        | StudioRuntimeStatus::Stopped
+        | StudioRuntimeStatus::Failed => Err(BridgeError::runtime_stopped()),
     }
 }
 

@@ -1,7 +1,7 @@
 use super::{
     DemoMode, ensure_flutter_dependencies, print_context, run_flutter, run_os_tool, run_tool,
 };
-use crate::{paths, process};
+use crate::{paths, process, pubspec_lock};
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -143,11 +143,37 @@ fn generate_gui_sources(
     run_flutter(workspace_root, app_dir, &["gen-l10n"], DemoMode::Native)?;
     ensure_frb_codegen_version()?;
     run_frb_codegen(workspace_root, app_dir)?;
-    run_tool("dart", BUILD_RUNNER_ARGS, app_dir)?;
+    run_build_runner(app_dir)?;
     normalize_generated_dart_whitespace(&app_dir.join("lib"))?;
     run_tool("dart", &["format", "lib"], app_dir)?;
     run_tool("cargo", &["fmt", "--all"], workspace_root)?;
     write_codegen_fingerprint(workspace_root, app_dir)
+}
+
+fn run_build_runner(app_dir: &Path) -> Result<()> {
+    let lock_path = app_dir.join("pubspec.lock");
+    preserve_canonical_lockfile(&lock_path, || run_tool("dart", BUILD_RUNNER_ARGS, app_dir))
+}
+
+fn preserve_canonical_lockfile(
+    lock_path: &Path,
+    operation: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let original_lock = pubspec_lock::read_optional(lock_path)?;
+    let operation_result = operation();
+    let validation_result = operation_result.as_ref().map_or(Ok(()), |_| {
+        pubspec_lock::classify_change(lock_path, original_lock.as_deref()).map(|change| {
+            if change == pubspec_lock::LockfileChange::HostedUrlsOnly {
+                println!("Restoring canonical pubspec.lock hosted URLs after build_runner.");
+            }
+        })
+    });
+    let restore_result =
+        pubspec_lock::restore_canonical_optional(lock_path, original_lock.as_deref());
+
+    operation_result?;
+    validation_result?;
+    restore_result
 }
 
 fn generated_sources_are_current(workspace_root: &Path, app_dir: &Path) -> Result<bool> {
@@ -525,6 +551,59 @@ mod tests {
     fn build_runner_uses_current_conflicting_output_behavior() {
         assert_eq!(BUILD_RUNNER_ARGS, ["run", "build_runner", "build"]);
         assert!(!BUILD_RUNNER_ARGS.contains(&"--delete-conflicting-outputs"));
+    }
+
+    #[test]
+    fn build_runner_guard_restores_canonical_hosted_urls() -> Result<()> {
+        let lock_path = temporary_lock_path("mirror-restore");
+        let canonical = hosted_lockfile("https://pub.dev", "2.13.0");
+        fs::write(&lock_path, &canonical)?;
+
+        preserve_canonical_lockfile(&lock_path, || {
+            pubspec_lock::rewrite_hosted_urls(&lock_path, "https://mirror.example")
+        })?;
+
+        assert_eq!(fs::read_to_string(&lock_path)?, canonical);
+        fs::remove_file(lock_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn build_runner_guard_rejects_dependency_drift_and_restores_lockfile() -> Result<()> {
+        let lock_path = temporary_lock_path("dependency-drift");
+        let canonical = hosted_lockfile("https://pub.dev", "2.13.0");
+        fs::write(&lock_path, &canonical)?;
+
+        let error = preserve_canonical_lockfile(&lock_path, || {
+            fs::write(
+                &lock_path,
+                hosted_lockfile("https://mirror.example", "2.14.0"),
+            )?;
+            Ok(())
+        })
+        .expect_err("build_runner must not change dependency resolution");
+
+        assert!(error.to_string().contains("beyond hosted source URLs"));
+        assert_eq!(fs::read_to_string(&lock_path)?, canonical);
+        fs::remove_file(lock_path)?;
+        Ok(())
+    }
+
+    fn hosted_lockfile(url: &str, version: &str) -> String {
+        format!(
+            "packages:\n  async:\n    dependency: transitive\n    description:\n      name: async\n      url: \"{url}\"\n    source: hosted\n    version: \"{version}\"\n"
+        )
+    }
+
+    fn temporary_lock_path(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "pl-xtask-codegen-{name}-{}-{unique}.lock",
+            std::process::id()
+        ))
     }
 
     #[test]

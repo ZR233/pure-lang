@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use pl_studio_runtime::{
+use pl_core::{
     AgentModelConfig, AgentRoleId, ModelInfo, ModelParameter, ModelRouteConfig, PermissionMode,
-    ProviderConfig, ProviderId, ReasoningEffort, StudioConfig,
+    ProviderConfig, ProviderId, ReasoningEffort,
 };
+use pl_studio_runtime::StudioConfig;
 
 pub(super) fn task_test_config(base_url: String) -> StudioConfig {
     let mut model = ModelInfo::fallback("local-responses");

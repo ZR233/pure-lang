@@ -26,7 +26,7 @@ pub use pl_core::config::{
     validate_mcp_identifier, zhipu_coding_plan_token,
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
-pub use runtime::{ConfigRuntime, ConfigRuntimeSnapshot};
+pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
 pub use store::{ConfigPaths, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 14;

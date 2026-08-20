@@ -2,23 +2,18 @@
 
 # 会话生命周期 Flutter Driver GUI 验收。
 #
-# Demo：起始页草稿 -> 首次发送建会话 -> 相邻归档 -> 归档到零。
-# 真实 Bridge：隔离 home 打开空 Project -> seed -> 归档到零 -> 同 home 重启仍为零。
+# 起始页草稿 -> 首次发送建会话 -> 相邻归档 -> 归档到零。
+# Fixture 只存在于 DriverDemoStudioApi，不进入生产 FRB 或 StudioRuntime。
 
 [CmdletBinding()]
 param(
-    [switch]$Demo,
-
     [string]$ArtifactsDirectory,
 
     [ValidateRange(60, 1800)]
     [int]$GuiStartupTimeoutSeconds = 900,
 
     [ValidateRange(60, 900)]
-    [int]$DriverTimeoutSeconds = 480,
-
-    [ValidateRange(2, 10)]
-    [int]$SeedCount = 3
+    [int]$DriverTimeoutSeconds = 480
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,16 +30,10 @@ if ([string]::IsNullOrWhiteSpace($ArtifactsDirectory)) {
 }
 $ArtifactsDirectory = [System.IO.Path]::GetFullPath($ArtifactsDirectory)
 New-Item -ItemType Directory -Path $ArtifactsDirectory -Force | Out-Null
-$studioHome = Join-Path $ArtifactsDirectory 'studio-home'
-$workspace = Join-Path $ArtifactsDirectory 'workspace'
-New-Item -ItemType Directory -Path $workspace -Force | Out-Null
 
 function Invoke-LifecycleRound {
     param(
-        [Parameter(Mandatory = $true)][string]$Label,
-        [Parameter(Mandatory = $true)][string]$Mode,
-        [Parameter(Mandatory = $true)][bool]$UseDemo,
-        [Parameter(Mandatory = $true)][bool]$EnableSeed
+        [Parameter(Mandatory = $true)][string]$Label
     )
 
     $roundArtifacts = Join-Path $ArtifactsDirectory $Label
@@ -57,16 +46,9 @@ function Invoke-LifecycleRound {
     $driverProcess = $null
     try {
         $environment = @{
-            'PURE_STUDIO_HOME' = $studioHome
             'PURE_STUDIO_NATIVE_LIFECYCLE_LOG' = Join-Path $roundArtifacts 'native-window.log'
         }
-        if ($EnableSeed) {
-            $environment['PURE_STUDIO_SEED_FIXTURES'] = '1'
-        }
-        $guiArguments = @('xtask', 'run-gui', '--driver', '--log-level', 'debug')
-        if ($UseDemo) {
-            $guiArguments = @('xtask', 'run-gui', '--demo', '--driver', '--log-level', 'debug')
-        }
+        $guiArguments = @('xtask', 'run-gui', '--demo', '--driver', '--log-level', 'debug')
         $guiProcess = Start-LoggedProcess `
             -FilePath 'cargo' `
             -Arguments $guiArguments `
@@ -84,13 +66,8 @@ function Invoke-LifecycleRound {
         $driverArguments = @(
             'run', 'test_driver/session_lifecycle_acceptance_driver.dart',
             '--vm-service-url', $vmServiceUrl,
-            '--mode', $Mode,
-            '--artifacts', $roundArtifacts,
-            '--seed-count', "$SeedCount"
+            '--artifacts', $roundArtifacts
         )
-        if ($Mode -eq 'runtime-seed') {
-            $driverArguments += @('--workspace', $workspace)
-        }
         $driverProcess = Start-LoggedProcess `
             -FilePath 'dart' `
             -Arguments $driverArguments `
@@ -117,13 +94,7 @@ function Invoke-LifecycleRound {
     }
 }
 
-if ($Demo) {
-    Invoke-LifecycleRound -Label 'demo' -Mode 'demo' -UseDemo $true -EnableSeed $false
-}
-else {
-    Invoke-LifecycleRound -Label 'round-1' -Mode 'runtime-seed' -UseDemo $false -EnableSeed $true
-    Invoke-LifecycleRound -Label 'round-2' -Mode 'runtime-restart' -UseDemo $false -EnableSeed $false
-}
+Invoke-LifecycleRound -Label 'demo'
 
 Write-Output 'Session lifecycle Driver harness completed successfully.'
 Write-Output "Artifacts: $ArtifactsDirectory"

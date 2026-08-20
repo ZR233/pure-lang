@@ -9,12 +9,8 @@ import '../types/history.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/thread_stream.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-Future<List<BridgeThread>> listThreads({required String projectId}) => RustLib
-    .instance
-    .api
-    .crateApiStudioHandlersHistoryListThreads(projectId: projectId);
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// 从内存目录索引按 `(updatedAt, id)` 倒序 keyset 分页；GUI 触底加载使用。
 Future<BridgeThreadDirectoryPage> listThreadsPage({
@@ -33,12 +29,3 @@ Future<BridgeThreadTurnPage> listThreadTurns({
 }) => RustLib.instance.api.crateApiStudioHandlersHistoryListThreadTurns(
   request: request,
 );
-
-/// 驱动验收专用：在真实 runtime 中预置 N 条确定性 root Thread。
-///
-/// 仅当进程以 `PURE_STUDIO_SEED_FIXTURES=1` 启动时可用（隔离验收环境）；
-/// 普通运行直接拒绝，不触碰用户的会话数据。
-Future<List<BridgeThread>> seedDriverThreadFixtures({required int count}) =>
-    RustLib.instance.api.crateApiStudioHandlersHistorySeedDriverThreadFixtures(
-      count: count,
-    );

@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pure_studio/main.dart' as studio;
 import 'package:pure_studio/src/app/studio_shutdown.dart';
 import 'package:pure_studio/src/data/frb/studio_api.dart';
-import 'package:pure_studio/src/rust/api/studio.dart' as frb;
 import 'package:pure_studio/src/data/repositories/studio_repository.dart';
 import 'package:pure_studio/src/shared/studio_driver_state.dart';
 
@@ -54,16 +53,17 @@ Future<String> _handleDriverData(String? message) async {
       await (_shutdownTask ??= _runShutdown());
       return jsonEncode({'shutdown': 'completed'});
     case final String seed when seed.startsWith('seed-threads:'):
-      // 真实 runtime 驱动验收：预置确定性 root Thread（需 PURE_STUDIO_SEED_FIXTURES=1）。
+      // Fixture 只属于专用 Driver demo harness，不穿过生产 FRB API。
       final count = int.tryParse(seed.substring('seed-threads:'.length)) ?? 0;
-      if (_container.read(studioApiProvider) is FrbStudioApi) {
-        final threads = await frb.seedDriverThreadFixtures(count: count);
+      final api = _container.read(studioApiProvider);
+      if (api is DriverDemoStudioApi) {
+        api.preparePagingScenario(count);
         _container.invalidate(studioControllerProvider);
         await _container.read(studioControllerProvider.future);
         _publishSidebarDirectory();
-        return jsonEncode({'seeded': threads.length});
+        return jsonEncode({'seeded': count});
       }
-      return jsonEncode({'error': 'seeding requires the real runtime bridge'});
+      return jsonEncode({'error': 'seeding requires the Driver demo harness'});
     case 'shutdown-begin':
       // 触发关机但不等待；验收脚本可在阶段界面显示期间截图/快照。
       _shutdownTask ??= _runShutdown();

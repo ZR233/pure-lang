@@ -4,11 +4,12 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentActivity {
   idle,
@@ -187,6 +188,27 @@ class BridgeBudgetUsageDto {
 }
 
 enum BridgeConversationRecoveryMode { rewindTail, rebuildThread }
+
+@freezed
+sealed class BridgeIntegratedReviewGateDto
+    with _$BridgeIntegratedReviewGateDto {
+  const BridgeIntegratedReviewGateDto._();
+
+  const factory BridgeIntegratedReviewGateDto.required_({
+    required String reason,
+  }) = BridgeIntegratedReviewGateDto_Required;
+  const factory BridgeIntegratedReviewGateDto.satisfiedByReview({
+    required String reviewRoundId,
+    required String reviewedHead,
+  }) = BridgeIntegratedReviewGateDto_SatisfiedByReview;
+  const factory BridgeIntegratedReviewGateDto.notRequiredNoDelivery() =
+      BridgeIntegratedReviewGateDto_NotRequiredNoDelivery;
+  const factory BridgeIntegratedReviewGateDto.notRequiredSingleExecutorEquivalent({
+    required String workUnitId,
+    required int completionRevision,
+    required String mergeRecordId,
+  }) = BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent;
+}
 
 class BridgeLspHealthDto {
   final List<String> activeLspServers;
@@ -1363,6 +1385,7 @@ class BridgeTaskRuntimeDto {
   final String? stopRequestedOrigin;
   final String? stopRequestedReason;
   final BigInt taskGeneration;
+  final BridgeIntegratedReviewGateDto integratedReviewGate;
   final List<BridgeTaskFailureDto> failures;
   final BridgeTaskFailureDto? terminalFailure;
   final List<BridgeTaskWorkUnitDto> workUnits;
@@ -1379,6 +1402,7 @@ class BridgeTaskRuntimeDto {
     this.stopRequestedOrigin,
     this.stopRequestedReason,
     required this.taskGeneration,
+    required this.integratedReviewGate,
     required this.failures,
     this.terminalFailure,
     required this.workUnits,
@@ -1397,6 +1421,7 @@ class BridgeTaskRuntimeDto {
       stopRequestedOrigin.hashCode ^
       stopRequestedReason.hashCode ^
       taskGeneration.hashCode ^
+      integratedReviewGate.hashCode ^
       failures.hashCode ^
       terminalFailure.hashCode ^
       workUnits.hashCode ^
@@ -1417,6 +1442,7 @@ class BridgeTaskRuntimeDto {
           stopRequestedOrigin == other.stopRequestedOrigin &&
           stopRequestedReason == other.stopRequestedReason &&
           taskGeneration == other.taskGeneration &&
+          integratedReviewGate == other.integratedReviewGate &&
           failures == other.failures &&
           terminalFailure == other.terminalFailure &&
           workUnits == other.workUnits &&
@@ -1441,6 +1467,11 @@ class BridgeTaskWorkUnitDto {
   final String? continuationSourceTurnId;
   final BigInt continuationRevision;
   final BigInt executorProgressRevision;
+  final String? blueprintFingerprint;
+  final String? objective;
+  final BigInt implementationStepCount;
+  final BigInt acceptanceCriterionCount;
+  final BigInt verificationCount;
 
   const BridgeTaskWorkUnitDto({
     required this.id,
@@ -1458,6 +1489,11 @@ class BridgeTaskWorkUnitDto {
     this.continuationSourceTurnId,
     required this.continuationRevision,
     required this.executorProgressRevision,
+    this.blueprintFingerprint,
+    this.objective,
+    required this.implementationStepCount,
+    required this.acceptanceCriterionCount,
+    required this.verificationCount,
   });
 
   @override
@@ -1476,7 +1512,12 @@ class BridgeTaskWorkUnitDto {
       continuationState.hashCode ^
       continuationSourceTurnId.hashCode ^
       continuationRevision.hashCode ^
-      executorProgressRevision.hashCode;
+      executorProgressRevision.hashCode ^
+      blueprintFingerprint.hashCode ^
+      objective.hashCode ^
+      implementationStepCount.hashCode ^
+      acceptanceCriterionCount.hashCode ^
+      verificationCount.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1497,7 +1538,12 @@ class BridgeTaskWorkUnitDto {
           continuationState == other.continuationState &&
           continuationSourceTurnId == other.continuationSourceTurnId &&
           continuationRevision == other.continuationRevision &&
-          executorProgressRevision == other.executorProgressRevision;
+          executorProgressRevision == other.executorProgressRevision &&
+          blueprintFingerprint == other.blueprintFingerprint &&
+          objective == other.objective &&
+          implementationStepCount == other.implementationStepCount &&
+          acceptanceCriterionCount == other.acceptanceCriterionCount &&
+          verificationCount == other.verificationCount;
 }
 
 class RuntimeSnapshot {

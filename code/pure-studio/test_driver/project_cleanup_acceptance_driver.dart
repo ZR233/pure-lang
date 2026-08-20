@@ -73,9 +73,8 @@ Future<void> main(List<String> arguments) async {
       throw StateError('Project cleanup deleted the user workspace');
     }
 
-    await File(
-      options.snapshotOutput,
-    ).writeAsString('${jsonEncode(cleaned)}\n', flush: true);
+    await File(options.snapshotOutput)
+        .writeAsString('${jsonEncode(cleaned)}\n', flush: true);
     stdout.writeln(
       jsonEncode({
         'result': 'completed',

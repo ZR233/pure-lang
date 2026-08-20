@@ -12,6 +12,37 @@ use super::{
 };
 
 impl StudioRuntime {
+    /// Creates a root Thread and accepts its first Turn from the shared API request.
+    pub async fn create_thread_command(
+        &self,
+        project_id: String,
+        request: pl_protocol::studio::CreateThreadRequest,
+    ) -> Result<StudioStartNewThreadResponse> {
+        let mode = match request.mode.as_str() {
+            "simple" => StudioMode::Simple,
+            "task" => StudioMode::Task,
+            _ => {
+                return Err(anyhow::Error::new(
+                    pl_protocol::studio::StudioError::invalid_argument(
+                        "mode must be simple or task",
+                    ),
+                ));
+            }
+        };
+        self.start_new_thread(StudioStartNewThreadRequest {
+            project_id,
+            title: request.title,
+            prompt: request.prompt,
+            attachment_ids: request.attachment_ids,
+            mode,
+            options: super::StudioSubmitPromptOptions {
+                turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
+                ..super::StudioSubmitPromptOptions::default()
+            },
+        })
+        .await
+    }
+
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;

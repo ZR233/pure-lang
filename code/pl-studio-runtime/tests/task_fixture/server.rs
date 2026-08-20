@@ -8,9 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use super::PARENT_HISTORY_MARKER;
 use super::git::git_output;
 use super::sse::{final_text, repeated_tool_call, tool_call};
+use super::{PARENT_HISTORY_MARKER, PLANNER_FOLLOWUP_PATH};
 
 const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 *** Add File: design/task-flow.md
@@ -29,6 +29,10 @@ const FEATURE_PATCH: &str = r#"*** Begin Patch
 *** Add File: src/feature.txt
 +offline integration verified
 *** End Patch"#;
+const PLANNER_FOLLOWUP_PATCH: &str = r#"*** Begin Patch
+*** Add File: src/planner-followup.txt
++planner merge adjustment verified
+*** End Patch"#;
 const EXPECTED_PATCH_FAILURE: &str = r#"*** Begin Patch
 *** Update File: README.md
 @@
@@ -41,6 +45,12 @@ enum ScriptRole {
     Planner,
     Executor,
     Reviewer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptMode {
+    SingleExecutorEquivalent,
+    PostMergeImplementation,
 }
 
 impl ScriptRole {
@@ -66,6 +76,7 @@ struct ScriptState {
     runtime: StudioRuntime,
     thread_id: String,
     workspace: PathBuf,
+    mode: ScriptMode,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -80,11 +91,13 @@ impl ScriptedModelServer {
         runtime: StudioRuntime,
         thread_id: String,
         workspace: PathBuf,
+        mode: ScriptMode,
     ) -> Self {
         let state = Arc::new(ScriptState {
             runtime,
             thread_id,
             workspace,
+            mode,
             progress: Mutex::new(ScriptProgress::default()),
         });
         let server_state = state.clone();
@@ -107,7 +120,10 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = (21, 11, 6);
+        let expected = match self.state.mode {
+            ScriptMode::SingleExecutorEquivalent => (19, 12, 3),
+            ScriptMode::PostMergeImplementation => (24, 12, 7),
+        };
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -124,6 +140,20 @@ impl ScriptedModelServer {
                 .any(|request| request.contains("list_agents(executor)")),
             "executor wait delta should not be followed by list_agents refresh"
         );
+        if self.state.mode == ScriptMode::PostMergeImplementation {
+            let sequence = progress.requests.join("\n");
+            for expected_action in [
+                "task_request_integrated_review",
+                "wait_agents(integrated-review)",
+                "task_status(integrated-review)",
+                "task_complete",
+            ] {
+                assert!(
+                    sequence.contains(expected_action),
+                    "missing scripted action {expected_action}:\n{sequence}"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -155,7 +185,7 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ScriptState>) {
         let request = read_json_request(&mut socket).await?;
         let role = request_role(&request)?;
         let step = next_step(&state, role).await;
-        validate_request_step(&request, role, step)?;
+        validate_request_step(&request, role, step, state.mode)?;
         let (action, body) = scripted_response(&state, role, step)
             .await
             .with_context(|| {
@@ -194,18 +224,21 @@ async fn scripted_response(
     match role {
         ScriptRole::Planner => planner_response(state, step).await,
         ScriptRole::Executor => executor_response(state, step).await,
-        ScriptRole::Reviewer => reviewer_response(step),
+        ScriptRole::Reviewer => reviewer_response(state.mode, step),
     }
 }
 
 async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
     let response = match step {
         0 => (
-            "exec(planner rg --files)",
+            "list_files(planner workspace)",
             tool_call(
                 "planner-explore-files",
-                "exec",
-                serde_json::json!({"command": "rg --files"}),
+                "list_files",
+                serde_json::json!({
+                    "path": ".",
+                    "limit": 100
+                }),
             ),
         ),
         1 => (
@@ -237,13 +270,55 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 "task_spawn_executor",
                 serde_json::json!({
                     "taskName": "offline_executor",
-                    "message": "Create src/feature.txt with the exact required content, commit it, verify it, and report the completion for review.",
-                    "scopeHints": ["design"],
-                    "verificationCommands": [{
-                        "command": "git diff --check",
-                        "cwd": ".",
-                        "purpose": "verify the patch has no whitespace errors"
-                    }]
+                    "objective": "Create and commit src/feature.txt with the exact fixture content.",
+                    "scope": {
+                        "inScope": ["Create the deterministic feature fixture and verify its committed diff."],
+                        "outOfScope": ["Do not change the Task design or merge the executor branch."],
+                        "scopeHints": ["design"]
+                    },
+                    "implementationSteps": [{
+                        "id": "step-create",
+                        "instruction": "Create src/feature.txt with the exact fixture content from the confirmed plan.",
+                        "targets": [{"path": "src/feature.txt"}],
+                        "expectedOutcome": "The executor worktree contains the exact deterministic fixture file.",
+                        "criterionIds": ["criterion-content"]
+                    }, {
+                        "id": "step-commit",
+                        "instruction": "Commit the feature file and leave the executor worktree clean.",
+                        "targets": [{"path": "src/feature.txt"}],
+                        "expectedOutcome": "HEAD contains the feature file and the worktree is clean.",
+                        "criterionIds": ["criterion-commit"]
+                    }],
+                    "acceptanceCriteria": [{
+                        "id": "criterion-content",
+                        "requirement": "src/feature.txt has the exact required fixture content."
+                    }, {
+                        "id": "criterion-commit",
+                        "requirement": "The delivery commit is clean and has no whitespace errors."
+                    }],
+                    "dependencies": [],
+                    "evidence": [{
+                        "path": "design/task-flow.md",
+                        "symbol": "Offline Task Flow",
+                        "note": "Confirmed design contract for the fixture."
+                    }],
+                    "verification": {
+                        "commands": [{
+                            "id": "check-diff",
+                            "command": "git diff --check HEAD^ HEAD",
+                            "cwd": ".",
+                            "purpose": "Verify the committed patch has no whitespace errors.",
+                            "expectedOutcome": "The command exits successfully with no output.",
+                            "criterionIds": ["criterion-commit"]
+                        }],
+                        "inspections": [{
+                            "id": "inspect-feature",
+                            "instruction": "Inspect src/feature.txt and compare it with the confirmed fixture content.",
+                            "targets": [{"path": "src/feature.txt"}],
+                            "expectedOutcome": "The file content matches the confirmed contract exactly.",
+                            "criterionIds": ["criterion-content"]
+                        }]
+                    }
                 }),
             ),
         ),
@@ -317,33 +392,34 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        15 => ("task_record_merge", {
-            let task = current_task(state).await?;
-            let executor_id = executor_agent_id(state).await?;
-            let completion = task
-                .completions
-                .iter()
-                .filter(|completion| completion.executor_agent_id == executor_id)
-                .max_by_key(|completion| completion.revision)
-                .context("approved executor completion is absent before merge accounting")?;
-            let resulting_head = git_output(&state.workspace, &["rev-parse", "HEAD"])?;
-            if resulting_head == task.expected_head {
-                bail!("planner Git merge did not advance the main workspace HEAD");
-            }
+        15 if state.mode == ScriptMode::PostMergeImplementation => (
+            "apply_patch(planner merge adjustment)",
             tool_call(
-                "record-executor-merge",
-                "task_record_merge",
+                "planner-merge-adjustment",
+                "apply_patch",
                 serde_json::json!({
-                    "executorAgentId": executor_id,
-                    "completionRevision": completion.revision,
-                    "expectedPreviousHead": task.expected_head,
-                    "resultingHead": resulting_head,
-                    "method": "merge",
-                    "summary": "Planner merged the approved offline executor branch with ordinary Git."
+                    "input": PLANNER_FOLLOWUP_PATCH,
+                    "cwd": "."
                 }),
-            )
-        }),
-        16 => (
+            ),
+        ),
+        16 if state.mode == ScriptMode::PostMergeImplementation => (
+            "exec(amend planner merge)",
+            tool_call(
+                "amend-planner-merge",
+                "exec",
+                serde_json::json!({
+                    "command": "git add -- src/planner-followup.txt && git -c user.name=\"Pure Studio\" -c user.email=pure-studio@local commit --amend --no-edit"
+                }),
+            ),
+        ),
+        15 if state.mode == ScriptMode::SingleExecutorEquivalent => {
+            ("task_record_merge", record_merge_call(state).await?)
+        }
+        17 if state.mode == ScriptMode::PostMergeImplementation => {
+            ("task_record_merge", record_merge_call(state).await?)
+        }
+        16 if state.mode == ScriptMode::SingleExecutorEquivalent => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -351,7 +427,27 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        17 => (
+        18 if state.mode == ScriptMode::PostMergeImplementation => (
+            "task_update_design(consistency)",
+            tool_call(
+                "design-consistency",
+                "task_update_design",
+                serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
+            ),
+        ),
+        17 if state.mode == ScriptMode::SingleExecutorEquivalent => (
+            "task_status(review-gate)",
+            tool_call("status-review-gate", "task_status", serde_json::json!({})),
+        ),
+        19 if state.mode == ScriptMode::PostMergeImplementation => (
+            "task_status(review-gate)",
+            tool_call("status-review-gate", "task_status", serde_json::json!({})),
+        ),
+        18 if state.mode == ScriptMode::SingleExecutorEquivalent => (
+            "task_complete",
+            tool_call("complete-task", "task_complete", serde_json::json!({})),
+        ),
+        20 if state.mode == ScriptMode::PostMergeImplementation => (
             "task_request_integrated_review",
             tool_call(
                 "request-integrated-review",
@@ -359,15 +455,18 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        18 => (
-            "list_agents(integrated-review)",
-            tool_call(
-                "list-integrated-review",
-                "list_agents",
-                serde_json::json!({}),
-            ),
-        ),
-        19 => (
+        21 if state.mode == ScriptMode::PostMergeImplementation => {
+            let reviewer_id = integrated_reviewer_agent_id(state).await?;
+            (
+                "wait_agents(integrated-review)",
+                tool_call(
+                    "wait-integrated-review",
+                    "wait_agents",
+                    serde_json::json!({"targets": [reviewer_id]}),
+                ),
+            )
+        }
+        22 if state.mode == ScriptMode::PostMergeImplementation => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -375,13 +474,40 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        20 => (
+        23 if state.mode == ScriptMode::PostMergeImplementation => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
         _ => bail!("unexpected planner request step {step}"),
     };
     Ok(response)
+}
+
+async fn record_merge_call(state: &ScriptState) -> Result<String> {
+    let task = current_task(state).await?;
+    let executor_id = executor_agent_id(state).await?;
+    let completion = task
+        .completions
+        .iter()
+        .filter(|completion| completion.executor_agent_id == executor_id)
+        .max_by_key(|completion| completion.revision)
+        .context("approved executor completion is absent before merge accounting")?;
+    let resulting_head = git_output(&state.workspace, &["rev-parse", "HEAD"])?;
+    if resulting_head == task.expected_head {
+        bail!("planner Git merge did not advance the main workspace HEAD");
+    }
+    Ok(tool_call(
+        "record-executor-merge",
+        "task_record_merge",
+        serde_json::json!({
+            "executorAgentId": executor_id,
+            "completionRevision": completion.revision,
+            "expectedPreviousHead": task.expected_head,
+            "resultingHead": resulting_head,
+            "method": "merge",
+            "summary": "Planner merged the approved offline executor branch with ordinary Git."
+        }),
+    ))
 }
 
 async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
@@ -471,6 +597,14 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
             ),
         ),
         9 => (
+            "exec(verification)",
+            tool_call(
+                "executor-verify-diff",
+                "exec",
+                serde_json::json!({"command": "git diff --check HEAD^ HEAD"}),
+            ),
+        ),
+        10 => (
             "report_progress(verifying)",
             tool_call(
                 "executor-progress-verifying",
@@ -482,7 +616,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 }),
             ),
         ),
-        10 => {
+        11 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -498,7 +632,13 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                     serde_json::json!({
                         "kind": "delivery",
                         "headCommit": head,
-                        "verificationSummary": "offline fixture content committed"
+                        "verificationResults": [{
+                            "checkId": "check-diff",
+                            "summary": "git diff --check HEAD^ HEAD exited successfully with no output"
+                        }, {
+                            "checkId": "inspect-feature",
+                            "summary": "src/feature.txt matches the confirmed fixture content exactly"
+                        }]
                     }),
                 ),
             )
@@ -508,9 +648,9 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
     Ok(response)
 }
 
-fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
-    let response = match step % 3 {
-        0 => (
+fn reviewer_response(mode: ScriptMode, step: usize) -> Result<(&'static str, String)> {
+    let response = match (mode, step) {
+        (_, 0) => (
             "list_files(design)",
             tool_call(
                 "review-list-design",
@@ -518,7 +658,7 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
                 serde_json::json!({"path": "design"}),
             ),
         ),
-        1 => (
+        (_, 1) => (
             "read_file(design)",
             tool_call(
                 "review-read-design",
@@ -526,29 +666,75 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
                 serde_json::json!({"path": "design/task-flow.md"}),
             ),
         ),
-        2 => (
-            "review_exit(pass)",
+        (_, 2) => ("review_exit(pass)", review_exit_call(false)),
+        (ScriptMode::PostMergeImplementation, 3) => (
+            "list_files(integrated)",
             tool_call(
-                "review-pass",
-                "review_exit",
-                serde_json::json!({
-                    "verdict": "pass",
-                    "summary": "Implementation matches the reviewed offline task contract.",
-                    "designReferences": [{
-                        "path": "design/task-flow.md",
-                        "section": "Offline Task Flow"
-                    }],
-                    "findings": [],
-                    "fileReviews": [{
-                        "path": "src/feature.txt",
-                        "reviewed": true
-                    }]
-                }),
+                "integrated-list-files",
+                "list_files",
+                serde_json::json!({"path": "src"}),
             ),
         ),
+        (ScriptMode::PostMergeImplementation, 4) => (
+            "read_file(integrated-design)",
+            tool_call(
+                "integrated-read-design",
+                "read_file",
+                serde_json::json!({"path": "design/task-flow.md"}),
+            ),
+        ),
+        (ScriptMode::PostMergeImplementation, 5) => (
+            "read_file(integrated-change)",
+            tool_call(
+                "integrated-read-change",
+                "read_file",
+                serde_json::json!({"path": PLANNER_FOLLOWUP_PATH}),
+            ),
+        ),
+        (ScriptMode::PostMergeImplementation, 6) => {
+            ("review_exit(integrated-pass)", review_exit_call(true))
+        }
         _ => bail!("unexpected reviewer request step {step}"),
     };
     Ok(response)
+}
+
+fn review_exit_call(integrated: bool) -> String {
+    tool_call(
+        if integrated {
+            "integrated-review-pass"
+        } else {
+            "review-pass"
+        },
+        "review_exit",
+        serde_json::json!({
+            "verdict": "pass",
+            "summary": if integrated {
+                "Integrated implementation matches the final reviewed Task contract."
+            } else {
+                "Implementation matches the reviewed offline task contract."
+            },
+            "designReferences": [{
+                "path": "design/task-flow.md",
+                "section": "Offline Task Flow"
+            }],
+            "findings": [],
+            "fileReviews": if integrated {
+                serde_json::json!([{
+                    "path": "src/feature.txt",
+                    "reviewed": true
+                }, {
+                    "path": PLANNER_FOLLOWUP_PATH,
+                    "reviewed": true
+                }])
+            } else {
+                serde_json::json!([{
+                    "path": "src/feature.txt",
+                    "reviewed": true
+                }])
+            }
+        }),
+    )
 }
 
 async fn current_task(state: &ScriptState) -> Result<StudioTaskRuntime> {
@@ -566,6 +752,16 @@ async fn executor_agent_id(state: &ScriptState) -> Result<String> {
         .into_iter()
         .find_map(|unit| unit.agent_id)
         .context("executor is absent from task projection")
+}
+
+async fn integrated_reviewer_agent_id(state: &ScriptState) -> Result<String> {
+    current_task(state)
+        .await?
+        .reviews
+        .into_iter()
+        .filter(|review| review.scope == "integrated")
+        .find_map(|review| review.reviewer_agent_id)
+        .context("integrated reviewer is absent from task projection")
 }
 
 async fn next_step(state: &ScriptState, role: ScriptRole) -> usize {
@@ -610,7 +806,12 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
     bail!("cannot identify scripted role from tools: {names:?}")
 }
 
-fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: usize) -> Result<()> {
+fn validate_request_step(
+    request: &serde_json::Value,
+    role: ScriptRole,
+    step: usize,
+    mode: ScriptMode,
+) -> Result<()> {
     if role == ScriptRole::Planner {
         let tools = request_tools(request)?;
         if step <= 2 {
@@ -621,9 +822,11 @@ fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: us
     }
     if role == ScriptRole::Planner && step == 1 {
         let output = latest_function_call_output(request)
-            .context("Planner rg --files did not return a tool result")?;
-        if !output.contains("\"status\":\"completed\"") || !output.contains("\"exitCode\":0") {
-            bail!("Planner rg --files was expected to succeed before plan_exit: {output}");
+            .context("Planner list_files did not return a tool result")?;
+        if !output.contains("README.md") {
+            bail!(
+                "Planner list_files was expected to observe README.md before plan_exit: {output}"
+            );
         }
     }
     if role == ScriptRole::Planner
@@ -632,6 +835,47 @@ fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: us
             .is_some_and(|output| output.contains("\"reused\":true"))
     {
         bail!("the repeated executor allocation did not resolve to the durable WorkUnit");
+    }
+    if mode == ScriptMode::SingleExecutorEquivalent
+        && role == ScriptRole::Planner
+        && step == 18
+        && !latest_function_call_output(request).is_some_and(|output| {
+            output.contains("\"status\":\"notRequiredSingleExecutorEquivalent\"")
+        })
+    {
+        bail!("single-executor equivalent merge did not expose the review exemption");
+    }
+    if mode == ScriptMode::PostMergeImplementation
+        && role == ScriptRole::Planner
+        && step == 16
+        && latest_function_call_output(request)
+            .is_some_and(|output| output.contains("Tool execution error:"))
+    {
+        bail!("planner merge adjustment patch failed");
+    }
+    if mode == ScriptMode::PostMergeImplementation
+        && role == ScriptRole::Planner
+        && step == 17
+        && !latest_function_call_output(request)
+            .is_some_and(|output| output.contains("\"exitCode\":0"))
+    {
+        bail!("planner merge adjustment commit failed");
+    }
+    if mode == ScriptMode::PostMergeImplementation
+        && role == ScriptRole::Planner
+        && step == 20
+        && !latest_function_call_output(request)
+            .is_some_and(|output| output.contains("\"status\":\"required\""))
+    {
+        bail!("planner-adjusted merge did not require integrated review");
+    }
+    if mode == ScriptMode::PostMergeImplementation
+        && role == ScriptRole::Planner
+        && step == 23
+        && !latest_function_call_output(request)
+            .is_some_and(|output| output.contains("\"status\":\"satisfiedByReview\""))
+    {
+        bail!("integrated review did not satisfy the final completion gate");
     }
     if role == ScriptRole::Executor && step == 0 {
         let request_text = request.to_string();
@@ -656,6 +900,11 @@ fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: us
             bail!("fixture patch was expected to fail before reread: {output}");
         }
     }
+    if mode == ScriptMode::PostMergeImplementation && role == ScriptRole::Reviewer && step == 7 {
+        let output = latest_function_call_output(request)
+            .context("integrated reviewer exit did not return a tool result")?;
+        bail!("integrated reviewer exit was rejected: {output}");
+    }
     Ok(())
 }
 
@@ -679,12 +928,14 @@ fn validate_planning_contract(tools: &[serde_json::Value]) -> Result<()> {
                 .and_then(serde_json::Value::as_str)
         })
         .collect::<BTreeSet<_>>();
-    for required in ["exec", "write_stdin", "plan_exit"] {
+    for required in ["list_files", "read_file", "plan_exit"] {
         if !names.contains(required) {
             bail!("planning tools do not include {required}: {names:?}");
         }
     }
     for unavailable in [
+        "exec",
+        "write_stdin",
         "search_files",
         "task_status",
         "task_spawn_executor",
@@ -722,11 +973,27 @@ fn validate_planner_spawn_contract(tools: &[serde_json::Value]) -> Result<()> {
         .iter()
         .filter_map(serde_json::Value::as_str)
         .collect::<BTreeSet<_>>();
-    if required != BTreeSet::from(["message", "taskName", "verificationCommands"]) {
+    if required
+        != BTreeSet::from([
+            "acceptanceCriteria",
+            "dependencies",
+            "evidence",
+            "implementationSteps",
+            "objective",
+            "scope",
+            "taskName",
+            "verification",
+        ])
+    {
         bail!("task_spawn_executor has unexpected required fields: {required:?}");
     }
-    if executor_schema["properties"].get("scopeHints").is_none() {
-        bail!("task_spawn_executor schema does not expose optional scopeHints");
+    if executor_schema["properties"].get("message").is_some()
+        || executor_schema["properties"].get("scopeHints").is_some()
+        || executor_schema["properties"]
+            .get("verificationCommands")
+            .is_some()
+    {
+        bail!("task_spawn_executor still exposes legacy free-form fields");
     }
     if executor_schema["properties"].get("ownedPaths").is_some() {
         bail!("task_spawn_executor schema still exposes legacy ownedPaths");

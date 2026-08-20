@@ -6,11 +6,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ReviewScope, ReviewVerdict, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
-    TaskStopReason, ThreadExecutionStatus, WorkUnitStatus,
+    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    ThreadExecutionStatus, WorkUnitStatus,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
-use crate::{AgentLifecycleState, AgentRuntimeHandle, ToolEffect};
+use crate::{AgentLifecycleState, AgentRuntimeHandle, StudioIntegratedReviewGate, ToolEffect};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +27,7 @@ struct StopTaskInput {
 #[serde(rename_all = "camelCase")]
 struct TaskCompletionOutput {
     run: TaskRunRecord,
+    integrated_review_gate: StudioIntegratedReviewGate,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,9 +68,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<CompleteTaskInput>::new(
             "task_complete",
-            "Complete a design-consistent task whose deliveries are merged or recorded as \
-             no-delivery. Requires a current integrated review when source merges exist and an \
-             all-completed todo list when one exists.",
+            "Complete a design-consistent task when its shared integrated-review gate is satisfied or explicitly not required.",
         )
         .registered(move |_: CompleteTaskInput, context| {
             let coordinator = coordinator.clone();
@@ -201,15 +200,6 @@ impl TaskCoordinator {
             .store
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
-        if run.phase != TaskRunPhase::Reviewing {
-            return Ok(TaskCompleteOutcome::rejected(
-                "wrongPhase",
-                format!(
-                    "task_complete requires reviewing phase; current phase is {}",
-                    run.phase.as_str()
-                ),
-            ));
-        }
         if run.stop_requested {
             return Ok(TaskCompleteOutcome::rejected(
                 "stopRequested",
@@ -237,19 +227,37 @@ impl TaskCoordinator {
                 "all executor deliveries must be merged or recorded as no-delivery",
             ));
         }
-        // 无 source merge（全部 NoDelivery）时没有可审查的集成 diff，
-        // 不再强制 integrated review。
-        let has_source_merge = !self.store.list_merge_records(&run.id).await?.is_empty();
-        if has_source_merge {
-            let latest_review = self.store.list_review_rounds(&run.id).await?.pop();
-            if !latest_review.is_some_and(|review| {
-                review.scope == ReviewScope::Integrated
-                    && review.reviewed_head == run.expected_head
-                    && review.verdict == ReviewVerdict::Pass
-            }) {
+        let completions = self.store.list_work_completions(&run.id).await?;
+        let merges = self.store.list_merge_records(&run.id).await?;
+        let reviews = self.store.list_review_rounds(&run.id).await?;
+        let integrated_review_gate = super::review::integrated_review_gate(
+            &run,
+            &work_units,
+            &completions,
+            &merges,
+            &reviews,
+        )
+        .await;
+        match (&integrated_review_gate, run.phase) {
+            (StudioIntegratedReviewGate::Required { reason }, _) => {
                 return Ok(TaskCompleteOutcome::rejected(
-                    "reviewMissing",
-                    "latest integrated review must pass for the current task HEAD",
+                    "reviewRequired",
+                    reason.clone(),
+                ));
+            }
+            (StudioIntegratedReviewGate::SatisfiedByReview { .. }, TaskRunPhase::Reviewing)
+            | (
+                StudioIntegratedReviewGate::NotRequiredNoDelivery
+                | StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent { .. },
+                TaskRunPhase::Implementing | TaskRunPhase::Reworking | TaskRunPhase::Reviewing,
+            ) => {}
+            _ => {
+                return Ok(TaskCompleteOutcome::rejected(
+                    "wrongPhase",
+                    format!(
+                        "task_complete cannot consume the current review gate in phase {}",
+                        run.phase.as_str()
+                    ),
                 ));
             }
         }
@@ -290,9 +298,15 @@ impl TaskCoordinator {
                 error.to_string(),
             ));
         }
+        if let Err(error) = super::git::ensure_no_git_operation(&run.workspace_root).await {
+            return Ok(TaskCompleteOutcome::rejected(
+                "repositoryDrift",
+                error.to_string(),
+            ));
+        }
         let completed = self
             .store
-            .complete_reviewed_task(thread_id, &run.expected_head)
+            .complete_task(thread_id, &run.expected_head, &integrated_review_gate)
             .await;
         let completed = match completed {
             Ok(completed) => completed,
@@ -313,7 +327,10 @@ impl TaskCoordinator {
         };
         self.release_owned_process_lease(&run.id);
         Ok(TaskCompleteOutcome::Completed(Box::new(
-            TaskCompletionOutput { run: completed },
+            TaskCompletionOutput {
+                run: completed,
+                integrated_review_gate,
+            },
         )))
     }
 

@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use pl_studio_runtime::{
     AgentMessageChannel, BuiltinMcpServerState, ConfigPaths, ConfigStore, McpServerStatusKind,
-    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioRole, StudioRuntime, StudioStore,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest, ThreadItem, ThreadItemContent,
-    ThreadItemStatus, TurnState, WebSearchMode, builtin_mcp_server_ids,
+    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind, StudioRole, StudioRuntime,
+    StudioRuntimeOptions, StudioSubmitPromptOptions, StudioSubmitPromptRequest, ThreadItem,
+    ThreadItemContent, ThreadItemStatus, TurnState, WebSearchMode, builtin_mcp_server_ids,
 };
 
 const LIVE_CONFIG_ENV: &str = "PURE_STUDIO_LIVE_INSTALLED_CONFIG";
@@ -66,9 +66,9 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
 
     let home = root.join("home");
     let workspace = root.join("workspace");
-    let database_path = root.join("studio.sqlite");
     create_cargo_demo(&workspace).await?;
     let config_store = isolated_config_store(&installed_config, &home)?;
+    let studio_home = config_store.paths().config_dir().to_path_buf();
     let isolated_config = config_store.load()?;
     assert_isolated_capabilities(&isolated_config)?;
     let isolated_route = isolated_config.resolve_role(StudioRole::Executor)?;
@@ -81,13 +81,17 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         isolated_route.endpoint.bearer_token.is_some(),
         "isolated live config did not retain the executor credential"
     );
-    let store = StudioStore::open(&database_path).await?;
-    let runtime = StudioRuntime::new(store.clone(), config_store.clone())?;
+    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(studio_home.clone()),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
+    runtime.start_runtime().await?;
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime
         .create_thread(&project.id, "Installed config Rust LSP live")
         .await?;
-    runtime.start_runtime().await?;
 
     let live_result = run_prompt_and_assert(&runtime, &thread.id).await;
     let shutdown = tokio::time::timeout(Duration::from_secs(30), runtime.shutdown_runtime())
@@ -95,13 +99,16 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         .context("Studio runtime shutdown timed out")
         .and_then(|result| result.map(|_| ()));
     drop(runtime);
-    drop(store);
 
     shutdown?;
     live_result?;
 
-    let reopened_store = StudioStore::open(&database_path).await?;
-    let reopened = StudioRuntime::new(reopened_store.clone(), config_store)?;
+    let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(studio_home),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
     let persisted_result = async {
         reopened.start_runtime().await?;
         let persisted = reopened.thread_snapshot(&thread.id).await?;
@@ -115,7 +122,6 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
             .context("reopened Studio runtime shutdown timed out")
             .and_then(|result| result.map(|_| ()));
     drop(reopened);
-    drop(reopened_store);
     reopened_shutdown?;
     persisted_result
 }

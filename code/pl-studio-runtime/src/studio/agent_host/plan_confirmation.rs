@@ -1,4 +1,4 @@
-use crate::studio::{InteractionRuntime, StudioProductEventRuntime, StudioStore};
+use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 use crate::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionScope, InteractionStatus,
 };
@@ -14,16 +14,16 @@ use crate::studio::store::RecoverablePlan;
 #[derive(Clone)]
 pub(super) struct StudioPlanConfirmationProjector {
     store: StudioStore,
-    interactions: InteractionRuntime,
-    product_events: StudioProductEventRuntime,
+    interactions: InteractionService,
+    product_events: ProductEventBus,
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
 }
 
 impl StudioPlanConfirmationProjector {
     pub(super) fn new(
         store: StudioStore,
-        interactions: InteractionRuntime,
-        product_events: StudioProductEventRuntime,
+        interactions: InteractionService,
+        product_events: ProductEventBus,
         runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
     ) -> Self {
         Self {
@@ -166,13 +166,12 @@ impl StudioPlanConfirmationProjector {
         thread_id: &str,
         plan: &RecoverablePlan,
     ) -> anyhow::Result<()> {
-        let runtime = wait_for_runtime(self.runtime.clone()).await?;
-        let snapshot = runtime
-            .snapshot(pl_core::AgentId::new(agent_id.to_string())?)
-            .await?;
-        if snapshot.lifecycle != AgentLifecycleState::Active
-            || snapshot.active_turn_id.is_some()
-            || snapshot.pending_inputs != 0
+        let interaction_id = format!("plan-confirmation-{}", plan.item_id);
+        if self
+            .store
+            .read_interaction(&interaction_id)
+            .await?
+            .is_some()
         {
             return Ok(());
         }
@@ -181,6 +180,16 @@ impl StudioPlanConfirmationProjector {
             .find_active_task_run_for_root_thread(thread_id)
             .await?
             .is_some()
+        {
+            return Ok(());
+        }
+        let runtime = wait_for_runtime(self.runtime.clone()).await?;
+        let snapshot = runtime
+            .snapshot(pl_core::AgentId::new(agent_id.to_string())?)
+            .await?;
+        if snapshot.lifecycle != AgentLifecycleState::Active
+            || snapshot.active_turn_id.is_some()
+            || snapshot.pending_inputs != 0
         {
             return Ok(());
         }
@@ -230,7 +239,7 @@ mod tests {
     use crate::StudioMode;
     use crate::config::{ConfigPaths, ConfigStore};
     use crate::studio::{
-        ChildThreadSpec, InteractionRuntime, StudioProductEventRuntime, StudioRuntime, StudioStore,
+        ChildThreadSpec, InteractionService, ProductEventBus, StudioRuntime, StudioStore,
     };
     use pl_protocol::{ThreadItem, ThreadItemContent, ThreadItemStatus, ThreadNotification};
 
@@ -258,8 +267,8 @@ mod tests {
         let (_runtime_tx, runtime_rx) = watch::channel(None);
         let projector = StudioPlanConfirmationProjector::new(
             store.clone(),
-            InteractionRuntime::new(store.clone()),
-            StudioProductEventRuntime::new(store.clone()),
+            InteractionService::new(store.clone()),
+            ProductEventBus::new(store.clone()),
             runtime_rx,
         );
 
@@ -435,5 +444,77 @@ mod tests {
 
         studio.shutdown().await;
         let _ = tokio::fs::remove_dir_all(home).await;
+    }
+
+    #[tokio::test]
+    async fn resolved_plan_confirmation_is_skipped_without_a_runtime_actor() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/resolved-plan").await.unwrap();
+        let thread = store
+            .create_thread(&project.id, "Resolved plan", StudioMode::Task)
+            .await
+            .unwrap();
+        let plan = RecoverablePlan {
+            turn_id: "turn-resolved-plan".to_string(),
+            item_id: "resolved-plan-item".to_string(),
+            content: "# Plan\n\nAlready resolved.".to_string(),
+        };
+        let interaction_id = format!("plan-confirmation-{}", plan.item_id);
+        store
+            .upsert_interaction(&InteractionRequest {
+                interaction_id: interaction_id.clone(),
+                kind: InteractionKind::PlanConfirmation,
+                status: InteractionStatus::Resolved,
+                scope: InteractionScope {
+                    thread_id: thread.id.clone(),
+                    turn_id: plan.turn_id.clone(),
+                    item_id: Some(plan.item_id.clone()),
+                    tool_id: None,
+                    agent_path: Some(thread.id.clone()),
+                },
+                payload: InteractionPayload::PlanConfirmation {
+                    plan_id: plan.item_id.clone(),
+                    content: plan.content.clone(),
+                },
+                created_at: 1,
+                updated_at: 2,
+                resolved_at: Some(2),
+                resolution: Some(crate::InteractionResolution::PlanConfirmation {
+                    decision: crate::PlanConfirmationResolution::Dismiss,
+                    content: None,
+                    reason: None,
+                }),
+            })
+            .await
+            .unwrap();
+        let (_runtime_tx, runtime_rx) = watch::channel(None);
+        let projector = StudioPlanConfirmationProjector::new(
+            store.clone(),
+            InteractionService::new(store.clone()),
+            ProductEventBus::new(store.clone()),
+            runtime_rx,
+        );
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            projector.recover_candidate(&thread.id, &thread.id, &plan),
+        )
+        .await
+        .expect("resolved confirmation must not wait for a runtime actor")
+        .unwrap();
+
+        let interaction = store
+            .read_interaction(&interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(interaction.status, InteractionStatus::Resolved);
+        assert!(
+            store
+                .list_pending_interactions(&thread.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }

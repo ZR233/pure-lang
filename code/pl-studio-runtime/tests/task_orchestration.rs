@@ -9,8 +9,8 @@ use pl_studio_runtime::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest,
 };
 use task_fixture::{
-    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, TaskFlowFixture, git_output,
-    normalized_text,
+    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, PLANNER_FOLLOWUP_CONTENT,
+    PLANNER_FOLLOWUP_PATH, ScriptMode, TaskFlowFixture, git_output, normalized_text,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -99,15 +99,18 @@ async fn run_offline_task_flow() -> Result<()> {
     )?;
     assert_eq!(merge_parents.split_whitespace().count(), 2);
 
-    assert_eq!(task.reviews.len(), 2);
+    assert_eq!(task.reviews.len(), 1);
     assert_eq!(task.reviews[0].scope, "delivery");
-    assert_eq!(task.reviews[1].scope, "integrated");
     for review in &task.reviews {
         assert_eq!(review.verdict, "pass");
         assert_eq!(review.design_references.len(), 1);
         assert_eq!(review.design_references[0].path, "design/task-flow.md");
         assert_eq!(review.design_references[0].section, "Offline Task Flow");
     }
+    assert!(matches!(
+        &task.integrated_review_gate,
+        pl_studio_runtime::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent { .. }
+    ));
 
     assert_eq!(
         normalized_text(&fixture.workspace.join(FEATURE_PATH))?,
@@ -161,6 +164,71 @@ async fn run_offline_task_flow() -> Result<()> {
         .await?
         .context("task session disappeared")?;
     assert_eq!(session.mode, StudioMode::Simple.label());
+
+    fixture.shutdown().await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "scripted planner requires ripgrep on the host"]
+async fn offline_task_flow_requires_integrated_review_when_merge_content_changes() -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(120), run_offline_required_review_flow())
+        .await
+        .context("offline required-review Task integration test timed out")?
+}
+
+async fn run_offline_required_review_flow() -> Result<()> {
+    let fixture = TaskFlowFixture::new_with_mode(ScriptMode::PostMergeImplementation).await?;
+    fixture
+        .runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: fixture.thread_id.clone(),
+            prompt: "Create the offline fixture, adjust the merge content, and satisfy the required integrated review."
+                .to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await?;
+    let confirmation = fixture.wait_for_plan_confirmation().await?;
+    fixture
+        .runtime
+        .resolve_interaction(
+            confirmation.interaction_id,
+            InteractionResolution::PlanConfirmation {
+                decision: PlanConfirmationResolution::ImplementFreshContext,
+                content: None,
+                reason: None,
+            },
+        )
+        .await?;
+
+    let task = fixture.wait_for_completed_task().await?;
+    fixture.wait_for_no_active_turns().await?;
+    fixture.assert_script_complete().await?;
+
+    assert_eq!(task.work_units.len(), 1);
+    assert_eq!(task.merges.len(), 1);
+    assert_eq!(task.reviews.len(), 2);
+    assert_eq!(task.reviews[0].scope, "delivery");
+    assert_eq!(task.reviews[1].scope, "integrated");
+    assert!(task.reviews.iter().all(|review| review.verdict == "pass"));
+    let (review_round_id, reviewed_head) = match &task.integrated_review_gate {
+        pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {
+            review_round_id,
+            reviewed_head,
+        } => (review_round_id, reviewed_head),
+        other => anyhow::bail!("unexpected final integrated review gate: {other:?}"),
+    };
+    assert_eq!(review_round_id, &task.reviews[1].id);
+    assert_eq!(reviewed_head, &task.expected_head);
+    assert_eq!(
+        normalized_text(&fixture.workspace.join(PLANNER_FOLLOWUP_PATH))?,
+        PLANNER_FOLLOWUP_CONTENT
+    );
+    assert_eq!(
+        git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,
+        task.expected_head
+    );
+    assert!(git_output(&fixture.workspace, &["status", "--porcelain"])?.is_empty());
 
     fixture.shutdown().await
 }

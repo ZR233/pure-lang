@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use utoipa::ToSchema;
 
 use crate::Message;
 
@@ -45,7 +46,7 @@ pub struct AgentWorkingState {
 }
 
 /// 对话上下文恢复方式；两种方式都保留外部世界状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ConversationRecoveryMode {
     RewindTail,

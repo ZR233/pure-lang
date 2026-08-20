@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, RwLock};
 pub struct SkillCatalogRuntime {
     command_lock: Arc<Mutex<()>>,
     states: Arc<RwLock<BTreeMap<String, SkillsStateSnapshot>>>,
-    events: Option<crate::StudioProductEventRuntime>,
+    events: Option<crate::ProductEventBus>,
 }
 
 /// 某 Project 已发布且可被未来 Turn 冻结的 catalog。
@@ -29,7 +29,7 @@ pub struct SkillsStateSnapshot {
 }
 
 impl SkillCatalogRuntime {
-    pub fn new(events: crate::StudioProductEventRuntime) -> Self {
+    pub fn new(events: crate::ProductEventBus) -> Self {
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),

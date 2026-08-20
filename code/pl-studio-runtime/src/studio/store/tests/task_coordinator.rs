@@ -1370,7 +1370,7 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         ))
         .await;
 
-    let product_events = crate::StudioProductEventRuntime::new(fixture.store.clone());
+    let product_events = crate::ProductEventBus::new(fixture.store.clone());
     let first = product_events
         .refresh_task(&fixture.run.root_thread_id)
         .await

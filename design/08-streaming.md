@@ -71,3 +71,15 @@ stream 即使并发到达，也不会用旧 workspace snapshot 回滚刚确认�
 项目、root/child Thread directory、Task、设置、Provider usage 和 MCP/LSP health 使用独立低频
 product stream。product stream 不携带 Turn/Item delta；Thread directory 变化只重绑 workspace
 中的 Thread 元数据引用，不改变 Turn、Item、Interaction 或 runtime 内容。
+
+## 8.6 FRB 与 HTTP transport
+
+FRB 与 HTTP SSE 消费同一个 runtime subscription API，不各自实现流状态机。HTTP product stream
+为 `GET /api/v1/events/product`，Thread stream 为
+`GET /api/v1/threads/{threadId}/events`。Thread 首帧固定为 authoritative snapshot，后续发送
+notification、lagged、closed；producer 在连接存活期间持有 Thread residency pin，断开或 server
+shutdown 必须取消 producer、释放 receiver 与 pin。
+
+Product lag 发送 `stale` 并要求重读 `/api/v1/state`。SSE 不提供 durable replay；收到
+`Last-Event-ID` 时先发送 `stale`。每 15 秒发送 comment heartbeat；heartbeat 不占用领域 sequence，
+FRB 与 HTTP 的 transport buffer 也不共享 sequence 或取消句柄。

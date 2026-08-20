@@ -4,9 +4,13 @@ mod metadata;
 mod tool;
 
 pub(crate) use handoff::{
-    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorDependencyV1, TaskExecutorEvidenceV1,
-    TaskExecutorHandoffInput, TaskExecutorHandoffV1, TaskExecutorVerificationCommandV1,
+    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorAcceptanceCriterion, TaskExecutorBlueprint,
+    TaskExecutorDependency, TaskExecutorEvidence, TaskExecutorHandoff,
+    TaskExecutorImplementationStep, TaskExecutorScope, TaskExecutorVerificationContract,
+    verification_result_map,
 };
+#[cfg(test)]
+pub(crate) use handoff::{TaskExecutorTarget, TaskExecutorVerificationCommand};
 pub(crate) use lifecycle::{
     StudioTaskSpawnPreparation, StudioTaskSpawnRequest, normalize_scope_hints,
 };

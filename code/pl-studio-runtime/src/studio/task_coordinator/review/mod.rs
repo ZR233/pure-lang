@@ -1,5 +1,7 @@
 mod coverage;
 mod exit;
+mod gate;
+pub(crate) use gate::integrated_review_gate;
 pub(crate) mod prompt;
 mod read;
 mod trace;
@@ -15,14 +17,15 @@ use super::design::design_commit_is_current;
 use super::git::{GitDiffSelection, changed_files_between_selected};
 use super::{
     BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
-    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskRunPhase, TaskRunRecord,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord,
-    WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
+    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRunPhase,
+    TaskRunRecord, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
+    WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
-    AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
+    AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, StudioIntegratedReviewGate,
+    ThreadContextState, ThreadId, ToolEffect,
 };
 
 const REVIEWER_CONSTRAINT: &str = include_str!("../../../prompts/review/constraint.md");
@@ -42,6 +45,12 @@ struct RequestIntegratedReviewInput {}
 #[serde(deny_unknown_fields)]
 struct TaskStatusInput {}
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReadWorkUnitHandoffInput {
+    work_unit_id: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestReviewOutput {
@@ -58,6 +67,7 @@ struct RequestReviewOutput {
 #[serde(rename_all = "camelCase")]
 struct TaskStatusOutput {
     run: TaskRunRecord,
+    integrated_review_gate: StudioIntegratedReviewGate,
     work_units: Vec<ModelWorkUnit>,
     completions: Vec<ModelCompletion>,
     merge_candidates: Vec<MergeCandidate>,
@@ -169,6 +179,11 @@ pub(super) struct ModelWorkUnit {
     continuation_revision: u64,
     created_at: i64,
     updated_at: i64,
+    blueprint_fingerprint: Option<String>,
+    objective: Option<String>,
+    implementation_step_count: usize,
+    acceptance_criterion_count: usize,
+    verification_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -308,18 +323,36 @@ impl TaskCoordinator {
                             runtime.as_ref(),
                         )
                         .await?;
-                    let reviews = coordinator
-                        .store
-                        .list_review_rounds(&run.id)
-                        .await?
+                    let review_records = coordinator.store.list_review_rounds(&run.id).await?;
+                    let integrated_review_gate = integrated_review_gate(
+                        &run,
+                        &work_units,
+                        &completions,
+                        &merges,
+                        &review_records,
+                    )
+                    .await;
+                    let reviews = review_records
                         .into_iter()
                         .map(ModelReviewOverview::from)
                         .collect::<Vec<_>>();
+                    let mut model_work_units = Vec::with_capacity(work_units.len());
+                    for work_unit in &work_units {
+                        let handoff = coordinator
+                            .store
+                            .read_work_unit_handoff(&work_unit.id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|(_, handoff)| handoff);
+                        model_work_units.push(ModelWorkUnit::new(
+                            &run,
+                            work_unit,
+                            handoff.as_ref(),
+                        ));
+                    }
                     let output = TaskStatusOutput {
-                        work_units: work_units
-                            .iter()
-                            .map(|work_unit| ModelWorkUnit::new(&run, work_unit))
-                            .collect(),
+                        work_units: model_work_units,
                         completions: completions
                             .iter()
                             .map(|completion| ModelCompletion::new(&run, completion))
@@ -327,6 +360,7 @@ impl TaskCoordinator {
                         merge_candidates,
                         merges,
                         reviews,
+                        integrated_review_gate,
                         run,
                     };
                     // task_status 是只读概览；放宽预算保证中小任务一次读全，超大任务
@@ -339,6 +373,47 @@ impl TaskCoordinator {
                     .map_err(anyhow::Error::from)
                 }
             })
+        .with_effect(ToolEffect::Read)
+    }
+
+    pub(crate) fn read_work_unit_handoff_tool(
+        self: &Arc<Self>,
+        thread_id: impl Into<String>,
+    ) -> RegisteredTool {
+        let coordinator = self.clone();
+        let thread_id = thread_id.into();
+        FunctionToolDefinition::<ReadWorkUnitHandoffInput>::new(
+            "read_work_unit_handoff",
+            "Read the complete durable implementation blueprint for one Task work unit.",
+        )
+        .registered(move |input: ReadWorkUnitHandoffInput, _| {
+            let coordinator = coordinator.clone();
+            let thread_id = thread_id.clone();
+            async move {
+                let work_unit_id = input.work_unit_id.trim();
+                if work_unit_id.is_empty() {
+                    bail!("workUnitId must not be empty")
+                }
+                let run = coordinator
+                    .store
+                    .read_active_task_run_for_root_thread(&thread_id)
+                    .await?;
+                let (work_unit, handoff) = coordinator
+                    .store
+                    .read_work_unit_handoff(work_unit_id)
+                    .await?
+                    .context("Task work unit handoff not found")?;
+                if work_unit.task_run_id != run.id {
+                    bail!("workUnitId does not belong to the active Task")
+                }
+                ToolExecutionResult::<serde_json::Value>::json_with_budget(
+                    handoff,
+                    8_000,
+                    32 * 1024,
+                )
+                .map_err(anyhow::Error::from)
+            }
+        })
         .with_effect(ToolEffect::Read)
     }
 
@@ -502,7 +577,11 @@ impl TaskCoordinator {
 }
 
 impl ModelWorkUnit {
-    pub(super) fn new(run: &TaskRunRecord, work_unit: &WorkUnitRecord) -> Self {
+    pub(super) fn new(
+        run: &TaskRunRecord,
+        work_unit: &WorkUnitRecord,
+        handoff: Option<&TaskExecutorHandoff>,
+    ) -> Self {
         Self {
             id: work_unit.id.clone(),
             task_run_id: work_unit.task_run_id.clone(),
@@ -530,6 +609,13 @@ impl ModelWorkUnit {
             continuation_revision: work_unit.continuation_revision,
             created_at: work_unit.created_at,
             updated_at: work_unit.updated_at,
+            blueprint_fingerprint: handoff.map(|handoff| handoff.blueprint_fingerprint.clone()),
+            objective: handoff.map(|handoff| handoff.blueprint.objective.clone()),
+            implementation_step_count: handoff
+                .map_or(0, |handoff| handoff.blueprint.implementation_steps.len()),
+            acceptance_criterion_count: handoff
+                .map_or(0, |handoff| handoff.blueprint.acceptance_criteria.len()),
+            verification_count: handoff.map_or(0, |handoff| handoff.blueprint.verification_count()),
         }
     }
 }
