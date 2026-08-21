@@ -1,6 +1,6 @@
 use pl_model::{
     CompletionRequest, CompletionResponse, ModelInvocationContext, ModelRuntime, ReasoningConfig,
-    ToolSchema,
+    ReasoningSummary, ToolSchema,
 };
 use pl_protocol::{PureError, Result};
 use tokio_util::sync::CancellationToken;
@@ -25,6 +25,22 @@ pub struct ModelTurnRequest {
 impl ModelTurnRequest {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 从已校验的模型路由继承模型能力、token 限制和 reasoning 配置。
+    pub fn from_route(route: &ResolvedModelRoute) -> Self {
+        let reasoning = route.effort.as_ref().map(|effort| ReasoningConfig {
+            effort: Some(effort.as_str().to_string()),
+            summary: Some(if effort.is_none() {
+                ReasoningSummary::Disabled
+            } else {
+                ReasoningSummary::Enabled
+            }),
+        });
+        Self::new()
+            .with_parallel_tool_calls(route.model.capabilities.tools.parallel_tool_calls)
+            .with_max_tokens(route.model.max_output_tokens)
+            .with_reasoning(reasoning)
     }
 
     pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
