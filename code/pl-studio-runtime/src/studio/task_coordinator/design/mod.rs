@@ -1,24 +1,23 @@
 mod cancel;
 mod git;
-mod patch;
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use futures::FutureExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use self::git::*;
-use self::patch::*;
-use super::git::inspect_repository;
-use super::{BranchLeaseRecord, DesignUpdateOutput, TaskCoordinator, TaskRunPhase, TaskRunRecord};
-use crate::ToolEffect;
-use crate::tool::{
-    FunctionToolDefinition, LocalWorkspaceFileBackend, RegisteredTool, ToolExecutionResult,
-    apply_patch_to_backend,
+use super::git::{ensure_no_git_operation, fingerprint_repository, inspect_repository};
+use super::{
+    BranchLeaseRecord, DesignFinalizeOutput, TaskCoordinator, TaskGitFingerprint, TaskRunRecord,
+    TaskRunStateKind,
 };
+use crate::ToolEffect;
+use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -47,24 +46,68 @@ impl DesignCommitTestBarrier {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct TaskUpdateDesignInput {
-    /// Exactly one complete Codex patch block for design/**.
-    patch: String,
-}
-
-#[derive(Debug)]
-struct ValidatedDesignPatch {
-    patch: String,
-    paths: Vec<String>,
-}
-
-#[derive(Debug)]
-enum OriginalPath {
-    Missing,
-    File(Vec<u8>),
+struct TaskFinalizeDesignInput {
+    /// Non-empty summary of the design-stage conclusions and any workspace draft.
+    summary: String,
 }
 
 impl TaskCoordinator {
+    pub(crate) fn design_tool_completion_callback(
+        self: &Arc<Self>,
+        task_run_id: String,
+        turn_id: String,
+        workspace: std::path::PathBuf,
+    ) -> pl_core::ToolCompletionCallback {
+        let coordinator = self.clone();
+        Arc::new(move |completion| {
+            let coordinator = coordinator.clone();
+            let task_run_id = task_run_id.clone();
+            let turn_id = turn_id.clone();
+            let workspace = workspace.clone();
+            async move {
+                // Finalize performs its own exact-scope validation. If it fails, its
+                // post-hook must not turn an untrusted concurrent edit into an accepted
+                // design observation.
+                if completion.name == "task_finalize_design" {
+                    return Ok(());
+                }
+                coordinator
+                    .observe_design_workspace(
+                        &task_run_id,
+                        &turn_id,
+                        &completion.call_id,
+                        &workspace,
+                    )
+                    .await
+            }
+            .boxed()
+        })
+    }
+
+    async fn observe_design_workspace(
+        &self,
+        task_run_id: &str,
+        turn_id: &str,
+        tool_call_id: &str,
+        workspace: &Path,
+    ) -> Result<()> {
+        let Some(run) = self.store.read_task_run(task_run_id).await? else {
+            return Ok(());
+        };
+        if run.kind() != TaskRunStateKind::DesignUpdating {
+            return Ok(());
+        }
+        if normalized_path(workspace) != normalized_path(Path::new(&run.workspace_root)) {
+            bail!("design tool observation workspace no longer matches its TaskRun");
+        }
+        let fingerprint =
+            fingerprint_repository(workspace, &run.base_commit, &run.expected_head).await?;
+        self.store
+            .record_task_design_observation(task_run_id, turn_id, tool_call_id, fingerprint)
+            .await?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn set_design_after_commit_barrier(&self, barrier: DesignCommitTestBarrier) {
         *self
@@ -86,51 +129,239 @@ impl TaskCoordinator {
         }
     }
 
-    pub(crate) fn task_update_design_tool(
+    pub(crate) fn task_finalize_design_tool(
         self: &Arc<Self>,
         root_thread_id: impl Into<String>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let root_thread_id = root_thread_id.into();
-        FunctionToolDefinition::<TaskUpdateDesignInput>::new(
-            "task_update_design",
-            "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. Every Update hunk line starts with a control prefix: space for context, `-` for deletion, or `+` for addition. Preserve a leading `-` or `+` in the file content after that prefix; for example, replace Markdown `- old` with `-- old` and `+- new`. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
+        FunctionToolDefinition::<TaskFinalizeDesignInput>::new(
+            "task_finalize_design",
+            "Finish the mandatory Task design stage after exploration and optional ordinary workspace edits. No design document change is required. If the workspace changed, the runtime commits the complete Task-owned draft before entering implementing; otherwise it advances without creating a commit.",
         )
-        .registered(move |arguments: TaskUpdateDesignInput, context| {
-                let coordinator = coordinator.clone();
-                let root_thread_id = root_thread_id.clone();
-                async move {
-                    let output = coordinator
-                        .update_design(
-                            &root_thread_id,
-                            context.workspace.root(),
-                            &arguments.patch,
-                        )
-                        .await
-                        .map_err(|error| anyhow::anyhow!("task_update_design failed: {error:#}"))?;
-                    ToolExecutionResult::<serde_json::Value>::json(output)
-                        .map_err(anyhow::Error::from)
-                }
-            })
+        .registered(move |arguments: TaskFinalizeDesignInput, context| {
+            let coordinator = coordinator.clone();
+            let root_thread_id = root_thread_id.clone();
+            async move {
+                let output = coordinator
+                    .finalize_design(
+                        &root_thread_id,
+                        context.workspace.root(),
+                        &arguments.summary,
+                    )
+                    .await
+                    .map_err(|error| anyhow::anyhow!("task_finalize_design failed: {error:#}"))?;
+                ToolExecutionResult::<serde_json::Value>::json(output)
+                    .map_err(anyhow::Error::from)
+            }
+        })
         .with_effect(ToolEffect::BranchControl)
     }
 
-    pub(crate) async fn update_design(
+    pub(crate) async fn finalize_design(
         &self,
         root_thread_id: &str,
         caller_workspace: &Path,
-        patch: &str,
-    ) -> Result<DesignUpdateOutput> {
+        summary: &str,
+    ) -> Result<DesignFinalizeOutput> {
+        let summary = summary.trim();
+        if summary.is_empty() {
+            bail!("task_finalize_design summary must not be empty");
+        }
+
         let _mutation_guard = self.lock_branch_mutation().await;
         let (run, _lease) = self
             .load_mutation_scope(root_thread_id, caller_workspace)
             .await?;
-        ensure_design_phase(run.phase)?;
-        let validated = validate_design_patch(caller_workspace, patch).await?;
-        let originals = snapshot_paths(caller_workspace, &validated.paths).await?;
-        self.apply_and_commit_design(&run, validated, &originals)
+        ensure_design_phase(run.kind())?;
+
+        let workspace = Path::new(&run.workspace_root);
+        let draft_fingerprint =
+            fingerprint_repository(workspace, &run.base_commit, &run.expected_head).await?;
+        let observed_fingerprint = &run
+            .latest_design_observation()
+            .context("designUpdating state is missing its workspace observation")?
+            .fingerprint;
+        if observed_fingerprint != &draft_fingerprint {
+            bail!(
+                "workspace changed outside the Task tool observation chain; preserve the files and run another model tool before task_finalize_design"
+            );
+        }
+        let changed_files = collect_worktree_changes(workspace).await?;
+        if changed_files.is_empty() {
+            return self
+                .finalize_clean_design(&run, summary, &draft_fingerprint)
+                .await;
+        }
+        self.finalize_design_draft(&run, summary, changed_files, draft_fingerprint)
             .await
     }
+
+    async fn finalize_clean_design(
+        &self,
+        run: &TaskRunRecord,
+        summary: &str,
+        fingerprint: &TaskGitFingerprint,
+    ) -> Result<DesignFinalizeOutput> {
+        match self
+            .store
+            .finalize_task_design(
+                &run.id,
+                &run.expected_head,
+                &run.expected_head,
+                None,
+                summary,
+                fingerprint,
+            )
+            .await
+        {
+            Ok(true) => {
+                self.verify_durable_exact_scope(
+                    run,
+                    &run.expected_head,
+                    "design finalization durable CAS",
+                )
+                .await?;
+                Ok(DesignFinalizeOutput {
+                    task_run_id: run.id.clone(),
+                    previous_head: run.expected_head.clone(),
+                    finalized_head: run.expected_head.clone(),
+                    phase_commit: None,
+                    changed_files: Vec::new(),
+                    state: TaskRunStateKind::Implementing,
+                })
+            }
+            Ok(false) => bail!("task head changed while finalizing the design stage"),
+            Err(error) => Err(error).context("failed to finalize the design stage"),
+        }
+    }
+
+    async fn finalize_design_draft(
+        &self,
+        run: &TaskRunRecord,
+        summary: &str,
+        changed_files: Vec<String>,
+        draft_fingerprint: TaskGitFingerprint,
+    ) -> Result<DesignFinalizeOutput> {
+        let workspace = Path::new(&run.workspace_root);
+        let original_index_tree = write_tree(workspace).await?;
+        let commit_result = async {
+            stage_paths(workspace, &changed_files).await?;
+            let staged = cached_changed_files(workspace).await?;
+            ensure_same_paths(&staged, &changed_files)?;
+            let remaining = collect_unstaged_and_untracked(workspace).await?;
+            if !remaining.is_empty() {
+                bail!(
+                    "workspace changed concurrently while finalizing the design stage: {}",
+                    remaining.join(", ")
+                );
+            }
+            let validated_tree = write_tree(workspace).await?;
+            run_git_checked(workspace, &["commit", "-m", "chore(task): 完成设计阶段"])
+                .await
+                .context("failed to create the design-stage baseline commit")?;
+            let phase_commit = read_head(workspace).await?;
+            Ok::<_, anyhow::Error>((phase_commit, validated_tree))
+        }
+        .await;
+        let (phase_commit, validated_tree) = match commit_result {
+            Ok(result) => result,
+            Err(operation_error) => {
+                self.restore_draft_index_or_block(
+                    run,
+                    &draft_fingerprint,
+                    &original_index_tree,
+                    &format!("design finalization failed: {operation_error}"),
+                )
+                .await?;
+                return Err(operation_error).context(
+                    "task_finalize_design did not create a baseline commit; the workspace draft was preserved",
+                );
+            }
+        };
+
+        #[cfg(test)]
+        self.wait_after_design_commit().await;
+        let exact_changed_files = match self
+            .validate_captured_branch_commit(
+                run,
+                &phase_commit,
+                &run.expected_head,
+                &changed_files,
+                &validated_tree,
+            )
+            .await
+        {
+            Ok(exact) => exact,
+            Err(error) => {
+                self.block_run(
+                    run,
+                    format!("design-stage commit could not be proven exact: {error}"),
+                )
+                .await?;
+                return Err(error).context("design-stage commit could not be proven exact");
+            }
+        };
+        self.ensure_exact_commit_is_clean(
+            run,
+            &phase_commit,
+            "design-stage post-commit inspection failed",
+        )
+        .await?;
+
+        match self
+            .store
+            .finalize_task_design(
+                &run.id,
+                &run.expected_head,
+                &phase_commit,
+                Some(&phase_commit),
+                summary,
+                &draft_fingerprint,
+            )
+            .await
+        {
+            Ok(true) => {
+                self.verify_durable_exact_scope(
+                    run,
+                    &phase_commit,
+                    "design finalization durable CAS",
+                )
+                .await?;
+                Ok(DesignFinalizeOutput {
+                    task_run_id: run.id.clone(),
+                    previous_head: run.expected_head.clone(),
+                    finalized_head: phase_commit.clone(),
+                    phase_commit: Some(phase_commit),
+                    changed_files: exact_changed_files,
+                    state: TaskRunStateKind::Implementing,
+                })
+            }
+            Ok(false) => {
+                self.compensate_draft_commit_or_block(
+                    run,
+                    &draft_fingerprint,
+                    &original_index_tree,
+                    &phase_commit,
+                    "design finalization head CAS failed",
+                )
+                .await?;
+                bail!("task head changed while recording design finalization")
+            }
+            Err(error) => {
+                self.compensate_draft_commit_or_block(
+                    run,
+                    &draft_fingerprint,
+                    &original_index_tree,
+                    &phase_commit,
+                    &format!("design finalization transaction failed: {error}"),
+                )
+                .await?;
+                Err(error).context("failed to record design finalization")
+            }
+        }
+    }
+
     async fn load_mutation_scope(
         &self,
         root_thread_id: &str,
@@ -165,7 +396,7 @@ impl TaskCoordinator {
         {
             bail!("TaskRun and BranchLease no longer describe the same branch head");
         }
-        let snapshot = inspect_repository(caller_workspace, true).await?;
+        let snapshot = inspect_repository(caller_workspace, false).await?;
         if normalized_path(&snapshot.workspace_root)
             != normalized_path(Path::new(&run.workspace_root))
             || normalized_path(&snapshot.git_common_dir)
@@ -175,150 +406,7 @@ impl TaskCoordinator {
         {
             bail!("current workspace, branch, or HEAD does not match the active Task run");
         }
-        Ok(())
-    }
-
-    async fn apply_and_commit_design(
-        &self,
-        run: &TaskRunRecord,
-        validated: ValidatedDesignPatch,
-        originals: &BTreeMap<String, OriginalPath>,
-    ) -> Result<DesignUpdateOutput> {
-        let workspace = Path::new(&run.workspace_root);
-        let commit_result = async {
-            let backend = LocalWorkspaceFileBackend::new(workspace.to_path_buf(), false).await?;
-            apply_patch_to_backend(&backend, ".".to_string(), &validated.patch).await?;
-
-            let changed = collect_worktree_changes(workspace).await?;
-            if changed.is_empty() {
-                bail!("task_update_design patch produced no changes");
-            }
-            ensure_only_validated_design_changes(&changed, &validated.paths)?;
-            stage_paths(workspace, &validated.paths).await?;
-            let changed_files = cached_changed_files(workspace).await?;
-            if changed_files.is_empty() {
-                bail!("task_update_design patch produced no staged changes");
-            }
-            ensure_only_validated_design_changes(&changed_files, &validated.paths)?;
-            let remaining = collect_unstaged_and_untracked(workspace).await?;
-            if !remaining.is_empty() {
-                bail!("workspace changed concurrently while committing task design");
-            }
-            let validated_tree = write_tree(workspace).await?;
-
-            run_git_checked(workspace, &["commit", "-m", "更新任务设计"])
-                .await
-                .context("failed to create focused design commit")?;
-            Ok::<_, anyhow::Error>(validated_tree)
-        }
-        .await;
-        let validated_tree = match commit_result {
-            Ok(validated_tree) => validated_tree,
-            Err(operation_error) => {
-                if let Err(rollback_error) =
-                    rollback_paths(workspace, originals, &run.expected_head).await
-                {
-                    self.block_run(
-                        run,
-                        format!(
-                            "design update failed: {operation_error}; rollback could not safely restore the repository: {rollback_error}; Git state was preserved"
-                        ),
-                    )
-                    .await?;
-                    bail!(
-                        "design update failed: {operation_error}; rollback could not safely restore the repository and the task run was blocked: {rollback_error}"
-                    );
-                }
-                if let Err(cleanliness_error) = ensure_repository_clean(workspace).await {
-                    self.block_run(
-                        run,
-                        format!(
-                            "design update failed: {operation_error}; repository was not clean after rollback: {cleanliness_error}; residual Git state was preserved"
-                        ),
-                    )
-                    .await?;
-                    bail!(
-                        "design update failed: {operation_error}; repository was not clean after rollback and the task run was blocked: {cleanliness_error}"
-                    );
-                }
-                bail!(
-                    "task_update_design did not record a design commit: {operation_error:#}; the coordinator restored the validated design paths and index to their pre-call state; retry with one complete logical patch"
-                );
-            }
-        };
-
-        let design_commit = match read_head(workspace).await {
-            Ok(commit) => commit,
-            Err(error) => {
-                self.block_run(
-                    run,
-                    format!("design commit identity could not be captured: {error}"),
-                )
-                .await?;
-                return Err(error).context("design commit identity could not be captured");
-            }
-        };
-        #[cfg(test)]
-        self.wait_after_design_commit().await;
-
-        let changed_files = match self
-            .validate_captured_branch_commit(
-                run,
-                &design_commit,
-                &run.expected_head,
-                &validated.paths,
-                &validated_tree,
-            )
-            .await
-        {
-            Ok(exact) => exact,
-            Err(error) => {
-                self.block_run(
-                    run,
-                    format!("design commit could not be proven exact: {error}"),
-                )
-                .await?;
-                return Err(error).context("design commit could not be proven exact");
-            }
-        };
-        self.ensure_exact_commit_is_clean(
-            run,
-            originals,
-            &design_commit,
-            "design post-commit inspection failed",
-        )
-        .await?;
-        match self
-            .store
-            .advance_task_design_head(&run.id, &run.expected_head, &design_commit)
-            .await
-        {
-            Ok(true) => {
-                self.verify_durable_exact_scope(run, &design_commit, "design commit durable CAS")
-                    .await?;
-                Ok(DesignUpdateOutput {
-                    task_run_id: run.id.clone(),
-                    previous_head: run.expected_head.clone(),
-                    design_commit,
-                    changed_files,
-                })
-            }
-            Ok(false) => {
-                self.compensate_or_block(run, originals, &design_commit, "design head CAS failed")
-                    .await?;
-                bail!("task head changed while recording the design commit")
-            }
-            Err(error) => {
-                self.compensate_or_block(
-                    run,
-                    originals,
-                    &design_commit,
-                    &format!("design transaction failed: {error}"),
-                )
-                .await?;
-                Err(error).context("failed to record the design commit")
-            }
-        }
+        ensure_no_git_operation(caller_workspace).await
     }
 
     async fn validate_captured_branch_commit(
@@ -348,7 +436,6 @@ impl TaskCoordinator {
     async fn ensure_exact_commit_is_clean(
         &self,
         run: &TaskRunRecord,
-        originals: &BTreeMap<String, OriginalPath>,
         commit: &str,
         reason: &str,
     ) -> Result<()> {
@@ -356,9 +443,9 @@ impl TaskCoordinator {
         match inspect_repository(workspace, true).await {
             Ok(snapshot) if exact_run_scope(run, commit).matches(&snapshot) => Ok(()),
             Ok(_) | Err(_) => {
-                self.compensate_or_block(run, originals, commit, reason)
+                self.block_run(run, format!("{reason}; external Git state was preserved"))
                     .await?;
-                bail!("{reason}; exact commit was compensated")
+                bail!("{reason}; the task run was blocked and Git state was preserved")
             }
         }
     }
@@ -389,57 +476,83 @@ impl TaskCoordinator {
         )
     }
 
-    async fn compensate_or_block(
+    async fn restore_draft_index_or_block(
         &self,
         run: &TaskRunRecord,
-        originals: &BTreeMap<String, OriginalPath>,
+        expected_fingerprint: &TaskGitFingerprint,
+        original_index_tree: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let workspace = Path::new(&run.workspace_root);
+        let restored = async {
+            let snapshot = inspect_repository(workspace, false).await?;
+            if !exact_run_scope(run, &run.expected_head).matches(&snapshot) {
+                bail!("repository identity or HEAD changed while restoring the design draft");
+            }
+            ensure_no_git_operation(workspace).await?;
+            run_git_checked(workspace, &["read-tree", original_index_tree]).await?;
+            let actual =
+                fingerprint_repository(workspace, &run.base_commit, &run.expected_head).await?;
+            if &actual != expected_fingerprint {
+                bail!("workspace draft fingerprint changed during design finalization");
+            }
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = restored {
+            self.block_run(
+                run,
+                format!("{reason}; workspace draft restoration failed: {error}"),
+            )
+            .await?;
+            bail!(
+                "{reason}; task run was blocked because the workspace draft could not be restored: {error}"
+            )
+        }
+        Ok(())
+    }
+
+    async fn compensate_draft_commit_or_block(
+        &self,
+        run: &TaskRunRecord,
+        expected_fingerprint: &TaskGitFingerprint,
+        original_index_tree: &str,
         commit: &str,
         reason: &str,
     ) -> Result<()> {
         let workspace = Path::new(&run.workspace_root);
-        let scope = exact_run_scope(run, commit);
         let safe = inspect_repository(workspace, true)
             .await
-            .is_ok_and(|snapshot| scope.matches(&snapshot));
+            .is_ok_and(|snapshot| exact_run_scope(run, commit).matches(&snapshot));
         if safe {
-            let compensation = compensate_commit(scope, &run.expected_head).await;
-
-            let cleanup = async {
-                compensation?;
-                restore_originals(workspace, originals).await?;
-                ensure_repository_clean(workspace).await
+            let compensation = async {
+                run_git_checked(workspace, &["reset", "--mixed", &run.expected_head]).await?;
+                run_git_checked(workspace, &["read-tree", original_index_tree]).await?;
+                let actual =
+                    fingerprint_repository(workspace, &run.base_commit, &run.expected_head).await?;
+                if &actual != expected_fingerprint {
+                    bail!("compensated workspace does not match the original design draft");
+                }
+                Ok::<_, anyhow::Error>(())
             }
             .await;
-            if let Err(cleanup_error) = cleanup {
+            if let Err(error) = compensation {
                 self.block_run(
                     run,
-                    format!(
-                        "{reason}; automatic compensation failed after the design commit: {cleanup_error}"
-                    ),
+                    format!("{reason}; automatic compensation failed: {error}"),
                 )
                 .await?;
-                bail!(
-                    "{reason}; compensation failed and the task run was blocked: {cleanup_error}"
-                );
+                bail!("{reason}; compensation failed and the task run was blocked: {error}")
             }
             return Ok(());
         }
 
         self.block_run(
             run,
-            format!(
-                "{reason}; automatic compensation was unsafe because HEAD or workspace changed"
-            ),
+            format!("{reason}; compensation was unsafe because HEAD or workspace changed"),
         )
         .await?;
         bail!("{reason}; task run was blocked because compensation was unsafe")
-    }
-
-    pub(super) fn ensure_executor_design_contract(&self, run: &TaskRunRecord) -> Result<()> {
-        if design_commit_is_current(run) {
-            return Ok(());
-        }
-        bail!("task_spawn_executor requires a durable design commit at the current task HEAD")
     }
 }
 
@@ -452,21 +565,25 @@ fn exact_run_scope<'a>(run: &'a TaskRunRecord, commit: &'a str) -> ExactReposito
     }
 }
 
-fn ensure_design_phase(phase: TaskRunPhase) -> Result<()> {
-    if matches!(
-        phase,
-        TaskRunPhase::DesignUpdating | TaskRunPhase::Implementing | TaskRunPhase::Reworking
-    ) {
+fn ensure_design_phase(phase: TaskRunStateKind) -> Result<()> {
+    if phase == TaskRunStateKind::DesignUpdating {
         return Ok(());
     }
     bail!(
-        "task_update_design is not allowed during phase {}",
+        "task_finalize_design requires phase designUpdating; current phase is {}",
         phase.as_str()
     )
 }
 
-pub(crate) fn design_commit_is_current(run: &TaskRunRecord) -> bool {
-    run.design_commit.as_deref() == Some(run.expected_head.as_str())
+fn ensure_same_paths(actual: &[String], expected: &[String]) -> Result<()> {
+    let actual = actual.iter().collect::<BTreeSet<_>>();
+    let expected = expected.iter().collect::<BTreeSet<_>>();
+    if actual != expected {
+        bail!(
+            "staged design-stage paths do not match the workspace draft: expected {expected:?}, actual {actual:?}"
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

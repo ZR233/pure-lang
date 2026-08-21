@@ -64,13 +64,10 @@ StudioBridgeEventPayload _productPayloadFromFrb(
 TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
   return TaskRuntimeView(
     runId: task.runId,
-    phase: task.phase,
+    state: _taskStateFromFrb(task.state),
     branch: task.branch,
     expectedHead: task.expectedHead,
-    statusMessage: task.statusMessage,
-    stopRequestedOrigin: task.stopRequestedOrigin,
-    stopRequestedReason: task.stopRequestedReason,
-    taskGeneration: task.taskGeneration.toInt(),
+    revision: task.revision.toInt(),
     integratedReviewGate: switch (task.integratedReviewGate) {
       frb.BridgeIntegratedReviewGateDto_Required(:final reason) =>
         IntegratedReviewGateView.required(reason: reason),
@@ -104,28 +101,11 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
         TaskWorkUnitView(
           id: unit.id,
           title: unit.title,
-          status: unit.status,
+          state: _taskWorkUnitStateFromFrb(unit.state),
           worktreePath: unit.worktreePath,
           branch: unit.branch,
           agentId: unit.agentId,
-          executionStatus: unit.executionStatus,
-          executionError: unit.executionError,
-          budgetLimit: unit.budgetLimit == null
-              ? null
-              : TaskBudgetLimitView(
-                  kind: unit.budgetLimit!.kind,
-                  usage: TaskBudgetUsageView(
-                    modelSteps: unit.budgetLimit!.usage.modelSteps,
-                    toolCalls: unit.budgetLimit!.usage.toolCalls,
-                    waitCalls: unit.budgetLimit!.usage.waitCalls,
-                    elapsedMs: unit.budgetLimit!.usage.elapsedMs,
-                  ),
-                ),
-          budgetSliceCount: unit.budgetSliceCount,
           budgetSliceLimit: unit.budgetSliceLimit,
-          continuationState: unit.continuationState,
-          continuationSourceTurnId: unit.continuationSourceTurnId,
-          continuationRevision: unit.continuationRevision,
           executorProgressRevision: unit.executorProgressRevision,
           blueprintFingerprint: unit.blueprintFingerprint,
           objective: unit.objective,
@@ -182,10 +162,9 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           completionId: review.completionId,
           completionRevision: review.completionRevision,
           reviewedHead: review.reviewedHead,
-          verdict: review.verdict,
+          state: _taskReviewStateFromFrb(review.state),
           requestedByCallId: review.requestedByCallId,
           reviewerAgentId: review.reviewerAgentId,
-          summary: review.summary,
           designReferences: [
             for (final reference in review.designReferences)
               TaskDesignReferenceView(
@@ -216,6 +195,196 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
         ),
     ],
   );
+}
+
+TaskStateView _taskStateFromFrb(frb.BridgeTaskState state) {
+  return switch (state) {
+    frb.BridgeTaskState_DesignUpdating(:final field0) =>
+      DesignUpdatingTaskStateView(_taskStateDataFromFrb(field0)),
+    frb.BridgeTaskState_Implementing(:final field0) =>
+      ImplementingTaskStateView(_taskStateDataFromFrb(field0)),
+    frb.BridgeTaskState_Merging(:final field0) => MergingTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Reviewing(:final field0) => ReviewingTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Reworking(:final field0) => ReworkingTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Stopping(:final field0) => StoppingTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Blocked(:final field0) => BlockedTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Completed(:final field0) => CompletedTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Failed(:final field0) => FailedTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+    frb.BridgeTaskState_Cancelled(:final field0) => CancelledTaskStateView(
+      _taskStateDataFromFrb(field0),
+    ),
+  };
+}
+
+TaskStateDataView _taskStateDataFromFrb(frb.BridgeTaskStateData data) {
+  return TaskStateDataView(
+    generation: data.generation.toInt(),
+    statusMessage: data.statusMessage,
+    stopRequestedOrigin: data.stopRequest?.origin,
+    stopRequestedReason: data.stopRequest?.reason,
+  );
+}
+
+TaskWorkUnitStateView _taskWorkUnitStateFromFrb(
+  frb.BridgeTaskWorkUnitState state,
+) {
+  return switch (state) {
+    frb.BridgeTaskWorkUnitState_Pending(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.pending,
+      TaskWorkUnitExecution.queued,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_Running(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.running,
+      switch (field0.execution) {
+        frb.BridgeRunningExecution.running => TaskWorkUnitExecution.running,
+        frb.BridgeRunningExecution.budgetLimited =>
+          TaskWorkUnitExecution.budgetLimited,
+      },
+      field0.progress,
+    ),
+    frb.BridgeTaskWorkUnitState_AwaitingCompletion(:final field0) =>
+      _taskWorkUnitState(
+        TaskWorkUnitStateKind.awaitingCompletion,
+        switch (field0.execution) {
+          frb.BridgeAwaitingExecution.completed =>
+            TaskWorkUnitExecution.completed,
+          frb.BridgeAwaitingExecution.failed => TaskWorkUnitExecution.failed,
+          frb.BridgeAwaitingExecution.cancelled =>
+            TaskWorkUnitExecution.cancelled,
+        },
+        field0.progress,
+      ),
+    frb.BridgeTaskWorkUnitState_ReadyForReview(:final field0) =>
+      _taskWorkUnitState(
+        TaskWorkUnitStateKind.readyForReview,
+        TaskWorkUnitExecution.completed,
+        field0,
+      ),
+    frb.BridgeTaskWorkUnitState_Reviewing(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.reviewing,
+      TaskWorkUnitExecution.completed,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_ChangesRequested(:final field0) =>
+      _taskWorkUnitState(
+        TaskWorkUnitStateKind.changesRequested,
+        TaskWorkUnitExecution.completed,
+        field0,
+      ),
+    frb.BridgeTaskWorkUnitState_Approved(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.approved,
+      TaskWorkUnitExecution.completed,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_Merged(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.merged,
+      TaskWorkUnitExecution.completed,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_NoDelivery(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.noDelivery,
+      TaskWorkUnitExecution.completed,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_NeedsAttention(:final field0) =>
+      _taskWorkUnitState(
+        TaskWorkUnitStateKind.needsAttention,
+        TaskWorkUnitExecution.budgetLimited,
+        field0,
+      ),
+    frb.BridgeTaskWorkUnitState_Failed(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.failed,
+      TaskWorkUnitExecution.failed,
+      field0,
+    ),
+    frb.BridgeTaskWorkUnitState_Cancelled(:final field0) => _taskWorkUnitState(
+      TaskWorkUnitStateKind.cancelled,
+      TaskWorkUnitExecution.cancelled,
+      field0,
+    ),
+  };
+}
+
+TaskWorkUnitStateView _taskWorkUnitState(
+  TaskWorkUnitStateKind kind,
+  TaskWorkUnitExecution execution,
+  frb.BridgeTaskWorkUnitProgress progress,
+) {
+  return TaskWorkUnitStateView(
+    kind: kind,
+    execution: execution,
+    progress: TaskWorkUnitProgressView(
+      executionError: progress.executionError,
+      budgetLimit: progress.budgetLimit == null
+          ? null
+          : TaskBudgetLimitView(
+              kind: progress.budgetLimit!.kind,
+              usage: TaskBudgetUsageView(
+                modelSteps: progress.budgetLimit!.usage.modelSteps,
+                toolCalls: progress.budgetLimit!.usage.toolCalls,
+                waitCalls: progress.budgetLimit!.usage.waitCalls,
+                elapsedMs: progress.budgetLimit!.usage.elapsedMs,
+              ),
+            ),
+      budgetSliceCount: progress.budgetSliceCount,
+      continuationState: switch (progress.continuationState) {
+        frb.BridgeExecutorContinuationState.none =>
+          TaskExecutorContinuationState.none,
+        frb.BridgeExecutorContinuationState.pendingStart =>
+          TaskExecutorContinuationState.pendingStart,
+        frb.BridgeExecutorContinuationState.compacting =>
+          TaskExecutorContinuationState.compacting,
+        frb.BridgeExecutorContinuationState.plannerWakePending =>
+          TaskExecutorContinuationState.plannerWakePending,
+        frb.BridgeExecutorContinuationState.needsAttention =>
+          TaskExecutorContinuationState.needsAttention,
+      },
+      continuationSourceTurnId: progress.continuationSourceTurnId,
+      continuationRevision: progress.continuationRevision,
+    ),
+  );
+}
+
+TaskReviewStateView _taskReviewStateFromFrb(frb.BridgeTaskReviewState state) {
+  return switch (state) {
+    frb.BridgeTaskReviewState_Pending() => const TaskReviewStateView(
+      kind: TaskReviewStateKind.pending,
+    ),
+    frb.BridgeTaskReviewState_Pass(:final summary) => TaskReviewStateView(
+      kind: TaskReviewStateKind.pass,
+      summary: summary,
+    ),
+    frb.BridgeTaskReviewState_ChangesRequired(:final summary) =>
+      TaskReviewStateView(
+        kind: TaskReviewStateKind.changesRequired,
+        summary: summary,
+      ),
+    frb.BridgeTaskReviewState_Blocked(:final summary) => TaskReviewStateView(
+      kind: TaskReviewStateKind.blocked,
+      summary: summary,
+    ),
+    frb.BridgeTaskReviewState_Failed(:final summary, :final error) =>
+      TaskReviewStateView(
+        kind: TaskReviewStateKind.failed,
+        summary: summary,
+        error: error,
+      ),
+  };
 }
 
 TaskFailureView _taskFailureFromFrb(frb.BridgeTaskFailureDto failure) {
@@ -523,8 +692,21 @@ TaskRecoveryPreview _taskRecoveryPreviewFromFrb(
     previewToken: preview.previewToken,
     rootThreadId: preview.rootThreadId,
     runId: preview.runId,
+    revision: preview.revision.toInt(),
     taskGeneration: preview.taskGeneration.toInt(),
-    phase: preview.phase,
+    state: switch (preview.state) {
+      frb.BridgeTaskRecoveryState.designUpdating =>
+        TaskStateKind.designUpdating,
+      frb.BridgeTaskRecoveryState.implementing => TaskStateKind.implementing,
+      frb.BridgeTaskRecoveryState.merging => TaskStateKind.merging,
+      frb.BridgeTaskRecoveryState.reviewing => TaskStateKind.reviewing,
+      frb.BridgeTaskRecoveryState.reworking => TaskStateKind.reworking,
+      frb.BridgeTaskRecoveryState.stopping => TaskStateKind.stopping,
+      frb.BridgeTaskRecoveryState.blocked => TaskStateKind.blocked,
+      frb.BridgeTaskRecoveryState.completed => TaskStateKind.completed,
+      frb.BridgeTaskRecoveryState.failed => TaskStateKind.failed,
+      frb.BridgeTaskRecoveryState.cancelled => TaskStateKind.cancelled,
+    },
     expectedHead: preview.expectedHead,
     stopRequested: preview.stopRequested,
     branchLeaseId: preview.branchLeaseId,
@@ -615,8 +797,21 @@ frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
     previewToken: preview.previewToken,
     rootThreadId: preview.rootThreadId,
     runId: preview.runId,
+    revision: BigInt.from(preview.revision),
     taskGeneration: BigInt.from(preview.taskGeneration),
-    phase: preview.phase,
+    state: switch (preview.state) {
+      TaskStateKind.designUpdating =>
+        frb.BridgeTaskRecoveryState.designUpdating,
+      TaskStateKind.implementing => frb.BridgeTaskRecoveryState.implementing,
+      TaskStateKind.merging => frb.BridgeTaskRecoveryState.merging,
+      TaskStateKind.reviewing => frb.BridgeTaskRecoveryState.reviewing,
+      TaskStateKind.reworking => frb.BridgeTaskRecoveryState.reworking,
+      TaskStateKind.stopping => frb.BridgeTaskRecoveryState.stopping,
+      TaskStateKind.blocked => frb.BridgeTaskRecoveryState.blocked,
+      TaskStateKind.completed => frb.BridgeTaskRecoveryState.completed,
+      TaskStateKind.failed => frb.BridgeTaskRecoveryState.failed,
+      TaskStateKind.cancelled => frb.BridgeTaskRecoveryState.cancelled,
+    },
     expectedHead: preview.expectedHead,
     stopRequested: preview.stopRequested,
     branchLeaseId: preview.branchLeaseId,

@@ -10,7 +10,7 @@ class _Header extends StatelessWidget {
     final thread = state.selectedRootThread;
     final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
-    final taskPhase = state.runtime.task?.phase;
+    final taskPhase = state.runtime.task?.state.kind;
     return SizedBox(
       height: 78,
       child: Padding(

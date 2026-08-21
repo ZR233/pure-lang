@@ -12,13 +12,13 @@ void registerTaskRecoveryTests() {
     AgentWorkspaceView workspaceFor(TaskWorkUnitView workUnit) {
       final task = TaskRuntimeView(
         runId: 'run-46',
-        phase: 'implementing',
+        state: TaskStateView.facts(
+          kind: TaskStateKind.implementing,
+          generation: 1,
+        ),
         branch: 'main',
         expectedHead: 'head',
-        statusMessage: null,
-        stopRequestedOrigin: null,
-        stopRequestedReason: null,
-        taskGeneration: 1,
+        revision: 0,
         workUnits: [workUnit],
         completions: const [],
         merges: const [],
@@ -45,15 +45,18 @@ void registerTaskRecoveryTests() {
     expect(
       workspaceFor(
         _taskRecoveryWorkUnit(
-          status: 'awaitingCompletion',
-          execution: 'failed',
+          status: TaskWorkUnitStateKind.awaitingCompletion,
+          execution: TaskWorkUnitExecution.failed,
         ),
       ).isTaskPaused,
       isTrue,
     );
     expect(
       workspaceFor(
-        _taskRecoveryWorkUnit(status: 'running', execution: 'running'),
+        _taskRecoveryWorkUnit(
+          status: TaskWorkUnitStateKind.running,
+          execution: TaskWorkUnitExecution.running,
+        ),
       ).isTaskPaused,
       isFalse,
     );
@@ -71,13 +74,14 @@ void registerTaskRecoveryTests() {
       );
       final task = TaskRuntimeView(
         runId: preview.runId,
-        phase: preview.phase,
+        state: TaskStateView.facts(
+          kind: TaskStateKind.implementing,
+          generation: preview.taskGeneration,
+          statusMessage: 'paused',
+        ),
         branch: 'codex/task-46',
         expectedHead: preview.expectedHead,
-        statusMessage: 'paused',
-        stopRequestedOrigin: null,
-        stopRequestedReason: null,
-        taskGeneration: preview.taskGeneration,
+        revision: preview.revision,
         workUnits: const [],
         completions: const [],
         merges: const [],
@@ -242,23 +246,23 @@ void registerTaskRecoveryTests() {
 }
 
 TaskWorkUnitView _taskRecoveryWorkUnit({
-  required String status,
-  required String execution,
+  required TaskWorkUnitStateKind status,
+  required TaskWorkUnitExecution execution,
 }) => TaskWorkUnitView(
   id: 'wu-1',
   title: 'executor',
-  status: status,
+  state: TaskWorkUnitStateView.facts(
+    kind: status,
+    execution: execution,
+    executionError: execution == TaskWorkUnitExecution.failed
+        ? 'provider failed'
+        : null,
+    continuationRevision: BigInt.zero,
+  ),
   worktreePath: r'C:\workspace-wu-1',
   branch: 'task-wu-1',
   agentId: 'executor-1',
-  executionStatus: execution,
-  executionError: execution == 'failed' ? 'provider failed' : null,
-  budgetLimit: null,
-  budgetSliceCount: 1,
   budgetSliceLimit: 4,
-  continuationState: 'none',
-  continuationSourceTurnId: null,
-  continuationRevision: BigInt.zero,
   executorProgressRevision: BigInt.zero,
 );
 
@@ -279,8 +283,9 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
     previewToken: 'preview-token',
     rootThreadId: 'session-1',
     runId: 'run-46',
+    revision: 8,
     taskGeneration: 3,
-    phase: 'implementing',
+    state: TaskStateKind.implementing,
     expectedHead: '0123456789abcdef',
     stopRequested: true,
     branchLeaseId: 'lease-1',

@@ -6,20 +6,26 @@ pub(crate) mod git;
 mod merge;
 mod recovery;
 pub(crate) mod review;
+mod review_round;
 mod scope_hint;
 mod spawn;
+mod task_run;
 mod types;
 mod work_completion;
+mod work_unit;
 
 pub(crate) use coordinator::*;
 #[cfg(test)]
 pub(crate) use recovery::MERGE_RECOVERY_BLOCK_PREFIX;
 pub(crate) use recovery::is_retryable_merge_recovery_message;
+pub(crate) use review_round::*;
 pub(crate) use spawn::{
     StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
     TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
 };
+pub(crate) use task_run::*;
 pub(crate) use types::*;
+pub(crate) use work_unit::*;
 
 #[cfg(test)]
 mod tests;

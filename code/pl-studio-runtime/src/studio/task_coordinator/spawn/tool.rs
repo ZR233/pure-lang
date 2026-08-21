@@ -9,7 +9,7 @@ use super::{
     TaskExecutorBlueprint, TaskExecutorDependency, TaskExecutorEvidence,
     TaskExecutorImplementationStep, TaskExecutorScope, TaskExecutorVerificationContract,
 };
-use crate::studio::task_coordinator::{AllocateExecutor, TaskCoordinator};
+use crate::studio::task_coordinator::{AllocateExecutor, TaskCoordinator, TaskRunStateKind};
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
@@ -72,6 +72,18 @@ struct TaskSpawnExecutorOutput {
     reused: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskSpawnExecutorRejection {
+    status: &'static str,
+    code: &'static str,
+    recoverable: bool,
+    message: String,
+    current_phase: &'static str,
+    required_phases: Vec<&'static str>,
+    next_action: Option<&'static str>,
+}
+
 impl TaskCoordinator {
     pub(crate) fn task_spawn_executor_tool(
         self: &Arc<Self>,
@@ -89,6 +101,12 @@ impl TaskCoordinator {
             let thread_id = thread_id.clone();
             let coordinator = Arc::clone(&coordinator);
             async move {
+                if let Some(rejection) = coordinator
+                    .executor_spawn_phase_rejection(&thread_id)
+                    .await?
+                {
+                    return spawn_rejection(rejection);
+                }
                 // Blueprint validation and context budgeting must precede every durable allocation.
                 let blueprint = arguments.into_blueprint()?;
                 let blueprint_fingerprint = blueprint.fingerprint()?;
@@ -171,6 +189,55 @@ impl TaskCoordinator {
         })
         .with_effect(ToolEffect::BranchControl)
     }
+
+    async fn executor_spawn_phase_rejection(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<TaskSpawnExecutorRejection>> {
+        let run = self
+            .store
+            .read_active_task_run_for_root_thread(thread_id)
+            .await?;
+        if run.kind().allows_executor_spawn() {
+            return Ok(None);
+        }
+        let (required_phases, next_action, message) = if run.kind()
+            == TaskRunStateKind::DesignUpdating
+        {
+            (
+                vec![TaskRunStateKind::Implementing.as_str()],
+                Some("task_finalize_design"),
+                format!(
+                    "当前任务处于 {}；派发执行者要求 {}。请先调用 task_finalize_design 完成设计阶段。",
+                    run.kind().as_str(),
+                    TaskRunStateKind::Implementing.as_str()
+                ),
+            )
+        } else {
+            (
+                vec![
+                    TaskRunStateKind::Implementing.as_str(),
+                    TaskRunStateKind::Reworking.as_str(),
+                ],
+                None,
+                format!(
+                    "当前任务处于 {}；派发执行者只允许在 {} 或 {} 阶段。",
+                    run.kind().as_str(),
+                    TaskRunStateKind::Implementing.as_str(),
+                    TaskRunStateKind::Reworking.as_str()
+                ),
+            )
+        };
+        Ok(Some(TaskSpawnExecutorRejection {
+            status: "rejected",
+            code: "task_phase_mismatch",
+            recoverable: true,
+            message,
+            current_phase: run.kind().as_str(),
+            required_phases,
+            next_action,
+        }))
+    }
 }
 
 fn ensure_reused_blueprint_matches(existing: &str, requested: &str) -> Result<()> {
@@ -196,6 +263,14 @@ fn spawn_output(
         reused,
     })
     .map_err(anyhow::Error::from)
+}
+
+fn spawn_rejection(
+    rejection: TaskSpawnExecutorRejection,
+) -> Result<ToolExecutionResult<serde_json::Value>> {
+    Ok(ToolExecutionResult::<serde_json::Value>::failure(
+        serde_json::to_string(&rejection)?,
+    ))
 }
 
 fn executor_constraint(scope_hints: &[String]) -> Result<String> {
@@ -240,6 +315,55 @@ fn executor_runtime_ids(thread_id: &str, call_id: &str) -> Result<(ThreadId, Tur
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::studio::task_coordinator::{CreateTaskRun, test_task_git_fingerprint};
+    use crate::{StudioMode, StudioStore};
+
+    #[tokio::test]
+    async fn design_updating_rejection_names_the_required_phase_and_next_action() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/spawn-gate").await.unwrap();
+        let thread = store
+            .create_thread(&project.id, "Spawn gate", StudioMode::Task)
+            .await
+            .unwrap();
+        store
+            .create_task_run_with_lease(CreateTaskRun {
+                root_thread_id: thread.id.clone(),
+                plan: "implement the confirmed plan".to_string(),
+                workspace_root: "C:/work/spawn-gate".to_string(),
+                git_common_dir: "C:/work/spawn-gate/.git".to_string(),
+                branch: "main".to_string(),
+                head_commit: "1111111".to_string(),
+                design_baseline: test_task_git_fingerprint(
+                    "C:/work/spawn-gate",
+                    "C:/work/spawn-gate/.git",
+                    "main",
+                    "1111111",
+                ),
+            })
+            .await
+            .unwrap();
+        let coordinator = TaskCoordinator::new(store);
+
+        let rejection = coordinator
+            .executor_spawn_phase_rejection(&thread.id)
+            .await
+            .unwrap()
+            .expect("designUpdating must reject executor allocation");
+        let value = serde_json::to_value(rejection).unwrap();
+
+        assert_eq!(value["code"], "task_phase_mismatch");
+        assert_eq!(value["currentPhase"], "designUpdating");
+        assert_eq!(value["requiredPhases"], serde_json::json!(["implementing"]));
+        assert_eq!(value["nextAction"], "task_finalize_design");
+        assert!(value["message"].as_str().unwrap().contains("implementing"));
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap()
+                .contains("task_finalize_design")
+        );
+    }
 
     #[test]
     fn executor_runtime_ids_are_stable_git_ref_components() {

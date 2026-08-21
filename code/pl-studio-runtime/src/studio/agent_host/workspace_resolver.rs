@@ -7,9 +7,7 @@ use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::StudioStore;
 use crate::studio::records::{ProjectRecord, ThreadRecord};
-use crate::studio::task_coordinator::{
-    ReviewScope, TaskRunPhase, TaskRunRecord, WorkCompletionRecord,
-};
+use crate::studio::task_coordinator::{ReviewScope, TaskRunRecord, WorkCompletionRecord};
 
 /// 从 Studio durable owner 解析单个 Agent 的 canonical workspace。
 #[derive(Clone)]
@@ -64,12 +62,13 @@ impl AgentWorkspaceResolver {
                 if let Some(run) = active_task_run {
                     validate_main_workspace(&root, run).await?;
                 }
-                let mutability =
-                    if active_task_run.is_some_and(|run| run.phase == TaskRunPhase::Merging) {
-                        WorkspaceMutability::ReadWrite
-                    } else {
-                        WorkspaceMutability::ReadOnly
-                    };
+                let mutability = if active_task_run
+                    .is_some_and(|run| run.kind().allows_planner_workspace_mutation())
+                {
+                    WorkspaceMutability::ReadWrite
+                } else {
+                    WorkspaceMutability::ReadOnly
+                };
                 Ok(AgentWorkspace::confined(root, mutability))
             }
         }
@@ -289,8 +288,8 @@ mod tests {
     use crate::studio::agent_host::resources::StudioAgentResources;
     use crate::studio::records::{ThreadKind, ThreadVisibility};
     use crate::studio::task_coordinator::{
-        AgentDelivery, AgentWorktreeDelivery, CreateWorkUnit, TaskCoordinator, WorkCompletionKind,
-        WorkUnitStatus,
+        AgentDelivery, AgentWorktreeDelivery, CreateWorkUnit, TaskCoordinator, TaskRunStateKind,
+        WorkCompletionKind, WorkUnitStatus,
     };
 
     #[tokio::test]
@@ -396,7 +395,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_root_is_writable_only_during_planner_merge_phase() {
+    async fn task_root_mutability_comes_from_the_task_state_capability() {
         let fixture = ResolverFixture::new("planner-mutability").await;
         let identity = AgentIdentity {
             id: AgentId::new(fixture.root_thread.id.clone()).unwrap(),
@@ -404,6 +403,18 @@ mod tests {
             role: StudioRole::Planner.id(),
             depth: 0,
         };
+
+        let design_updating = fixture
+            .resolver()
+            .resolve(
+                &identity,
+                &fixture.root_thread,
+                &fixture.project,
+                Some(&fixture.design_run),
+            )
+            .await
+            .unwrap();
+        assert_eq!(design_updating.mutability(), WorkspaceMutability::ReadWrite);
 
         let implementing = fixture
             .resolver()
@@ -419,7 +430,7 @@ mod tests {
 
         let merging = fixture
             .store
-            .transition_task_run(&fixture.run.id, TaskRunPhase::Merging, None)
+            .transition_task_run(&fixture.run.id, TaskRunStateKind::Merging, None)
             .await
             .unwrap();
         let workspace = fixture
@@ -533,6 +544,7 @@ mod tests {
         project: ProjectRecord,
         root_thread: ThreadRecord,
         run: TaskRunRecord,
+        design_run: TaskRunRecord,
         repository: PathBuf,
         worktree: PathBuf,
         branch: String,
@@ -551,12 +563,12 @@ mod tests {
                 .await
                 .unwrap();
             let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
-            let run = coordinator
+            let design_run = coordinator
                 .start_confirmed_task(&root_thread.id, "plan", &repository)
                 .await
                 .unwrap();
             let run = store
-                .transition_task_run(&run.id, TaskRunPhase::Implementing, None)
+                .transition_task_run(&design_run.id, TaskRunStateKind::Implementing, None)
                 .await
                 .unwrap();
             let executor_agent_id = "executor-agent".to_string();
@@ -611,10 +623,11 @@ mod tests {
                 project,
                 root_thread,
                 run,
+                design_run,
                 repository,
                 worktree,
                 branch,
-                work_unit_id: work_unit.id,
+                work_unit_id: work_unit.id.clone(),
                 executor_agent_id,
             }
         }

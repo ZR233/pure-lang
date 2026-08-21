@@ -1,3 +1,5 @@
+import 'runtime_models.dart';
+
 enum RecoveryIssueScope { application, project, thread }
 
 enum RecoveryIssueCategory {
@@ -184,8 +186,9 @@ class TaskRecoveryPreview {
     required this.previewToken,
     required this.rootThreadId,
     required this.runId,
+    required this.revision,
     required this.taskGeneration,
-    required this.phase,
+    required this.state,
     required this.expectedHead,
     required this.stopRequested,
     required this.branchLeaseId,
@@ -203,8 +206,9 @@ class TaskRecoveryPreview {
   final String previewToken;
   final String rootThreadId;
   final String runId;
+  final int revision;
   final int taskGeneration;
-  final String phase;
+  final TaskStateKind state;
   final String expectedHead;
   final bool stopRequested;
   final String branchLeaseId;

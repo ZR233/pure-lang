@@ -8,9 +8,12 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    RecordTaskAgentFailure, ReviewVerdict, TaskFailureDisposition, TaskFailureRecord,
-    TaskFailureSettlement, TaskRunPhase, ThreadExecutionStatus, WorkUnitStatus,
+    RecordTaskAgentFailure, ReviewRoundState, ReviewVerdict, TaskCommand, TaskFailureDisposition,
+    TaskFailureRecord, TaskFailureSettlement, ThreadExecutionStatus, WorkUnitStatus,
 };
+
+use super::review::update_review_round_state;
+use super::work_unit::{update_work_unit_state, work_unit_state};
 
 impl StudioStore {
     pub(crate) async fn record_task_agent_failure(
@@ -36,9 +39,8 @@ impl StudioStore {
             else {
                 return Ok(None);
             };
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if phase.is_terminal() {
+            let record = super::task_run_record(run.clone())?;
+            if record.kind().is_terminal() {
                 return Ok(None);
             }
             if entities::task_failure::Entity::find()
@@ -94,15 +96,8 @@ impl StudioStore {
             .await?;
 
             let terminalized = disposition == TaskFailureDisposition::Fatal;
-            let task_generation = run.task_generation;
-            let mut run_active: entities::task_run::ActiveModel = run.into();
-            run_active.status_message = Set(Some(input.failure.message.clone()));
-            run_active.updated_at = Set(now);
-            if terminalized {
-                run_active.phase = Set(TaskRunPhase::Failed.as_str().to_string());
-                run_active.terminal_generation = Set(Some(task_generation));
-                run_active.terminal_failure_id = Set(Some(failure_model.id.clone()));
-                settle_task_children(&tx, &failure_model.task_run_id, &input.failure.message, now)
+            let run = if terminalized {
+                settle_task_children(&tx, &failure_model.task_run_id, &input.failure.message)
                     .await?;
                 entities::branch_lease::Entity::delete_many()
                     .filter(
@@ -111,8 +106,18 @@ impl StudioStore {
                     )
                     .exec(&tx)
                     .await?;
-            }
-            let run = run_active.update(&tx).await?;
+                super::apply_task_command(
+                    &tx,
+                    run,
+                    TaskCommand::Fail {
+                        message: input.failure.message.clone(),
+                        failure_id: Some(failure_model.id.clone()),
+                    },
+                )
+                .await?
+            } else {
+                run
+            };
             Ok(Some(TaskFailureSettlement {
                 run: super::task_run_record(run)?,
                 terminalized,
@@ -173,37 +178,41 @@ async fn settle_task_children(
     tx: &sea_orm::DatabaseTransaction,
     task_run_id: &str,
     message: &str,
-    now: i64,
 ) -> Result<()> {
     for unit in entities::work_unit::Entity::find()
         .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id))
         .all(tx)
         .await?
     {
-        let status = WorkUnitStatus::from_str(&unit.status)
-            .with_context(|| format!("invalid work unit status: {}", unit.status))?;
+        let state = work_unit_state(&unit)?;
+        let status = state.status();
         if matches!(status, WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery) {
             continue;
         }
-        let mut active: entities::work_unit::ActiveModel = unit.into();
-        active.status = Set(WorkUnitStatus::Failed.as_str().to_string());
-        active.execution_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
-        active.execution_error = Set(Some(message.to_string()));
-        active.updated_at = Set(now);
-        active.update(tx).await?;
+        let mut progress = state.into_progress();
+        progress.execution_error = Some(message.to_string());
+        update_work_unit_state(
+            tx,
+            unit,
+            WorkUnitStatus::Failed,
+            ThreadExecutionStatus::Failed,
+            progress,
+        )
+        .await?;
     }
     for round in entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id))
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .all(tx)
         .await?
     {
-        let mut active: entities::review_round::ActiveModel = round.into();
-        active.status = Set(ReviewVerdict::Failed.as_str().to_string());
-        active.reviewer_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
-        active.reviewer_error = Set(Some(message.to_string()));
-        active.updated_at = Set(now);
-        active.update(tx).await?;
+        let state = ReviewRoundState::from_parts(
+            ReviewVerdict::Failed,
+            ThreadExecutionStatus::Failed,
+            Some(message.to_string()),
+            Some(message.to_string()),
+        )?;
+        update_review_round_state(tx, round, state).await?;
     }
     Ok(())
 }

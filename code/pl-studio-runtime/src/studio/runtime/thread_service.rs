@@ -234,7 +234,7 @@ impl StudioRuntime {
             .list_task_runs_for_project(project_id)
             .await?
             .iter()
-            .any(|run| !run.phase.is_terminal())
+            .any(|run| !run.kind().is_terminal())
         {
             bail!("project has an active task");
         }

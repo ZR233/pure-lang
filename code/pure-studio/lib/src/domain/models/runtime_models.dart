@@ -238,16 +238,144 @@ class ThreadRuntimeView {
   }
 }
 
-class TaskRuntimeView {
-  const TaskRuntimeView({
-    required this.runId,
-    required this.phase,
-    required this.branch,
-    required this.expectedHead,
+enum TaskStateKind {
+  designUpdating,
+  implementing,
+  merging,
+  reviewing,
+  reworking,
+  stopping,
+  blocked,
+  completed,
+  failed,
+  cancelled,
+}
+
+sealed class TaskStateView {
+  const TaskStateView(this.data);
+
+  factory TaskStateView.facts({
+    required TaskStateKind kind,
+    int generation = 0,
+    String? statusMessage,
+    String? stopRequestedOrigin,
+    String? stopRequestedReason,
+  }) {
+    final data = TaskStateDataView(
+      generation: generation,
+      statusMessage: statusMessage,
+      stopRequestedOrigin: stopRequestedOrigin,
+      stopRequestedReason: stopRequestedReason,
+    );
+    return switch (kind) {
+      TaskStateKind.designUpdating => DesignUpdatingTaskStateView(data),
+      TaskStateKind.implementing => ImplementingTaskStateView(data),
+      TaskStateKind.merging => MergingTaskStateView(data),
+      TaskStateKind.reviewing => ReviewingTaskStateView(data),
+      TaskStateKind.reworking => ReworkingTaskStateView(data),
+      TaskStateKind.stopping => StoppingTaskStateView(data),
+      TaskStateKind.blocked => BlockedTaskStateView(data),
+      TaskStateKind.completed => CompletedTaskStateView(data),
+      TaskStateKind.failed => FailedTaskStateView(data),
+      TaskStateKind.cancelled => CancelledTaskStateView(data),
+    };
+  }
+
+  final TaskStateDataView data;
+  TaskStateKind get kind;
+}
+
+final class DesignUpdatingTaskStateView extends TaskStateView {
+  const DesignUpdatingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.designUpdating;
+}
+
+final class ImplementingTaskStateView extends TaskStateView {
+  const ImplementingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.implementing;
+}
+
+final class MergingTaskStateView extends TaskStateView {
+  const MergingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.merging;
+}
+
+final class ReviewingTaskStateView extends TaskStateView {
+  const ReviewingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.reviewing;
+}
+
+final class ReworkingTaskStateView extends TaskStateView {
+  const ReworkingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.reworking;
+}
+
+final class StoppingTaskStateView extends TaskStateView {
+  const StoppingTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.stopping;
+}
+
+final class BlockedTaskStateView extends TaskStateView {
+  const BlockedTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.blocked;
+}
+
+final class CompletedTaskStateView extends TaskStateView {
+  const CompletedTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.completed;
+}
+
+final class FailedTaskStateView extends TaskStateView {
+  const FailedTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.failed;
+}
+
+final class CancelledTaskStateView extends TaskStateView {
+  const CancelledTaskStateView(super.data);
+
+  @override
+  TaskStateKind get kind => TaskStateKind.cancelled;
+}
+
+class TaskStateDataView {
+  const TaskStateDataView({
+    required this.generation,
     required this.statusMessage,
     required this.stopRequestedOrigin,
     required this.stopRequestedReason,
-    required this.taskGeneration,
+  });
+
+  final int generation;
+  final String? statusMessage;
+  final String? stopRequestedOrigin;
+  final String? stopRequestedReason;
+}
+
+class TaskRuntimeView {
+  const TaskRuntimeView({
+    required this.runId,
+    required this.state,
+    required this.branch,
+    required this.expectedHead,
+    required this.revision,
     this.integratedReviewGate = const IntegratedReviewGateView.required(
       reason: 'review gate unavailable',
     ),
@@ -260,13 +388,10 @@ class TaskRuntimeView {
   });
 
   final String runId;
-  final String phase;
+  final TaskStateView state;
   final String branch;
   final String expectedHead;
-  final String? statusMessage;
-  final String? stopRequestedOrigin;
-  final String? stopRequestedReason;
-  final int taskGeneration;
+  final int revision;
   final IntegratedReviewGateView integratedReviewGate;
   final List<TaskFailureView> failures;
   final TaskFailureView? terminalFailure;
@@ -275,17 +400,30 @@ class TaskRuntimeView {
   final List<TaskMergeView> merges;
   final List<TaskReviewView> reviews;
 
-  bool get isActive =>
-      !const {'completed', 'blocked', 'failed', 'cancelled'}.contains(phase);
+  String? get statusMessage => state.data.statusMessage;
+  String? get stopRequestedOrigin => state.data.stopRequestedOrigin;
+  String? get stopRequestedReason => state.data.stopRequestedReason;
+  int get taskGeneration => state.data.generation;
+
+  bool get isActive => switch (state.kind) {
+    TaskStateKind.completed ||
+    TaskStateKind.failed ||
+    TaskStateKind.cancelled => false,
+    TaskStateKind.designUpdating ||
+    TaskStateKind.implementing ||
+    TaskStateKind.merging ||
+    TaskStateKind.reviewing ||
+    TaskStateKind.reworking ||
+    TaskStateKind.stopping ||
+    TaskStateKind.blocked => true,
+  };
 
   bool get hasRecoverableExecutorFailure {
     if (!const {
-      'planning',
-      'pendingConfirmation',
-      'designUpdating',
-      'implementing',
-      'reworking',
-    }.contains(phase)) {
+      TaskStateKind.designUpdating,
+      TaskStateKind.implementing,
+      TaskStateKind.reworking,
+    }.contains(state.kind)) {
       return false;
     }
     final hasFailedExecutor = workUnits.any(
@@ -392,22 +530,100 @@ class TaskFailureView {
   bool get isFatal => disposition == 'fatal';
 }
 
+enum TaskWorkUnitStateKind {
+  pending,
+  running,
+  awaitingCompletion,
+  readyForReview,
+  reviewing,
+  changesRequested,
+  approved,
+  merged,
+  noDelivery,
+  needsAttention,
+  failed,
+  cancelled,
+}
+
+enum TaskWorkUnitExecution {
+  queued,
+  running,
+  budgetLimited,
+  completed,
+  failed,
+  cancelled,
+}
+
+enum TaskExecutorContinuationState {
+  none,
+  pendingStart,
+  compacting,
+  plannerWakePending,
+  needsAttention,
+}
+
+class TaskWorkUnitStateView {
+  const TaskWorkUnitStateView({
+    required this.kind,
+    required this.execution,
+    required this.progress,
+  });
+
+  factory TaskWorkUnitStateView.facts({
+    required TaskWorkUnitStateKind kind,
+    required TaskWorkUnitExecution execution,
+    String? executionError,
+    TaskBudgetLimitView? budgetLimit,
+    int budgetSliceCount = 1,
+    TaskExecutorContinuationState continuationState =
+        TaskExecutorContinuationState.none,
+    String? continuationSourceTurnId,
+    required BigInt continuationRevision,
+  }) => TaskWorkUnitStateView(
+    kind: kind,
+    execution: execution,
+    progress: TaskWorkUnitProgressView(
+      executionError: executionError,
+      budgetLimit: budgetLimit,
+      budgetSliceCount: budgetSliceCount,
+      continuationState: continuationState,
+      continuationSourceTurnId: continuationSourceTurnId,
+      continuationRevision: continuationRevision,
+    ),
+  );
+
+  final TaskWorkUnitStateKind kind;
+  final TaskWorkUnitExecution execution;
+  final TaskWorkUnitProgressView progress;
+}
+
+class TaskWorkUnitProgressView {
+  const TaskWorkUnitProgressView({
+    required this.executionError,
+    required this.budgetLimit,
+    required this.budgetSliceCount,
+    required this.continuationState,
+    required this.continuationSourceTurnId,
+    required this.continuationRevision,
+  });
+
+  final String? executionError;
+  final TaskBudgetLimitView? budgetLimit;
+  final int budgetSliceCount;
+  final TaskExecutorContinuationState continuationState;
+  final String? continuationSourceTurnId;
+  final BigInt continuationRevision;
+}
+
 class TaskWorkUnitView {
   const TaskWorkUnitView({
     required this.id,
     required this.title,
-    required this.status,
+    required this.state,
     required this.worktreePath,
     required this.branch,
     required this.agentId,
-    required this.executionStatus,
-    required this.executionError,
-    required this.budgetLimit,
-    required this.budgetSliceCount,
     required this.budgetSliceLimit,
-    required this.continuationState,
-    required this.continuationSourceTurnId,
-    required this.continuationRevision,
     required this.executorProgressRevision,
     this.blueprintFingerprint,
     this.objective,
@@ -418,24 +634,27 @@ class TaskWorkUnitView {
 
   final String id;
   final String title;
-  final String status;
+  final TaskWorkUnitStateView state;
   final String worktreePath;
   final String branch;
   final String? agentId;
-  final String executionStatus;
-  final String? executionError;
-  final TaskBudgetLimitView? budgetLimit;
-  final int budgetSliceCount;
   final int budgetSliceLimit;
-  final String continuationState;
-  final String? continuationSourceTurnId;
-  final BigInt continuationRevision;
   final BigInt executorProgressRevision;
   final String? blueprintFingerprint;
   final String? objective;
   final int implementationStepCount;
   final int acceptanceCriterionCount;
   final int verificationCount;
+
+  String get status => state.kind.name;
+  String get executionStatus => state.execution.name;
+  String? get executionError => state.progress.executionError;
+  TaskBudgetLimitView? get budgetLimit => state.progress.budgetLimit;
+  int get budgetSliceCount => state.progress.budgetSliceCount;
+  String get continuationState => state.progress.continuationState.name;
+  String? get continuationSourceTurnId =>
+      state.progress.continuationSourceTurnId;
+  BigInt get continuationRevision => state.progress.continuationRevision;
 }
 
 class TaskBudgetLimitView {
@@ -527,6 +746,16 @@ class TaskMergeView {
   final DateTime updatedAt;
 }
 
+enum TaskReviewStateKind { pending, pass, changesRequired, blocked, failed }
+
+class TaskReviewStateView {
+  const TaskReviewStateView({required this.kind, this.summary, this.error});
+
+  final TaskReviewStateKind kind;
+  final String? summary;
+  final String? error;
+}
+
 class TaskReviewView {
   const TaskReviewView({
     required this.id,
@@ -536,10 +765,9 @@ class TaskReviewView {
     required this.completionId,
     required this.completionRevision,
     required this.reviewedHead,
-    required this.verdict,
+    required this.state,
     required this.requestedByCallId,
     required this.reviewerAgentId,
-    required this.summary,
     required this.designReferences,
     required this.findings,
     required this.createdAt,
@@ -553,14 +781,16 @@ class TaskReviewView {
   final String? completionId;
   final int? completionRevision;
   final String reviewedHead;
-  final String verdict;
+  final TaskReviewStateView state;
   final String requestedByCallId;
   final String? reviewerAgentId;
-  final String? summary;
   final List<TaskDesignReferenceView> designReferences;
   final List<TaskReviewFindingView> findings;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  String get verdict => state.kind.name;
+  String? get summary => state.summary;
 }
 
 class TaskDesignReferenceView {

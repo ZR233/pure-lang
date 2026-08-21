@@ -561,12 +561,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskContinuationNeedsAttention => 'Needs attention';
 
   @override
-  String get statusTaskPhasePlanning => 'Planning';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => 'Waiting for confirmation';
-
-  @override
   String get statusTaskPhaseDesignUpdating => 'Updating design';
 
   @override

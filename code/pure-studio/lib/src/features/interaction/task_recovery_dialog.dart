@@ -407,7 +407,7 @@ class _TaskRecoveryFacts extends StatelessWidget {
       runSpacing: 8,
       children: [
         Chip(label: Text('Task ${preview.runId}')),
-        Chip(label: Text(context.taskPhaseLabel(preview.phase))),
+        Chip(label: Text(context.taskPhaseLabel(preview.state))),
         Chip(label: Text('HEAD ${_shortHash(preview.expectedHead)}')),
         if (preview.stopRequested)
           const Chip(

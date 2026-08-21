@@ -58,10 +58,16 @@ async fn run_offline_task_flow() -> Result<()> {
     fixture.wait_for_no_active_turns().await?;
     fixture.assert_script_complete().await?;
 
-    assert_eq!(task.phase, "completed");
+    assert!(matches!(
+        &task.state,
+        pl_studio_runtime::StudioTaskState::Completed(_)
+    ));
     assert_eq!(task.work_units.len(), 1);
     let work_unit = &task.work_units[0];
-    assert_eq!(work_unit.status, "merged");
+    assert!(matches!(
+        &work_unit.state,
+        pl_studio_runtime::StudioTaskWorkUnitState::Merged(_)
+    ));
     assert!(work_unit.agent_id.is_some());
     assert!(!Path::new(&work_unit.worktree_path).exists());
 
@@ -80,7 +86,10 @@ async fn run_offline_task_flow() -> Result<()> {
         .iter()
         .find(|review| review.reviewer_agent_id.is_some())
         .context("review round is absent")?;
-    assert_eq!(reviewer.verdict, "pass");
+    assert!(matches!(
+        &reviewer.state,
+        pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+    ));
 
     assert_eq!(task.merges.len(), 1);
     let merge = &task.merges[0];
@@ -102,7 +111,10 @@ async fn run_offline_task_flow() -> Result<()> {
     assert_eq!(task.reviews.len(), 1);
     assert_eq!(task.reviews[0].scope, "delivery");
     for review in &task.reviews {
-        assert_eq!(review.verdict, "pass");
+        assert!(matches!(
+            &review.state,
+            pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+        ));
         assert_eq!(review.design_references.len(), 1);
         assert_eq!(review.design_references[0].path, "design/task-flow.md");
         assert_eq!(review.design_references[0].section, "Offline Task Flow");
@@ -118,7 +130,7 @@ async fn run_offline_task_flow() -> Result<()> {
     );
     let design = normalized_text(&fixture.workspace.join(DESIGN_PATH))?;
     assert!(design.contains("# Offline Task Flow"));
-    assert!(design.contains("Implementation status: completed and merged."));
+    assert!(!design.contains("Implementation status: completed and merged."));
     assert_eq!(
         git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,
         task.expected_head
@@ -210,7 +222,10 @@ async fn run_offline_required_review_flow() -> Result<()> {
     assert_eq!(task.reviews.len(), 2);
     assert_eq!(task.reviews[0].scope, "delivery");
     assert_eq!(task.reviews[1].scope, "integrated");
-    assert!(task.reviews.iter().all(|review| review.verdict == "pass"));
+    assert!(task.reviews.iter().all(|review| matches!(
+        &review.state,
+        pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+    )));
     let (review_round_id, reviewed_head) = match &task.integrated_review_gate {
         pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {
             review_round_id,

@@ -31,7 +31,7 @@ void registerTaskRuntimeDetailTests() {
                       updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
                     ),
                     runtime: _testRuntime().copyWith(
-                      task: _failureTask(fatal, phase: 'failed'),
+                      task: _failureTask(fatal, phase: TaskStateKind.failed),
                     ),
                     permissionMode: PermissionMode.requestApproval,
                     providers: const [],
@@ -39,9 +39,14 @@ void registerTaskRuntimeDetailTests() {
                     isBusy: false,
                   ),
                 ),
-                TaskRuntimeDetail(task: _failureTask(fatal, phase: 'failed')),
                 TaskRuntimeDetail(
-                  task: _failureTask(recoverable, phase: 'reviewing'),
+                  task: _failureTask(fatal, phase: TaskStateKind.failed),
+                ),
+                TaskRuntimeDetail(
+                  task: _failureTask(
+                    recoverable,
+                    phase: TaskStateKind.reviewing,
+                  ),
                 ),
               ],
             ),
@@ -87,7 +92,10 @@ void registerTaskRuntimeDetailTests() {
     );
     expect(
       find.byKey(
-        StudioDriverKeys.taskPhase('task-run-stop-origin', 'stopping'),
+        StudioDriverKeys.taskPhase(
+          'task-run-stop-origin',
+          TaskStateKind.stopping,
+        ),
       ),
       findsOneWidget,
     );
@@ -220,7 +228,7 @@ void registerTaskRuntimeDetailTests() {
       findsOneWidget,
     );
     expect(
-      find.byKey(StudioDriverKeys.taskPhase(task.runId, task.phase)),
+      find.byKey(StudioDriverKeys.taskPhase(task.runId, task.state.kind)),
       findsOneWidget,
     );
     expect(
@@ -233,7 +241,7 @@ void registerTaskRuntimeDetailTests() {
         jsonDecode(StudioDriverState.snapshotJson()) as Map<String, dynamic>;
     final taskSnapshot = snapshot['task'] as Map<String, dynamic>;
     expect(taskSnapshot['runId'], task.runId);
-    expect(taskSnapshot['phase'], task.phase);
+    expect(taskSnapshot['phase'], task.state.kind.name);
     expect(taskSnapshot['statusMessage'], task.statusMessage);
     expect(taskSnapshot['workUnits'], hasLength(1));
     final workUnitSnapshot =
@@ -274,16 +282,17 @@ TaskFailureView _taskFailure({
 
 TaskRuntimeView _failureTask(
   TaskFailureView failure, {
-  required String phase,
+  required TaskStateKind phase,
 }) => TaskRuntimeView(
   runId: 'task-${failure.id}',
-  phase: phase,
+  state: TaskStateView.facts(
+    kind: phase,
+    generation: 1,
+    statusMessage: failure.message,
+  ),
   branch: 'main',
   expectedHead: '0123456789abcdef',
-  statusMessage: failure.message,
-  stopRequestedOrigin: null,
-  stopRequestedReason: null,
-  taskGeneration: 1,
+  revision: 0,
   failures: [failure],
   terminalFailure: failure.isFatal ? failure : null,
   workUnits: const [],
@@ -298,37 +307,42 @@ TaskRuntimeView _stoppedTask({
   required int generation,
 }) => TaskRuntimeView(
   runId: 'task-run-stop-origin',
-  phase: 'stopping',
+  state: TaskStateView.facts(
+    kind: TaskStateKind.stopping,
+    generation: generation,
+    statusMessage: '正在停止',
+    stopRequestedOrigin: origin,
+    stopRequestedReason: reason,
+  ),
   branch: 'main',
   expectedHead: '0123456789abcdef',
-  statusMessage: '正在停止',
-  stopRequestedOrigin: origin,
-  stopRequestedReason: reason,
-  taskGeneration: generation,
+  revision: 0,
   workUnits: [
     TaskWorkUnitView(
       id: 'unit-1',
       title: '实现任务',
-      status: 'needsAttention',
+      state: TaskWorkUnitStateView.facts(
+        kind: TaskWorkUnitStateKind.needsAttention,
+        execution: TaskWorkUnitExecution.budgetLimited,
+        executionError: 'rollover compaction failed',
+        budgetLimit: TaskBudgetLimitView(
+          kind: 'wallClock',
+          usage: TaskBudgetUsageView(
+            modelSteps: 12,
+            toolCalls: 34,
+            waitCalls: 2,
+            elapsedMs: BigInt.from(1800000),
+          ),
+        ),
+        budgetSliceCount: 4,
+        continuationState: TaskExecutorContinuationState.needsAttention,
+        continuationSourceTurnId: 'turn-4',
+        continuationRevision: BigInt.from(7),
+      ),
       worktreePath: '.pure/worktrees/unit-1',
       branch: 'pure-task-unit-1',
       agentId: 'executor-1',
-      executionStatus: 'budgetLimited',
-      executionError: 'rollover compaction failed',
-      budgetLimit: TaskBudgetLimitView(
-        kind: 'wallClock',
-        usage: TaskBudgetUsageView(
-          modelSteps: 12,
-          toolCalls: 34,
-          waitCalls: 2,
-          elapsedMs: BigInt.from(1800000),
-        ),
-      ),
-      budgetSliceCount: 4,
       budgetSliceLimit: 4,
-      continuationState: 'needsAttention',
-      continuationSourceTurnId: 'turn-4',
-      continuationRevision: BigInt.from(7),
       executorProgressRevision: BigInt.from(42),
     ),
   ],
@@ -377,10 +391,12 @@ TaskRuntimeView _stoppedTask({
       completionId: 'completion-1',
       completionRevision: 2,
       reviewedHead: 'abcdef123456',
-      verdict: 'changesRequired',
+      state: const TaskReviewStateView(
+        kind: TaskReviewStateKind.changesRequired,
+        summary: '需要修复',
+      ),
       requestedByCallId: 'review-1',
       reviewerAgentId: 'reviewer-1',
-      summary: '需要修复',
       designReferences: const [],
       findings: const [
         TaskReviewFindingView(

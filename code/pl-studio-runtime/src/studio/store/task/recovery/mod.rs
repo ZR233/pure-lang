@@ -1,19 +1,20 @@
 use anyhow::{Context, Result, bail};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 
 use crate::studio::entity as entities;
-use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationState, RestartAgentReconciliation, ReviewScope, ReviewVerdict,
-    TaskRunPhase, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
-    TaskWorktreeOwnerSnapshot, ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
+    ExecutorContinuationState, RestartAgentReconciliation, ReviewRoundState, ReviewScope,
+    ReviewVerdict, TaskCommand, TaskRunStateKind, TaskWorktreeCleanupState,
+    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
+    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
 };
 
 use super::{
-    task_run_record, work_completion::work_completion_record, work_unit::work_unit_record,
+    review::{review_round_state, update_review_round_state},
+    task_run_record,
+    work_completion::work_completion_record,
+    work_unit::{update_work_unit_state, work_unit_record, work_unit_state},
 };
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
@@ -27,16 +28,14 @@ impl StudioStore {
         &self,
         task_run_id: &str,
         expected_generation: u64,
-        expected_phase: TaskRunPhase,
+        expected_phase: TaskRunStateKind,
         expected_head: &str,
     ) -> Result<bool> {
         if !matches!(
             expected_phase,
-            TaskRunPhase::Planning
-                | TaskRunPhase::PendingConfirmation
-                | TaskRunPhase::DesignUpdating
-                | TaskRunPhase::Implementing
-                | TaskRunPhase::Reworking
+            TaskRunStateKind::DesignUpdating
+                | TaskRunStateKind::Implementing
+                | TaskRunStateKind::Reworking
         ) {
             bail!(
                 "Task recovery cannot clear StopRequested during phase {}",
@@ -49,12 +48,11 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("Task recovery run not found")?;
-            let generation = u64::try_from(run.task_generation)
-                .context("Task recovery generation is negative")?;
-            if generation != expected_generation
-                || run.phase != expected_phase.as_str()
+            let record = task_run_record(run.clone())?;
+            if record.generation() != expected_generation
+                || record.kind() != expected_phase
                 || run.expected_head != expected_head
-                || run.terminal_generation.is_some()
+                || record.kind().is_terminal()
             {
                 bail!("Task recovery facts changed before StopRequested could be cleared");
             }
@@ -69,17 +67,10 @@ impl StudioStore {
             {
                 bail!("Task recovery branch lease changed before StopRequested clear");
             }
-            if run.stop_requested == 0 {
+            if !record.is_stop_requested() {
                 return Ok(false);
             }
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.stop_requested = Set(0);
-            active.stop_requested_origin = Set(None);
-            active.stop_requested_reason = Set(None);
-            active.stop_requested_at = Set(None);
-            active.updated_at = Set(unix_seconds());
-            active.update(&tx).await?;
-            Ok(true)
+            bail!("Task recovery cannot clear a stop after the run entered stopping")
         }
         .await;
         match result {
@@ -150,13 +141,12 @@ impl StudioStore {
             let resources = work_units
                 .into_iter()
                 .map(|work_unit| -> Result<_> {
-                    let creation_state = if work_unit.execution_error.as_deref()
-                        == Some(RESTART_BEFORE_CREATE_DIAGNOSTIC)
-                    {
-                        TaskWorktreeCreationState::UncreatedBeforeRestart
-                    } else {
-                        TaskWorktreeCreationState::MustExist
-                    };
+                    let creation_state =
+                        if work_unit.execution_error() == Some(RESTART_BEFORE_CREATE_DIAGNOSTIC) {
+                            TaskWorktreeCreationState::UncreatedBeforeRestart
+                        } else {
+                            TaskWorktreeCreationState::MustExist
+                        };
                     let completion = completions
                         .iter()
                         .filter(|completion| completion.work_unit_id == work_unit.id)
@@ -197,59 +187,44 @@ impl StudioStore {
                 .await?;
             validate_work_units(task_run_id, &work_units)?;
 
-            let now = unix_seconds();
             let cancelled_reviewers =
-                reconcile_pending_reviews_after_restart(&tx, &run, &work_units, now).await?;
+                reconcile_pending_reviews_after_restart(&tx, &run, &work_units).await?;
             let mut summary = RestartAgentReconciliation {
                 cancelled_thread_executions: cancelled_reviewers,
                 ..RestartAgentReconciliation::default()
             };
             for work_unit in work_units {
-                let status = WorkUnitStatus::from_str(&work_unit.status)
-                    .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-                let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
-                    .with_context(|| {
-                        format!(
-                            "invalid WorkUnit Thread execution status: {}",
-                            work_unit.execution_status
-                        )
-                    })?;
+                let state = work_unit_state(&work_unit)?;
+                let status = state.status();
+                let execution_status = state.execution_status();
                 let transient_execution = is_transient_execution(execution_status);
-                let continuation_state =
-                    ExecutorContinuationState::from_str(&work_unit.continuation_state)
-                        .with_context(|| {
-                            format!(
-                                "invalid executor continuation state: {}",
-                                work_unit.continuation_state
-                            )
-                        })?;
+                let continuation_state = state.progress().continuation_state;
                 if status == WorkUnitStatus::Pending {
-                    let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                    active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
-                    active.execution_status =
-                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                    active.execution_error =
-                        Set(Some(RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string()));
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                    let mut progress = state.into_progress();
+                    progress.execution_error = Some(RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string());
+                    update_work_unit_state(
+                        &tx,
+                        work_unit,
+                        WorkUnitStatus::Cancelled,
+                        ThreadExecutionStatus::Cancelled,
+                        progress,
+                    )
+                    .await?;
                     summary.cancelled_work_units += 1;
-                } else if status == WorkUnitStatus::Running
-                    && continuation_state != ExecutorContinuationState::PendingStart
+                } else if (status == WorkUnitStatus::Running
+                    && continuation_state != ExecutorContinuationState::PendingStart)
+                    || transient_execution
                 {
-                    let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                    active.status = Set(WorkUnitStatus::AwaitingCompletion.as_str().to_string());
-                    active.execution_status =
-                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                    active.execution_error = Set(Some(RESTART_DIAGNOSTIC.to_string()));
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
-                } else if transient_execution {
-                    let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                    active.execution_status =
-                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                    active.execution_error = Set(Some(RESTART_DIAGNOSTIC.to_string()));
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                    let mut progress = state.into_progress();
+                    progress.execution_error = Some(RESTART_DIAGNOSTIC.to_string());
+                    update_work_unit_state(
+                        &tx,
+                        work_unit,
+                        WorkUnitStatus::AwaitingCompletion,
+                        ThreadExecutionStatus::Cancelled,
+                        progress,
+                    )
+                    .await?;
                 }
                 if transient_execution {
                     summary.cancelled_thread_executions += 1;
@@ -275,51 +250,54 @@ async fn reconcile_pending_reviews_after_restart(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
     work_units: &[entities::work_unit::Model],
-    now: i64,
 ) -> Result<usize> {
     let rounds = entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .all(tx)
         .await?;
     let mut cancelled_reviewers = 0;
     for round in rounds {
         validate_restart_reviewer(&round)?;
+        let round_state = review_round_state(&round)?;
         if round.reviewer_thread_id.is_some()
             && matches!(
-                ThreadExecutionStatus::from_str(&round.reviewer_status),
-                Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
+                round_state.reviewer_status(),
+                ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
             )
         {
             cancelled_reviewers += 1;
         }
         match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
             ReviewScope::Delivery => {
-                restore_delivery_review_after_restart(tx, &round, work_units, now).await?;
+                restore_delivery_review_after_restart(tx, &round, work_units).await?;
             }
             ReviewScope::Integrated => {
                 if round.work_unit_id.is_some()
                     || round.completion_id.is_some()
                     || round.completion_revision.is_some()
                     || round.reviewed_head != run.expected_head
-                    || run.phase != TaskRunPhase::Reviewing.as_str()
+                    || task_run_record(run.clone())?.kind() != TaskRunStateKind::Reviewing
                 {
                     bail!("pending integrated review does not match the task run");
                 }
-                let mut active: entities::task_run::ActiveModel = run.clone().into();
-                active.phase = Set(TaskRunPhase::Reworking.as_str().to_string());
-                active.status_message = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
-                active.updated_at = Set(now);
-                active.update(tx).await?;
+                super::apply_task_command(
+                    tx,
+                    run.clone(),
+                    TaskCommand::BeginReworking {
+                        status_message: REVIEW_RESTART_DIAGNOSTIC.to_string(),
+                    },
+                )
+                .await?;
             }
         }
-        let mut active: entities::review_round::ActiveModel = round.into();
-        active.status = Set(ReviewVerdict::Failed.as_str().to_string());
-        active.reviewer_status = Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-        active.reviewer_error = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
-        active.summary = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
-        active.updated_at = Set(now);
-        active.update(tx).await?;
+        let state = ReviewRoundState::from_parts(
+            ReviewVerdict::Failed,
+            ThreadExecutionStatus::Cancelled,
+            Some(REVIEW_RESTART_DIAGNOSTIC.to_string()),
+            Some(REVIEW_RESTART_DIAGNOSTIC.to_string()),
+        )?;
+        update_review_round_state(tx, round, state).await?;
     }
     Ok(cancelled_reviewers)
 }
@@ -329,8 +307,8 @@ fn validate_restart_reviewer(round: &entities::review_round::Model) -> Result<()
         return Ok(());
     };
     if !matches!(
-        ThreadExecutionStatus::from_str(&round.reviewer_status),
-        Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
+        review_round_state(round)?.reviewer_status(),
+        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
     ) {
         bail!("pending review has an invalid reviewer Thread status");
     }
@@ -341,7 +319,6 @@ async fn restore_delivery_review_after_restart(
     tx: &sea_orm::DatabaseTransaction,
     round: &entities::review_round::Model,
     work_units: &[entities::work_unit::Model],
-    now: i64,
 ) -> Result<()> {
     let work_unit_id = round
         .work_unit_id
@@ -366,7 +343,8 @@ async fn restore_delivery_review_after_restart(
         .head_commit
         .as_deref()
         .unwrap_or(work_unit.base_commit.as_str());
-    if work_unit.status != WorkUnitStatus::Reviewing.as_str()
+    let state = work_unit_state(work_unit)?;
+    if state.status() != WorkUnitStatus::Reviewing
         || completion.task_run_id != round.task_run_id
         || completion.work_unit_id != work_unit.id
         || completion.revision != completion_revision
@@ -375,10 +353,16 @@ async fn restore_delivery_review_after_restart(
     {
         bail!("pending delivery review target does not match its completion");
     }
-    let mut active: entities::work_unit::ActiveModel = work_unit.clone().into();
-    active.status = Set(WorkUnitStatus::ReadyForReview.as_str().to_string());
-    active.updated_at = Set(now);
-    active.update(tx).await?;
+    let execution = state.execution_status();
+    let progress = state.into_progress();
+    update_work_unit_state(
+        tx,
+        work_unit.clone(),
+        WorkUnitStatus::ReadyForReview,
+        execution,
+        progress,
+    )
+    .await?;
     Ok(())
 }
 
@@ -386,7 +370,7 @@ fn merge_cleanup_state(
     work_unit: &crate::studio::task_coordinator::WorkUnitRecord,
     merges: &[entities::merge_record::Model],
 ) -> Result<TaskWorktreeCleanupState> {
-    if work_unit.status != WorkUnitStatus::Merged {
+    if work_unit.status() != WorkUnitStatus::Merged {
         return Ok(TaskWorktreeCleanupState::NotMerged);
     }
     let mut matches = Vec::new();
@@ -424,57 +408,7 @@ fn validate_work_units(task_run_id: &str, work_units: &[entities::work_unit::Mod
 }
 
 fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
-    let unit_status = WorkUnitStatus::from_str(&unit.status)
-        .with_context(|| format!("invalid work unit status: {}", unit.status))?;
-    let execution_status =
-        ThreadExecutionStatus::from_str(&unit.execution_status).with_context(|| {
-            format!(
-                "invalid WorkUnit Thread execution status: {}",
-                unit.execution_status
-            )
-        })?;
-    let valid = matches!(
-        (unit_status, execution_status),
-        (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
-            | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
-            | (
-                WorkUnitStatus::Running,
-                ThreadExecutionStatus::BudgetLimited
-            )
-            | (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Completed
-            )
-            | (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Failed
-            )
-            | (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Cancelled
-            )
-            | (
-                WorkUnitStatus::ReadyForReview,
-                ThreadExecutionStatus::Completed
-            )
-            | (WorkUnitStatus::Reviewing, ThreadExecutionStatus::Completed)
-            | (
-                WorkUnitStatus::ChangesRequested,
-                ThreadExecutionStatus::Completed
-            )
-            | (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed)
-            | (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
-            | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
-            | (
-                WorkUnitStatus::NeedsAttention,
-                ThreadExecutionStatus::BudgetLimited
-            )
-            | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)
-            | (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled)
-    );
-    if !valid {
-        bail!("WorkUnit status and Thread execution status do not match");
-    }
+    work_unit_state(unit)?;
     Ok(())
 }
 

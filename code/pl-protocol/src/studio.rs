@@ -413,8 +413,9 @@ pub struct StudioTaskRecoveryPreview {
     pub preview_token: String,
     pub root_thread_id: String,
     pub run_id: String,
+    pub revision: u64,
     pub task_generation: u64,
-    pub phase: String,
+    pub state: StudioTaskRecoveryState,
     pub expected_head: String,
     pub stop_requested: bool,
     pub branch_lease_id: String,
@@ -427,6 +428,21 @@ pub struct StudioTaskRecoveryPreview {
     pub completion_revision_fingerprint: String,
     pub review_revision_fingerprint: String,
     pub merge_revision_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StudioTaskRecoveryState {
+    DesignUpdating,
+    Implementing,
+    Merging,
+    Reviewing,
+    Reworking,
+    Stopping,
+    Blocked,
+    Completed,
+    Failed,
+    Cancelled,
 }
 
 /// Applies a previously generated Task recovery preview.

@@ -13,12 +13,11 @@ use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::design::design_commit_is_current;
 use super::git::{GitDiffSelection, changed_files_between_selected};
 use super::{
     BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
-    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRunPhase,
-    TaskRunRecord, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
+    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRunRecord,
+    TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
     WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
@@ -127,6 +126,10 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             .file_reviews
             .as_ref()
             .map(|coverage| coverage.diagnostics_revision);
+        let verdict = record.verdict();
+        let reviewer_status = record.reviewer_status();
+        let reviewer_error = record.reviewer_error().map(str::to_string);
+        let summary = record.summary().map(str::to_string);
         Self {
             id: record.id,
             round: record.round,
@@ -135,11 +138,11 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             completion_id: record.completion_id,
             completion_revision: record.completion_revision,
             reviewed_head: record.reviewed_head,
-            verdict: record.verdict,
+            verdict,
             reviewer_thread_id: record.reviewer_thread_id,
-            reviewer_status: record.reviewer_status,
-            reviewer_error: record.reviewer_error,
-            summary: record.summary,
+            reviewer_status,
+            reviewer_error,
+            summary,
             findings_count,
             has_recommendations,
             coverage_known,
@@ -489,16 +492,13 @@ impl TaskCoordinator {
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
         if !matches!(
-            run.phase,
-            TaskRunPhase::Implementing | TaskRunPhase::Reworking
+            run.kind(),
+            TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
         ) {
             bail!("integrated review requires implementing or reworking");
         }
         self.ensure_process_lease_owned(&run)?;
         validate_review_repository(&run).await?;
-        if !design_commit_is_current(&run) {
-            bail!("integrated review requires final task_update_design for the current HEAD");
-        }
         Ok(run)
     }
 
@@ -510,13 +510,13 @@ impl TaskCoordinator {
         merges: &[MergeRecord],
         runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<Vec<MergeCandidate>> {
-        if run.phase != TaskRunPhase::Merging {
+        if run.kind() != TaskRunStateKind::Merging {
             return Ok(Vec::new());
         }
         let mut candidates = Vec::new();
         for work_unit in work_units {
-            if work_unit.status != WorkUnitStatus::Approved
-                || work_unit.execution_status != ThreadExecutionStatus::Completed
+            if work_unit.status() != WorkUnitStatus::Approved
+                || work_unit.execution_status() != ThreadExecutionStatus::Completed
             {
                 continue;
             }
@@ -586,7 +586,7 @@ impl ModelWorkUnit {
             id: work_unit.id.clone(),
             task_run_id: work_unit.task_run_id.clone(),
             title: work_unit.title.clone(),
-            status: work_unit.status,
+            status: work_unit.status(),
             scope_hints: work_unit.scope_hints.clone(),
             base_commit: work_unit.base_commit.clone(),
             relative_worktree_path: model_worktree_locator(
@@ -594,19 +594,21 @@ impl ModelWorkUnit {
                 &work_unit.worktree_path,
             ),
             branch: work_unit.branch.clone(),
-            worktree_disposition: work_unit.worktree_disposition,
+            worktree_disposition: work_unit.worktree_disposition(),
             attempt: work_unit.attempt,
             executor_thread_id: work_unit.executor_thread_id.clone(),
             requested_by_call_id: work_unit.requested_by_call_id.clone(),
-            execution_status: work_unit.execution_status,
-            execution_summary: work_unit.execution_summary.clone(),
-            execution_error: work_unit.execution_error.clone(),
-            budget_limit: work_unit.budget_limit,
-            budget_slice_count: work_unit.budget_slice_count,
+            execution_status: work_unit.execution_status(),
+            execution_summary: work_unit.execution_summary().map(str::to_string),
+            execution_error: work_unit.execution_error().map(str::to_string),
+            budget_limit: work_unit.budget_limit().cloned(),
+            budget_slice_count: work_unit.budget_slice_count(),
             budget_slice_limit: super::MAX_EXECUTOR_BUDGET_SLICES,
-            continuation_state: work_unit.continuation_state,
-            continuation_source_turn_id: work_unit.continuation_source_turn_id.clone(),
-            continuation_revision: work_unit.continuation_revision,
+            continuation_state: work_unit.continuation_state(),
+            continuation_source_turn_id: work_unit
+                .continuation_source_turn_id()
+                .map(str::to_string),
+            continuation_revision: work_unit.continuation_revision(),
             created_at: work_unit.created_at,
             updated_at: work_unit.updated_at,
             blueprint_fingerprint: handoff.map(|handoff| handoff.blueprint_fingerprint.clone()),

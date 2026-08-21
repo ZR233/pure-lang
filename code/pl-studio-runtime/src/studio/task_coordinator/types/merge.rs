@@ -92,31 +92,6 @@ pub(crate) struct RecordTaskMerge {
     pub(crate) summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReviewRoundRecord {
-    pub(crate) id: String,
-    pub(crate) task_run_id: String,
-    pub(crate) round: u32,
-    pub(crate) scope: ReviewScope,
-    pub(crate) work_unit_id: Option<String>,
-    pub(crate) completion_id: Option<String>,
-    pub(crate) completion_revision: Option<u32>,
-    pub(crate) reviewed_head: String,
-    pub(crate) verdict: ReviewVerdict,
-    pub(crate) requested_by_call_id: String,
-    pub(crate) reviewer_thread_id: Option<String>,
-    pub(crate) reviewer_status: ThreadExecutionStatus,
-    pub(crate) reviewer_error: Option<String>,
-    pub(crate) summary: Option<String>,
-    pub(crate) design_references: Vec<ReviewDesignReference>,
-    pub(crate) findings: Vec<ReviewFinding>,
-    #[serde(skip_serializing)]
-    pub(crate) file_reviews: Option<ReviewFileCoverage>,
-    pub(crate) created_at: i64,
-    pub(crate) updated_at: i64,
-}
-
 pub(crate) const REVIEW_FILE_COVERAGE_VERSION: u32 = 1;
 
 /// ReviewRound 创建时冻结的文件审查状态及最近一次提交诊断。

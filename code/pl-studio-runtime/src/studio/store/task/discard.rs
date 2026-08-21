@@ -1,14 +1,14 @@
 use anyhow::{Context, Result, bail};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
+
+use super::work_unit::{update_work_unit_state, work_unit_state};
 
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, ExecutorContinuationState, TaskRunPhase, TaskStopOrigin,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    ExecutorCloseDisposition, ExecutorContinuationState, TaskCommand, TaskRunStateKind,
+    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 struct ExecutorCloseScope {
@@ -29,30 +29,29 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("recovery cleanup task run not found")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            let record = super::task_run_record(run.clone())?;
+            let phase = record.kind();
             let now = unix_seconds();
             if !phase.is_terminal() {
-                let next_generation = run
-                    .task_generation
-                    .checked_add(1)
-                    .context("task generation overflow while authorizing recovery cleanup")?;
-                let mut active: entities::task_run::ActiveModel = run.into();
-                active.stop_requested = Set(1);
-                active.stop_requested_origin =
-                    Set(Some(TaskStopOrigin::UserRequest.as_str().to_string()));
-                active.stop_requested_reason =
-                    Set(Some("recovery cleanup requested by user".to_string()));
-                active.stop_requested_at = Set(Some(now));
-                active.task_generation = Set(next_generation);
-                active.updated_at = Set(now);
-                let run = active.update(&tx).await?;
+                let reason = TaskStopReason::new("recovery cleanup requested by user")
+                    .context("recovery cleanup stop reason must not be empty")?;
+                let run = if phase == TaskRunStateKind::Stopping {
+                    run
+                } else {
+                    super::apply_task_command(
+                        &tx,
+                        run,
+                        TaskCommand::RequestStop((TaskStopOrigin::UserRequest, reason, now).into()),
+                    )
+                    .await?
+                };
+                let stopping = super::task_run_record(run.clone())?;
                 super::write_task_terminal_fact(
                     &tx,
                     run,
-                    TaskRunPhase::Cancelled,
+                    TaskRunStateKind::Cancelled,
                     Some("recovery cleanup requested by user".to_string()),
-                    Some(u64::try_from(next_generation)?),
+                    Some(stopping.generation()),
                 )
                 .await?;
             }
@@ -62,12 +61,12 @@ impl StudioStore {
                 .all(&tx)
                 .await?;
             for work_unit in work_units {
-                let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                active.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
-                    .as_str()
-                    .to_string());
-                active.updated_at = Set(now);
-                active.update(&tx).await?;
+                let state = work_unit_state(&work_unit)?;
+                let status = state.status();
+                let execution = state.execution_status();
+                let mut progress = state.into_progress();
+                progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
+                update_work_unit_state(&tx, work_unit, status, execution, progress).await?;
             }
             entities::branch_lease::Entity::delete_many()
                 .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -94,25 +93,20 @@ impl StudioStore {
                 return Ok(plan.disposition);
             }
 
-            let now = unix_seconds();
-            let continuation_revision = work_unit.continuation_revision.saturating_add(1);
-            let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
+            let state = work_unit_state(&work_unit)?;
+            let mut progress = state.clone().into_progress();
+            let mut status = state.status();
+            let mut execution = state.execution_status();
             if plan.cancel_active {
-                active_work_unit.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
-                active_work_unit.execution_status =
-                    Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                active_work_unit.execution_error =
-                    Set(Some("executor discarded by planner".to_string()));
-                active_work_unit.continuation_state =
-                    Set(ExecutorContinuationState::None.as_str().to_string());
-                active_work_unit.continuation_source_turn_id = Set(None);
-                active_work_unit.continuation_revision = Set(continuation_revision);
+                status = WorkUnitStatus::Cancelled;
+                execution = ThreadExecutionStatus::Cancelled;
+                progress.execution_error = Some("executor discarded by planner".to_string());
+                progress.continuation_state = ExecutorContinuationState::None;
+                progress.continuation_source_turn_id = None;
+                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
             }
-            active_work_unit.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
-                .as_str()
-                .to_string());
-            active_work_unit.updated_at = Set(now);
-            active_work_unit.update(&tx).await?;
+            progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
+            update_work_unit_state(&tx, work_unit, status, execution, progress).await?;
 
             Ok(plan.disposition)
         }
@@ -161,15 +155,9 @@ async fn load_executor_close_scope(
 }
 
 fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<ExecutorClosePlan> {
-    let work_status = WorkUnitStatus::from_str(&work_unit.status)
-        .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-    let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
-        .with_context(|| {
-            format!(
-                "invalid Thread execution status: {}",
-                work_unit.execution_status
-            )
-        })?;
+    let state = work_unit_state(work_unit)?;
+    let work_status = state.status();
+    let execution_status = state.execution_status();
     if work_status == WorkUnitStatus::Approved
         && execution_status == ThreadExecutionStatus::Completed
     {
@@ -218,8 +206,8 @@ fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<Executo
     if !active_pair && !terminal_pair {
         bail!(
             "executor close lifecycle state mismatch: workUnit={}, execution={}",
-            work_unit.status,
-            work_unit.execution_status
+            work_status.as_str(),
+            execution_status.as_str()
         );
     }
     Ok(ExecutorClosePlan {

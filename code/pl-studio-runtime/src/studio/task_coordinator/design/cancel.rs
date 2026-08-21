@@ -1,12 +1,10 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
 use super::git::*;
-use super::patch::ensure_only_validated_design_changes;
-use super::{TaskCoordinator, design_commit_is_current};
-use crate::studio::task_coordinator::git::changed_files_between;
+use super::{TaskCoordinator, exact_run_scope};
+use crate::studio::task_coordinator::git::{changed_files_between, inspect_repository};
 use crate::studio::task_coordinator::{BranchMutationGuard, DesignCancellationRevert};
 
 impl TaskCoordinator {
@@ -31,15 +29,14 @@ impl TaskCoordinator {
             .read_task_run(task_run_id)
             .await?
             .context("task run not found")?;
-        if run.phase.is_terminal() {
-            bail!("cannot revert design for a terminal task run");
+        if run.kind().is_terminal() {
+            bail!("cannot revert the design-stage commit for a terminal task run");
         }
-        let design_commit = run
-            .design_commit
-            .as_deref()
-            .context("task run has no accepted design commit")?;
-        if !design_commit_is_current(&run) {
-            bail!("task branch contains commits after the accepted design commit");
+        let phase_commit = run
+            .design_phase_commit()
+            .context("task run has no design-stage commit")?;
+        if run.expected_head != phase_commit || run.design_finalized_head() != Some(phase_commit) {
+            bail!("task branch contains commits after the design-stage commit");
         }
         if !self.store.list_merge_records(&run.id).await?.is_empty() {
             bail!("task run already has an accepted source merge");
@@ -51,41 +48,44 @@ impl TaskCoordinator {
             .context("task branch lease not found")?;
         self.validate_mutation_snapshot(&run, &lease, Path::new(&run.workspace_root))
             .await?;
+        ensure_repository_clean(Path::new(&run.workspace_root)).await?;
         ensure_single_parent(
             Path::new(&run.workspace_root),
-            design_commit,
+            phase_commit,
             &run.base_commit,
         )
         .await?;
-        let design_paths = changed_files_between(
+        let changed_paths = changed_files_between(
             Path::new(&run.workspace_root),
             &run.base_commit,
-            design_commit,
+            phase_commit,
         )
         .await?;
-        ensure_only_validated_design_changes(&design_paths, &design_paths)?;
         let reverted_tree = read_tree(Path::new(&run.workspace_root), &run.base_commit).await?;
 
         let workspace = Path::new(&run.workspace_root);
         let revert_result = async {
-            run_git_checked(workspace, &["revert", "--no-commit", design_commit])
+            run_git_checked(workspace, &["revert", "--no-commit", phase_commit])
                 .await
-                .context("failed to apply the focused design revert")?;
-            run_git_checked(workspace, &["commit", "-m", "撤销任务设计提交"])
-                .await
-                .context("failed to commit the focused design revert")?;
+                .context("failed to apply the design-stage revert")?;
+            run_git_checked(
+                workspace,
+                &["commit", "-m", "revert(task): 撤销设计阶段提交"],
+            )
+            .await
+            .context("failed to commit the design-stage revert")?;
             Ok::<_, anyhow::Error>(())
         }
         .await;
         if let Err(error) = revert_result {
             self.block_run(
                 &run,
-                format!("design revert failed and Git state was preserved: {error}"),
+                format!("design-stage revert failed and Git state was preserved: {error}"),
             )
             .await?;
-            return Err(error).context("design revert failed; Git state was preserved");
+            return Err(error).context("design-stage revert failed; Git state was preserved");
         }
-        let revert_commit = match read_head(Path::new(&run.workspace_root)).await {
+        let revert_commit = match read_head(workspace).await {
             Ok(commit) => commit,
             Err(error) => {
                 self.block_run(
@@ -98,67 +98,94 @@ impl TaskCoordinator {
         };
         #[cfg(test)]
         self.wait_after_design_commit().await;
-        let _reverted_paths = match self
+        if let Err(error) = self
             .validate_captured_branch_commit(
                 &run,
                 &revert_commit,
-                design_commit,
-                &design_paths,
+                phase_commit,
+                &changed_paths,
                 &reverted_tree,
             )
             .await
         {
-            Ok(exact) => exact,
-            Err(error) => {
-                self.block_run(
-                    &run,
-                    format!("revert commit could not be proven exact: {error}"),
-                )
-                .await?;
-                return Err(error).context("revert commit could not be proven exact");
-            }
-        };
+            self.block_run(
+                &run,
+                format!("revert commit could not be proven exact: {error}"),
+            )
+            .await?;
+            return Err(error).context("revert commit could not be proven exact");
+        }
         self.ensure_exact_commit_is_clean(
             &run,
-            &BTreeMap::new(),
             &revert_commit,
             "revert post-commit inspection failed",
         )
         .await?;
         match self
             .store
-            .compare_and_set_task_head(&run.id, design_commit, &revert_commit)
+            .compare_and_set_task_head(&run.id, phase_commit, &revert_commit)
             .await
         {
             Ok(true) => {
                 self.verify_durable_exact_scope(&run, &revert_commit, "design revert durable CAS")
                     .await?;
                 Ok(DesignCancellationRevert {
-                    task_run_id: run.id,
-                    previous_head: design_commit.to_string(),
+                    task_run_id: run.id.clone(),
+                    previous_head: phase_commit.to_string(),
                     revert_commit,
                 })
             }
             Ok(false) => {
-                self.compensate_or_block(
+                self.compensate_revert_or_block(
                     &run,
-                    &BTreeMap::new(),
                     &revert_commit,
+                    phase_commit,
                     "revert head CAS failed",
                 )
                 .await?;
-                bail!("task head changed while recording the design revert")
+                bail!("task head changed while recording the design-stage revert")
             }
             Err(error) => {
-                self.compensate_or_block(
+                self.compensate_revert_or_block(
                     &run,
-                    &BTreeMap::new(),
                     &revert_commit,
+                    phase_commit,
                     &format!("revert transaction failed: {error}"),
                 )
                 .await?;
-                Err(error).context("failed to record the design revert")
+                Err(error).context("failed to record the design-stage revert")
             }
         }
+    }
+
+    async fn compensate_revert_or_block(
+        &self,
+        run: &crate::studio::task_coordinator::TaskRunRecord,
+        revert_commit: &str,
+        previous_head: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let workspace = Path::new(&run.workspace_root);
+        let scope = exact_run_scope(run, revert_commit);
+        let safe = inspect_repository(workspace, true)
+            .await
+            .is_ok_and(|snapshot| scope.matches(&snapshot));
+        if safe {
+            if let Err(error) = compensate_commit(scope, previous_head).await {
+                self.block_run(
+                    run,
+                    format!("{reason}; automatic revert compensation failed: {error}"),
+                )
+                .await?;
+                bail!("{reason}; compensation failed and the task run was blocked: {error}")
+            }
+            return Ok(());
+        }
+        self.block_run(
+            run,
+            format!("{reason}; compensation was unsafe because HEAD or workspace changed"),
+        )
+        .await?;
+        bail!("{reason}; task run was blocked because compensation was unsafe")
     }
 }

@@ -906,7 +906,7 @@ impl StudioRuntime {
                 .store
                 .find_active_task_run_for_root_thread(&root_thread_id)
                 .await?
-                .map(|run| run.id);
+                .map(|run| run.id.clone());
             let affected = failures
                 .iter()
                 .map(|failure| failure.agent_thread_id.as_str())

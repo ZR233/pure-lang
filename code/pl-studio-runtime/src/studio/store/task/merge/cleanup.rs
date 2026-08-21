@@ -3,7 +3,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, Quer
 
 use super::super::task_run_record;
 use super::super::work_completion::{delivery_from_completion, work_completion_record};
-use super::super::work_unit::work_unit_record;
+use super::super::work_unit::{work_unit_record, work_unit_state};
 use super::merge_record;
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
@@ -42,11 +42,13 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("recorded merge completion not found")?;
+        let work_unit_state = work_unit_state(&work_unit)?;
         if work_unit.task_run_id != run.id
             || work_unit.executor_thread_id.as_deref() != Some(merge.executor_agent_id.as_str())
-            || work_unit.execution_status != ThreadExecutionStatus::Completed.as_str()
-            || work_unit.status != WorkUnitStatus::Merged.as_str()
-            || work_unit.worktree_disposition != TaskWorktreeDisposition::CleanupRequested.as_str()
+            || work_unit_state.execution_status() != ThreadExecutionStatus::Completed
+            || work_unit_state.status() != WorkUnitStatus::Merged
+            || work_unit_state.progress().worktree_disposition
+                != TaskWorktreeDisposition::CleanupRequested
             || completion.task_run_id != run.id
             || completion.work_unit_id != work_unit.id
             || completion.executor_agent_id != merge.executor_agent_id

@@ -1069,18 +1069,6 @@ abstract class AppLocalizations {
   /// **'Needs attention'**
   String get statusTaskContinuationNeedsAttention;
 
-  /// No description provided for @statusTaskPhasePlanning.
-  ///
-  /// In en, this message translates to:
-  /// **'Planning'**
-  String get statusTaskPhasePlanning;
-
-  /// No description provided for @statusTaskPhasePendingConfirmation.
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting for confirmation'**
-  String get statusTaskPhasePendingConfirmation;
-
   /// No description provided for @statusTaskPhaseDesignUpdating.
   ///
   /// In en, this message translates to:

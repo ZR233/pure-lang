@@ -1,21 +1,26 @@
 use super::*;
 use crate::studio::task_coordinator::*;
 
-fn create_input(root_thread_id: &str, phase: TaskRunPhase) -> CreateTaskRun {
+fn create_input(root_thread_id: &str) -> CreateTaskRun {
     CreateTaskRun {
         root_thread_id: root_thread_id.to_string(),
-        phase,
         plan: "# Plan\n\nImplement it".to_string(),
         workspace_root: "C:/work/task".to_string(),
         git_common_dir: "C:/work/task/.git".to_string(),
         branch: "main".to_string(),
         head_commit: "1111111".to_string(),
+        design_baseline: test_task_git_fingerprint(
+            "C:/work/task",
+            "C:/work/task/.git",
+            "main",
+            "1111111",
+        ),
     }
 }
 
 async fn allocation_fixture(
     name: &str,
-    phase: TaskRunPhase,
+    phase: TaskRunStateKind,
 ) -> (StudioStore, String, TaskRunRecord) {
     let store = StudioStore::open_memory().await.unwrap();
     let workspace_root = format!("C:/work/{name}");
@@ -24,11 +29,54 @@ async fn allocation_fixture(
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id, phase);
+    let mut input = create_input(&session.id);
     input.workspace_root = workspace_root.clone();
     input.git_common_dir = format!("{workspace_root}/.git");
+    input.design_baseline = test_task_git_fingerprint(
+        &input.workspace_root,
+        &input.git_common_dir,
+        &input.branch,
+        &input.head_commit,
+    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    let run = move_test_run_to(&store, run, phase).await;
     (store, session.id, run)
+}
+
+async fn move_test_run_to(
+    store: &StudioStore,
+    mut run: TaskRunRecord,
+    phase: TaskRunStateKind,
+) -> TaskRunRecord {
+    let path: &[TaskRunStateKind] = match phase {
+        TaskRunStateKind::DesignUpdating => &[],
+        TaskRunStateKind::Implementing => &[TaskRunStateKind::Implementing],
+        TaskRunStateKind::Merging => &[TaskRunStateKind::Implementing, TaskRunStateKind::Merging],
+        TaskRunStateKind::Reviewing => {
+            &[TaskRunStateKind::Implementing, TaskRunStateKind::Reviewing]
+        }
+        TaskRunStateKind::Reworking => &[
+            TaskRunStateKind::Implementing,
+            TaskRunStateKind::Merging,
+            TaskRunStateKind::Reworking,
+        ],
+        TaskRunStateKind::Stopping => &[TaskRunStateKind::Implementing, TaskRunStateKind::Stopping],
+        TaskRunStateKind::Blocked => &[TaskRunStateKind::Implementing, TaskRunStateKind::Blocked],
+        TaskRunStateKind::Completed => {
+            &[TaskRunStateKind::Implementing, TaskRunStateKind::Completed]
+        }
+        TaskRunStateKind::Failed => &[TaskRunStateKind::Implementing, TaskRunStateKind::Failed],
+        TaskRunStateKind::Cancelled => {
+            &[TaskRunStateKind::Implementing, TaskRunStateKind::Cancelled]
+        }
+    };
+    for next in path {
+        run = store
+            .transition_task_run(&run.id, *next, Some("test transition".to_string()))
+            .await
+            .unwrap();
+    }
+    run
 }
 
 #[tokio::test]
@@ -45,16 +93,16 @@ async fn task_run_and_branch_lease_are_created_atomically() {
         .unwrap();
 
     let (run, lease) = store
-        .create_task_run_with_lease(create_input(&session.id, TaskRunPhase::Planning))
+        .create_task_run_with_lease(create_input(&session.id))
         .await
         .unwrap();
     let error = store
-        .create_task_run_with_lease(create_input(&competing_session.id, TaskRunPhase::Planning))
+        .create_task_run_with_lease(create_input(&competing_session.id))
         .await
         .expect_err("same branch must have one lease");
 
     assert!(error.to_string().contains("already leased"));
-    assert_eq!(run.phase, TaskRunPhase::Planning);
+    assert_eq!(run.kind(), TaskRunStateKind::DesignUpdating);
     assert_eq!(run.base_commit, "1111111");
     assert_eq!(run.expected_head, "1111111");
     assert_eq!(lease.task_run_id, run.id);
@@ -70,18 +118,25 @@ async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
         .create_thread(&project.id, "Retry merge", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id, TaskRunPhase::Merging);
+    let mut input = create_input(&session.id);
     input.workspace_root = "C:/work/retry-merge".to_string();
     input.git_common_dir = "C:/work/retry-merge/.git".to_string();
+    input.design_baseline = test_task_git_fingerprint(
+        &input.workspace_root,
+        &input.git_common_dir,
+        &input.branch,
+        &input.head_commit,
+    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    let run = move_test_run_to(&store, run, TaskRunStateKind::Merging).await;
 
     let reason = format!("{MERGE_RECOVERY_BLOCK_PREFIX} HEAD changed before task_record_merge");
     let blocked = store
         .block_task_and_release_lease(&run.id, &reason)
         .await
         .unwrap();
-    assert_eq!(blocked.phase, TaskRunPhase::Blocked);
-    assert_eq!(blocked.terminal_generation, Some(blocked.task_generation));
+    assert_eq!(blocked.kind(), TaskRunStateKind::Blocked);
+    assert_eq!(blocked.terminal_generation(), None);
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
     assert_eq!(
         store
@@ -92,10 +147,10 @@ async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
     );
 
     let retried = store.retry_blocked_merge_task(&blocked).await.unwrap();
-    assert_eq!(retried.phase, TaskRunPhase::Merging);
-    assert_eq!(retried.task_generation, blocked.task_generation + 1);
-    assert_eq!(retried.terminal_generation, None);
-    assert_eq!(retried.status_message, None);
+    assert_eq!(retried.kind(), TaskRunStateKind::Merging);
+    assert_eq!(retried.generation(), blocked.generation() + 1);
+    assert_eq!(retried.terminal_generation(), None);
+    assert_eq!(retried.status_message(), None);
     let lease = store.read_branch_lease(&run.id).await.unwrap().unwrap();
     assert_eq!(lease.git_common_dir, retried.git_common_dir);
     assert_eq!(lease.branch, retried.branch);
@@ -125,10 +180,17 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id, TaskRunPhase::Implementing);
+    let mut input = create_input(&session.id);
     input.workspace_root = "C:/work/task-stop".to_string();
     input.git_common_dir = "C:/work/task-stop/.git".to_string();
+    input.design_baseline = test_task_git_fingerprint(
+        &input.workspace_root,
+        &input.git_common_dir,
+        &input.branch,
+        &input.head_commit,
+    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    let run = move_test_run_to(&store, run, TaskRunStateKind::Implementing).await;
 
     let requested = store
         .request_task_stop(
@@ -139,8 +201,8 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         )
         .await
         .unwrap();
-    assert!(requested.stop_requested);
-    assert_eq!(requested.phase, TaskRunPhase::Implementing);
+    assert!(requested.is_stop_requested());
+    assert_eq!(requested.kind(), TaskRunStateKind::Stopping);
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
     let allocation = store
         .allocate_executor(AllocateExecutor {
@@ -158,46 +220,46 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     assert!(error.to_string().contains("after task stop was requested"));
 
     let stopping = store
-        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
+        .begin_task_stop(&run.id, &run.expected_head, requested.generation())
         .await
         .unwrap();
-    assert_eq!(stopping.phase, TaskRunPhase::Stopping);
+    assert_eq!(stopping.kind(), TaskRunStateKind::Stopping);
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
 
     let cancelled = store
         .cancel_task_and_release_lease(
             &run.id,
             &run.expected_head,
-            requested.task_generation,
+            requested.generation(),
             "test stop",
         )
         .await
         .unwrap();
-    assert_eq!(cancelled.phase, TaskRunPhase::Cancelled);
+    assert_eq!(cancelled.kind(), TaskRunStateKind::Cancelled);
     assert_eq!(
-        cancelled.terminal_generation,
-        Some(requested.task_generation)
+        cancelled.terminal_generation(),
+        Some(requested.generation())
     );
     assert_eq!(
         store
             .cancel_task_and_release_lease(
                 &run.id,
                 &run.expected_head,
-                requested.task_generation,
+                requested.generation(),
                 "duplicate stop",
             )
             .await
             .unwrap()
-            .terminal_generation,
-        Some(requested.task_generation),
+            .terminal_generation(),
+        Some(requested.generation()),
         "the same generation must reuse its one durable terminal fact"
     );
 }
 
 #[tokio::test]
-async fn task_recovery_clears_stop_with_cas_and_is_idempotent() {
+async fn task_recovery_cannot_exit_the_stopping_state() {
     let (store, _thread_id, run) =
-        allocation_fixture("task-recovery-stop", TaskRunPhase::Implementing).await;
+        allocation_fixture("task-recovery-stop", TaskRunStateKind::Implementing).await;
     let requested = store
         .request_task_stop(
             &run.id,
@@ -208,70 +270,23 @@ async fn task_recovery_clears_stop_with_cas_and_is_idempotent() {
         .await
         .unwrap();
 
-    let stale_error = store
+    let error = store
         .clear_task_stop_for_recovery(
             &run.id,
-            requested.task_generation + 1,
-            TaskRunPhase::Implementing,
+            requested.generation(),
+            TaskRunStateKind::Stopping,
             &run.expected_head,
         )
         .await
         .unwrap_err();
-    assert!(stale_error.to_string().contains("facts changed"));
+    assert!(error.to_string().contains("during phase stopping"));
     assert!(
         store
             .read_task_run(&run.id)
             .await
             .unwrap()
             .unwrap()
-            .stop_requested
-    );
-
-    let phase_error = store
-        .clear_task_stop_for_recovery(
-            &run.id,
-            requested.task_generation,
-            TaskRunPhase::Reviewing,
-            &run.expected_head,
-        )
-        .await
-        .unwrap_err();
-    assert!(phase_error.to_string().contains("during phase reviewing"));
-    assert!(
-        store
-            .read_task_run(&run.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .stop_requested
-    );
-
-    assert!(
-        store
-            .clear_task_stop_for_recovery(
-                &run.id,
-                requested.task_generation,
-                TaskRunPhase::Implementing,
-                &run.expected_head,
-            )
-            .await
-            .unwrap()
-    );
-    let resumed = store.read_task_run(&run.id).await.unwrap().unwrap();
-    assert!(!resumed.stop_requested);
-    assert_eq!(resumed.stop_requested_origin, None);
-    assert_eq!(resumed.stop_requested_reason, None);
-    assert_eq!(resumed.stop_requested_at, None);
-    assert!(
-        !store
-            .clear_task_stop_for_recovery(
-                &run.id,
-                requested.task_generation,
-                TaskRunPhase::Implementing,
-                &run.expected_head,
-            )
-            .await
-            .unwrap()
+            .is_stop_requested()
     );
 }
 
@@ -279,7 +294,7 @@ async fn task_recovery_clears_stop_with_cas_and_is_idempotent() {
 async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
     let (store, thread_id, run) = allocation_fixture(
         "executor-allocation-idempotency",
-        TaskRunPhase::Implementing,
+        TaskRunStateKind::Implementing,
     )
     .await;
     let first = store
@@ -360,8 +375,11 @@ async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
 
 #[tokio::test]
 async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking() {
-    let (store, thread_id, _) =
-        allocation_fixture("executor-allocation-terminal", TaskRunPhase::Implementing).await;
+    let (store, thread_id, _) = allocation_fixture(
+        "executor-allocation-terminal",
+        TaskRunStateKind::Implementing,
+    )
+    .await;
     let first = store
         .allocate_executor(AllocateExecutor {
             thread_id: thread_id.clone(),
@@ -390,7 +408,7 @@ async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking(
     assert_eq!(after_terminal.work_unit.attempt, 2);
 
     let (store, thread_id, _) =
-        allocation_fixture("executor-allocation-reworking", TaskRunPhase::Reworking).await;
+        allocation_fixture("executor-allocation-reworking", TaskRunStateKind::Reworking).await;
     let first = store
         .allocate_executor(AllocateExecutor {
             thread_id: thread_id.clone(),
@@ -419,13 +437,18 @@ async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking(
 #[tokio::test]
 async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempotent() {
     let fixture = ExecutorFixture::new("close-cancelled-awaiting-completion").await;
+    let mut progress = fixture.work_unit().await.state.into_progress();
+    progress.continuation_revision = 7;
     fixture
         .store
-        .execute_test_sql(&format!(
-            "UPDATE work_units SET status = 'awaitingCompletion', execution_status = 'cancelled', continuation_revision = 7 WHERE id = '{}'",
-            fixture.work_unit.id
-        ))
-        .await;
+        .update_work_unit_state_for_test(
+            &fixture.work_unit.id,
+            WorkUnitStatus::AwaitingCompletion,
+            ThreadExecutionStatus::Cancelled,
+            progress,
+        )
+        .await
+        .unwrap();
 
     assert_eq!(
         fixture
@@ -452,11 +475,11 @@ async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempote
         ExecutorCloseDisposition::Discard
     );
     let settled = fixture.work_unit().await;
-    assert_eq!(settled.status, WorkUnitStatus::Cancelled);
-    assert_eq!(settled.execution_status, ThreadExecutionStatus::Cancelled);
-    assert_eq!(settled.continuation_revision, 8);
+    assert_eq!(settled.status(), WorkUnitStatus::Cancelled);
+    assert_eq!(settled.execution_status(), ThreadExecutionStatus::Cancelled);
+    assert_eq!(settled.continuation_revision(), 8);
     assert_eq!(
-        settled.worktree_disposition,
+        settled.worktree_disposition(),
         TaskWorktreeDisposition::CleanupRequested
     );
 
@@ -472,19 +495,25 @@ async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempote
             .unwrap(),
         ExecutorCloseDisposition::Discard
     );
-    assert_eq!(fixture.work_unit().await.continuation_revision, 8);
+    assert_eq!(fixture.work_unit().await.continuation_revision(), 8);
 }
 
 #[tokio::test]
 async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
     let fixture = ExecutorFixture::new("follow-up-restores-running-pair").await;
+    let mut progress = fixture.work_unit().await.state.into_progress();
+    progress.execution_error = Some("transient transport failure".to_string());
+    progress.continuation_revision = 3;
     fixture
         .store
-        .execute_test_sql(&format!(
-            "UPDATE work_units SET status = 'awaitingCompletion', execution_status = 'failed', execution_error = 'transient transport failure', continuation_revision = 3 WHERE id = '{}'",
-            fixture.work_unit.id
-        ))
-        .await;
+        .update_work_unit_state_for_test(
+            &fixture.work_unit.id,
+            WorkUnitStatus::AwaitingCompletion,
+            ThreadExecutionStatus::Failed,
+            progress,
+        )
+        .await
+        .unwrap();
 
     fixture
         .store
@@ -492,17 +521,17 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
         .await
         .unwrap();
     let started = fixture.work_unit().await;
-    assert_eq!(started.status, WorkUnitStatus::Running);
-    assert_eq!(started.execution_status, ThreadExecutionStatus::Running);
-    assert_eq!(started.execution_error, None);
-    assert_eq!(started.continuation_revision, 4);
+    assert_eq!(started.status(), WorkUnitStatus::Running);
+    assert_eq!(started.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(started.execution_error(), None);
+    assert_eq!(started.continuation_revision(), 4);
 
     fixture
         .store
         .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
         .await
         .unwrap();
-    assert_eq!(fixture.work_unit().await.continuation_revision, 4);
+    assert_eq!(fixture.work_unit().await.continuation_revision(), 4);
 
     let recovery = fixture
         .store
@@ -511,8 +540,11 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
         .unwrap();
     assert_eq!(recovery.cancelled_thread_executions, 1);
     let recovered = fixture.work_unit().await;
-    assert_eq!(recovered.status, WorkUnitStatus::AwaitingCompletion);
-    assert_eq!(recovered.execution_status, ThreadExecutionStatus::Cancelled);
+    assert_eq!(recovered.status(), WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(
+        recovered.execution_status(),
+        ThreadExecutionStatus::Cancelled
+    );
 }
 
 #[tokio::test]
@@ -523,14 +555,17 @@ async fn executor_close_still_rejects_completion_review_states() {
         WorkUnitStatus::Reviewing,
         WorkUnitStatus::ChangesRequested,
     ] {
+        let progress = fixture.work_unit().await.state.into_progress();
         fixture
             .store
-            .execute_test_sql(&format!(
-                "UPDATE work_units SET status = '{}', execution_status = 'completed' WHERE id = '{}'",
-                status.as_str(),
-                fixture.work_unit.id
-            ))
-            .await;
+            .update_work_unit_state_for_test(
+                &fixture.work_unit.id,
+                status,
+                ThreadExecutionStatus::Completed,
+                progress,
+            )
+            .await
+            .unwrap();
         let error = fixture
             .store
             .preflight_executor_close(
@@ -588,7 +623,7 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .await;
 
         assert_eq!(
-            fixture.work_unit().await.status,
+            fixture.work_unit().await.status(),
             WorkUnitStatus::ChangesRequested
         );
         fixture
@@ -596,9 +631,9 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
             .await
             .unwrap();
-        assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Running);
+        assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Running);
         assert_eq!(
-            fixture.work_unit().await.execution_status,
+            fixture.work_unit().await.execution_status(),
             ThreadExecutionStatus::Running
         );
     }
@@ -639,7 +674,7 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .all(|completion| completion.status == WorkCompletionStatus::ChangesRequired)
     );
     assert_eq!(completions[4].status, WorkCompletionStatus::Approved);
-    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+    assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Approved);
 }
 
 #[tokio::test]
@@ -699,9 +734,9 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
         .await
         .unwrap();
 
-    assert_eq!(rejected.verdict, ReviewVerdict::Pending);
-    assert_eq!(rejected.reviewer_status, ThreadExecutionStatus::Running);
-    assert_eq!(rejected.summary, None);
+    assert_eq!(rejected.verdict(), ReviewVerdict::Pending);
+    assert_eq!(rejected.reviewer_status(), ThreadExecutionStatus::Running);
+    assert_eq!(rejected.summary(), None);
     assert!(rejected.findings.is_empty());
     let persisted_coverage = rejected.file_reviews.as_ref().unwrap();
     assert_eq!(persisted_coverage.diagnostics_revision, 1);
@@ -713,7 +748,10 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
             .missing_files,
         vec!["src/lib.rs"]
     );
-    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Reviewing);
+    assert_eq!(
+        fixture.work_unit().await.status(),
+        WorkUnitStatus::Reviewing
+    );
     assert_eq!(
         fixture
             .store
@@ -721,8 +759,8 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
             .await
             .unwrap()
             .unwrap()
-            .phase,
-        TaskRunPhase::Implementing
+            .kind(),
+        TaskRunStateKind::Implementing
     );
     assert!(
         fixture
@@ -748,9 +786,9 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
         )
         .await
         .unwrap();
-    assert_eq!(accepted.verdict, ReviewVerdict::Pass);
+    assert_eq!(accepted.verdict(), ReviewVerdict::Pass);
     assert!(accepted.file_reviews.as_ref().unwrap().is_complete());
-    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+    assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Approved);
     let wakes = fixture
         .store
         .list_pending_task_planner_wakes()
@@ -858,14 +896,14 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
         failed.executor_thread_id.as_deref(),
         Some(fixture.agent_id.as_str())
     );
-    assert_eq!(failed.status, WorkUnitStatus::AwaitingCompletion);
-    assert_eq!(failed.execution_status, ThreadExecutionStatus::Failed);
+    assert_eq!(failed.status(), WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(failed.execution_status(), ThreadExecutionStatus::Failed);
     assert_eq!(
-        failed.continuation_state,
+        failed.continuation_state(),
         ExecutorContinuationState::PlannerWakePending
     );
     assert_eq!(
-        failed.continuation_source_turn_id.as_deref(),
+        failed.continuation_source_turn_id(),
         Some("turn-rework-failed")
     );
 
@@ -922,9 +960,12 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
         .unwrap();
     let resumed = fixture.work_unit().await;
     assert_eq!(resumed.id, fixture.work_unit.id);
-    assert_eq!(resumed.status, WorkUnitStatus::Running);
-    assert_eq!(resumed.execution_status, ThreadExecutionStatus::Running);
-    assert_eq!(resumed.continuation_state, ExecutorContinuationState::None);
+    assert_eq!(resumed.status(), WorkUnitStatus::Running);
+    assert_eq!(resumed.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(
+        resumed.continuation_state(),
+        ExecutorContinuationState::None
+    );
     assert!(
         fixture
             .store
@@ -986,7 +1027,7 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
     assert_eq!(first.cancelled_thread_executions, 1);
     assert_eq!(second.cancelled_thread_executions, 0);
     assert_eq!(
-        fixture.work_unit().await.status,
+        fixture.work_unit().await.status(),
         WorkUnitStatus::ReadyForReview
     );
     let stored_completion = fixture
@@ -1009,13 +1050,13 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         .into_iter()
         .find(|candidate| candidate.id == round.id)
         .unwrap();
-    assert_eq!(stored_round.verdict, ReviewVerdict::Failed);
+    assert_eq!(stored_round.verdict(), ReviewVerdict::Failed);
     assert_eq!(
-        stored_round.summary.as_deref(),
+        stored_round.summary(),
         Some("reviewer interrupted by application restart before review_exit")
     );
     assert_eq!(
-        stored_round.reviewer_status,
+        stored_round.reviewer_status(),
         ThreadExecutionStatus::Cancelled
     );
 }
@@ -1029,7 +1070,7 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
         .await
         .unwrap();
     let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id, TaskRunPhase::Planning))
+        .create_task_run_with_lease(create_input(&session.id))
         .await
         .unwrap();
     let read_barrier = tokio::sync::Barrier::new(2);
@@ -1037,13 +1078,13 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
     let (first, second) = tokio::join!(
         store.transition_task_run_after_read(
             &run.id,
-            TaskRunPhase::PendingConfirmation,
+            TaskRunStateKind::Implementing,
             None,
             Some(&read_barrier),
         ),
         store.transition_task_run_after_read(
             &run.id,
-            TaskRunPhase::PendingConfirmation,
+            TaskRunStateKind::Implementing,
             None,
             Some(&read_barrier),
         ),
@@ -1054,18 +1095,18 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
     assert!(
         conflict
             .to_string()
-            .contains("task phase changed concurrently")
+            .contains("task state changed concurrently")
     );
     assert_eq!(
-        store.read_task_run(&run.id).await.unwrap().unwrap().phase,
-        TaskRunPhase::PendingConfirmation
+        store.read_task_run(&run.id).await.unwrap().unwrap().kind(),
+        TaskRunStateKind::Implementing
     );
 }
 
 #[tokio::test]
 async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
     let (store, root_thread_id, run) =
-        allocation_fixture("fatal-provider-failure", TaskRunPhase::Implementing).await;
+        allocation_fixture("fatal-provider-failure", TaskRunStateKind::Implementing).await;
     let failure = provider_failure(
         pl_protocol::ProviderFailureKind::Authentication,
         pl_protocol::RetryDisposition::Permanent,
@@ -1086,8 +1127,8 @@ async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
         .expect("active Task must record failure");
 
     assert!(settlement.terminalized);
-    assert_eq!(settlement.run.phase, TaskRunPhase::Failed);
-    assert!(settlement.run.terminal_failure_id.is_some());
+    assert_eq!(settlement.run.kind(), TaskRunStateKind::Failed);
+    assert!(settlement.run.terminal_failure_id().is_some());
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
     let failures = store.list_task_failures(&run.id).await.unwrap();
     assert_eq!(failures.len(), 1);
@@ -1097,7 +1138,7 @@ async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
 #[tokio::test]
 async fn first_concurrent_fatal_failure_wins_terminal_identity() {
     let (store, root_thread_id, run) =
-        allocation_fixture("concurrent-fatal-failure", TaskRunPhase::Implementing).await;
+        allocation_fixture("concurrent-fatal-failure", TaskRunStateKind::Implementing).await;
     let first_store = store.clone();
     let second_store = store.clone();
     let first_root = root_thread_id.clone();
@@ -1137,19 +1178,22 @@ async fn first_concurrent_fatal_failure_wins_terminal_identity() {
         1
     );
     let stored_run = store.read_task_run(&run.id).await.unwrap().unwrap();
-    assert_eq!(stored_run.phase, TaskRunPhase::Failed);
+    assert_eq!(stored_run.kind(), TaskRunStateKind::Failed);
     let failures = store.list_task_failures(&run.id).await.unwrap();
     assert_eq!(failures.len(), 1);
     assert_eq!(
-        stored_run.terminal_failure_id.as_deref(),
+        stored_run.terminal_failure_id(),
         Some(failures[0].id.as_str())
     );
 }
 
 #[tokio::test]
 async fn recoverable_provider_failure_keeps_task_and_lease_active() {
-    let (store, root_thread_id, run) =
-        allocation_fixture("recoverable-provider-failure", TaskRunPhase::Implementing).await;
+    let (store, root_thread_id, run) = allocation_fixture(
+        "recoverable-provider-failure",
+        TaskRunStateKind::Implementing,
+    )
+    .await;
     let failure = provider_failure(
         pl_protocol::ProviderFailureKind::Transport,
         pl_protocol::RetryDisposition::Retryable {
@@ -1172,8 +1216,8 @@ async fn recoverable_provider_failure_keeps_task_and_lease_active() {
         .expect("active Task must record failure");
 
     assert!(!settlement.terminalized);
-    assert_eq!(settlement.run.phase, TaskRunPhase::Implementing);
-    assert!(settlement.run.terminal_failure_id.is_none());
+    assert_eq!(settlement.run.kind(), TaskRunStateKind::Implementing);
+    assert!(settlement.run.terminal_failure_id().is_none());
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
     assert_eq!(
         store.list_task_failures(&run.id).await.unwrap()[0].disposition,
@@ -1209,9 +1253,12 @@ async fn fatal_executor_failure_preserves_worktree_for_manual_cleanup() {
         .unwrap()
         .pop()
         .expect("work unit remains durable");
-    assert_eq!(unit.status, WorkUnitStatus::Failed);
-    assert_eq!(unit.execution_status, ThreadExecutionStatus::Failed);
-    assert_eq!(unit.worktree_disposition, TaskWorktreeDisposition::Protect);
+    assert_eq!(unit.status(), WorkUnitStatus::Failed);
+    assert_eq!(unit.execution_status(), ThreadExecutionStatus::Failed);
+    assert_eq!(
+        unit.worktree_disposition(),
+        TaskWorktreeDisposition::Protect
+    );
     assert_eq!(unit.worktree_path, fixture.work_unit.worktree_path);
     assert_eq!(unit.branch, fixture.work_unit.branch);
 }
@@ -1249,10 +1296,17 @@ impl ExecutorFixture {
             .create_thread(&project.id, "Task", StudioMode::Task)
             .await
             .unwrap();
-        let mut input = create_input(&session.id, TaskRunPhase::Implementing);
+        let mut input = create_input(&session.id);
         input.workspace_root = format!("C:/work/{name}");
         input.git_common_dir = format!("C:/work/{name}/.git");
+        input.design_baseline = test_task_git_fingerprint(
+            &input.workspace_root,
+            &input.git_common_dir,
+            &input.branch,
+            &input.head_commit,
+        );
         let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+        let run = move_test_run_to(&store, run, TaskRunStateKind::Implementing).await;
         let agent_id = format!("agent-{name}");
         let work_unit = store
             .create_work_unit(CreateWorkUnit {

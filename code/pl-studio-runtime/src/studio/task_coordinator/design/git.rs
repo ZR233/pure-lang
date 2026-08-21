@@ -29,18 +29,6 @@ impl ExactRepositoryScope<'_> {
     }
 }
 
-pub(super) async fn git_path_is_ignored(workspace: &Path, path: &str) -> Result<bool> {
-    let output = run_git(workspace, &["check-ignore", "--no-index", "-q", "--", path]).await?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => bail!(
-            "git check-ignore failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-    }
-}
-
 pub(super) async fn stage_paths(workspace: &Path, paths: &[String]) -> Result<()> {
     let mut args = vec!["add", "--"];
     args.extend(paths.iter().map(String::as_str));
@@ -144,7 +132,7 @@ pub(super) async fn ensure_single_parent(
     let line = String::from_utf8(output.stdout)?.trim().to_string();
     let fields = line.split_whitespace().collect::<Vec<_>>();
     if fields.as_slice() != [commit, parent] {
-        bail!("design commit is not the only commit after the task base");
+        bail!("task lifecycle commit is not the only commit after its expected parent");
     }
     Ok(())
 }

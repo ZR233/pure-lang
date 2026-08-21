@@ -74,6 +74,13 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 5. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
 6. 在统一收尾阶段写入完整 authoritative payload，并发送唯一 `ItemCompleted`。
 
+统一收尾完成后、结果进入本轮有序 tool record 之前，core 调用 `TurnOptions` 中可选的宿主
+`ToolCompletion` callback。callback 接收稳定的 tool identity、名称、终态与 canonical 结果；成功、
+失败、拒绝和取消都经过同一个入口，宿主不得按具体工具名另建旁路。callback 失败属于 fatal tool
+runtime failure，不能让模型在宿主观察未持久化时继续执行后续调用。Studio 用该通用边界在 Task
+`DesignUpdating` 期间重算并 CAS 保存工作区内容指纹，因此命令生成文件、动态工具和普通文件工具
+与 `apply_patch` 具有相同的所有权观察语义。
+
 路径类工具不要求模型提供绝对路径。运行时把相对路径按 typed `AgentWorkspace.root` 解析，
 规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query`
 的 `filePath` 和权限 precheck 必须复用同一个 resolver。`boundary=confined`
@@ -415,7 +422,10 @@ Timeline Item。
 枚举的 `turnOutcome`。旧模型历史、工具结果和派生缓存不做迁移或兼容转换，协议切换后由产品
 重建新会话和相关 fixture。
 
-产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的 `task_spawn_executor` 使用
+产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的 `task_spawn_executor` 在活动
+Task planner Turn 中保持可见，但首次派发只接受 `Implementing`，返工派发只接受 `Reworking`；
+其他 phase 返回包含 current/required phase 与下一步工具的 recoverable `task_phase_mismatch`，且不得
+分配任何 durable owner。Task 的 `task_spawn_executor` 使用
 破坏性的结构化实施蓝图协议，包含目标、分组范围、带目标路径与验收引用的实施步骤、验收条件、
 依赖、证据，以及带 ID、预期结果和验收引用的命令/检查验证。runtime 在分配任何 WorkUnit、
 worktree、lease 或 child Thread 前校验完整性、唯一引用、规范仓库相对路径、未知字段和固定上下文

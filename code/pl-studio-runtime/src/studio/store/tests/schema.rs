@@ -11,8 +11,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v8_with_review_file_coverage() {
-    let root = unique_test_root("schema-v8");
+async fn creates_canonical_schema_v10_with_data_carrying_state_enums() {
+    let root = unique_test_root("schema-v10");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -45,6 +45,19 @@ async fn creates_canonical_schema_v8_with_review_file_coverage() {
             "missing {table}"
         );
     }
+    for trigger in [
+        "guard_work_completion_owner_insert",
+        "guard_work_completion_owner_update",
+        "guard_review_round_owner_insert",
+        "guard_review_round_owner_update",
+        "guard_merge_record_owner_insert",
+        "guard_merge_record_owner_update",
+    ] {
+        assert!(
+            schema_object_exists(store.database(), "trigger", trigger).await,
+            "missing {trigger}"
+        );
+    }
     let submission_columns = table_columns(store.database(), "thread_submissions").await;
     for column in [
         "id",
@@ -64,13 +77,34 @@ async fn creates_canonical_schema_v8_with_review_file_coverage() {
     }
     let work_unit_columns = table_columns(store.database(), "work_units").await;
     assert!(work_unit_columns.contains(&"scope_hints_json".to_string()));
+    assert!(work_unit_columns.contains(&"state_json".to_string()));
+    assert!(work_unit_columns.contains(&"state_kind".to_string()));
+    assert!(work_unit_columns.contains(&"revision".to_string()));
+    assert!(!work_unit_columns.contains(&"status".to_string()));
+    assert!(!work_unit_columns.contains(&"execution_status".to_string()));
     assert!(!work_unit_columns.contains(&"owned_paths_json".to_string()));
     let item_columns = table_columns(store.database(), "items").await;
     assert!(!item_columns.contains(&"provider_private_payload".to_string()));
     let review_round_columns = table_columns(store.database(), "review_rounds").await;
     assert!(review_round_columns.contains(&"file_reviews_json".to_string()));
+    assert!(review_round_columns.contains(&"state_json".to_string()));
+    assert!(review_round_columns.contains(&"state_kind".to_string()));
+    assert!(review_round_columns.contains(&"revision".to_string()));
+    assert!(!review_round_columns.contains(&"status".to_string()));
+    assert!(!review_round_columns.contains(&"reviewer_status".to_string()));
     let task_run_columns = table_columns(store.database(), "task_runs").await;
-    assert!(task_run_columns.contains(&"terminal_failure_id".to_string()));
+    assert!(task_run_columns.contains(&"state_json".to_string()));
+    assert!(task_run_columns.contains(&"state_kind".to_string()));
+    assert!(task_run_columns.contains(&"revision".to_string()));
+    for removed in [
+        "phase",
+        "design_commit",
+        "status_message",
+        "stop_requested",
+        "terminal_failure_id",
+    ] {
+        assert!(!task_run_columns.contains(&removed.to_string()));
+    }
     let task_failure_columns = table_columns(store.database(), "task_failures").await;
     for column in [
         "task_run_id",
@@ -149,7 +183,7 @@ async fn creates_canonical_schema_v8_with_review_file_coverage() {
 }
 
 #[tokio::test]
-async fn schema_v7_database_is_rebuilt_to_v8_without_migration() {
+async fn schema_v9_database_is_rebuilt_to_v10_without_migration() {
     let root = unique_test_root("schema-v7-rebuild");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
@@ -163,8 +197,8 @@ async fn schema_v7_database_is_rebuilt_to_v8_without_migration() {
         .await
         .unwrap();
     drop(store);
-    // 旧库只有版本号低于 v8；v8 起 Studio schema 单版本精确重建，不再迁移。
-    create_database(&database_path, "PRAGMA user_version = 7;").await;
+    // 旧库只有版本号低于 v10；Studio schema 单版本精确重建，不再迁移。
+    create_database(&database_path, "PRAGMA user_version = 9;").await;
 
     let rebuilt = StudioStore::open(&database_path).await.unwrap();
 
@@ -172,7 +206,7 @@ async fn schema_v7_database_is_rebuilt_to_v8_without_migration() {
         schema_version(rebuilt.database()).await,
         STUDIO_DATABASE_SCHEMA_VERSION
     );
-    // 重建丢弃旧数据，而不是把 v7 行迁移进 v8。
+    // 重建丢弃旧数据，而不是把 v9 行迁移进 v10。
     assert!(rebuilt.list_projects().await.unwrap().is_empty());
 
     drop(rebuilt);
@@ -366,10 +400,14 @@ async fn locked_database_family_member_never_produces_a_half_initialized_schema(
 }
 
 async fn table_exists(db: &DatabaseConnection, table: &str) -> bool {
+    schema_object_exists(db, "table", table).await
+}
+
+async fn schema_object_exists(db: &DatabaseConnection, kind: &str, name: &str) -> bool {
     db.query_one_raw(Statement::from_sql_and_values(
         DatabaseBackend::Sqlite,
-        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
-        [table.into()],
+        "SELECT name FROM sqlite_schema WHERE type = ? AND name = ?",
+        [kind.into(), name.into()],
     ))
     .await
     .unwrap()
@@ -379,7 +417,7 @@ async fn table_exists(db: &DatabaseConnection, table: &str) -> bool {
 async fn table_columns(db: &DatabaseConnection, table: &str) -> Vec<String> {
     db.query_all_raw(Statement::from_string(
         DatabaseBackend::Sqlite,
-        format!("PRAGMA table_info(\"{table}\")"),
+        format!("PRAGMA table_xinfo(\"{table}\")"),
     ))
     .await
     .unwrap()

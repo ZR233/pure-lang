@@ -11,11 +11,13 @@ use pl_protocol::{ConversationRecoveryMode, ThreadItemContent, ThreadToolCall, T
 use crate::studio::agent_host::root_agent_id;
 use crate::studio::task_coordinator::git::fingerprint_repository;
 use crate::studio::task_coordinator::{
-    TaskRunPhase, TaskRunRecord, ThreadExecutionStatus, WorkUnitRecord, WorkUnitStatus,
+    TaskGitFingerprint, TaskRunRecord, TaskRunStateKind, ThreadExecutionStatus, WorkUnitRecord,
+    WorkUnitStatus,
 };
 use crate::studio::{
-    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
-    StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
+    StudioTaskGitFingerprint, StudioTaskRecoveryPreview, StudioTaskRecoveryRequest,
+    StudioTaskRecoveryResult, StudioTaskRecoveryState, StudioTaskRecoveryTarget,
+    StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
 };
 
 use super::StudioRuntime;
@@ -117,26 +119,29 @@ impl StudioRuntime {
                 .map_err(anyhow::Error::msg)?
         };
 
-        let main_after = fingerprint_repository(
-            &request.preview.main_git_fingerprint.workspace_root,
-            &request.preview.main_git_fingerprint.base_commit,
-            &request.preview.main_git_fingerprint.expected_head,
-        )
-        .await?;
-        let target_after = fingerprint_repository(
-            &target.git_fingerprint.workspace_root,
-            &target.git_fingerprint.base_commit,
-            &target.git_fingerprint.expected_head,
-        )
-        .await?;
+        let main_after = studio_git_fingerprint(
+            fingerprint_repository(
+                &request.preview.main_git_fingerprint.workspace_root,
+                &request.preview.main_git_fingerprint.base_commit,
+                &request.preview.main_git_fingerprint.expected_head,
+            )
+            .await?,
+        );
+        let target_after = studio_git_fingerprint(
+            fingerprint_repository(
+                &target.git_fingerprint.workspace_root,
+                &target.git_fingerprint.base_commit,
+                &target.git_fingerprint.expected_head,
+            )
+            .await?,
+        );
         if main_after != request.preview.main_git_fingerprint
             || target_after != target.git_fingerprint
         {
             bail!("Git/worktree fingerprint changed during conversation recovery");
         }
 
-        let phase = TaskRunPhase::from_str(&request.preview.phase)
-            .context("Task recovery preview has an invalid phase")?;
+        let phase = task_kind_from_recovery_state(request.preview.state);
         let stop_cleared = if request.preview.stop_requested {
             self.store
                 .clear_task_stop_for_recovery(
@@ -195,7 +200,7 @@ impl StudioRuntime {
             .store
             .read_active_task_run_for_root_thread(root_thread_id)
             .await?;
-        ensure_recoverable_phase(run.phase)?;
+        ensure_recoverable_phase(run.kind())?;
         let lease = self
             .store
             .read_branch_lease(&run.id)
@@ -214,9 +219,10 @@ impl StudioRuntime {
         let completions = self.store.list_work_completions(&run.id).await?;
         let reviews = self.store.list_review_rounds(&run.id).await?;
         let merges = self.store.list_merge_records(&run.id).await?;
-        let main_git_fingerprint =
+        let main_git_fingerprint = studio_git_fingerprint(
             fingerprint_repository(&run.workspace_root, &run.base_commit, &run.expected_head)
-                .await?;
+                .await?,
+        );
         let mut candidates = Vec::new();
         for unit in work_units.iter().filter(|unit| eligible_executor(unit)) {
             let Some(thread_id) = unit.executor_thread_id.as_deref() else {
@@ -270,11 +276,12 @@ impl StudioRuntime {
         let mut preview = StudioTaskRecoveryPreview {
             preview_token: String::new(),
             root_thread_id: root_thread_id.to_string(),
-            run_id: run.id,
-            task_generation: run.task_generation,
-            phase: run.phase.as_str().to_string(),
-            expected_head: run.expected_head,
-            stop_requested: run.stop_requested,
+            run_id: run.id.clone(),
+            revision: run.revision,
+            task_generation: run.generation(),
+            state: recovery_state_from_task_kind(run.kind()),
+            expected_head: run.expected_head.clone(),
+            stop_requested: run.is_stop_requested(),
             branch_lease_id: lease.id,
             branch_lease_branch: lease.branch,
             branch_lease_git_common_dir: lease.git_common_dir,
@@ -398,7 +405,7 @@ impl StudioRuntime {
                 Some(unit) => (
                     Some(unit.id.clone()),
                     Some(unit.attempt),
-                    Some(unit.continuation_revision),
+                    Some(unit.continuation_revision()),
                     unit.branch.clone(),
                     unit.worktree_path.clone(),
                     unit.base_commit.clone(),
@@ -412,8 +419,9 @@ impl StudioRuntime {
                     run.base_commit.clone(),
                 ),
             };
-        let git_fingerprint =
-            fingerprint_repository(&worktree_path, &base_commit, &run.expected_head).await?;
+        let git_fingerprint = studio_git_fingerprint(
+            fingerprint_repository(&worktree_path, &base_commit, &run.expected_head).await?,
+        );
         let has_failure = failure_index.is_some();
         let priority = match (kind, has_failure) {
             (StudioTaskRecoveryTargetKind::Executor, true) => 0,
@@ -457,11 +465,12 @@ impl StudioRuntime {
             .read_active_task_run_for_root_thread(&preview.root_thread_id)
             .await?;
         if run.id != preview.run_id
-            || run.task_generation != preview.task_generation
-            || run.phase.as_str() != preview.phase
+            || run.revision != preview.revision
+            || run.generation() != preview.task_generation
+            || recovery_state_from_task_kind(run.kind()) != preview.state
             || run.expected_head != preview.expected_head
-            || (!allow_cleared_stop && run.stop_requested != preview.stop_requested)
-            || (allow_cleared_stop && run.stop_requested && !preview.stop_requested)
+            || (!allow_cleared_stop && run.is_stop_requested() != preview.stop_requested)
+            || (allow_cleared_stop && run.is_stop_requested() && !preview.stop_requested)
         {
             bail!("Task recovery facts changed after conversation recovery");
         }
@@ -501,7 +510,7 @@ impl StudioRuntime {
                     .context("Task recovery WorkUnit disappeared")?;
                 if unit.executor_thread_id.as_deref() != Some(target.thread_id.as_str())
                     || Some(unit.attempt) != target.attempt
-                    || Some(unit.continuation_revision) != target.continuation_revision
+                    || Some(unit.continuation_revision()) != target.continuation_revision
                     || unit.branch != target.branch
                     || unit.worktree_path != target.worktree_path
                     || unit.base_commit != target.git_fingerprint.base_commit
@@ -510,18 +519,22 @@ impl StudioRuntime {
                 }
             }
         }
-        let main = fingerprint_repository(
-            &preview.main_git_fingerprint.workspace_root,
-            &preview.main_git_fingerprint.base_commit,
-            &preview.main_git_fingerprint.expected_head,
-        )
-        .await?;
-        let target_git = fingerprint_repository(
-            &target.git_fingerprint.workspace_root,
-            &target.git_fingerprint.base_commit,
-            &target.git_fingerprint.expected_head,
-        )
-        .await?;
+        let main = studio_git_fingerprint(
+            fingerprint_repository(
+                &preview.main_git_fingerprint.workspace_root,
+                &preview.main_git_fingerprint.base_commit,
+                &preview.main_git_fingerprint.expected_head,
+            )
+            .await?,
+        );
+        let target_git = studio_git_fingerprint(
+            fingerprint_repository(
+                &target.git_fingerprint.workspace_root,
+                &target.git_fingerprint.base_commit,
+                &target.git_fingerprint.expected_head,
+            )
+            .await?,
+        );
         if main != preview.main_git_fingerprint || target_git != target.git_fingerprint {
             bail!("Task recovery Git fingerprint changed");
         }
@@ -535,6 +548,51 @@ impl StudioRuntime {
             bail!("Task Completion/Review/Merge facts changed");
         }
         Ok(())
+    }
+}
+
+fn studio_git_fingerprint(fingerprint: TaskGitFingerprint) -> StudioTaskGitFingerprint {
+    StudioTaskGitFingerprint {
+        workspace_root: fingerprint.workspace_root,
+        git_common_dir: fingerprint.git_common_dir,
+        branch: fingerprint.branch,
+        head: fingerprint.head,
+        base_commit: fingerprint.base_commit,
+        expected_head: fingerprint.expected_head,
+        operation: fingerprint.operation,
+        index_diff_hash: fingerprint.index_diff_hash,
+        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
+        untracked_content_hash: fingerprint.untracked_content_hash,
+    }
+}
+
+const fn recovery_state_from_task_kind(kind: TaskRunStateKind) -> StudioTaskRecoveryState {
+    match kind {
+        TaskRunStateKind::DesignUpdating => StudioTaskRecoveryState::DesignUpdating,
+        TaskRunStateKind::Implementing => StudioTaskRecoveryState::Implementing,
+        TaskRunStateKind::Merging => StudioTaskRecoveryState::Merging,
+        TaskRunStateKind::Reviewing => StudioTaskRecoveryState::Reviewing,
+        TaskRunStateKind::Reworking => StudioTaskRecoveryState::Reworking,
+        TaskRunStateKind::Stopping => StudioTaskRecoveryState::Stopping,
+        TaskRunStateKind::Blocked => StudioTaskRecoveryState::Blocked,
+        TaskRunStateKind::Completed => StudioTaskRecoveryState::Completed,
+        TaskRunStateKind::Failed => StudioTaskRecoveryState::Failed,
+        TaskRunStateKind::Cancelled => StudioTaskRecoveryState::Cancelled,
+    }
+}
+
+const fn task_kind_from_recovery_state(state: StudioTaskRecoveryState) -> TaskRunStateKind {
+    match state {
+        StudioTaskRecoveryState::DesignUpdating => TaskRunStateKind::DesignUpdating,
+        StudioTaskRecoveryState::Implementing => TaskRunStateKind::Implementing,
+        StudioTaskRecoveryState::Merging => TaskRunStateKind::Merging,
+        StudioTaskRecoveryState::Reviewing => TaskRunStateKind::Reviewing,
+        StudioTaskRecoveryState::Reworking => TaskRunStateKind::Reworking,
+        StudioTaskRecoveryState::Stopping => TaskRunStateKind::Stopping,
+        StudioTaskRecoveryState::Blocked => TaskRunStateKind::Blocked,
+        StudioTaskRecoveryState::Completed => TaskRunStateKind::Completed,
+        StudioTaskRecoveryState::Failed => TaskRunStateKind::Failed,
+        StudioTaskRecoveryState::Cancelled => TaskRunStateKind::Cancelled,
     }
 }
 
@@ -597,14 +655,12 @@ fn belongs_to_root(
     false
 }
 
-fn ensure_recoverable_phase(phase: TaskRunPhase) -> Result<()> {
+fn ensure_recoverable_phase(phase: TaskRunStateKind) -> Result<()> {
     if matches!(
         phase,
-        TaskRunPhase::Planning
-            | TaskRunPhase::PendingConfirmation
-            | TaskRunPhase::DesignUpdating
-            | TaskRunPhase::Implementing
-            | TaskRunPhase::Reworking
+        TaskRunStateKind::DesignUpdating
+            | TaskRunStateKind::Implementing
+            | TaskRunStateKind::Reworking
     ) {
         Ok(())
     } else {
@@ -618,14 +674,14 @@ fn ensure_recoverable_phase(phase: TaskRunPhase) -> Result<()> {
 fn eligible_executor(unit: &WorkUnitRecord) -> bool {
     unit.executor_thread_id.is_some()
         && matches!(
-            unit.status,
+            unit.status(),
             WorkUnitStatus::Running
                 | WorkUnitStatus::AwaitingCompletion
                 | WorkUnitStatus::ChangesRequested
                 | WorkUnitStatus::NeedsAttention
         )
         && matches!(
-            unit.execution_status,
+            unit.execution_status(),
             ThreadExecutionStatus::Running
                 | ThreadExecutionStatus::Completed
                 | ThreadExecutionStatus::BudgetLimited
@@ -781,13 +837,13 @@ mod tests {
     #[test]
     fn recovery_phase_excludes_review_merge_and_terminal_states() {
         for phase in [
-            TaskRunPhase::Merging,
-            TaskRunPhase::Reviewing,
-            TaskRunPhase::Stopping,
-            TaskRunPhase::Completed,
-            TaskRunPhase::Blocked,
-            TaskRunPhase::Failed,
-            TaskRunPhase::Cancelled,
+            TaskRunStateKind::Merging,
+            TaskRunStateKind::Reviewing,
+            TaskRunStateKind::Stopping,
+            TaskRunStateKind::Completed,
+            TaskRunStateKind::Blocked,
+            TaskRunStateKind::Failed,
+            TaskRunStateKind::Cancelled,
         ] {
             assert!(ensure_recoverable_phase(phase).is_err(), "{phase:?}");
         }

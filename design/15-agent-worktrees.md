@@ -16,7 +16,9 @@
 明确丢弃或任务终结后释放，不再与
 单次 agent turn 终态绑定。
 
-Task executor 只能由 `task_spawn_executor { taskName, message, scopeHints? }` 创建。
+Task executor 只能由 `task_spawn_executor` 创建。Task planner 必须先调用
+`task_finalize_design` 进入 `Implementing`；有设计阶段 workspace 变化时，finalize 创建的提交会推进
+Task expected HEAD，因此 executor worktree 从该 HEAD 创建并自然继承全部文档、代码和其他修改。
 `scopeHints` 是可选的仓库相对关注路径，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
 它不是文件授权、并发互斥或 completion 门禁。executor 可以修改自身 worktree 内任意仓库文件，
 真正不变量是 canonical worktree、Git identity、clean delivery 与完整 base-to-HEAD diff。

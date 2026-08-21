@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use pl_studio_runtime::{
     ConfigStore, InteractionKind, InteractionRequest, StudioHostKind, StudioMode, StudioRole,
-    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime,
+    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime, StudioTaskState,
 };
 
 use super::git::git_output;
@@ -125,11 +125,11 @@ impl LiveTaskFixture {
                 return Ok(confirmation);
             }
             if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await?
-                && is_failed_phase(&task.phase)
+                && is_live_failure(&task.state)
             {
                 bail!(
-                    "Task entered terminal phase `{}` before plan confirmation\n{}",
-                    task.phase,
+                    "Task entered blocked or terminal state `{}` before plan confirmation\n{}",
+                    task_state_name(&task.state),
                     self.diagnostics().await
                 );
             }
@@ -171,14 +171,15 @@ impl LiveTaskFixture {
             }
 
             if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await? {
-                if task.phase == "completed" {
+                if matches!(&task.state, StudioTaskState::Completed(_)) {
                     return Ok(task);
                 }
-                if is_failed_phase(&task.phase) {
+                if is_live_failure(&task.state) {
                     bail!(
-                        "Task entered terminal phase `{}`: {}\n{}",
-                        task.phase,
-                        task.status_message
+                        "Task entered blocked or terminal state `{}`: {}\n{}",
+                        task_state_name(&task.state),
+                        task_state_data(&task.state)
+                            .status_message
                             .as_deref()
                             .unwrap_or("no status message"),
                         self.diagnostics().await
@@ -468,8 +469,41 @@ impl Drop for TempRoot {
     }
 }
 
-fn is_failed_phase(phase: &str) -> bool {
-    matches!(phase, "blocked" | "failed" | "cancelled")
+fn task_state_name(state: &StudioTaskState) -> &'static str {
+    match state {
+        StudioTaskState::DesignUpdating(_) => "designUpdating",
+        StudioTaskState::Implementing(_) => "implementing",
+        StudioTaskState::Merging(_) => "merging",
+        StudioTaskState::Reviewing(_) => "reviewing",
+        StudioTaskState::Reworking(_) => "reworking",
+        StudioTaskState::Stopping(_) => "stopping",
+        StudioTaskState::Blocked(_) => "blocked",
+        StudioTaskState::Completed(_) => "completed",
+        StudioTaskState::Failed(_) => "failed",
+        StudioTaskState::Cancelled(_) => "cancelled",
+    }
+}
+
+fn task_state_data(state: &StudioTaskState) -> &pl_studio_runtime::StudioTaskStateData {
+    match state {
+        StudioTaskState::DesignUpdating(data)
+        | StudioTaskState::Implementing(data)
+        | StudioTaskState::Merging(data)
+        | StudioTaskState::Reviewing(data)
+        | StudioTaskState::Reworking(data)
+        | StudioTaskState::Stopping(data)
+        | StudioTaskState::Blocked(data)
+        | StudioTaskState::Completed(data)
+        | StudioTaskState::Failed(data)
+        | StudioTaskState::Cancelled(data) => data,
+    }
+}
+
+fn is_live_failure(state: &StudioTaskState) -> bool {
+    matches!(
+        state,
+        StudioTaskState::Blocked(_) | StudioTaskState::Failed(_) | StudioTaskState::Cancelled(_)
+    )
 }
 
 fn compact_item_diagnostic(item: &pl_protocol::ThreadItem) -> String {

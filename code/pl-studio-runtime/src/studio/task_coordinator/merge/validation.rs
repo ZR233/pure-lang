@@ -23,8 +23,8 @@ pub(super) fn ensure_preflight_delivery_identity(
     if work_unit.executor_thread_id.as_deref() != Some(agent_id) {
         mismatches.push("agentId");
     }
-    if work_unit.execution_status != ThreadExecutionStatus::Completed
-        || work_unit.status != WorkUnitStatus::Approved
+    if work_unit.execution_status() != ThreadExecutionStatus::Completed
+        || work_unit.status() != WorkUnitStatus::Approved
     {
         mismatches.push("delivery status");
     }

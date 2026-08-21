@@ -128,7 +128,10 @@ impl TaskFlowFixture {
         let deadline = Instant::now() + TEST_TIMEOUT;
         loop {
             if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await?
-                && task.phase == "completed"
+                && matches!(
+                    &task.state,
+                    pl_studio_runtime::StudioTaskState::Completed(_)
+                )
             {
                 return Ok(task);
             }

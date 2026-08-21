@@ -9,14 +9,14 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, ExecutorContinuationRequest,
-    ExecutorContinuationState, MAX_EXECUTOR_BUDGET_SLICES, TaskRunPhase, ThreadExecutionStatus,
+    ExecutorContinuationState, MAX_EXECUTOR_BUDGET_SLICES, TaskRunStateKind, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitStatus,
 };
 use pl_core::{AgentTurnOutcome, MailboxBudgetAction, TurnOutcomeKind};
 use pl_protocol::BudgetLimitKind;
 
 use super::task_run_record;
-use super::work_unit::work_unit_record;
+use super::work_unit::{update_work_unit_state, work_unit_record, work_unit_state};
 
 impl StudioStore {
     pub(crate) async fn resolve_active_completion_scope(
@@ -33,12 +33,12 @@ impl StudioStore {
         let mut fallback = Vec::new();
         for work_unit in work_units {
             let Some(run) = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
-                .filter(entities::task_run::Column::Phase.is_not_in([
-                    TaskRunPhase::Stopping.as_str(),
-                    TaskRunPhase::Completed.as_str(),
-                    TaskRunPhase::Blocked.as_str(),
-                    TaskRunPhase::Failed.as_str(),
-                    TaskRunPhase::Cancelled.as_str(),
+                .filter(entities::task_run::Column::StateKind.is_not_in([
+                    TaskRunStateKind::Stopping.as_str(),
+                    TaskRunStateKind::Completed.as_str(),
+                    TaskRunStateKind::Blocked.as_str(),
+                    TaskRunStateKind::Failed.as_str(),
+                    TaskRunStateKind::Cancelled.as_str(),
                 ]))
                 .one(&self.db)
                 .await?
@@ -90,21 +90,24 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if phase == TaskRunPhase::Stopping || phase.is_terminal() || run.stop_requested != 0 {
+            let task = task_run_record(run.clone())?;
+            let phase = task.kind();
+            if phase == TaskRunStateKind::Stopping
+                || phase == TaskRunStateKind::Blocked
+                || phase.is_terminal()
+                || task.is_stop_requested()
+            {
                 bail!("task is not accepting executor completion");
             }
-            if work_unit.execution_status != ThreadExecutionStatus::Running.as_str() {
+            let work_unit_state = work_unit_state(&work_unit)?;
+            if work_unit_state.execution_status() != ThreadExecutionStatus::Running {
                 bail!("executor Thread is not active");
             }
             if !matches!(
-                WorkUnitStatus::from_str(&work_unit.status),
-                Some(
-                    WorkUnitStatus::Running
-                        | WorkUnitStatus::AwaitingCompletion
-                        | WorkUnitStatus::ChangesRequested
-                )
+                work_unit_state.status(),
+                WorkUnitStatus::Running
+                    | WorkUnitStatus::AwaitingCompletion
+                    | WorkUnitStatus::ChangesRequested
             ) {
                 bail!("work unit is not accepting a completion");
             }
@@ -151,14 +154,17 @@ impl StudioStore {
             }
             .insert(&tx)
             .await?;
-            let mut work_unit_active: entities::work_unit::ActiveModel = work_unit.into();
-            work_unit_active.status = Set(WorkUnitStatus::ReadyForReview.as_str().to_string());
-            work_unit_active.execution_status =
-                Set(ThreadExecutionStatus::Completed.as_str().to_string());
-            work_unit_active.execution_summary = Set(Some(verification_summary.to_string()));
-            work_unit_active.execution_error = Set(None);
-            work_unit_active.updated_at = Set(now);
-            work_unit_active.update(&tx).await?;
+            let mut progress = work_unit_state.into_progress();
+            progress.execution_summary = Some(verification_summary.to_string());
+            progress.execution_error = None;
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::ReadyForReview,
+                ThreadExecutionStatus::Completed,
+                progress,
+            )
+            .await?;
             work_completion_record(completion)
         }
         .await;
@@ -173,27 +179,13 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let work_unit = executor_work_unit(&tx, agent_id).await?;
-            let work_status = WorkUnitStatus::from_str(&work_unit.status)
-                .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-            let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
-                .with_context(|| {
-                    format!(
-                        "invalid WorkUnit Thread execution status: {}",
-                        work_unit.execution_status
-                    )
-                })?;
-            let continuation_state = ExecutorContinuationState::from_str(
-                &work_unit.continuation_state,
-            )
-            .with_context(|| {
-                format!(
-                    "invalid executor continuation state: {}",
-                    work_unit.continuation_state
-                )
-            })?;
+            let state = work_unit_state(&work_unit)?;
+            let work_status = state.status();
+            let execution_status = state.execution_status();
+            let continuation_state = state.progress().continuation_state;
             let budget_attention = work_status == WorkUnitStatus::NeedsAttention
                 && execution_status == ThreadExecutionStatus::BudgetLimited
-                && work_unit.budget_limit_json.is_some()
+                && state.progress().budget_limit.is_some()
                 && continuation_state == ExecutorContinuationState::NeedsAttention;
             if !matches!(
                 work_status,
@@ -204,36 +196,39 @@ impl StudioStore {
             {
                 bail!(
                     "executor cannot start a turn while work unit is {}",
-                    work_unit.status
+                    work_status.as_str()
                 );
             }
             let already_running = work_status == WorkUnitStatus::Running
                 && execution_status == ThreadExecutionStatus::Running
                 && continuation_state == ExecutorContinuationState::None;
             let already_refreshed = already_running
-                && work_unit.budget_slice_count == 1
-                && work_unit.budget_limit_json.is_none()
-                && work_unit.execution_error.is_none()
-                && work_unit.continuation_source_turn_id.is_none();
+                && state.progress().budget_slice_count == 1
+                && state.progress().budget_limit.is_none()
+                && state.progress().execution_error.is_none()
+                && state.progress().continuation_source_turn_id.is_none();
             if (budget_action == MailboxBudgetAction::Preserve && already_running)
                 || (budget_action == MailboxBudgetAction::Refresh && already_refreshed)
             {
                 return Ok(());
             }
-            let continuation_revision = work_unit.continuation_revision.saturating_add(1);
-            let mut active: entities::work_unit::ActiveModel = work_unit.into();
-            active.status = Set(WorkUnitStatus::Running.as_str().to_string());
-            active.execution_status = Set(ThreadExecutionStatus::Running.as_str().to_string());
-            active.execution_error = Set(None);
-            active.continuation_state = Set(ExecutorContinuationState::None.as_str().to_string());
+            let mut progress = state.into_progress();
+            progress.continuation_revision = progress.continuation_revision.saturating_add(1);
+            progress.execution_error = None;
+            progress.continuation_state = ExecutorContinuationState::None;
             if budget_action == MailboxBudgetAction::Refresh {
-                active.budget_limit_json = Set(None);
-                active.budget_slice_count = Set(1);
-                active.continuation_source_turn_id = Set(None);
+                progress.budget_limit = None;
+                progress.budget_slice_count = 1;
+                progress.continuation_source_turn_id = None;
             }
-            active.continuation_revision = Set(continuation_revision);
-            active.updated_at = Set(unix_seconds());
-            active.update(&tx).await?;
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::Running,
+                ThreadExecutionStatus::Running,
+                progress,
+            )
+            .await?;
             Ok(())
         }
         .await;
@@ -248,8 +243,8 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let work_unit = executor_work_unit(&tx, agent_id).await?;
-            let work_status = WorkUnitStatus::from_str(&work_unit.status)
-                .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
+            let state = work_unit_state(&work_unit)?;
+            let work_status = state.status();
             if matches!(
                 work_status,
                 WorkUnitStatus::ReadyForReview
@@ -263,16 +258,10 @@ impl StudioStore {
             ) {
                 return Ok(None);
             }
-            let continuation_state = ExecutorContinuationState::from_str(
-                &work_unit.continuation_state,
-            )
-            .with_context(|| {
-                format!(
-                    "invalid executor continuation state: {}",
-                    work_unit.continuation_state
-                )
-            })?;
-            if work_unit.continuation_source_turn_id.as_deref() == Some(outcome.turn_id.as_str()) {
+            let continuation_state = state.progress().continuation_state;
+            if state.progress().continuation_source_turn_id.as_deref()
+                == Some(outcome.turn_id.as_str())
+            {
                 if outcome.kind == TurnOutcomeKind::BudgetLimited
                     && continuation_state == ExecutorContinuationState::PendingStart
                 {
@@ -280,53 +269,49 @@ impl StudioStore {
                         agent_id: agent_id.to_string(),
                         work_unit_id: work_unit.id,
                         source_turn_id: outcome.turn_id.to_string(),
-                        slice_count: u32::try_from(work_unit.budget_slice_count)
-                            .context("executor budget slice count is negative")?,
+                        slice_count: state.progress().budget_slice_count,
                     }));
                 }
                 return Ok(None);
             }
 
-            let now = unix_seconds();
             if outcome.kind == TurnOutcomeKind::BudgetLimited {
                 let budget_limit = outcome
                     .budget_limit
                     .context("budget-limited executor outcome has no budget snapshot")?;
-                let current_slice = u32::try_from(work_unit.budget_slice_count)
-                    .context("executor budget slice count is negative")?;
+                let current_slice = state.progress().budget_slice_count;
                 let can_continue = budget_limit.kind == BudgetLimitKind::WallClock
                     && outcome.rollover_compacted
                     && outcome.rollover_compaction_error.is_none()
                     && current_slice < MAX_EXECUTOR_BUDGET_SLICES;
-                let mut active: entities::work_unit::ActiveModel = work_unit.clone().into();
-                active.execution_status =
-                    Set(ThreadExecutionStatus::BudgetLimited.as_str().to_string());
-                active.budget_limit_json = Set(Some(serde_json::to_string(&budget_limit)?));
-                active.continuation_source_turn_id = Set(Some(outcome.turn_id.to_string()));
-                active.continuation_revision =
-                    Set(work_unit.continuation_revision.saturating_add(1));
-                active.updated_at = Set(now);
+                let mut progress = state.clone().into_progress();
+                progress.budget_limit = Some(budget_limit);
+                progress.continuation_source_turn_id = Some(outcome.turn_id.to_string());
+                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
                 if can_continue {
                     let next_slice = current_slice.saturating_add(1);
-                    active.status = Set(WorkUnitStatus::Running.as_str().to_string());
-                    active.budget_slice_count = Set(i32::try_from(next_slice)?);
-                    active.continuation_state =
-                        Set(ExecutorContinuationState::PendingStart.as_str().to_string());
-                    active.execution_error = Set(None);
-                    active.update(&tx).await?;
+                    let work_unit_id = work_unit.id.clone();
+                    progress.budget_slice_count = next_slice;
+                    progress.continuation_state = ExecutorContinuationState::PendingStart;
+                    progress.execution_error = None;
+                    update_work_unit_state(
+                        &tx,
+                        work_unit,
+                        WorkUnitStatus::Running,
+                        ThreadExecutionStatus::BudgetLimited,
+                        progress,
+                    )
+                    .await?;
                     return Ok(Some(ExecutorContinuationRequest {
                         agent_id: agent_id.to_string(),
-                        work_unit_id: work_unit.id,
+                        work_unit_id,
                         source_turn_id: outcome.turn_id.to_string(),
                         slice_count: next_slice,
                     }));
                 }
-                active.status = Set(WorkUnitStatus::NeedsAttention.as_str().to_string());
-                active.continuation_state = Set(ExecutorContinuationState::NeedsAttention
-                    .as_str()
-                    .to_string());
-                active.execution_error =
-                    Set(outcome.rollover_compaction_error.clone().or_else(|| {
+                progress.continuation_state = ExecutorContinuationState::NeedsAttention;
+                progress.execution_error =
+                    outcome.rollover_compaction_error.clone().or_else(|| {
                         outcome.reason.clone().or_else(|| {
                             Some(if budget_limit.kind == BudgetLimitKind::WallClock {
                                 format!(
@@ -339,18 +324,16 @@ impl StudioStore {
                                 )
                             })
                         })
-                    }));
-                active.update(&tx).await?;
+                    });
+                update_work_unit_state(
+                    &tx,
+                    work_unit,
+                    WorkUnitStatus::NeedsAttention,
+                    ThreadExecutionStatus::BudgetLimited,
+                    progress,
+                )
+                .await?;
                 return Ok(None);
-            }
-            if matches!(
-                work_status,
-                WorkUnitStatus::Running | WorkUnitStatus::ChangesRequested
-            ) {
-                let mut active: entities::work_unit::ActiveModel = work_unit.clone().into();
-                active.status = Set(WorkUnitStatus::AwaitingCompletion.as_str().to_string());
-                active.updated_at = Set(now);
-                active.update(&tx).await?;
             }
             let status = match outcome.kind {
                 TurnOutcomeKind::Completed => ThreadExecutionStatus::Completed,
@@ -358,29 +341,30 @@ impl StudioStore {
                 TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
                 TurnOutcomeKind::BudgetLimited => unreachable!("handled above"),
             };
-            let continuation_revision = work_unit.continuation_revision.saturating_add(1);
-            let mut active: entities::work_unit::ActiveModel = work_unit.into();
-            active.execution_status = Set(status.as_str().to_string());
-            active.execution_error = Set(outcome.reason.clone().or_else(|| {
+            let mut progress = state.into_progress();
+            progress.execution_error = outcome.reason.clone().or_else(|| {
                 (outcome.kind == TurnOutcomeKind::Completed).then(|| {
                     "executor turn ended without a successful report_completion".to_string()
                 })
-            }));
+            });
             if matches!(
                 outcome.kind,
                 TurnOutcomeKind::Completed | TurnOutcomeKind::Failed
             ) {
-                active.continuation_state = Set(ExecutorContinuationState::PlannerWakePending
-                    .as_str()
-                    .to_string());
-                active.continuation_source_turn_id = Set(Some(outcome.turn_id.to_string()));
-                active.continuation_revision = Set(continuation_revision);
+                progress.continuation_state = ExecutorContinuationState::PlannerWakePending;
+                progress.continuation_source_turn_id = Some(outcome.turn_id.to_string());
+                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
             } else {
-                active.continuation_state =
-                    Set(ExecutorContinuationState::None.as_str().to_string());
+                progress.continuation_state = ExecutorContinuationState::None;
             }
-            active.updated_at = Set(now);
-            active.update(&tx).await?;
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::AwaitingCompletion,
+                status,
+                progress,
+            )
+            .await?;
             Ok(None)
         }
         .await;
@@ -398,22 +382,26 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("executor continuation work unit not found")?;
+            let state = work_unit_state(&work_unit)?;
             if work_unit.executor_thread_id.as_deref() != Some(continuation.agent_id.as_str())
-                || work_unit.continuation_source_turn_id.as_deref()
+                || state.progress().continuation_source_turn_id.as_deref()
                     != Some(continuation.source_turn_id.as_str())
-                || work_unit.continuation_state != ExecutorContinuationState::PendingStart.as_str()
+                || state.progress().continuation_state != ExecutorContinuationState::PendingStart
             {
                 return Ok(());
             }
-            let mut active: entities::work_unit::ActiveModel = work_unit.clone().into();
-            active.status = Set(WorkUnitStatus::NeedsAttention.as_str().to_string());
-            active.continuation_state = Set(ExecutorContinuationState::NeedsAttention
-                .as_str()
-                .to_string());
-            active.continuation_revision = Set(work_unit.continuation_revision.saturating_add(1));
-            active.execution_error = Set(Some(error.to_string()));
-            active.updated_at = Set(unix_seconds());
-            active.update(&tx).await?;
+            let mut progress = state.into_progress();
+            progress.continuation_state = ExecutorContinuationState::NeedsAttention;
+            progress.continuation_revision = progress.continuation_revision.saturating_add(1);
+            progress.execution_error = Some(error.to_string());
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::NeedsAttention,
+                ThreadExecutionStatus::BudgetLimited,
+                progress,
+            )
+            .await?;
             Ok(())
         }
         .await;

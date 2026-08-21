@@ -4,8 +4,8 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
+use super::TaskGitFingerprint;
 use crate::agent::worktree::git_compatible_path;
-use crate::studio::StudioTaskGitFingerprint;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositorySnapshot {
@@ -63,7 +63,7 @@ pub(crate) async fn fingerprint_repository(
     path: impl AsRef<Path>,
     base_commit: &str,
     expected_head: &str,
-) -> Result<StudioTaskGitFingerprint> {
+) -> Result<TaskGitFingerprint> {
     let path = path.as_ref().to_path_buf();
     let base_commit = base_commit.to_string();
     let expected_head = expected_head.to_string();
@@ -342,7 +342,7 @@ fn fingerprint_repository_blocking(
     path: &Path,
     base_commit: &str,
     expected_head: &str,
-) -> Result<StudioTaskGitFingerprint> {
+) -> Result<TaskGitFingerprint> {
     let snapshot = inspect_repository_blocking(path, false)?;
     let index_diff = git_output_bytes(
         &snapshot.workspace_root,
@@ -369,7 +369,7 @@ fn fingerprint_repository_blocking(
         untracked_facts.extend_from_slice(object_id.as_bytes());
         untracked_facts.push(0);
     }
-    Ok(StudioTaskGitFingerprint {
+    Ok(TaskGitFingerprint {
         workspace_root: normalized_path(&snapshot.workspace_root),
         git_common_dir: normalized_path(&snapshot.git_common_dir),
         branch: snapshot.branch,

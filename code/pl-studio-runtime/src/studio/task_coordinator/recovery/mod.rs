@@ -29,7 +29,7 @@ impl TaskCoordinator {
         for owner in owners {
             for resource in &owner.resources {
                 let unit = &resource.work_unit;
-                let disposition = if unit.worktree_disposition
+                let disposition = if unit.worktree_disposition()
                     == TaskWorktreeDisposition::CleanupRequested
                 {
                     DurableWorktreeDisposition::Cleanup

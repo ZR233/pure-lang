@@ -8,7 +8,7 @@ use super::super::{TaskRunRecord, WorkUnitRecord};
 use super::normalize_scope_hints;
 
 pub(crate) const TASK_EXECUTOR_HANDOFF_SECTION_ID: &str = "studio.task_executor_handoff";
-const TASK_EXECUTOR_HANDOFF_VERSION: u32 = 2;
+const TASK_EXECUTOR_HANDOFF_VERSION: u32 = 3;
 const MAX_EXECUTOR_BLUEPRINT_BYTES: usize = 20 * 1024;
 
 /// Planner 可以随 executor allocation 一起提交的结构化依赖。
@@ -132,7 +132,8 @@ pub(crate) struct TaskExecutorOwnership {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TaskExecutorRepositoryFacts {
     pub(crate) base_commit: String,
-    pub(crate) design_commit: Option<String>,
+    pub(crate) design_finalized_head: String,
+    pub(crate) design_phase_commit: Option<String>,
     pub(crate) expected_head_at_spawn: String,
     pub(crate) worktree_path: String,
     pub(crate) branch: String,
@@ -312,7 +313,11 @@ impl TaskExecutorHandoff {
             },
             repository: TaskExecutorRepositoryFacts {
                 base_commit: work_unit.base_commit.clone(),
-                design_commit: run.design_commit.clone(),
+                design_finalized_head: run
+                    .design_finalized_head()
+                    .map(str::to_string)
+                    .context("Task executor allocation requires a finalized design stage")?,
+                design_phase_commit: run.design_phase_commit().map(str::to_string),
                 expected_head_at_spawn: run.expected_head.clone(),
                 worktree_path: work_unit.worktree_path.clone(),
                 branch: work_unit.branch.clone(),
@@ -375,6 +380,8 @@ impl TaskExecutorHandoff {
             || self.ownership.requesting_call_id != work_unit.requested_by_call_id
             || self.ownership.parent_thread_id != run.root_thread_id
             || self.repository.base_commit != work_unit.base_commit
+            || Some(self.repository.design_finalized_head.as_str()) != run.design_finalized_head()
+            || self.repository.design_phase_commit.as_deref() != run.design_phase_commit()
             || self.repository.expected_head_at_spawn != work_unit.base_commit
             || self.repository.worktree_path != work_unit.worktree_path
             || self.repository.branch != work_unit.branch
@@ -612,7 +619,8 @@ mod tests {
             },
             repository: TaskExecutorRepositoryFacts {
                 base_commit: "base".to_string(),
-                design_commit: Some("design".to_string()),
+                design_finalized_head: "design".to_string(),
+                design_phase_commit: Some("design".to_string()),
                 expected_head_at_spawn: "base".to_string(),
                 worktree_path: "/tmp/worktree".to_string(),
                 branch: "task-work-1".to_string(),

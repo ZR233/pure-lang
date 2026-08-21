@@ -147,7 +147,7 @@ impl StudioAgentRepository {
             .await
             .map_err(anyhow_into)?
         {
-            ids.insert(run.root_thread_id);
+            ids.insert(run.root_thread_id.clone());
         }
         for wake in self
             .store

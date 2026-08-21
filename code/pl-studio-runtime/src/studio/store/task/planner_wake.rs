@@ -8,6 +8,9 @@ use crate::studio::task_coordinator::{
     TaskPlannerWakeSource, ThreadExecutionStatus,
 };
 
+use super::review::review_round_state;
+use super::work_unit::work_unit_state;
+
 impl StudioStore {
     pub(crate) async fn list_pending_task_planner_wakes(
         &self,
@@ -16,20 +19,16 @@ impl StudioStore {
         for run in self.list_active_task_runs().await? {
             let latest_review = entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-                .filter(entities::review_round::Column::Status.ne(ReviewVerdict::Pending.as_str()))
+                .filter(
+                    entities::review_round::Column::StateKind.ne(ReviewVerdict::Pending.as_str()),
+                )
                 .order_by_desc(entities::review_round::Column::Round)
                 .one(&self.db)
                 .await?;
             let Some(round) = latest_review else {
                 continue;
             };
-            let reviewer_status = ThreadExecutionStatus::from_str(&round.reviewer_status)
-                .with_context(|| {
-                    format!(
-                        "invalid review Thread execution status: {}",
-                        round.reviewer_status
-                    )
-                })?;
+            let reviewer_status = review_round_state(&round)?.reviewer_status();
             if matches!(
                 reviewer_status,
                 ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
@@ -76,41 +75,45 @@ impl StudioStore {
 
     async fn pending_executor_terminal_wakes(&self) -> Result<Vec<TaskPlannerWakeRequest>> {
         let units = entities::work_unit::Entity::find()
-            .filter(entities::work_unit::Column::ContinuationState.is_in([
-                ExecutorContinuationState::PlannerWakePending.as_str(),
-                ExecutorContinuationState::NeedsAttention.as_str(),
-            ]))
             .order_by_asc(entities::work_unit::Column::UpdatedAt)
             .order_by_asc(entities::work_unit::Column::Id)
             .all(&self.db)
             .await?;
         let mut wakes = Vec::with_capacity(units.len());
         for unit in units {
-            let continuation_state = ExecutorContinuationState::from_str(&unit.continuation_state)
-                .context("invalid executor continuation state")?;
+            let state = work_unit_state(&unit)?;
+            let progress = state.progress();
+            let continuation_state = progress.continuation_state;
+            if !matches!(
+                continuation_state,
+                ExecutorContinuationState::PlannerWakePending
+                    | ExecutorContinuationState::NeedsAttention
+            ) {
+                continue;
+            }
             if continuation_state == ExecutorContinuationState::NeedsAttention
-                && (ThreadExecutionStatus::from_str(&unit.execution_status)
-                    != Some(ThreadExecutionStatus::BudgetLimited)
-                    || unit.budget_limit_json.is_none())
+                && (state.execution_status() != ThreadExecutionStatus::BudgetLimited
+                    || progress.budget_limit.is_none())
             {
                 continue;
             }
             let Some(run) = self.read_task_run(&unit.task_run_id).await? else {
                 bail!("executor terminal wake task run not found");
             };
-            if run.phase.is_terminal() {
+            if run.kind().is_terminal() {
                 continue;
             }
             wakes.push(TaskPlannerWakeRequest {
-                task_run_id: run.id,
-                root_thread_id: run.root_thread_id,
+                task_run_id: run.id.clone(),
+                root_thread_id: run.root_thread_id.clone(),
                 source: TaskPlannerWakeSource::ExecutorTerminal {
                     work_unit_id: unit.id,
                     executor_thread_id: unit
                         .executor_thread_id
                         .context("executor terminal wake has no executor Thread")?,
-                    source_turn_id: unit
+                    source_turn_id: progress
                         .continuation_source_turn_id
+                        .clone()
                         .context("executor terminal wake has no source Turn")?,
                 },
             });

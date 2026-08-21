@@ -11,7 +11,8 @@ use git::git_output;
 use live_fixture::{LIVE_VERIFY_MARKER, LiveTaskFixture, command_output, normalized_text};
 use pl_studio_runtime::{
     InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskReviewState, StudioTaskState,
+    StudioTaskWorkUnitState,
 };
 
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -90,18 +91,18 @@ async fn assert_task_invariants(
     fixture: &LiveTaskFixture,
     task: &pl_studio_runtime::StudioTaskRuntime,
 ) -> Result<()> {
-    if task.phase != "completed" {
-        bail!("Task phase is `{}` instead of `completed`", task.phase);
+    if !matches!(&task.state, StudioTaskState::Completed(_)) {
+        bail!("Task state is `{:?}` instead of `completed`", task.state);
     }
     if task.work_units.is_empty() {
         bail!("Task did not create an executor work unit");
     }
     for unit in &task.work_units {
-        if unit.status != "merged" {
+        if !matches!(&unit.state, StudioTaskWorkUnitState::Merged(_)) {
             bail!(
-                "work unit `{}` finished with status `{}`",
+                "work unit `{}` finished with state `{:?}`",
                 unit.id,
-                unit.status
+                unit.state
             );
         }
         if unit.implementation_step_count < 2
@@ -269,7 +270,7 @@ async fn assert_task_invariants(
                 .find(|review| review.id == *review_round_id)
                 .context("satisfied review gate references a missing round")?;
             if review.scope != "integrated"
-                || review.verdict != "pass"
+                || !matches!(&review.state, StudioTaskReviewState::Pass { .. })
                 || review.reviewed_head != *reviewed_head
                 || reviewed_head != &task.expected_head
             {
@@ -293,7 +294,7 @@ async fn assert_task_invariants(
                     && review.completion_id.as_deref() == Some(completion.id.as_str())
                     && review.completion_revision == Some(completion.revision)
                     && review.reviewed_head == completion.head_commit.as_deref().unwrap_or_default()
-                    && review.verdict == "pass"
+                    && matches!(&review.state, StudioTaskReviewState::Pass { .. })
             })
     }) {
         bail!("an approved completion has no matching passing delivery review");
@@ -401,6 +402,6 @@ Keep deterministic gameplay rules in game-core.mjs so verify.mjs can import them
 verify.mjs must use node:assert to verify movement boundaries, shooting, collision, scoring, and restart, then print exactly this success marker on its own line:
 {LIVE_VERIFY_MARKER}
 
-In Task mode, update and commit design/shooter.md, then spawn one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps, repository targets, stable acceptance criteria, and command or inspection checks that cover every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Synchronize the final design, read the shared integrated review gate, and do not create an integrated reviewer when it reports the single-executor equivalent exemption. If it reports required, request integrated review and repair failures through the normal Task workflow. Only call task_complete when the gate permits it. The final Git worktree must be clean."#
+In Task mode, during DesignUpdating use ordinary repository tools such as apply_patch to create design/shooter.md, then call task_finalize_design exactly once. Do not look for or call a dedicated design-update tool, and do not require a second design edit after implementation. After finalize, spawn one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps, repository targets, stable acceptance criteria, and command or inspection checks that cover every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Read the shared integrated review gate, and do not create an integrated reviewer when it reports the single-executor equivalent exemption. If it reports required, request integrated review and repair failures through the normal Task workflow. Only call task_complete when the gate permits it. The final Git worktree must be clean."#
     )
 }

@@ -9,6 +9,19 @@ use tokio_util::sync::CancellationToken;
 pub type InteractionFuture = BoxFuture<'static, pl_protocol::InteractionResolution>;
 pub type InteractionCallback =
     Arc<dyn Fn(pl_protocol::InteractionRequest) -> InteractionFuture + Send + Sync>;
+pub type ToolCompletionFuture = BoxFuture<'static, anyhow::Result<()>>;
+pub type ToolCompletionCallback = Arc<dyn Fn(ToolCompletion) -> ToolCompletionFuture + Send + Sync>;
+
+/// A completed model-requested tool call exposed to an embedding host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCompletion {
+    pub call_id: String,
+    pub name: String,
+    pub status: String,
+    pub result: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+}
 
 /// 会话级权限模式。
 ///
@@ -99,6 +112,7 @@ pub enum UserInputMode {
 pub struct TurnOptions {
     pub permission_mode: PermissionMode,
     pub interaction_callback: Option<InteractionCallback>,
+    pub tool_completion_callback: Option<ToolCompletionCallback>,
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
     pub prompt_cache_key: Option<String>,
@@ -185,6 +199,12 @@ impl TurnOptions {
         self
     }
 
+    /// Observe every model-requested tool after its durable trace item is finalized.
+    pub fn with_tool_completion_callback(mut self, callback: ToolCompletionCallback) -> Self {
+        self.tool_completion_callback = Some(callback);
+        self
+    }
+
     pub fn with_permission_mode(mut self, permission_mode: PermissionMode) -> Self {
         self.permission_mode = permission_mode;
         self
@@ -206,6 +226,7 @@ impl Default for TurnOptions {
         Self {
             permission_mode: PermissionMode::RequestApproval,
             interaction_callback: None,
+            tool_completion_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
             prompt_cache_key: None,
@@ -229,6 +250,10 @@ impl std::fmt::Debug for TurnOptions {
             .field(
                 "interaction_callback",
                 &self.interaction_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "tool_completion_callback",
+                &self.tool_completion_callback.as_ref().map(|_| "<callback>"),
             )
             .field(
                 "cancellation_token",

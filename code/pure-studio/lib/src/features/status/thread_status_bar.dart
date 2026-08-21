@@ -283,15 +283,15 @@ class _TaskRuntimeReadout extends StatelessWidget {
     final status = failure?.message ?? task.statusMessage ?? '';
     final fatal = failure?.isFatal ?? false;
     final tooltip = status.isEmpty
-        ? '${context.taskPhaseLabel(task.phase)} · ${task.runId}'
-        : '${fatal ? context.l10n.statusTaskFailed : context.taskPhaseLabel(task.phase)} · $status';
+        ? '${context.taskPhaseLabel(task.state.kind)} · ${task.runId}'
+        : '${fatal ? context.l10n.statusTaskFailed : context.taskPhaseLabel(task.state.kind)} · $status';
     return KeyedSubtree(
       key: StudioDriverKeys.taskRuntime(task.runId),
       child: Semantics(
         key: StudioDriverKeys.taskStatus(task.runId, status),
         label: tooltip,
         child: _StatusReadout(
-          key: StudioDriverKeys.taskPhase(task.runId, task.phase),
+          key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
           icon: fatal
               ? Icons.error_outline
               : failure == null
@@ -300,7 +300,7 @@ class _TaskRuntimeReadout extends StatelessWidget {
           label: fatal
               ? context.l10n.statusTaskFailed
               : failure == null
-              ? context.taskPhaseLabel(task.phase)
+              ? context.taskPhaseLabel(task.state.kind)
               : context.l10n.statusTaskRecoverable,
           tooltip: tooltip,
           maxWidth: 120,

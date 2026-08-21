@@ -9,11 +9,8 @@ use super::*;
 use crate::studio::task_coordinator::AllocateExecutor;
 use crate::{StudioMode, StudioStore};
 
-const DESIGN_PATCH: &str =
-    "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch";
-
 #[tokio::test]
-async fn design_patch_commits_and_atomically_opens_executor_gate() {
+async fn ordinary_workspace_edits_are_committed_and_atomically_open_executor_gate() {
     let fixture = DesignFixture::new("success").await;
     let before = fixture.run.expected_head.clone();
 
@@ -27,7 +24,18 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
     };
     assert!(denied.to_string().contains("requires task phase"));
 
-    let output = fixture.update(DESIGN_PATCH).await.unwrap();
+    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
+    let generated = Command::new("sh")
+        .current_dir(&fixture.repository)
+        .args(["-c", "printf 'generated\\n' > source.rs"])
+        .status()
+        .unwrap();
+    assert!(generated.success());
+    fixture.observe("call-command-generated-files").await;
+    let output = fixture
+        .finalize("updated design and generated source")
+        .await
+        .unwrap();
     let run = fixture
         .store
         .read_task_run(&fixture.run.id)
@@ -43,13 +51,17 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 
     assert_eq!(output.task_run_id, fixture.run.id);
     assert_eq!(output.previous_head, before);
-    assert_eq!(output.changed_files, vec!["design/spec.md".to_string()]);
-    assert_eq!(run.phase, TaskRunPhase::Implementing);
     assert_eq!(
-        run.design_commit.as_deref(),
-        Some(output.design_commit.as_str())
+        output.changed_files,
+        vec!["design/spec.md".to_string(), "source.rs".to_string()]
     );
-    assert_eq!(run.expected_head, output.design_commit);
+    assert_eq!(run.kind(), TaskRunStateKind::Implementing);
+    assert_eq!(run.design_phase_commit(), output.phase_commit.as_deref());
+    assert_eq!(
+        run.design_summary(),
+        Some("updated design and generated source")
+    );
+    assert_eq!(run.expected_head, output.finalized_head);
     assert_eq!(lease.expected_head, run.expected_head);
     assert_eq!(
         git_output(&fixture.repository, &["rev-parse", "HEAD"]),
@@ -69,25 +81,37 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 }
 
 #[tokio::test]
-async fn empty_noop_and_later_hunk_failure_restore_exact_state() {
-    let fixture = DesignFixture::new("rollback").await;
+async fn clean_workspace_finalizes_without_creating_a_commit() {
+    let fixture = DesignFixture::new("clean").await;
     let before = fixture.head();
-    for patch in [
-        "*** Begin Patch\n*** End Patch",
-        "*** Begin Patch\n*** Update File: design/spec.md\n*** End Patch",
-        "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+temporary\n*** Update File: design/missing.md\n@@\n-missing\n+changed\n*** End Patch",
-    ] {
-        assert!(fixture.update(patch).await.is_err());
-        assert_eq!(fixture.head(), before);
-        assert_eq!(fixture.design_text(), "before\n");
-        assert!(fixture.status().is_empty());
-    }
+    let output = fixture
+        .finalize("no workspace edits were needed")
+        .await
+        .unwrap();
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(output.previous_head, before);
+    assert_eq!(output.finalized_head, before);
+    assert_eq!(output.phase_commit, None);
+    assert!(output.changed_files.is_empty());
+    assert_eq!(run.kind(), TaskRunStateKind::Implementing);
+    assert_eq!(run.design_finalized_head(), Some(before.as_str()));
+    assert_eq!(run.design_phase_commit(), None);
+    assert_eq!(fixture.head(), before);
+    assert!(fixture.status().is_empty());
     fixture.cleanup().await;
 }
 
 #[tokio::test]
-async fn concurrent_identical_calls_serialize_to_one_commit_and_one_cas() {
+async fn concurrent_finalize_calls_serialize_to_one_commit_and_one_cas() {
     let fixture = DesignFixture::new("concurrent").await;
+    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
+    fixture.observe("call-concurrent-edit").await;
     let start = Arc::new(tokio::sync::Barrier::new(3));
     let mut calls = Vec::new();
     for _ in 0..2 {
@@ -98,7 +122,7 @@ async fn concurrent_identical_calls_serialize_to_one_commit_and_one_cas() {
         calls.push(tokio::spawn(async move {
             start.wait().await;
             coordinator
-                .update_design(&thread_id, &repository, DESIGN_PATCH)
+                .finalize_design(&thread_id, &repository, "concurrent finalize")
                 .await
         }));
     }
@@ -128,6 +152,8 @@ async fn concurrent_identical_calls_serialize_to_one_commit_and_one_cas() {
 #[tokio::test]
 async fn unsafe_sqlite_compensation_blocks_without_overwriting_external_change() {
     let fixture = DesignFixture::new("unsafe-compensation").await;
+    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
+    fixture.observe("call-unsafe-compensation-edit").await;
     inject_design_transaction_failure(&fixture.store).await;
     let barrier = DesignCommitTestBarrier::new();
     fixture
@@ -138,7 +164,7 @@ async fn unsafe_sqlite_compensation_blocks_without_overwriting_external_change()
     let repository = fixture.repository.clone();
     let update = tokio::spawn(async move {
         coordinator
-            .update_design(&thread_id, &repository, DESIGN_PATCH)
+            .finalize_design(&thread_id, &repository, "unsafe compensation")
             .await
     });
     tokio::time::timeout(
@@ -161,7 +187,7 @@ async fn unsafe_sqlite_compensation_blocks_without_overwriting_external_change()
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(run.kind(), TaskRunStateKind::Blocked);
     assert_eq!(fixture.design_text(), "external-after-commit\n");
     fixture.cleanup().await;
 }
@@ -169,7 +195,13 @@ async fn unsafe_sqlite_compensation_blocks_without_overwriting_external_change()
 #[tokio::test]
 async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
     let fixture = DesignFixture::new("cancel-revert").await;
-    let design = fixture.update(DESIGN_PATCH).await.unwrap();
+    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
+    fixture.observe("call-cancel-edit").await;
+    let design = fixture
+        .finalize("design before cancellation")
+        .await
+        .unwrap();
+    let design_commit = design.phase_commit.clone().unwrap();
 
     let reverted = fixture
         .coordinator
@@ -189,7 +221,7 @@ async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(reverted.previous_head, design.design_commit);
+    assert_eq!(reverted.previous_head, design_commit);
     assert_ne!(reverted.revert_commit, reverted.previous_head);
     assert_eq!(run.expected_head, reverted.revert_commit);
     assert_eq!(lease.expected_head, run.expected_head);
@@ -209,59 +241,36 @@ async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
             &fixture.repository,
             &["show", "-s", "--format=%P", &reverted.revert_commit]
         ),
-        design.design_commit
+        design_commit
     );
     assert!(fixture.status().is_empty());
     fixture.cleanup().await;
 }
 
 #[tokio::test]
-async fn accepted_source_merge_requires_a_final_design_consistency_commit() {
-    let fixture = DesignFixture::new("source-merge-consistency").await;
-    let design = fixture.update(DESIGN_PATCH).await.unwrap();
-    std::fs::write(fixture.repository.join("source.rs"), "source\n").unwrap();
-    git(&fixture.repository, &["add", "source.rs"]);
-    git(
-        &fixture.repository,
-        &["commit", "-m", "merge accepted source"],
-    );
-    let merged_head = fixture.head();
+async fn finalize_rejects_unobserved_external_edits_without_touching_the_draft() {
+    let fixture = DesignFixture::new("unobserved-external-edit").await;
+    std::fs::write(fixture.repository.join("design/spec.md"), "external\n").unwrap();
+
+    let error = fixture
+        .finalize("must reject an edit outside the observation chain")
+        .await
+        .unwrap_err();
+
     assert!(
-        fixture
-            .store
-            .compare_and_set_task_head(&fixture.run.id, &design.design_commit, &merged_head)
-            .await
-            .unwrap()
+        error
+            .to_string()
+            .contains("outside the Task tool observation chain")
     );
-    fixture
-        .store
-        .create_test_merge_record(&fixture.run.id, &design.design_commit, &merged_head)
-        .await
-        .unwrap();
-
     let run = fixture
         .store
         .read_task_run(&fixture.run.id)
         .await
         .unwrap()
         .unwrap();
-    assert!(!design_commit_is_current(&run));
-
-    let consistency = fixture
-        .update(&replace_patch("after", "after-source-merge"))
-        .await
-        .unwrap();
-    let run = fixture
-        .store
-        .read_task_run(&fixture.run.id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(design_commit_is_current(&run));
-    assert_eq!(
-        run.design_commit.as_deref(),
-        Some(consistency.design_commit.as_str())
-    );
+    assert_eq!(run.kind(), TaskRunStateKind::DesignUpdating);
+    assert_eq!(fixture.design_text(), "external\n");
+    assert_ne!(fixture.status(), "");
     fixture.cleanup().await;
 }
 
@@ -305,10 +314,34 @@ impl DesignFixture {
         }
     }
 
-    async fn update(&self, patch: &str) -> anyhow::Result<DesignUpdateOutput> {
+    async fn finalize(&self, summary: &str) -> anyhow::Result<DesignFinalizeOutput> {
         self.coordinator
-            .update_design(&self.thread_id, &self.repository, patch)
+            .finalize_design(&self.thread_id, &self.repository, summary)
             .await
+    }
+
+    async fn observe(&self, tool_call_id: &str) {
+        let run = self
+            .store
+            .read_task_run(&self.run.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let fingerprint =
+            fingerprint_repository(&self.repository, &run.base_commit, &run.expected_head)
+                .await
+                .unwrap();
+        assert!(
+            self.store
+                .record_task_design_observation(
+                    &run.id,
+                    "turn-design-test",
+                    tool_call_id,
+                    fingerprint,
+                )
+                .await
+                .unwrap()
+        );
     }
 
     fn head(&self) -> String {
@@ -342,16 +375,11 @@ fn allocation(thread_id: &str, suffix: &str) -> AllocateExecutor {
     }
 }
 
-fn replace_patch(before: &str, after: &str) -> String {
-    format!(
-        "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-{before}\n+{after}\n*** End Patch"
-    )
-}
-
 async fn inject_design_transaction_failure(store: &StudioStore) {
     store
         .execute_test_sql(
-            "CREATE TRIGGER fail_design_update BEFORE UPDATE OF design_commit ON task_runs \
+            "CREATE TRIGGER fail_design_update BEFORE UPDATE OF state_json ON task_runs \
+             WHEN json_extract(NEW.state_json, '$.kind') = 'implementing' \
              BEGIN SELECT RAISE(FAIL, 'injected design transaction failure'); END;",
         )
         .await;

@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    TaskCoordinator, TaskRunRecord, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
     ThreadExecutionStatus, WorkUnitStatus,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -166,18 +166,18 @@ impl TaskCoordinator {
                 .preflight_task_stop_locked(thread_id, &branch_guard)
                 .await?;
             self.store
-                .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
+                .begin_task_stop(&run.id, &run.expected_head, requested.generation())
                 .await?
         };
         self.store
-            .settle_agents_for_task_stop(&run.id, requested.task_generation, reason.as_str())
+            .settle_agents_for_task_stop(&run.id, requested.generation(), reason.as_str())
             .await?;
         close_task_children(runtime, thread_id).await?;
         let branch_guard = self.lock_branch_mutation().await;
         let stopped = self
             .stop_task_locked(
                 &run.id,
-                requested.task_generation,
+                requested.generation(),
                 reason.as_str(),
                 &branch_guard,
             )
@@ -200,7 +200,7 @@ impl TaskCoordinator {
             .store
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
-        if run.stop_requested {
+        if run.is_stop_requested() {
             return Ok(TaskCompleteOutcome::rejected(
                 "stopRequested",
                 "task_complete is unavailable after task_stop was requested",
@@ -209,16 +209,16 @@ impl TaskCoordinator {
         if let Some(message) = incomplete_todo_message(todo) {
             return Ok(TaskCompleteOutcome::rejected("todoIncomplete", message));
         }
-        if run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
+        if run.design_finalized_head().is_none() {
             return Ok(TaskCompleteOutcome::rejected(
                 "repositoryDrift",
-                "task design is not recorded at the current task HEAD",
+                "task design stage has not been finalized",
             ));
         }
         let work_units = self.store.list_work_units(&run.id).await?;
         if work_units.iter().any(|unit| {
             !matches!(
-                unit.status,
+                unit.status(),
                 WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery
             )
         }) {
@@ -238,25 +238,27 @@ impl TaskCoordinator {
             &reviews,
         )
         .await;
-        match (&integrated_review_gate, run.phase) {
+        match (&integrated_review_gate, run.kind()) {
             (StudioIntegratedReviewGate::Required { reason }, _) => {
                 return Ok(TaskCompleteOutcome::rejected(
                     "reviewRequired",
                     reason.clone(),
                 ));
             }
-            (StudioIntegratedReviewGate::SatisfiedByReview { .. }, TaskRunPhase::Reviewing)
+            (StudioIntegratedReviewGate::SatisfiedByReview { .. }, TaskRunStateKind::Reviewing)
             | (
                 StudioIntegratedReviewGate::NotRequiredNoDelivery
                 | StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent { .. },
-                TaskRunPhase::Implementing | TaskRunPhase::Reworking | TaskRunPhase::Reviewing,
+                TaskRunStateKind::Implementing
+                | TaskRunStateKind::Reworking
+                | TaskRunStateKind::Reviewing,
             ) => {}
             _ => {
                 return Ok(TaskCompleteOutcome::rejected(
                     "wrongPhase",
                     format!(
                         "task_complete cannot consume the current review gate in phase {}",
-                        run.phase.as_str()
+                        run.kind().as_str()
                     ),
                 ));
             }
@@ -390,18 +392,14 @@ impl TaskCoordinator {
             );
         }
         let has_source_merge = !self.store.list_merge_records(&run.id).await?.is_empty();
-        if !has_source_merge {
-            if run.design_commit.is_some() {
-                self.revert_design_for_no_source_cancel_locked(&run.id, guard)
-                    .await?;
-                run = self
-                    .store
-                    .read_task_run(&run.id)
-                    .await?
-                    .context("task run disappeared after design revert")?;
-            }
-        } else if run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
-            bail!("task_stop requires a final design consistency update after source merges");
+        if !has_source_merge && run.design_phase_commit().is_some() {
+            self.revert_design_for_no_source_cancel_locked(&run.id, guard)
+                .await?;
+            run = self
+                .store
+                .read_task_run(&run.id)
+                .await?
+                .context("task run disappeared after design revert")?;
         }
         super::review::validate_review_repository(&run).await?;
         let cancelled = self
@@ -419,23 +417,19 @@ impl TaskCoordinator {
             .list_work_units(&run.id)
             .await?
             .into_iter()
-            .find(|work_unit| work_unit.status == super::WorkUnitStatus::AwaitingCompletion);
+            .find(|work_unit| work_unit.status() == super::WorkUnitStatus::AwaitingCompletion);
         let Some(work_unit) = work_unit else {
             return Ok(None);
         };
-        Ok(work_unit.executor_thread_id)
+        Ok(work_unit.executor_thread_id.clone())
     }
 
     async fn validate_stop_request(&self, run: &TaskRunRecord) -> Result<()> {
         self.ensure_process_lease_owned(run)?;
-        if run.phase == TaskRunPhase::Merging {
+        if run.kind() == TaskRunStateKind::Merging {
             bail!("task_stop requires Planner Git integration to be recorded first");
         }
         super::review::validate_review_repository(run).await?;
-        let merges = self.store.list_merge_records(&run.id).await?;
-        if !merges.is_empty() && run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
-            bail!("task_stop requires a final design consistency update after source merges");
-        }
         Ok(())
     }
 }
@@ -509,7 +503,7 @@ async fn wait_for_terminal_outcomes(
                 .into_iter()
                 .any(|unit| {
                     matches!(
-                        unit.execution_status,
+                        unit.execution_status(),
                         ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
                     )
                 });
@@ -520,7 +514,7 @@ async fn wait_for_terminal_outcomes(
                 .into_iter()
                 .any(|round| {
                     matches!(
-                        round.reviewer_status,
+                        round.reviewer_status(),
                         ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
                     )
                 });

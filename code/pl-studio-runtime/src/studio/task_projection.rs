@@ -1,15 +1,25 @@
 use anyhow::Result;
 
 use crate::{
-    StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioIntegratedReviewGate,
+    StudioAwaitingExecution, StudioAwaitingWorkUnit, StudioBlockedRecovery,
+    StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioExecutorContinuationState,
+    StudioFailedReviewerState, StudioFinalizedDesign, StudioIntegratedReviewGate,
+    StudioPendingReviewerState, StudioRunningExecution, StudioRunningWorkUnit,
     StudioTaskCompletionRuntime, StudioTaskDesignReferenceRuntime, StudioTaskFailureRuntime,
     StudioTaskMergeRuntime, StudioTaskReviewFindingRuntime, StudioTaskReviewRuntime,
-    StudioTaskRuntime, StudioTaskWorkUnitRuntime,
+    StudioTaskReviewState, StudioTaskReviewTarget, StudioTaskRuntime, StudioTaskState,
+    StudioTaskStateData, StudioTaskStopRequest, StudioTaskWorkUnitProgress,
+    StudioTaskWorkUnitRuntime, StudioTaskWorkUnitState, StudioTaskWorktreeDisposition,
 };
 
 use super::{
     StudioStore,
-    task_coordinator::{MergeRecord, ReviewRoundRecord, TaskRunRecord, WorkCompletionRecord},
+    task_coordinator::{
+        AwaitingExecution, BlockedRecovery, DesignProgress, ExecutorContinuationState,
+        FailedReviewerState, MergeRecord, PendingReviewerState, ReviewRoundRecord,
+        ReviewRoundState, ReviewTarget, RunningExecution, TaskRunRecord, TaskRunState,
+        TaskWorktreeDisposition, WorkCompletionRecord, WorkUnitProgress, WorkUnitState,
+    },
 };
 
 pub(crate) async fn load_task_runtime(
@@ -42,26 +52,11 @@ pub(crate) async fn load_task_runtime(
         work_unit_runtimes.push(StudioTaskWorkUnitRuntime {
             id: unit.id.clone(),
             title: unit.title.clone(),
-            status: unit.status.as_str().to_string(),
+            state: studio_work_unit_state(&unit.state),
             worktree_path: unit.worktree_path.clone(),
             branch: unit.branch.clone(),
             agent_id: unit.executor_thread_id.clone(),
-            execution_status: unit.execution_status.as_str().to_string(),
-            execution_error: unit.execution_error.clone(),
-            budget_limit: unit.budget_limit.map(|limit| StudioBudgetLimitRuntime {
-                kind: limit.kind.as_str().to_string(),
-                usage: StudioBudgetUsageRuntime {
-                    model_steps: limit.usage.model_steps,
-                    tool_calls: limit.usage.tool_calls,
-                    wait_calls: limit.usage.wait_calls,
-                    elapsed_ms: limit.usage.elapsed_ms,
-                },
-            }),
-            budget_slice_count: unit.budget_slice_count,
             budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
-            continuation_state: unit.continuation_state.as_str().to_string(),
-            continuation_source_turn_id: unit.continuation_source_turn_id.clone(),
-            continuation_revision: unit.continuation_revision,
             executor_progress_revision,
             blueprint_fingerprint: handoff
                 .as_ref()
@@ -92,7 +87,7 @@ pub(crate) async fn load_task_runtime(
     )
     .await;
     let failures = store.list_task_failures(&run.id).await?;
-    Ok(Some(studio_task_runtime(
+    studio_task_runtime(
         run,
         work_unit_runtimes,
         completions,
@@ -100,7 +95,8 @@ pub(crate) async fn load_task_runtime(
         reviews,
         failures,
         integrated_review_gate,
-    )))
+    )
+    .map(Some)
 }
 
 fn studio_task_runtime(
@@ -111,8 +107,8 @@ fn studio_task_runtime(
     reviews: Vec<ReviewRoundRecord>,
     failures: Vec<super::task_coordinator::TaskFailureRecord>,
     integrated_review_gate: StudioIntegratedReviewGate,
-) -> StudioTaskRuntime {
-    let terminal_failure_id = run.terminal_failure_id.clone();
+) -> Result<StudioTaskRuntime> {
+    let terminal_failure_id = run.terminal_failure_id();
     let all_failures = failures
         .into_iter()
         .map(|failure| StudioTaskFailureRuntime {
@@ -130,26 +126,18 @@ fn studio_task_runtime(
         })
         .collect::<Vec<_>>();
     let terminal_failure = terminal_failure_id
-        .as_deref()
         .and_then(|id| all_failures.iter().find(|failure| failure.id == id))
         .cloned();
     let failures = all_failures
         .into_iter()
         .filter(|failure| failure.resolved_at.is_none())
         .collect();
-    StudioTaskRuntime {
-        run_id: run.id,
-        phase: run.phase.as_str().to_string(),
-        branch: run.branch,
-        expected_head: run.expected_head,
-        status_message: run.status_message,
-        stop_requested_origin: run
-            .stop_requested_origin
-            .map(|origin| origin.as_str().to_string()),
-        stop_requested_reason: run
-            .stop_requested_reason
-            .map(|reason| reason.as_str().to_string()),
-        task_generation: run.task_generation,
+    Ok(StudioTaskRuntime {
+        run_id: run.id.clone(),
+        state: studio_task_state(&run)?,
+        branch: run.branch.clone(),
+        expected_head: run.expected_head.clone(),
+        revision: run.revision,
         integrated_review_gate,
         failures,
         terminal_failure,
@@ -202,10 +190,9 @@ fn studio_task_runtime(
                 completion_id: review.completion_id,
                 completion_revision: review.completion_revision,
                 reviewed_head: review.reviewed_head,
-                verdict: review.verdict.as_str().to_string(),
+                state: studio_review_state(&review.state),
                 requested_by_call_id: review.requested_by_call_id,
                 reviewer_agent_id: review.reviewer_thread_id,
-                summary: review.summary,
                 design_references: review
                     .design_references
                     .into_iter()
@@ -238,5 +225,194 @@ fn studio_task_runtime(
                 updated_at: review.updated_at,
             })
             .collect(),
+    })
+}
+
+fn studio_task_state(run: &TaskRunRecord) -> Result<StudioTaskState> {
+    let data = StudioTaskStateData {
+        generation: run.generation(),
+        status_message: run.status_message().map(str::to_string),
+        finalized_design: match run.state.design() {
+            DesignProgress::Updating => None,
+            DesignProgress::Finalized(design) => Some(StudioFinalizedDesign {
+                head: design.head.clone(),
+                commit: design.commit.clone(),
+                summary: design.summary.clone(),
+                fingerprint: serde_json::to_string(&design.fingerprint)?,
+            }),
+        },
+        stop_request: run
+            .state
+            .stop_request()
+            .map(|request| StudioTaskStopRequest {
+                origin: request.origin.as_str().to_string(),
+                reason: request.reason.as_str().to_string(),
+                requested_at: request.requested_at,
+            }),
+        review_target: match &run.state {
+            TaskRunState::Reviewing(state) => Some(studio_review_target(state.target())),
+            _ => None,
+        },
+        blocked_recovery: match &run.state {
+            TaskRunState::Blocked(state) => Some(match state.recovery() {
+                BlockedRecovery::RetryMerge => StudioBlockedRecovery::RetryMerge,
+                BlockedRecovery::ResumeRework => StudioBlockedRecovery::ResumeRework,
+                BlockedRecovery::ManualOnly => StudioBlockedRecovery::ManualOnly,
+            }),
+            _ => None,
+        },
+        failure_id: run.terminal_failure_id().map(str::to_string),
+    };
+    Ok(match &run.state {
+        TaskRunState::DesignUpdating(_) => StudioTaskState::DesignUpdating(data),
+        TaskRunState::Implementing(_) => StudioTaskState::Implementing(data),
+        TaskRunState::Merging(_) => StudioTaskState::Merging(data),
+        TaskRunState::Reviewing(_) => StudioTaskState::Reviewing(data),
+        TaskRunState::Reworking(_) => StudioTaskState::Reworking(data),
+        TaskRunState::Stopping(_) => StudioTaskState::Stopping(data),
+        TaskRunState::Blocked(_) => StudioTaskState::Blocked(data),
+        TaskRunState::Completed(_) => StudioTaskState::Completed(data),
+        TaskRunState::Failed(_) => StudioTaskState::Failed(data),
+        TaskRunState::Cancelled(_) => StudioTaskState::Cancelled(data),
+    })
+}
+
+fn studio_review_target(target: &ReviewTarget) -> StudioTaskReviewTarget {
+    match target {
+        ReviewTarget::Delivery {
+            work_unit_id,
+            completion_id,
+            completion_revision,
+            reviewed_head,
+        } => StudioTaskReviewTarget::Delivery {
+            work_unit_id: work_unit_id.clone(),
+            completion_id: completion_id.clone(),
+            completion_revision: *completion_revision,
+            reviewed_head: reviewed_head.clone(),
+        },
+        ReviewTarget::Integration { reviewed_head } => StudioTaskReviewTarget::Integration {
+            reviewed_head: reviewed_head.clone(),
+        },
+    }
+}
+
+fn studio_work_unit_state(state: &WorkUnitState) -> StudioTaskWorkUnitState {
+    match state {
+        WorkUnitState::Pending(progress) => {
+            StudioTaskWorkUnitState::Pending(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Running(state) => StudioTaskWorkUnitState::Running(StudioRunningWorkUnit {
+            execution: match state.execution {
+                RunningExecution::Running => StudioRunningExecution::Running,
+                RunningExecution::BudgetLimited => StudioRunningExecution::BudgetLimited,
+            },
+            progress: studio_work_unit_progress(&state.progress),
+        }),
+        WorkUnitState::AwaitingCompletion(state) => {
+            StudioTaskWorkUnitState::AwaitingCompletion(StudioAwaitingWorkUnit {
+                execution: match state.execution {
+                    AwaitingExecution::Completed => StudioAwaitingExecution::Completed,
+                    AwaitingExecution::Failed => StudioAwaitingExecution::Failed,
+                    AwaitingExecution::Cancelled => StudioAwaitingExecution::Cancelled,
+                },
+                progress: studio_work_unit_progress(&state.progress),
+            })
+        }
+        WorkUnitState::ReadyForReview(progress) => {
+            StudioTaskWorkUnitState::ReadyForReview(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Reviewing(progress) => {
+            StudioTaskWorkUnitState::Reviewing(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::ChangesRequested(progress) => {
+            StudioTaskWorkUnitState::ChangesRequested(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Approved(progress) => {
+            StudioTaskWorkUnitState::Approved(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Merged(progress) => {
+            StudioTaskWorkUnitState::Merged(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::NoDelivery(progress) => {
+            StudioTaskWorkUnitState::NoDelivery(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::NeedsAttention(progress) => {
+            StudioTaskWorkUnitState::NeedsAttention(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Failed(progress) => {
+            StudioTaskWorkUnitState::Failed(studio_work_unit_progress(progress))
+        }
+        WorkUnitState::Cancelled(progress) => {
+            StudioTaskWorkUnitState::Cancelled(studio_work_unit_progress(progress))
+        }
+    }
+}
+
+fn studio_work_unit_progress(progress: &WorkUnitProgress) -> StudioTaskWorkUnitProgress {
+    StudioTaskWorkUnitProgress {
+        worktree_disposition: match progress.worktree_disposition {
+            TaskWorktreeDisposition::Protect => StudioTaskWorktreeDisposition::Protect,
+            TaskWorktreeDisposition::CleanupRequested => {
+                StudioTaskWorktreeDisposition::CleanupRequested
+            }
+        },
+        execution_summary: progress.execution_summary.clone(),
+        execution_error: progress.execution_error.clone(),
+        budget_limit: progress
+            .budget_limit
+            .as_ref()
+            .map(|limit| StudioBudgetLimitRuntime {
+                kind: limit.kind.as_str().to_string(),
+                usage: StudioBudgetUsageRuntime {
+                    model_steps: limit.usage.model_steps,
+                    tool_calls: limit.usage.tool_calls,
+                    wait_calls: limit.usage.wait_calls,
+                    elapsed_ms: limit.usage.elapsed_ms,
+                },
+            }),
+        budget_slice_count: progress.budget_slice_count,
+        continuation_state: match progress.continuation_state {
+            ExecutorContinuationState::None => StudioExecutorContinuationState::None,
+            ExecutorContinuationState::PendingStart => {
+                StudioExecutorContinuationState::PendingStart
+            }
+            ExecutorContinuationState::Compacting => StudioExecutorContinuationState::Compacting,
+            ExecutorContinuationState::PlannerWakePending => {
+                StudioExecutorContinuationState::PlannerWakePending
+            }
+            ExecutorContinuationState::NeedsAttention => {
+                StudioExecutorContinuationState::NeedsAttention
+            }
+        },
+        continuation_source_turn_id: progress.continuation_source_turn_id.clone(),
+        continuation_revision: progress.continuation_revision,
+    }
+}
+
+fn studio_review_state(state: &ReviewRoundState) -> StudioTaskReviewState {
+    match state {
+        ReviewRoundState::Pending(state) => StudioTaskReviewState::Pending {
+            reviewer: match state.reviewer {
+                PendingReviewerState::Queued => StudioPendingReviewerState::Queued,
+                PendingReviewerState::Running => StudioPendingReviewerState::Running,
+            },
+        },
+        ReviewRoundState::Pass(state) => StudioTaskReviewState::Pass {
+            summary: state.summary.clone(),
+        },
+        ReviewRoundState::ChangesRequired(state) => StudioTaskReviewState::ChangesRequired {
+            summary: state.summary.clone(),
+        },
+        ReviewRoundState::Blocked(state) => StudioTaskReviewState::Blocked {
+            summary: state.summary.clone(),
+        },
+        ReviewRoundState::Failed(state) => StudioTaskReviewState::Failed {
+            reviewer: match state.reviewer {
+                FailedReviewerState::Failed => StudioFailedReviewerState::Failed,
+                FailedReviewerState::Cancelled => StudioFailedReviewerState::Cancelled,
+            },
+            error: state.error.clone(),
+            summary: state.summary.clone(),
+        },
     }
 }

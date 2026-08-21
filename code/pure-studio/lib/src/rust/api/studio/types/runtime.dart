@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentActivity {
   idle,
@@ -138,6 +138,31 @@ class BridgeAgentProgressDto {
           updatedAt == other.updatedAt;
 }
 
+enum BridgeAwaitingExecution { completed, failed, cancelled }
+
+class BridgeAwaitingWorkUnit {
+  final BridgeAwaitingExecution execution;
+  final BridgeTaskWorkUnitProgress progress;
+
+  const BridgeAwaitingWorkUnit({
+    required this.execution,
+    required this.progress,
+  });
+
+  @override
+  int get hashCode => execution.hashCode ^ progress.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAwaitingWorkUnit &&
+          runtimeType == other.runtimeType &&
+          execution == other.execution &&
+          progress == other.progress;
+}
+
+enum BridgeBlockedRecovery { retryMerge, resumeRework, manualOnly }
+
 class BridgeBudgetLimitDto {
   final String kind;
   final BridgeBudgetUsageDto usage;
@@ -188,6 +213,44 @@ class BridgeBudgetUsageDto {
 }
 
 enum BridgeConversationRecoveryMode { rewindTail, rebuildThread }
+
+enum BridgeExecutorContinuationState {
+  none,
+  pendingStart,
+  compacting,
+  plannerWakePending,
+  needsAttention,
+}
+
+enum BridgeFailedReviewerState { failed, cancelled }
+
+class BridgeFinalizedDesign {
+  final String head;
+  final String? commit;
+  final String summary;
+  final String fingerprint;
+
+  const BridgeFinalizedDesign({
+    required this.head,
+    this.commit,
+    required this.summary,
+    required this.fingerprint,
+  });
+
+  @override
+  int get hashCode =>
+      head.hashCode ^ commit.hashCode ^ summary.hashCode ^ fingerprint.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeFinalizedDesign &&
+          runtimeType == other.runtimeType &&
+          head == other.head &&
+          commit == other.commit &&
+          summary == other.summary &&
+          fingerprint == other.fingerprint;
+}
 
 @freezed
 sealed class BridgeIntegratedReviewGateDto
@@ -437,6 +500,8 @@ sealed class BridgeObservedStatePhase with _$BridgeObservedStatePhase {
       BridgeObservedStatePhase_Stopped;
 }
 
+enum BridgePendingReviewerState { queued, running }
+
 class BridgeRecoveryCleanupPreviewDto {
   final String issueId;
   final String expectedRevision;
@@ -553,6 +618,29 @@ enum BridgeRecoveryIssueCategory {
 enum BridgeRecoveryIssueScope { application, project, thread }
 
 enum BridgeRecoveryResourcePresence { absent, complete, partial }
+
+enum BridgeRunningExecution { running, budgetLimited }
+
+class BridgeRunningWorkUnit {
+  final BridgeRunningExecution execution;
+  final BridgeTaskWorkUnitProgress progress;
+
+  const BridgeRunningWorkUnit({
+    required this.execution,
+    required this.progress,
+  });
+
+  @override
+  int get hashCode => execution.hashCode ^ progress.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRunningWorkUnit &&
+          runtimeType == other.runtimeType &&
+          execution == other.execution &&
+          progress == other.progress;
+}
 
 enum BridgeRuntimeStatus {
   uninitialized,
@@ -948,8 +1036,9 @@ class BridgeTaskRecoveryPreviewDto {
   final String previewToken;
   final String rootThreadId;
   final String runId;
+  final BigInt revision;
   final BigInt taskGeneration;
-  final String phase;
+  final BridgeTaskRecoveryState state;
   final String expectedHead;
   final bool stopRequested;
   final String branchLeaseId;
@@ -967,8 +1056,9 @@ class BridgeTaskRecoveryPreviewDto {
     required this.previewToken,
     required this.rootThreadId,
     required this.runId,
+    required this.revision,
     required this.taskGeneration,
-    required this.phase,
+    required this.state,
     required this.expectedHead,
     required this.stopRequested,
     required this.branchLeaseId,
@@ -988,8 +1078,9 @@ class BridgeTaskRecoveryPreviewDto {
       previewToken.hashCode ^
       rootThreadId.hashCode ^
       runId.hashCode ^
+      revision.hashCode ^
       taskGeneration.hashCode ^
-      phase.hashCode ^
+      state.hashCode ^
       expectedHead.hashCode ^
       stopRequested.hashCode ^
       branchLeaseId.hashCode ^
@@ -1011,8 +1102,9 @@ class BridgeTaskRecoveryPreviewDto {
           previewToken == other.previewToken &&
           rootThreadId == other.rootThreadId &&
           runId == other.runId &&
+          revision == other.revision &&
           taskGeneration == other.taskGeneration &&
-          phase == other.phase &&
+          state == other.state &&
           expectedHead == other.expectedHead &&
           stopRequested == other.stopRequested &&
           branchLeaseId == other.branchLeaseId &&
@@ -1146,6 +1238,19 @@ class BridgeTaskRecoveryResultDto {
           gitFingerprint == other.gitFingerprint;
 }
 
+enum BridgeTaskRecoveryState {
+  designUpdating,
+  implementing,
+  merging,
+  reviewing,
+  reworking,
+  stopping,
+  blocked,
+  completed,
+  failed,
+  cancelled,
+}
+
 class BridgeTaskRecoveryTargetDto {
   final String threadId;
   final BridgeTaskRecoveryTargetKind kind;
@@ -1266,10 +1371,9 @@ class BridgeTaskReviewDto {
   final String? completionId;
   final int? completionRevision;
   final String reviewedHead;
-  final String verdict;
+  final BridgeTaskReviewState state;
   final String requestedByCallId;
   final String? reviewerAgentId;
-  final String? summary;
   final List<BridgeTaskDesignReferenceDto> designReferences;
   final List<BridgeTaskReviewFindingDto> findings;
   final PlatformInt64 createdAt;
@@ -1283,10 +1387,9 @@ class BridgeTaskReviewDto {
     this.completionId,
     this.completionRevision,
     required this.reviewedHead,
-    required this.verdict,
+    required this.state,
     required this.requestedByCallId,
     this.reviewerAgentId,
-    this.summary,
     required this.designReferences,
     required this.findings,
     required this.createdAt,
@@ -1302,10 +1405,9 @@ class BridgeTaskReviewDto {
       completionId.hashCode ^
       completionRevision.hashCode ^
       reviewedHead.hashCode ^
-      verdict.hashCode ^
+      state.hashCode ^
       requestedByCallId.hashCode ^
       reviewerAgentId.hashCode ^
-      summary.hashCode ^
       designReferences.hashCode ^
       findings.hashCode ^
       createdAt.hashCode ^
@@ -1323,10 +1425,9 @@ class BridgeTaskReviewDto {
           completionId == other.completionId &&
           completionRevision == other.completionRevision &&
           reviewedHead == other.reviewedHead &&
-          verdict == other.verdict &&
+          state == other.state &&
           requestedByCallId == other.requestedByCallId &&
           reviewerAgentId == other.reviewerAgentId &&
-          summary == other.summary &&
           designReferences == other.designReferences &&
           findings == other.findings &&
           createdAt == other.createdAt &&
@@ -1376,15 +1477,48 @@ class BridgeTaskReviewFindingDto {
           designReferences == other.designReferences;
 }
 
+@freezed
+sealed class BridgeTaskReviewState with _$BridgeTaskReviewState {
+  const BridgeTaskReviewState._();
+
+  const factory BridgeTaskReviewState.pending({
+    required BridgePendingReviewerState reviewer,
+  }) = BridgeTaskReviewState_Pending;
+  const factory BridgeTaskReviewState.pass({required String summary}) =
+      BridgeTaskReviewState_Pass;
+  const factory BridgeTaskReviewState.changesRequired({
+    required String summary,
+  }) = BridgeTaskReviewState_ChangesRequired;
+  const factory BridgeTaskReviewState.blocked({required String summary}) =
+      BridgeTaskReviewState_Blocked;
+  const factory BridgeTaskReviewState.failed({
+    required BridgeFailedReviewerState reviewer,
+    required String error,
+    required String summary,
+  }) = BridgeTaskReviewState_Failed;
+}
+
+@freezed
+sealed class BridgeTaskReviewTarget with _$BridgeTaskReviewTarget {
+  const BridgeTaskReviewTarget._();
+
+  const factory BridgeTaskReviewTarget.delivery({
+    required String workUnitId,
+    required String completionId,
+    required int completionRevision,
+    required String reviewedHead,
+  }) = BridgeTaskReviewTarget_Delivery;
+  const factory BridgeTaskReviewTarget.integration({
+    required String reviewedHead,
+  }) = BridgeTaskReviewTarget_Integration;
+}
+
 class BridgeTaskRuntimeDto {
   final String runId;
-  final String phase;
+  final BridgeTaskState state;
   final String branch;
   final String expectedHead;
-  final String? statusMessage;
-  final String? stopRequestedOrigin;
-  final String? stopRequestedReason;
-  final BigInt taskGeneration;
+  final BigInt revision;
   final BridgeIntegratedReviewGateDto integratedReviewGate;
   final List<BridgeTaskFailureDto> failures;
   final BridgeTaskFailureDto? terminalFailure;
@@ -1395,13 +1529,10 @@ class BridgeTaskRuntimeDto {
 
   const BridgeTaskRuntimeDto({
     required this.runId,
-    required this.phase,
+    required this.state,
     required this.branch,
     required this.expectedHead,
-    this.statusMessage,
-    this.stopRequestedOrigin,
-    this.stopRequestedReason,
-    required this.taskGeneration,
+    required this.revision,
     required this.integratedReviewGate,
     required this.failures,
     this.terminalFailure,
@@ -1414,13 +1545,10 @@ class BridgeTaskRuntimeDto {
   @override
   int get hashCode =>
       runId.hashCode ^
-      phase.hashCode ^
+      state.hashCode ^
       branch.hashCode ^
       expectedHead.hashCode ^
-      statusMessage.hashCode ^
-      stopRequestedOrigin.hashCode ^
-      stopRequestedReason.hashCode ^
-      taskGeneration.hashCode ^
+      revision.hashCode ^
       integratedReviewGate.hashCode ^
       failures.hashCode ^
       terminalFailure.hashCode ^
@@ -1435,13 +1563,10 @@ class BridgeTaskRuntimeDto {
       other is BridgeTaskRuntimeDto &&
           runtimeType == other.runtimeType &&
           runId == other.runId &&
-          phase == other.phase &&
+          state == other.state &&
           branch == other.branch &&
           expectedHead == other.expectedHead &&
-          statusMessage == other.statusMessage &&
-          stopRequestedOrigin == other.stopRequestedOrigin &&
-          stopRequestedReason == other.stopRequestedReason &&
-          taskGeneration == other.taskGeneration &&
+          revision == other.revision &&
           integratedReviewGate == other.integratedReviewGate &&
           failures == other.failures &&
           terminalFailure == other.terminalFailure &&
@@ -1451,21 +1576,107 @@ class BridgeTaskRuntimeDto {
           reviews == other.reviews;
 }
 
+@freezed
+sealed class BridgeTaskState with _$BridgeTaskState {
+  const BridgeTaskState._();
+
+  const factory BridgeTaskState.designUpdating(BridgeTaskStateData field0) =
+      BridgeTaskState_DesignUpdating;
+  const factory BridgeTaskState.implementing(BridgeTaskStateData field0) =
+      BridgeTaskState_Implementing;
+  const factory BridgeTaskState.merging(BridgeTaskStateData field0) =
+      BridgeTaskState_Merging;
+  const factory BridgeTaskState.reviewing(BridgeTaskStateData field0) =
+      BridgeTaskState_Reviewing;
+  const factory BridgeTaskState.reworking(BridgeTaskStateData field0) =
+      BridgeTaskState_Reworking;
+  const factory BridgeTaskState.stopping(BridgeTaskStateData field0) =
+      BridgeTaskState_Stopping;
+  const factory BridgeTaskState.blocked(BridgeTaskStateData field0) =
+      BridgeTaskState_Blocked;
+  const factory BridgeTaskState.completed(BridgeTaskStateData field0) =
+      BridgeTaskState_Completed;
+  const factory BridgeTaskState.failed(BridgeTaskStateData field0) =
+      BridgeTaskState_Failed;
+  const factory BridgeTaskState.cancelled(BridgeTaskStateData field0) =
+      BridgeTaskState_Cancelled;
+}
+
+class BridgeTaskStateData {
+  final BigInt generation;
+  final String? statusMessage;
+  final BridgeFinalizedDesign? finalizedDesign;
+  final BridgeTaskStopRequest? stopRequest;
+  final BridgeTaskReviewTarget? reviewTarget;
+  final BridgeBlockedRecovery? blockedRecovery;
+  final String? failureId;
+
+  const BridgeTaskStateData({
+    required this.generation,
+    this.statusMessage,
+    this.finalizedDesign,
+    this.stopRequest,
+    this.reviewTarget,
+    this.blockedRecovery,
+    this.failureId,
+  });
+
+  @override
+  int get hashCode =>
+      generation.hashCode ^
+      statusMessage.hashCode ^
+      finalizedDesign.hashCode ^
+      stopRequest.hashCode ^
+      reviewTarget.hashCode ^
+      blockedRecovery.hashCode ^
+      failureId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskStateData &&
+          runtimeType == other.runtimeType &&
+          generation == other.generation &&
+          statusMessage == other.statusMessage &&
+          finalizedDesign == other.finalizedDesign &&
+          stopRequest == other.stopRequest &&
+          reviewTarget == other.reviewTarget &&
+          blockedRecovery == other.blockedRecovery &&
+          failureId == other.failureId;
+}
+
+class BridgeTaskStopRequest {
+  final String origin;
+  final String reason;
+  final PlatformInt64 requestedAt;
+
+  const BridgeTaskStopRequest({
+    required this.origin,
+    required this.reason,
+    required this.requestedAt,
+  });
+
+  @override
+  int get hashCode => origin.hashCode ^ reason.hashCode ^ requestedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskStopRequest &&
+          runtimeType == other.runtimeType &&
+          origin == other.origin &&
+          reason == other.reason &&
+          requestedAt == other.requestedAt;
+}
+
 class BridgeTaskWorkUnitDto {
   final String id;
   final String title;
-  final String status;
+  final BridgeTaskWorkUnitState state;
   final String worktreePath;
   final String branch;
   final String? agentId;
-  final String executionStatus;
-  final String? executionError;
-  final BridgeBudgetLimitDto? budgetLimit;
-  final int budgetSliceCount;
   final int budgetSliceLimit;
-  final String continuationState;
-  final String? continuationSourceTurnId;
-  final BigInt continuationRevision;
   final BigInt executorProgressRevision;
   final String? blueprintFingerprint;
   final String? objective;
@@ -1476,18 +1687,11 @@ class BridgeTaskWorkUnitDto {
   const BridgeTaskWorkUnitDto({
     required this.id,
     required this.title,
-    required this.status,
+    required this.state,
     required this.worktreePath,
     required this.branch,
     this.agentId,
-    required this.executionStatus,
-    this.executionError,
-    this.budgetLimit,
-    required this.budgetSliceCount,
     required this.budgetSliceLimit,
-    required this.continuationState,
-    this.continuationSourceTurnId,
-    required this.continuationRevision,
     required this.executorProgressRevision,
     this.blueprintFingerprint,
     this.objective,
@@ -1500,18 +1704,11 @@ class BridgeTaskWorkUnitDto {
   int get hashCode =>
       id.hashCode ^
       title.hashCode ^
-      status.hashCode ^
+      state.hashCode ^
       worktreePath.hashCode ^
       branch.hashCode ^
       agentId.hashCode ^
-      executionStatus.hashCode ^
-      executionError.hashCode ^
-      budgetLimit.hashCode ^
-      budgetSliceCount.hashCode ^
       budgetSliceLimit.hashCode ^
-      continuationState.hashCode ^
-      continuationSourceTurnId.hashCode ^
-      continuationRevision.hashCode ^
       executorProgressRevision.hashCode ^
       blueprintFingerprint.hashCode ^
       objective.hashCode ^
@@ -1526,18 +1723,11 @@ class BridgeTaskWorkUnitDto {
           runtimeType == other.runtimeType &&
           id == other.id &&
           title == other.title &&
-          status == other.status &&
+          state == other.state &&
           worktreePath == other.worktreePath &&
           branch == other.branch &&
           agentId == other.agentId &&
-          executionStatus == other.executionStatus &&
-          executionError == other.executionError &&
-          budgetLimit == other.budgetLimit &&
-          budgetSliceCount == other.budgetSliceCount &&
           budgetSliceLimit == other.budgetSliceLimit &&
-          continuationState == other.continuationState &&
-          continuationSourceTurnId == other.continuationSourceTurnId &&
-          continuationRevision == other.continuationRevision &&
           executorProgressRevision == other.executorProgressRevision &&
           blueprintFingerprint == other.blueprintFingerprint &&
           objective == other.objective &&
@@ -1545,6 +1735,96 @@ class BridgeTaskWorkUnitDto {
           acceptanceCriterionCount == other.acceptanceCriterionCount &&
           verificationCount == other.verificationCount;
 }
+
+class BridgeTaskWorkUnitProgress {
+  final BridgeTaskWorktreeDisposition worktreeDisposition;
+  final String? executionSummary;
+  final String? executionError;
+  final BridgeBudgetLimitDto? budgetLimit;
+  final int budgetSliceCount;
+  final BridgeExecutorContinuationState continuationState;
+  final String? continuationSourceTurnId;
+  final BigInt continuationRevision;
+
+  const BridgeTaskWorkUnitProgress({
+    required this.worktreeDisposition,
+    this.executionSummary,
+    this.executionError,
+    this.budgetLimit,
+    required this.budgetSliceCount,
+    required this.continuationState,
+    this.continuationSourceTurnId,
+    required this.continuationRevision,
+  });
+
+  @override
+  int get hashCode =>
+      worktreeDisposition.hashCode ^
+      executionSummary.hashCode ^
+      executionError.hashCode ^
+      budgetLimit.hashCode ^
+      budgetSliceCount.hashCode ^
+      continuationState.hashCode ^
+      continuationSourceTurnId.hashCode ^
+      continuationRevision.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskWorkUnitProgress &&
+          runtimeType == other.runtimeType &&
+          worktreeDisposition == other.worktreeDisposition &&
+          executionSummary == other.executionSummary &&
+          executionError == other.executionError &&
+          budgetLimit == other.budgetLimit &&
+          budgetSliceCount == other.budgetSliceCount &&
+          continuationState == other.continuationState &&
+          continuationSourceTurnId == other.continuationSourceTurnId &&
+          continuationRevision == other.continuationRevision;
+}
+
+@freezed
+sealed class BridgeTaskWorkUnitState with _$BridgeTaskWorkUnitState {
+  const BridgeTaskWorkUnitState._();
+
+  const factory BridgeTaskWorkUnitState.pending(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Pending;
+  const factory BridgeTaskWorkUnitState.running(BridgeRunningWorkUnit field0) =
+      BridgeTaskWorkUnitState_Running;
+  const factory BridgeTaskWorkUnitState.awaitingCompletion(
+    BridgeAwaitingWorkUnit field0,
+  ) = BridgeTaskWorkUnitState_AwaitingCompletion;
+  const factory BridgeTaskWorkUnitState.readyForReview(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_ReadyForReview;
+  const factory BridgeTaskWorkUnitState.reviewing(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Reviewing;
+  const factory BridgeTaskWorkUnitState.changesRequested(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_ChangesRequested;
+  const factory BridgeTaskWorkUnitState.approved(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Approved;
+  const factory BridgeTaskWorkUnitState.merged(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Merged;
+  const factory BridgeTaskWorkUnitState.noDelivery(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_NoDelivery;
+  const factory BridgeTaskWorkUnitState.needsAttention(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_NeedsAttention;
+  const factory BridgeTaskWorkUnitState.failed(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Failed;
+  const factory BridgeTaskWorkUnitState.cancelled(
+    BridgeTaskWorkUnitProgress field0,
+  ) = BridgeTaskWorkUnitState_Cancelled;
+}
+
+enum BridgeTaskWorktreeDisposition { protect, cleanupRequested }
 
 class RuntimeSnapshot {
   final BridgeRuntimeStatus status;

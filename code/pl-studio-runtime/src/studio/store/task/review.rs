@@ -9,10 +9,13 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentReview, BeginIntegratedReview, ReviewExitDiagnostics, ReviewFileCoverage,
-    ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunPhase, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionStatus, WorkUnitStatus,
+    ReviewRoundRecord, ReviewRoundState, ReviewScope, ReviewTarget, ReviewVerdict, TaskCommand,
+    TaskRunStateKind, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus,
+    WorkUnitStatus, decode_review_round_state,
 };
 use pl_core::TurnOutcomeKind;
+
+use super::work_unit::{update_work_unit_state, work_unit_state};
 
 impl StudioStore {
     pub(crate) async fn begin_delivery_review(
@@ -33,8 +36,13 @@ impl StudioStore {
                 .all(&tx)
                 .await?;
             let work_unit = match units.as_slice() {
-                [unit] if unit.status == WorkUnitStatus::ReadyForReview.as_str() => unit.clone(),
-                [unit] => bail!("executor work unit is {}, not readyForReview", unit.status),
+                [unit] if unit.state_kind == WorkUnitStatus::ReadyForReview.as_str() => {
+                    unit.clone()
+                }
+                [unit] => bail!(
+                    "executor work unit is {}, not readyForReview",
+                    unit.state_kind
+                ),
                 [] => bail!("executor work unit not found"),
                 _ => bail!("executor owns multiple work units"),
             };
@@ -69,10 +77,17 @@ impl StudioStore {
                 },
             )
             .await?;
-            let mut unit_active: entities::work_unit::ActiveModel = work_unit.into();
-            unit_active.status = Set(WorkUnitStatus::Reviewing.as_str().to_string());
-            unit_active.updated_at = Set(unix_seconds());
-            unit_active.update(&tx).await?;
+            let state = work_unit_state(&work_unit)?;
+            let execution = state.execution_status();
+            let progress = state.into_progress();
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::Reviewing,
+                execution,
+                progress,
+            )
+            .await?;
             Ok(round)
         }
         .await;
@@ -97,7 +112,7 @@ impl StudioStore {
                 .await?;
             if work_units.iter().any(|unit| {
                 !matches!(
-                    WorkUnitStatus::from_str(&unit.status),
+                    WorkUnitStatus::from_str(&unit.state_kind),
                     Some(WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery)
                 )
             }) {
@@ -116,13 +131,14 @@ impl StudioStore {
                 },
             )
             .await?;
-            let mut run_active: entities::task_run::ActiveModel = run.into();
-            run_active.phase = Set(TaskRunPhase::Reviewing.as_str().to_string());
-            run_active.status_message = Set(Some(
-                "integrated reviewer is inspecting the task HEAD".to_string(),
-            ));
-            run_active.updated_at = Set(unix_seconds());
-            run_active.update(&tx).await?;
+            super::apply_task_command(
+                &tx,
+                run,
+                TaskCommand::BeginReviewing(ReviewTarget::Integration {
+                    reviewed_head: request.reviewed_head,
+                }),
+            )
+            .await?;
             Ok(round)
         }
         .await;
@@ -142,13 +158,34 @@ impl StudioStore {
             if round.reviewer_thread_id.is_some() {
                 bail!("reviewer spawn authorization is already consumed");
             }
-            let now = unix_seconds();
-            let mut round_active: entities::review_round::ActiveModel = round.into();
-            round_active.reviewer_thread_id = Set(Some(agent_id.to_string()));
-            round_active.reviewer_status = Set(ThreadExecutionStatus::Queued.as_str().to_string());
-            round_active.reviewer_error = Set(None);
-            round_active.updated_at = Set(now);
-            let round = round_active.update(&tx).await?;
+            let next_revision = round
+                .revision
+                .checked_add(1)
+                .context("ReviewRound revision overflow")?;
+            let update = entities::review_round::Entity::update_many()
+                .col_expr(
+                    entities::review_round::Column::ReviewerThreadId,
+                    Expr::value(Some(agent_id.to_string())),
+                )
+                .col_expr(
+                    entities::review_round::Column::Revision,
+                    Expr::value(next_revision),
+                )
+                .col_expr(
+                    entities::review_round::Column::UpdatedAt,
+                    Expr::value(unix_seconds()),
+                )
+                .filter(entities::review_round::Column::Id.eq(round.id.clone()))
+                .filter(entities::review_round::Column::Revision.eq(round.revision))
+                .exec(&tx)
+                .await?;
+            if update.rows_affected != 1 {
+                bail!("ReviewRound authorization lost its revision CAS");
+            }
+            let round = entities::review_round::Entity::find_by_id(round.id)
+                .one(&tx)
+                .await?
+                .context("ReviewRound disappeared after reviewer authorization")?;
             review_round_record(round)
         }
         .await;
@@ -164,17 +201,20 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("review round not found")?;
+        let state = review_round_state(&round)?;
         if round.reviewer_thread_id.as_deref() != Some(reviewer_thread_id)
-            || round.status != ReviewVerdict::Pending.as_str()
-            || round.reviewer_status != ThreadExecutionStatus::Queued.as_str()
+            || state.verdict() != ReviewVerdict::Pending
+            || state.reviewer_status() != ThreadExecutionStatus::Queued
         {
             bail!("reviewer activation does not match the pending review round");
         }
-        let mut active: entities::review_round::ActiveModel = round.into();
-        active.reviewer_status = Set(ThreadExecutionStatus::Running.as_str().to_string());
-        active.reviewer_error = Set(None);
-        active.updated_at = Set(unix_seconds());
-        active.update(&self.db).await?;
+        let state = ReviewRoundState::from_parts(
+            ReviewVerdict::Pending,
+            ThreadExecutionStatus::Running,
+            None,
+            None,
+        )?;
+        update_review_round_state(&self.db, round, state).await?;
         Ok(())
     }
 
@@ -194,14 +234,13 @@ impl StudioStore {
             {
                 bail!("review spawn failure does not match reviewer authorization");
             }
-            let now = unix_seconds();
-            let mut round_active: entities::review_round::ActiveModel = round.clone().into();
-            round_active.status = Set(ReviewVerdict::Failed.as_str().to_string());
-            round_active.reviewer_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
-            round_active.reviewer_error = Set(Some(error.to_string()));
-            round_active.summary = Set(Some(error.to_string()));
-            round_active.updated_at = Set(now);
-            round_active.update(&tx).await?;
+            let failed_state = ReviewRoundState::from_parts(
+                ReviewVerdict::Failed,
+                ThreadExecutionStatus::Failed,
+                Some(error.to_string()),
+                Some(error.to_string()),
+            )?;
+            update_review_round_state(&tx, round.clone(), failed_state).await?;
             match ReviewScope::from_str(&round.scope) {
                 Some(ReviewScope::Delivery) => {
                     let work_unit_id = round
@@ -212,17 +251,27 @@ impl StudioStore {
                         .one(&tx)
                         .await?
                         .context("delivery review work unit not found")?;
-                    let mut active: entities::work_unit::ActiveModel = unit.into();
-                    active.status = Set(WorkUnitStatus::ReadyForReview.as_str().to_string());
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                    let state = work_unit_state(&unit)?;
+                    let execution = state.execution_status();
+                    let progress = state.into_progress();
+                    update_work_unit_state(
+                        &tx,
+                        unit,
+                        WorkUnitStatus::ReadyForReview,
+                        execution,
+                        progress,
+                    )
+                    .await?;
                 }
                 Some(ReviewScope::Integrated) => {
-                    let mut active: entities::task_run::ActiveModel = run.into();
-                    active.phase = Set(TaskRunPhase::Reworking.as_str().to_string());
-                    active.status_message = Set(Some(format!("reviewer spawn failed: {error}")));
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                    super::apply_task_command(
+                        &tx,
+                        run,
+                        TaskCommand::BeginReworking {
+                            status_message: format!("reviewer spawn failed: {error}"),
+                        },
+                    )
+                    .await?;
                 }
                 None => bail!("invalid stored review scope"),
             }
@@ -243,7 +292,7 @@ impl StudioStore {
         let result = async {
             let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
-            if round.reviewer_status != ThreadExecutionStatus::Running.as_str()
+            if review_round_state(&round)?.reviewer_status() != ThreadExecutionStatus::Running
                 || round.reviewer_thread_id.as_deref() != Some(reviewer_agent_id)
             {
                 bail!("reviewer Thread does not match the pending review");
@@ -256,58 +305,41 @@ impl StudioStore {
                     complete_delivery_review(&tx, &run, &round, &review, now).await?;
                 }
                 ReviewScope::Integrated => {
+                    let task = super::task_run_record(run.clone())?;
                     if round.reviewed_head != run.expected_head
-                        || run.phase != TaskRunPhase::Reviewing.as_str()
+                        || task.kind() != TaskRunStateKind::Reviewing
                     {
                         bail!("integrated review no longer matches current Task HEAD");
                     }
-                    let next_phase = match review.verdict {
-                        ReviewVerdict::Pass => TaskRunPhase::Reviewing.as_str().to_string(),
+                    match review.verdict {
+                        ReviewVerdict::Pass => {}
                         ReviewVerdict::ChangesRequired | ReviewVerdict::Blocked => {
-                            TaskRunPhase::Reworking.as_str().to_string()
+                            super::apply_task_command(
+                                &tx,
+                                run.clone(),
+                                TaskCommand::BeginReworking {
+                                    status_message: review.summary.clone(),
+                                },
+                            )
+                            .await?;
                         }
                         ReviewVerdict::Pending | ReviewVerdict::Failed => {
                             bail!("reviewer cannot select pending or failed")
                         }
-                    };
-                    let updated = entities::task_run::Entity::update_many()
-                        .col_expr(entities::task_run::Column::Phase, Expr::value(next_phase))
-                        .col_expr(
-                            entities::task_run::Column::StatusMessage,
-                            Expr::value(Some(review.summary.clone())),
-                        )
-                        .col_expr(entities::task_run::Column::UpdatedAt, Expr::value(now))
-                        .filter(entities::task_run::Column::Id.eq(run.id.clone()))
-                        .filter(
-                            entities::task_run::Column::Phase.eq(TaskRunPhase::Reviewing.as_str()),
-                        )
-                        .filter(
-                            entities::task_run::Column::ExpectedHead
-                                .eq(round.reviewed_head.clone()),
-                        )
-                        .exec(&tx)
-                        .await?;
-                    if updated.rows_affected != 1 {
-                        bail!("integrated review no longer matches current Task HEAD");
                     }
                 }
             }
+            let next_state = ReviewRoundState::from_parts(
+                review.verdict,
+                ThreadExecutionStatus::Completed,
+                Some(review.summary.clone()),
+                None,
+            )?;
+            let next_revision = round.revision.saturating_add(1);
             let updated_round = entities::review_round::Entity::update_many()
                 .col_expr(
-                    entities::review_round::Column::Status,
-                    Expr::value(review.verdict.as_str()),
-                )
-                .col_expr(
-                    entities::review_round::Column::Summary,
-                    Expr::value(Some(review.summary.clone())),
-                )
-                .col_expr(
-                    entities::review_round::Column::ReviewerStatus,
-                    Expr::value(ThreadExecutionStatus::Completed.as_str()),
-                )
-                .col_expr(
-                    entities::review_round::Column::ReviewerError,
-                    Expr::value(Option::<String>::None),
+                    entities::review_round::Column::StateJson,
+                    Expr::value(serde_json::to_string(&next_state)?),
                 )
                 .col_expr(
                     entities::review_round::Column::DesignReferencesJson,
@@ -322,8 +354,12 @@ impl StudioStore {
                     Expr::value(Some(file_reviews_json)),
                 )
                 .col_expr(entities::review_round::Column::UpdatedAt, Expr::value(now))
+                .col_expr(
+                    entities::review_round::Column::Revision,
+                    Expr::value(next_revision),
+                )
                 .filter(entities::review_round::Column::Id.eq(round.id.clone()))
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+                .filter(entities::review_round::Column::Revision.eq(round.revision))
                 .exec(&tx)
                 .await?;
             if updated_round.rows_affected != 1 {
@@ -349,7 +385,7 @@ impl StudioStore {
         let result = async {
             let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
-            if round.reviewer_status != ThreadExecutionStatus::Running.as_str() {
+            if review_round_state(&round)?.reviewer_status() != ThreadExecutionStatus::Running {
                 bail!("reviewer Thread does not match the pending review");
             }
             let file_reviews_json =
@@ -363,12 +399,12 @@ impl StudioStore {
                     entities::review_round::Column::UpdatedAt,
                     Expr::value(unix_seconds()),
                 )
-                .filter(entities::review_round::Column::Id.eq(round.id.clone()))
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
-                .filter(
-                    entities::review_round::Column::ReviewerStatus
-                        .eq(ThreadExecutionStatus::Running.as_str()),
+                .col_expr(
+                    entities::review_round::Column::Revision,
+                    Expr::value(round.revision.saturating_add(1)),
                 )
+                .filter(entities::review_round::Column::Id.eq(round.id.clone()))
+                .filter(entities::review_round::Column::Revision.eq(round.revision))
                 .exec(&tx)
                 .await?;
             if updated.rows_affected != 1 {
@@ -428,7 +464,9 @@ impl StudioStore {
                     entities::review_round::Column::ReviewerThreadId
                         .eq(reviewer_agent_id.to_string()),
                 )
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+                .filter(
+                    entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()),
+                )
                 .all(&tx)
                 .await?;
             let round = match rounds.as_slice() {
@@ -439,7 +477,6 @@ impl StudioStore {
             let detail = reason
                 .map(str::to_string)
                 .unwrap_or_else(|| "reviewer ended without a successful review_exit".to_string());
-            let now = unix_seconds();
             let outcome_status = match outcome_kind {
                 TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
                 TurnOutcomeKind::Completed
@@ -447,31 +484,13 @@ impl StudioStore {
                 | TurnOutcomeKind::BudgetLimited => ThreadExecutionStatus::Failed,
             };
 
-            let updated_round = entities::review_round::Entity::update_many()
-                .col_expr(
-                    entities::review_round::Column::Status,
-                    Expr::value(ReviewVerdict::Failed.as_str()),
-                )
-                .col_expr(
-                    entities::review_round::Column::Summary,
-                    Expr::value(Some(detail.clone())),
-                )
-                .col_expr(
-                    entities::review_round::Column::ReviewerStatus,
-                    Expr::value(outcome_status.as_str()),
-                )
-                .col_expr(
-                    entities::review_round::Column::ReviewerError,
-                    Expr::value(Some(detail.clone())),
-                )
-                .col_expr(entities::review_round::Column::UpdatedAt, Expr::value(now))
-                .filter(entities::review_round::Column::Id.eq(round.id.clone()))
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
-                .exec(&tx)
-                .await?;
-            if updated_round.rows_affected == 0 {
-                return Ok(());
-            }
+            let failed_state = ReviewRoundState::from_parts(
+                ReviewVerdict::Failed,
+                outcome_status,
+                Some(detail.clone()),
+                Some(detail.clone()),
+            )?;
+            update_review_round_state(&tx, round.clone(), failed_state).await?;
 
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
                 ReviewScope::Delivery => {
@@ -483,11 +502,18 @@ impl StudioStore {
                         .one(&tx)
                         .await?
                         .context("delivery review work unit not found")?;
-                    if work_unit.status == WorkUnitStatus::Reviewing.as_str() {
-                        let mut active: entities::work_unit::ActiveModel = work_unit.into();
-                        active.status = Set(WorkUnitStatus::ReadyForReview.as_str().to_string());
-                        active.updated_at = Set(now);
-                        active.update(&tx).await?;
+                    if work_unit.state_kind == WorkUnitStatus::Reviewing.as_str() {
+                        let state = work_unit_state(&work_unit)?;
+                        let execution = state.execution_status();
+                        let progress = state.into_progress();
+                        update_work_unit_state(
+                            &tx,
+                            work_unit,
+                            WorkUnitStatus::ReadyForReview,
+                            execution,
+                            progress,
+                        )
+                        .await?;
                     }
                 }
                 ReviewScope::Integrated => {
@@ -495,12 +521,15 @@ impl StudioStore {
                         .one(&tx)
                         .await?
                         .context("integrated review task run not found")?;
-                    if run.phase == TaskRunPhase::Reviewing.as_str() {
-                        let mut active: entities::task_run::ActiveModel = run.into();
-                        active.phase = Set(TaskRunPhase::Reworking.as_str().to_string());
-                        active.status_message = Set(Some(detail));
-                        active.updated_at = Set(now);
-                        active.update(&tx).await?;
+                    if super::task_run_record(run.clone())?.kind() == TaskRunStateKind::Reviewing {
+                        super::apply_task_command(
+                            &tx,
+                            run,
+                            TaskCommand::BeginReworking {
+                                status_message: detail,
+                            },
+                        )
+                        .await?;
                     }
                 }
             }
@@ -541,7 +570,7 @@ async fn complete_delivery_review(
         .head_commit
         .as_deref()
         .unwrap_or(work_unit.base_commit.as_str());
-    if work_unit.status != WorkUnitStatus::Reviewing.as_str()
+    if work_unit.state_kind != WorkUnitStatus::Reviewing.as_str()
         || completion.work_unit_id != work_unit.id
         || completion.revision != completion_revision
         || completion.status != WorkCompletionStatus::ReadyForReview.as_str()
@@ -588,42 +617,24 @@ async fn complete_delivery_review(
     if updated_completion.rows_affected != 1 {
         bail!("delivery review completion is stale or was already settled");
     }
-    let updated_unit = entities::work_unit::Entity::update_many()
-        .col_expr(
-            entities::work_unit::Column::Status,
-            Expr::value(unit_status.as_str()),
-        )
-        .col_expr(entities::work_unit::Column::UpdatedAt, Expr::value(now))
-        .filter(entities::work_unit::Column::Id.eq(work_unit.id))
-        .filter(entities::work_unit::Column::Status.eq(WorkUnitStatus::Reviewing.as_str()))
-        .exec(tx)
-        .await?;
-    if updated_unit.rows_affected != 1 {
-        bail!("delivery review work unit is stale or was already settled");
-    }
+    let state = work_unit_state(&work_unit)?;
+    let execution = state.execution_status();
+    let progress = state.into_progress();
+    update_work_unit_state(tx, work_unit, unit_status, execution, progress).await?;
     if completion_status == WorkCompletionStatus::Approved
         && WorkCompletionKind::from_str(&completion.kind) == Some(WorkCompletionKind::Delivery)
     {
-        let updated_run = entities::task_run::Entity::update_many()
-            .col_expr(
-                entities::task_run::Column::Phase,
-                Expr::value(TaskRunPhase::Merging.as_str()),
-            )
-            .col_expr(
-                entities::task_run::Column::StatusMessage,
-                Expr::value(Some(format!(
+        super::apply_task_command(
+            tx,
+            run.clone(),
+            TaskCommand::BeginMerging {
+                status_message: Some(format!(
                     "approved Completion {} is ready for planner Git integration",
                     completion.id
-                ))),
-            )
-            .col_expr(entities::task_run::Column::UpdatedAt, Expr::value(now))
-            .filter(entities::task_run::Column::Id.eq(run.id.clone()))
-            .filter(entities::task_run::Column::Phase.eq(run.phase.clone()))
-            .exec(tx)
-            .await?;
-        if updated_run.rows_affected != 1 {
-            bail!("TaskRun changed before entering planner merge phase");
-        }
+                )),
+            },
+        )
+        .await?;
     }
     Ok(())
 }
@@ -685,17 +696,16 @@ async fn insert_review_round(
             completion_id: Set(completion_id),
             completion_revision: Set(completion_revision),
             reviewed_head: Set(reviewed_head.to_string()),
-            status: Set(ReviewVerdict::Pending.as_str().to_string()),
             requested_by_call_id: Set(request.requested_by_call_id.to_string()),
             reviewer_thread_id: Set(None),
-            reviewer_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
-            reviewer_error: Set(None),
-            summary: Set(None),
+            state_json: Set(serde_json::to_string(&ReviewRoundState::pending())?),
+            revision: Set(0),
             design_references_json: Set("[]".to_string()),
             findings_json: Set("[]".to_string()),
             file_reviews_json: Set(Some(serde_json::to_string(&file_reviews)?)),
             created_at: Set(now),
             updated_at: Set(now),
+            ..Default::default()
         }
         .insert(tx)
         .await?,
@@ -705,6 +715,7 @@ async fn insert_review_round(
 pub(super) fn review_round_record(
     model: entities::review_round::Model,
 ) -> Result<ReviewRoundRecord> {
+    let state = review_round_state(&model)?;
     Ok(ReviewRoundRecord {
         id: model.id,
         task_run_id: model.task_run_id,
@@ -719,15 +730,9 @@ pub(super) fn review_round_record(
             .transpose()
             .context("completion revision must be positive")?,
         reviewed_head: model.reviewed_head,
-        verdict: ReviewVerdict::from_str(&model.status)
-            .with_context(|| format!("invalid review verdict: {}", model.status))?,
         requested_by_call_id: model.requested_by_call_id,
         reviewer_thread_id: model.reviewer_thread_id,
-        reviewer_status: ThreadExecutionStatus::from_str(&model.reviewer_status).with_context(
-            || format!("invalid reviewer Thread status: {}", model.reviewer_status),
-        )?,
-        reviewer_error: model.reviewer_error,
-        summary: model.summary,
+        state,
         design_references: serde_json::from_str(&model.design_references_json)?,
         findings: serde_json::from_str(&model.findings_json)?,
         file_reviews: model
@@ -735,9 +740,62 @@ pub(super) fn review_round_record(
             .as_deref()
             .map(serde_json::from_str)
             .transpose()?,
+        revision: u64::try_from(model.revision).context("review round revision is negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+pub(super) fn review_round_state(
+    model: &entities::review_round::Model,
+) -> Result<ReviewRoundState> {
+    let state = decode_review_round_state(&model.state_json)?;
+    if state.verdict().as_str() != model.state_kind {
+        bail!(
+            "stored ReviewRound state discriminator mismatch: JSON is {}, generated column is {}",
+            state.verdict().as_str(),
+            model.state_kind
+        );
+    }
+    Ok(state)
+}
+
+pub(super) async fn update_review_round_state<C>(
+    connection: &C,
+    model: entities::review_round::Model,
+    state: ReviewRoundState,
+) -> Result<entities::review_round::Model>
+where
+    C: sea_orm::ConnectionTrait,
+{
+    let next_revision = model
+        .revision
+        .checked_add(1)
+        .context("ReviewRound revision overflow")?;
+    let result = entities::review_round::Entity::update_many()
+        .col_expr(
+            entities::review_round::Column::StateJson,
+            Expr::value(serde_json::to_string(&state)?),
+        )
+        .col_expr(
+            entities::review_round::Column::Revision,
+            Expr::value(next_revision),
+        )
+        .col_expr(
+            entities::review_round::Column::UpdatedAt,
+            Expr::value(unix_seconds()),
+        )
+        .filter(entities::review_round::Column::Id.eq(model.id.clone()))
+        .filter(entities::review_round::Column::Revision.eq(model.revision))
+        .exec(connection)
+        .await?;
+    if result.rows_affected != 1 {
+        bail!("ReviewRound state update lost its revision CAS");
+    }
+    entities::review_round::Entity::find_by_id(model.id)
+        .one(connection)
+        .await?
+        .context("ReviewRound disappeared after state update")
 }
 
 #[derive(Clone, Copy)]
@@ -754,7 +812,7 @@ async fn pending_review_for_reviewer(
     let rounds = entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
         .filter(entities::review_round::Column::ReviewerThreadId.eq(reviewer_agent_id.to_string()))
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .all(tx)
         .await?;
     match rounds.as_slice() {
@@ -811,10 +869,11 @@ async fn active_implementation_run(
     thread_id: &str,
 ) -> Result<entities::task_run::Model> {
     let run = active_nonterminal_run(tx, thread_id).await?;
+    let record = super::task_run_record(run.clone())?;
     if !matches!(
-        TaskRunPhase::from_str(&run.phase),
-        Some(TaskRunPhase::Implementing | TaskRunPhase::Reworking)
-    ) || run.stop_requested != 0
+        record.kind(),
+        TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
+    ) || record.is_stop_requested()
     {
         bail!("review request requires implementing or reworking");
     }
@@ -827,11 +886,10 @@ async fn active_nonterminal_run(
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
         .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
-        .filter(entities::task_run::Column::Phase.is_not_in([
-            TaskRunPhase::Completed.as_str(),
-            TaskRunPhase::Blocked.as_str(),
-            TaskRunPhase::Failed.as_str(),
-            TaskRunPhase::Cancelled.as_str(),
+        .filter(entities::task_run::Column::StateKind.is_not_in([
+            TaskRunStateKind::Completed.as_str(),
+            TaskRunStateKind::Failed.as_str(),
+            TaskRunStateKind::Cancelled.as_str(),
         ]))
         .all(tx)
         .await?;
@@ -848,7 +906,7 @@ async fn ensure_no_pending_review(
 ) -> Result<()> {
     if entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .one(tx)
         .await?
         .is_some()
@@ -885,7 +943,7 @@ async fn ensure_no_pending_delivery_review(
     if entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
         .filter(entities::review_round::Column::WorkUnitId.eq(Some(work_unit_id.to_string())))
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .one(tx)
         .await?
         .is_some()
@@ -905,7 +963,7 @@ async fn pending_review_by_call(
         .filter(
             entities::review_round::Column::RequestedByCallId.eq(requested_by_call_id.to_string()),
         )
-        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
         .all(tx)
         .await?;
     match rounds.as_slice() {

@@ -148,8 +148,8 @@ impl TaskCoordinator {
             WorktreeCreateSpec {
                 repo_root: PathBuf::from(&allocation.run.workspace_root),
                 path: PathBuf::from(&allocation.work_unit.worktree_path),
-                branch: allocation.work_unit.branch,
-                base_commit: allocation.work_unit.base_commit,
+                branch: allocation.work_unit.branch.clone(),
+                base_commit: allocation.work_unit.base_commit.clone(),
             },
             work_unit_id,
             vec![handoff],
@@ -160,16 +160,8 @@ impl TaskCoordinator {
         &self,
         input: AllocateExecutor,
     ) -> PureResult<ExecutorAllocation> {
-        let root_thread_id = input.thread_id.clone();
         let _mutation_guard = self.lock_branch_mutation().await;
         let _allocation_guard = self.allocation_lock.lock().await;
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(&root_thread_id)
-            .await
-            .map_err(store_spawn_error)?;
-        self.ensure_executor_design_contract(&run)
-            .map_err(store_spawn_error)?;
         self.store
             .allocate_executor(input)
             .await

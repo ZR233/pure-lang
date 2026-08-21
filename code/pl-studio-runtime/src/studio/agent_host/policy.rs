@@ -6,7 +6,7 @@ use pl_core::{
 };
 
 use crate::StudioMode;
-use crate::studio::task_coordinator::TaskRunPhase;
+use crate::studio::task_coordinator::TaskRunStateKind;
 
 const COLLABORATION_CONTROL_TOOLS: [&str; 7] = [
     "spawn_agent",
@@ -29,7 +29,7 @@ const PLAN_EXIT_TOOL: [&str; 1] = ["plan_exit"];
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StudioPolicyContext {
     pub(super) mode: StudioMode,
-    pub(super) task_phase: Option<TaskRunPhase>,
+    pub(super) task_phase: Option<TaskRunStateKind>,
 }
 
 pub(super) fn studio_execution_policy(
@@ -60,7 +60,7 @@ pub(super) fn studio_execution_policy(
     }
     if is_root
         && context.mode == StudioMode::Task
-        && context.task_phase != Some(TaskRunPhase::Merging)
+        && context.task_phase != Some(TaskRunStateKind::Merging)
     {
         visible_tools = without_tools(visible_tools, &PLANNER_GIT_MUTATION_TOOLS);
     }
@@ -76,10 +76,7 @@ pub(super) fn studio_execution_policy(
 fn may_submit_plan(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> bool {
     snapshot.identity.parent_id.is_none()
         && context.mode == StudioMode::Task
-        && matches!(
-            context.task_phase,
-            None | Some(TaskRunPhase::Planning | TaskRunPhase::PendingConfirmation)
-        )
+        && context.task_phase.is_none()
 }
 
 fn spawn_roles(is_root: bool, mode: StudioMode) -> BTreeSet<AgentRoleId> {
@@ -121,10 +118,11 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
                     ToolEffect::AgentControl,
                     ToolEffect::BranchControl,
                 ];
-                if context.task_phase == Some(TaskRunPhase::Merging) {
+                if context
+                    .task_phase
+                    .is_some_and(TaskRunStateKind::allows_planner_workspace_mutation)
+                {
                     effects.push(ToolEffect::Process);
-                }
-                if context.task_phase == Some(TaskRunPhase::Merging) {
                     effects.push(ToolEffect::WorkspaceWrite);
                 }
                 effects
@@ -162,25 +160,19 @@ fn finalization(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> TurnF
         };
     }
     match context.task_phase {
-        None | Some(TaskRunPhase::Planning | TaskRunPhase::PendingConfirmation)
-            if may_submit_plan(snapshot, context) =>
-        {
-            required_tool("plan_exit")
-        }
-        None | Some(TaskRunPhase::Planning | TaskRunPhase::PendingConfirmation) => {
-            TurnFinalizationPolicy::Direct
-        }
-        Some(TaskRunPhase::DesignUpdating) => required_tool("task_update_design"),
-        Some(TaskRunPhase::Reviewing) => required_tool("task_complete"),
+        None if may_submit_plan(snapshot, context) => required_tool("plan_exit"),
+        None => TurnFinalizationPolicy::Direct,
+        Some(TaskRunStateKind::DesignUpdating) => required_tool("task_finalize_design"),
+        Some(TaskRunStateKind::Reviewing) => required_tool("task_complete"),
         Some(
-            TaskRunPhase::Implementing
-            | TaskRunPhase::Merging
-            | TaskRunPhase::Reworking
-            | TaskRunPhase::Stopping
-            | TaskRunPhase::Completed
-            | TaskRunPhase::Blocked
-            | TaskRunPhase::Failed
-            | TaskRunPhase::Cancelled,
+            TaskRunStateKind::Implementing
+            | TaskRunStateKind::Merging
+            | TaskRunStateKind::Reworking
+            | TaskRunStateKind::Stopping
+            | TaskRunStateKind::Completed
+            | TaskRunStateKind::Blocked
+            | TaskRunStateKind::Failed
+            | TaskRunStateKind::Cancelled,
         ) => TurnFinalizationPolicy::Direct,
     }
 }
@@ -200,18 +192,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn task_root_process_effect_is_limited_to_merging() {
+    fn task_root_process_effect_is_available_during_design_and_merge() {
         let visible = ToolVisibilitySet::from_tool_names(["exec", "write_stdin"]);
         let root = snapshot("planner", true);
         let task_phases = [
             (None, false),
-            (Some(TaskRunPhase::Planning), false),
-            (Some(TaskRunPhase::PendingConfirmation), false),
-            (Some(TaskRunPhase::DesignUpdating), false),
-            (Some(TaskRunPhase::Implementing), false),
-            (Some(TaskRunPhase::Merging), true),
-            (Some(TaskRunPhase::Reviewing), false),
-            (Some(TaskRunPhase::Reworking), false),
+            (Some(TaskRunStateKind::DesignUpdating), true),
+            (Some(TaskRunStateKind::Implementing), false),
+            (Some(TaskRunStateKind::Merging), true),
+            (Some(TaskRunStateKind::Reviewing), false),
+            (Some(TaskRunStateKind::Reworking), false),
+            (Some(TaskRunStateKind::Stopping), false),
+            (Some(TaskRunStateKind::Blocked), false),
+            (Some(TaskRunStateKind::Completed), false),
+            (Some(TaskRunStateKind::Failed), false),
+            (Some(TaskRunStateKind::Cancelled), false),
         ];
         for (task_phase, process_allowed) in task_phases {
             let policy = studio_execution_policy(
@@ -248,7 +243,7 @@ mod tests {
                 &snapshot(role, false),
                 StudioPolicyContext {
                     mode: StudioMode::Task,
-                    task_phase: Some(TaskRunPhase::Implementing),
+                    task_phase: Some(TaskRunStateKind::Implementing),
                 },
                 visible.clone(),
             );
@@ -262,14 +257,14 @@ mod tests {
     }
 
     #[test]
-    fn plan_exit_is_only_visible_to_task_root_planner_during_planning() {
+    fn lifecycle_finalizers_are_visible_only_in_their_own_stage() {
         let visible = ToolVisibilitySet::from_tool_names(["plan_exit", "exec"]);
         for role in ["planner", "explorer", "reviewer", "executor"] {
             let policy = studio_execution_policy(
                 &snapshot(role, false),
                 StudioPolicyContext {
                     mode: StudioMode::Task,
-                    task_phase: Some(TaskRunPhase::Planning),
+                    task_phase: None,
                 },
                 visible.clone(),
             );
@@ -280,29 +275,23 @@ mod tests {
             );
         }
 
-        for task_phase in [
-            None,
-            Some(TaskRunPhase::Planning),
-            Some(TaskRunPhase::PendingConfirmation),
-        ] {
-            let planning = studio_execution_policy(
-                &snapshot("planner", true),
-                StudioPolicyContext {
-                    mode: StudioMode::Task,
-                    task_phase,
-                },
-                visible.clone(),
-            );
-            assert!(planning.visible_tools.contains("plan_exit"));
-            assert!(planning.allows_tool("plan_exit", Some(ToolEffect::Read)));
-            assert_eq!(planning.finalization, required_tool("plan_exit"));
-        }
+        let planning = studio_execution_policy(
+            &snapshot("planner", true),
+            StudioPolicyContext {
+                mode: StudioMode::Task,
+                task_phase: None,
+            },
+            visible.clone(),
+        );
+        assert!(planning.visible_tools.contains("plan_exit"));
+        assert!(planning.allows_tool("plan_exit", Some(ToolEffect::Read)));
+        assert_eq!(planning.finalization, required_tool("plan_exit"));
 
         let reviewing = studio_execution_policy(
             &snapshot("planner", true),
             StudioPolicyContext {
                 mode: StudioMode::Task,
-                task_phase: Some(TaskRunPhase::Reviewing),
+                task_phase: Some(TaskRunStateKind::Reviewing),
             },
             visible.clone(),
         );
@@ -312,13 +301,13 @@ mod tests {
             &snapshot("planner", true),
             StudioPolicyContext {
                 mode: StudioMode::Task,
-                task_phase: Some(TaskRunPhase::DesignUpdating),
+                task_phase: Some(TaskRunStateKind::DesignUpdating),
             },
-            ToolVisibilitySet::from_tool_names(["task_update_design"]),
+            ToolVisibilitySet::from_tool_names(["task_finalize_design"]),
         );
         assert_eq!(
             design_updating.finalization,
-            required_tool("task_update_design")
+            required_tool("task_finalize_design")
         );
 
         let simple = studio_execution_policy(

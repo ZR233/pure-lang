@@ -25,8 +25,8 @@ class TaskRuntimeDetail extends StatelessWidget {
               title: context.l10n.statusTaskSection,
               children: [
                 StatusDetailRow(
-                  key: StudioDriverKeys.taskPhase(task.runId, task.phase),
-                  label: context.taskPhaseLabel(task.phase),
+                  key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
+                  label: context.taskPhaseLabel(task.state.kind),
                   value: task.statusMessage ?? task.runId,
                   valueKey: StudioDriverKeys.taskStatus(
                     task.runId,

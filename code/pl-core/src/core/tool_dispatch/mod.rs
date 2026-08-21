@@ -10,6 +10,7 @@ use pl_protocol::{InferenceOrchestrationMetrics, ToolCallKind};
 use pl_trace::TracePartStatus;
 use tokio::sync::RwLock;
 
+use crate::ToolCompletion;
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::AgentSession;
 use crate::tool::cache::{ToolCachePolicy, TurnToolCacheHandle};
@@ -622,6 +623,7 @@ async fn collect_scheduled_tools(
                             let record = interrupted_tool_execution_record(tool_call);
                             finalize_tool_item(recorder, item, &record);
                             emit_tool_progress(progress, recorder, &record);
+                            notify_tool_completion(options, &record).await?;
                             ordered_records[index] = Some(record);
                         }
                         return Ok(tool_execution_batch(
@@ -653,6 +655,7 @@ async fn collect_scheduled_tools(
         tool_execution_millis = tool_execution_millis.saturating_add(record.execution_millis);
         finalize_tool_item(recorder, item, &record);
         emit_tool_progress(progress, recorder, &record);
+        notify_tool_completion(options, &record).await?;
         ordered_records[index] = Some(record);
     }
 
@@ -663,6 +666,30 @@ async fn collect_scheduled_tools(
         parallel_candidates,
         duplicate_suppressed,
     ))
+}
+
+async fn notify_tool_completion(
+    options: &TurnOptions,
+    record: &ToolExecutionRecord,
+) -> Result<(), ToolExecutionError> {
+    let Some(callback) = options.tool_completion_callback.as_ref() else {
+        return Ok(());
+    };
+    callback(ToolCompletion {
+        call_id: record.call_id.clone(),
+        name: record.name.clone(),
+        status: record.status.as_str().to_string(),
+        result: record.result.clone(),
+        exit_code: record.exit_code,
+        timed_out: record.timed_out,
+    })
+    .await
+    .map_err(|error| {
+        ToolExecutionError::Fatal(format!(
+            "host post-tool observation failed after {}: {error:#}",
+            record.name
+        ))
+    })
 }
 
 fn tool_execution_batch(

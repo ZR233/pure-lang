@@ -9,7 +9,7 @@ use sea_orm::{
 };
 
 use crate::studio::entity::{item, thread, thread_session_state, turn};
-use crate::studio::task_coordinator::TaskRunPhase;
+use crate::studio::task_coordinator::TaskRunStateKind;
 
 #[tokio::test]
 async fn initialize_runtime_isolates_unavailable_registered_project() {
@@ -372,7 +372,7 @@ async fn open_project_validates_path_before_persisting() {
 
 #[tokio::test]
 async fn archive_project_refuses_a_durable_active_task() {
-    use crate::studio::task_coordinator::{CreateTaskRun, TaskRunPhase};
+    use crate::studio::task_coordinator::CreateTaskRun;
 
     let store = StudioStore::open_memory().await.unwrap();
     let project = store
@@ -386,12 +386,17 @@ async fn archive_project_refuses_a_durable_active_task() {
     store
         .create_task_run_with_lease(CreateTaskRun {
             root_thread_id: thread.id.clone(),
-            phase: TaskRunPhase::Planning,
             plan: "# Plan".to_string(),
             workspace_root: "C:/work/archive-active-task".to_string(),
             git_common_dir: "C:/work/archive-active-task/.git".to_string(),
             branch: "main".to_string(),
             head_commit: "1111111".to_string(),
+            design_baseline: crate::studio::task_coordinator::test_task_git_fingerprint(
+                "C:/work/archive-active-task",
+                "C:/work/archive-active-task/.git",
+                "main",
+                "1111111",
+            ),
         })
         .await
         .unwrap();
@@ -423,7 +428,7 @@ async fn archive_project_refuses_a_durable_active_task() {
 
 #[tokio::test]
 async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
-    use crate::studio::task_coordinator::{CreateTaskRun, TaskRunPhase};
+    use crate::studio::task_coordinator::CreateTaskRun;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -441,12 +446,17 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
     busy_store
         .create_task_run_with_lease(CreateTaskRun {
             root_thread_id: session.id,
-            phase: TaskRunPhase::Planning,
             plan: "# Plan".to_string(),
             workspace_root: "C:/work/update-busy".to_string(),
             git_common_dir: "C:/work/update-busy/.git".to_string(),
             branch: "main".to_string(),
             head_commit: "1111111".to_string(),
+            design_baseline: crate::studio::task_coordinator::test_task_git_fingerprint(
+                "C:/work/update-busy",
+                "C:/work/update-busy/.git",
+                "main",
+                "1111111",
+            ),
         })
         .await
         .unwrap();
@@ -1054,7 +1064,7 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
         "search_files",
         "task_status",
         "task_spawn_executor",
-        "task_update_design",
+        "task_finalize_design",
         "task_record_merge",
         "task_request_delivery_review",
         "task_request_integrated_review",
@@ -1091,12 +1101,12 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
 }
 
 #[tokio::test]
-async fn fresh_task_run_turn_installs_task_tools_without_process_tools() {
+async fn fresh_task_run_turn_exposes_normal_tools_and_finalizes_without_edits() {
     let design_update = responses_function_tool_sse(
         "active-task-design",
-        "task_update_design",
+        "task_finalize_design",
         serde_json::json!({
-            "patch": "*** Begin Patch\n*** Add File: design/task.md\n+Active Task design.\n*** End Patch"
+            "summary": "No repository edits are needed before implementation."
         }),
     );
     let design_ack = responses_final_text_sse("active-task-design-ack", "TaskRun design updated");
@@ -1173,32 +1183,28 @@ async fn fresh_task_run_turn_installs_task_tools_without_process_tools() {
 
     let request = requests.recv().await.unwrap();
     let tool_names = response_tool_names(&request);
-    for required in ["task_status", "task_update_design", "task_spawn_executor"] {
+    for required in ["task_status", "task_finalize_design", "task_spawn_executor"] {
         assert!(
             tool_names.contains(&required),
             "active Task request omitted {required}: {tool_names:?}"
         );
     }
-    for unavailable in ["exec", "write_stdin"] {
+    for available in ["exec", "write_stdin"] {
         assert!(
-            !tool_names.contains(&unavailable),
-            "active Task request exposed {unavailable}: {tool_names:?}"
+            tool_names.contains(&available),
+            "active Task request omitted {available}: {tool_names:?}"
         );
     }
     assert!(!tool_names.contains(&"search_files"));
     let acknowledgement = requests.recv().await.unwrap();
     let acknowledgement_tools = response_tool_names(&acknowledgement);
-    assert!(!acknowledgement_tools.contains(&"exec"));
-    assert!(!acknowledgement_tools.contains(&"write_stdin"));
+    assert!(acknowledgement_tools.contains(&"exec"));
+    assert!(acknowledgement_tools.contains(&"write_stdin"));
     let durable = store.read_task_run(&run.id).await.unwrap().unwrap();
     assert_eq!(durable.id, run.id);
     assert_eq!(durable.root_thread_id, thread.id);
-    assert_eq!(durable.phase, TaskRunPhase::Implementing);
-    assert!(durable.design_commit.is_some());
-    assert_eq!(
-        std::fs::read_to_string(workspace.join("design/task.md")).unwrap(),
-        "Active Task design.\n"
-    );
+    assert_eq!(durable.kind(), TaskRunStateKind::Implementing);
+    assert_eq!(durable.design_phase_commit(), None);
 
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -1215,9 +1221,9 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
     let initial_ack = responses_final_text_sse("implementation-plan-ack", "计划已提交确认");
     let implementation_design = responses_function_tool_sse(
         "implementation-fresh-turn",
-        "task_update_design",
+        "task_finalize_design",
         serde_json::json!({
-            "patch": "*** Begin Patch\n*** Add File: design/task.md\n+Fresh Task implementation design.\n*** End Patch"
+            "summary": "The confirmed plan is sufficient without repository edits."
         }),
     );
     let implementation_ack = responses_final_text_sse(
@@ -1336,11 +1342,11 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
     let implementation_ack_request = requests.recv().await.unwrap();
     for request in [&planning_request, &planning_ack_request] {
         let tool_names = response_tool_names(request);
-        assert!(!tool_names.contains(&"task_update_design"));
+        assert!(!tool_names.contains(&"task_finalize_design"));
         assert!(!tool_names.contains(&"task_spawn_executor"));
     }
     let implementation_tools = response_tool_names(&implementation_request);
-    for required in ["task_status", "task_update_design", "task_spawn_executor"] {
+    for required in ["task_status", "task_finalize_design", "task_spawn_executor"] {
         assert!(
             implementation_tools.contains(&required),
             "fresh Task request omitted {required}: {implementation_tools:?}"
@@ -1348,10 +1354,10 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
     }
     for request in [&implementation_request, &implementation_ack_request] {
         let tool_names = response_tool_names(request);
-        for unavailable in ["exec", "write_stdin"] {
+        for available in ["exec", "write_stdin"] {
             assert!(
-                !tool_names.contains(&unavailable),
-                "fresh Task request exposed {unavailable}: {tool_names:?}"
+                tool_names.contains(&available),
+                "fresh Task request omitted {available}: {tool_names:?}"
             );
         }
     }
@@ -1373,8 +1379,8 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         .read_active_task_run_for_root_thread(&thread.id)
         .await
         .unwrap();
-    assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
-    assert!(durable_run.design_commit.is_some());
+    assert_eq!(durable_run.kind(), TaskRunStateKind::Implementing);
+    assert_eq!(durable_run.design_phase_commit(), None);
 
     let owner = crate::studio::agent_host::root_agent_id(&thread.id);
     let mail_id =

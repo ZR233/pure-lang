@@ -161,8 +161,6 @@
   "statusTaskContinuationCompacting": "正在压缩上下文",
   "statusTaskContinuationPendingStart": "正在启动下一切片",
   "statusTaskContinuationNeedsAttention": "需要处理",
-  "statusTaskPhasePlanning": "规划中",
-  "statusTaskPhasePendingConfirmation": "等待确认",
   "statusTaskPhaseDesignUpdating": "更新设计",
   "statusTaskPhaseImplementing": "实施中",
   "statusTaskPhaseMerging": "合并中",

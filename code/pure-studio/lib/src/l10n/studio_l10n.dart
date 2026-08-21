@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/models/studio_enums.dart';
+import '../domain/models/runtime_models.dart';
 import '../domain/models/turn_models.dart';
 import 'app_localizations.dart';
 
@@ -35,21 +36,18 @@ extension StudioLocalizationsX on BuildContext {
     };
   }
 
-  String taskPhaseLabel(String phase) {
+  String taskPhaseLabel(TaskStateKind phase) {
     return switch (phase) {
-      'planning' => l10n.statusTaskPhasePlanning,
-      'pendingConfirmation' => l10n.statusTaskPhasePendingConfirmation,
-      'designUpdating' => l10n.statusTaskPhaseDesignUpdating,
-      'implementing' => l10n.statusTaskPhaseImplementing,
-      'merging' => l10n.statusTaskPhaseMerging,
-      'reviewing' => l10n.statusTaskPhaseReviewing,
-      'reworking' => l10n.statusTaskPhaseReworking,
-      'stopping' => l10n.statusTaskPhaseStopping,
-      'completed' => l10n.statusTaskPhaseCompleted,
-      'blocked' => l10n.statusTaskPhaseBlocked,
-      'failed' => l10n.statusTaskPhaseFailed,
-      'cancelled' => l10n.statusTaskPhaseCancelled,
-      _ => phase,
+      TaskStateKind.designUpdating => l10n.statusTaskPhaseDesignUpdating,
+      TaskStateKind.implementing => l10n.statusTaskPhaseImplementing,
+      TaskStateKind.merging => l10n.statusTaskPhaseMerging,
+      TaskStateKind.reviewing => l10n.statusTaskPhaseReviewing,
+      TaskStateKind.reworking => l10n.statusTaskPhaseReworking,
+      TaskStateKind.stopping => l10n.statusTaskPhaseStopping,
+      TaskStateKind.blocked => l10n.statusTaskPhaseBlocked,
+      TaskStateKind.completed => l10n.statusTaskPhaseCompleted,
+      TaskStateKind.failed => l10n.statusTaskPhaseFailed,
+      TaskStateKind.cancelled => l10n.statusTaskPhaseCancelled,
     };
   }
 

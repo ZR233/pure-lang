@@ -90,22 +90,22 @@ void registerControllerStreamTests() {
   test(
     'authoritative product snapshot removes a stale selected Task',
     () async {
-      const staleTask = TaskRuntimeView(
+      final staleTask = TaskRuntimeView(
         runId: 'task-stale',
-        phase: 'implementing',
+        state: TaskStateView.facts(
+          kind: TaskStateKind.implementing,
+          generation: 1,
+        ),
         branch: 'pure-task-stale',
         expectedHead: 'abc123',
-        statusMessage: null,
-        stopRequestedOrigin: null,
-        stopRequestedReason: null,
-        taskGeneration: 1,
+        revision: 0,
         workUnits: [],
         completions: [],
         merges: [],
         reviews: [],
       );
       final initial = _twoProjectState(selectedProjectId: 'project-a').copyWith(
-        taskDirectory: const TaskDirectoryState(
+        taskDirectory: TaskDirectoryState(
           values: [
             TaskDirectoryEntryView(rootThreadId: 'session-b', task: staleTask),
           ],

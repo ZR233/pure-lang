@@ -116,7 +116,7 @@ impl TaskCoordinator {
                 metadata(),
             ));
             entries.push(ToolEntry::new(
-                self.task_update_design_tool(thread_id),
+                self.task_finalize_design_tool(thread_id),
                 metadata(),
             ));
             entries.push(ToolEntry::new(
@@ -392,9 +392,9 @@ fn is_direct_task_child(subagent: &SubagentContext, root_thread_id: &str) -> boo
 }
 
 fn ensure_completion_scope_is_open(scope: &DeliveryScope) -> Result<()> {
-    if scope.work_unit.execution_status != ThreadExecutionStatus::Running
+    if scope.work_unit.execution_status() != ThreadExecutionStatus::Running
         || !matches!(
-            scope.work_unit.status,
+            scope.work_unit.status(),
             WorkUnitStatus::Running
                 | WorkUnitStatus::AwaitingCompletion
                 | WorkUnitStatus::ChangesRequested

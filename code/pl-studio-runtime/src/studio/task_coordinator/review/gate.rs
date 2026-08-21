@@ -1,8 +1,7 @@
 use anyhow::{Context, Result, bail};
 
 use super::super::git::{
-    GitDiffSelection, changed_files_between_selected, ensure_no_git_operation, inspect_repository,
-    is_ancestor, resolve_tree_oid,
+    ensure_no_git_operation, inspect_repository, is_ancestor, resolve_tree_oid,
 };
 use super::super::{
     MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunRecord,
@@ -23,7 +22,7 @@ pub(crate) async fn integrated_review_gate(
         .filter(|review| review.scope == ReviewScope::Integrated)
         .collect::<Vec<_>>();
     if let Some(latest) = integrated_reviews.iter().max_by_key(|review| review.round) {
-        if latest.verdict == ReviewVerdict::Pass && latest.reviewed_head == run.expected_head {
+        if latest.verdict() == ReviewVerdict::Pass && latest.reviewed_head == run.expected_head {
             return StudioIntegratedReviewGate::SatisfiedByReview {
                 review_round_id: latest.id.clone(),
                 reviewed_head: latest.reviewed_head.clone(),
@@ -38,7 +37,7 @@ pub(crate) async fn integrated_review_gate(
     if merges.is_empty() {
         return if work_units
             .iter()
-            .all(|work_unit| work_unit.status == WorkUnitStatus::NoDelivery)
+            .all(|work_unit| work_unit.status() == WorkUnitStatus::NoDelivery)
         {
             StudioIntegratedReviewGate::NotRequiredNoDelivery
         } else {
@@ -65,9 +64,6 @@ async fn prove_single_executor_equivalence(
     reviews: &[ReviewRoundRecord],
     candidate: &SingleExecutorCandidate<'_>,
 ) -> Result<()> {
-    if run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
-        bail!("最终设计提交不是当前任务提交")
-    }
     if candidate.completion.base_commit != candidate.merge.expected_previous_head {
         bail!("获准 completion 的基础提交与合并前任务提交不同")
     }
@@ -84,7 +80,7 @@ async fn prove_single_executor_equivalence(
         .iter()
         .find(|review| {
             review.scope == ReviewScope::Delivery
-                && review.verdict == ReviewVerdict::Pass
+                && review.verdict() == ReviewVerdict::Pass
                 && review.work_unit_id.as_deref() == Some(candidate.work_unit.id.as_str())
                 && review.completion_id.as_deref() == Some(candidate.completion.id.as_str())
                 && review.completion_revision == Some(candidate.completion.revision)
@@ -94,12 +90,12 @@ async fn prove_single_executor_equivalence(
     if !is_terminal(reviewed_status(delivery_review)) {
         bail!("交付审查者尚未结束")
     }
-    if !is_terminal(candidate.work_unit.execution_status) {
+    if !is_terminal(candidate.work_unit.execution_status()) {
         bail!("执行者尚未结束")
     }
     if reviews
         .iter()
-        .any(|review| !is_terminal(review.reviewer_status))
+        .any(|review| !is_terminal(review.reviewer_status()))
     {
         bail!("仍有任务审查者未结束")
     }
@@ -126,18 +122,9 @@ async fn prove_single_executor_equivalence(
     {
         bail!("当前任务提交不继承已记录的合并结果")
     }
-    let implementation_changes = changed_files_between_selected(
-        &run.workspace_root,
-        &candidate.merge.resulting_head,
-        &run.expected_head,
-        GitDiffSelection::ExcludeDesign,
-    )
-    .await?;
-    if !implementation_changes.is_empty() {
-        bail!(
-            "合并后存在 design/** 之外的额外修改：{}",
-            implementation_changes.join(", ")
-        )
+    let current_tree = resolve_tree_oid(&run.workspace_root, &run.expected_head).await?;
+    if current_tree != delivery_tree {
+        bail!("交付审查后当前任务的完整版本树发生变化")
     }
     Ok(())
 }
@@ -161,7 +148,7 @@ fn single_executor_candidate<'a>(
         .executor_thread_id
         .as_deref()
         .context("唯一工作单缺少执行者身份")?;
-    if work_unit.status != WorkUnitStatus::Merged {
+    if work_unit.status() != WorkUnitStatus::Merged {
         bail!("唯一工作单尚未完成合并")
     }
     let [merge] = merges else {
@@ -188,7 +175,7 @@ fn single_executor_candidate<'a>(
     let passing_delivery_reviews = reviews
         .iter()
         .filter(|review| {
-            review.scope == ReviewScope::Delivery && review.verdict == ReviewVerdict::Pass
+            review.scope == ReviewScope::Delivery && review.verdict() == ReviewVerdict::Pass
         })
         .count();
     if passing_delivery_reviews != 1 {
@@ -202,7 +189,7 @@ fn single_executor_candidate<'a>(
 }
 
 fn reviewed_status(review: &ReviewRoundRecord) -> ThreadExecutionStatus {
-    review.reviewer_status
+    review.reviewer_status()
 }
 
 fn is_terminal(status: ThreadExecutionStatus) -> bool {

@@ -55,19 +55,16 @@ void registerDemoProjectTests() {
     final state = await DemoStudioApi().readStudioState();
     final api = _FakeStudioApi(
       state.copyWith(
-        taskDirectory: const TaskDirectoryState(
+        taskDirectory: TaskDirectoryState(
           values: [
             TaskDirectoryEntryView(
               rootThreadId: 'thread-main',
               task: TaskRuntimeView(
                 runId: 'task-run-active',
-                phase: 'implementing',
+                state: TaskStateView.facts(kind: TaskStateKind.implementing),
                 branch: 'codex/task-mode',
                 expectedHead: '1234567890abcdef',
-                statusMessage: null,
-                stopRequestedOrigin: null,
-                stopRequestedReason: null,
-                taskGeneration: 0,
+                revision: 0,
                 workUnits: [],
                 completions: [],
                 merges: [],

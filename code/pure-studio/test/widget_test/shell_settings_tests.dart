@@ -690,19 +690,19 @@ void registerShellSettingsTests() {
             ),
           ),
         },
-        taskDirectory: const TaskDirectoryState(
+        taskDirectory: TaskDirectoryState(
           values: [
             TaskDirectoryEntryView(
               rootThreadId: 'session-1',
               task: TaskRuntimeView(
                 runId: 'task-run-1',
-                phase: 'implementing',
+                state: TaskStateView.facts(
+                  kind: TaskStateKind.implementing,
+                  statusMessage: 'Executor delivery ready',
+                ),
                 branch: 'codex/task-mode',
                 expectedHead: '1234567890abcdef',
-                statusMessage: 'Executor delivery ready',
-                stopRequestedOrigin: null,
-                stopRequestedReason: null,
-                taskGeneration: 0,
+                revision: 0,
                 workUnits: [],
                 completions: [],
                 merges: [],
@@ -733,7 +733,9 @@ void registerShellSettingsTests() {
       findsOneWidget,
     );
     expect(
-      find.byKey(StudioDriverKeys.taskPhase('task-run-1', 'implementing')),
+      find.byKey(
+        StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.implementing),
+      ),
       findsOneWidget,
     );
     expect(

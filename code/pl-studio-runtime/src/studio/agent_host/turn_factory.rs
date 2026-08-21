@@ -111,7 +111,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         } else {
             None
         };
-        let task_phase = active_task_run.as_ref().map(|run| run.phase);
+        let task_phase = active_task_run.as_ref().map(|run| run.kind());
         #[cfg(debug_assertions)]
         let task_driver_budget = debug_task_driver_budget_fixture()?;
         if let Some(run) = active_task_run.as_ref() {
@@ -373,6 +373,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .with_prompt_scope(prompt_scope)
                 .with_interaction_callback(interaction_callback),
         );
+        if is_root
+            && task_phase == Some(crate::studio::task_coordinator::TaskRunStateKind::DesignUpdating)
+        {
+            let run = active_task_run
+                .as_ref()
+                .ok_or_else(|| turn_error("designUpdating turn has no active TaskRun"))?;
+            options = options.with_tool_completion_callback(
+                self.coordinator.design_tool_completion_callback(
+                    run.id.clone(),
+                    context.turn_id.to_string(),
+                    workspace_root.clone(),
+                ),
+            );
+        }
         #[cfg(debug_assertions)]
         if let Some(fixture) = task_driver_budget
             && mode == StudioMode::Task
@@ -574,7 +588,7 @@ fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<Su
 }
 
 fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRunRecord) -> Result<()> {
-    if run.stop_requested {
+    if run.is_stop_requested() {
         return Err(turn_error("task is quiescing; no new turn may start"));
     }
     Ok(())
@@ -588,7 +602,8 @@ fn anyhow_error(error: impl std::fmt::Display) -> PureError {
 mod tests {
     use super::*;
     use crate::studio::task_coordinator::{
-        TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskGitFingerprint,
+        TaskRunRecord, TaskRunState, TaskStopOrigin, TaskStopReason, TaskStopRequest,
     };
 
     #[test]
@@ -655,26 +670,48 @@ mod tests {
 
     fn stopped_run() -> TaskRunRecord {
         TaskRunRecord {
-            id: "task-run".to_string(),
-            root_thread_id: "session".to_string(),
-            phase: TaskRunPhase::Implementing,
-            plan: "plan".to_string(),
+            context: TaskContext {
+                id: "task-run".to_string(),
+                root_thread_id: "session".to_string(),
+                plan: "plan".to_string(),
+                workspace_root: "C:/workspace".to_string(),
+                git_common_dir: "C:/workspace/.git".to_string(),
+                branch: "main".to_string(),
+                base_commit: "base".to_string(),
+                expected_head: "head".to_string(),
+            },
+            state: TaskRunState::Stopping(StoppingState::new(
+                DesignProgress::from_finalized(FinalizedDesign {
+                    head: "head".to_string(),
+                    commit: Some("head".to_string()),
+                    summary: "design complete".to_string(),
+                    fingerprint: test_fingerprint(),
+                }),
+                7,
+                TaskStopRequest {
+                    origin: TaskStopOrigin::UserRequest,
+                    reason: TaskStopReason::new("stop").unwrap(),
+                    requested_at: 1,
+                },
+            )),
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn test_fingerprint() -> TaskGitFingerprint {
+        TaskGitFingerprint {
             workspace_root: "C:/workspace".to_string(),
             git_common_dir: "C:/workspace/.git".to_string(),
             branch: "main".to_string(),
+            head: "head".to_string(),
             base_commit: "base".to_string(),
             expected_head: "head".to_string(),
-            design_commit: Some("head".to_string()),
-            status_message: None,
-            stop_requested: true,
-            stop_requested_origin: Some(TaskStopOrigin::UserRequest),
-            stop_requested_reason: TaskStopReason::new("stop"),
-            stop_requested_at: Some(1),
-            task_generation: 7,
-            terminal_generation: None,
-            terminal_failure_id: None,
-            created_at: 1,
-            updated_at: 1,
+            operation: "none".to_string(),
+            index_diff_hash: "index".to_string(),
+            working_tree_diff_hash: "worktree".to_string(),
+            untracked_content_hash: "untracked".to_string(),
         }
     }
 }

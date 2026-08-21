@@ -144,7 +144,7 @@ impl TaskCoordinator {
                     .await?
                     .context("reviewer has no canonical ReviewRound")?;
                 ensure!(
-                    round.task_run_id == run.id && round.verdict == ReviewVerdict::Pending,
+                    round.task_run_id == run.id && round.verdict() == ReviewVerdict::Pending,
                     "reviewer ReviewRound is not pending in the active Task"
                 );
                 let frozen = round

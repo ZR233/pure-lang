@@ -5,14 +5,14 @@ use sea_orm::{
 };
 
 use super::task_run_record;
-use super::work_unit::work_unit_record;
+use super::work_unit::{update_work_unit_state, work_unit_record, work_unit_state};
 use crate::agent::worktree::git_compatible_path;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, ExecutorContinuationState, TaskRunPhase,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, ThreadExecutionStatus, WorkUnitState,
+    WorkUnitStatus,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -35,11 +35,10 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let run_model = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(thread_id))
-            .filter(entities::task_run::Column::Phase.is_not_in([
-                TaskRunPhase::Completed.as_str(),
-                TaskRunPhase::Blocked.as_str(),
-                TaskRunPhase::Failed.as_str(),
-                TaskRunPhase::Cancelled.as_str(),
+            .filter(entities::task_run::Column::StateKind.is_not_in([
+                TaskRunStateKind::Completed.as_str(),
+                TaskRunStateKind::Failed.as_str(),
+                TaskRunStateKind::Cancelled.as_str(),
             ]))
             .order_by_desc(entities::task_run::Column::UpdatedAt)
             .order_by_desc(entities::task_run::Column::Id)
@@ -47,12 +46,12 @@ impl StudioStore {
             .await?
             .context("active task run not found for this session")?;
         let run = task_run_record(run_model)?;
-        if run.stop_requested {
+        if run.is_stop_requested() {
             bail!("executor allocation is not allowed after task stop was requested");
         }
         if !matches!(
-            run.phase,
-            TaskRunPhase::Implementing | TaskRunPhase::Reworking
+            run.kind(),
+            TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
         ) {
             bail!("executor allocation requires task phase implementing or reworking");
         }
@@ -79,10 +78,10 @@ impl StudioStore {
                 reused: true,
             });
         }
-        if run.phase == TaskRunPhase::Implementing {
+        if run.kind() == TaskRunStateKind::Implementing {
             for existing_unit in existing
                 .iter()
-                .filter(|unit| is_active_work_unit(&unit.status))
+                .filter(|unit| is_active_work_unit(&unit.state_kind))
             {
                 if normalize_executor_title(&existing_unit.title)? == title
                     && stored_scope_matches(existing_unit, &scope_hints)?
@@ -99,7 +98,7 @@ impl StudioStore {
         }
         let active = existing
             .iter()
-            .filter(|unit| is_active_work_unit(&unit.status))
+            .filter(|unit| is_active_work_unit(&unit.state_kind))
             .collect::<Vec<_>>();
         if active.len() >= MAX_ACTIVE_EXECUTORS {
             bail!("task executor concurrency limit reached: at most 4 active executors");
@@ -133,25 +132,18 @@ impl StudioStore {
                 id: Set(work_unit_id.clone()),
                 task_run_id: Set(run.id.clone()),
                 title: Set(title),
-                status: Set(WorkUnitStatus::Pending.as_str().to_string()),
                 scope_hints_json: Set(scope_hints_json),
                 base_commit: Set(run.expected_head.clone()),
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
-                worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(attempt_i32),
                 executor_thread_id: Set(Some(agent_id)),
                 requested_by_call_id: Set(requested_by_call_id),
-                execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
-                execution_summary: Set(None),
-                execution_error: Set(None),
-                budget_limit_json: Set(None),
-                budget_slice_count: Set(1),
-                continuation_state: Set(ExecutorContinuationState::None.as_str().to_string()),
-                continuation_source_turn_id: Set(None),
-                continuation_revision: Set(0),
+                state_json: Set(serde_json::to_string(&WorkUnitState::pending())?),
+                revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
+                ..Default::default()
             }
             .insert(&tx)
             .await?,
@@ -205,13 +197,11 @@ impl StudioStore {
             .one(&tx)
             .await?
             .context("executor work unit not found")?;
-        let now = unix_seconds();
-        let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
-        active_work_unit.status = Set(work_unit_status.as_str().to_string());
-        active_work_unit.execution_status = Set(execution_status.as_str().to_string());
-        active_work_unit.execution_error = Set(error);
-        active_work_unit.updated_at = Set(now);
-        active_work_unit.update(&tx).await?;
+        let state = work_unit_state(&work_unit)?;
+        let mut progress = state.into_progress();
+        progress.execution_error = error;
+        update_work_unit_state(&tx, work_unit, work_unit_status, execution_status, progress)
+            .await?;
         tx.commit().await?;
         Ok(())
     }

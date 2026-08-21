@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../domain/models/runtime_models.dart';
+
 abstract final class StudioDriverKeys {
   static const shell = ValueKey<String>('studio-shell');
   static const startPage = ValueKey<String>('studio-start-page');
@@ -158,8 +160,8 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> taskRuntime(String runId) =>
       ValueKey<String>('task-runtime-$runId');
 
-  static ValueKey<String> taskPhase(String runId, String phase) =>
-      ValueKey<String>('task-runtime-$runId-phase-$phase');
+  static ValueKey<String> taskPhase(String runId, TaskStateKind phase) =>
+      ValueKey<String>('task-runtime-$runId-phase-${phase.name}');
 
   static ValueKey<String> taskStatus(String runId, String status) =>
       ValueKey<String>('task-runtime-$runId-status-$status');

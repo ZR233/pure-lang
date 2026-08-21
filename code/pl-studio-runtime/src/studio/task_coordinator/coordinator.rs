@@ -7,15 +7,16 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{MutexGuard, broadcast};
 
 use super::git::{
-    RepositorySnapshot, inspect_repository, inspect_worktree_changes, prepare_repository_for_task,
+    RepositorySnapshot, fingerprint_repository, inspect_repository, inspect_worktree_changes,
+    prepare_repository_for_task,
 };
 use super::recovery::{
     MergingRecovery, inspect_merging_recovery, is_retryable_merge_recovery_message,
     validate_snapshot_owner,
 };
 use super::{
-    CreateTaskRun, RecordTaskAgentFailure, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot,
-    WorkUnitRecord,
+    CreateTaskRun, RecordTaskAgentFailure, TaskRunRecord, TaskRunStateKind,
+    TaskWorktreeOwnerSnapshot, WorkUnitRecord,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -217,6 +218,9 @@ impl TaskCoordinator {
             bail!("task plan must not be empty");
         }
         let snapshot = prepare_repository_for_task(repository).await?;
+        let design_baseline =
+            fingerprint_repository(&snapshot.workspace_root, &snapshot.head, &snapshot.head)
+                .await?;
         let key = BranchKey::new(&snapshot.git_common_dir, &snapshot.branch);
         let owner_token = new_id("task-owner");
         acquire_process_lease(&key, &owner_token)?;
@@ -225,12 +229,12 @@ impl TaskCoordinator {
             .store
             .create_task_run_with_lease(CreateTaskRun {
                 root_thread_id: root_thread_id.to_string(),
-                phase: TaskRunPhase::DesignUpdating,
                 plan: plan.trim().to_string(),
                 workspace_root: snapshot.workspace_root.to_string_lossy().to_string(),
                 git_common_dir: snapshot.git_common_dir.to_string_lossy().to_string(),
                 branch: snapshot.branch,
                 head_commit: snapshot.head,
+                design_baseline,
             })
             .await;
         let (run, _) = match result {
@@ -296,14 +300,13 @@ impl TaskCoordinator {
                 .read_task_run(&run.id)
                 .await?
                 .context("task run disappeared after agent restart reconciliation")?;
-            if run.phase == TaskRunPhase::Stopping {
+            if run.kind() == TaskRunStateKind::Stopping {
                 let reason = run
-                    .stop_requested_reason
-                    .as_ref()
+                    .stop_reason()
                     .map_or("task stop resumed after restart", |reason| reason.as_str());
                 if let Err(error) = self
                     .store
-                    .settle_agents_for_task_stop(&run.id, run.task_generation, reason)
+                    .settle_agents_for_task_stop(&run.id, run.generation(), reason)
                     .await
                 {
                     let message = format!("task stop recovery settlement failed: {error}");
@@ -330,7 +333,7 @@ impl TaskCoordinator {
         for failure in preflight.failures {
             for run in &failure.runs {
                 failed_preflight_runs.insert(run.id.clone());
-                if !run.phase.is_terminal() {
+                if !run.kind().is_terminal() {
                     self.block_run(run, failure.message.clone()).await?;
                 }
                 self.push_recovery_issue(
@@ -394,7 +397,7 @@ impl TaskCoordinator {
             {
                 continue;
             }
-            if run.phase == TaskRunPhase::Merging {
+            if run.kind() == TaskRunStateKind::Merging {
                 match inspect_merging_recovery(&run).await {
                     MergingRecovery::Resume => report.recovered_runs.push(run),
                     MergingRecovery::Retry(message) => {
@@ -443,14 +446,13 @@ impl TaskCoordinator {
                 .await?;
                 continue;
             }
-            if run.phase == TaskRunPhase::Stopping {
+            if run.kind() == TaskRunStateKind::Stopping {
                 let reason = run
-                    .stop_requested_reason
-                    .as_ref()
+                    .stop_reason()
                     .map_or("task stop resumed after restart", |reason| reason.as_str());
                 let guard = self.lock_branch_mutation().await;
                 if let Err(error) = self
-                    .stop_task_locked(&run.id, run.task_generation, reason, &guard)
+                    .stop_task_locked(&run.id, run.generation(), reason, &guard)
                     .await
                 {
                     drop(guard);
@@ -472,8 +474,8 @@ impl TaskCoordinator {
         }
         for run in self.store.list_retryable_blocked_merge_task_runs().await? {
             let message = run
-                .status_message
-                .clone()
+                .status_message()
+                .map(str::to_string)
                 .context("retryable merge recovery task is missing its diagnostic")?;
             self.push_recovery_issue(
                 &mut report,
@@ -506,10 +508,9 @@ impl TaskCoordinator {
             .read_task_run(task_run_id)
             .await?
             .context("merge recovery task run not found")?;
-        if run.phase != TaskRunPhase::Blocked
+        if run.kind() != TaskRunStateKind::Blocked
             || run.root_thread_id != issue.thread_id.as_deref().unwrap_or_default()
-            || run.status_message.as_deref() != Some(issue.message.as_str())
-            || run.terminal_generation != Some(run.task_generation)
+            || run.status_message() != Some(issue.message.as_str())
             || !is_retryable_merge_recovery_message(&issue.message)
         {
             bail!("merge recovery state changed before retry");
@@ -869,12 +870,12 @@ impl TaskCoordinator {
     pub(crate) async fn finish_task(
         &self,
         task_run_id: &str,
-        phase: TaskRunPhase,
+        phase: TaskRunStateKind,
         status_message: Option<String>,
     ) -> Result<TaskRunRecord> {
         if !matches!(
             phase,
-            TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
+            TaskRunStateKind::Completed | TaskRunStateKind::Failed | TaskRunStateKind::Cancelled
         ) {
             bail!("finish_task requires a terminal phase");
         }
@@ -907,7 +908,7 @@ impl TaskCoordinator {
             .read_task_run(task_run_id)
             .await?
             .context("task run not found while blocking continuation failure")?;
-        if !run.phase.is_terminal() {
+        if !run.kind().is_terminal() {
             self.block_run(&run, reason).await?;
         }
         Ok(())
@@ -923,10 +924,8 @@ impl TaskCoordinator {
     }
 
     fn publish_blocked_terminal(&self, run: &TaskRunRecord) -> Result<()> {
-        if run.phase != TaskRunPhase::Blocked
-            || run.terminal_generation != Some(run.task_generation)
-        {
-            bail!("blocked task terminal fact is not canonical for its task generation");
+        if run.kind() != TaskRunStateKind::Blocked {
+            bail!("blocked task fact is not canonical");
         }
         self.release_owned_process_lease(&run.id);
         release_process_lease(
@@ -1059,8 +1058,8 @@ fn recovery_cleanup_revision(
             let resource = &resources[resource_index];
             resource_index += 1;
             digest.update(unit.id.as_bytes());
-            digest.update(unit.status.as_str().as_bytes());
-            digest.update(unit.worktree_disposition.as_str().as_bytes());
+            digest.update(unit.status().as_str().as_bytes());
+            digest.update(unit.worktree_disposition().as_str().as_bytes());
             digest.update(resource.path.as_bytes());
             digest.update(resource.branch.as_bytes());
             digest.update([resource.registration_exists as u8]);

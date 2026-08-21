@@ -165,7 +165,7 @@ pub(crate) async fn build_review_prompt(
     render_template(
         COMMON_TEMPLATE,
         [
-            ("PLAN", run.plan),
+            ("PLAN", run.plan.clone()),
             ("SCOPE_BLOCK", scope_block),
             (
                 "PRIOR_REVIEWS_JSON",
@@ -227,7 +227,7 @@ impl From<&WorkUnitRecord> for ReviewFocus {
         Self {
             work_unit_id: work_unit.id.clone(),
             title: work_unit.title.clone(),
-            status: work_unit.status,
+            status: work_unit.status(),
             scope_hints: work_unit.scope_hints.clone(),
         }
     }

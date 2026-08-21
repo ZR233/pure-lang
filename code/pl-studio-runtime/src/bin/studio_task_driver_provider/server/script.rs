@@ -18,13 +18,6 @@ const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 +
 +The implementation must create `src/feature.txt` containing exactly `offline integration verified` followed by a newline.
 *** End Patch"#;
-const CONSISTENCY_DESIGN_PATCH: &str = r#"*** Begin Patch
-*** Update File: design/task-flow.md
-@@
- The implementation must create `src/feature.txt` containing exactly `offline integration verified` followed by a newline.
-+
-+Implementation status: completed and merged.
-*** End Patch"#;
 const FEATURE_PATCH: &str = r#"*** Begin Patch
 *** Add File: src/feature.txt
 +offline integration verified
@@ -79,7 +72,7 @@ pub(super) fn role(request: &serde_json::Value) -> Result<ScriptRole> {
     if names.contains("review_exit") {
         return Ok(ScriptRole::Reviewer);
     }
-    if names.contains("plan_exit") || names.contains("task_update_design") {
+    if names.contains("plan_exit") || names.contains("task_status") {
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
@@ -151,7 +144,7 @@ fn planner_response(
 ) -> Result<(&'static str, String)> {
     if exercise_recovery {
         match step {
-            7 => {
+            8 => {
                 return Ok((
                     "final(executor failure observed)",
                     final_text(
@@ -160,7 +153,7 @@ fn planner_response(
                     ),
                 ));
             }
-            8 => {
+            9 => {
                 return Ok((
                     RECOVERY_INTERRUPTION_ACTION,
                     final_text(
@@ -169,7 +162,7 @@ fn planner_response(
                     ),
                 ));
             }
-            9 => {
+            10 => {
                 return Ok((
                     "task_status(after recovery)",
                     tool_call(
@@ -179,7 +172,7 @@ fn planner_response(
                     ),
                 ));
             }
-            10 => {
+            11 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "send_message(recovered executor)",
@@ -193,13 +186,13 @@ fn planner_response(
                     ),
                 ));
             }
-            11.. => step -= 5,
-            0..=6 => {}
+            12.. => step -= 5,
+            0..=7 => {}
         }
     }
     if exercise_budget_recovery {
         match step {
-            6 => {
+            7 => {
                 return Ok((
                     "final(budget NeedsAttention observed)",
                     final_text(
@@ -208,7 +201,7 @@ fn planner_response(
                     ),
                 ));
             }
-            7 => {
+            8 => {
                 return Ok((
                     "task_status(budget NeedsAttention)",
                     tool_call(
@@ -218,7 +211,7 @@ fn planner_response(
                     ),
                 ));
             }
-            8 => {
+            9 => {
                 progress.budget_recovery_message_sent = true;
                 let executor_id = executor_id(progress)?;
                 return Ok((
@@ -233,7 +226,7 @@ fn planner_response(
                     ),
                 ));
             }
-            9 => {
+            10 => {
                 return Ok((
                     "task_status(recovered running)",
                     tool_call(
@@ -243,7 +236,7 @@ fn planner_response(
                     ),
                 ));
             }
-            10..=13 => {
+            11..=14 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "wait_agents(recovered executor)",
@@ -254,7 +247,7 @@ fn planner_response(
                     ),
                 ));
             }
-            14 => {
+            15 => {
                 return Ok((
                     "task_status(recovered completion)",
                     tool_call(
@@ -264,7 +257,7 @@ fn planner_response(
                     ),
                 ));
             }
-            15 => {
+            16 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "task_request_delivery_review",
@@ -275,8 +268,8 @@ fn planner_response(
                     ),
                 ));
             }
-            16.. => step -= 5,
-            0..=5 => {}
+            17.. => step -= 5,
+            0..=6 => {}
         }
     }
     let response = match step {
@@ -303,14 +296,22 @@ fn planner_response(
             final_text("plan-submitted", "Plan submitted for confirmation."),
         ),
         3 => (
-            "task_update_design(initial)",
+            "apply_patch(initial design)",
             tool_call(
                 "design-initial",
-                "task_update_design",
-                serde_json::json!({"patch": INITIAL_DESIGN_PATCH}),
+                "apply_patch",
+                serde_json::json!({"input": INITIAL_DESIGN_PATCH, "cwd": "."}),
             ),
         ),
         4 => (
+            "task_finalize_design",
+            tool_call(
+                "finalize-design",
+                "task_finalize_design",
+                serde_json::json!({"summary": "Recorded the executor contract in design/task-flow.md."}),
+            ),
+        ),
+        5 => (
             "task_spawn_executor",
             tool_call(
                 "spawn-executor",
@@ -329,7 +330,7 @@ fn planner_response(
                 }),
             ),
         ),
-        5..=8 => {
+        6..=9 => {
             let executor_id = executor_id(progress)?;
             (
                 "wait_agents(executor)",
@@ -340,11 +341,11 @@ fn planner_response(
                 ),
             )
         }
-        9 => (
+        10 => (
             "task_status(completion)",
             tool_call("status-completion", "task_status", serde_json::json!({})),
         ),
-        10 => {
+        11 => {
             let executor_id = executor_id(progress)?;
             (
                 "task_request_delivery_review",
@@ -355,11 +356,11 @@ fn planner_response(
                 ),
             )
         }
-        11 => (
+        12 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        12 => (
+        13 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -367,7 +368,7 @@ fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        13 => {
+        14 => {
             let executor_id = executor_id(progress)?;
             (
                 "close_agent(executor)",
@@ -378,7 +379,7 @@ fn planner_response(
                 ),
             )
         }
-        14 => (
+        15 => (
             "task_status(after executor close)",
             tool_call(
                 "status-after-executor-close",
@@ -386,7 +387,7 @@ fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        15 => {
+        16 => {
             let branch = task_worktree(workspace)?.branch;
             progress.expected_previous_head = Some(git_output(workspace, &["rev-parse", "HEAD"])?);
             (
@@ -402,7 +403,7 @@ fn planner_response(
                 ),
             )
         }
-        16 => {
+        17 => {
             let executor_id = executor_id(progress)?;
             let previous = progress
                 .expected_previous_head
@@ -425,14 +426,6 @@ fn planner_response(
                 ),
             )
         }
-        17 => (
-            "task_update_design(consistency)",
-            tool_call(
-                "design-consistency",
-                "task_update_design",
-                serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
-            ),
-        ),
         18 => (
             "task_request_integrated_review",
             tool_call(
@@ -829,26 +822,21 @@ mod tests {
         };
 
         let (action, body) =
-            planner_response(&mut progress, Path::new("."), 6, false, true).unwrap();
+            planner_response(&mut progress, Path::new("."), 7, false, true).unwrap();
         assert_eq!(action, "final(budget NeedsAttention observed)");
         assert!(body.contains("Waiting for the queued Planner wake"));
 
         let expected = [
-            (7, "task_status", serde_json::json!({})),
+            (8, "task_status", serde_json::json!({})),
             (
-                8,
+                9,
                 "send_message",
                 serde_json::json!({
                     "target": "executor-original",
                     "message": "Resume the same WorkUnit and worktree. This message refreshes your budget; continue the original implementation and report completion without spawning replacement work."
                 }),
             ),
-            (9, "task_status", serde_json::json!({})),
-            (
-                10,
-                "wait_agents",
-                serde_json::json!({"targets": ["executor-original"]}),
-            ),
+            (10, "task_status", serde_json::json!({})),
             (
                 11,
                 "wait_agents",
@@ -864,13 +852,18 @@ mod tests {
                 "wait_agents",
                 serde_json::json!({"targets": ["executor-original"]}),
             ),
-            (14, "task_status", serde_json::json!({})),
             (
-                15,
+                14,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (15, "task_status", serde_json::json!({})),
+            (
+                16,
                 "task_request_delivery_review",
                 serde_json::json!({"executorAgentId": "executor-original"}),
             ),
-            (16, "list_agents", serde_json::json!({})),
+            (17, "list_agents", serde_json::json!({})),
         ];
 
         for (step, expected_name, expected_arguments) in expected {

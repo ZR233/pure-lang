@@ -173,7 +173,7 @@ abstract final class StudioDriverState {
     'previewToken': preview.previewToken,
     'runId': preview.runId,
     'taskGeneration': preview.taskGeneration,
-    'phase': preview.phase,
+    'phase': preview.state.name,
     'expectedHead': preview.expectedHead,
     'stopRequested': preview.stopRequested,
     'branchLeaseId': preview.branchLeaseId,
@@ -252,7 +252,7 @@ abstract final class StudioDriverState {
 
   static Map<String, Object?> _taskJson(TaskRuntimeView task) => {
     'runId': task.runId,
-    'phase': task.phase,
+    'phase': task.state.kind.name,
     'branch': task.branch,
     'expectedHead': task.expectedHead,
     'statusMessage': task.statusMessage,

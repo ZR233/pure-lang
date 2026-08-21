@@ -21,7 +21,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    BranchLeaseRecord, CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    BlockedRecovery, BranchLeaseRecord, CreateTaskRun, DesignWorkspaceObservation, FinalizedDesign,
+    TaskCommand, TaskContext, TaskRunRecord, TaskRunState, TaskRunStateKind,
     is_retryable_merge_recovery_message,
 };
 
@@ -41,27 +42,22 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let now = unix_seconds();
         let task_run_id = new_id("task-run");
+        let state_json = serde_json::to_string(&TaskRunState::new(input.design_baseline))
+            .context("failed to encode initial task state")?;
         let task_model = entities::task_run::ActiveModel {
             id: Set(task_run_id.clone()),
             root_thread_id: Set(input.root_thread_id),
-            phase: Set(input.phase.as_str().to_string()),
             plan: Set(input.plan),
             workspace_root: Set(input.workspace_root),
             git_common_dir: Set(input.git_common_dir.clone()),
             branch: Set(input.branch.clone()),
             base_commit: Set(input.head_commit.clone()),
             expected_head: Set(input.head_commit.clone()),
-            design_commit: Set(None),
-            status_message: Set(None),
-            stop_requested: Set(0),
-            stop_requested_origin: Set(None),
-            stop_requested_reason: Set(None),
-            stop_requested_at: Set(None),
-            task_generation: Set(0),
-            terminal_generation: Set(None),
-            terminal_failure_id: Set(None),
+            state_json: Set(state_json),
+            revision: Set(0),
             created_at: Set(now),
             updated_at: Set(now),
+            ..Default::default()
         }
         .insert(&tx)
         .await?;
@@ -95,11 +91,10 @@ impl StudioStore {
 
     pub(crate) async fn list_active_task_runs(&self) -> Result<Vec<TaskRunRecord>> {
         let models = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::Phase.is_not_in([
-                TaskRunPhase::Completed.as_str(),
-                TaskRunPhase::Blocked.as_str(),
-                TaskRunPhase::Failed.as_str(),
-                TaskRunPhase::Cancelled.as_str(),
+            .filter(entities::task_run::Column::StateKind.is_not_in([
+                TaskRunStateKind::Completed.as_str(),
+                TaskRunStateKind::Failed.as_str(),
+                TaskRunStateKind::Cancelled.as_str(),
             ]))
             .order_by_asc(entities::task_run::Column::CreatedAt)
             .order_by_asc(entities::task_run::Column::Id)
@@ -112,21 +107,22 @@ impl StudioStore {
         &self,
     ) -> Result<Vec<TaskRunRecord>> {
         let models = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Blocked.as_str()))
+            .filter(entities::task_run::Column::StateKind.eq(TaskRunStateKind::Blocked.as_str()))
             .order_by_asc(entities::task_run::Column::CreatedAt)
             .order_by_asc(entities::task_run::Column::Id)
             .all(&self.db)
             .await?;
-        models
+        let runs = models
             .into_iter()
-            .filter(|model| {
-                model
-                    .status_message
-                    .as_deref()
+            .map(task_run_record)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(runs
+            .into_iter()
+            .filter(|run| {
+                run.status_message()
                     .is_some_and(is_retryable_merge_recovery_message)
             })
-            .map(task_run_record)
-            .collect()
+            .collect())
     }
 
     pub(crate) async fn list_task_runs_for_project(
@@ -175,11 +171,10 @@ impl StudioStore {
     ) -> Result<Option<TaskRunRecord>> {
         let models = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
-            .filter(entities::task_run::Column::Phase.is_not_in([
-                TaskRunPhase::Completed.as_str(),
-                TaskRunPhase::Blocked.as_str(),
-                TaskRunPhase::Failed.as_str(),
-                TaskRunPhase::Cancelled.as_str(),
+            .filter(entities::task_run::Column::StateKind.is_not_in([
+                TaskRunStateKind::Completed.as_str(),
+                TaskRunStateKind::Failed.as_str(),
+                TaskRunStateKind::Cancelled.as_str(),
             ]))
             .order_by_asc(entities::task_run::Column::CreatedAt)
             .order_by_asc(entities::task_run::Column::Id)
@@ -207,7 +202,7 @@ impl StudioStore {
     pub(crate) async fn transition_task_run(
         &self,
         task_run_id: &str,
-        next: TaskRunPhase,
+        next: TaskRunStateKind,
         status_message: Option<String>,
     ) -> Result<TaskRunRecord> {
         self.transition_task_run_after_read(task_run_id, next, status_message, None)
@@ -218,7 +213,7 @@ impl StudioStore {
     pub(crate) async fn transition_task_run_after_read(
         &self,
         task_run_id: &str,
-        next: TaskRunPhase,
+        next: TaskRunStateKind,
         status_message: Option<String>,
         read_barrier: Option<&tokio::sync::Barrier>,
     ) -> Result<TaskRunRecord> {
@@ -226,37 +221,30 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("task run not found")?;
-        let current_phase = TaskRunPhase::from_str(&current.phase)
-            .with_context(|| format!("invalid stored task phase: {}", current.phase))?;
-        if current_phase != next && !current_phase.can_transition_to(next) {
-            bail!(
-                "invalid task phase transition: {} -> {}",
-                current_phase.as_str(),
-                next.as_str()
-            );
-        }
+        let current_record = task_run_record(current.clone())?;
+        let command = test_transition_command(&current_record, next, status_message)?;
+        let decision = current_record.decide(command)?;
         if let Some(read_barrier) = read_barrier {
             read_barrier.wait().await;
         }
-        let terminal_generation = current.task_generation;
-        let expected_phase = current.phase;
-        let mut active = entities::task_run::ActiveModel {
-            phase: Set(next.as_str().to_string()),
-            status_message: Set(status_message),
+        let expected_revision = current.revision;
+        let next_revision = expected_revision
+            .checked_add(1)
+            .context("task revision overflow")?;
+        let active = entities::task_run::ActiveModel {
+            state_json: Set(serde_json::to_string(&decision.next_state)?),
+            revision: Set(next_revision),
             updated_at: Set(unix_seconds()),
             ..Default::default()
         };
-        if next.is_terminal() {
-            active.terminal_generation = Set(Some(terminal_generation));
-        }
         let updated = entities::task_run::Entity::update_many()
             .set(active)
             .filter(entities::task_run::Column::Id.eq(task_run_id.to_string()))
-            .filter(entities::task_run::Column::Phase.eq(expected_phase))
+            .filter(entities::task_run::Column::Revision.eq(expected_revision))
             .exec(&self.db)
             .await?;
         if updated.rows_affected != 1 {
-            bail!("task phase changed concurrently");
+            bail!("task state changed concurrently");
         }
         self.read_task_run(task_run_id)
             .await?
@@ -277,35 +265,51 @@ impl StudioStore {
             return Ok(false);
         };
         if task.expected_head != expected_head {
+            tx.rollback().await?;
             return Ok(false);
         }
-        let now = unix_seconds();
-        let mut task_active: entities::task_run::ActiveModel = task.into();
-        task_active.expected_head = Set(next_head.to_string());
-        task_active.updated_at = Set(now);
-        task_active.update(&tx).await?;
-
         let lease = entities::branch_lease::Entity::find()
             .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
             .one(&tx)
             .await?
             .context("task branch lease not found")?;
         if lease.expected_head != expected_head {
+            tx.rollback().await?;
             return Ok(false);
         }
-        let mut lease_active: entities::branch_lease::ActiveModel = lease.into();
-        lease_active.expected_head = Set(next_head.to_string());
-        lease_active.updated_at = Set(now);
-        lease_active.update(&tx).await?;
+        if compare_and_swap_task_run(&tx, &task, None, Some(next_head))
+            .await?
+            .is_none()
+        {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        let lease_update = entities::branch_lease::Entity::update_many()
+            .set(entities::branch_lease::ActiveModel {
+                expected_head: Set(next_head.to_string()),
+                updated_at: Set(unix_seconds()),
+                ..Default::default()
+            })
+            .filter(entities::branch_lease::Column::Id.eq(lease.id))
+            .filter(entities::branch_lease::Column::ExpectedHead.eq(expected_head.to_string()))
+            .exec(&tx)
+            .await?;
+        if lease_update.rows_affected != 1 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         tx.commit().await?;
         Ok(true)
     }
 
-    pub(crate) async fn advance_task_design_head(
+    pub(crate) async fn finalize_task_design(
         &self,
         task_run_id: &str,
         expected_head: &str,
-        design_commit: &str,
+        finalized_head: &str,
+        phase_commit: Option<&str>,
+        summary: &str,
+        fingerprint: &crate::studio::task_coordinator::TaskGitFingerprint,
     ) -> Result<bool> {
         let tx = self.db.begin().await?;
         let Some(task) = entities::task_run::Entity::find_by_id(task_run_id.to_string())
@@ -315,27 +319,14 @@ impl StudioStore {
             tx.rollback().await?;
             return Ok(false);
         };
-        let phase = TaskRunPhase::from_str(&task.phase)
-            .with_context(|| format!("invalid stored task phase: {}", task.phase))?;
-        let next_phase = match phase {
-            TaskRunPhase::DesignUpdating => TaskRunPhase::Implementing,
-            TaskRunPhase::Implementing | TaskRunPhase::Reworking => phase,
-            TaskRunPhase::Planning
-            | TaskRunPhase::PendingConfirmation
-            | TaskRunPhase::Merging
-            | TaskRunPhase::Reviewing
-            | TaskRunPhase::Stopping
-            | TaskRunPhase::Completed
-            | TaskRunPhase::Blocked
-            | TaskRunPhase::Failed
-            | TaskRunPhase::Cancelled => {
-                tx.rollback().await?;
-                bail!(
-                    "task_update_design is not allowed during phase {}",
-                    phase.as_str()
-                );
-            }
-        };
+        let run = task_run_record(task.clone())?;
+        if run.kind() != TaskRunStateKind::DesignUpdating {
+            tx.rollback().await?;
+            bail!(
+                "task_finalize_design requires phase designUpdating; current phase is {}",
+                run.kind().as_str()
+            );
+        }
         if task.expected_head != expected_head {
             tx.rollback().await?;
             return Ok(false);
@@ -351,21 +342,78 @@ impl StudioStore {
             return Ok(false);
         }
 
-        let now = unix_seconds();
-        let mut task_active: entities::task_run::ActiveModel = task.into();
-        task_active.expected_head = Set(design_commit.to_string());
-        task_active.design_commit = Set(Some(design_commit.to_string()));
-        task_active.phase = Set(next_phase.as_str().to_string());
-        task_active.status_message = Set(None);
-        task_active.updated_at = Set(now);
-        task_active.update(&tx).await?;
-
-        let mut lease_active: entities::branch_lease::ActiveModel = lease.into();
-        lease_active.expected_head = Set(design_commit.to_string());
-        lease_active.updated_at = Set(now);
-        lease_active.update(&tx).await?;
+        let finalized_design = FinalizedDesign {
+            head: finalized_head.to_string(),
+            commit: phase_commit.map(str::to_string),
+            summary: summary.to_string(),
+            fingerprint: fingerprint.clone(),
+        };
+        let decision = run.decide(TaskCommand::FinalizeDesign(finalized_design))?;
+        if compare_and_swap_task_run(&tx, &task, Some(&decision.next_state), Some(finalized_head))
+            .await?
+            .is_none()
+        {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+        let lease_update = entities::branch_lease::Entity::update_many()
+            .set(entities::branch_lease::ActiveModel {
+                expected_head: Set(finalized_head.to_string()),
+                updated_at: Set(unix_seconds()),
+                ..Default::default()
+            })
+            .filter(entities::branch_lease::Column::Id.eq(lease.id))
+            .filter(entities::branch_lease::Column::ExpectedHead.eq(expected_head.to_string()))
+            .exec(&tx)
+            .await?;
+        if lease_update.rows_affected != 1 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         tx.commit().await?;
         Ok(true)
+    }
+
+    pub(crate) async fn record_task_design_observation(
+        &self,
+        task_run_id: &str,
+        turn_id: &str,
+        tool_call_id: &str,
+        fingerprint: crate::studio::task_coordinator::TaskGitFingerprint,
+    ) -> Result<bool> {
+        const MAX_CAS_ATTEMPTS: usize = 4;
+        for _ in 0..MAX_CAS_ATTEMPTS {
+            let Some(model) = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&self.db)
+                .await?
+            else {
+                return Ok(false);
+            };
+            let run = task_run_record(model.clone())?;
+            if run.kind() != TaskRunStateKind::DesignUpdating {
+                return Ok(false);
+            }
+            let latest = run
+                .latest_design_observation()
+                .context("designUpdating state is missing its workspace observation")?;
+            let sequence = latest
+                .sequence
+                .checked_add(1)
+                .context("design observation sequence overflow")?;
+            let decision = run.decide(TaskCommand::ObserveDesign(DesignWorkspaceObservation {
+                sequence,
+                turn_id: Some(turn_id.to_string()),
+                tool_call_id: Some(tool_call_id.to_string()),
+                fingerprint: fingerprint.clone(),
+            }))?;
+            if compare_and_swap_task_run(&self.db, &model, Some(&decision.next_state), None)
+                .await?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+        bail!("task design observation repeatedly lost its revision CAS")
     }
 
     #[cfg(test)]
@@ -378,6 +426,73 @@ impl StudioStore {
     }
 }
 
+#[cfg(test)]
+fn test_transition_command(
+    run: &TaskRunRecord,
+    next: TaskRunStateKind,
+    status_message: Option<String>,
+) -> Result<TaskCommand> {
+    let message = status_message.unwrap_or_else(|| "test transition".to_string());
+    let command = match next {
+        TaskRunStateKind::DesignUpdating => {
+            bail!("a TaskRun cannot transition back to designUpdating")
+        }
+        TaskRunStateKind::Implementing if run.kind() == TaskRunStateKind::DesignUpdating => {
+            TaskCommand::FinalizeDesign(FinalizedDesign {
+                head: run.expected_head.clone(),
+                commit: None,
+                summary: message,
+                fingerprint: run
+                    .latest_design_observation()
+                    .context("test design transition is missing its baseline")?
+                    .fingerprint
+                    .clone(),
+            })
+        }
+        TaskRunStateKind::Implementing => TaskCommand::BeginImplementing {
+            status_message: Some(message),
+        },
+        TaskRunStateKind::Merging => TaskCommand::BeginMerging {
+            status_message: Some(message),
+        },
+        TaskRunStateKind::Reviewing => TaskCommand::BeginReviewing(
+            crate::studio::task_coordinator::ReviewTarget::Integration {
+                reviewed_head: run.expected_head.clone(),
+            },
+        ),
+        TaskRunStateKind::Reworking => TaskCommand::BeginReworking {
+            status_message: message,
+        },
+        TaskRunStateKind::Stopping => TaskCommand::RequestStop(
+            (
+                crate::studio::task_coordinator::TaskStopOrigin::PlannerDecision,
+                crate::studio::task_coordinator::TaskStopReason::new(message)
+                    .context("test stop reason must not be empty")?,
+                unix_seconds(),
+            )
+                .into(),
+        ),
+        TaskRunStateKind::Blocked => TaskCommand::Block {
+            recovery: if is_retryable_merge_recovery_message(&message) {
+                BlockedRecovery::RetryMerge
+            } else {
+                BlockedRecovery::ManualOnly
+            },
+            message,
+        },
+        TaskRunStateKind::Completed => TaskCommand::Complete,
+        TaskRunStateKind::Failed => TaskCommand::Fail {
+            message,
+            failure_id: None,
+        },
+        TaskRunStateKind::Cancelled => TaskCommand::Cancel {
+            message,
+            request: run.stop_request().cloned(),
+        },
+    };
+    Ok(command)
+}
+
 fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     for (label, value) in [
         ("rootThreadId", input.root_thread_id.as_str()),
@@ -386,6 +501,10 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
         ("gitCommonDir", input.git_common_dir.as_str()),
         ("branch", input.branch.as_str()),
         ("headCommit", input.head_commit.as_str()),
+        (
+            "designBaseline.workspaceRoot",
+            input.design_baseline.workspace_root.as_str(),
+        ),
     ] {
         if value.trim().is_empty() {
             bail!("{label} must not be empty");
@@ -395,44 +514,83 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
 }
 
 pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRunRecord> {
-    let phase = TaskRunPhase::from_str(&model.phase)
-        .with_context(|| format!("invalid stored task phase: {}", model.phase))?;
-    let stop_requested_origin = match model.stop_requested_origin.as_deref() {
-        Some(value) => Some(
-            TaskStopOrigin::from_str(value)
-                .with_context(|| format!("invalid stored task stop origin: {value}"))?,
-        ),
-        None => None,
-    };
-    let task_generation = u64::try_from(model.task_generation)
-        .context("stored task generation must not be negative")?;
-    let terminal_generation = model
-        .terminal_generation
-        .map(u64::try_from)
-        .transpose()
-        .context("stored terminal generation must not be negative")?;
+    let state: TaskRunState =
+        serde_json::from_str(&model.state_json).context("invalid stored task state JSON")?;
+    if state.kind().as_str() != model.state_kind {
+        bail!(
+            "stored task state discriminator mismatch: generated {}, decoded {}",
+            model.state_kind,
+            state.kind().as_str()
+        );
+    }
     Ok(TaskRunRecord {
-        id: model.id,
-        root_thread_id: model.root_thread_id,
-        phase,
-        plan: model.plan,
-        workspace_root: model.workspace_root,
-        git_common_dir: model.git_common_dir,
-        branch: model.branch,
-        base_commit: model.base_commit,
-        expected_head: model.expected_head,
-        design_commit: model.design_commit,
-        status_message: model.status_message,
-        stop_requested: model.stop_requested != 0,
-        stop_requested_origin,
-        stop_requested_reason: model.stop_requested_reason.map(TaskStopReason::from_stored),
-        stop_requested_at: model.stop_requested_at,
-        task_generation,
-        terminal_generation,
-        terminal_failure_id: model.terminal_failure_id,
+        context: TaskContext {
+            id: model.id,
+            root_thread_id: model.root_thread_id,
+            plan: model.plan,
+            workspace_root: model.workspace_root,
+            git_common_dir: model.git_common_dir,
+            branch: model.branch,
+            base_commit: model.base_commit,
+            expected_head: model.expected_head,
+        },
+        state,
+        revision: u64::try_from(model.revision)
+            .context("stored task revision must not be negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+pub(super) async fn apply_task_command(
+    tx: &sea_orm::DatabaseTransaction,
+    model: entities::task_run::Model,
+    command: TaskCommand,
+) -> Result<entities::task_run::Model> {
+    let run = task_run_record(model.clone())?;
+    let decision = run.decide(command)?;
+    compare_and_swap_task_run(tx, &model, Some(&decision.next_state), None)
+        .await?
+        .context("TaskRun state update lost its revision CAS")
+}
+
+pub(super) async fn compare_and_swap_task_run<C>(
+    connection: &C,
+    model: &entities::task_run::Model,
+    next_state: Option<&TaskRunState>,
+    next_expected_head: Option<&str>,
+) -> Result<Option<entities::task_run::Model>>
+where
+    C: sea_orm::ConnectionTrait,
+{
+    let next_revision = model
+        .revision
+        .checked_add(1)
+        .context("task revision overflow")?;
+    let mut active = entities::task_run::ActiveModel {
+        revision: Set(next_revision),
+        updated_at: Set(unix_seconds()),
+        ..Default::default()
+    };
+    if let Some(next_state) = next_state {
+        active.state_json = Set(serde_json::to_string(next_state)?);
+    }
+    if let Some(next_expected_head) = next_expected_head {
+        active.expected_head = Set(next_expected_head.to_string());
+    }
+    let result = entities::task_run::Entity::update_many()
+        .set(active)
+        .filter(entities::task_run::Column::Id.eq(model.id.clone()))
+        .filter(entities::task_run::Column::Revision.eq(model.revision))
+        .exec(connection)
+        .await?;
+    if result.rows_affected != 1 {
+        return Ok(None);
+    }
+    entities::task_run::Entity::find_by_id(model.id.clone())
+        .one(connection)
+        .await
+        .context("failed to reload TaskRun after revision CAS")
 }
 
 fn branch_lease_record(model: entities::branch_lease::Model) -> BranchLeaseRecord {
@@ -450,45 +608,54 @@ fn branch_lease_record(model: entities::branch_lease::Model) -> BranchLeaseRecor
 pub(super) async fn write_task_terminal_fact(
     tx: &sea_orm::DatabaseTransaction,
     run: entities::task_run::Model,
-    next_phase: TaskRunPhase,
+    next_state: TaskRunStateKind,
     status_message: Option<String>,
     expected_generation: Option<u64>,
 ) -> Result<entities::task_run::Model> {
-    if !next_phase.is_terminal() {
-        bail!("task terminal fact requires a terminal phase");
+    if !next_state.is_terminal() && next_state != TaskRunStateKind::Blocked {
+        bail!("task terminal fact requires blocked or a terminal state");
     }
-    let current_phase = TaskRunPhase::from_str(&run.phase)
-        .with_context(|| format!("invalid stored task phase: {}", run.phase))?;
-    let task_generation = u64::try_from(run.task_generation)
-        .context("stored task generation must not be negative")?;
+    let current = task_run_record(run.clone())?;
+    let task_generation = current.state.generation();
     if expected_generation.is_some_and(|expected| expected != task_generation) {
         bail!("task terminal fact belongs to another generation");
     }
-    if let Some(terminal_generation) = run.terminal_generation {
-        let terminal_generation = u64::try_from(terminal_generation)
-            .context("stored terminal generation must not be negative")?;
-        if current_phase == next_phase && terminal_generation == task_generation {
+    if current.kind().is_terminal() {
+        if current.kind() == next_state {
             return Ok(run);
         }
-        bail!("task already has a terminal fact for another phase or generation");
+        bail!("task already has a different terminal state");
     }
-    if current_phase.is_terminal() {
-        bail!("stored terminal task is missing its terminal generation");
-    }
-    if !current_phase.can_transition_to(next_phase) {
-        bail!(
-            "invalid task terminal transition: {} -> {}",
-            current_phase.as_str(),
-            next_phase.as_str()
-        );
-    }
-
-    let mut active: entities::task_run::ActiveModel = run.into();
-    active.phase = Set(next_phase.as_str().to_string());
-    active.status_message = Set(status_message);
-    active.terminal_generation = Set(Some(i64::try_from(task_generation)?));
-    active.updated_at = Set(unix_seconds());
-    Ok(active.update(tx).await?)
+    let message = status_message.unwrap_or_else(|| next_state.as_str().to_string());
+    let command = match next_state {
+        TaskRunStateKind::Blocked => TaskCommand::Block {
+            recovery: if is_retryable_merge_recovery_message(&message) {
+                BlockedRecovery::RetryMerge
+            } else {
+                BlockedRecovery::ManualOnly
+            },
+            message,
+        },
+        TaskRunStateKind::Completed => TaskCommand::Complete,
+        TaskRunStateKind::Failed => TaskCommand::Fail {
+            message,
+            failure_id: None,
+        },
+        TaskRunStateKind::Cancelled => TaskCommand::Cancel {
+            message,
+            request: current.stop_request().cloned(),
+        },
+        TaskRunStateKind::DesignUpdating
+        | TaskRunStateKind::Implementing
+        | TaskRunStateKind::Merging
+        | TaskRunStateKind::Reviewing
+        | TaskRunStateKind::Reworking
+        | TaskRunStateKind::Stopping => unreachable!("checked above"),
+    };
+    let decision = current.decide(command)?;
+    compare_and_swap_task_run(tx, &run, Some(&decision.next_state), None)
+        .await?
+        .context("TaskRun terminal update lost its revision CAS")
 }
 
 async fn delete_blocked_branch_lease(

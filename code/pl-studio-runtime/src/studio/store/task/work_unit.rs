@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use pl_protocol::AgentWorkingState;
+#[cfg(test)]
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr,
 };
 
 use crate::studio::entity as entities;
@@ -12,8 +14,8 @@ use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
     ExecutorContinuationRequest, ExecutorContinuationState, TASK_EXECUTOR_HANDOFF_SECTION_ID,
-    TaskExecutorHandoff, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitRecord,
-    WorkUnitStatus,
+    TaskExecutorHandoff, ThreadExecutionStatus, WorkUnitContext, WorkUnitProgress, WorkUnitRecord,
+    WorkUnitState, WorkUnitStatus, decode_work_unit_state,
 };
 
 impl StudioStore {
@@ -25,25 +27,18 @@ impl StudioStore {
                 id: Set(new_id("work-unit")),
                 task_run_id: Set(input.task_run_id),
                 title: Set(input.title),
-                status: Set(WorkUnitStatus::Pending.as_str().to_string()),
                 scope_hints_json: Set(serde_json::to_string(&input.scope_hints)?),
                 base_commit: Set(input.base_commit),
                 worktree_path: Set(input.worktree_path),
                 branch: Set(input.branch),
-                worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(input.attempt as i32),
                 executor_thread_id: Set(None),
                 requested_by_call_id: Set(String::new()),
-                execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
-                execution_summary: Set(None),
-                execution_error: Set(None),
-                budget_limit_json: Set(None),
-                budget_slice_count: Set(1),
-                continuation_state: Set(ExecutorContinuationState::None.as_str().to_string()),
-                continuation_source_turn_id: Set(None),
-                continuation_revision: Set(0),
+                state_json: Set(serde_json::to_string(&WorkUnitState::pending())?),
+                revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
+                ..Default::default()
             }
             .insert(&self.db)
             .await?,
@@ -61,11 +56,60 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("work unit not found")?;
-        let mut active: entities::work_unit::ActiveModel = model.into();
-        active.status = Set(status.as_str().to_string());
-        active.executor_thread_id = Set(executor_thread_id);
-        active.updated_at = Set(unix_seconds());
-        work_unit_record(active.update(&self.db).await?)
+        let state = work_unit_state(&model)?;
+        let execution = default_execution_status(status);
+        let state = WorkUnitState::from_parts(status, execution, state.into_progress())?;
+        let next_revision = model
+            .revision
+            .checked_add(1)
+            .context("WorkUnit revision overflow")?;
+        let result = entities::work_unit::Entity::update_many()
+            .col_expr(
+                entities::work_unit::Column::ExecutorThreadId,
+                Expr::value(executor_thread_id),
+            )
+            .col_expr(
+                entities::work_unit::Column::StateJson,
+                Expr::value(serde_json::to_string(&state)?),
+            )
+            .col_expr(
+                entities::work_unit::Column::Revision,
+                Expr::value(next_revision),
+            )
+            .col_expr(
+                entities::work_unit::Column::UpdatedAt,
+                Expr::value(unix_seconds()),
+            )
+            .filter(entities::work_unit::Column::Id.eq(model.id.clone()))
+            .filter(entities::work_unit::Column::Revision.eq(model.revision))
+            .exec(&self.db)
+            .await?;
+        if result.rows_affected != 1 {
+            anyhow::bail!("WorkUnit test update lost its revision CAS");
+        }
+        work_unit_record(
+            entities::work_unit::Entity::find_by_id(model.id)
+                .one(&self.db)
+                .await?
+                .context("WorkUnit disappeared after test update")?,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn update_work_unit_state_for_test(
+        &self,
+        work_unit_id: &str,
+        status: WorkUnitStatus,
+        execution: ThreadExecutionStatus,
+        progress: WorkUnitProgress,
+    ) -> Result<WorkUnitRecord> {
+        let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
+            .one(&self.db)
+            .await?
+            .context("work unit not found")?;
+        work_unit_record(
+            update_work_unit_state(&self.db, model, status, execution, progress).await?,
+        )
     }
 
     pub(crate) async fn read_work_unit(
@@ -153,45 +197,49 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("executor work unit not found")?;
-        let mut active: entities::work_unit::ActiveModel = work_unit.into();
-        active.status = Set(WorkUnitStatus::NeedsAttention.as_str().to_string());
-        active.execution_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
-        active.execution_error = Set(Some(error.to_string()));
-        active.continuation_state = Set(ExecutorContinuationState::NeedsAttention
-            .as_str()
-            .to_string());
-        active.updated_at = Set(crate::studio::ids::unix_seconds());
-        active.update(&self.db).await?;
+        let state = work_unit_state(&work_unit)?;
+        let mut progress = state.into_progress();
+        progress.execution_error = Some(error.to_string());
+        progress.continuation_state = ExecutorContinuationState::NeedsAttention;
+        update_work_unit_state(
+            &self.db,
+            work_unit,
+            WorkUnitStatus::NeedsAttention,
+            ThreadExecutionStatus::BudgetLimited,
+            progress,
+        )
+        .await?;
         Ok(())
     }
 
     pub(crate) async fn list_pending_executor_continuations(
         &self,
     ) -> Result<Vec<ExecutorContinuationRequest>> {
-        entities::work_unit::Entity::find()
-            .filter(
-                entities::work_unit::Column::ContinuationState
-                    .eq(ExecutorContinuationState::PendingStart.as_str()),
-            )
+        let units = entities::work_unit::Entity::find()
             .order_by_asc(entities::work_unit::Column::UpdatedAt)
             .order_by_asc(entities::work_unit::Column::Id)
             .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|unit| {
-                Ok(ExecutorContinuationRequest {
-                    agent_id: unit
-                        .executor_thread_id
-                        .context("pending executor continuation has no executor Thread")?,
-                    work_unit_id: unit.id,
-                    source_turn_id: unit
-                        .continuation_source_turn_id
-                        .context("pending executor continuation has no source Turn")?,
-                    slice_count: u32::try_from(unit.budget_slice_count)
-                        .context("pending executor continuation has invalid slice count")?,
-                })
-            })
-            .collect()
+            .await?;
+        let mut requests = Vec::new();
+        for unit in units {
+            let state = work_unit_state(&unit)?;
+            let progress = state.progress();
+            if progress.continuation_state != ExecutorContinuationState::PendingStart {
+                continue;
+            }
+            requests.push(ExecutorContinuationRequest {
+                agent_id: unit
+                    .executor_thread_id
+                    .context("pending executor continuation has no executor Thread")?,
+                work_unit_id: unit.id,
+                source_turn_id: progress
+                    .continuation_source_turn_id
+                    .clone()
+                    .context("pending executor continuation has no source Turn")?,
+                slice_count: progress.budget_slice_count,
+            });
+        }
+        Ok(requests)
     }
 
     pub(crate) async fn executor_continuation_turn_id(
@@ -204,10 +252,11 @@ impl StudioStore {
         else {
             return Ok(None);
         };
+        let state = work_unit_state(&unit)?;
         if unit.executor_thread_id.as_deref() != Some(continuation.agent_id.as_str())
-            || unit.continuation_source_turn_id.as_deref()
+            || state.progress().continuation_source_turn_id.as_deref()
                 != Some(continuation.source_turn_id.as_str())
-            || unit.continuation_state != ExecutorContinuationState::PendingStart.as_str()
+            || state.progress().continuation_state != ExecutorContinuationState::PendingStart
         {
             return Ok(None);
         }
@@ -229,53 +278,94 @@ impl StudioStore {
 }
 
 pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
+    let state = work_unit_state(&model)?;
     Ok(WorkUnitRecord {
-        id: model.id,
-        task_run_id: model.task_run_id,
-        title: model.title,
-        status: WorkUnitStatus::from_str(&model.status)
-            .with_context(|| format!("invalid work unit status: {}", model.status))?,
-        scope_hints: serde_json::from_str(&model.scope_hints_json)?,
-        base_commit: model.base_commit,
-        worktree_path: model.worktree_path,
-        branch: model.branch,
-        worktree_disposition: TaskWorktreeDisposition::from_str(&model.worktree_disposition)
-            .with_context(|| {
-                format!(
-                    "invalid task worktree disposition: {}",
-                    model.worktree_disposition
-                )
-            })?,
-        attempt: model.attempt as u32,
-        executor_thread_id: model.executor_thread_id,
-        requested_by_call_id: model.requested_by_call_id,
-        execution_status: ThreadExecutionStatus::from_str(&model.execution_status).with_context(
-            || {
-                format!(
-                    "invalid Thread execution status: {}",
-                    model.execution_status
-                )
-            },
-        )?,
-        execution_summary: model.execution_summary,
-        execution_error: model.execution_error,
-        budget_limit: model
-            .budget_limit_json
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?,
-        budget_slice_count: u32::try_from(model.budget_slice_count)
-            .context("budget slice count is negative")?,
-        continuation_state: ExecutorContinuationState::from_str(&model.continuation_state)
-            .with_context(|| {
-                format!(
-                    "invalid executor continuation state: {}",
-                    model.continuation_state
-                )
-            })?,
-        continuation_source_turn_id: model.continuation_source_turn_id,
-        continuation_revision: u64::try_from(model.continuation_revision)
-            .context("continuation revision is negative")?,
+        context: WorkUnitContext {
+            id: model.id,
+            task_run_id: model.task_run_id,
+            title: model.title,
+            scope_hints: serde_json::from_str(&model.scope_hints_json)?,
+            base_commit: model.base_commit,
+            worktree_path: model.worktree_path,
+            branch: model.branch,
+            attempt: u32::try_from(model.attempt).context("work unit attempt is negative")?,
+            executor_thread_id: model.executor_thread_id,
+            requested_by_call_id: model.requested_by_call_id,
+        },
+        state,
+        revision: u64::try_from(model.revision).context("work unit revision is negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+pub(super) fn work_unit_state(model: &entities::work_unit::Model) -> Result<WorkUnitState> {
+    let state = decode_work_unit_state(&model.state_json)?;
+    if state.status().as_str() != model.state_kind {
+        anyhow::bail!(
+            "stored WorkUnit state discriminator mismatch: JSON is {}, generated column is {}",
+            state.status().as_str(),
+            model.state_kind
+        );
+    }
+    Ok(state)
+}
+
+pub(super) async fn update_work_unit_state<C>(
+    connection: &C,
+    model: entities::work_unit::Model,
+    status: WorkUnitStatus,
+    execution: ThreadExecutionStatus,
+    progress: WorkUnitProgress,
+) -> Result<entities::work_unit::Model>
+where
+    C: ConnectionTrait,
+{
+    let next_state = WorkUnitState::from_parts(status, execution, progress)?;
+    let next_revision = model
+        .revision
+        .checked_add(1)
+        .context("WorkUnit revision overflow")?;
+    let result = entities::work_unit::Entity::update_many()
+        .col_expr(
+            entities::work_unit::Column::StateJson,
+            Expr::value(serde_json::to_string(&next_state)?),
+        )
+        .col_expr(
+            entities::work_unit::Column::Revision,
+            Expr::value(next_revision),
+        )
+        .col_expr(
+            entities::work_unit::Column::UpdatedAt,
+            Expr::value(crate::studio::ids::unix_seconds()),
+        )
+        .filter(entities::work_unit::Column::Id.eq(model.id.clone()))
+        .filter(entities::work_unit::Column::Revision.eq(model.revision))
+        .exec(connection)
+        .await?;
+    if result.rows_affected != 1 {
+        anyhow::bail!("WorkUnit state update lost its revision CAS");
+    }
+    entities::work_unit::Entity::find_by_id(model.id)
+        .one(connection)
+        .await?
+        .context("WorkUnit disappeared after state update")
+}
+
+#[cfg(test)]
+fn default_execution_status(status: WorkUnitStatus) -> ThreadExecutionStatus {
+    match status {
+        WorkUnitStatus::Pending => ThreadExecutionStatus::Queued,
+        WorkUnitStatus::Running => ThreadExecutionStatus::Running,
+        WorkUnitStatus::AwaitingCompletion
+        | WorkUnitStatus::ReadyForReview
+        | WorkUnitStatus::Reviewing
+        | WorkUnitStatus::ChangesRequested
+        | WorkUnitStatus::Approved
+        | WorkUnitStatus::Merged
+        | WorkUnitStatus::NoDelivery => ThreadExecutionStatus::Completed,
+        WorkUnitStatus::NeedsAttention => ThreadExecutionStatus::BudgetLimited,
+        WorkUnitStatus::Failed => ThreadExecutionStatus::Failed,
+        WorkUnitStatus::Cancelled => ThreadExecutionStatus::Cancelled,
+    }
 }

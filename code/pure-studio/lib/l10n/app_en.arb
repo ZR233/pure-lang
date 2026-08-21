@@ -215,8 +215,6 @@
   "statusTaskContinuationCompacting": "Compacting context",
   "statusTaskContinuationPendingStart": "Starting next slice",
   "statusTaskContinuationNeedsAttention": "Needs attention",
-  "statusTaskPhasePlanning": "Planning",
-  "statusTaskPhasePendingConfirmation": "Waiting for confirmation",
   "statusTaskPhaseDesignUpdating": "Updating design",
   "statusTaskPhaseImplementing": "Implementing",
   "statusTaskPhaseMerging": "Merging",

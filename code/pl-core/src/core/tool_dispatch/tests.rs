@@ -1,9 +1,9 @@
 use pretty_assertions::assert_eq;
 
-use super::ToolExecutionRecord;
 use super::display::redact_user_input_display_result;
 use super::progress_messages::{tool_start_progress_message, tool_terminal_progress_message};
 use super::records::finalize_tool_item;
+use super::{ToolExecutionError, ToolExecutionRecord, notify_tool_completion};
 use pl_protocol::ToolCallKind;
 use pl_trace::TracePartStatus;
 
@@ -163,5 +163,52 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
             result_hash: "result-hash".to_string(),
             cache_hit: true,
         })
+    );
+}
+
+#[tokio::test]
+async fn completed_tool_callback_receives_the_canonical_terminal_record() {
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let callback_observed = observed.clone();
+    let options = crate::TurnOptions::default().with_tool_completion_callback(std::sync::Arc::new(
+        move |completion| {
+            let callback_observed = callback_observed.clone();
+            Box::pin(async move {
+                callback_observed.lock().unwrap().push(completion);
+                Ok(())
+            })
+        },
+    ));
+    let mut record = completed_record("exec");
+    record.result = "generated file".to_string();
+    record.exit_code = Some(0);
+
+    notify_tool_completion(&options, &record).await.unwrap();
+
+    let observations = observed.lock().unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].call_id, "call-1");
+    assert_eq!(observations[0].name, "exec");
+    assert_eq!(observations[0].status, "completed");
+    assert_eq!(observations[0].result, "generated file");
+    assert_eq!(observations[0].exit_code, Some(0));
+}
+
+#[tokio::test]
+async fn completed_tool_callback_failure_is_a_fatal_host_boundary_error() {
+    let options =
+        crate::TurnOptions::default().with_tool_completion_callback(std::sync::Arc::new(|_| {
+            Box::pin(async { anyhow::bail!("fingerprint failed") })
+        }));
+
+    let error = notify_tool_completion(&options, &completed_record("apply_patch"))
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ToolExecutionError::Fatal(
+            "host post-tool observation failed after apply_patch: fingerprint failed".to_string()
+        )
     );
 }

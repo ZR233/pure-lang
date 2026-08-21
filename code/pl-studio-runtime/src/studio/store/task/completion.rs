@@ -9,9 +9,13 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationState, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord,
-    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    BlockedRecovery, ExecutorContinuationState, ReviewRoundState, ReviewScope, ReviewVerdict,
+    TaskCommand, TaskRunRecord, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
+
+use super::review::{review_round_state, update_review_round_state};
+use super::work_unit::{update_work_unit_state, work_unit_state};
 
 #[derive(Debug, thiserror::Error)]
 #[error("task root thread still has {total} pending interactions")]
@@ -50,36 +54,22 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found while requesting stop")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if run.expected_head != expected_head || phase.is_terminal() {
+            let record = super::task_run_record(run.clone())?;
+            if run.expected_head != expected_head || record.kind().is_terminal() {
                 bail!("task stop no longer matches the active task HEAD");
             }
-            if run.terminal_generation.is_some() {
-                bail!("active task already has a terminal generation");
-            }
             validate_lease(&tx, &run, expected_head).await?;
-            if run.stop_requested != 0 {
-                return super::task_run_record(run);
+            if record.is_stop_requested() {
+                return Ok(record);
             }
             let now = unix_seconds();
-            let next_generation = run
-                .task_generation
-                .checked_add(1)
-                .context("task generation overflow while requesting stop")?;
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.stop_requested = Set(1);
-            active.stop_requested_origin = Set(Some(origin.as_str().to_string()));
-            active.stop_requested_reason = Set(Some(reason.as_str().to_string()));
-            active.stop_requested_at = Set(Some(now));
-            active.task_generation = Set(next_generation);
-            active.terminal_generation = Set(None);
-            active.status_message = Set(Some(format!(
-                "task stop requested by {}; settling active turns",
-                origin.as_str()
-            )));
-            active.updated_at = Set(now);
-            super::task_run_record(active.update(&tx).await?)
+            let updated = super::apply_task_command(
+                &tx,
+                run,
+                TaskCommand::RequestStop((origin, reason.clone(), now).into()),
+            )
+            .await?;
+            super::task_run_record(updated)
         }
         .await;
         finish_transaction(tx, result).await
@@ -97,29 +87,21 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found while beginning stop")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if run.expected_head != expected_head || phase.is_terminal() {
+            let record = super::task_run_record(run.clone())?;
+            if run.expected_head != expected_head || record.kind().is_terminal() {
                 bail!("task stop no longer matches the active task HEAD");
             }
-            if run.stop_requested == 0 {
+            if !record.is_stop_requested() {
                 bail!("task stop must be requested before entering stopping");
             }
-            if run.task_generation != i64::try_from(expected_generation)? {
+            if record.generation() != expected_generation {
                 bail!("task stop generation changed before entering stopping");
             }
             validate_lease(&tx, &run, expected_head).await?;
-            if phase == TaskRunPhase::Stopping {
-                return super::task_run_record(run);
+            if record.kind() != TaskRunStateKind::Stopping {
+                bail!("task stop request did not enter the stopping state");
             }
-            if !phase.can_transition_to(TaskRunPhase::Stopping) {
-                bail!("task phase cannot transition to stopping");
-            }
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.phase = Set(TaskRunPhase::Stopping.as_str().to_string());
-            active.status_message = Set(Some("task stop is settling agents".to_string()));
-            active.updated_at = Set(unix_seconds());
-            super::task_run_record(active.update(&tx).await?)
+            Ok(record)
         }
         .await;
         finish_transaction(tx, result).await
@@ -136,20 +118,22 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found while blocking")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if phase.is_terminal() {
+            let record = super::task_run_record(run.clone())?;
+            if record.kind().is_terminal() {
                 return super::task_run_record(run);
             }
-            if !phase.can_transition_to(TaskRunPhase::Blocked) {
-                bail!("task phase cannot transition to blocked");
-            }
-            let blocked = super::write_task_terminal_fact(
+            let recovery = if super::is_retryable_merge_recovery_message(reason) {
+                BlockedRecovery::RetryMerge
+            } else {
+                BlockedRecovery::ManualOnly
+            };
+            let blocked = super::apply_task_command(
                 &tx,
                 run,
-                TaskRunPhase::Blocked,
-                Some(reason.to_string()),
-                None,
+                TaskCommand::Block {
+                    message: reason.to_string(),
+                    recovery,
+                },
             )
             .await?;
             super::delete_blocked_branch_lease(&tx, task_run_id).await?;
@@ -169,25 +153,20 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("blocked merge task run not found while retrying recovery")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if phase != TaskRunPhase::Blocked
-                || run.terminal_generation != Some(run.task_generation)
-                || run.task_generation != i64::try_from(expected.task_generation)?
+            let record = super::task_run_record(run.clone())?;
+            if record.kind() != TaskRunStateKind::Blocked
+                || record.generation() != expected.generation()
+                || record.revision != expected.revision
                 || run.updated_at != expected.updated_at
                 || run.workspace_root != expected.workspace_root
                 || run.git_common_dir != expected.git_common_dir
                 || run.branch != expected.branch
                 || run.expected_head != expected.expected_head
-                || run.status_message != expected.status_message
+                || record.status_message() != expected.status_message()
             {
                 bail!("merge recovery state changed before retry");
             }
             let now = unix_seconds();
-            let next_generation = run
-                .task_generation
-                .checked_add(1)
-                .context("task generation overflow while retrying merge recovery")?;
             entities::branch_lease::ActiveModel {
                 id: Set(new_id("branch-lease")),
                 task_run_id: Set(run.id.clone()),
@@ -201,13 +180,16 @@ impl StudioStore {
             .await
             .context("merge recovery could not reacquire the durable branch lease")?;
 
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.phase = Set(TaskRunPhase::Merging.as_str().to_string());
-            active.status_message = Set(None);
-            active.task_generation = Set(next_generation);
-            active.terminal_generation = Set(None);
-            active.updated_at = Set(now);
-            super::task_run_record(active.update(&tx).await?)
+            let updated = super::apply_task_command(
+                &tx,
+                run,
+                TaskCommand::RecoverBlocked {
+                    recovery: BlockedRecovery::RetryMerge,
+                    status_message: "retrying blocked merge".to_string(),
+                },
+            )
+            .await?;
+            super::task_run_record(updated)
         }
         .await;
         finish_transaction(tx, result).await
@@ -222,24 +204,26 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_run_for_session(&tx, thread_id).await?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            let record = super::task_run_record(run.clone())?;
+            let phase = record.kind();
             if !matches!(
                 phase,
-                TaskRunPhase::Implementing | TaskRunPhase::Reworking | TaskRunPhase::Reviewing
+                TaskRunStateKind::Implementing
+                    | TaskRunStateKind::Reworking
+                    | TaskRunStateKind::Reviewing
             ) || run.expected_head != expected_head
-                || run.design_commit.as_deref() != Some(expected_head)
+                || record.design().is_none()
             {
-                bail!("task completion requires final design at the current HEAD");
+                bail!("task completion requires a finalized design stage at the current task HEAD");
             }
-            if run.stop_requested != 0 {
+            if record.is_stop_requested() {
                 bail!("task completion is unavailable after stop was requested");
             }
             validate_lease(&tx, &run, expected_head).await?;
             validate_completion_children(&tx, &run, phase, gate).await?;
             validate_no_pending_interactions(&tx, &run.root_thread_id).await?;
             let completed =
-                super::write_task_terminal_fact(&tx, run, TaskRunPhase::Completed, None, None)
+                super::write_task_terminal_fact(&tx, run, TaskRunStateKind::Completed, None, None)
                     .await?;
             delete_lease(&tx, &completed.id).await?;
             super::task_run_record(completed)
@@ -260,20 +244,20 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found while stopping agents")?;
-            if run.phase != TaskRunPhase::Stopping.as_str() || run.stop_requested == 0 {
+            let record = super::task_run_record(run.clone())?;
+            if record.kind() != TaskRunStateKind::Stopping || !record.is_stop_requested() {
                 bail!("task agents can only be settled after entering requested stopping");
             }
-            if run.task_generation != i64::try_from(expected_generation)? {
+            if record.generation() != expected_generation {
                 bail!("task stop generation changed before settling agents");
             }
-            let now = unix_seconds();
             for unit in entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
                 .all(&tx)
                 .await?
             {
-                let status = WorkUnitStatus::from_str(&unit.status)
-                    .with_context(|| format!("invalid work unit status: {}", unit.status))?;
+                let state = work_unit_state(&unit)?;
+                let status = state.status();
                 let cancel = matches!(
                     status,
                     WorkUnitStatus::Pending
@@ -287,41 +271,40 @@ impl StudioStore {
                 );
                 let authorize_cleanup = status != WorkUnitStatus::Merged;
                 if cancel || authorize_cleanup {
-                    let continuation_revision = unit.continuation_revision.saturating_add(1);
-                    let mut active: entities::work_unit::ActiveModel = unit.into();
+                    let mut progress = state.clone().into_progress();
+                    let mut next_status = status;
+                    let mut execution = state.execution_status();
                     if cancel {
-                        active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
-                        active.execution_status =
-                            Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                        active.execution_error = Set(Some(reason.to_string()));
-                        active.continuation_state =
-                            Set(ExecutorContinuationState::None.as_str().to_string());
-                        active.continuation_source_turn_id = Set(None);
-                        active.continuation_revision = Set(continuation_revision);
+                        next_status = WorkUnitStatus::Cancelled;
+                        execution = ThreadExecutionStatus::Cancelled;
+                        progress.execution_error = Some(reason.to_string());
+                        progress.continuation_state = ExecutorContinuationState::None;
+                        progress.continuation_source_turn_id = None;
+                        progress.continuation_revision =
+                            progress.continuation_revision.saturating_add(1);
                     }
                     if authorize_cleanup {
-                        active.worktree_disposition =
-                            Set(TaskWorktreeDisposition::CleanupRequested
-                                .as_str()
-                                .to_string());
+                        progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
                     }
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                    update_work_unit_state(&tx, unit, next_status, execution, progress).await?;
                 }
             }
             for round in entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
-                .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+                .filter(
+                    entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()),
+                )
                 .all(&tx)
                 .await?
             {
-                let mut active: entities::review_round::ActiveModel = round.into();
-                active.status = Set(ReviewVerdict::Failed.as_str().to_string());
-                active.reviewer_status = Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
-                active.reviewer_error = Set(Some(reason.to_string()));
-                active.summary = Set(Some(reason.to_string()));
-                active.updated_at = Set(now);
-                active.update(&tx).await?;
+                let _current = review_round_state(&round)?;
+                let state = ReviewRoundState::from_parts(
+                    ReviewVerdict::Failed,
+                    ThreadExecutionStatus::Cancelled,
+                    Some(reason.to_string()),
+                    Some(reason.to_string()),
+                )?;
+                update_review_round_state(&tx, round, state).await?;
             }
             Ok(())
         }
@@ -342,11 +325,11 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("task run not found")?;
-            let phase = TaskRunPhase::from_str(&run.phase)
-                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            let record = super::task_run_record(run.clone())?;
+            let phase = record.kind();
             if phase.is_terminal() {
-                if phase == TaskRunPhase::Cancelled
-                    && run.terminal_generation == Some(i64::try_from(expected_generation)?)
+                if phase == TaskRunStateKind::Cancelled
+                    && record.terminal_generation() == Some(expected_generation)
                 {
                     return super::task_run_record(run);
                 }
@@ -355,17 +338,17 @@ impl StudioStore {
             if run.expected_head != expected_head {
                 bail!("task stop no longer matches the active task HEAD");
             }
-            if phase != TaskRunPhase::Stopping || run.stop_requested == 0 {
+            if phase != TaskRunStateKind::Stopping || !record.is_stop_requested() {
                 bail!("task cancellation requires requested stopping phase");
             }
-            if run.task_generation != i64::try_from(expected_generation)? {
+            if record.generation() != expected_generation {
                 bail!("task stop generation changed before cancellation");
             }
             validate_lease(&tx, &run, expected_head).await?;
             let cancelled = super::write_task_terminal_fact(
                 &tx,
                 run,
-                TaskRunPhase::Cancelled,
+                TaskRunStateKind::Cancelled,
                 Some(reason.to_string()),
                 Some(expected_generation),
             )
@@ -412,7 +395,7 @@ async fn validate_no_pending_interactions(
 async fn validate_completion_children(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
-    phase: TaskRunPhase,
+    phase: TaskRunStateKind,
     gate: &StudioIntegratedReviewGate,
 ) -> Result<()> {
     let units = entities::work_unit::Entity::find()
@@ -420,18 +403,26 @@ async fn validate_completion_children(
         .all(tx)
         .await?;
     if units.iter().any(|unit| {
-        !matches!(
-            WorkUnitStatus::from_str(&unit.status),
-            Some(WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery)
-        )
+        work_unit_state(unit)
+            .map(|state| {
+                !matches!(
+                    state.status(),
+                    WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery
+                )
+            })
+            .unwrap_or(true)
     }) {
         bail!("all executor deliveries must be terminal and consumed before completion");
     }
     if units.iter().any(|unit| {
-        matches!(
-            ThreadExecutionStatus::from_str(&unit.execution_status),
-            Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
-        )
+        work_unit_state(unit)
+            .map(|state| {
+                matches!(
+                    state.execution_status(),
+                    ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
+                )
+            })
+            .unwrap_or(true)
     }) {
         bail!("all task agents must be terminal before completion");
     }
@@ -444,10 +435,14 @@ async fn validate_completion_children(
         .all(tx)
         .await?;
     if reviews.iter().any(|review| {
-        matches!(
-            ThreadExecutionStatus::from_str(&review.reviewer_status),
-            Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
-        )
+        review_round_state(review)
+            .map(|state| {
+                matches!(
+                    state.reviewer_status(),
+                    ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
+                )
+            })
+            .unwrap_or(true)
     }) {
         bail!("all task reviewers must be terminal before completion");
     }
@@ -459,7 +454,7 @@ async fn validate_completion_children(
             review_round_id,
             reviewed_head,
         } => {
-            if phase != TaskRunPhase::Reviewing || reviewed_head != &run.expected_head {
+            if phase != TaskRunStateKind::Reviewing || reviewed_head != &run.expected_head {
                 bail!("integrated review gate no longer matches task phase or HEAD")
             }
             let review = reviews
@@ -467,7 +462,7 @@ async fn validate_completion_children(
                 .find(|review| review.id == *review_round_id)
                 .context("integrated review gate round disappeared")?;
             if review.scope != ReviewScope::Integrated.as_str()
-                || review.status != ReviewVerdict::Pass.as_str()
+                || review.state_kind != ReviewVerdict::Pass.as_str()
                 || review.reviewed_head != run.expected_head
             {
                 bail!("integrated review gate no longer identifies a passing current review")
@@ -477,7 +472,7 @@ async fn validate_completion_children(
             if !merges.is_empty()
                 || units
                     .iter()
-                    .any(|unit| unit.status != WorkUnitStatus::NoDelivery.as_str())
+                    .any(|unit| unit.state_kind != WorkUnitStatus::NoDelivery.as_str())
             {
                 bail!("no-delivery review exemption no longer matches task children")
             }
@@ -532,7 +527,7 @@ async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<
         bail!("single-executor review exemption requires exactly one merge record")
     };
     if unit.id != work_unit_id
-        || unit.status != WorkUnitStatus::Merged.as_str()
+        || unit.state_kind != WorkUnitStatus::Merged.as_str()
         || merge.id != merge_record_id
         || merge.work_unit_id != unit.id
         || merge.completion_revision != i32::try_from(completion_revision)?
@@ -563,7 +558,7 @@ async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<
         .iter()
         .filter(|review| {
             review.scope == ReviewScope::Delivery.as_str()
-                && review.status == ReviewVerdict::Pass.as_str()
+                && review.state_kind == ReviewVerdict::Pass.as_str()
         })
         .collect::<Vec<_>>();
     let [review] = passing_delivery_reviews.as_slice() else {
@@ -585,10 +580,10 @@ async fn active_run_for_session(
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
         .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
-        .filter(entities::task_run::Column::Phase.is_in([
-            TaskRunPhase::Implementing.as_str(),
-            TaskRunPhase::Reworking.as_str(),
-            TaskRunPhase::Reviewing.as_str(),
+        .filter(entities::task_run::Column::StateKind.is_in([
+            TaskRunStateKind::Implementing.as_str(),
+            TaskRunStateKind::Reworking.as_str(),
+            TaskRunStateKind::Reviewing.as_str(),
         ]))
         .all(tx)
         .await?;

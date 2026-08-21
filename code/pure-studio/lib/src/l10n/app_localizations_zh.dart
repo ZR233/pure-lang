@@ -538,12 +538,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskContinuationNeedsAttention => '需要处理';
 
   @override
-  String get statusTaskPhasePlanning => '规划中';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => '等待确认';
-
-  @override
   String get statusTaskPhaseDesignUpdating => '更新设计';
 
   @override
@@ -2174,12 +2168,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskContinuationNeedsAttention => '需要处理';
-
-  @override
-  String get statusTaskPhasePlanning => '规划中';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => '等待确认';
 
   @override
   String get statusTaskPhaseDesignUpdating => '更新设计';

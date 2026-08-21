@@ -1,7 +1,7 @@
 use super::*;
 use crate::studio::task_coordinator::{
-    CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource, TaskRunPhase,
-    WorkUnitStatus,
+    CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource,
+    TaskRunStateKind, WorkUnitStatus, test_task_git_fingerprint,
 };
 use crate::{StudioProductEventKind, ThreadVisibility};
 use pl_protocol::ThreadItemContent;
@@ -365,12 +365,17 @@ async fn mode_switch_is_rejected_while_a_task_is_active() {
     store
         .create_task_run_with_lease(CreateTaskRun {
             root_thread_id: thread.id.clone(),
-            phase: TaskRunPhase::Implementing,
             plan: "# Plan\n\nImplement the requested change.".to_string(),
             workspace_root: workspace.to_string_lossy().into_owned(),
             git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
             branch: "main".to_string(),
             head_commit: "1111111".to_string(),
+            design_baseline: test_task_git_fingerprint(
+                workspace.to_string_lossy(),
+                workspace.join(".git").to_string_lossy(),
+                "main",
+                "1111111",
+            ),
         })
         .await
         .unwrap();
@@ -493,13 +498,26 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
     let (run, _) = store
         .create_task_run_with_lease(CreateTaskRun {
             root_thread_id: thread.id.clone(),
-            phase: TaskRunPhase::Implementing,
             plan: "# Plan\n\nImplement the requested change.".to_string(),
             workspace_root: workspace.to_string_lossy().into_owned(),
             git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
             branch: "main".to_string(),
             head_commit: "1111111".to_string(),
+            design_baseline: test_task_git_fingerprint(
+                workspace.to_string_lossy(),
+                workspace.join(".git").to_string_lossy(),
+                "main",
+                "1111111",
+            ),
         })
+        .await
+        .unwrap();
+    let run = store
+        .transition_task_run(
+            &run.id,
+            TaskRunStateKind::Implementing,
+            Some("test design finalized".to_string()),
+        )
         .await
         .unwrap();
     let executor_thread_id = format!("{}-executor", thread.id);
@@ -564,7 +582,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
             .await
             .unwrap()
             .unwrap()
-            .continuation_state,
+            .continuation_state(),
         ExecutorContinuationState::PlannerWakePending
     );
     assert!(!store.task_planner_wake_was_delivered(&wake).await.unwrap());
@@ -800,11 +818,14 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
     assert!(error.to_string().contains("task is active"));
     assert!(archive_error.to_string().contains("task is active"));
     assert_eq!(task.run_id, run.id);
-    assert_eq!(task.phase, "designUpdating");
+    assert!(matches!(
+        task.state,
+        crate::protocol::StudioTaskState::DesignUpdating(_)
+    ));
     assert_eq!(task.branch, run.branch);
     runtime
         .task_coordinator
-        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .finish_task(&run.id, TaskRunStateKind::Cancelled, None)
         .await
         .unwrap();
     let _ = std::fs::remove_dir_all(home);
@@ -1077,7 +1098,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
     server.await.unwrap();
     runtime
         .task_coordinator
-        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .finish_task(&run.id, TaskRunStateKind::Cancelled, None)
         .await
         .unwrap();
     runtime.shutdown().await;

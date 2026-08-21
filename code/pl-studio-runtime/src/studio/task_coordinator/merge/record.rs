@@ -10,7 +10,7 @@ use super::scope::delivery_from_completion;
 use super::validation::{ensure_preflight_delivery_identity, validate_repository_identity};
 use crate::studio::task_coordinator::{
     AgentDelivery, BranchLeaseRecord, MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator,
-    TaskMergeScope, TaskRunPhase, TaskRunRecord, WorkCompletionRecord, WorkUnitRecord,
+    TaskMergeScope, TaskRunRecord, TaskRunStateKind, WorkCompletionRecord, WorkUnitRecord,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, ToolEffect};
@@ -180,7 +180,7 @@ impl TaskCoordinator {
             .store
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
-        if run.phase != TaskRunPhase::Merging {
+        if run.kind() != TaskRunStateKind::Merging {
             bail!("task_record_merge requires phase merging");
         }
         let lease = self

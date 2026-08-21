@@ -4,13 +4,14 @@ use sea_orm::{
     TransactionTrait,
 };
 
+use super::super::work_unit::{update_work_unit_state, work_unit_state};
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    MergeCleanupEvidence, MergeMethod, MergeRecord, RecordTaskMerge, ReviewVerdict, TaskRunPhase,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus,
-    WorkUnitStatus,
+    MergeCleanupEvidence, MergeMethod, MergeRecord, RecordTaskMerge, ReviewVerdict, TaskCommand,
+    TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
+    WorkCompletionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -19,7 +20,9 @@ impl StudioStore {
         let result = async {
             let runs = entities::task_run::Entity::find()
                 .filter(entities::task_run::Column::RootThreadId.eq(input.thread_id.clone()))
-                .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Merging.as_str()))
+                .filter(
+                    entities::task_run::Column::StateKind.eq(TaskRunStateKind::Merging.as_str()),
+                )
                 .all(&tx)
                 .await?;
             let run = match runs.as_slice() {
@@ -58,10 +61,11 @@ impl StudioStore {
             if executor.role != "executor" || executor.status != "closed" {
                 bail!("executor must remain canonically closed during merge accounting");
             }
+            let work_unit_state = work_unit_state(&work_unit)?;
             if work_unit.task_run_id != run.id
                 || work_unit.executor_thread_id.as_deref() != Some(input.executor_agent_id.as_str())
-                || work_unit.status != WorkUnitStatus::Approved.as_str()
-                || work_unit.execution_status != ThreadExecutionStatus::Completed.as_str()
+                || work_unit_state.status() != WorkUnitStatus::Approved
+                || work_unit_state.execution_status() != ThreadExecutionStatus::Completed
                 || completion.task_run_id != run.id
                 || completion.work_unit_id != work_unit.id
                 || completion.executor_agent_id != input.executor_agent_id
@@ -93,7 +97,7 @@ impl StudioStore {
                 completion_id: Set(completion.id),
                 completion_revision: Set(i32::try_from(input.completion_revision)?),
                 executor_agent_id: Set(input.executor_agent_id),
-                expected_previous_head: Set(input.expected_previous_head),
+                expected_previous_head: Set(input.expected_previous_head.clone()),
                 resulting_head: Set(input.resulting_head.clone()),
                 delivery_head: Set(delivery_head),
                 method: Set(input.method.as_str().to_string()),
@@ -106,47 +110,74 @@ impl StudioStore {
             .insert(&tx)
             .await?;
 
-            let mut work_unit_active: entities::work_unit::ActiveModel = work_unit.into();
-            work_unit_active.status = Set(WorkUnitStatus::Merged.as_str().to_string());
-            work_unit_active.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
-                .as_str()
-                .to_string());
-            work_unit_active.updated_at = Set(now);
-            work_unit_active.update(&tx).await?;
+            let mut progress = work_unit_state.into_progress();
+            progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
+            update_work_unit_state(
+                &tx,
+                work_unit,
+                WorkUnitStatus::Merged,
+                ThreadExecutionStatus::Completed,
+                progress,
+            )
+            .await?;
 
             let remaining_approved = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
-                .filter(entities::work_unit::Column::Status.eq(WorkUnitStatus::Approved.as_str()))
+                .filter(
+                    entities::work_unit::Column::StateKind.eq(WorkUnitStatus::Approved.as_str()),
+                )
                 .one(&tx)
                 .await?
                 .is_some();
             let prior_rework = entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
                 .filter(
-                    entities::review_round::Column::Status
+                    entities::review_round::Column::StateKind
                         .eq(ReviewVerdict::ChangesRequired.as_str()),
                 )
                 .one(&tx)
                 .await?
                 .is_some();
-            let next_phase = if remaining_approved {
-                TaskRunPhase::Merging
+            let record = super::super::task_run_record(run.clone())?;
+            let next_state = if remaining_approved {
+                record.state.clone()
             } else if prior_rework {
-                TaskRunPhase::Reworking
+                record
+                    .decide(TaskCommand::BeginReworking {
+                        status_message: "merged delivery still requires rework".to_string(),
+                    })?
+                    .next_state
             } else {
-                TaskRunPhase::Implementing
+                record
+                    .decide(TaskCommand::BeginImplementing {
+                        status_message: None,
+                    })?
+                    .next_state
             };
-            let mut run_active: entities::task_run::ActiveModel = run.into();
-            run_active.phase = Set(next_phase.as_str().to_string());
-            run_active.expected_head = Set(input.resulting_head.clone());
-            run_active.status_message = Set(None);
-            run_active.updated_at = Set(now);
-            run_active.update(&tx).await?;
+            super::super::compare_and_swap_task_run(
+                &tx,
+                &run,
+                Some(&next_state),
+                Some(&input.resulting_head),
+            )
+            .await?
+            .context("TaskRun merge accounting lost its revision CAS")?;
 
-            let mut lease_active: entities::branch_lease::ActiveModel = lease.into();
-            lease_active.expected_head = Set(input.resulting_head);
-            lease_active.updated_at = Set(now);
-            lease_active.update(&tx).await?;
+            let lease_update = entities::branch_lease::Entity::update_many()
+                .set(entities::branch_lease::ActiveModel {
+                    expected_head: Set(input.resulting_head),
+                    updated_at: Set(now),
+                    ..Default::default()
+                })
+                .filter(entities::branch_lease::Column::Id.eq(lease.id))
+                .filter(
+                    entities::branch_lease::Column::ExpectedHead.eq(input.expected_previous_head),
+                )
+                .exec(&tx)
+                .await?;
+            if lease_update.rows_affected != 1 {
+                bail!("BranchLease merge accounting lost its expected-head CAS");
+            }
 
             merge_record(merge)
         }
@@ -173,92 +204,6 @@ impl StudioStore {
             .into_iter()
             .map(merge_record)
             .collect()
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn create_test_merge_record(
-        &self,
-        task_run_id: &str,
-        expected_previous_head: &str,
-        resulting_head: &str,
-    ) -> Result<MergeRecord> {
-        let tx = self.db.begin().await?;
-        let now = unix_seconds();
-        let agent_id = new_id("test-executor");
-        let work_unit_id = new_id("test-work-unit");
-        let completion_id = new_id("test-completion");
-        entities::work_unit::ActiveModel {
-            id: Set(work_unit_id.clone()),
-            task_run_id: Set(task_run_id.to_string()),
-            title: Set("test recorded merge".to_string()),
-            status: Set(WorkUnitStatus::Merged.as_str().to_string()),
-            scope_hints_json: Set("[]".to_string()),
-            base_commit: Set(expected_previous_head.to_string()),
-            worktree_path: Set(".pure/worktrees/test/test".to_string()),
-            branch: Set("pure-task-test-test".to_string()),
-            worktree_disposition: Set(TaskWorktreeDisposition::CleanupRequested
-                .as_str()
-                .to_string()),
-            attempt: Set(1),
-            executor_thread_id: Set(Some(agent_id.clone())),
-            requested_by_call_id: Set(new_id("test-call")),
-            execution_status: Set(ThreadExecutionStatus::Completed.as_str().to_string()),
-            execution_summary: Set(Some("test delivery".to_string())),
-            execution_error: Set(None),
-            budget_limit_json: Set(None),
-            budget_slice_count: Set(1),
-            continuation_state: Set(
-                crate::studio::task_coordinator::ExecutorContinuationState::None
-                    .as_str()
-                    .to_string(),
-            ),
-            continuation_source_turn_id: Set(None),
-            continuation_revision: Set(0),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(&tx)
-        .await?;
-        entities::work_completion::ActiveModel {
-            id: Set(completion_id.clone()),
-            task_run_id: Set(task_run_id.to_string()),
-            work_unit_id: Set(work_unit_id.clone()),
-            executor_agent_id: Set(agent_id.clone()),
-            revision: Set(1),
-            kind: Set(WorkCompletionKind::Delivery.as_str().to_string()),
-            status: Set(WorkCompletionStatus::Approved.as_str().to_string()),
-            base_commit: Set(expected_previous_head.to_string()),
-            head_commit: Set(Some(resulting_head.to_string())),
-            changed_files_json: Set("[]".to_string()),
-            verification_summary: Set("test delivery".to_string()),
-            worktree_path: Set(".pure/worktrees/test/test".to_string()),
-            branch: Set("pure-task-test-test".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(&tx)
-        .await?;
-        let model = entities::merge_record::ActiveModel {
-            id: Set(new_id("merge")),
-            task_run_id: Set(task_run_id.to_string()),
-            work_unit_id: Set(work_unit_id),
-            completion_id: Set(completion_id),
-            completion_revision: Set(1),
-            executor_agent_id: Set(agent_id),
-            expected_previous_head: Set(expected_previous_head.to_string()),
-            resulting_head: Set(resulting_head.to_string()),
-            delivery_head: Set(resulting_head.to_string()),
-            method: Set(MergeMethod::Manual.as_str().to_string()),
-            summary: Set("test recorded merge".to_string()),
-            cleanup_status: Set("alreadyAbsent".to_string()),
-            cleanup_detail: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(&tx)
-        .await?;
-        tx.commit().await?;
-        merge_record(model)
     }
 }
 

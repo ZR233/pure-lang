@@ -82,6 +82,8 @@ impl TaskCoordinator {
                         bail!("review round {} has no findings to read", input.round_id);
                     }
                     let total = round.findings.len();
+                    let verdict = round.verdict();
+                    let summary = round.summary().map(str::to_string);
                     let findings = round
                         .findings
                         .into_iter()
@@ -93,8 +95,8 @@ impl TaskCoordinator {
                         id: round.id,
                         round: round.round,
                         scope: round.scope,
-                        verdict: round.verdict,
-                        summary: round.summary,
+                        verdict,
+                        summary,
                         design_references: round.design_references,
                         findings,
                         offset,

@@ -18,13 +18,6 @@ const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 +
 +The implementation must create `src/feature.txt` containing exactly `offline integration verified` followed by a newline.
 *** End Patch"#;
-const CONSISTENCY_DESIGN_PATCH: &str = r#"*** Begin Patch
-*** Update File: design/task-flow.md
-@@
- The implementation must create `src/feature.txt` containing exactly `offline integration verified` followed by a newline.
-+
-+Implementation status: completed and merged.
-*** End Patch"#;
 const FEATURE_PATCH: &str = r#"*** Begin Patch
 *** Add File: src/feature.txt
 +offline integration verified
@@ -256,14 +249,22 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             final_text("plan-submitted", "Plan submitted for confirmation."),
         ),
         3 => (
-            "task_update_design(initial)",
+            "apply_patch(initial design)",
             tool_call(
                 "design-initial",
-                "task_update_design",
-                serde_json::json!({"patch": INITIAL_DESIGN_PATCH}),
+                "apply_patch",
+                serde_json::json!({"input": INITIAL_DESIGN_PATCH, "cwd": "."}),
             ),
         ),
         4 => (
+            "task_finalize_design",
+            tool_call(
+                "finalize-design",
+                "task_finalize_design",
+                serde_json::json!({"summary": "Recorded the executor contract in design/task-flow.md."}),
+            ),
+        ),
+        5 => (
             "task_spawn_executor(exact duplicate)",
             repeated_tool_call(
                 "spawn-executor",
@@ -322,7 +323,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             ),
         ),
-        5..=8 => {
+        6..=9 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "wait_agents(executor)",
@@ -333,11 +334,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        9 => (
+        10 => (
             "task_status(completion)",
             tool_call("status-completion", "task_status", serde_json::json!({})),
         ),
-        10 => {
+        11 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "task_request_delivery_review",
@@ -348,11 +349,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        11 => (
+        12 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        12 => (
+        13 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -360,7 +361,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        13 => {
+        14 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "close_agent(executor)",
@@ -371,7 +372,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        14 => {
+        15 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -392,7 +393,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        15 if state.mode == ScriptMode::PostMergeImplementation => (
+        16 if state.mode == ScriptMode::PostMergeImplementation => (
             "apply_patch(planner merge adjustment)",
             tool_call(
                 "planner-merge-adjustment",
@@ -403,7 +404,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             ),
         ),
-        16 if state.mode == ScriptMode::PostMergeImplementation => (
+        17 if state.mode == ScriptMode::PostMergeImplementation => (
             "exec(amend planner merge)",
             tool_call(
                 "amend-planner-merge",
@@ -413,28 +414,12 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             ),
         ),
-        15 if state.mode == ScriptMode::SingleExecutorEquivalent => {
+        16 if state.mode == ScriptMode::SingleExecutorEquivalent => {
             ("task_record_merge", record_merge_call(state).await?)
         }
-        17 if state.mode == ScriptMode::PostMergeImplementation => {
+        18 if state.mode == ScriptMode::PostMergeImplementation => {
             ("task_record_merge", record_merge_call(state).await?)
         }
-        16 if state.mode == ScriptMode::SingleExecutorEquivalent => (
-            "task_update_design(consistency)",
-            tool_call(
-                "design-consistency",
-                "task_update_design",
-                serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
-            ),
-        ),
-        18 if state.mode == ScriptMode::PostMergeImplementation => (
-            "task_update_design(consistency)",
-            tool_call(
-                "design-consistency",
-                "task_update_design",
-                serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
-            ),
-        ),
         17 if state.mode == ScriptMode::SingleExecutorEquivalent => (
             "task_status(review-gate)",
             tool_call("status-review-gate", "task_status", serde_json::json!({})),
@@ -800,7 +785,7 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
         ensure_fresh_task_child(request, "reviewer")?;
         return Ok(ScriptRole::Reviewer);
     }
-    if names.contains("plan_exit") || names.contains("task_update_design") {
+    if names.contains("plan_exit") || names.contains("task_status") {
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
@@ -830,7 +815,7 @@ fn validate_request_step(
         }
     }
     if role == ScriptRole::Planner
-        && step == 5
+        && step == 6
         && !latest_function_call_output(request)
             .is_some_and(|output| output.contains("\"reused\":true"))
     {
@@ -847,7 +832,7 @@ fn validate_request_step(
     }
     if mode == ScriptMode::PostMergeImplementation
         && role == ScriptRole::Planner
-        && step == 16
+        && step == 17
         && latest_function_call_output(request)
             .is_some_and(|output| output.contains("Tool execution error:"))
     {
@@ -855,7 +840,7 @@ fn validate_request_step(
     }
     if mode == ScriptMode::PostMergeImplementation
         && role == ScriptRole::Planner
-        && step == 17
+        && step == 18
         && !latest_function_call_output(request)
             .is_some_and(|output| output.contains("\"exitCode\":0"))
     {
@@ -939,7 +924,7 @@ fn validate_planning_contract(tools: &[serde_json::Value]) -> Result<()> {
         "search_files",
         "task_status",
         "task_spawn_executor",
-        "task_update_design",
+        "task_finalize_design",
         "task_record_merge",
         "task_request_delivery_review",
         "task_request_integrated_review",
