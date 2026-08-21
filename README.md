@@ -11,10 +11,8 @@ Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求
 ## 架构
 
 ```text
-pl-core                   核心编译引擎与 Studio runtime
-  │                       turn/session 编排、配置管理、工具审批、
-  │                       MCP 动态工具集成、Studio SQLite 持久化、技能系统、
-  │                       runtime 状态机、会话事件订阅
+pl-core                   产品无关的 Thread/Turn/Item runtime
+  │                       模型采样、工具、MCP、LSP 与 agent 编排
   ├────► pl-model         LLM Provider 适配层
   │                       OpenAI 兼容 wire API、SSE 流式、模型元数据
   ├────► pl-lsp           LSP 客户端
@@ -23,13 +21,14 @@ pl-core                   核心编译引擎与 Studio runtime
   │                       Studio wire DTO、消息、权限、错误类型
   ├────► pl-trace         内部 trace 事件层
   │                       AgentEvent、TraceEvent、TracePart
-  ▲
-  │
-pl-studio-bridge          Flutter Rust Bridge v2 桥接 crate
-  ▲
-  │
-pure-studio       Flutter Windows 桌面应用
-                          Material 3 + Riverpod + 会话级事件流
+  ▼
+pl-studio-runtime         Studio SQLite、Task、设置与产品事件
+  ├────► pl-studio-server 独立 HTTP/OpenAPI/SSE 宿主
+  └────► pl-studio-bridge Flutter Rust Bridge v2 适配器
+                 ▲
+                 │
+pure-studio              Flutter 桌面应用
+                         Material 3 + Riverpod + Thread 事件流
 ```
 
 ### Workspace Crate
@@ -40,17 +39,23 @@ pure-studio       Flutter Windows 桌面应用
 | `pl-trace` | `code/pl-trace/` | 内部运行事件类型：AgentEvent、TraceEvent、TracePart |
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
-| `pl-core` | `code/pl-core/` | 核心编译引擎与 Studio runtime：turn/session、配置、工具、MCP、SQLite projection，并通过 `interfaces` 等模块逐步端口化 |
-| `pl-studio-bridge` | `code/pure-studio/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
-| `pure-studio` | `code/pure-studio/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
-| `pl-xtask` | `xtask/` | 本仓库开发任务入口：GUI 验证、运行、发布构建和 Flutter Windows Rust bridge 构建 |
+| `pl-output` | `code/pl-output/` | 工具输出截断与模型可见投影算法 |
+| `pl-patch` | `code/pl-patch/` | apply-patch 语法、匹配与 backend 契约 |
+| `pl-skill-core` | `code/pl-skill-core/` | Skill frontmatter 与路径安全规则 |
+| `pl-core` | `code/pl-core/` | 产品无关的 Thread runtime、模型与工具编排、MCP 和 agent runtime |
+| `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio SQLite、Task、配置、恢复与产品事件的唯一业务 façade |
+| `pl-studio-server` | `code/pl-studio-server/` | 独立 HTTP/OpenAPI/SSE transport 宿主 |
+| `pl-studio-bridge` | `code/pure-studio/rust/` | Flutter Rust Bridge v2 transport 适配器 |
+| `pure-studio` | `code/pure-studio/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
+| `pl-xtask` | `xtask/` | GUI 生成、验证、运行、构建与发布编排入口 |
 
 ### 依赖规则
 
 ```
-pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio
-                              pl-lsp    ←  pl-core
-（底层）                                                         （顶层）
+pl-protocol ← pl-trace ← pl-model ← pl-core ← pl-studio-runtime
+                          pl-lsp  ↗                 ├→ pl-studio-server
+                                                  └→ pl-studio-bridge ← pure-studio
+（底层）                                                                    （顶层）
 ```
 
 ## 快速开始
@@ -68,13 +73,13 @@ pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  
 cargo xtask run-gui
 ```
 
-Flutter 端通过 `pl-studio-bridge` 调用 `pl-core` Studio runtime。每个打开的会话只订阅自己的高频 timeline/turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局流。
+Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每个打开的 Thread 只订阅自己的高频 Item/Turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局产品流。
 
 首次启动后，在 Pure Studio 设置页面配置 LLM Provider。配置保存在：
 
 ```text
 ~/.pure/config.toml                 # 全局配置（provider、模型、角色）
-~/.pure/studio/studio_*.sqlite      # Studio 数据库（会话、消息、运行时记录）
+~/.pure/studio/studio.sqlite        # Studio 的单一 canonical 数据库
 ```
 
 ### 项目结构
@@ -83,41 +88,20 @@ Flutter 端通过 `pl-studio-bridge` 调用 `pl-core` Studio runtime。每个打
 pure-lang/
 ├── code/
 │   ├── pl-protocol/          # 公共协议层
+│   ├── pl-trace/             # 内部 trace 事件
 │   ├── pl-model/             # LLM provider 适配
 │   ├── pl-lsp/               # LSP 客户端（rust-analyzer 支持）
-│   ├── pl-core/              # 核心编译引擎
-│   │   ├── src/agent/          # 子代理系统
-│   │   ├── src/config/         # 配置系统（provider、role、MCP、runtime）
-│   │   ├── src/core/           # 核心引擎（turn loop、tool dispatch、权限）
-│   │   ├── src/domain/         # 领域模型
-│   │   ├── src/infrastructure/ # 基础设施适配器（SQLite、文件系统）
-│   │   ├── src/interfaces/     # 端口定义
-│   │   ├── src/mcp/            # MCP 动态工具运行时
-│   │   ├── src/tool/           # 工具系统
-│   │   │   ├── command/          # Shell 进程管理（exec + write_stdin）
-│   │   │   ├── file/             # 文件操作（read、write、apply_patch）
-│   │   │   ├── multi_agent/      # 子代理编排工具
-│   │   │   ├── ask_user.rs       # 向用户提问
-│   │   │   ├── lsp.rs            # LSP 查询
-│   │   │   └── skill.rs          # 技能系统工具
-│   │   ├── src/skill/           # 技能目录与扫描
-│   │   ├── src/studio/          # Studio 运行时（SQLite、审批）
-│   │   └── migrations/          # SeaORM SQLite 迁移
-│   └── pure-studio/  # Flutter Windows 桌面应用
-│       ├── lib/                # Material 3 + Riverpod UI
-│       ├── rust/               # pl-studio-bridge crate
-│       └── windows/            # Flutter Windows runner
-├── design/                   # 架构设计文档（14 份）
-│   ├── 01-overview.md
-│   ├── 02-crates.md
-│   ├── 03-pipeline.md
-│   ├── ...
-│   └── 13-tool-calling-runtime.md
-├── .claude/skills/           # 项目技能（Codex 协作规则）
+│   ├── pl-output/            # 输出截断算法
+│   ├── pl-patch/             # apply-patch 引擎
+│   ├── pl-skill-core/        # Skill 核心规则
+│   ├── pl-core/              # Thread/Turn/Item 与工具 runtime
+│   ├── pl-studio-runtime/    # Studio 业务 runtime
+│   ├── pl-studio-server/     # HTTP/OpenAPI/SSE server
+│   └── pure-studio/          # Flutter 桌面应用与 FRB crate
+├── design/                   # 21 份顶层架构设计文档及原型/视觉资产
 ├── .cargo/config.toml        # Cargo 配置
 ├── xtask/                    # pl-xtask 开发任务入口
-├── CLAUDE.md                 # 项目规范
-└── Agents.md                 # Codex 项目记忆
+└── AGENTS.md                 # 项目协作与工程规范
 ```
 
 ## 技术栈
@@ -139,16 +123,16 @@ pure-lang/
 
 | 概念 | 说明 |
 |------|------|
-| **Turn** | 单轮编译请求，包含消息、工具调用、模型交互的完整生命周期 |
-| **Session** | 多轮会话管理，维护消息历史和上下文 |
+| **Thread** | 一个 agent 独占的对话、输入队列与持久历史 |
+| **Turn** | Thread 中一次由明确输入启动的执行 |
+| **Item** | 消息、推理、工具调用、计划等穷尽的 Thread 内容单元 |
 | **Tool** | 可执行工具（Shell、文件操作、Subagent、LSP 查询、用户提问等），通过 `ToolRegistry` 注册；支持 MCP 动态工具扩展 |
-| **MCP** | Model Context Protocol 集成，运行时发现和调用外部 MCP 服务器提供的工具 |
 | **LSP** | Language Server Protocol 客户端，支持代码智能查询（定义跳转、引用查找等） |
 | **Agent** | 子代理系统，支持分层任务分解与编排 |
 | **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
 | **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
 | **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
-| **CompileMode** | 编译模式（auto / plan） |
+| **StudioMode** | root Thread 模式（Simple / Task） |
 
 ### 内置工具
 
@@ -171,21 +155,9 @@ pure-lang/
 ### Rust 后端
 
 ```bash
-# 格式化
-cargo fmt
-
-# Lint（严格模式）
-cargo clippy -- -D warnings
-
-# 运行各 crate 测试
-cargo test -p pl-protocol
-cargo test -p pl-trace
-cargo test -p pl-model
-cargo test -p pl-lsp
-cargo test -p pl-core
-cargo test -p pl-studio-bridge
-
-# 运行全部测试
+# 与 CI 一致的 Rust 门禁
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
@@ -236,13 +208,16 @@ cargo xtask run-gui --demo
 | [13-skills.md](./design/13-skills.md) | 技能系统设计 |
 | [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
 | [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
+| [15-agent-worktrees.md](./design/15-agent-worktrees.md) | Agent worktree 所有权与生命周期 |
+| [16-task-orchestration.md](./design/16-task-orchestration.md) | Simple/Task 编排与状态机 |
+| [17-agent-runtime-host.md](./design/17-agent-runtime-host.md) | Agent runtime 与宿主边界 |
+| [18-studio-release-update.md](./design/18-studio-release-update.md) | Studio 发布与更新 |
+| [19-studio-storage-and-diagnostics.md](./design/19-studio-storage-and-diagnostics.md) | Studio 存储与诊断 |
+| [20-studio-state-runtime.md](./design/20-studio-state-runtime.md) | Studio 状态查询与领域生命周期 |
 
 ## 项目规范
 
-详细的编码约定和协作规则见：
-
-- [`CLAUDE.md`](./CLAUDE.md) — 项目规范（RPITIT、模块设计、导出、测试等）
-- [`Agents.md`](./Agents.md) — 项目记忆与 Codex 协作约定
+详细的编码约定和协作规则见 [`AGENTS.md`](./AGENTS.md)。
 
 ## License
 

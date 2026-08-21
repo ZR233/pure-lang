@@ -206,11 +206,11 @@ class TimelineReasoningGroup {
   DateTime? get createdAt => parts.isEmpty ? null : parts.first.createdAt;
 
   bool get isActive =>
-      parts.any((part) => !_isTerminalTimelineStatus(part.status));
+      parts.any((part) => !isTerminalTimelineStatus(part.status));
 
   String get status {
     for (final part in parts.reversed) {
-      if (!_isTerminalTimelineStatus(part.status)) {
+      if (!isTerminalTimelineStatus(part.status)) {
         return part.status;
       }
     }
@@ -376,7 +376,7 @@ String? _plainReasoningSummary(String value) {
   return summary.isEmpty ? null : summary;
 }
 
-bool _isTerminalTimelineStatus(String status) {
+bool isTerminalTimelineStatus(String status) {
   return const {
     'completed',
     'failed',

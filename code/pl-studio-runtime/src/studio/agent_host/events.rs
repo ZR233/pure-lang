@@ -8,6 +8,7 @@ use pl_core::{
     AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxBudgetAction, MailboxPresentation, ThreadId,
     TurnOutcomeKind,
 };
+use pl_protocol::LabeledEnum;
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
 
@@ -416,7 +417,7 @@ impl StudioAgentEventProjector {
             return Ok(());
         };
         let resource = self.resources.get(&snapshot.identity.id).await;
-        let status = status_label(&snapshot);
+        let status = thread_status(&snapshot);
         let snapshot_error = error(&snapshot);
         let summary = resource.as_ref().map(|resource| resource.task_name.clone());
         self.store
@@ -466,7 +467,7 @@ impl StudioAgentEventProjector {
                         || thread.title.clone(),
                         |resource| resource.task_name.clone(),
                     ),
-                    status: status.to_string(),
+                    status: status.label().to_string(),
                     summary: snapshot
                         .progress
                         .as_ref()
@@ -638,19 +639,21 @@ pub(in crate::studio) async fn materialize_pending_task_planner_wakes(
     Ok(())
 }
 
-fn status_label(snapshot: &AgentSnapshot) -> &'static str {
+fn thread_status(snapshot: &AgentSnapshot) -> pl_protocol::ThreadStatus {
     match snapshot.lifecycle {
-        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
-        AgentLifecycleState::Faulted => "failed",
+        AgentLifecycleState::Closing | AgentLifecycleState::Closed => {
+            pl_protocol::ThreadStatus::Closed
+        }
+        AgentLifecycleState::Faulted => pl_protocol::ThreadStatus::Failed,
         AgentLifecycleState::Active => match snapshot.activity {
             AgentActivityState::Queued | AgentActivityState::Active(ActiveKind::Running) => {
-                "running"
+                pl_protocol::ThreadStatus::Running
             }
             AgentActivityState::Active(
                 ActiveKind::WaitingTool | ActiveKind::WaitingInteraction,
             )
-            | AgentActivityState::Cancelling => "waiting",
-            AgentActivityState::Idle => "idle",
+            | AgentActivityState::Cancelling => pl_protocol::ThreadStatus::Waiting,
+            AgentActivityState::Idle => pl_protocol::ThreadStatus::Idle,
         },
     }
 }
@@ -744,7 +747,7 @@ mod tests {
     fn budget_limited_turn_leaves_thread_idle_without_error() {
         let snapshot = snapshot_with_outcome(TurnOutcomeKind::BudgetLimited);
 
-        assert_eq!(status_label(&snapshot), "idle");
+        assert_eq!(thread_status(&snapshot), pl_protocol::ThreadStatus::Idle);
         assert_eq!(error(&snapshot), None);
     }
 

@@ -532,7 +532,7 @@ impl TaskCoordinator {
                 .read_thread(executor_agent_id)
                 .await?
                 .context("approved executor canonical Thread not found")?;
-            if executor.role != "executor" || executor.status != "closed" {
+            if executor.role != "executor" || executor.status != pl_protocol::ThreadStatus::Closed {
                 continue;
             }
             let Some(completion) = completions

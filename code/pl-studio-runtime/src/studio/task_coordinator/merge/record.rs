@@ -222,7 +222,7 @@ impl TaskCoordinator {
             .await?
             .context("executor canonical Thread not found")?;
         ensure!(
-            executor.role == "executor" && executor.status == "closed",
+            executor.role == "executor" && executor.status == pl_protocol::ThreadStatus::Closed,
             "executor must be canonically closed before merge accounting"
         );
         Ok(PlannerMergeScope {

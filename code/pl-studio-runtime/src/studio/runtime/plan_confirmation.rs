@@ -56,7 +56,7 @@ impl StudioRuntime {
                     .read_thread(&thread_id)
                     .await?
                     .context("Task Thread not found")?;
-                if thread.mode != StudioMode::Task.label() {
+                if thread.mode != StudioMode::Task {
                     bail!("plan implementation requires a Task mode Thread");
                 }
                 let project = self

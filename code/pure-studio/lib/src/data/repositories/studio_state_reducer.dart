@@ -524,7 +524,7 @@ ThreadWorkspace? _appendThreadItemDelta(
   final index = items.indexWhere((item) => item.id == delta.itemId);
   if (index < 0) return null;
   final item = items[index];
-  if (_isTerminalItemStatus(item.status)) return null;
+  if (isTerminalTimelineStatus(item.status)) return null;
   if (delta.revision <= item.revision) {
     return workspace.copyWith(revision: workspaceRevision);
   }
@@ -562,17 +562,6 @@ bool _sameItemIdentity(ThreadItemView left, ThreadItemView right) {
       left.threadId == right.threadId &&
       left.turnId == right.turnId &&
       left.kind == right.kind;
-}
-
-bool _isTerminalItemStatus(String status) {
-  return const {
-    'completed',
-    'failed',
-    'interrupted',
-    'cancelled',
-    'denied',
-    'budgetLimited',
-  }.contains(status);
 }
 
 int _compareItems(ThreadItemView left, ThreadItemView right) {

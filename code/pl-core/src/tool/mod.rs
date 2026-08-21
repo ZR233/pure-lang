@@ -242,6 +242,17 @@ mod tests {
                 output_bytes_budget: None,
             }
         );
+        let output = execution.into_tool_output();
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.runtime_events.iter().any(|event| matches!(
+            event,
+            ToolRuntimeEvent::OutputMetrics {
+                raw_bytes: 41,
+                model_visible_bytes: 41,
+                artifact_bytes: 0,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -351,10 +362,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registered_tool_from_execution_result_honors_cancelled_context() {
+    async fn registered_tool_honors_cancelled_context() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let tool_calls = calls.clone();
-        let tool = RegisteredTool::from_execution_result(
+        let tool = RegisteredTool::new(
             "product_tool",
             "Product tool",
             serde_json::json!({ "type": "object" }),
@@ -362,10 +373,12 @@ mod tests {
                 let tool_calls = tool_calls.clone();
                 async move {
                     tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Ok(ToolExecutionResult::<serde_json::Value>::new(
-                        true,
-                        "ran".to_string(),
-                        false,
+                    Ok(ToolOutput::from_model_output(
+                        ToolOutputModelOutputRequest {
+                            model_output: "ran".to_string(),
+                            success: true,
+                            ends_turn: false,
+                        },
                     ))
                 }
             },
@@ -407,7 +420,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registered_tool_from_fallible_execution_result_maps_display_error() {
+    async fn typed_function_tool_maps_display_error() {
+        #[derive(Debug, Deserialize, JsonSchema)]
+        struct EmptyInput {}
+
         #[derive(Debug)]
         struct DisplayError(&'static str);
 
@@ -417,14 +433,10 @@ mod tests {
             }
         }
 
-        let tool = RegisteredTool::from_fallible_execution_result(
-            "product_tool",
-            "Product tool",
-            serde_json::json!({ "type": "object" }),
-            |_input, _context| async move {
+        let tool = FunctionToolDefinition::<EmptyInput>::new("product_tool", "Product tool")
+            .registered(|_input, _context| async move {
                 Err::<ToolExecutionResult<serde_json::Value>, DisplayError>(DisplayError("boom"))
-            },
-        );
+            });
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let result = tool
             .execute(

@@ -15,6 +15,10 @@ idle 且没有 pending input；StudioRuntime 持 lifecycle 临界区后单次原
 漂移，Turn 构建也不因角色陈旧而拒绝。不存在启动修复步骤。Task root 永远不能进入 executor
 WorkUnit 生命周期。
 
+SQLite 只在存储列中保留 `simple | task` 和 Thread status 的稳定标签；repository 读边界必须严格
+解析为 Rust enum，未知标签直接返回存储错误，不能降级成 Simple 或 Idle。`ThreadRecord`、mode
+切换与 status 更新入口只接受 typed enum，字符串只存在于 SQLite 和既有 transport wire 边界。
+
 每个 agent 固定对应一个 Thread。child 通过 `rootThreadId`、`parentThreadId`、`role` 和
 `agentPath` 表达关系。TaskRun 只绑定 root Thread；executor 和 reviewer 直接由 WorkUnit、
 ReviewRound 引用，不建立 AgentOutcome 镜像。Rust runtime 同样只使用 `ThreadId` 表达 actor 身份，

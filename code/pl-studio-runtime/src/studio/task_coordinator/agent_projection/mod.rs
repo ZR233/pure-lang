@@ -32,7 +32,7 @@ impl TaskCoordinator {
                     self.store.read_thread(thread_id).await?.context(
                         "agent canonical Thread not found while awaiting close projection",
                     )?;
-                if thread.status == "closed" {
+                if thread.status == pl_protocol::ThreadStatus::Closed {
                     return Ok::<(), anyhow::Error>(());
                 }
                 tokio::time::sleep(CLOSED_PROJECTION_POLL_INTERVAL).await;

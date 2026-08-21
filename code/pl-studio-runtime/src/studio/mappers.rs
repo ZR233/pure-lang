@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use pl_protocol::LabeledEnum;
+use pl_protocol::{LabeledEnum, ThreadStatus};
 
 use crate::studio::entity as entities;
 use crate::studio::records::{
@@ -20,12 +20,18 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     }
 }
 
-pub fn thread_record(model: entities::thread::Model) -> ThreadRecord {
-    ThreadRecord {
+pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
+    let mode = crate::StudioMode::from_label(&model.mode)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .with_context(|| format!("unsupported Thread mode in studio db: {}", model.id))?;
+    let status = ThreadStatus::from_label(&model.status)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .with_context(|| format!("unsupported Thread status in studio db: {}", model.id))?;
+    Ok(ThreadRecord {
         id: model.id.clone(),
         project_id: model.project_id,
         title: model.title,
-        mode: model.mode,
+        mode,
         created_at: model.created_at,
         updated_at: model.updated_at,
         visibility: if model.archived == 0 {
@@ -42,11 +48,11 @@ pub fn thread_record(model: entities::thread::Model) -> ThreadRecord {
         },
         agent_path: model.id,
         role: model.role,
-        status: model.status,
+        status,
         summary: None,
         error: None,
         runtime_updated_at: Some(model.updated_at),
-    }
+    })
 }
 
 pub fn attachment_record(model: entities::attachment::Model) -> AttachmentRecord {

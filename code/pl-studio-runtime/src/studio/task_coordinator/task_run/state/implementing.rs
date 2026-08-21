@@ -11,14 +11,6 @@ pub(crate) struct ImplementingState {
 
 impl ImplementingState {
     pub(crate) fn new(design: FinalizedDesign, generation: u64) -> Self {
-        Self::with_status(design, generation, None)
-    }
-
-    pub(crate) fn with_status(
-        design: FinalizedDesign,
-        generation: u64,
-        _status_message: Option<String>,
-    ) -> Self {
         Self {
             generation,
             design: DesignProgress::from_finalized(design),

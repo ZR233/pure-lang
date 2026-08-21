@@ -135,7 +135,7 @@ impl StudioPlanConfirmationProjector {
         let Some(thread) = self.store.read_thread(thread_id).await? else {
             return Ok(false);
         };
-        Ok(thread.mode == "task"
+        Ok(thread.mode == crate::StudioMode::Task
             && thread.parent_thread_id.is_none()
             && thread.id == thread.root_thread_id
             && thread.id == thread_id
@@ -218,7 +218,7 @@ impl StudioPlanConfirmationProjector {
             self.store
                 .update_thread_status(
                     thread_id,
-                    "waiting",
+                    pl_protocol::ThreadStatus::Waiting,
                     thread.summary,
                     None,
                     crate::studio::ids::unix_seconds(),
@@ -439,7 +439,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .status,
-            "waiting"
+            pl_protocol::ThreadStatus::Waiting
         );
 
         studio.shutdown().await;

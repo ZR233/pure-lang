@@ -52,13 +52,4 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
       !isBusy &&
       (rootThread.status == 'interrupted' ||
           runtime.task!.hasRecoverableExecutorFailure);
-
-  RoleSettingsView? role(String key) {
-    for (final role in roles) {
-      if (role.key == key) {
-        return role;
-      }
-    }
-    return null;
-  }
 }

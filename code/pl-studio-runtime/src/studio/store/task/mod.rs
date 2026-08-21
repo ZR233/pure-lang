@@ -17,6 +17,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
+use crate::StudioMode;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
@@ -35,7 +36,7 @@ impl StudioStore {
         let Some(root_thread) = self.read_thread(&input.root_thread_id).await? else {
             bail!("task root Thread not found");
         };
-        if root_thread.mode != "task" {
+        if root_thread.mode != StudioMode::Task {
             bail!("task coordinator requires a task mode root Thread");
         }
 
@@ -447,9 +448,7 @@ fn test_transition_command(
                     .clone(),
             })
         }
-        TaskRunStateKind::Implementing => TaskCommand::BeginImplementing {
-            status_message: Some(message),
-        },
+        TaskRunStateKind::Implementing => TaskCommand::BeginImplementing,
         TaskRunStateKind::Merging => TaskCommand::BeginMerging {
             status_message: Some(message),
         },

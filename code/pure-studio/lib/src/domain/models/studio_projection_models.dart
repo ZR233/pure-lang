@@ -177,13 +177,4 @@ abstract class StatusBarView with _$StatusBarView {
       isBusy: workspace.isBusy,
     );
   }
-
-  RoleSettingsView? role(String key) {
-    for (final role in roles) {
-      if (role.key == key) {
-        return role;
-      }
-    }
-    return null;
-  }
 }

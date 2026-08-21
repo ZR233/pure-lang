@@ -370,7 +370,10 @@ impl McpTurnLease {
                         .handle
                         .resource_query(lease.generation, server_id, operation)
                         .await?;
-                    crate::tool::ToolOutput::json(value)
+                    Ok(
+                        crate::tool::ToolExecutionResult::<serde_json::Value>::json(value)?
+                            .into_tool_output(),
+                    )
                 }
             },
         )

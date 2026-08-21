@@ -242,22 +242,6 @@ impl ToolOutput {
         }
     }
 
-    pub fn json(value: impl Serialize) -> Result<Self, PureError> {
-        let description =
-            serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
-                tool: "registered_tool".to_string(),
-                error: format!("failed to serialize JSON output: {error}"),
-            })?;
-        Ok(Self {
-            description: model_visible_tool_output(&description),
-            truncated: OutputTruncation::empty(),
-            output_file: PathBuf::new(),
-            exit_code: None,
-            timed_out: false,
-            runtime_events: Vec::new(),
-        })
-    }
-
     /// 消费工具输出并返回模型可见文本。
     ///
     /// `ToolOutput` 内部目前用 `description` 存储模型可见输出；产品层应通过该

@@ -107,9 +107,7 @@ impl TaskRun {
 pub(crate) enum TaskCommand {
     ObserveDesign(DesignWorkspaceObservation),
     FinalizeDesign(FinalizedDesign),
-    BeginImplementing {
-        status_message: Option<String>,
-    },
+    BeginImplementing,
     BeginMerging {
         status_message: Option<String>,
     },
@@ -193,16 +191,11 @@ impl TaskRunState {
                     ImplementingState::new(design, generation),
                 )))
             }
-            (
-                Self::Merging(_) | Self::Reworking(_),
-                TaskCommand::BeginImplementing { status_message },
-            ) => Ok(TransitionDecision::state(Self::Implementing(
-                ImplementingState::with_status(
-                    require_finalized_design(design)?,
-                    generation,
-                    status_message,
-                ),
-            ))),
+            (Self::Merging(_) | Self::Reworking(_), TaskCommand::BeginImplementing) => {
+                Ok(TransitionDecision::state(Self::Implementing(
+                    ImplementingState::new(require_finalized_design(design)?, generation),
+                )))
+            }
             (
                 Self::Implementing(_) | Self::Reworking(_),
                 TaskCommand::BeginMerging { status_message },
@@ -304,7 +297,7 @@ impl TaskCommand {
         match self {
             Self::ObserveDesign(_) => "observeDesign",
             Self::FinalizeDesign(_) => "finalizeDesign",
-            Self::BeginImplementing { .. } => "beginImplementing",
+            Self::BeginImplementing => "beginImplementing",
             Self::BeginMerging { .. } => "beginMerging",
             Self::BeginReviewing(_) => "beginReviewing",
             Self::BeginReworking { .. } => "beginReworking",

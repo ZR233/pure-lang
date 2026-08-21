@@ -224,54 +224,6 @@ impl RegisteredTool {
         }
     }
 
-    pub fn from_execution_result<F, Fut, Artifact>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: serde_json::Value,
-        handler: F,
-    ) -> Self
-    where
-        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<ToolExecutionResult<Artifact>, PureError>> + Send + 'static,
-        Artifact: Serialize + Send + 'static,
-    {
-        Self::new(name, description, input_schema, move |input, context| {
-            let future = handler(input, context);
-            async move { future.await.map(ToolExecutionResult::into_tool_output) }
-        })
-    }
-
-    pub fn from_fallible_execution_result<F, Fut, Artifact, Error>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: serde_json::Value,
-        handler: F,
-    ) -> Self
-    where
-        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
-            + Send
-            + 'static,
-        Artifact: Serialize + Send + 'static,
-        Error: fmt::Display + Send + 'static,
-    {
-        let name = name.into();
-        let tool_name = name.clone();
-        Self::new(name, description, input_schema, move |input, context| {
-            let future = handler(input, context);
-            let tool_name = tool_name.clone();
-            async move {
-                future
-                    .await
-                    .map(ToolExecutionResult::into_tool_output)
-                    .map_err(|error| PureError::ToolExecutionFailed {
-                        tool: tool_name,
-                        error: error.to_string(),
-                    })
-            }
-        })
-    }
-
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
         self

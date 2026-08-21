@@ -98,7 +98,7 @@ async fn start_new_thread_creates_the_root_only_after_valid_input() {
         .unwrap();
 
     assert_eq!(started.thread.project_id, project.id);
-    assert_eq!(started.thread.mode, "simple");
+    assert_eq!(started.thread.mode, StudioMode::Simple);
     assert_eq!(started.thread.role, "executor");
     assert_eq!(started.submission.thread_id, started.thread.id);
     assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
@@ -134,11 +134,11 @@ async fn start_new_thread_honors_the_requested_task_mode() {
         .await
         .unwrap();
 
-    assert_eq!(started.thread.mode, "task");
+    assert_eq!(started.thread.mode, StudioMode::Task);
     assert_eq!(started.thread.role, "planner");
     let roots = store.list_root_threads(&project.id).await.unwrap();
     assert_eq!(roots.len(), 1);
-    assert_eq!(roots[0].mode, "task");
+    assert_eq!(roots[0].mode, StudioMode::Task);
     assert_eq!(roots[0].role, "planner");
 
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
@@ -203,14 +203,12 @@ async fn start_new_thread_compensates_a_synchronous_submit_failure() {
         ThreadVisibility::Archived
     );
     assert!(!runtime.residency.snapshot().await.contains(compensated_id));
-    let (handle, agent_id) = runtime
-        .try_get_thread_handle(compensated_id)
-        .await
-        .unwrap()
-        .expect("the compensated actor remains queryable for diagnostics");
-    assert_eq!(
-        handle.snapshot(agent_id).await.unwrap().lifecycle,
-        pl_core::AgentLifecycleState::Closed
+    assert!(
+        runtime
+            .try_get_thread_handle(compensated_id)
+            .await
+            .unwrap()
+            .is_none()
     );
     runtime.shutdown().await;
 }
@@ -338,7 +336,7 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
     let unchanged_child = runtime.store.read_thread(&child.id).await.unwrap().unwrap();
 
     assert!(error.to_string().contains("root Thread"));
-    assert_eq!(unchanged_child.mode, "task");
+    assert_eq!(unchanged_child.mode, StudioMode::Task);
     assert_eq!(unchanged_child.role, "reviewer");
     let _ = std::fs::remove_dir_all(workspace);
 }
@@ -387,7 +385,7 @@ async fn mode_switch_is_rejected_while_a_task_is_active() {
 
     assert!(error.to_string().contains("while a task is active"));
     let unchanged = store.read_thread(&thread.id).await.unwrap().unwrap();
-    assert_eq!(unchanged.mode, "task");
+    assert_eq!(unchanged.mode, StudioMode::Task);
     assert_eq!(unchanged.role, "planner");
     let _ = std::fs::remove_dir_all(workspace);
 }
@@ -667,14 +665,12 @@ async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
     let roots = store.list_root_threads(&project.id).await.unwrap();
     assert!(roots.is_empty());
     for thread_id in [&root.id, &child.id] {
-        let (handle, agent_id) = runtime
-            .try_get_thread_handle(thread_id)
-            .await
-            .unwrap()
-            .expect("closed actor remains queryable for diagnostics");
-        assert_eq!(
-            handle.snapshot(agent_id).await.unwrap().lifecycle,
-            pl_core::AgentLifecycleState::Closed
+        assert!(
+            runtime
+                .try_get_thread_handle(thread_id)
+                .await
+                .unwrap()
+                .is_none()
         );
         assert!(!runtime.residency.snapshot().await.contains(thread_id));
     }
@@ -903,7 +899,7 @@ async fn active_turn_and_pending_input_prevent_thread_mutation() {
             .contains("active turn or pending input")
     );
     let unchanged = store.read_thread(&thread.id).await.unwrap().unwrap();
-    assert_eq!(unchanged.mode, "simple");
+    assert_eq!(unchanged.mode, StudioMode::Simple);
     assert_eq!(unchanged.role, "executor");
     assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
     let _ = release_tx.send(());
@@ -1015,7 +1011,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
     store
         .update_thread_status(
             &session.id,
-            "idle",
+            pl_protocol::ThreadStatus::Idle,
             None,
             None,
             crate::studio::ids::unix_seconds(),
@@ -1177,13 +1173,16 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     .await
     .expect("project cleanup must publish fresh project and Thread directories");
     let framework = runtime.agent_framework().await.unwrap();
-    let root = framework
+    let root_error = framework
         .handle()
         .snapshot(crate::studio::agent_host::root_agent_id(&session.id))
         .await
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(root.lifecycle, crate::AgentLifecycleState::Closed);
+    assert!(matches!(
+        root_error,
+        pl_core::AgentRuntimeError::NotFound(_)
+    ));
     assert!(runtime.active_turns_for_test().await.is_empty());
     assert!(runtime.list_projects().await.unwrap().is_empty());
     assert!(project_directory.projects.is_empty());

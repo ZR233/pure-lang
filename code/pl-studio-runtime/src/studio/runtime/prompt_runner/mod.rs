@@ -4,7 +4,6 @@ use crate::{InteractionKind, InteractionResolution, InteractionStatus, PlanLifec
 use anyhow::{Context, Result, bail};
 use futures::FutureExt;
 
-use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::agent_host::{StudioAgentRepository, root_agent_id};
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
@@ -142,7 +141,7 @@ impl StudioRuntime {
         if thread_record.thread_kind != ThreadKind::Root {
             bail!("only a root Task Thread can be resumed");
         }
-        if thread_record.status != "idle" {
+        if thread_record.status != pl_protocol::ThreadStatus::Idle {
             bail!("Task Thread is not paused");
         }
         let run = self
@@ -294,7 +293,7 @@ impl StudioRuntime {
         if thread.parent_thread_id.is_some() {
             return Ok(());
         }
-        let desired = StudioMode::from_label(&thread.mode).root_role().id();
+        let desired = thread.mode.root_role().id();
         if snapshot.identity.role == desired {
             return Ok(());
         }
@@ -408,7 +407,7 @@ impl StudioRuntime {
                     "root Studio Thread {} has invalid canonical owner",
                     thread_record.id
                 );
-                let role = StudioMode::from_label(&thread_record.mode).root_role();
+                let role = thread_record.mode.root_role();
                 (None, role, 0)
             }
             ThreadKind::Agent => {

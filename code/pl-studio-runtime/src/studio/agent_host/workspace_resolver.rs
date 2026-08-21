@@ -27,7 +27,7 @@ impl AgentWorkspaceResolver {
         project: &ProjectRecord,
         active_task_run: Option<&TaskRun>,
     ) -> Result<AgentWorkspace> {
-        let mode = StudioMode::from_label(&thread.mode);
+        let mode = thread.mode;
         if identity.parent_id.is_none() {
             return self.resolve_root(mode, project, active_task_run).await;
         }
@@ -647,7 +647,7 @@ mod tests {
                 id: agent_id.to_string(),
                 project_id: self.root_thread.project_id.clone(),
                 title: role.display_name().to_string(),
-                mode: self.root_thread.mode.clone(),
+                mode: self.root_thread.mode,
                 created_at: self.root_thread.created_at,
                 updated_at: self.root_thread.updated_at,
                 visibility: ThreadVisibility::Active,
@@ -656,7 +656,7 @@ mod tests {
                 thread_kind: ThreadKind::Agent,
                 agent_path: agent_id.to_string(),
                 role: role.key().to_string(),
-                status: "running".to_string(),
+                status: pl_protocol::ThreadStatus::Running,
                 summary: None,
                 error: None,
                 runtime_updated_at: None,

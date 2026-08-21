@@ -718,11 +718,10 @@ async fn cleanup_project(
 }
 
 fn parse_mode(mode: &str) -> Result<StudioMode, ApiError> {
-    match mode.trim() {
-        "simple" => Ok(StudioMode::Simple),
-        "task" => Ok(StudioMode::Task),
-        mode => Err(ApiError(StudioError::invalid_argument(format!(
-            "unsupported Thread mode: {mode}"
-        )))),
-    }
+    StudioMode::from_label(mode.trim()).map_err(|_| {
+        ApiError(StudioError::invalid_argument(format!(
+            "unsupported Thread mode: {}",
+            mode.trim()
+        )))
+    })
 }

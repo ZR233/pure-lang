@@ -99,7 +99,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .ok_or_else(|| turn_error("selected Studio project not found"))?;
         let config = self.config_runtime.read()?.config;
         let skill_catalog = self.skills.read(&thread_record.project_id).await.catalog;
-        let mode = StudioMode::from_label(&thread_record.mode);
+        let mode = thread_record.mode;
         let is_root = context.snapshot.identity.parent_id.is_none();
         // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
         let root_role = is_root.then(|| mode.root_role());

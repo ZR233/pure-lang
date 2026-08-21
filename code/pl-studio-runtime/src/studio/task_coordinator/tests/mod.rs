@@ -1830,7 +1830,13 @@ async fn closed_thread_projection_barrier_waits_for_durable_status() {
     let updated_at = crate::studio::ids::unix_seconds() + 1;
     fixture
         .store
-        .update_thread_status(&fixture.subagent.id, "idle", None, None, updated_at)
+        .update_thread_status(
+            &fixture.subagent.id,
+            pl_protocol::ThreadStatus::Idle,
+            None,
+            None,
+            updated_at,
+        )
         .await
         .unwrap();
     let store = fixture.store.clone();
@@ -1838,7 +1844,13 @@ async fn closed_thread_projection_barrier_waits_for_durable_status() {
     let projection = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         store
-            .update_thread_status(&executor_id, "closed", None, None, updated_at + 1)
+            .update_thread_status(
+                &executor_id,
+                pl_protocol::ThreadStatus::Closed,
+                None,
+                None,
+                updated_at + 1,
+            )
             .await
     });
 
@@ -1857,7 +1869,7 @@ async fn closed_thread_projection_barrier_waits_for_durable_status() {
             .unwrap()
             .unwrap()
             .status,
-        "closed"
+        pl_protocol::ThreadStatus::Closed
     );
     fixture.cleanup();
 }
@@ -2617,7 +2629,7 @@ async fn persist_closed_executor_thread(
     store
         .update_thread_status(
             executor_thread_id,
-            "closed",
+            pl_protocol::ThreadStatus::Closed,
             None,
             None,
             crate::studio::ids::unix_seconds(),

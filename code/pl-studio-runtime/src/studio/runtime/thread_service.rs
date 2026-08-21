@@ -18,17 +18,11 @@ impl StudioRuntime {
         project_id: String,
         request: pl_protocol::studio::CreateThreadRequest,
     ) -> Result<StudioStartNewThreadResponse> {
-        let mode = match request.mode.as_str() {
-            "simple" => StudioMode::Simple,
-            "task" => StudioMode::Task,
-            _ => {
-                return Err(anyhow::Error::new(
-                    pl_protocol::studio::StudioError::invalid_argument(
-                        "mode must be simple or task",
-                    ),
-                ));
-            }
-        };
+        let mode = StudioMode::from_label(request.mode.trim()).map_err(|_| {
+            anyhow::Error::new(pl_protocol::studio::StudioError::invalid_argument(
+                "mode must be simple or task",
+            ))
+        })?;
         self.start_new_thread(StudioStartNewThreadRequest {
             project_id,
             title: request.title,

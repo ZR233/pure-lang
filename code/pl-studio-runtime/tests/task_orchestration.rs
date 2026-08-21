@@ -175,7 +175,7 @@ async fn run_offline_task_flow() -> Result<()> {
         .read_thread(&fixture.thread_id)
         .await?
         .context("task session disappeared")?;
-    assert_eq!(session.mode, StudioMode::Simple.label());
+    assert_eq!(session.mode, StudioMode::Simple);
 
     fixture.shutdown().await
 }

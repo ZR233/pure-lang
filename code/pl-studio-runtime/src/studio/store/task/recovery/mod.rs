@@ -389,13 +389,8 @@ fn validate_work_units(task_run_id: &str, work_units: &[entities::work_unit::Mod
         if unit.executor_thread_id.is_none() || unit.attempt <= 0 {
             bail!("work unit has no valid executor Thread identity");
         }
-        validate_status_pair(unit)?;
+        work_unit_state(unit)?;
     }
-    Ok(())
-}
-
-fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
-    work_unit_state(unit)?;
     Ok(())
 }
 

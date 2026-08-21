@@ -1,8 +1,12 @@
+use pl_protocol::{LabeledEnum, ThreadMode, UnknownLabelError};
+use serde::{Deserialize, Serialize};
+
 /// Pure Studio 的产品交互模式。
 ///
 /// 模式只决定 Studio 选择的角色、指令、工具策略与完成方式；`pl-core`
 /// 不感知这些产品语义。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum StudioMode {
     #[default]
     Simple,
@@ -25,11 +29,8 @@ impl StudioMode {
         }
     }
 
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Simple => "simple",
-            Self::Task => "task",
-        }
+    pub fn label(self) -> &'static str {
+        ThreadMode::from(self).label()
     }
 
     /// root Thread 的角色是 mode 的派生投影：Simple 对应 executor，Task 对应 planner。
@@ -40,11 +41,25 @@ impl StudioMode {
         }
     }
 
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "task" => Self::Task,
-            "simple" => Self::Simple,
-            _ => Self::Simple,
+    pub fn from_label(label: &str) -> Result<Self, UnknownLabelError> {
+        ThreadMode::from_label(label).map(Self::from)
+    }
+}
+
+impl From<StudioMode> for ThreadMode {
+    fn from(value: StudioMode) -> Self {
+        match value {
+            StudioMode::Simple => Self::Simple,
+            StudioMode::Task => Self::Task,
+        }
+    }
+}
+
+impl From<ThreadMode> for StudioMode {
+    fn from(value: ThreadMode) -> Self {
+        match value {
+            ThreadMode::Simple => Self::Simple,
+            ThreadMode::Task => Self::Task,
         }
     }
 }
@@ -76,5 +91,13 @@ mod tests {
         let unknown = StudioMode::Task.instructions_for("custom", false);
         assert!(unknown.contains("不得调用 `plan_exit`"));
         assert!(unknown.contains("不承担 root planner"));
+    }
+
+    #[test]
+    fn mode_labels_round_trip_and_reject_unknown_values() {
+        for mode in [StudioMode::Simple, StudioMode::Task] {
+            assert_eq!(StudioMode::from_label(mode.label()), Ok(mode));
+        }
+        assert!(StudioMode::from_label("legacy").is_err());
     }
 }

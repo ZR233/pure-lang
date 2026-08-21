@@ -178,7 +178,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             self.store
                 .update_thread_status(
                     &lease.resource.thread_id,
-                    "failed",
+                    pl_protocol::ThreadStatus::Failed,
                     None,
                     Some("framework spawn rolled back".to_string()),
                     crate::studio::ids::unix_seconds(),

@@ -141,11 +141,7 @@ impl StudioStore {
                     })?
                     .next_state
             } else {
-                record
-                    .decide(TaskCommand::BeginImplementing {
-                        status_message: None,
-                    })?
-                    .next_state
+                record.decide(TaskCommand::BeginImplementing)?.next_state
             };
             super::super::compare_and_swap_task_run(
                 &tx,

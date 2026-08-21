@@ -16,16 +16,12 @@ fn lifecycle_transition_table_accepts_every_declared_path() {
         ),
         (
             state(TaskRunStateKind::Merging),
-            TaskCommand::BeginImplementing {
-                status_message: None,
-            },
+            TaskCommand::BeginImplementing,
             TaskRunStateKind::Implementing,
         ),
         (
             state(TaskRunStateKind::Reworking),
-            TaskCommand::BeginImplementing {
-                status_message: None,
-            },
+            TaskCommand::BeginImplementing,
             TaskRunStateKind::Implementing,
         ),
         (
@@ -376,9 +372,7 @@ fn commands() -> Vec<TaskCommand> {
     vec![
         TaskCommand::ObserveDesign(observation(1)),
         TaskCommand::FinalizeDesign(finalized_design()),
-        TaskCommand::BeginImplementing {
-            status_message: None,
-        },
+        TaskCommand::BeginImplementing,
         TaskCommand::BeginMerging {
             status_message: None,
         },

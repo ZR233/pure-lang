@@ -6,13 +6,14 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::StudioMode;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
 use crate::studio::store_support::non_empty_title;
+use crate::{StudioMode, ThreadStatus};
+use pl_protocol::LabeledEnum;
 
 impl StudioStore {
     pub async fn create_thread(
@@ -34,7 +35,7 @@ impl StudioStore {
             parent_thread_id: Set(None),
             role: Set(mode.root_role().key().to_string()),
             agent_path: Set(id),
-            status: Set("idle".to_string()),
+            status: Set(ThreadStatus::Idle.label().to_string()),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
@@ -48,7 +49,7 @@ impl StudioStore {
         }
         .insert(&self.db)
         .await?;
-        Ok(thread_record(model))
+        thread_record(model)
     }
 
     pub(in crate::studio) async fn create_child_thread(
@@ -64,7 +65,7 @@ impl StudioStore {
             .one(&self.db)
             .await?
         {
-            let existing = thread_record(existing);
+            let existing = thread_record(existing)?;
             anyhow::ensure!(
                 existing.parent_thread_id.as_deref() == Some(spec.parent_thread_id.as_str()),
                 "Thread {} 已属于其他父 Thread",
@@ -87,7 +88,7 @@ impl StudioStore {
             parent_thread_id: Set(Some(spec.parent_thread_id)),
             role: Set(spec.role),
             agent_path: Set(spec.id),
-            status: Set("running".to_string()),
+            status: Set(ThreadStatus::Running.label().to_string()),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
@@ -101,35 +102,33 @@ impl StudioStore {
         }
         .insert(&self.db)
         .await?;
-        Ok(thread_record(model))
+        thread_record(model)
     }
 
     pub async fn list_root_threads(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
         use entities::thread;
         let threads = thread::Entity::find()
             .filter(thread::Column::ProjectId.eq(project_id))
-            .filter(thread::Column::Mode.is_in(["simple", "task"]))
             .filter(thread::Column::Archived.eq(0))
             .filter(thread::Column::ParentThreadId.is_null())
             .order_by_desc(thread::Column::UpdatedAt)
             .order_by_desc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        Ok(threads.into_iter().map(thread_record).collect())
+        threads.into_iter().map(thread_record).collect()
     }
 
     pub async fn list_threads(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
         use entities::thread;
         let threads = thread::Entity::find()
             .filter(thread::Column::ProjectId.eq(project_id))
-            .filter(thread::Column::Mode.is_in(["simple", "task"]))
             .filter(thread::Column::Archived.eq(0))
             .order_by_desc(thread::Column::UpdatedAt)
             .order_by_asc(thread::Column::CreatedAt)
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        Ok(threads.into_iter().map(thread_record).collect())
+        threads.into_iter().map(thread_record).collect()
     }
 
     pub async fn list_project_thread_ids(&self, project_id: &str) -> Result<Vec<String>> {
@@ -145,11 +144,11 @@ impl StudioStore {
 
     pub async fn read_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
         use entities::thread;
-        Ok(thread::Entity::find_by_id(thread_id.to_string())
-            .filter(thread::Column::Mode.is_in(["simple", "task"]))
+        thread::Entity::find_by_id(thread_id.to_string())
             .one(&self.db)
             .await?
-            .map(thread_record))
+            .map(thread_record)
+            .transpose()
     }
 
     pub(in crate::studio) async fn read_thread_runtime_revision(
@@ -188,7 +187,7 @@ impl StudioStore {
         else {
             return Ok(None);
         };
-        let archived = thread_record(existing.clone());
+        let archived = thread_record(existing.clone())?;
         let targets = if existing.parent_thread_id.is_none() {
             thread::Entity::find()
                 .filter(thread::Column::RootThreadId.eq(thread_id))
@@ -218,7 +217,7 @@ impl StudioStore {
     pub(in crate::studio) async fn update_thread_status(
         &self,
         thread_id: &str,
-        status: &str,
+        status: ThreadStatus,
         _summary: Option<String>,
         _error: Option<String>,
         updated_at: i64,
@@ -231,7 +230,7 @@ impl StudioStore {
             return Ok(());
         };
         let mut active: thread::ActiveModel = existing.into();
-        active.status = Set(status.to_string());
+        active.status = Set(status.label().to_string());
         active.updated_at = Set(updated_at);
         active.update(&self.db).await?;
         Ok(())
