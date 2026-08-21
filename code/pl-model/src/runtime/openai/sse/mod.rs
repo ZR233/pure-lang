@@ -791,4 +791,4 @@ fn responses_tool_identity(event: &SseStreamEvent) -> (String, String) {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

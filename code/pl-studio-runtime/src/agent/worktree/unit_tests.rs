@@ -1,4 +1,4 @@
-//! Studio worktree 生命周期测试。
+//! Studio worktree 生命周期单元测试。
 
 use std::fs;
 use std::path::{Path, PathBuf};

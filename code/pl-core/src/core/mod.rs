@@ -587,4 +587,4 @@ use turn_result::{
 };
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

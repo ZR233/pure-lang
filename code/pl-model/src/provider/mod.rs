@@ -277,27 +277,17 @@ impl ProviderEndpoint {
     }
 
     pub fn zhipu(base_url: Option<String>) -> Self {
-        Self {
-            name: "Zhipu".into(),
-            base_url: base_url.unwrap_or_else(|| "https://open.bigmodel.cn/api/paas/v4".into()),
-            bearer_token: None,
-            http_headers: None,
-            tool_wire_policy: ToolWirePolicy::FunctionFallback,
-            apply_patch_tool_type: None,
-            service_capabilities: ProviderServiceCapabilities::default(),
-        }
+        Self::compatible(
+            "Zhipu",
+            base_url.unwrap_or_else(|| "https://open.bigmodel.cn/api/paas/v4".into()),
+        )
     }
 
     pub fn zhipu_coding_plan(base_url: Option<String>) -> Self {
-        Self {
-            name: "Zhipu Coding Plan".into(),
-            base_url: base_url.unwrap_or_else(|| ZHIPU_CODING_PLAN_BASE_URL.into()),
-            bearer_token: None,
-            http_headers: None,
-            tool_wire_policy: ToolWirePolicy::FunctionFallback,
-            apply_patch_tool_type: None,
-            service_capabilities: ProviderServiceCapabilities::default(),
-        }
+        Self::compatible(
+            "Zhipu Coding Plan",
+            base_url.unwrap_or_else(|| ZHIPU_CODING_PLAN_BASE_URL.into()),
+        )
     }
 
     /// 构造通用 OpenAI-compatible provider。
@@ -375,16 +365,20 @@ mod tests {
     fn zhipu_uses_canonical_endpoint() {
         let info = ProviderEndpoint::zhipu(None);
 
-        assert_eq!(info.base_url, "https://open.bigmodel.cn/api/paas/v4");
+        assert_eq!(
+            info,
+            ProviderEndpoint::compatible("Zhipu", "https://open.bigmodel.cn/api/paas/v4")
+        );
     }
 
     #[test]
     fn zhipu_coding_plan_uses_zhipu_runtime_with_coding_endpoint() {
         let info = ProviderEndpoint::zhipu_coding_plan(None);
 
-        assert_eq!(info.name, "Zhipu Coding Plan");
-        assert_eq!(info.base_url, ZHIPU_CODING_PLAN_BASE_URL);
-        assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
+        assert_eq!(
+            info,
+            ProviderEndpoint::compatible("Zhipu Coding Plan", ZHIPU_CODING_PLAN_BASE_URL)
+        );
     }
 
     #[test]

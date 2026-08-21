@@ -13,6 +13,7 @@ use super::backend::{
     CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
 };
 use super::head_tail_buffer::HeadTailBuffer;
+use crate::tool::tool_error;
 use crate::tool::truncation::TruncatedOutput;
 
 mod lifecycle;
@@ -482,12 +483,5 @@ enum StreamKind {
     Stderr,
 }
 
-fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
-    }
-}
-
 #[cfg(test)]
-mod tests;
+mod unit_tests;

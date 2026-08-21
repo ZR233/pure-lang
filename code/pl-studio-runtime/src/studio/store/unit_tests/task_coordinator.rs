@@ -371,6 +371,43 @@ async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
 }
 
 #[tokio::test]
+async fn task_projection_rejects_executor_without_durable_handoff() {
+    let (store, root_thread_id, run) = allocation_fixture(
+        "projection-missing-executor-handoff",
+        TaskRunStateKind::Implementing,
+    )
+    .await;
+    let work_unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "Implement projection".to_string(),
+            scope_hints: vec!["src".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: format!("C:/work/{}/.pure/worktrees/orphan", run.id),
+            branch: format!("pure-task-{}-orphan", run.id),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &work_unit.id,
+            WorkUnitState::running(work_unit.state.clone().into_progress()),
+            Some("missing-executor-session".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let error = crate::studio::task_projection::load_task_runtime(&store, &root_thread_id)
+        .await
+        .expect_err("projection must not hide a missing executor handoff");
+
+    let report = format!("{error:#}");
+    assert!(report.contains("failed to load Task handoff for work unit"));
+    assert!(report.contains("executor session state is missing"));
+}
+
+#[tokio::test]
 async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking() {
     let (store, thread_id, _) = allocation_fixture(
         "executor-allocation-terminal",
@@ -1401,6 +1438,13 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         })
         .await
         .unwrap();
+    crate::studio::task_coordinator::test_support::persist_executor_handoff(
+        &fixture.store,
+        &fixture.run,
+        &fixture.work_unit,
+        &fixture.run.root_thread_id,
+    )
+    .await;
     fixture
         .store
         .execute_test_sql(&format!(

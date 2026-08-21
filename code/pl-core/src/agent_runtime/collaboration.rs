@@ -27,10 +27,11 @@ const MAX_SUBMISSION_LIMIT: usize = 50;
 const MAX_SUBMISSION_OUTPUT_BYTES: usize = 64 * 1024;
 
 mod support;
+use crate::tool::tool_error;
 use support::{
     agent_path, filter_visible, fork_session, json_output, json_output_with_budget, object_schema,
     parse_agent_id, parse_input, progress_schema, send_message_schema, spawn_schema,
-    submissions_schema, target_schema, tool_error, wait_schema,
+    submissions_schema, target_schema, wait_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。

@@ -514,4 +514,4 @@ impl Config for PureOpenAiConfig {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

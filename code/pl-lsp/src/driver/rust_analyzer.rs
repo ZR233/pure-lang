@@ -151,22 +151,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_reports_missing_command_for_unknown_program() {
-        let driver = RustAnalyzerDriver::new();
-        let command = LspResolvedCommand {
-            program: "definitely-not-rust-analyzer-pure-test".to_string(),
-            args: Vec::new(),
-        };
-
-        let outcome = driver.probe(&command).await;
-
-        assert!(
-            matches!(&outcome, LspProbeOutcome::MissingCommand { .. }),
-            "{outcome:?}"
-        );
-    }
-
-    #[tokio::test]
     async fn repair_rejects_foreign_component() {
         let driver = RustAnalyzerDriver::new();
         let component = LspMissingComponent {

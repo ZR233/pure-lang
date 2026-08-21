@@ -536,4 +536,4 @@ fn estimate_context_request_tokens(
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

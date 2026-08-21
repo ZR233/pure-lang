@@ -5,6 +5,7 @@ use std::sync::Arc;
 use lsp_types::{DiagnosticSeverity, NumberOrString, PublishDiagnosticsParams};
 use tokio::sync::Mutex;
 
+use crate::time::unix_seconds;
 use crate::types::{LspDiagnostic, LspPosition, LspRange};
 use crate::uri::{file_uri_to_path, normalize_separators};
 
@@ -90,12 +91,4 @@ fn number_or_string(nos: NumberOrString) -> String {
         NumberOrString::Number(n) => n.to_string(),
         NumberOrString::String(s) => s,
     }
-}
-
-/// 获取当前 Unix 时间戳（秒）。
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }

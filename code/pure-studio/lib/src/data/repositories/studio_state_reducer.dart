@@ -295,8 +295,12 @@ StudioState applySettingsState(
   StudioState current,
   SettingsStateSnapshot next,
 ) {
-  if (!next.meta.isNewerThan(current.settingsState.meta)) return current;
-  return current.copyWith(settingsState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.settingsState,
+    next,
+    (snapshot) => current.copyWith(settingsState: snapshot),
+  );
 }
 
 StudioState applyProjectDirectory(
@@ -376,29 +380,45 @@ StudioState setThreadDirectoryLoading(StudioState current, bool isLoading) {
 }
 
 StudioState applyTaskDirectory(StudioState current, TaskDirectoryState next) {
-  if (!next.meta.isNewerThan(current.taskDirectory.meta)) return current;
-  return current.copyWith(taskDirectory: next);
+  return _applyObservedSnapshot(
+    current,
+    current.taskDirectory,
+    next,
+    (snapshot) => current.copyWith(taskDirectory: snapshot),
+  );
 }
 
 StudioState applyAgentDirectory(StudioState current, AgentDirectoryState next) {
-  if (!next.meta.isNewerThan(current.agentDirectory.meta)) return current;
-  return current.copyWith(agentDirectory: next);
+  return _applyObservedSnapshot(
+    current,
+    current.agentDirectory,
+    next,
+    (snapshot) => current.copyWith(agentDirectory: snapshot),
+  );
 }
 
 StudioState applyRecoveryState(
   StudioState current,
   RecoveryStateSnapshot next,
 ) {
-  if (!next.meta.isNewerThan(current.recoveryState.meta)) return current;
-  return current.copyWith(recoveryState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.recoveryState,
+    next,
+    (snapshot) => current.copyWith(recoveryState: snapshot),
+  );
 }
 
 StudioState applyProviderUsageState(
   StudioState current,
   ProviderUsageStateSnapshot next,
 ) {
-  if (!next.meta.isNewerThan(current.providerUsageState.meta)) return current;
-  return current.copyWith(providerUsageState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.providerUsageState,
+    next,
+    (snapshot) => current.copyWith(providerUsageState: snapshot),
+  );
 }
 
 StudioState applySkillsState(StudioState current, SkillsStateSnapshot next) {
@@ -410,18 +430,40 @@ StudioState applySkillsState(StudioState current, SkillsStateSnapshot next) {
 }
 
 StudioState applyMcpState(StudioState current, McpStateSnapshot next) {
-  if (!next.meta.isNewerThan(current.mcpState.meta)) return current;
-  return current.copyWith(mcpState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.mcpState,
+    next,
+    (snapshot) => current.copyWith(mcpState: snapshot),
+  );
 }
 
 StudioState applyLspState(StudioState current, LspStateSnapshot next) {
-  if (!next.meta.isNewerThan(current.lspState.meta)) return current;
-  return current.copyWith(lspState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.lspState,
+    next,
+    (snapshot) => current.copyWith(lspState: snapshot),
+  );
 }
 
 StudioState applyUpdaterState(StudioState current, UpdaterStateSnapshot next) {
-  if (!next.meta.isNewerThan(current.updaterState.meta)) return current;
-  return current.copyWith(updaterState: next);
+  return _applyObservedSnapshot(
+    current,
+    current.updaterState,
+    next,
+    (snapshot) => current.copyWith(updaterState: snapshot),
+  );
+}
+
+StudioState _applyObservedSnapshot<T extends ObservedStateSnapshot>(
+  StudioState current,
+  T previous,
+  T next,
+  StudioState Function(T snapshot) replace,
+) {
+  if (!next.meta.isNewerThan(previous.meta)) return current;
+  return replace(next);
 }
 
 String defaultEffortForModel(

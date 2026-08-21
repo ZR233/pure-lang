@@ -15,9 +15,6 @@ mod snapshots;
 #[cfg(test)]
 mod testing;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -174,3 +171,6 @@ impl LspRuntimeServerState {
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests;

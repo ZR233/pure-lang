@@ -5,10 +5,10 @@ mod id;
 mod provider;
 mod route;
 
-#[cfg(test)]
-mod tests;
-
 pub use catalog::*;
 pub use id::*;
 pub use provider::*;
 pub use route::*;
+
+#[cfg(test)]
+mod unit_tests;

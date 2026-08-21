@@ -466,4 +466,4 @@ fn has_project_root(
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

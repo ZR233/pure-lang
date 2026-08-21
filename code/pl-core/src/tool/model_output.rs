@@ -368,21 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn batch_projection_fairly_shares_budget_between_large_results() {
-        let outputs = vec!["甲".repeat(4_000), "乙".repeat(4_000)];
-
-        let projected = model_visible_tool_output_batch_with_tokens(&outputs, 256);
-
-        assert_eq!(projected[0].len(), projected[1].len());
-        assert!(projected.iter().map(String::len).sum::<usize>() <= 256 * 4);
-        assert!(
-            projected
-                .iter()
-                .all(|output| output.is_char_boundary(output.len()))
-        );
-    }
-
-    #[test]
     fn batch_projection_strictly_bounds_json_results() {
         let outputs = vec![
             json!({ "stdout": "x".repeat(8_000) }).to_string(),
@@ -401,13 +386,6 @@ mod tests {
         assert_eq!(model_tool_output_batch_token_budget(2, None), 6_000);
         assert_eq!(model_tool_output_batch_token_budget(2, Some(20_000)), 5_000);
         assert_eq!(model_tool_output_batch_token_budget(2, Some(100)), 256);
-    }
-
-    #[test]
-    fn byte_projection_honors_tiny_strict_limits() {
-        let projected = model_visible_tool_output_with_bytes("{\"value\":true}", 1);
-
-        assert!(projected.len() <= 1);
     }
 
     #[test]

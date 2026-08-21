@@ -130,10 +130,19 @@ Widget _timelineApp({
   );
 }
 
-Future<void> _pumpFrameBatch() async {
-  await pumpEventQueue();
-  final binding = SchedulerBinding.instance;
-  binding.handleBeginFrame(const Duration(milliseconds: 16));
-  binding.handleDrawFrame();
-  await pumpEventQueue();
+void _configureResponsiveView(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+bool _isLiftedDetailCard(Widget widget) {
+  if (widget is! DecoratedBox) {
+    return false;
+  }
+  final decoration = widget.decoration;
+  return decoration is BoxDecoration &&
+      decoration.border != null &&
+      (decoration.boxShadow?.isNotEmpty ?? false);
 }

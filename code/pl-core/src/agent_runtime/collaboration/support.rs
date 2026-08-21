@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::super::{AgentAccessPolicy, AgentSnapshot, AgentTargetSelector, ThreadId};
 use super::{ForkTurns, TOOL_SPAWN_AGENT};
+use crate::tool::tool_error;
 use crate::{AgentSession, AgentSessionForkPolicy, ToolOutput};
 
 pub(super) fn fork_session(
@@ -319,11 +320,4 @@ pub(super) fn json_output_with_budget(
         timed_out: false,
         runtime_events: vec![crate::tool::ToolRuntimeEvent::OutputBudget { max_bytes }],
     })
-}
-
-pub(super) fn tool_error(tool: &str, error: String) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error,
-    }
 }

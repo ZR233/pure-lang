@@ -1,7 +1,7 @@
 use pl_trace::TracePart;
 
-use super::turn_result::unix_seconds;
 use crate::TraceRecorder;
+use crate::time::unix_seconds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProgressVerbosity {

@@ -4,7 +4,7 @@ mod search;
 
 use futures::FutureExt;
 use pl_model::ToolSchema;
-use pl_protocol::{PureError, Result};
+use pl_protocol::Result;
 use serde_json::{Value, json};
 
 use crate::tool::text_document::{
@@ -12,7 +12,7 @@ use crate::tool::text_document::{
 };
 use crate::tool::{
     BoxFuture, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
-    deserialize_tool_input,
+    deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 
@@ -216,13 +216,6 @@ fn validate_expected_revision(tool: &str, expected: Option<u64>, current: u64) -
         ));
     }
     Ok(())
-}
-
-fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
-    }
 }
 
 #[cfg(test)]

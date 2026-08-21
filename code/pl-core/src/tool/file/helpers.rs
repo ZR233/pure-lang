@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::path::WorkspacePaths;
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput};
-use crate::tool::{ToolContext, ToolOutput};
+use crate::tool::{ToolContext, ToolOutput, tool_error};
 use pl_protocol::PureError;
 
 pub(super) fn text_output(description: String) -> ToolOutput {
@@ -21,13 +21,6 @@ pub(super) fn text_output(description: String) -> ToolOutput {
         exit_code: Some(0),
         timed_out: false,
         runtime_events: Vec::new(),
-    }
-}
-
-pub(super) fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
     }
 }
 

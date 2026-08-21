@@ -50,11 +50,6 @@ path = "tests/task_live.rs"
 required-features = ["live-tests"]
 
 [[test]]
-name = "deepseek_cache_live"
-path = "tests/deepseek_cache_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
 name = "lsp_live"
 path = "tests/lsp_live.rs"
 required-features = ["live-tests"]

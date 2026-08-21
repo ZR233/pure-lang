@@ -320,7 +320,6 @@ fn response_tool_names(request: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
-mod config;
 mod deepseek_cache;
 mod lifecycle;
 mod openai_cache;

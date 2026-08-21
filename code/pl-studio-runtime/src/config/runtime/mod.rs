@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::studio::unix_seconds;
 use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -141,13 +142,6 @@ fn ensure_revision(expected: u64, actual: u64) -> ConfigRuntimeResult<()> {
 
 fn config_runtime_poisoned() -> ConfigRuntimeError {
     PureError::ConfigError("ConfigRuntime state lock is poisoned".to_string()).into()
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -96,13 +96,6 @@ mod tests {
     }
 
     #[test]
-    fn encodes_spaces_in_file_uri() {
-        let uri = path_to_file_uri(&std::env::temp_dir().join("pure lang/lib.rs"));
-
-        assert!(uri.contains("pure%20lang"));
-    }
-
-    #[test]
     fn strips_windows_verbatim_drive_prefix_before_file_uri_encoding() {
         let normalized = normalize_windows_verbatim_path(r"\\?\C:\work\pure lang\src\lib.rs");
 

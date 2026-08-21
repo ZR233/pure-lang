@@ -110,13 +110,6 @@ pub(super) fn is_cancelled(options: &TurnOptions) -> bool {
         .is_some_and(|token| token.is_cancelled())
 }
 
-pub(super) fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
 pub(super) fn budget_limit_message(kind: BudgetLimitKind, usage: &BudgetUsage) -> String {
     format!(
         "budget limited by {} budget (modelSteps={}, toolCalls={}, waitCalls={}, elapsedMs={})",

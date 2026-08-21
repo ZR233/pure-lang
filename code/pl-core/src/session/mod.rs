@@ -15,9 +15,6 @@ use crate::working_set::canonical_content_hash;
 mod fork;
 pub mod tool_history;
 
-#[cfg(test)]
-mod tests;
-
 /// 核心编译会话。
 ///
 /// 保存多轮 turn 之间的消息历史，供 `TurnEngine` 构造模型请求。
@@ -437,3 +434,6 @@ impl AgentSession {
         state.messages.push(message);
     }
 }
+
+#[cfg(test)]
+mod unit_tests;

@@ -18,6 +18,7 @@ pub(crate) fn is_mcp_tool_name(name: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) use unit_tests::McpTestHarness;
+
 #[cfg(test)]
-pub(crate) use tests::McpTestHarness;
+mod unit_tests;

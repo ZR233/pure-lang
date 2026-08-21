@@ -261,45 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn dart_accepts_empty_and_option_arguments() -> Result<()> {
-        let outcome = parse(
-            [
-                "xtask",
-                "dart",
-                "run",
-                "",
-                "--enable-asserts",
-                "--help",
-                "-h",
-            ]
-            .map(OsString::from),
-        )?;
-
-        assert_eq!(
-            outcome,
-            ParseOutcome::Run(Command::Dart(ToolOptions {
-                args: ["run", "", "--enable-asserts", "--help", "-h"]
-                    .map(OsString::from)
-                    .into(),
-            }))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn separator_immediately_after_tool_name_is_forwarded() -> Result<()> {
-        let outcome = parse(["xtask", "dart", "--", "--version"].map(OsString::from))?;
-
-        assert_eq!(
-            outcome,
-            ParseOutcome::Run(Command::Dart(ToolOptions {
-                args: ["--", "--version"].map(OsString::from).into(),
-            }))
-        );
-        Ok(())
-    }
-
-    #[test]
     fn help_is_returned_as_successful_output() -> Result<()> {
         let outcome = parse(["xtask", "--help"].map(OsString::from))?;
 

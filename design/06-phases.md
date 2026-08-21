@@ -34,6 +34,10 @@ P0 不包含独立沙箱。`pure-studio` 接入工具系统时默认使用 `Perm
 
 ## 6.4 验证命令
 
+每个架构、协议、状态机、持久化事务或生命周期节点在进入下一阶段前，必须先具备对应的确定性
+单元测试；只有当行为能通过 crate 对外 API 观察且需要跨模块证明时，才增加 crate 根 `tests/`
+集成测试。重复覆盖、实现细节和纯视觉尺寸测试不进入阶段验收清单。
+
 仓库通过 `.cargo/config.toml` 将 Rust test harness 的默认并发限制为 4。`pl-core`
 同时运行大量本地 HTTP/SSE mock server、git 子进程和 SQLite runtime；在 Windows 上使用
 CPU 核心数作为无界默认并发会造成临时端口连接失败，并让等待预期连接的异步测试长时间

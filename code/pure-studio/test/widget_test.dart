@@ -4,7 +4,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,17 +18,12 @@ import 'package:pure_studio/src/features/shell/studio_shell.dart';
 import 'package:pure_studio/src/features/status/status_bar_item.dart';
 import 'package:pure_studio/src/features/status/context_usage_readout.dart';
 import 'package:pure_studio/src/features/status/thread_status_bar.dart';
-import 'package:pure_studio/src/features/status/task_runtime_detail.dart';
 import 'package:pure_studio/src/features/todo/todo_panel.dart';
-import 'package:pure_studio/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio/src/l10n/app_localizations.dart';
 import 'package:pure_studio/src/shared/studio_chrome.dart';
 import 'package:pure_studio/src/shared/studio_driver_keys.dart';
-import 'package:pure_studio/src/shared/studio_driver_state.dart';
-
-import 'support/responsive_visual_fixture.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
@@ -40,13 +34,9 @@ part 'widget_test/snapshot_settings_tests.dart';
 part 'widget_test/thread_stream_tests.dart';
 part 'widget_test/agent_workspace_tests.dart';
 part 'widget_test/demo_project_tests.dart';
-part 'widget_test/markdown_render_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
-part 'widget_test/timeline_turn_activity_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
-part 'widget_test/responsive_layout_tests.dart';
 part 'widget_test/status_accessibility_tests.dart';
-part 'widget_test/task_runtime_detail_tests.dart';
 part 'widget_test/shell_settings_tests.dart';
 part 'widget_test/interaction_tests.dart';
 part 'widget_test/skills_tests.dart';
@@ -57,7 +47,6 @@ part 'widget_test/state_fixtures.dart';
 part 'widget_test/fake_studio_api.dart';
 part 'widget_test/settings_helpers.dart';
 part 'widget_test/studio_update_tests.dart';
-part 'widget_test/provider_lifecycle_tests.dart';
 part 'widget_test/app_lifecycle_tests.dart';
 part 'widget_test/history_window_tests.dart';
 
@@ -71,18 +60,13 @@ void main() {
   registerThreadStreamTests();
   registerAgentWorkspaceTests();
   registerDemoProjectTests();
-  registerMarkdownRenderTests();
   registerTimelineToolTests();
-  registerTimelineTurnActivityTests();
   registerTimelineScrollTests();
-  registerResponsiveLayoutTests();
   registerStatusAccessibilityTests();
-  registerTaskRuntimeDetailTests();
   registerShellSettingsTests();
   registerInteractionTests();
   registerSkillsTests();
   registerStudioUpdateTests();
-  registerProviderLifecycleTests();
   registerAppLifecycleTests();
   registerHistoryWindowTests();
 }

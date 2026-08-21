@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::config::StudioConfig;
+use crate::studio::ids::unix_seconds;
 use crate::{ProviderUsageRecord, ProviderUsageState, StudioStore};
 
 const CACHE_KEY: &str = "observed:providerUsage:v1";
@@ -193,11 +194,4 @@ fn config_fingerprint(config: &StudioConfig) -> Result<String> {
     let mut hasher = DefaultHasher::new();
     serialized.hash(&mut hasher);
     Ok(format!("{:x}", hasher.finish()))
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }

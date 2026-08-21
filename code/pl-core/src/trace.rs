@@ -1,3 +1,4 @@
+use crate::time::unix_seconds;
 use pl_protocol::TokenUsageSnapshot;
 use pl_trace::{
     AgentEvent, AgentEventSender, TraceAgentPart, TraceDelta, TraceEvent, TraceEventKind,
@@ -500,13 +501,6 @@ impl TraceRecorder {
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
         })
     }
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 fn tool_item_matches(

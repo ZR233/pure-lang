@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::studio::ids::unix_seconds;
 use anyhow::{Error, Result};
 use pl_core::config::SkillsConfig;
 use pl_core::skill::SkillCatalog;
@@ -183,13 +184,6 @@ pub(super) fn skills_fingerprint(config: &SkillsConfig) -> Result<String> {
     let mut hasher = DefaultHasher::new();
     serialized.hash(&mut hasher);
     Ok(format!("{:x}", hasher.finish()))
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -607,4 +607,4 @@ fn append_chunk(chunks: &mut Vec<String>, chunk_index: Option<u32>, delta: &str)
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

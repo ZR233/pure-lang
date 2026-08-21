@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use crate::tool::container::helpers::{preview_error, tool_error};
+use crate::tool::container::helpers::preview_error;
 use crate::tool::shell::shell_quote_word;
 use crate::tool::{
     ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecRequest,
+    tool_error,
 };
 use pl_protocol::Result;
 

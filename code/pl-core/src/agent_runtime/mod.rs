@@ -12,9 +12,6 @@ mod runtime;
 mod state;
 mod turn;
 
-#[cfg(test)]
-mod tests;
-
 pub use collaboration::AgentCollaborationTools;
 pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
@@ -40,3 +37,6 @@ pub(crate) use turn::{
     AgentTurnMailboxHandle, TurnBudgetRefreshHandle, TurnBudgetRefreshReceiver,
     turn_budget_refresh_channel,
 };
+
+#[cfg(test)]
+mod unit_tests;

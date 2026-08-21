@@ -41,8 +41,9 @@ use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_too
 use super::turn_result::{
     budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
     interrupted_turn_result, is_cancelled, looks_like_unexecuted_tool_call_text,
-    normalize_provider_error, should_request_parallel_tool_calls, unix_seconds,
+    normalize_provider_error, should_request_parallel_tool_calls,
 };
+use crate::time::unix_seconds;
 
 pub(super) async fn run_turn_with_trace(
     core: &TurnEngine,

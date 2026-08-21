@@ -348,70 +348,6 @@ impl PreparedSessionRuntime {
     }
 }
 
-#[cfg(test)]
-mod prepared_session_runtime_tests {
-    use pl_protocol::{ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot};
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn prepared_runtime_replaces_resources_without_resetting_cumulative_usage() {
-        let mut current = ThreadSnapshot::empty("session");
-        current.runtime = Some(ThreadRuntimeSnapshot {
-            thread_id: "session".to_string(),
-            usage: ThreadRuntimeUsage {
-                model: "old-model".to_string(),
-                context_window: Some(10),
-                latest_context_tokens: 7,
-                prompt_tokens: 5,
-                completion_tokens: 2,
-                cached_prompt_tokens: 1,
-                cache_write_tokens: 0,
-                cache_miss_tokens: 4,
-                reasoning_tokens: 0,
-                inference_count: 1,
-                total_tokens: 7,
-                cache_hit_rate: Some(0.2),
-                estimated_costs: Vec::new(),
-                estimated_cache_savings: Vec::new(),
-                has_unpriced_usage: false,
-                prompt_generation: None,
-                prompt_cache_policy: None,
-                prefix_changed_reason: None,
-                updated_at: 1,
-            },
-            active_skills: vec!["review".to_string()],
-            active_mcp_servers: vec!["old-mcp".to_string()],
-            active_lsp_servers: vec!["old-lsp".to_string()],
-            todo: None,
-            progress: None,
-            mcp_health: None,
-            tool_registry_revision: Some(3),
-            tool_catalog_hash: Some("stale-catalog".to_string()),
-            updated_at: 1,
-        });
-        let prepared = PreparedSessionRuntime::new("new-model")
-            .with_context_window(128_000)
-            .with_mcp_servers(vec!["search".to_string()])
-            .with_lsp(vec!["rust-analyzer".to_string()])
-            .with_agent_count(2)
-            .with_tool_diagnostics(Some(9), Some("catalog-v9".to_string()));
-
-        let merged = prepared.merge_with(&ThreadId::new("session").unwrap(), &current, 9);
-
-        assert_eq!(merged.usage.model, "new-model");
-        assert_eq!(merged.usage.context_window, Some(128_000));
-        assert_eq!(merged.usage.total_tokens, 7);
-        assert_eq!(merged.active_skills, vec!["review".to_string()]);
-        assert_eq!(merged.active_mcp_servers, vec!["search".to_string()]);
-        assert_eq!(merged.active_lsp_servers, vec!["rust-analyzer".to_string()]);
-        assert_eq!(merged.tool_registry_revision, Some(9));
-        assert_eq!(merged.tool_catalog_hash.as_deref(), Some("catalog-v9"));
-        assert_eq!(merged.updated_at, 9);
-    }
-}
-
 /// mid-turn durable Thread checkpoint 的触发原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnCheckpointReason {
@@ -547,5 +483,69 @@ impl std::fmt::Debug for AgentTurnCheckpointHandle {
             .field("turn_id", &self.turn_id)
             .field("thread_id", &self.thread_id)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn prepared_runtime_replaces_resources_without_resetting_cumulative_usage() {
+        let mut current = ThreadSnapshot::empty("session");
+        current.runtime = Some(ThreadRuntimeSnapshot {
+            thread_id: "session".to_string(),
+            usage: ThreadRuntimeUsage {
+                model: "old-model".to_string(),
+                context_window: Some(10),
+                latest_context_tokens: 7,
+                prompt_tokens: 5,
+                completion_tokens: 2,
+                cached_prompt_tokens: 1,
+                cache_write_tokens: 0,
+                cache_miss_tokens: 4,
+                reasoning_tokens: 0,
+                inference_count: 1,
+                total_tokens: 7,
+                cache_hit_rate: Some(0.2),
+                estimated_costs: Vec::new(),
+                estimated_cache_savings: Vec::new(),
+                has_unpriced_usage: false,
+                prompt_generation: None,
+                prompt_cache_policy: None,
+                prefix_changed_reason: None,
+                updated_at: 1,
+            },
+            active_skills: vec!["review".to_string()],
+            active_mcp_servers: vec!["old-mcp".to_string()],
+            active_lsp_servers: vec!["old-lsp".to_string()],
+            todo: None,
+            progress: None,
+            mcp_health: None,
+            tool_registry_revision: Some(3),
+            tool_catalog_hash: Some("stale-catalog".to_string()),
+            updated_at: 1,
+        });
+        let prepared = PreparedSessionRuntime::new("new-model")
+            .with_context_window(128_000)
+            .with_mcp_servers(vec!["search".to_string()])
+            .with_lsp(vec!["rust-analyzer".to_string()])
+            .with_agent_count(2)
+            .with_tool_diagnostics(Some(9), Some("catalog-v9".to_string()));
+
+        let merged = prepared.merge_with(&ThreadId::new("session").unwrap(), &current, 9);
+
+        assert_eq!(merged.usage.model, "new-model");
+        assert_eq!(merged.usage.context_window, Some(128_000));
+        assert_eq!(merged.usage.total_tokens, 7);
+        assert_eq!(merged.active_skills, vec!["review".to_string()]);
+        assert_eq!(merged.active_mcp_servers, vec!["search".to_string()]);
+        assert_eq!(merged.active_lsp_servers, vec!["rust-analyzer".to_string()]);
+        assert_eq!(merged.tool_registry_revision, Some(9));
+        assert_eq!(merged.tool_catalog_hash.as_deref(), Some("catalog-v9"));
+        assert_eq!(merged.updated_at, 9);
     }
 }

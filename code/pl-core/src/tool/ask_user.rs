@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
 use futures::FutureExt;
 use pl_protocol::{
@@ -243,13 +244,6 @@ fn user_input_interaction(
         resolved_at: None,
         resolution: None,
     }
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 #[cfg(test)]

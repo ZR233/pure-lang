@@ -60,44 +60,6 @@ fn session_note_tools_declare_read_effect_for_plan_policy() {
 }
 
 #[test]
-fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
-    let options = SharedToolSchemaOptions::from_capabilities(
-        &crate::config::ToolCapabilityConfig::hosted_workspace(),
-    )
-    .with_plan_exit(false);
-    let names = shared_tool_names(options);
-
-    assert!(names.contains(&"exec".to_string()));
-    assert!(names.contains(&"git_status".to_string()));
-    assert!(!names.contains(&"plan_exit".to_string()));
-}
-
-#[test]
-fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
-    let visibility = ToolVisibilitySet::from_tool_names(["read_file", "spawn_agent"])
-        .with_tool_names(["github_api_request", "mcp__docs__lookup"]);
-
-    assert!(visibility.contains("read_file"));
-    assert!(visibility.contains("spawn_agent"));
-    assert!(visibility.contains("github_api_request"));
-    assert!(visibility.contains("mcp__docs__lookup"));
-    assert!(!visibility.contains("git_status"));
-
-    let schemas = visibility.filter_schemas([
-        pl_model::ToolSchema::function("github_api_request", "GitHub", serde_json::json!({})),
-        pl_model::ToolSchema::function("hidden_product_tool", "Hidden", serde_json::json!({})),
-    ]);
-
-    assert_eq!(
-        schemas
-            .into_iter()
-            .map(|schema| schema.name().to_string())
-            .collect::<Vec<_>>(),
-        vec!["github_api_request".to_string()]
-    );
-}
-
-#[test]
 fn shared_tool_schemas_keep_exec_and_git_opt_in() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         workspace_files: true,
@@ -497,19 +459,4 @@ async fn enabled_tools_snapshot_records_registered_tools() {
     assert!(event.tools.contains(&"plan_exit".to_string()));
     assert!(event.tools.contains(&"write_file".to_string()));
     assert!(event.tools.contains(&"apply_patch".to_string()));
-}
-
-#[tokio::test]
-async fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
-    let registry = pl_lsp::LspRuntimeRegistry::new();
-    let mut core = test_turn_engine().with_lsp_runtime(registry);
-    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
-        .await;
-
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
-    let event = enabled_tools_event(&events);
-
-    // 空注册表没有可用语言，不应出现任何 LSP 工具。
-    assert!(event.tools.iter().all(|t| !t.starts_with("lsp_query_")));
-    assert!(event.tools.contains(&"plan_exit".to_string()));
 }

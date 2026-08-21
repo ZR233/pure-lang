@@ -1,9 +1,6 @@
 //! TaskRun aggregate and lifecycle state machine.
 
 mod state;
-#[cfg(test)]
-mod tests;
-
 use std::ops::Deref;
 
 use anyhow::{Context, Result, bail};
@@ -333,3 +330,6 @@ impl From<(TaskStopOrigin, TaskStopReason, i64)> for TaskStopRequest {
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests;

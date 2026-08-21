@@ -3,9 +3,6 @@ mod scanning;
 mod system;
 mod util;
 
-#[cfg(test)]
-mod tests;
-
 use std::path::{Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
@@ -172,7 +169,7 @@ pub fn bump_project_view(project_dir: &Path, skill: &SkillMetadata) -> Result<()
         return Ok(());
     }
     util::validate_usage_write(project_dir, &skill.path)?;
-    let now = util::unix_seconds();
+    let now = crate::time::unix_seconds();
     let mut usage =
         util::load_usage(&skill.path)?.unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.views += 1;
@@ -186,15 +183,18 @@ pub fn mark_project_skill_created(project_dir: &Path, skill_dir: &Path) -> Resul
     util::save_usage(
         project_dir,
         skill_dir,
-        &SkillUsage::agent_created(util::unix_seconds()),
+        &SkillUsage::agent_created(crate::time::unix_seconds()),
     )
 }
 
 pub fn bump_project_patch(project_dir: &Path, skill_dir: &Path) -> Result<()> {
     util::validate_usage_write(project_dir, skill_dir)?;
-    let now = util::unix_seconds();
+    let now = crate::time::unix_seconds();
     let mut usage = util::load_usage(skill_dir)?.unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.patches += 1;
     usage.updated_at = now;
     util::save_usage(project_dir, skill_dir, &usage)
 }
+
+#[cfg(test)]
+mod unit_tests;

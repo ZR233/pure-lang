@@ -325,24 +325,6 @@ impl ToolCall {
     }
 }
 
-#[cfg(test)]
-mod tool_call_tests {
-    use super::{ToolCall, ToolCallIdentity};
-
-    #[test]
-    fn identity_exposes_item_and_call_ids() {
-        let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), "call-1");
-
-        assert_eq!(
-            call.identity(),
-            ToolCallIdentity {
-                item_id: "item-1".to_string(),
-                call_id: "call-1".to_string(),
-            }
-        );
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ToolCallPayload {
@@ -777,6 +759,19 @@ mod tests {
             prompt_cache: Default::default(),
             interleaved: None,
         }
+    }
+
+    #[test]
+    fn tool_call_identity_exposes_item_and_call_ids() {
+        let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), "call-1");
+
+        assert_eq!(
+            call.identity(),
+            ToolCallIdentity {
+                item_id: "item-1".to_string(),
+                call_id: "call-1".to_string(),
+            }
+        );
     }
 
     #[test]

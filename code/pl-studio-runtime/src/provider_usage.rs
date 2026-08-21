@@ -12,6 +12,7 @@ use serde_json::Value;
 use crate::ProviderConfig;
 use crate::config::StudioConfig;
 use crate::config_editor::provider_template_kind;
+use crate::studio::unix_seconds;
 use serde::{Deserialize, Serialize};
 
 const ZHIPU_TOKEN_LIMIT_TYPE: &str = "TOKENS_LIMIT";
@@ -466,11 +467,4 @@ fn query_zhipu(info: pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture {
             .map(ProviderUsageData::ZhipuCodingPlan)
     }
     .boxed()
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }

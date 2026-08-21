@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use futures::FutureExt;
 use pl_protocol::{
@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use tokio::sync::{Notify, broadcast, mpsc};
 
 use crate::config::{EffectiveMcpServerConfig, McpServerConfig, McpServerSourceKind};
+use crate::time::unix_seconds;
 use crate::tool::{PublishGuard, ToolRegistry, ToolSourceId};
 use crate::turn::ToolEffect;
 
@@ -940,11 +941,4 @@ fn serialize_optional<T: serde::Serialize>(value: &Option<T>) -> Option<Value> {
 
 fn serialize_resource_result(result: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(result).map_err(PureError::from)
-}
-
-fn unix_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }

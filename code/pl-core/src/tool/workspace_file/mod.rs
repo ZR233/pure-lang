@@ -15,7 +15,7 @@ use pl_protocol::Result;
 use serde_json::Value;
 
 use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, tool_error};
 use crate::turn::ToolEffect;
 
 pub use backend::*;
@@ -62,12 +62,7 @@ where
     }
 
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        match self.kind {
-            WorkspaceFileToolKind::ReadFile | WorkspaceFileToolKind::ListFiles => {
-                ToolCachePolicy::UntilWorkspaceMutation
-            }
-            WorkspaceFileToolKind::ApplyPatch => ToolCachePolicy::Never,
-        }
+        self.kind.cache_policy()
     }
 
     fn execute<'a>(
@@ -84,7 +79,7 @@ where
                 context.tool_cache.workspace_epoch(),
             )
             .await?
-            .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
+            .ok_or_else(|| tool_error(self.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
         }
         .boxed()
@@ -134,12 +129,7 @@ impl Tool for LocalWorkspaceFileTool {
     }
 
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        match self.kind {
-            WorkspaceFileToolKind::ReadFile | WorkspaceFileToolKind::ListFiles => {
-                ToolCachePolicy::UntilWorkspaceMutation
-            }
-            WorkspaceFileToolKind::ApplyPatch => ToolCachePolicy::Never,
-        }
+        self.kind.cache_policy()
     }
 
     fn execute<'a>(
@@ -165,7 +155,7 @@ impl Tool for LocalWorkspaceFileTool {
                 context.tool_cache.workspace_epoch(),
             )
             .await?
-            .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
+            .ok_or_else(|| tool_error(self.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
         }
         .boxed()

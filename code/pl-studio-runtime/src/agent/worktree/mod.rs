@@ -8,9 +8,6 @@ mod backend;
 mod error;
 mod manager;
 mod reconcile;
-#[cfg(test)]
-mod tests;
-
 pub use backend::{LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure};
 pub use error::WorktreeError;
 pub use manager::git_compatible_path;
@@ -42,3 +39,6 @@ pub fn same_worktree_path(
 }
 #[cfg(test)]
 pub(crate) use reconcile::{reconcile_task_worktrees, set_after_registration_remove_barrier};
+
+#[cfg(test)]
+mod unit_tests;

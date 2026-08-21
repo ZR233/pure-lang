@@ -802,4 +802,4 @@ fn push_tool_alias(aliases: &mut Vec<String>, value: &str) {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

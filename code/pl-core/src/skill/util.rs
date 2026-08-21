@@ -142,10 +142,3 @@ pub(super) fn validate_usage_write(project_dir: &Path, skill_dir: &Path) -> Resu
         .map_err(|error| PureError::ConfigError(error.to_string()))?;
     Ok(())
 }
-
-pub(super) fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}

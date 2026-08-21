@@ -6,8 +6,8 @@ use pl_protocol::{PureError, Result};
 use serde::Serialize;
 
 use super::backend::*;
-use super::ops::tool_error;
 use super::schema::TOOL_APPLY_PATCH;
+use crate::tool::tool_error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

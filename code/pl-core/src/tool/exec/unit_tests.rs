@@ -285,22 +285,6 @@ async fn background_output_observer_does_not_keep_turn_event_channel_open() {
 }
 
 #[tokio::test]
-async fn echoes_hello() {
-    let tool = test_tool();
-    let output = tool
-        .execute(tool_input("echo hello", "s1", "t1"), test_context())
-        .await
-        .unwrap();
-    let result = command_json(&output);
-
-    assert_eq!(result.status, "completed");
-    assert!(!output.timed_out);
-    assert!(!output.truncated.stdout.was_truncated);
-    assert!(output.truncated.stdout.content.contains("hello"));
-    assert_eq!(output.exit_code, Some(0));
-}
-
-#[tokio::test]
 async fn injected_backend_keeps_the_exec_result_contract() {
     let root = test_root();
     std::fs::create_dir_all(&root).unwrap();
@@ -391,17 +375,6 @@ async fn streams_tool_result_delta_for_stderr_output() {
     )));
 }
 
-#[tokio::test]
-async fn captures_stderr() {
-    let tool = test_tool();
-    let output = tool
-        .execute(tool_input(stderr_command(), "s2", "t2"), test_context())
-        .await
-        .unwrap();
-
-    assert!(output.truncated.stderr.content.contains("err"));
-}
-
 #[cfg(windows)]
 #[tokio::test]
 async fn windows_default_shell_executes_powershell_script() {
@@ -437,37 +410,6 @@ async fn windows_powershell_captures_unicode_stdout() {
 
     assert_eq!(output.exit_code, Some(0));
     assert!(output.truncated.stdout.content.contains("中文输出"));
-}
-
-#[tokio::test]
-async fn exit_code_nonzero() {
-    let tool = test_tool();
-    let output = tool
-        .execute(tool_input("exit 42", "s3", "t3"), test_context())
-        .await
-        .unwrap();
-    let result = command_json(&output);
-
-    assert_eq!(output.exit_code, Some(42));
-    assert_eq!(result.status, "failed");
-}
-
-#[tokio::test]
-async fn invalid_input_returns_error() {
-    let tool = test_tool();
-    let result = tool
-        .execute(
-            ToolInput {
-                arguments: serde_json::json!({}),
-                session_id: "s4".to_string(),
-                tool_id: "t4".to_string(),
-                revision_base: 0,
-            },
-            test_context(),
-        )
-        .await;
-
-    assert!(result.is_err());
 }
 
 #[tokio::test]

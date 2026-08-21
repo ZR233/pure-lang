@@ -11,7 +11,7 @@ use super::backend::{
     WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
     WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
-use super::ops::tool_error;
+use crate::tool::tool_error;
 
 #[derive(Debug, Clone)]
 pub struct LocalWorkspaceFileBackend {

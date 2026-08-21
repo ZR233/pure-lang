@@ -15,6 +15,7 @@ mod store_support;
 mod task_coordinator;
 mod task_projection;
 
+pub(crate) use ids::unix_seconds;
 pub use interaction_service::*;
 pub use product_event_bus::ProductEventBus;
 pub use records::{AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};

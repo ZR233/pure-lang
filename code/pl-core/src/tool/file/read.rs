@@ -7,7 +7,7 @@ use super::helpers::*;
 use super::input::PathInput;
 use crate::tool::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
-    deserialize_tool_input,
+    deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 

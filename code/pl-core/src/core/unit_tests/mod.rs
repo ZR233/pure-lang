@@ -448,7 +448,7 @@ impl Tool for DeltaEchoTool {
         >,
     > {
         async move {
-            let now = crate::core::turn_result::unix_seconds();
+            let now = crate::time::unix_seconds();
             let event = pl_trace::TracePartDeltaEvent {
                 turn_id: input.session_id.clone(),
                 item_id: input.tool_id.clone(),

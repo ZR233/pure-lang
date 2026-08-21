@@ -1,6 +1,6 @@
 use pl_protocol::Result;
 
-use super::ops::tool_error;
+use crate::tool::tool_error;
 
 pub(super) fn resolve_container_workspace_path(path: &str, cwd: Option<&str>) -> Result<String> {
     if path.starts_with('/') {

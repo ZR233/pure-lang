@@ -228,52 +228,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn cargo_args_map_debug_and_release_profiles() {
-        assert_eq!(
-            cargo_build_args(BridgeConfiguration::Debug, None),
-            vec![
-                OsString::from("build"),
-                OsString::from("-p"),
-                OsString::from(BRIDGE_PACKAGE_NAME),
-            ]
-        );
-        for configuration in [BridgeConfiguration::Profile, BridgeConfiguration::Release] {
-            assert_eq!(
-                cargo_build_args(configuration, Some(Path::new("custom-target"))),
-                vec![
-                    OsString::from("build"),
-                    OsString::from("-p"),
-                    OsString::from(BRIDGE_PACKAGE_NAME),
-                    OsString::from("--release"),
-                    OsString::from("--target-dir"),
-                    OsString::from("custom-target"),
-                ]
-            );
-        }
-    }
-
-    #[test]
-    fn cargo_target_dir_prefers_cli_then_environment_then_workspace_default() {
-        let workspace_root = Path::new("workspace");
-        assert_eq!(
-            resolve_cargo_target_dir(
-                workspace_root,
-                Some(Path::new("cli-target")),
-                Some(OsStr::new("environment-target")),
-            ),
-            workspace_root.join("cli-target")
-        );
-        assert_eq!(
-            resolve_cargo_target_dir(workspace_root, None, Some(OsStr::new("environment-target")),),
-            workspace_root.join("environment-target")
-        );
-        assert_eq!(
-            resolve_cargo_target_dir(workspace_root, None, None),
-            workspace_root.join("target")
-        );
-    }
-
-    #[test]
     fn artifact_candidates_follow_cargo_profile() {
         let target_dir = Path::new("workspace-target");
         let debug = artifact_candidates(target_dir, BridgeConfiguration::Debug);

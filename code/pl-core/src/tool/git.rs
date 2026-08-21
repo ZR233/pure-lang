@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +10,7 @@ use serde_json::{Value, json};
 use super::cache::ToolCachePolicy;
 use super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, deserialize_tool_input,
+    tool_error,
 };
 use crate::turn::ToolEffect;
 
@@ -437,16 +437,10 @@ fn redact(value: String, credential: Option<&GitCredential>) -> String {
     }
 }
 
-fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fmt;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 

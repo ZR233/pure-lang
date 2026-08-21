@@ -1,4 +1,4 @@
-//! registry 行为测试：membership、probe/repair 状态、路由与通用性验收。
+//! registry 单元测试：membership、probe/repair 状态、路由与通用性验收。
 
 use std::collections::BTreeMap;
 use std::fs;

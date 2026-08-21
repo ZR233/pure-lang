@@ -48,7 +48,11 @@ class ObservedStateMeta {
   bool isNewerThan(ObservedStateMeta current) => revision > current.revision;
 }
 
-class SettingsStateSnapshot {
+abstract interface class ObservedStateSnapshot {
+  ObservedStateMeta get meta;
+}
+
+class SettingsStateSnapshot implements ObservedStateSnapshot {
   const SettingsStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.providers = const [],
@@ -62,6 +66,7 @@ class SettingsStateSnapshot {
     this.permissionMode = PermissionMode.requestApproval,
   });
 
+  @override
   final ObservedStateMeta meta;
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
@@ -102,7 +107,7 @@ class LspServerStateView {
   final int? activityPercentage;
 }
 
-class McpStateSnapshot {
+class McpStateSnapshot implements ObservedStateSnapshot {
   const McpStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.desiredConfigFingerprint = '',
@@ -111,6 +116,7 @@ class McpStateSnapshot {
     this.servers = const [],
   });
 
+  @override
   final ObservedStateMeta meta;
   final String desiredConfigFingerprint;
   final String appliedConfigFingerprint;
@@ -118,19 +124,20 @@ class McpStateSnapshot {
   final List<McpServerSettingsView> servers;
 }
 
-class LspStateSnapshot {
+class LspStateSnapshot implements ObservedStateSnapshot {
   const LspStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.activeServers = const [],
     this.servers = const [],
   });
 
+  @override
   final ObservedStateMeta meta;
   final List<String> activeServers;
   final List<LspServerStateView> servers;
 }
 
-class SkillsStateSnapshot {
+class SkillsStateSnapshot implements ObservedStateSnapshot {
   const SkillsStateSnapshot({
     required this.meta,
     required this.projectId,
@@ -140,6 +147,7 @@ class SkillsStateSnapshot {
     required this.warnings,
   });
 
+  @override
   final ObservedStateMeta meta;
   final String projectId;
   final String configFingerprint;
@@ -148,19 +156,20 @@ class SkillsStateSnapshot {
   final List<String> warnings;
 }
 
-class ProviderUsageStateSnapshot {
+class ProviderUsageStateSnapshot implements ObservedStateSnapshot {
   const ProviderUsageStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.configFingerprint = '',
     this.usages = const [],
   });
 
+  @override
   final ObservedStateMeta meta;
   final String configFingerprint;
   final List<ProviderUsageView> usages;
 }
 
-class UpdaterStateSnapshot {
+class UpdaterStateSnapshot implements ObservedStateSnapshot {
   const UpdaterStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.version,
@@ -168,18 +177,20 @@ class UpdaterStateSnapshot {
     this.notesUrl,
   });
 
+  @override
   final ObservedStateMeta meta;
   final String? version;
   final DateTime? publishedAt;
   final String? notesUrl;
 }
 
-class DirectoryStateSnapshot<T> {
+class DirectoryStateSnapshot<T> implements ObservedStateSnapshot {
   const DirectoryStateSnapshot({
     this.meta = const ObservedStateMeta.initial(),
     this.values = const [],
   });
 
+  @override
   final ObservedStateMeta meta;
   final List<T> values;
 }

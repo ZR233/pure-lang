@@ -354,9 +354,6 @@ fn path_label(path: WebSearchPath) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 /// builtin 来源的 eager 工具条目。
 fn builtin_eager_entry(tool: impl crate::tool::Tool + 'static) -> crate::tool::ToolEntry {
     crate::tool::ToolEntry::new(
@@ -364,3 +361,6 @@ fn builtin_eager_entry(tool: impl crate::tool::Tool + 'static) -> crate::tool::T
         crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin()),
     )
 }
+
+#[cfg(test)]
+mod unit_tests;

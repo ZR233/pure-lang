@@ -10,6 +10,8 @@ mod review_round;
 mod scope_hint;
 mod spawn;
 mod task_run;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod types;
 mod work_completion;
 mod work_unit;
@@ -28,4 +30,4 @@ pub(crate) use types::*;
 pub(crate) use work_unit::*;
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

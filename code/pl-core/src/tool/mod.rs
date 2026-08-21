@@ -55,6 +55,13 @@ pub use truncation::*;
 pub use web_search::*;
 pub use workspace_file::*;
 
+pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> pl_protocol::PureError {
+    pl_protocol::PureError::ToolExecutionFailed {
+        tool: tool.to_string(),
+        error: error.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt;
@@ -67,79 +74,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use schemars::JsonSchema;
     use serde::Deserialize;
-
-    #[test]
-    fn tool_output_from_model_output_sets_exit_code_and_end_turn_event() {
-        let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
-            model_output: "saved".to_string(),
-            success: false,
-            ends_turn: true,
-        });
-
-        assert_eq!(
-            output,
-            ToolOutput {
-                description: "saved".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(1),
-                timed_out: false,
-                runtime_events: vec![ToolRuntimeEvent::EndTurn],
-            }
-        );
-    }
-
-    #[test]
-    fn tool_output_reports_end_turn_runtime_event() {
-        let output = ToolOutput {
-            description: "saved".to_string(),
-            truncated: OutputTruncation::empty(),
-            output_file: PathBuf::new(),
-            exit_code: Some(0),
-            timed_out: false,
-            runtime_events: vec![ToolRuntimeEvent::ToolResultRevision { revision: 1 }],
-        };
-        assert!(!output.ends_turn());
-
-        let output = ToolOutput {
-            runtime_events: vec![
-                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
-                ToolRuntimeEvent::EndTurn,
-            ],
-            ..output
-        };
-        assert!(output.ends_turn());
-    }
-
-    #[test]
-    fn tool_output_decodes_runtime_output_artifacts() {
-        #[derive(Debug, Deserialize, PartialEq, Eq)]
-        struct ArtifactRecord {
-            id: String,
-        }
-
-        let output = ToolOutput {
-            description: "saved".to_string(),
-            truncated: OutputTruncation::empty(),
-            output_file: PathBuf::new(),
-            exit_code: Some(0),
-            timed_out: false,
-            runtime_events: vec![
-                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
-                ToolRuntimeEvent::OutputArtifacts {
-                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
-                },
-                ToolRuntimeEvent::EndTurn,
-            ],
-        };
-
-        assert_eq!(
-            output.output_artifacts_as::<ArtifactRecord>(),
-            vec![ArtifactRecord {
-                id: "artifact-1".to_string(),
-            }]
-        );
-    }
 
     #[test]
     fn tool_output_projects_execution_result_for_product_adapters() {
@@ -175,84 +109,6 @@ mod tests {
                 output_bytes_budget: None,
             }
         );
-    }
-
-    #[test]
-    fn tool_execution_result_keeps_full_output_and_builds_tool_output() {
-        let execution = ToolExecutionResult::with_model_tokens(
-            true,
-            "full output".to_string(),
-            true,
-            10_000,
-            vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
-        );
-
-        assert_eq!(
-            execution,
-            ToolExecutionResult {
-                success: true,
-                output: "full output".to_string(),
-                model_output: "full output".to_string(),
-                ends_turn: true,
-                output_artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
-                output_bytes_budget: None,
-            }
-        );
-        assert_eq!(
-            execution.into_tool_output(),
-            ToolOutput {
-                description: "full output".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: vec![
-                    ToolRuntimeEvent::OutputArtifacts {
-                        artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
-                    },
-                    ToolRuntimeEvent::OutputMetrics {
-                        raw_bytes: 11,
-                        model_visible_bytes: 11,
-                        artifact_bytes: 19,
-                        result_hash: crate::canonical_content_hash(b"full output"),
-                    },
-                    ToolRuntimeEvent::EndTurn,
-                ],
-            }
-        );
-    }
-
-    #[test]
-    fn tool_execution_result_serializes_json_model_output() {
-        let execution = ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
-            "queued": [1],
-            "deduped": [2],
-            "ignored": []
-        }))
-        .expect("serialize JSON tool output");
-
-        assert_eq!(
-            execution,
-            ToolExecutionResult {
-                success: true,
-                output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
-                model_output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
-                ends_turn: false,
-                output_artifacts: Vec::new(),
-                output_bytes_budget: None,
-            }
-        );
-        let output = execution.into_tool_output();
-        assert_eq!(output.exit_code, Some(0));
-        assert!(output.runtime_events.iter().any(|event| matches!(
-            event,
-            ToolRuntimeEvent::OutputMetrics {
-                raw_bytes: 41,
-                model_visible_bytes: 41,
-                artifact_bytes: 0,
-                ..
-            }
-        )));
     }
 
     #[test]

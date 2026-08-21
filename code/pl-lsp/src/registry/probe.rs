@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::driver::LspProbeOutcome;
 use crate::types::{LspAvailabilityKind, LspResult, LspRuntimeError};
 
-use super::lsp_query::unix_seconds;
 use super::{LspRuntimeRegistry, canonical_workspace_root};
+use crate::time::unix_seconds;
 
 impl LspRuntimeRegistry {
     /// 显式探测一个 workspace 的全部 member server availability。

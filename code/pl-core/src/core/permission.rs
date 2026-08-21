@@ -8,7 +8,7 @@ use pl_protocol::{
 use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
 use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 
-use super::turn_result::unix_seconds;
+use crate::time::unix_seconds;
 
 pub(super) fn approval_request(
     tool_call: &pl_model::ToolCall,

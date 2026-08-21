@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::{
     StudioAwaitingExecution, StudioAwaitingWorkUnit, StudioBlockedRecovery,
@@ -19,6 +19,7 @@ use super::{
         FailedReviewerState, MergeRecord, PendingReviewerState, ReviewRoundRecord,
         ReviewRoundState, ReviewTarget, RunningExecution, TaskRun, TaskRunState,
         TaskWorktreeDisposition, WorkCompletionRecord, WorkUnitProgress, WorkUnitState,
+        WorkUnitStatus,
     },
 };
 
@@ -43,12 +44,15 @@ pub(crate) async fn load_task_runtime(
         } else {
             0
         };
-        let handoff = store
-            .read_work_unit_handoff(&unit.id)
-            .await
-            .ok()
-            .flatten()
-            .map(|(_, handoff)| handoff);
+        let handoff = if unit.status() == WorkUnitStatus::Pending {
+            None
+        } else {
+            store
+                .read_work_unit_handoff(&unit.id)
+                .await
+                .with_context(|| format!("failed to load Task handoff for work unit {}", unit.id))?
+                .map(|(_, handoff)| handoff)
+        };
         work_unit_runtimes.push(StudioTaskWorkUnitRuntime {
             id: unit.id.clone(),
             title: unit.title.clone(),

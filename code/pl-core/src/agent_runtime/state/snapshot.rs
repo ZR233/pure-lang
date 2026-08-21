@@ -50,37 +50,6 @@ pub struct AgentProgressReport {
     pub revision: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn progress_checkpoint_flattens_shared_report_fields() {
-        let checkpoint = AgentProgressCheckpoint {
-            report: AgentProgressReport {
-                stage: AgentProgressStage::Verifying,
-                summary: "tests passed".to_string(),
-                next_step: "ship".to_string(),
-                revision: 3,
-            },
-            updated_at: 42,
-        };
-
-        assert_eq!(
-            serde_json::to_value(checkpoint).unwrap(),
-            json!({
-                "stage": "verifying",
-                "summary": "tests passed",
-                "nextStep": "ship",
-                "revision": 3,
-                "updatedAt": 42,
-            })
-        );
-    }
-}
-
 /// agent 最新的显式进度 checkpoint。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -244,4 +213,35 @@ impl ThreadContextState {
 pub struct AgentWaitResult {
     pub snapshot: AgentSnapshot,
     pub last_turn: Option<AgentTurnOutcome>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn progress_checkpoint_flattens_shared_report_fields() {
+        let checkpoint = AgentProgressCheckpoint {
+            report: AgentProgressReport {
+                stage: AgentProgressStage::Verifying,
+                summary: "tests passed".to_string(),
+                next_step: "ship".to_string(),
+                revision: 3,
+            },
+            updated_at: 42,
+        };
+
+        assert_eq!(
+            serde_json::to_value(checkpoint).unwrap(),
+            json!({
+                "stage": "verifying",
+                "summary": "tests passed",
+                "nextStep": "ship",
+                "revision": 3,
+                "updatedAt": 42,
+            })
+        );
+    }
 }

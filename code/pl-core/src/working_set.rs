@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_protocol::{
     ContextSectionId, PinnedContextSection, PureError, SessionNote, TodoListSnapshot,
@@ -9,6 +8,7 @@ use pl_protocol::{
 use sha2::{Digest, Sha256};
 
 use crate::AgentSession;
+use crate::time::unix_seconds;
 
 pub const CURRENT_TODO_SECTION_ID: &str = "pl.current_todo";
 pub const CONVERSATION_RECOVERY_SECTION_ID: &str = "pl.conversation_recovery";
@@ -460,13 +460,6 @@ fn archive_oldest_evidence(evidence: &mut EvidenceLedgerDocument) -> Result<(), 
             evidence.archived.artifact_refs_omitted.saturating_add(1);
     }
     Ok(())
-}
-
-fn unix_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 #[cfg(test)]

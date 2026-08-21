@@ -96,4 +96,4 @@ impl OpenAiProtocol {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

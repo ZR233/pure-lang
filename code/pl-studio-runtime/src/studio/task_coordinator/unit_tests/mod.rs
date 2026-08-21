@@ -8,11 +8,7 @@ use pl_protocol::AgentWorkingState;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
 use super::merge::TaskRecordMergeInput;
-use super::spawn::{
-    TaskExecutorAcceptanceCriterion, TaskExecutorBlueprint, TaskExecutorImplementationStep,
-    TaskExecutorScope, TaskExecutorTarget, TaskExecutorVerificationCommand,
-    TaskExecutorVerificationContract,
-};
+use super::test_support::executor_blueprint;
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
@@ -39,45 +35,6 @@ async fn finalize_test_design(store: &StudioStore, run: &TaskRun) -> TaskRun {
             .unwrap()
     );
     store.read_task_run(&run.id).await.unwrap().unwrap()
-}
-
-fn executor_blueprint(task_name: &str, scope_hint: &str) -> TaskExecutorBlueprint {
-    TaskExecutorBlueprint {
-        task_name: task_name.to_string(),
-        objective: "move transport selection to ModelInfo".to_string(),
-        scope: TaskExecutorScope {
-            in_scope: vec!["model transport routing".to_string()],
-            out_of_scope: Vec::new(),
-            scope_hints: vec![scope_hint.to_string()],
-        },
-        implementation_steps: vec![TaskExecutorImplementationStep {
-            id: "step-1".to_string(),
-            instruction: "move transport selection to ModelInfo".to_string(),
-            targets: vec![TaskExecutorTarget {
-                path: scope_hint.to_string(),
-                symbol: Some("ModelInfo".to_string()),
-            }],
-            expected_outcome: "model transport uses one canonical selector".to_string(),
-            criterion_ids: vec!["criterion-1".to_string()],
-        }],
-        acceptance_criteria: vec![TaskExecutorAcceptanceCriterion {
-            id: "criterion-1".to_string(),
-            requirement: "model-level routing is tested".to_string(),
-        }],
-        dependencies: Vec::new(),
-        evidence: Vec::new(),
-        verification: TaskExecutorVerificationContract {
-            commands: vec![TaskExecutorVerificationCommand {
-                id: "check-1".to_string(),
-                command: "cargo test -p pl-model".to_string(),
-                cwd: ".".to_string(),
-                purpose: "verify model transport".to_string(),
-                expected_outcome: "pl-model tests pass".to_string(),
-                criterion_ids: vec!["criterion-1".to_string()],
-            }],
-            inspections: Vec::new(),
-        },
-    }
 }
 
 #[tokio::test]

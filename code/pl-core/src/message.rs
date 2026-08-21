@@ -345,11 +345,7 @@ mod tests {
             super::append_message_fragment_text("hello".to_string(), Some(&fragment)),
             "hello\n\nskill one\nskill two"
         );
-    }
-
-    #[test]
-    fn append_message_fragment_text_skips_empty_fragment() {
-        let fragment = Message {
+        let empty_fragment = Message {
             role: MessageRole::User,
             content: MessageContent::Text("   ".to_string()),
             reasoning_content: None,
@@ -359,7 +355,7 @@ mod tests {
         };
 
         assert_eq!(
-            super::append_message_fragment_text("hello".to_string(), Some(&fragment)),
+            super::append_message_fragment_text("hello".to_string(), Some(&empty_fragment)),
             "hello"
         );
         assert_eq!(

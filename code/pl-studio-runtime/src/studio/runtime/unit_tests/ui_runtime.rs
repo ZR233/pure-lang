@@ -523,7 +523,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         .create_work_unit(CreateWorkUnit {
             task_run_id: run.id.clone(),
             title: "Implement".to_string(),
-            scope_hints: Vec::new(),
+            scope_hints: vec!["src".to_string()],
             base_commit: run.base_commit.clone(),
             worktree_path: workspace.join("executor").to_string_lossy().into_owned(),
             branch: "task-executor".to_string(),
@@ -532,7 +532,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         .await
         .unwrap();
     let running = WorkUnitState::running(unit.state.clone().into_progress());
-    store
+    let unit = store
         .update_work_unit(&unit.id, running, Some(executor_thread_id.clone()))
         .await
         .unwrap();
@@ -540,6 +540,20 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         .activate_executor(&unit.id, &executor_thread_id)
         .await
         .unwrap();
+    store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: executor_thread_id.clone(),
+            parent_thread_id: thread.id.clone(),
+            agent_path: executor_thread_id.clone(),
+            role: "executor".to_string(),
+            title: "Task executor".to_string(),
+        })
+        .await
+        .unwrap();
+    crate::studio::task_coordinator::test_support::persist_executor_handoff(
+        &store, &run, &unit, &thread.id,
+    )
+    .await;
     store
         .settle_executor_turn_finished(
             &executor_thread_id,

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use lsp_types::{ProgressParams, ProgressParamsValue, ProgressToken, WorkDoneProgress};
 
+use crate::time::unix_seconds;
 use crate::types::LspActivityKind;
 
 /// LSP 客户端运行时状态快照。
@@ -145,14 +146,6 @@ fn activity_kind_for_progress(title: &str, message: Option<&str>) -> LspActivity
     } else {
         LspActivityKind::Busy
     }
-}
-
-/// 获取当前 Unix 时间戳（秒）。
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 #[cfg(test)]

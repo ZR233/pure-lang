@@ -2,6 +2,7 @@ use pl_model::ToolSchema;
 use serde_json::Value;
 
 use crate::tool::FunctionToolDefinition;
+use crate::tool::cache::ToolCachePolicy;
 use crate::turn::ToolEffect;
 
 use super::ops::{ApplyPatchInput, ListFilesInput, ReadFileInput};
@@ -80,6 +81,13 @@ impl WorkspaceFileToolKind {
 
     pub fn supports_parallel_tool_calls(self) -> bool {
         !matches!(self, Self::ApplyPatch)
+    }
+
+    pub fn cache_policy(self) -> ToolCachePolicy {
+        match self {
+            Self::ReadFile | Self::ListFiles => ToolCachePolicy::UntilWorkspaceMutation,
+            Self::ApplyPatch => ToolCachePolicy::Never,
+        }
     }
 
     pub fn to_schema(self) -> ToolSchema {

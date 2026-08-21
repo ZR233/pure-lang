@@ -23,7 +23,8 @@ use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOp
 use super::TurnEngine;
 use super::permission::{approval_request, request_user_approval, requested_workspace_access};
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::turn_result::{is_cancelled, unix_seconds};
+use super::turn_result::is_cancelled;
+use crate::time::unix_seconds;
 
 mod display;
 mod progress_messages;
@@ -725,4 +726,4 @@ fn tool_execution_batch(
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

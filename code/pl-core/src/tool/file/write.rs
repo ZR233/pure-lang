@@ -8,7 +8,7 @@ use super::input::*;
 use crate::path_safety::remove_dir_all_no_follow_async;
 use crate::tool::{
     BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
-    deserialize_tool_input,
+    deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 

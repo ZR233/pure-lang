@@ -3,9 +3,9 @@ mod backend;
 mod docker;
 pub(crate) mod helpers;
 
-#[cfg(test)]
-mod tests;
-
 pub use backend::*;
 #[cfg(feature = "docker-tools")]
 pub use docker::*;
+
+#[cfg(test)]
+mod unit_tests;

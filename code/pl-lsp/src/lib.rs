@@ -16,6 +16,7 @@ mod registry;
 mod resolved;
 mod rpc;
 mod status;
+mod time;
 mod transport;
 mod types;
 mod uri;

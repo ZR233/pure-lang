@@ -8,13 +8,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SkillsConfig;
 use crate::skill::*;
+use crate::time::unix_seconds;
 use crate::tool::cache::ToolCachePolicy;
 use crate::turn::ToolEffect;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{
     FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
-    deserialize_tool_input,
+    deserialize_tool_input, tool_error,
 };
 
 mod actions;
@@ -478,19 +479,5 @@ fn skill_source_label(source: SkillSourceKind) -> &'static str {
     }
 }
 
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
-    }
-}
-
 #[cfg(test)]
-mod tests;
+mod unit_tests;

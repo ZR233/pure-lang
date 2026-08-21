@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, RwLock, broadcast::error::RecvError};
 
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind, effective_mcp_servers};
 use crate::mcp::{McpAvailabilityKind, McpAvailabilitySnapshot};
+use crate::studio::ids::unix_seconds;
 use crate::{StudioMcpHealth, StudioMcpServer, StudioMcpStateSnapshot};
 
 use super::StudioRuntime;
@@ -544,13 +545,6 @@ fn operation_name(operation: StateOperation) -> &'static str {
         StateOperation::Reset => "reset",
         StateOperation::Shutdown => "shutdown",
     }
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

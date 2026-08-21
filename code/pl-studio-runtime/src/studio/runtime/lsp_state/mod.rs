@@ -4,6 +4,7 @@ use anyhow::Error;
 use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateError, StateOperation};
 use tokio::sync::{Mutex, RwLock};
 
+use crate::studio::ids::unix_seconds;
 use crate::{ProductEventBus, StudioLspHealth, StudioLspServer, StudioLspStateSnapshot};
 
 /// LSP published state 的唯一 owner。
@@ -198,11 +199,4 @@ fn operation_name(operation: StateOperation) -> &'static str {
         StateOperation::Reset => "reset",
         StateOperation::Shutdown => "shutdown",
     }
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default()
 }

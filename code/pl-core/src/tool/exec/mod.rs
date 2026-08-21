@@ -15,6 +15,7 @@ use super::{
     FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
     deserialize_tool_input,
 };
+use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
 
 pub const TOOL_EXEC: &str = "exec";
@@ -389,12 +390,5 @@ fn tool_output_from_snapshot(
     })
 }
 
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
 #[cfg(test)]
-mod tests;
+mod unit_tests;

@@ -8,7 +8,9 @@ use tokio_util::sync::CancellationToken;
 use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
 };
-use crate::tool::{OutputTruncation, deserialize_tool_input, model_visible_tool_output};
+use crate::tool::{
+    OutputTruncation, deserialize_tool_input, model_visible_tool_output, tool_error,
+};
 
 use super::backend::*;
 use super::patch::apply_patch_to_backend;
@@ -384,11 +386,4 @@ struct PaginationInput {
 fn path_or_current(path: Option<String>) -> String {
     path.filter(|path| !path.trim().is_empty())
         .unwrap_or_else(|| ".".to_string())
-}
-
-pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: error.to_string(),
-    }
 }

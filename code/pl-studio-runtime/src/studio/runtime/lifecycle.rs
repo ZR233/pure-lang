@@ -142,11 +142,6 @@ impl StudioRuntime {
         &self.agent_facility.product_events
     }
 
-    #[cfg(test)]
-    pub(crate) fn config_runtime(&self) -> &ConfigRuntime {
-        &self.config_runtime
-    }
-
     pub(crate) fn publish_settings_state(&self, settings: ConfigRuntimeSnapshot) -> Result<()> {
         let canonical = super::settings_api::settings_snapshot(settings)?;
         self.agent_facility.product_events.emit_settings_state(

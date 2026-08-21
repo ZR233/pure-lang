@@ -778,4 +778,4 @@ fn zhipu_capabilities(vision: bool) -> ModelCapabilities {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

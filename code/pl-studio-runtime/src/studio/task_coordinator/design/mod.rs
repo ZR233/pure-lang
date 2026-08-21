@@ -587,4 +587,4 @@ fn ensure_same_paths(actual: &[String], expected: &[String]) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests;
+mod unit_tests;

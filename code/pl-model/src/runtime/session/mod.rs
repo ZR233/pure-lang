@@ -101,6 +101,25 @@ impl ModelSession {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct ResponsesWebSocketSession {
+    pub(crate) connection_key: Option<u64>,
+    pub(crate) connection: Option<ResponsesWebSocketConnection>,
+    pub(crate) last_request: Option<Map<String, Value>>,
+    pub(crate) last_response_id: Option<String>,
+    pub(crate) last_response_items: Vec<Value>,
+}
+
+impl ResponsesWebSocketSession {
+    pub(crate) fn invalidate(&mut self) {
+        self.connection_key = None;
+        self.connection = None;
+        self.last_request = None;
+        self.last_response_id = None;
+        self.last_response_items.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,24 +152,5 @@ mod tests {
         );
         assert_eq!(after.continuation_invalid - before.continuation_invalid, 1);
         assert_eq!(after.continuation_used - before.continuation_used, 0);
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct ResponsesWebSocketSession {
-    pub(crate) connection_key: Option<u64>,
-    pub(crate) connection: Option<ResponsesWebSocketConnection>,
-    pub(crate) last_request: Option<Map<String, Value>>,
-    pub(crate) last_response_id: Option<String>,
-    pub(crate) last_response_items: Vec<Value>,
-}
-
-impl ResponsesWebSocketSession {
-    pub(crate) fn invalidate(&mut self) {
-        self.connection_key = None;
-        self.connection = None;
-        self.last_request = None;
-        self.last_response_id = None;
-        self.last_response_items.clear();
     }
 }
