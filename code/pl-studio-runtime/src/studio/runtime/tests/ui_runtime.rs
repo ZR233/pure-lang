@@ -1,7 +1,7 @@
 use super::*;
 use crate::studio::task_coordinator::{
     CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource,
-    TaskRunStateKind, WorkUnitStatus, test_task_git_fingerprint,
+    TaskRunStateKind, WorkUnitState, test_task_git_fingerprint,
 };
 use crate::{StudioProductEventKind, ThreadVisibility};
 use pl_protocol::ThreadItemContent;
@@ -533,12 +533,9 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         })
         .await
         .unwrap();
+    let running = WorkUnitState::running(unit.state.clone().into_progress());
     store
-        .update_work_unit(
-            &unit.id,
-            WorkUnitStatus::Running,
-            Some(executor_thread_id.clone()),
-        )
+        .update_work_unit(&unit.id, running, Some(executor_thread_id.clone()))
         .await
         .unwrap();
     store

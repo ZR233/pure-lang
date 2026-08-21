@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::AgentRoleId;
-use crate::agent_runtime::{AgentId, ThreadId, TurnId};
+use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::{mailbox::*, snapshot::*};
 
@@ -120,7 +120,7 @@ pub struct AgentRegistration {
 #[derive(Debug, Clone)]
 pub struct AgentSpawnRequest {
     pub thread_id: ThreadId,
-    pub parent_id: AgentId,
+    pub parent_id: ThreadId,
     pub role: AgentRoleId,
     pub session: ThreadContextState,
     /// 产品需要幂等重试时可提供稳定的首轮 id。

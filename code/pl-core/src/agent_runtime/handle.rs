@@ -10,12 +10,12 @@ use super::coordinator::{AgentRegistry, CoordinatorCommand};
 use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
     ActiveKind, AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
-    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId,
-    AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
-    AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
-    AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage, AgentSubmitRequest,
-    AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
-    ConversationRecoveryResult, ConversationRecoveryTarget, RestoredAgentRuntime, ThreadId, TurnId,
+    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentInteractionContinuationRequest,
+    AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage, AgentRegistration,
+    AgentRuntimeResult, AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
+    AgentSubmissionPage, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
+    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
+    ConversationRecoveryTarget, RestoredAgentRuntime, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -75,7 +75,7 @@ impl AgentRuntimeHandle {
     }
 
     /// LRU 淘汰一个空闲驻留 actor；busy（活动 Turn/pending input）时拒绝。
-    pub async fn evict_agent(&self, agent_id: AgentId) -> AgentRuntimeResult<()> {
+    pub async fn evict_agent(&self, agent_id: ThreadId) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
         self.send(CoordinatorCommand::EvictAgent { agent_id, reply })
             .await?;
@@ -85,7 +85,7 @@ impl AgentRuntimeHandle {
     /// 向 agent 提交显式输入；活动 turn 收到 steer，空闲 agent 启动下一 turn。
     pub async fn submit(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         request: AgentSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
         let (reply, receiver) = oneshot::channel();
@@ -97,7 +97,7 @@ impl AgentRuntimeHandle {
     /// 由目标 loop 原子解析唯一 canonical session 后提交输入。
     pub async fn submit_current_session(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         request: AgentCurrentSessionSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
         let (reply, receiver) = oneshot::channel();
@@ -117,7 +117,7 @@ impl AgentRuntimeHandle {
     /// 原子提交 resolved Interaction 与不可 steer 的后续 mailbox 输入。
     pub async fn submit_interaction_continuation(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         request: AgentInteractionContinuationRequest,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
@@ -141,7 +141,7 @@ impl AgentRuntimeHandle {
     /// that they were created with and therefore reject reconfiguration.
     pub async fn reconfigure_idle_role(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         role: AgentRoleId,
     ) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
@@ -156,7 +156,7 @@ impl AgentRuntimeHandle {
     /// 只读预览同一 Thread 的对话尾部回退或局部重建。
     pub async fn preview_conversation_recovery(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         target: ConversationRecoveryTarget,
     ) -> AgentRuntimeResult<ConversationRecoveryPreview> {
         let (reply, receiver) = oneshot::channel();
@@ -171,7 +171,7 @@ impl AgentRuntimeHandle {
     /// 以 recovery id 幂等提交 conversation recovery。
     pub async fn recover_conversation(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         request: ConversationRecoveryRequest,
     ) -> AgentRuntimeResult<ConversationRecoveryResult> {
         let (reply, receiver) = oneshot::channel();
@@ -192,7 +192,7 @@ impl AgentRuntimeHandle {
     }
 
     /// 中断与 id 精确匹配的活动 turn。
-    pub async fn cancel_turn(&self, agent_id: AgentId, turn_id: TurnId) -> AgentRuntimeResult<()> {
+    pub async fn cancel_turn(&self, agent_id: ThreadId, turn_id: TurnId) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(&agent_id, AgentLoopCommand::CancelTurn { turn_id, reply })
             .await?;
@@ -201,7 +201,7 @@ impl AgentRuntimeHandle {
 
     pub(crate) async fn set_activity(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         turn_id: TurnId,
         kind: ActiveKind,
     ) -> AgentRuntimeResult<()> {
@@ -220,7 +220,7 @@ impl AgentRuntimeHandle {
 
     pub(crate) async fn checkpoint_turn(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         checkpoint: AgentTurnCheckpoint,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
@@ -238,7 +238,7 @@ impl AgentRuntimeHandle {
     /// 将产品关联出的公共事实交给目标 agent 串行持久化和投影。
     pub async fn record_thread_facts(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         thread_id: ThreadId,
         facts: Vec<crate::ThreadNotificationFact>,
     ) -> AgentRuntimeResult<()> {
@@ -258,7 +258,7 @@ impl AgentRuntimeHandle {
     /// 更新调用 agent 的显式进度 checkpoint，并追加一条 durable 阶段提交记录。
     pub async fn report_progress(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         stage: AgentProgressStage,
         summary: String,
         next_step: String,
@@ -282,7 +282,7 @@ impl AgentRuntimeHandle {
     /// 读取目标 agent 唯一 canonical session 的有界、过滤摘要。
     pub async fn read_agent_session(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
     ) -> AgentRuntimeResult<AgentSessionDigest> {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(&agent_id, AgentLoopCommand::ReadSession { reply })
@@ -293,7 +293,7 @@ impl AgentRuntimeHandle {
     /// 读取目标 agent 的 durable 阶段提交历史（分页、不截断、关闭后可查）。
     pub async fn read_submissions(
         &self,
-        agent_id: AgentId,
+        agent_id: ThreadId,
         offset: usize,
         limit: usize,
     ) -> AgentRuntimeResult<AgentSubmissionPage> {
@@ -311,7 +311,7 @@ impl AgentRuntimeHandle {
     }
 
     /// 关闭 agent 及其产品资源。
-    pub async fn close(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentSnapshot> {
+    pub async fn close(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
         self.send(CoordinatorCommand::Close { agent_id, reply })
             .await?;
@@ -319,7 +319,7 @@ impl AgentRuntimeHandle {
     }
 
     /// 读取 agent latest snapshot。
-    pub async fn snapshot(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentSnapshot> {
+    pub async fn snapshot(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(&agent_id, AgentLoopCommand::Snapshot { reply })
             .await?;
@@ -346,7 +346,7 @@ impl AgentRuntimeHandle {
     /// 等待任一目标出现新 progress、interaction 或 terminal 事实，并返回最新增量消息。
     pub async fn wait_agents(
         &self,
-        targets: Vec<AgentId>,
+        targets: Vec<ThreadId>,
     ) -> AgentRuntimeResult<AgentDirectoryWaitResult> {
         if targets.is_empty() {
             return Err(AgentRuntimeError::InvalidInput(
@@ -369,7 +369,7 @@ impl AgentRuntimeHandle {
     }
 
     /// 等待 agent 进入 Idle 且队列为空；只由 directory watch 驱动。
-    pub async fn wait_until_idle(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
+    pub async fn wait_until_idle(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentWaitResult> {
         let mut subscription = self.directory.subscribe();
         loop {
             let snapshot = self.directory.snapshot(&agent_id)?;
@@ -424,14 +424,14 @@ impl AgentRuntimeHandle {
 
     async fn send_to_actor(
         &self,
-        agent_id: &AgentId,
+        agent_id: &ThreadId,
         command: AgentLoopCommand,
     ) -> AgentRuntimeResult<()> {
         let actor = self.actor(agent_id).await?;
         actor.send(command).await
     }
 
-    async fn actor(&self, agent_id: &AgentId) -> AgentRuntimeResult<AgentLoopHandle> {
+    async fn actor(&self, agent_id: &ThreadId) -> AgentRuntimeResult<AgentLoopHandle> {
         self.actors
             .read()
             .await
@@ -451,8 +451,8 @@ impl fmt::Debug for AgentRuntimeHandle {
 
 fn target_snapshots(
     directory: &AgentDirectorySnapshot,
-    targets: &[AgentId],
-) -> AgentRuntimeResult<BTreeMap<AgentId, AgentSnapshot>> {
+    targets: &[ThreadId],
+) -> AgentRuntimeResult<BTreeMap<ThreadId, AgentSnapshot>> {
     let snapshots = directory
         .agents
         .iter()
@@ -498,8 +498,8 @@ fn current_wait_result<'a>(
 }
 
 fn changed_wait_result(
-    baseline: &BTreeMap<AgentId, AgentSnapshot>,
-    current: &BTreeMap<AgentId, AgentSnapshot>,
+    baseline: &BTreeMap<ThreadId, AgentSnapshot>,
+    current: &BTreeMap<ThreadId, AgentSnapshot>,
 ) -> Option<AgentDirectoryWaitResult> {
     let changed = current
         .iter()
@@ -568,8 +568,8 @@ async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {
 
 fn root_agent_id_for(
     directory: &AgentDirectorySnapshot,
-    agent_id: &AgentId,
-) -> AgentRuntimeResult<AgentId> {
+    agent_id: &ThreadId,
+) -> AgentRuntimeResult<ThreadId> {
     let parents = directory
         .agents
         .iter()
@@ -616,8 +616,8 @@ mod tests {
         let previous_turn_id = TurnId::new("previous").unwrap();
         let active_turn_id = TurnId::new("active").unwrap();
         let mut snapshot = AgentRegistration::new(AgentIdentity {
-            id: AgentId::new("child").unwrap(),
-            parent_id: Some(AgentId::new("root").unwrap()),
+            id: ThreadId::new("child").unwrap(),
+            parent_id: Some(ThreadId::new("root").unwrap()),
             role: AgentRoleId::new("executor").unwrap(),
             depth: 1,
         })

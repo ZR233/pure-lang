@@ -9,7 +9,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     RecordTaskAgentFailure, ReviewRoundState, ReviewVerdict, TaskCommand, TaskFailureDisposition,
-    TaskFailureRecord, TaskFailureSettlement, ThreadExecutionStatus, WorkUnitStatus,
+    TaskFailureRecord, TaskFailureSettlement, WorkUnitState, WorkUnitStatus,
 };
 
 use super::review::update_review_round_state;
@@ -191,14 +191,7 @@ async fn settle_task_children(
         }
         let mut progress = state.into_progress();
         progress.execution_error = Some(message.to_string());
-        update_work_unit_state(
-            tx,
-            unit,
-            WorkUnitStatus::Failed,
-            ThreadExecutionStatus::Failed,
-            progress,
-        )
-        .await?;
+        update_work_unit_state(tx, unit, WorkUnitState::failed(progress)).await?;
     }
     for round in entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id))
@@ -206,12 +199,7 @@ async fn settle_task_children(
         .all(tx)
         .await?
     {
-        let state = ReviewRoundState::from_parts(
-            ReviewVerdict::Failed,
-            ThreadExecutionStatus::Failed,
-            Some(message.to_string()),
-            Some(message.to_string()),
-        )?;
+        let state = ReviewRoundState::failed(message.to_string(), message.to_string());
         update_review_round_state(tx, round, state).await?;
     }
     Ok(())

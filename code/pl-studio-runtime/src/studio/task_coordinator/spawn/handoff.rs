@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::super::{TaskRunRecord, WorkUnitRecord};
+use super::super::{TaskRun, WorkUnit};
 use super::normalize_scope_hints;
 
 pub(crate) const TASK_EXECUTOR_HANDOFF_SECTION_ID: &str = "studio.task_executor_handoff";
@@ -295,8 +295,8 @@ impl TaskExecutorBlueprint {
 
 impl TaskExecutorHandoff {
     pub(crate) fn new(
-        run: &TaskRunRecord,
-        work_unit: &WorkUnitRecord,
+        run: &TaskRun,
+        work_unit: &WorkUnit,
         parent_thread_id: String,
         blueprint: TaskExecutorBlueprint,
     ) -> Result<Self> {
@@ -370,8 +370,8 @@ impl TaskExecutorHandoff {
 
     pub(crate) fn validate_owner(
         &self,
-        run: &TaskRunRecord,
-        work_unit: &WorkUnitRecord,
+        run: &TaskRun,
+        work_unit: &WorkUnit,
         executor_agent_id: &str,
     ) -> Result<()> {
         if self.ownership.task_run_id != run.id

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::FutureExt;
-use pl_lsp::{LspQuery, LspRuntimeRegistry};
+use pl_lsp::{LspQuery, LspQueryOperation, LspRuntimeRegistry};
 use pl_protocol::PureError;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -105,7 +105,7 @@ impl Tool for LspCapabilitiesTool {
 struct LspQueryInput {
     /// 目标语言 ID；运行期按 catalog 路由到对应 server。
     language_id: String,
-    operation: LspQueryOperationInput,
+    operation: LspQueryOperation,
     /// Workspace-relative or absolute path to the source file.
     file_path: Option<PathBuf>,
     /// 1-based line number for position operations.
@@ -119,38 +119,6 @@ struct LspQueryInput {
     /// Maximum results to return.
     #[schemars(range(min = 1))]
     max_results: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-enum LspQueryOperationInput {
-    GoToDefinition,
-    FindReferences,
-    Hover,
-    DocumentSymbol,
-    WorkspaceSymbol,
-    GoToImplementation,
-    PrepareCallHierarchy,
-    IncomingCalls,
-    OutgoingCalls,
-    Diagnostics,
-}
-
-impl From<LspQueryOperationInput> for pl_lsp::LspQueryOperation {
-    fn from(operation: LspQueryOperationInput) -> Self {
-        match operation {
-            LspQueryOperationInput::GoToDefinition => Self::GoToDefinition,
-            LspQueryOperationInput::FindReferences => Self::FindReferences,
-            LspQueryOperationInput::Hover => Self::Hover,
-            LspQueryOperationInput::DocumentSymbol => Self::DocumentSymbol,
-            LspQueryOperationInput::WorkspaceSymbol => Self::WorkspaceSymbol,
-            LspQueryOperationInput::GoToImplementation => Self::GoToImplementation,
-            LspQueryOperationInput::PrepareCallHierarchy => Self::PrepareCallHierarchy,
-            LspQueryOperationInput::IncomingCalls => Self::IncomingCalls,
-            LspQueryOperationInput::OutgoingCalls => Self::OutgoingCalls,
-            LspQueryOperationInput::Diagnostics => Self::Diagnostics,
-        }
-    }
 }
 
 /// 统一的 LSP 语义查询工具；按 `languageId` 路由到对应 server。
@@ -195,7 +163,7 @@ impl Tool for LspQueryTool {
             let parsed: LspQueryInput =
                 deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?;
             let query = LspQuery {
-                operation: parsed.operation.into(),
+                operation: parsed.operation,
                 file_path: parsed.file_path,
                 line: parsed.line,
                 character: parsed.character,
@@ -269,7 +237,6 @@ fn resolve_query_path(
 mod tests {
     use std::sync::Arc;
 
-    use pl_lsp::LspQueryOperation;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -381,7 +348,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(parsed.language_id, "rust");
-        assert_eq!(parsed.operation, LspQueryOperationInput::Hover);
+        assert_eq!(parsed.operation, LspQueryOperation::Hover);
         assert_eq!(parsed.file_path, Some(PathBuf::from("src/lib.rs")));
         // languageId 提升为必填顶层字段并注入 LspQuery 路由。
         let query = LspQuery {

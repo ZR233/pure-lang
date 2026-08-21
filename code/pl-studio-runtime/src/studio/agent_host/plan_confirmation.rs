@@ -109,7 +109,7 @@ impl StudioPlanConfirmationProjector {
             let agent_path = agent_path.clone();
             async move {
                 let runtime = wait_for_runtime(runtime).await?;
-                let target_agent = pl_core::AgentId::new(agent_path.clone())?;
+                let target_agent = pl_core::ThreadId::new(agent_path.clone())?;
                 let target_thread = ThreadId::new(thread_id)?;
                 runtime
                     .record_thread_facts(
@@ -185,7 +185,7 @@ impl StudioPlanConfirmationProjector {
         }
         let runtime = wait_for_runtime(self.runtime.clone()).await?;
         let snapshot = runtime
-            .snapshot(pl_core::AgentId::new(agent_id.to_string())?)
+            .snapshot(pl_core::ThreadId::new(agent_id.to_string())?)
             .await?;
         if snapshot.lifecycle != AgentLifecycleState::Active
             || snapshot.active_turn_id.is_some()

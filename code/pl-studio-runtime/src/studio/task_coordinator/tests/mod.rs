@@ -22,7 +22,7 @@ use crate::{
 };
 use pl_core::tool::cache::TurnToolCacheHandle;
 
-async fn finalize_test_design(store: &StudioStore, run: &TaskRunRecord) -> TaskRunRecord {
+async fn finalize_test_design(store: &StudioStore, run: &TaskRun) -> TaskRun {
     assert!(
         store
             .finalize_task_design(
@@ -1139,11 +1139,12 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
     fixture.commit_file("src/lib.rs");
     let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
     fixture.submit(&source_head).await.unwrap();
+    let progress = fixture.work_unit().await.state.into_progress();
     fixture
         .store
         .update_work_unit(
             &fixture.work_unit_id,
-            WorkUnitStatus::Merged,
+            WorkUnitState::merged(progress),
             Some(fixture.subagent.id.clone()),
         )
         .await
@@ -1559,13 +1560,7 @@ async fn same_executor_rework_versions_keep_the_final_equivalent_delivery_exempt
     rejected_review.id = "delivery-review-revision-1".to_string();
     rejected_review.completion_id = Some(rejected_completion.id.clone());
     rejected_review.completion_revision = Some(1);
-    rejected_review.state = ReviewRoundState::from_parts(
-        ReviewVerdict::ChangesRequired,
-        ThreadExecutionStatus::Completed,
-        Some("changes required".to_string()),
-        None,
-    )
-    .unwrap();
+    rejected_review.state = ReviewRoundState::changes_required("changes required".to_string());
     reviews[0].completion_id = Some(completions[0].id.clone());
     reviews[0].completion_revision = Some(2);
     completions.insert(0, rejected_completion);
@@ -2158,12 +2153,9 @@ impl DeliveryFixture {
             })
             .await
             .unwrap();
+        let running = WorkUnitState::running(work_unit.state.clone().into_progress());
         let work_unit = store
-            .update_work_unit(
-                &work_unit.id,
-                WorkUnitStatus::Running,
-                Some("agent-1".to_string()),
-            )
+            .update_work_unit(&work_unit.id, running, Some("agent-1".to_string()))
             .await
             .unwrap();
         let subagent = SubagentContext {
@@ -2259,7 +2251,7 @@ impl DeliveryFixture {
         approve_delivery(&self.store, &self.root_thread_id, &work_unit, delivery).await
     }
 
-    async fn work_unit(&self) -> WorkUnitRecord {
+    async fn work_unit(&self) -> WorkUnit {
         self.store
             .read_work_unit(&self.work_unit_id)
             .await
@@ -2390,8 +2382,8 @@ fn integrate_planner_delivery(
 async fn prepare_equivalent_single_executor(
     fixture: &DeliveryFixture,
 ) -> (
-    TaskRunRecord,
-    Vec<WorkUnitRecord>,
+    TaskRun,
+    Vec<WorkUnit>,
     Vec<WorkCompletionRecord>,
     Vec<MergeRecord>,
     Vec<ReviewRoundRecord>,
@@ -2504,7 +2496,7 @@ fn todo_snapshot<const N: usize>(items: [(&str, &str); N]) -> pl_protocol::TodoL
 async fn approve_delivery(
     store: &StudioStore,
     root_thread_id: &str,
-    work_unit: &WorkUnitRecord,
+    work_unit: &WorkUnit,
     delivery: AgentDelivery,
 ) -> anyhow::Result<AgentDelivery> {
     let completion = store
@@ -2979,12 +2971,9 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
         })
         .await
         .unwrap();
+    let running = WorkUnitState::running(unit.state.clone().into_progress());
     store
-        .update_work_unit(
-            &unit.id,
-            WorkUnitStatus::Running,
-            Some("blocked-owned".to_string()),
-        )
+        .update_work_unit(&unit.id, running, Some("blocked-owned".to_string()))
         .await
         .unwrap();
     store
@@ -3088,7 +3077,7 @@ async fn task_session(store: &StudioStore, repository: &Path) -> crate::studio::
 
 async fn create_running_recovery_worktree(
     store: &StudioStore,
-    run: &TaskRunRecord,
+    run: &TaskRun,
     agent_id: &str,
     git_repository: &Path,
 ) -> PathBuf {
@@ -3116,12 +3105,9 @@ async fn create_running_recovery_worktree(
         })
         .await
         .unwrap();
+    let running = WorkUnitState::running(unit.state.clone().into_progress());
     store
-        .update_work_unit(
-            &unit.id,
-            WorkUnitStatus::Running,
-            Some(agent_id.to_string()),
-        )
+        .update_work_unit(&unit.id, running, Some(agent_id.to_string()))
         .await
         .unwrap();
     store.activate_executor(&unit.id, agent_id).await.unwrap();

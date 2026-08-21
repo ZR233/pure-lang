@@ -73,8 +73,8 @@ pub(crate) struct MergeCleanupEvidence {
 }
 
 pub(crate) struct TaskMergeScope {
-    pub(crate) run: TaskRunRecord,
-    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) run: TaskRun,
+    pub(crate) work_unit: WorkUnit,
     pub(crate) completion: WorkCompletionRecord,
     pub(crate) delivery: AgentDelivery,
     pub(crate) merge: MergeRecord,
@@ -256,7 +256,7 @@ pub(crate) struct AllocateExecutor {
 }
 
 pub(crate) struct ExecutorAllocation {
-    pub(crate) run: TaskRunRecord,
-    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) run: TaskRun,
+    pub(crate) work_unit: WorkUnit,
     pub(crate) reused: bool,
 }

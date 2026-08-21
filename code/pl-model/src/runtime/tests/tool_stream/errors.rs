@@ -31,7 +31,7 @@ fn stream_accumulator_rejects_events_after_completed() {
     apply_completed(&mut accumulator, &event_tx);
     let error = accumulator
         .apply(
-            StreamEvent::ReasoningRawDelta {
+            ModelStreamEvent::ReasoningRawDelta {
                 id: "thinking".to_string(),
                 content_index: 0,
                 delta: "late".to_string(),
@@ -61,7 +61,7 @@ fn stream_accumulator_projects_raw_reasoning_into_thinking_trace() {
 
     accumulator
         .apply(
-            StreamEvent::ReasoningRawDelta {
+            ModelStreamEvent::ReasoningRawDelta {
                 id: "thinking".to_string(),
                 content_index: 0,
                 delta: "raw only".to_string(),
@@ -87,12 +87,12 @@ fn stream_accumulator_rejects_tool_delta_without_name() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: Some("chat_tool_call:0".to_string()),
                 item_id: "call_1".to_string(),
                 call_id: None,
                 name: None,
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     "{\"path\":\"Cargo.toml\"}".to_string(),
                 ),
             },
@@ -100,7 +100,7 @@ fn stream_accumulator_rejects_tool_delta_without_name() {
         )
         .unwrap();
     let error = accumulator
-        .apply(StreamEvent::Completed { response_id: None }, &event_tx)
+        .apply(ModelStreamEvent::Completed { response_id: None }, &event_tx)
         .unwrap_err();
 
     match error {

@@ -488,10 +488,8 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
     let (base_url, bodies, handle) = serve_sse_sequence(vec![sse_body]).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    let runtime = CoreRuntimeProfile::minimal().with_runtime_options(
-        CoreRuntimeOptions::default()
-            .with_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache")),
-    );
+    let runtime = CoreRuntimeProfile::minimal()
+        .with_default_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache"));
     let core = test_turn_engine_builder(endpoint, local_responses_model())
         .with_runtime_profile(runtime)
         .build();

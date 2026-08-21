@@ -71,13 +71,16 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
 Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力、Responses profile 和官方 OpenAI Responses endpoint；OpenAI preset 覆盖自定义 `base_url` 后必须退回 eager/direct 工具，不能仅凭 OpenAI catalog 把 hosted tool type 发送给兼容代理。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为唯一的动态 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；不再保留未被 wire 消费的通用 `options` 袋。其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力、Responses profile 和官方 OpenAI Responses endpoint；OpenAI preset 覆盖自定义 `base_url` 后必须退回 eager/direct 工具，不能仅凭 OpenAI catalog 把 hosted tool type 发送给兼容代理。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
 ## 7.4 Provider 与 runtime
 
 当前所有支持的供应商共用一种 OpenAI-compatible 协议族，因此不建立 `ModelProvider` trait、厂商 runtime 子类或共享 provider wrapper。`ResolvedModelRoute` 解析出唯一的 `ProviderEndpoint + ModelInfo`，`ModelRuntime` 在构造时绑定该模型；后续请求不再携带 model，provider 也不保存 default model 或完整模型目录。
 
 `ProviderConfig` 是持久化配置和 catalog binding 的唯一来源；`ProviderEndpoint` 只包含运行时 endpoint、解析后的凭证、headers、tool wire policy 与服务能力。protocol 和 connection mode 只来自绑定模型的 `ModelTransportProfile`，避免 provider 与 model 两份事实漂移。
+所有自定义 OpenAI-compatible endpoint 使用同一个通用构造入口；不能按 Responses/Chat 名义复制
+只改名的构造器。模型能力只由 `ModelInfo.capabilities` 表达，endpoint 仅叠加真实的服务约束，
+runtime 不再维护一份始终为全能力的 provider bitflag 或异步空操作 credential façade。
 运行路径不匹配 OpenAI、DeepSeek、Zhipu、MiMo 等 ID，也不为这些厂商建立穷尽枚举分发。
 未来只有在实际支持第二种协议族时才引入新的 typed codec；当前不保留 Anthropic 占位或预先抽象。
 

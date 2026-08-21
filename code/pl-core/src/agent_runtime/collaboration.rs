@@ -37,12 +37,12 @@ use support::{
 #[derive(Debug, Clone)]
 pub struct AgentCollaborationTools {
     runtime: AgentRuntimeHandle,
-    caller: AgentId,
+    caller: ThreadId,
     policy: AgentAccessPolicy,
 }
 
 impl AgentCollaborationTools {
-    pub fn new(runtime: AgentRuntimeHandle, caller: AgentId, policy: AgentAccessPolicy) -> Self {
+    pub fn new(runtime: AgentRuntimeHandle, caller: ThreadId, policy: AgentAccessPolicy) -> Self {
         Self {
             runtime,
             caller,
@@ -155,7 +155,7 @@ impl CollaborationToolKind {
 struct CollaborationTool {
     kind: CollaborationToolKind,
     runtime: AgentRuntimeHandle,
-    caller: AgentId,
+    caller: ThreadId,
     policy: AgentAccessPolicy,
 }
 
@@ -520,7 +520,7 @@ impl CollaborationTool {
     async fn authorize(
         &self,
         selector: &AgentTargetSelector,
-        target: &AgentId,
+        target: &ThreadId,
     ) -> Result<(), PureError> {
         let snapshots = self
             .runtime
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn wait_message_projection_contains_only_latest_delta() {
-        let agent_id = AgentId::new("executor").unwrap();
+        let agent_id = ThreadId::new("executor").unwrap();
         let message = AgentDirectoryWaitMessage {
             identity: super::super::AgentIdentity {
                 id: agent_id,

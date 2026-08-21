@@ -78,7 +78,7 @@ fn validate_rejects_missing_provider_model_and_effort() {
 
 #[test]
 fn route_resolution_binds_one_model_to_the_endpoint() {
-    let provider = ProviderConfig::from_endpoint(
+    let provider = ProviderConfig::from_explicit_models(
         ProviderEndpoint::deepseek(None),
         ProviderConfig::deepseek_preset()
             .effective_models()

@@ -3,10 +3,10 @@ use crate::{
     PlanLifecycleState, StudioAgentActivity, StudioAgentDirectoryEntry, StudioAgentProgressRuntime,
 };
 use pl_core::{
-    ActiveKind, AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId,
-    AgentLifecycleState, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentSnapshot, AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxBudgetAction,
-    MailboxPresentation, ThreadId, TurnOutcomeKind,
+    ActiveKind, AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentLifecycleState,
+    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot,
+    AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxBudgetAction, MailboxPresentation, ThreadId,
+    TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -345,7 +345,7 @@ impl StudioAgentEventProjector {
                         .await
                         .at("waitForRuntimeToCloseReviewer")?;
                     let reviewer_id =
-                        AgentId::new(event.agent_id.to_string()).at("parseReviewerAgentId")?;
+                        ThreadId::new(event.agent_id.to_string()).at("parseReviewerAgentId")?;
                     runtime.close(reviewer_id).await.at("closeReviewer")?;
                 }
             }
@@ -504,7 +504,7 @@ async fn submit_executor_continuation(
     runtime: &AgentRuntimeHandle,
     continuation: &crate::studio::task_coordinator::ExecutorContinuationRequest,
 ) -> anyhow::Result<()> {
-    let agent_id = AgentId::new(continuation.agent_id.clone())?;
+    let agent_id = ThreadId::new(continuation.agent_id.clone())?;
     let thread_id = ThreadId::new(continuation.agent_id.clone())?;
     let request = AgentSubmitRequest::start(
         thread_id,
@@ -532,7 +532,7 @@ async fn recover_executor_continuation(
     continuation: &crate::studio::task_coordinator::ExecutorContinuationRequest,
 ) -> anyhow::Result<()> {
     if let Some(turn_id) = store.executor_continuation_turn_id(continuation).await? {
-        let agent_id = AgentId::new(continuation.agent_id.clone())?;
+        let agent_id = ThreadId::new(continuation.agent_id.clone())?;
         let snapshot = runtime.snapshot(agent_id).await?;
         if snapshot
             .active_turn_id
@@ -769,7 +769,7 @@ mod tests {
     fn snapshot_with_outcome(kind: TurnOutcomeKind) -> AgentSnapshot {
         AgentSnapshot {
             identity: AgentIdentity {
-                id: AgentId::new("agent-1").expect("agent id"),
+                id: ThreadId::new("agent-1").expect("agent id"),
                 parent_id: None,
                 role: AgentRoleId::new("planner").expect("role id"),
                 depth: 0,

@@ -27,9 +27,7 @@ use tagged_output::{TaggedOutputDiagnostics, TaggedVisibleOutputAdapter};
 use tool_stream::ToolStream;
 use trace_projection::TraceProjection;
 
-use event::ModelStreamEvent as CompletionStreamEvent;
-
-pub(crate) type CompletionEventStream = BoxStream<'static, Result<CompletionStreamEvent>>;
+pub(crate) type CompletionEventStream = BoxStream<'static, Result<ModelStreamEvent>>;
 pub(crate) type OpenAiRawEventStream = BoxStream<'static, Result<sse::SseStreamEvent>>;
 const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -73,7 +71,7 @@ struct ProviderStreamDecodeState {
     stream: OpenAiRawEventStream,
     decoder: sse::OpenAiStreamDecoder,
     visible_output: VisibleOutputDecoder,
-    pending: VecDeque<CompletionStreamEvent>,
+    pending: VecDeque<ModelStreamEvent>,
 }
 
 pub(crate) async fn collect_completion_event_stream(

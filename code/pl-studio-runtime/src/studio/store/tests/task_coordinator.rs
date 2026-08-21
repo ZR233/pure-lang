@@ -18,10 +18,7 @@ fn create_input(root_thread_id: &str) -> CreateTaskRun {
     }
 }
 
-async fn allocation_fixture(
-    name: &str,
-    phase: TaskRunStateKind,
-) -> (StudioStore, String, TaskRunRecord) {
+async fn allocation_fixture(name: &str, phase: TaskRunStateKind) -> (StudioStore, String, TaskRun) {
     let store = StudioStore::open_memory().await.unwrap();
     let workspace_root = format!("C:/work/{name}");
     let project = store.upsert_project(&workspace_root).await.unwrap();
@@ -45,9 +42,9 @@ async fn allocation_fixture(
 
 async fn move_test_run_to(
     store: &StudioStore,
-    mut run: TaskRunRecord,
+    mut run: TaskRun,
     phase: TaskRunStateKind,
-) -> TaskRunRecord {
+) -> TaskRun {
     let path: &[TaskRunStateKind] = match phase {
         TaskRunStateKind::DesignUpdating => &[],
         TaskRunStateKind::Implementing => &[TaskRunStateKind::Implementing],
@@ -443,9 +440,7 @@ async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempote
         .store
         .update_work_unit_state_for_test(
             &fixture.work_unit.id,
-            WorkUnitStatus::AwaitingCompletion,
-            ThreadExecutionStatus::Cancelled,
-            progress,
+            WorkUnitState::awaiting_cancelled(progress),
         )
         .await
         .unwrap();
@@ -508,9 +503,7 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
         .store
         .update_work_unit_state_for_test(
             &fixture.work_unit.id,
-            WorkUnitStatus::AwaitingCompletion,
-            ThreadExecutionStatus::Failed,
-            progress,
+            WorkUnitState::awaiting_failed(progress),
         )
         .await
         .unwrap();
@@ -550,20 +543,15 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
 #[tokio::test]
 async fn executor_close_still_rejects_completion_review_states() {
     let fixture = ExecutorFixture::new("close-review-active").await;
-    for status in [
-        WorkUnitStatus::ReadyForReview,
-        WorkUnitStatus::Reviewing,
-        WorkUnitStatus::ChangesRequested,
+    for transition in [
+        WorkUnitState::ready_for_review,
+        WorkUnitState::reviewing,
+        WorkUnitState::changes_requested,
     ] {
         let progress = fixture.work_unit().await.state.into_progress();
         fixture
             .store
-            .update_work_unit_state_for_test(
-                &fixture.work_unit.id,
-                status,
-                ThreadExecutionStatus::Completed,
-                progress,
-            )
+            .update_work_unit_state_for_test(&fixture.work_unit.id, transition(progress))
             .await
             .unwrap();
         let error = fixture
@@ -1280,8 +1268,8 @@ fn provider_failure(
 
 struct ExecutorFixture {
     store: StudioStore,
-    run: TaskRunRecord,
-    work_unit: WorkUnitRecord,
+    run: TaskRun,
+    work_unit: WorkUnit,
     agent_id: String,
 }
 
@@ -1320,12 +1308,9 @@ impl ExecutorFixture {
             })
             .await
             .unwrap();
+        let running = WorkUnitState::running(work_unit.state.clone().into_progress());
         let work_unit = store
-            .update_work_unit(
-                &work_unit.id,
-                WorkUnitStatus::Running,
-                Some(agent_id.clone()),
-            )
+            .update_work_unit(&work_unit.id, running, Some(agent_id.clone()))
             .await
             .unwrap();
         store
@@ -1393,7 +1378,7 @@ impl ExecutorFixture {
             .unwrap()
     }
 
-    async fn work_unit(&self) -> WorkUnitRecord {
+    async fn work_unit(&self) -> WorkUnit {
         self.store
             .read_work_unit(&self.work_unit.id)
             .await

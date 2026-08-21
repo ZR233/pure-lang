@@ -8,7 +8,7 @@ use pl_protocol::{ModelContextItem, PureError, Result};
 use serde_json::{Map, Value};
 
 use super::provider_error::openai_error_to_pure;
-use super::{ModelRuntime, PureOpenAiConfig, get_auth_token};
+use super::{ModelRuntime, PureOpenAiConfig};
 use crate::completion::{
     CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
     TokenUsage,
@@ -73,10 +73,9 @@ async fn compact_v2_attempt(
     body: Map<String, Value>,
     model_headers: &HashMap<String, String>,
 ) -> Result<ModelCompactionResponse> {
-    let token = get_auth_token(provider.endpoint().bearer_token.clone()).await?;
     let config = PureOpenAiConfig::new(
         provider.resolve_base_url(),
-        token,
+        provider.endpoint().bearer_token.clone(),
         provider.endpoint().http_headers.as_ref(),
         model_headers,
     )?;
@@ -142,10 +141,10 @@ fn build_compaction_body(
     request: &ModelCompactionRequest,
 ) -> Result<(Map<String, Value>, HashMap<String, String>)> {
     let model_info = provider.model().clone();
-    let effective_capabilities = model_info.capabilities.clone().with_provider_capabilities(
-        provider.capabilities,
-        provider.endpoint().uses_native_custom_tools(),
-    );
+    let effective_capabilities = model_info
+        .capabilities
+        .clone()
+        .with_native_custom_tools(provider.endpoint().uses_native_custom_tools());
     let supports_custom_tools = provider.endpoint().uses_native_custom_tools()
         && effective_capabilities.supports_custom_tools()
         && effective_capabilities.supports_freeform_tools();

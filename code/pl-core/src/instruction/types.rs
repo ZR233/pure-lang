@@ -78,7 +78,6 @@ pub enum InstructionSourceKind {
     ProfileUser,
     ProjectDoc,
     WorkspaceFallback,
-    ProfileWorkspace,
 }
 
 impl InstructionSnapshot {

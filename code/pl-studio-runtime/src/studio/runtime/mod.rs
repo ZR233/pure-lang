@@ -437,7 +437,7 @@ impl StudioRuntime {
 
 async fn close_agent_if_present(
     runtime: &pl_core::AgentRuntimeHandle,
-    agent_id: pl_core::AgentId,
+    agent_id: pl_core::ThreadId,
 ) -> Result<()> {
     match runtime.close(agent_id).boxed().await {
         Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
@@ -446,9 +446,9 @@ async fn close_agent_if_present(
 }
 
 fn has_project_root(
-    parents: &BTreeMap<pl_core::AgentId, Option<pl_core::AgentId>>,
-    agent_id: &pl_core::AgentId,
-    roots: &BTreeSet<pl_core::AgentId>,
+    parents: &BTreeMap<pl_core::ThreadId, Option<pl_core::ThreadId>>,
+    agent_id: &pl_core::ThreadId,
+    roots: &BTreeSet<pl_core::ThreadId>,
 ) -> bool {
     let mut current = Some(agent_id.clone());
     let mut remaining = parents.len().saturating_add(1);

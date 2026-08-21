@@ -25,9 +25,8 @@ pub use agent::{
 };
 pub use config::{
     ConfigPaths, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
-    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioInstructionsConfig, StudioMcpConfig,
-    StudioMode, StudioRole, StudioRuntimeConfig, StudioSkillsConfig, StudioUiConfig,
-    StudioWebSearchConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig, StudioMode, StudioRole,
+    StudioUiConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, provider_template_kind,

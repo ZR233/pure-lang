@@ -117,7 +117,7 @@ async fn start_runtime_registers_persisted_child_thread_identity() {
     let framework = runtime.agent_framework().await.unwrap();
     let child_agent = framework
         .handle()
-        .snapshot(pl_core::AgentId::new(child.id).unwrap())
+        .snapshot(pl_core::ThreadId::new(child.id).unwrap())
         .await
         .unwrap();
     assert_eq!(
@@ -2045,7 +2045,7 @@ async fn idle_registered_thread_stays_lazy_until_subscription_activates_it() {
     .unwrap();
     runtime.start_runtime().await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
-    let agent_id = pl_core::AgentId::new(thread.id.clone()).unwrap();
+    let agent_id = pl_core::ThreadId::new(thread.id.clone()).unwrap();
     assert!(matches!(
         framework.handle().snapshot(agent_id.clone()).await,
         Err(pl_core::AgentRuntimeError::NotFound(_))
@@ -2096,7 +2096,7 @@ async fn residency_evicts_idle_actors_beyond_capacity_and_restores_on_demand() {
         threads.push(thread);
     }
     let framework = runtime.agent_framework().await.unwrap();
-    let first_id = pl_core::AgentId::new(threads[0].id.clone()).unwrap();
+    let first_id = pl_core::ThreadId::new(threads[0].id.clone()).unwrap();
     assert!(
         matches!(
             framework.handle().snapshot(first_id.clone()).await,
@@ -2104,7 +2104,7 @@ async fn residency_evicts_idle_actors_beyond_capacity_and_restores_on_demand() {
         ),
         "LRU front idle actor must be evicted beyond capacity"
     );
-    let last_id = pl_core::AgentId::new(threads[16].id.clone()).unwrap();
+    let last_id = pl_core::ThreadId::new(threads[16].id.clone()).unwrap();
     assert!(framework.handle().snapshot(last_id).await.is_ok());
 
     // 被淘汰 Thread 再次访问时按需恢复。
@@ -2153,7 +2153,7 @@ async fn pinned_thread_is_not_evicted_beyond_capacity() {
     runtime.ensure_thread_agent(&threads[16].id).await.unwrap();
 
     let framework = runtime.agent_framework().await.unwrap();
-    let pinned_id = pl_core::AgentId::new(threads[0].id.clone()).unwrap();
+    let pinned_id = pl_core::ThreadId::new(threads[0].id.clone()).unwrap();
     assert!(
         runtime.residency.is_pinned(&threads[0].id),
         "pin guard must keep the thread pinned"
@@ -2163,7 +2163,7 @@ async fn pinned_thread_is_not_evicted_beyond_capacity() {
         "pinned thread must stay resident beyond capacity"
     );
     // pin 期间容量是软上限：唯一候选被钉住时不淘汰其他线程。
-    let neighbor_id = pl_core::AgentId::new(threads[1].id.clone()).unwrap();
+    let neighbor_id = pl_core::ThreadId::new(threads[1].id.clone()).unwrap();
     assert!(
         framework.handle().snapshot(neighbor_id).await.is_ok(),
         "pinned candidate blocks eviction; capacity is soft while observed"

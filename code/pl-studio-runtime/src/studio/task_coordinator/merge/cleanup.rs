@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
-use crate::{AgentId, AgentLifecycleState, AgentRuntimeHandle, WorktreeHandle, WorktreeManager};
+use crate::{AgentLifecycleState, AgentRuntimeHandle, ThreadId, WorktreeHandle, WorktreeManager};
 
 use super::git::{checked_git, run_git};
 use super::validation::validate_final_head;
@@ -41,7 +41,7 @@ pub(crate) async fn cleanup_accepted_delivery(
         Err(error) => return cleanup_failure(error.to_string()),
     }
     if let Some(runtime) = runtime {
-        let agent_id = match AgentId::new(scope.completion.executor_agent_id.clone()) {
+        let agent_id = match ThreadId::new(scope.completion.executor_agent_id.clone()) {
             Ok(agent_id) => agent_id,
             Err(error) => return cleanup_failure(error.to_string()),
         };

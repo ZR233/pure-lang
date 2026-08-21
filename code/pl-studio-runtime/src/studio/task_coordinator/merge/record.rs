@@ -10,7 +10,7 @@ use super::scope::delivery_from_completion;
 use super::validation::{ensure_preflight_delivery_identity, validate_repository_identity};
 use crate::studio::task_coordinator::{
     AgentDelivery, BranchLeaseRecord, MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator,
-    TaskMergeScope, TaskRunRecord, TaskRunStateKind, WorkCompletionRecord, WorkUnitRecord,
+    TaskMergeScope, TaskRun, TaskRunStateKind, WorkCompletionRecord, WorkUnit,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, ToolEffect};
@@ -292,9 +292,9 @@ fn validate_recorded_input(
 }
 
 struct PlannerMergeScope {
-    run: TaskRunRecord,
+    run: TaskRun,
     lease: BranchLeaseRecord,
-    work_unit: WorkUnitRecord,
+    work_unit: WorkUnit,
     completion: WorkCompletionRecord,
     delivery: AgentDelivery,
 }

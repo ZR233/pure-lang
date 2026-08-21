@@ -82,7 +82,6 @@ fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
     assert!(visibility.contains("github_api_request"));
     assert!(visibility.contains("mcp__docs__lookup"));
     assert!(!visibility.contains("git_status"));
-    assert_eq!(visibility.len(), visibility.to_btree_set().len());
 
     let schemas = visibility.filter_schemas([
         pl_model::ToolSchema::function("github_api_request", "GitHub", serde_json::json!({})),
@@ -452,7 +451,8 @@ async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
 
 #[tokio::test]
 async fn profiled_host_tools_do_not_register_local_workspace_tools() {
-    let runtime = CoreRuntimeProfile::host_provided(std::env::temp_dir())
+    let runtime = CoreRuntimeProfile::minimal()
+        .with_agent_workspace(crate::tool::AgentWorkspace::local(std::env::temp_dir()))
         .with_workspace_instructions("rules");
     let mut core = test_turn_engine_builder(
         pl_model::ProviderEndpoint::deepseek(None),

@@ -24,8 +24,7 @@ fn redacts_openai_api_keys_from_error_text() {
 
 #[test]
 fn chat_completions_model_rejects_websocket_before_creating_a_client() {
-    let info =
-        ProviderEndpoint::openai_compatible_chat("Future Chat Provider", "http://127.0.0.1:1/v1");
+    let info = ProviderEndpoint::compatible("Future Chat Provider", "http://127.0.0.1:1/v1");
     let mut model = ModelInfo::fallback("future-model");
     model.transport = ModelTransportProfile {
         protocol: ProviderWireProtocol::ChatCompletions,

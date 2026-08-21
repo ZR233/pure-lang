@@ -186,7 +186,8 @@ fn required_tool(name: &str) -> TurnFinalizationPolicy {
 #[cfg(test)]
 mod tests {
     use pl_core::{
-        AgentActivityState, AgentId, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
+        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
+        ThreadId,
     };
 
     use super::*;
@@ -324,8 +325,8 @@ mod tests {
     fn snapshot(role: &str, root: bool) -> AgentSnapshot {
         AgentSnapshot {
             identity: AgentIdentity {
-                id: AgentId::new(format!("agent-{role}")).unwrap(),
-                parent_id: (!root).then(|| AgentId::new("agent-root").unwrap()),
+                id: ThreadId::new(format!("agent-{role}")).unwrap(),
+                parent_id: (!root).then(|| ThreadId::new("agent-root").unwrap()),
                 role: AgentRoleId::new(role).unwrap(),
                 depth: u32::from(!root),
             },

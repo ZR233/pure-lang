@@ -1,4 +1,3 @@
-import 'thread_directory_models.dart';
 import 'studio_enums.dart';
 
 sealed class InteractionPayload {
@@ -85,22 +84,6 @@ class PendingInteraction {
   final String title;
   final String body;
   final InteractionPayload payload;
-}
-
-class InteractionResolutionResult {
-  const InteractionResolutionResult({
-    required this.threadId,
-    required this.interactionId,
-    required this.status,
-    required this.threads,
-  });
-
-  final String threadId;
-  final String interactionId;
-  final String status;
-  final List<StudioThread> threads;
-
-  bool get isResolved => status != 'pending';
 }
 
 class UserInputAnswerCommand {

@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::super::TaskRunRecord;
+use super::super::TaskRun;
 use super::super::git::{RepositorySnapshot, ensure_no_git_operation, inspect_repository};
 use crate::agent::worktree::same_worktree_path;
 
@@ -18,10 +18,7 @@ pub(crate) fn is_retryable_merge_recovery_message(message: &str) -> bool {
         || message == LEGACY_MERGE_RECOVERY_BLOCK_MESSAGE
 }
 
-pub(crate) fn validate_snapshot_owner(
-    run: &TaskRunRecord,
-    snapshot: &RepositorySnapshot,
-) -> Result<()> {
+pub(crate) fn validate_snapshot_owner(run: &TaskRun, snapshot: &RepositorySnapshot) -> Result<()> {
     if !same_worktree_path(&run.workspace_root, &snapshot.workspace_root) {
         bail!("task workspace changed outside the coordinator");
     }
@@ -33,7 +30,7 @@ pub(crate) fn validate_snapshot_owner(
     Ok(())
 }
 
-pub(crate) async fn inspect_merging_recovery(run: &TaskRunRecord) -> MergingRecovery {
+pub(crate) async fn inspect_merging_recovery(run: &TaskRun) -> MergingRecovery {
     let snapshot = match inspect_repository(&run.workspace_root, false).await {
         Ok(snapshot) => snapshot,
         Err(error) => {

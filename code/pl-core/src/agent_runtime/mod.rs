@@ -25,7 +25,7 @@ pub use host::{
     ThreadCommitOutcome, ThreadContextMutation, ThreadMutation, ThreadProjectionCommit,
     ThreadRepository,
 };
-pub use id::{AgentId, ThreadId, TurnId};
+pub use id::{ThreadId, TurnId};
 pub use policy::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentTargetSelector, ToolEffectSet,
     TurnFinalizationPolicy,

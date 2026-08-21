@@ -123,10 +123,6 @@ class TimelineTodoItem {
   final String status;
 }
 
-TimelineRow timelineRowFromAgentEvent(TimelineAgentEvent event) {
-  return TimelineRow.agentActivity(event);
-}
-
 String timelineAgentEventGroupKey(TimelineAgentEvent event) {
   if (event.payload is TimelineTodoListUpdate) {
     return event.eventId;

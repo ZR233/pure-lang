@@ -11,7 +11,7 @@ use crate::studio::task_coordinator::{
     AgentReview, BeginIntegratedReview, ReviewExitDiagnostics, ReviewFileCoverage,
     ReviewRoundRecord, ReviewRoundState, ReviewScope, ReviewTarget, ReviewVerdict, TaskCommand,
     TaskRunStateKind, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus,
-    WorkUnitStatus, decode_review_round_state,
+    WorkUnitState, WorkUnitStatus, decode_review_round_state,
 };
 use pl_core::TurnOutcomeKind;
 
@@ -78,16 +78,8 @@ impl StudioStore {
             )
             .await?;
             let state = work_unit_state(&work_unit)?;
-            let execution = state.execution_status();
             let progress = state.into_progress();
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::Reviewing,
-                execution,
-                progress,
-            )
-            .await?;
+            update_work_unit_state(&tx, work_unit, WorkUnitState::reviewing(progress)).await?;
             Ok(round)
         }
         .await;
@@ -208,12 +200,7 @@ impl StudioStore {
         {
             bail!("reviewer activation does not match the pending review round");
         }
-        let state = ReviewRoundState::from_parts(
-            ReviewVerdict::Pending,
-            ThreadExecutionStatus::Running,
-            None,
-            None,
-        )?;
+        let state = ReviewRoundState::running();
         update_review_round_state(&self.db, round, state).await?;
         Ok(())
     }
@@ -234,12 +221,7 @@ impl StudioStore {
             {
                 bail!("review spawn failure does not match reviewer authorization");
             }
-            let failed_state = ReviewRoundState::from_parts(
-                ReviewVerdict::Failed,
-                ThreadExecutionStatus::Failed,
-                Some(error.to_string()),
-                Some(error.to_string()),
-            )?;
+            let failed_state = ReviewRoundState::failed(error.to_string(), error.to_string());
             update_review_round_state(&tx, round.clone(), failed_state).await?;
             match ReviewScope::from_str(&round.scope) {
                 Some(ReviewScope::Delivery) => {
@@ -252,16 +234,9 @@ impl StudioStore {
                         .await?
                         .context("delivery review work unit not found")?;
                     let state = work_unit_state(&unit)?;
-                    let execution = state.execution_status();
                     let progress = state.into_progress();
-                    update_work_unit_state(
-                        &tx,
-                        unit,
-                        WorkUnitStatus::ReadyForReview,
-                        execution,
-                        progress,
-                    )
-                    .await?;
+                    update_work_unit_state(&tx, unit, WorkUnitState::ready_for_review(progress))
+                        .await?;
                 }
                 Some(ReviewScope::Integrated) => {
                     super::apply_task_command(
@@ -329,12 +304,16 @@ impl StudioStore {
                     }
                 }
             }
-            let next_state = ReviewRoundState::from_parts(
-                review.verdict,
-                ThreadExecutionStatus::Completed,
-                Some(review.summary.clone()),
-                None,
-            )?;
+            let next_state = match review.verdict {
+                ReviewVerdict::Pass => ReviewRoundState::pass(review.summary.clone()),
+                ReviewVerdict::ChangesRequired => {
+                    ReviewRoundState::changes_required(review.summary.clone())
+                }
+                ReviewVerdict::Blocked => ReviewRoundState::blocked(review.summary.clone()),
+                ReviewVerdict::Pending | ReviewVerdict::Failed => {
+                    bail!("reviewer cannot select pending or failed")
+                }
+            };
             let next_revision = round.revision.saturating_add(1);
             let updated_round = entities::review_round::Entity::update_many()
                 .col_expr(
@@ -477,19 +456,16 @@ impl StudioStore {
             let detail = reason
                 .map(str::to_string)
                 .unwrap_or_else(|| "reviewer ended without a successful review_exit".to_string());
-            let outcome_status = match outcome_kind {
-                TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
+            let failed_state = match outcome_kind {
+                TurnOutcomeKind::Cancelled => {
+                    ReviewRoundState::cancelled(detail.clone(), detail.clone())
+                }
                 TurnOutcomeKind::Completed
                 | TurnOutcomeKind::Failed
-                | TurnOutcomeKind::BudgetLimited => ThreadExecutionStatus::Failed,
+                | TurnOutcomeKind::BudgetLimited => {
+                    ReviewRoundState::failed(detail.clone(), detail.clone())
+                }
             };
-
-            let failed_state = ReviewRoundState::from_parts(
-                ReviewVerdict::Failed,
-                outcome_status,
-                Some(detail.clone()),
-                Some(detail.clone()),
-            )?;
             update_review_round_state(&tx, round.clone(), failed_state).await?;
 
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
@@ -504,14 +480,11 @@ impl StudioStore {
                         .context("delivery review work unit not found")?;
                     if work_unit.state_kind == WorkUnitStatus::Reviewing.as_str() {
                         let state = work_unit_state(&work_unit)?;
-                        let execution = state.execution_status();
                         let progress = state.into_progress();
                         update_work_unit_state(
                             &tx,
                             work_unit,
-                            WorkUnitStatus::ReadyForReview,
-                            execution,
-                            progress,
+                            WorkUnitState::ready_for_review(progress),
                         )
                         .await?;
                     }
@@ -578,20 +551,21 @@ async fn complete_delivery_review(
     {
         bail!("delivery review target changed after reviewer creation");
     }
-    let (completion_status, unit_status) = match review.verdict {
-        ReviewVerdict::Pass => (
-            WorkCompletionStatus::Approved,
-            if WorkCompletionKind::from_str(&completion.kind)
+    let progress = work_unit_state(&work_unit)?.into_progress();
+    let (completion_status, next_work_unit_state) = match review.verdict {
+        ReviewVerdict::Pass => {
+            let state = if WorkCompletionKind::from_str(&completion.kind)
                 == Some(WorkCompletionKind::NoDelivery)
             {
-                WorkUnitStatus::NoDelivery
+                WorkUnitState::no_delivery(progress)
             } else {
-                WorkUnitStatus::Approved
-            },
-        ),
+                WorkUnitState::approved(progress)
+            };
+            (WorkCompletionStatus::Approved, state)
+        }
         ReviewVerdict::ChangesRequired | ReviewVerdict::Blocked => (
             WorkCompletionStatus::ChangesRequired,
-            WorkUnitStatus::ChangesRequested,
+            WorkUnitState::changes_requested(progress),
         ),
         ReviewVerdict::Pending | ReviewVerdict::Failed => {
             bail!("reviewer cannot select pending or failed")
@@ -617,10 +591,7 @@ async fn complete_delivery_review(
     if updated_completion.rows_affected != 1 {
         bail!("delivery review completion is stale or was already settled");
     }
-    let state = work_unit_state(&work_unit)?;
-    let execution = state.execution_status();
-    let progress = state.into_progress();
-    update_work_unit_state(tx, work_unit, unit_status, execution, progress).await?;
+    update_work_unit_state(tx, work_unit, next_work_unit_state).await?;
     if completion_status == WorkCompletionStatus::Approved
         && WorkCompletionKind::from_str(&completion.kind) == Some(WorkCompletionKind::Delivery)
     {

@@ -138,7 +138,7 @@ where
 
     pub(super) async fn submit_current_session(
         &mut self,
-        root_agent_id: super::super::AgentId,
+        root_agent_id: super::super::ThreadId,
         request: AgentCurrentSessionSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
         if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
@@ -164,7 +164,7 @@ where
 
     pub(super) async fn submit_interaction_continuation(
         &mut self,
-        root_agent_id: super::super::AgentId,
+        root_agent_id: super::super::ThreadId,
         request: AgentInteractionContinuationRequest,
     ) -> AgentRuntimeResult<()> {
         if self.state.snapshot.lifecycle != AgentLifecycleState::Active {

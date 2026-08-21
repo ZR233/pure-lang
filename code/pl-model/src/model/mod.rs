@@ -7,8 +7,8 @@ pub(crate) mod info;
 mod parameter;
 
 pub use capabilities::{
-    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ProviderCapabilities,
-    ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
+    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ReasoningInterleaved,
+    ReasoningInterleavedField, ToolCapabilities,
 };
 pub use catalog::{
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,

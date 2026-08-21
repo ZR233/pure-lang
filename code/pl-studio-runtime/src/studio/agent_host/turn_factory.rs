@@ -17,8 +17,8 @@ use pl_core::tool::{
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
     CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
-    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
-    plan_web_search,
+    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest,
+    load_workspace_instruction_documents, plan_web_search,
 };
 
 use crate::config::ConfigRuntime;
@@ -140,8 +140,14 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .await
             .map_err(anyhow_error)?;
         let workspace_root = workspace.root().to_path_buf();
-        let workspace_instructions =
-            load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
+        let workspace_instructions = load_workspace_instruction_documents(
+            &workspace_root,
+            &workspace_root,
+            config.instructions.project_doc_max_bytes,
+            &config.instructions.project_doc_fallback_filenames,
+        )
+        .map_err(anyhow_error)?
+        .content();
         let executor_handoff = if mode == StudioMode::Task
             && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
@@ -555,7 +561,7 @@ fn interaction_emitter(
             let emitted_at = interaction.updated_at;
             runtime
                 .record_thread_facts(
-                    pl_core::AgentId::new(agent_path.clone())?,
+                    pl_core::ThreadId::new(agent_path.clone())?,
                     pl_core::ThreadId::new(thread_id)?,
                     vec![pl_core::ThreadNotificationFact::durable(
                         emitted_at,
@@ -587,7 +593,7 @@ fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<Su
     })
 }
 
-fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRunRecord) -> Result<()> {
+fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRun) -> Result<()> {
     if run.is_stop_requested() {
         return Err(turn_error("task is quiescing; no new turn may start"));
     }
@@ -602,8 +608,8 @@ fn anyhow_error(error: impl std::fmt::Display) -> PureError {
 mod tests {
     use super::*;
     use crate::studio::task_coordinator::{
-        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskGitFingerprint,
-        TaskRunRecord, TaskRunState, TaskStopOrigin, TaskStopReason, TaskStopRequest,
+        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskGitFingerprint, TaskRun,
+        TaskRunState, TaskStopOrigin, TaskStopReason, TaskStopRequest,
     };
 
     #[test]
@@ -668,8 +674,8 @@ mod tests {
         );
     }
 
-    fn stopped_run() -> TaskRunRecord {
-        TaskRunRecord {
+    fn stopped_run() -> TaskRun {
+        TaskRun {
             context: TaskContext {
                 id: "task-run".to_string(),
                 root_thread_id: "session".to_string(),

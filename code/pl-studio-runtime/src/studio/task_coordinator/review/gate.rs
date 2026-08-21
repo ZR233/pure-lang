@@ -4,15 +4,14 @@ use super::super::git::{
     ensure_no_git_operation, inspect_repository, is_ancestor, resolve_tree_oid,
 };
 use super::super::{
-    MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunRecord,
-    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus,
-    WorkUnitRecord, WorkUnitStatus,
+    MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRun, ThreadExecutionStatus,
+    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitStatus,
 };
 use crate::StudioIntegratedReviewGate;
 
 pub(crate) async fn integrated_review_gate(
-    run: &TaskRunRecord,
-    work_units: &[WorkUnitRecord],
+    run: &TaskRun,
+    work_units: &[WorkUnit],
     completions: &[WorkCompletionRecord],
     merges: &[MergeRecord],
     reviews: &[ReviewRoundRecord],
@@ -60,7 +59,7 @@ pub(crate) async fn integrated_review_gate(
 }
 
 async fn prove_single_executor_equivalence(
-    run: &TaskRunRecord,
+    run: &TaskRun,
     reviews: &[ReviewRoundRecord],
     candidate: &SingleExecutorCandidate<'_>,
 ) -> Result<()> {
@@ -130,13 +129,13 @@ async fn prove_single_executor_equivalence(
 }
 
 struct SingleExecutorCandidate<'a> {
-    work_unit: &'a WorkUnitRecord,
+    work_unit: &'a WorkUnit,
     completion: &'a WorkCompletionRecord,
     merge: &'a MergeRecord,
 }
 
 fn single_executor_candidate<'a>(
-    work_units: &'a [WorkUnitRecord],
+    work_units: &'a [WorkUnit],
     completions: &'a [WorkCompletionRecord],
     merges: &'a [MergeRecord],
     reviews: &[ReviewRoundRecord],

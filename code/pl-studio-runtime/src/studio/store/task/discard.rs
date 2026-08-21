@@ -8,7 +8,8 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     ExecutorCloseDisposition, ExecutorContinuationState, TaskCommand, TaskRunStateKind,
-    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitState,
+    WorkUnitStatus,
 };
 
 struct ExecutorCloseScope {
@@ -62,11 +63,9 @@ impl StudioStore {
                 .await?;
             for work_unit in work_units {
                 let state = work_unit_state(&work_unit)?;
-                let status = state.status();
-                let execution = state.execution_status();
-                let mut progress = state.into_progress();
+                let mut progress = state.clone().into_progress();
                 progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-                update_work_unit_state(&tx, work_unit, status, execution, progress).await?;
+                update_work_unit_state(&tx, work_unit, state.with_progress(progress)).await?;
             }
             entities::branch_lease::Entity::delete_many()
                 .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -95,18 +94,19 @@ impl StudioStore {
 
             let state = work_unit_state(&work_unit)?;
             let mut progress = state.clone().into_progress();
-            let mut status = state.status();
-            let mut execution = state.execution_status();
             if plan.cancel_active {
-                status = WorkUnitStatus::Cancelled;
-                execution = ThreadExecutionStatus::Cancelled;
                 progress.execution_error = Some("executor discarded by planner".to_string());
                 progress.continuation_state = ExecutorContinuationState::None;
                 progress.continuation_source_turn_id = None;
                 progress.continuation_revision = progress.continuation_revision.saturating_add(1);
             }
             progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-            update_work_unit_state(&tx, work_unit, status, execution, progress).await?;
+            let next_state = if plan.cancel_active {
+                WorkUnitState::cancelled(progress)
+            } else {
+                state.with_progress(progress)
+            };
+            update_work_unit_state(&tx, work_unit, next_state).await?;
 
             Ok(plan.disposition)
         }

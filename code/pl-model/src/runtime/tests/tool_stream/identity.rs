@@ -14,12 +14,12 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "call_0".to_string(),
                 call_id: Some("call_0".to_string()),
                 name: Some("exec".to_string()),
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     r#"{"command":"pwd"}"#.to_string(),
                 ),
             },
@@ -28,12 +28,12 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "call_0".to_string(),
                 call_id: Some("call_0".to_string()),
                 name: Some("exec".to_string()),
-                payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                payload: Some(ToolInputDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),
             },
@@ -79,7 +79,7 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputStarted {
+            ModelStreamEvent::ToolInputStarted {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: None,
@@ -92,12 +92,12 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: None,
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     r#"{"path":"Cargo.toml"}"#.to_string(),
                 ),
             },
@@ -106,7 +106,7 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
@@ -163,12 +163,12 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: String::new(),
                 call_id: Some("call_1".to_string()),
                 name: Some("read_file".to_string()),
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     r#"{"path":"Car"#.to_string(),
                 ),
             },
@@ -177,19 +177,19 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: None,
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(r#"go.toml"}"#.to_string()),
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(r#"go.toml"}"#.to_string()),
             },
             &event_tx,
         )
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
@@ -261,12 +261,12 @@ fn stream_trace_scope_rejects_similar_turn_prefix() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "turn-10-call".to_string(),
                 call_id: None,
                 name: Some("exec".to_string()),
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     r#"{"command":"pwd"}"#.to_string(),
                 ),
             },
@@ -275,7 +275,7 @@ fn stream_trace_scope_rejects_similar_turn_prefix() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "turn-10-call".to_string(),
                 call_id: None,
@@ -304,24 +304,24 @@ fn stream_accumulator_uses_responses_added_item_name_when_done_omits_name() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "ctc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: Some("apply_patch".to_string()),
-                payload_delta: ToolCallDeltaPayload::CustomInput(String::new()),
+                payload_delta: ToolInputDeltaPayload::CustomInput(String::new()),
             },
             &event_tx,
         )
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "ctc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: None,
-                payload_delta: ToolCallDeltaPayload::CustomInput(
+                payload_delta: ToolInputDeltaPayload::CustomInput(
                     "*** Begin Patch\n*** End Patch".to_string(),
                 ),
             },
@@ -330,12 +330,12 @@ fn stream_accumulator_uses_responses_added_item_name_when_done_omits_name() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "ctc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: None,
-                payload: Some(ToolCallDeltaPayload::CustomInput(
+                payload: Some(ToolInputDeltaPayload::CustomInput(
                     "*** Begin Patch\n*** End Patch".to_string(),
                 )),
             },

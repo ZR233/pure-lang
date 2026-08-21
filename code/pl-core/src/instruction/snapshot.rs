@@ -108,7 +108,6 @@ impl InstructionSnapshot {
                 &[
                     InstructionSourceKind::ProjectDoc,
                     InstructionSourceKind::WorkspaceFallback,
-                    InstructionSourceKind::ProfileWorkspace,
                 ],
             ),
         );

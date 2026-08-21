@@ -8,7 +8,7 @@ use crate::{CompletionTraceContext, ToolCallPayload};
 
 use super::*;
 
-fn single_event(event: &SseStreamEvent) -> Option<StreamEvent> {
+fn single_event(event: &SseStreamEvent) -> Option<ModelStreamEvent> {
     let events = process_sse_events(event);
     assert!(events.len() <= 1, "expected at most one event: {events:?}");
     events.into_iter().next()
@@ -31,7 +31,7 @@ fn process_chat_reasoning_content_as_thinking_delta() {
     }));
 
     match single_event(&event) {
-        Some(StreamEvent::ReasoningRawDelta { delta, .. }) => {
+        Some(ModelStreamEvent::ReasoningRawDelta { delta, .. }) => {
             assert_eq!(delta, "先比较整数位。");
         }
         other => panic!("unexpected event: {other:?}"),
@@ -45,7 +45,7 @@ fn process_chat_content_as_output_text_delta() {
     }));
 
     match single_event(&event) {
-        Some(StreamEvent::BlockDelta {
+        Some(ModelStreamEvent::BlockDelta {
             field: ModelBlockField::Text,
             delta,
             ..
@@ -65,10 +65,10 @@ fn process_chat_reasoning_and_content_from_same_chunk() {
 
     match process_sse_events(&event).as_slice() {
         [
-            StreamEvent::ReasoningRawDelta {
+            ModelStreamEvent::ReasoningRawDelta {
                 delta: reasoning, ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 field: ModelBlockField::Text,
                 delta: content,
                 ..
@@ -111,8 +111,8 @@ fn process_chat_completed_reads_deepseek_cached_token_aliases() {
 
         match process_sse_events(&event).as_slice() {
             [
-                StreamEvent::Usage(usage),
-                StreamEvent::Completed { response_id: None },
+                ModelStreamEvent::Usage(usage),
+                ModelStreamEvent::Completed { response_id: None },
             ] => {
                 assert_eq!(usage.cached_prompt_tokens, 35);
             }
@@ -145,8 +145,8 @@ fn process_chat_completed_reads_responses_style_token_usage() {
 
     match process_sse_events(&event).as_slice() {
         [
-            StreamEvent::Usage(usage),
-            StreamEvent::Completed { response_id: None },
+            ModelStreamEvent::Usage(usage),
+            ModelStreamEvent::Completed { response_id: None },
         ] => {
             assert_eq!(usage.prompt_tokens, 100);
             assert_eq!(usage.completion_tokens, 20);
@@ -180,8 +180,8 @@ fn process_responses_completed_reads_cache_write_tokens() {
 
     match process_sse_events(&event).as_slice() {
         [
-            StreamEvent::Usage(usage),
-            StreamEvent::Completed { response_id },
+            ModelStreamEvent::Usage(usage),
+            ModelStreamEvent::Completed { response_id },
         ] => {
             assert_eq!(usage.cached_prompt_tokens, 40);
             assert_eq!(usage.cache_write_tokens, 15);
@@ -209,7 +209,7 @@ fn process_responses_marks_summary_and_raw_reasoning() {
     .unwrap();
 
     match single_event(&summary) {
-        Some(StreamEvent::BlockDelta {
+        Some(ModelStreamEvent::BlockDelta {
             id,
             kind: ModelBlockKind::ReasoningSummary,
             field: ModelBlockField::ReasoningSummary,
@@ -223,7 +223,7 @@ fn process_responses_marks_summary_and_raw_reasoning() {
         other => panic!("unexpected event: {other:?}"),
     }
     match single_event(&raw) {
-        Some(StreamEvent::ReasoningRawDelta {
+        Some(ModelStreamEvent::ReasoningRawDelta {
             id,
             content_index,
             delta,
@@ -252,7 +252,7 @@ fn responses_decoder_preserves_native_text_phase_and_completed_text() {
     .unwrap();
     match decoder.decode(&commentary_added).as_slice() {
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id,
                 kind:
                     ModelBlockKind::Text {
@@ -274,7 +274,7 @@ fn responses_decoder_preserves_native_text_phase_and_completed_text() {
     .unwrap();
     match decoder.decode(&commentary_delta).as_slice() {
         [
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id,
                 kind:
                     ModelBlockKind::Text {
@@ -306,7 +306,7 @@ fn responses_decoder_preserves_native_text_phase_and_completed_text() {
     .unwrap();
     match decoder.decode(&final_done).as_slice() {
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind:
                     ModelBlockKind::Text {
@@ -314,7 +314,7 @@ fn responses_decoder_preserves_native_text_phase_and_completed_text() {
                     },
                 ..
             },
-            StreamEvent::BlockClosed {
+            ModelStreamEvent::BlockClosed {
                 id,
                 kind:
                     ModelBlockKind::Text {
@@ -346,7 +346,7 @@ fn responses_decoder_tracks_reasoning_summary_lifecycle() {
     .unwrap();
     match decoder.decode(&reasoning_added).as_slice() {
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id,
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
@@ -366,7 +366,7 @@ fn responses_decoder_tracks_reasoning_summary_lifecycle() {
     .unwrap();
     match decoder.decode(&summary_delta).as_slice() {
         [
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id,
                 kind: ModelBlockKind::ReasoningSummary,
                 field: ModelBlockField::ReasoningSummary,
@@ -393,13 +393,13 @@ fn responses_decoder_tracks_reasoning_summary_lifecycle() {
     .unwrap();
     match decoder.decode(&reasoning_done).as_slice() {
         [
-            StreamEvent::BlockClosed {
+            ModelStreamEvent::BlockClosed {
                 id,
                 kind: ModelBlockKind::ReasoningSummary,
                 authoritative_content: Some(ModelBlockContent::ReasoningSummary(summary)),
                 ..
             },
-            StreamEvent::ResponsesContextItem { item },
+            ModelStreamEvent::ResponsesContextItem { item },
         ] => {
             assert_eq!(id, "rs_1");
             assert_eq!(summary, &vec!["最终摘要。".to_string()]);
@@ -444,7 +444,7 @@ fn responses_decoder_closes_content_at_tool_boundary_once() {
     assert_eq!(boundary_events.len(), 3);
     assert!(boundary_events.iter().any(|event| matches!(
         event,
-        StreamEvent::BlockClosed {
+        ModelStreamEvent::BlockClosed {
             id,
             kind: ModelBlockKind::ReasoningSummary,
             ..
@@ -452,7 +452,7 @@ fn responses_decoder_closes_content_at_tool_boundary_once() {
     )));
     assert!(boundary_events.iter().any(|event| matches!(
         event,
-        StreamEvent::BlockClosed {
+        ModelStreamEvent::BlockClosed {
             id,
             kind:
                 ModelBlockKind::Text {
@@ -463,7 +463,7 @@ fn responses_decoder_closes_content_at_tool_boundary_once() {
     )));
     assert!(boundary_events.iter().any(|event| matches!(
         event,
-        StreamEvent::ToolInputStarted { item_id, .. } if item_id == "fc_1"
+        ModelStreamEvent::ToolInputStarted { item_id, .. } if item_id == "fc_1"
     )));
 
     let completed: SseStreamEvent = serde_json::from_value(serde_json::json!({
@@ -473,7 +473,7 @@ fn responses_decoder_closes_content_at_tool_boundary_once() {
     .unwrap();
     match decoder.decode(&completed).as_slice() {
         [
-            StreamEvent::Completed {
+            ModelStreamEvent::Completed {
                 response_id: Some(response_id),
             },
         ] => assert_eq!(response_id, "resp_1"),
@@ -495,12 +495,12 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
     assert!(matches!(
         first_reasoning.as_slice(),
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id: delta_id,
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
@@ -518,7 +518,7 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
     assert!(matches!(
         first_text.as_slice(),
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind:
                     ModelBlockKind::Text {
@@ -526,7 +526,7 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
                     },
                 ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id: delta_id,
                 kind:
                     ModelBlockKind::Text {
@@ -553,12 +553,12 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
     assert!(matches!(
         second_reasoning.as_slice(),
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id: delta_id,
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
@@ -570,7 +570,7 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
     assert!(matches!(
         second_text.as_slice(),
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind:
                     ModelBlockKind::Text {
@@ -578,7 +578,7 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
                     },
                 ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id: delta_id,
                 kind:
                     ModelBlockKind::Text {
@@ -603,7 +603,7 @@ fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
     assert!(matches!(
         first_text.as_slice(),
         [
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind:
                     ModelBlockKind::Text {
@@ -611,7 +611,7 @@ fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
                     },
                 ..
             },
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id: delta_id,
                 kind:
                     ModelBlockKind::Text {
@@ -637,7 +637,7 @@ fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
     assert!(matches!(
         channel_boundary.as_slice(),
         [
-            StreamEvent::BlockClosed {
+            ModelStreamEvent::BlockClosed {
                 id: closed_id,
                 kind:
                     ModelBlockKind::Text {
@@ -645,7 +645,7 @@ fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
                     },
                 ..
             },
-            StreamEvent::BlockOpened {
+            ModelStreamEvent::BlockOpened {
                 id: opened_id,
                 kind:
                     ModelBlockKind::Text {
@@ -664,7 +664,7 @@ fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
     .unwrap();
     match decoder.decode(&commentary_delta).as_slice() {
         [
-            StreamEvent::BlockDelta {
+            ModelStreamEvent::BlockDelta {
                 id,
                 kind:
                     ModelBlockKind::Text {
@@ -692,10 +692,10 @@ fn process_responses_custom_tool_delta() {
     .unwrap();
 
     match single_event(&event) {
-        Some(StreamEvent::ToolInputDelta {
+        Some(ModelStreamEvent::ToolInputDelta {
             item_id,
             call_id,
-            payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+            payload_delta: ToolInputDeltaPayload::CustomInput(delta),
             ..
         }) => {
             assert_eq!(item_id, "ctc_1");
@@ -721,11 +721,11 @@ fn process_chat_custom_tool_delta() {
     }));
 
     match single_event(&event) {
-        Some(StreamEvent::ToolInputDelta {
+        Some(ModelStreamEvent::ToolInputDelta {
             stream_id,
             item_id,
             name,
-            payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+            payload_delta: ToolInputDeltaPayload::CustomInput(delta),
             ..
         }) => {
             assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
@@ -749,11 +749,11 @@ fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
     }));
 
     match single_event(&event) {
-        Some(StreamEvent::ToolInputDelta {
+        Some(ModelStreamEvent::ToolInputDelta {
             stream_id,
             item_id,
             name,
-            payload_delta: ToolCallDeltaPayload::FunctionArguments(delta),
+            payload_delta: ToolInputDeltaPayload::FunctionArguments(delta),
             ..
         }) => {
             assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
@@ -831,7 +831,7 @@ fn process_responses_output_item_added_captures_tool_name() {
     .unwrap();
 
     match single_event(&event) {
-        Some(StreamEvent::ToolInputStarted {
+        Some(ModelStreamEvent::ToolInputStarted {
             item_id,
             call_id,
             name,
@@ -1004,7 +1004,7 @@ fn responses_id_only_delta_populates_call_id() {
 
     assert!(matches!(
         single_event(&event),
-        Some(StreamEvent::ToolInputDelta { item_id, call_id: Some(call_id), .. })
+        Some(ModelStreamEvent::ToolInputDelta { item_id, call_id: Some(call_id), .. })
             if item_id == "fc_1" && call_id == "fc_1"
     ));
 }

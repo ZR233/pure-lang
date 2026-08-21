@@ -190,8 +190,7 @@ fn profile_can_override_base_and_add_context_blocks() {
     let profile = InstructionProfile::new()
         .with_base_system_prompt("profile base")
         .with_developer_block("runtime", "profile developer")
-        .with_user_context_block("host", "profile user")
-        .with_workspace_instructions("profile workspace");
+        .with_user_context_block("host", "profile user");
 
     let snapshot = InstructionAssembler::assemble_with_profile(
         InstructionAssemblyRequest {
@@ -202,7 +201,7 @@ fn profile_can_override_base_and_add_context_blocks() {
             model: &ModelInfo::fallback("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
-            workspace_instructions: None,
+            workspace_instructions: Some("workspace"),
             subagent_constraint: None,
         },
         &profile,
@@ -234,8 +233,8 @@ fn profile_can_override_base_and_add_context_blocks() {
             .map(|block| block.source.kind)
             .collect::<Vec<_>>(),
         vec![
+            InstructionSourceKind::WorkspaceFallback,
             InstructionSourceKind::ProfileUser,
-            InstructionSourceKind::ProfileWorkspace
         ]
     );
     fs::remove_dir_all(dir).unwrap();

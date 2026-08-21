@@ -13,7 +13,7 @@ use serde::Deserialize;
 use self::git::*;
 use super::git::{ensure_no_git_operation, fingerprint_repository, inspect_repository};
 use super::{
-    BranchLeaseRecord, DesignFinalizeOutput, TaskCoordinator, TaskGitFingerprint, TaskRunRecord,
+    BranchLeaseRecord, DesignFinalizeOutput, TaskCoordinator, TaskGitFingerprint, TaskRun,
     TaskRunStateKind,
 };
 use crate::ToolEffect;
@@ -199,7 +199,7 @@ impl TaskCoordinator {
 
     async fn finalize_clean_design(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         summary: &str,
         fingerprint: &TaskGitFingerprint,
     ) -> Result<DesignFinalizeOutput> {
@@ -238,7 +238,7 @@ impl TaskCoordinator {
 
     async fn finalize_design_draft(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         summary: &str,
         changed_files: Vec<String>,
         draft_fingerprint: TaskGitFingerprint,
@@ -366,7 +366,7 @@ impl TaskCoordinator {
         &self,
         root_thread_id: &str,
         caller_workspace: &Path,
-    ) -> Result<(TaskRunRecord, BranchLeaseRecord)> {
+    ) -> Result<(TaskRun, BranchLeaseRecord)> {
         let run = self
             .store
             .read_active_task_run_for_root_thread(root_thread_id)
@@ -383,7 +383,7 @@ impl TaskCoordinator {
 
     async fn validate_mutation_snapshot(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         lease: &BranchLeaseRecord,
         caller_workspace: &Path,
     ) -> Result<()> {
@@ -411,7 +411,7 @@ impl TaskCoordinator {
 
     async fn validate_captured_branch_commit(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         commit: &str,
         previous_head: &str,
         expected_paths: &[String],
@@ -435,7 +435,7 @@ impl TaskCoordinator {
 
     async fn ensure_exact_commit_is_clean(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         commit: &str,
         reason: &str,
     ) -> Result<()> {
@@ -452,7 +452,7 @@ impl TaskCoordinator {
 
     async fn verify_durable_exact_scope(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         commit: &str,
         operation: &str,
     ) -> Result<()> {
@@ -478,7 +478,7 @@ impl TaskCoordinator {
 
     async fn restore_draft_index_or_block(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         expected_fingerprint: &TaskGitFingerprint,
         original_index_tree: &str,
         reason: &str,
@@ -514,7 +514,7 @@ impl TaskCoordinator {
 
     async fn compensate_draft_commit_or_block(
         &self,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         expected_fingerprint: &TaskGitFingerprint,
         original_index_tree: &str,
         commit: &str,
@@ -556,7 +556,7 @@ impl TaskCoordinator {
     }
 }
 
-fn exact_run_scope<'a>(run: &'a TaskRunRecord, commit: &'a str) -> ExactRepositoryScope<'a> {
+fn exact_run_scope<'a>(run: &'a TaskRun, commit: &'a str) -> ExactRepositoryScope<'a> {
     ExactRepositoryScope {
         workspace_root: Path::new(&run.workspace_root),
         git_common_dir: Path::new(&run.git_common_dir),

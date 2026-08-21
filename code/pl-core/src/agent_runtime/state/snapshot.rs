@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
 
-use crate::agent_runtime::{AgentId, ThreadId, TurnId};
+use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::lifecycle::*;
 
@@ -14,8 +14,8 @@ use super::lifecycle::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentIdentity {
-    pub id: AgentId,
-    pub parent_id: Option<AgentId>,
+    pub id: ThreadId,
+    pub parent_id: Option<ThreadId>,
     pub role: AgentRoleId,
     pub depth: u32,
 }

@@ -207,7 +207,7 @@ async fn model_transport_matrix_selects_http_endpoint_per_model() {
     )
     .await;
     let mimo = capture_model_http_request(
-        ProviderEndpoint::openai_compatible_chat("MiMo", "https://api.xiaomimimo.com/v1"),
+        ProviderEndpoint::compatible("MiMo", "https://api.xiaomimimo.com/v1"),
         find_model("mimo-v2.5"),
         chat_success_sse("mimo ok"),
     )
@@ -1241,11 +1241,8 @@ async fn openai_compatible_chat_provider_uses_chat_endpoint() {
     let (base_url, handle) = serve_sse_once(sse_body).await;
     let mut model = ModelInfo::fallback("mimo-chat");
     model.context_window = Some(128_000);
-    let provider = ModelRuntime::new(
-        ProviderEndpoint::openai_compatible_chat("MiMo", base_url),
-        model,
-    )
-    .unwrap();
+    let provider =
+        ModelRuntime::new(ProviderEndpoint::compatible("MiMo", base_url), model).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
 
     let response = provider

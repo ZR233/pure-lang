@@ -10,7 +10,7 @@ use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, ExecutorContinuationRequest,
     ExecutorContinuationState, MAX_EXECUTOR_BUDGET_SLICES, TaskRunStateKind, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitStatus,
+    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
 };
 use pl_core::{AgentTurnOutcome, MailboxBudgetAction, TurnOutcomeKind};
 use pl_protocol::BudgetLimitKind;
@@ -157,14 +157,8 @@ impl StudioStore {
             let mut progress = work_unit_state.into_progress();
             progress.execution_summary = Some(verification_summary.to_string());
             progress.execution_error = None;
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::ReadyForReview,
-                ThreadExecutionStatus::Completed,
-                progress,
-            )
-            .await?;
+            update_work_unit_state(&tx, work_unit, WorkUnitState::ready_for_review(progress))
+                .await?;
             work_completion_record(completion)
         }
         .await;
@@ -221,14 +215,7 @@ impl StudioStore {
                 progress.budget_slice_count = 1;
                 progress.continuation_source_turn_id = None;
             }
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::Running,
-                ThreadExecutionStatus::Running,
-                progress,
-            )
-            .await?;
+            update_work_unit_state(&tx, work_unit, WorkUnitState::running(progress)).await?;
             Ok(())
         }
         .await;
@@ -294,14 +281,8 @@ impl StudioStore {
                     progress.budget_slice_count = next_slice;
                     progress.continuation_state = ExecutorContinuationState::PendingStart;
                     progress.execution_error = None;
-                    update_work_unit_state(
-                        &tx,
-                        work_unit,
-                        WorkUnitStatus::Running,
-                        ThreadExecutionStatus::BudgetLimited,
-                        progress,
-                    )
-                    .await?;
+                    update_work_unit_state(&tx, work_unit, WorkUnitState::budget_limited(progress))
+                        .await?;
                     return Ok(Some(ExecutorContinuationRequest {
                         agent_id: agent_id.to_string(),
                         work_unit_id,
@@ -325,22 +306,10 @@ impl StudioStore {
                             })
                         })
                     });
-                update_work_unit_state(
-                    &tx,
-                    work_unit,
-                    WorkUnitStatus::NeedsAttention,
-                    ThreadExecutionStatus::BudgetLimited,
-                    progress,
-                )
-                .await?;
+                update_work_unit_state(&tx, work_unit, WorkUnitState::needs_attention(progress))
+                    .await?;
                 return Ok(None);
             }
-            let status = match outcome.kind {
-                TurnOutcomeKind::Completed => ThreadExecutionStatus::Completed,
-                TurnOutcomeKind::Failed => ThreadExecutionStatus::Failed,
-                TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
-                TurnOutcomeKind::BudgetLimited => unreachable!("handled above"),
-            };
             let mut progress = state.into_progress();
             progress.execution_error = outcome.reason.clone().or_else(|| {
                 (outcome.kind == TurnOutcomeKind::Completed).then(|| {
@@ -357,14 +326,13 @@ impl StudioStore {
             } else {
                 progress.continuation_state = ExecutorContinuationState::None;
             }
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::AwaitingCompletion,
-                status,
-                progress,
-            )
-            .await?;
+            let next_state = match outcome.kind {
+                TurnOutcomeKind::Completed => WorkUnitState::awaiting_completed(progress),
+                TurnOutcomeKind::Failed => WorkUnitState::awaiting_failed(progress),
+                TurnOutcomeKind::Cancelled => WorkUnitState::awaiting_cancelled(progress),
+                TurnOutcomeKind::BudgetLimited => unreachable!("handled above"),
+            };
+            update_work_unit_state(&tx, work_unit, next_state).await?;
             Ok(None)
         }
         .await;
@@ -394,14 +362,8 @@ impl StudioStore {
             progress.continuation_state = ExecutorContinuationState::NeedsAttention;
             progress.continuation_revision = progress.continuation_revision.saturating_add(1);
             progress.execution_error = Some(error.to_string());
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::NeedsAttention,
-                ThreadExecutionStatus::BudgetLimited,
-                progress,
-            )
-            .await?;
+            update_work_unit_state(&tx, work_unit, WorkUnitState::needs_attention(progress))
+                .await?;
             Ok(())
         }
         .await;

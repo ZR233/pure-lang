@@ -17,7 +17,7 @@ use super::{
     task_coordinator::{
         AwaitingExecution, BlockedRecovery, DesignProgress, ExecutorContinuationState,
         FailedReviewerState, MergeRecord, PendingReviewerState, ReviewRoundRecord,
-        ReviewRoundState, ReviewTarget, RunningExecution, TaskRunRecord, TaskRunState,
+        ReviewRoundState, ReviewTarget, RunningExecution, TaskRun, TaskRunState,
         TaskWorktreeDisposition, WorkCompletionRecord, WorkUnitProgress, WorkUnitState,
     },
 };
@@ -100,7 +100,7 @@ pub(crate) async fn load_task_runtime(
 }
 
 fn studio_task_runtime(
-    run: TaskRunRecord,
+    run: TaskRun,
     work_units: Vec<StudioTaskWorkUnitRuntime>,
     completions: Vec<WorkCompletionRecord>,
     merges: Vec<MergeRecord>,
@@ -228,7 +228,7 @@ fn studio_task_runtime(
     })
 }
 
-fn studio_task_state(run: &TaskRunRecord) -> Result<StudioTaskState> {
+fn studio_task_state(run: &TaskRun) -> Result<StudioTaskState> {
     let data = StudioTaskStateData {
         generation: run.generation(),
         status_message: run.status_message().map(str::to_string),

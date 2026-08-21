@@ -14,13 +14,12 @@ use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
     ExecutorContinuationRequest, ExecutorContinuationState, TASK_EXECUTOR_HANDOFF_SECTION_ID,
-    TaskExecutorHandoff, ThreadExecutionStatus, WorkUnitContext, WorkUnitProgress, WorkUnitRecord,
-    WorkUnitState, WorkUnitStatus, decode_work_unit_state,
+    TaskExecutorHandoff, WorkUnit, WorkUnitContext, WorkUnitState, decode_work_unit_state,
 };
 
 impl StudioStore {
     #[cfg(test)]
-    pub(crate) async fn create_work_unit(&self, input: CreateWorkUnit) -> Result<WorkUnitRecord> {
+    pub(crate) async fn create_work_unit(&self, input: CreateWorkUnit) -> Result<WorkUnit> {
         let now = unix_seconds();
         work_unit_record(
             entities::work_unit::ActiveModel {
@@ -49,16 +48,13 @@ impl StudioStore {
     pub(crate) async fn update_work_unit(
         &self,
         work_unit_id: &str,
-        status: WorkUnitStatus,
+        state: WorkUnitState,
         executor_thread_id: Option<String>,
-    ) -> Result<WorkUnitRecord> {
+    ) -> Result<WorkUnit> {
         let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
             .one(&self.db)
             .await?
             .context("work unit not found")?;
-        let state = work_unit_state(&model)?;
-        let execution = default_execution_status(status);
-        let state = WorkUnitState::from_parts(status, execution, state.into_progress())?;
         let next_revision = model
             .revision
             .checked_add(1)
@@ -99,23 +95,16 @@ impl StudioStore {
     pub(crate) async fn update_work_unit_state_for_test(
         &self,
         work_unit_id: &str,
-        status: WorkUnitStatus,
-        execution: ThreadExecutionStatus,
-        progress: WorkUnitProgress,
-    ) -> Result<WorkUnitRecord> {
+        state: WorkUnitState,
+    ) -> Result<WorkUnit> {
         let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
             .one(&self.db)
             .await?
             .context("work unit not found")?;
-        work_unit_record(
-            update_work_unit_state(&self.db, model, status, execution, progress).await?,
-        )
+        work_unit_record(update_work_unit_state(&self.db, model, state).await?)
     }
 
-    pub(crate) async fn read_work_unit(
-        &self,
-        work_unit_id: &str,
-    ) -> Result<Option<WorkUnitRecord>> {
+    pub(crate) async fn read_work_unit(&self, work_unit_id: &str) -> Result<Option<WorkUnit>> {
         entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
             .one(&self.db)
             .await?
@@ -126,7 +115,7 @@ impl StudioStore {
     pub(crate) async fn read_work_unit_handoff(
         &self,
         work_unit_id: &str,
-    ) -> Result<Option<(WorkUnitRecord, TaskExecutorHandoff)>> {
+    ) -> Result<Option<(WorkUnit, TaskExecutorHandoff)>> {
         let Some(work_unit) = self.read_work_unit(work_unit_id).await? else {
             return Ok(None);
         };
@@ -160,7 +149,7 @@ impl StudioStore {
         Ok(Some((work_unit, handoff)))
     }
 
-    pub(crate) async fn list_work_units(&self, task_run_id: &str) -> Result<Vec<WorkUnitRecord>> {
+    pub(crate) async fn list_work_units(&self, task_run_id: &str) -> Result<Vec<WorkUnit>> {
         entities::work_unit::Entity::find()
             .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
             .order_by_asc(entities::work_unit::Column::CreatedAt)
@@ -175,7 +164,7 @@ impl StudioStore {
     pub(crate) async fn find_work_unit_for_executor(
         &self,
         executor_agent_id: &str,
-    ) -> Result<Option<WorkUnitRecord>> {
+    ) -> Result<Option<WorkUnit>> {
         let work_units = entities::work_unit::Entity::find()
             .filter(entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()))
             .all(&self.db)
@@ -204,9 +193,7 @@ impl StudioStore {
         update_work_unit_state(
             &self.db,
             work_unit,
-            WorkUnitStatus::NeedsAttention,
-            ThreadExecutionStatus::BudgetLimited,
-            progress,
+            WorkUnitState::needs_attention(progress),
         )
         .await?;
         Ok(())
@@ -277,9 +264,9 @@ impl StudioStore {
     }
 }
 
-pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
+pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnit> {
     let state = work_unit_state(&model)?;
-    Ok(WorkUnitRecord {
+    Ok(WorkUnit {
         context: WorkUnitContext {
             id: model.id,
             task_run_id: model.task_run_id,
@@ -314,14 +301,11 @@ pub(super) fn work_unit_state(model: &entities::work_unit::Model) -> Result<Work
 pub(super) async fn update_work_unit_state<C>(
     connection: &C,
     model: entities::work_unit::Model,
-    status: WorkUnitStatus,
-    execution: ThreadExecutionStatus,
-    progress: WorkUnitProgress,
+    next_state: WorkUnitState,
 ) -> Result<entities::work_unit::Model>
 where
     C: ConnectionTrait,
 {
-    let next_state = WorkUnitState::from_parts(status, execution, progress)?;
     let next_revision = model
         .revision
         .checked_add(1)
@@ -350,22 +334,4 @@ where
         .one(connection)
         .await?
         .context("WorkUnit disappeared after state update")
-}
-
-#[cfg(test)]
-fn default_execution_status(status: WorkUnitStatus) -> ThreadExecutionStatus {
-    match status {
-        WorkUnitStatus::Pending => ThreadExecutionStatus::Queued,
-        WorkUnitStatus::Running => ThreadExecutionStatus::Running,
-        WorkUnitStatus::AwaitingCompletion
-        | WorkUnitStatus::ReadyForReview
-        | WorkUnitStatus::Reviewing
-        | WorkUnitStatus::ChangesRequested
-        | WorkUnitStatus::Approved
-        | WorkUnitStatus::Merged
-        | WorkUnitStatus::NoDelivery => ThreadExecutionStatus::Completed,
-        WorkUnitStatus::NeedsAttention => ThreadExecutionStatus::BudgetLimited,
-        WorkUnitStatus::Failed => ThreadExecutionStatus::Failed,
-        WorkUnitStatus::Cancelled => ThreadExecutionStatus::Cancelled,
-    }
 }

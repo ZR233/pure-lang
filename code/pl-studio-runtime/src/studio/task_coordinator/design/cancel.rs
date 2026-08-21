@@ -160,7 +160,7 @@ impl TaskCoordinator {
 
     async fn compensate_revert_or_block(
         &self,
-        run: &crate::studio::task_coordinator::TaskRunRecord,
+        run: &crate::studio::task_coordinator::TaskRun,
         revert_commit: &str,
         previous_head: &str,
         reason: &str,

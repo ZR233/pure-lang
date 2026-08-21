@@ -290,7 +290,7 @@ mod tests {
             .uri("/api/v1/projects")
             .header("host", "localhost:1421")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"path":"/tmp/project","legacy":true}"#))
+            .body(Body::from(r#"{"path":"/tmp/project","unknown":true}"#))
             .unwrap();
         let response = app.clone().oneshot(unknown_field).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

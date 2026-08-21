@@ -21,7 +21,7 @@ pub(in crate::studio) struct StudioAgentLifecycle {
 }
 
 pub(in crate::studio) struct StudioSpawnLease {
-    agent_id: pl_core::AgentId,
+    agent_id: pl_core::ThreadId,
     resource: StudioAgentResource,
 }
 

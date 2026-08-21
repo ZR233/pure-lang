@@ -49,13 +49,11 @@ fn openai_provider_with_secret() -> ProviderConfig {
 }
 
 fn custom_responses_provider(model: ModelInfo, bearer_token: Option<&str>) -> ProviderConfig {
-    let mut info = ProviderEndpoint::responses_compatible(
-        "Responses-compatible",
-        "https://responses.example/v1",
-    );
+    let mut info =
+        ProviderEndpoint::compatible("Responses-compatible", "https://responses.example/v1");
     info.bearer_token = bearer_token.map(str::to_string);
     info.service_capabilities = ProviderServiceCapabilities::openai_web_search();
-    ProviderConfig::from_endpoint(info, vec![model])
+    ProviderConfig::from_explicit_models(info, vec![model])
 }
 
 #[test]
@@ -92,13 +90,12 @@ fn explicit_override_can_disable_preset_capabilities() {
 
 #[test]
 fn custom_capability_uses_same_standalone_planner() {
-    let mut info =
-        ProviderEndpoint::responses_compatible("Future provider", "https://future.example/v1");
+    let mut info = ProviderEndpoint::compatible("Future provider", "https://future.example/v1");
     info.bearer_token = Some("secret".to_string());
     info.service_capabilities = ProviderServiceCapabilities::openai_web_search();
     let mut model = ModelInfo::fallback("future-model");
     model.capabilities.tools.function_calling = true;
-    let provider = ProviderConfig::from_endpoint(info, vec![model.clone()]);
+    let provider = ProviderConfig::from_explicit_models(info, vec![model.clone()]);
     assert!(provider.preset.is_none());
     assert!(matches!(
         provider.catalog,
@@ -140,8 +137,8 @@ fn hosted_path_is_exclusive_when_function_tools_are_unavailable() {
 fn standalone_backend_can_be_selected_from_another_routed_provider() {
     let mut current_model = ModelInfo::fallback("current-model");
     current_model.capabilities.tools.function_calling = true;
-    let current = ProviderConfig::from_endpoint(
-        ProviderEndpoint::openai_compatible_chat("Current", "https://current.example/v1"),
+    let current = ProviderConfig::from_explicit_models(
+        ProviderEndpoint::compatible("Current", "https://current.example/v1"),
         vec![current_model.clone()],
     );
     let search = openai_provider_with_secret();

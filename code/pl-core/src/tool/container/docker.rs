@@ -7,8 +7,7 @@ use super::backend::{
     ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
     ContainerExecRequest,
 };
-use super::helpers::shell_quote;
-use crate::tool::shell::{ShellCommandTimeout, shell_command_with_timeout};
+use crate::tool::shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_word};
 
 /// 基于 Docker CLI 的通用容器后端。
 ///
@@ -98,7 +97,7 @@ impl ContainerBackend for DockerCliContainerBackend {
             &self.container_id,
             "/bin/sh",
             "-lc",
-            &format!("cat -- {}", shell_quote(&request.path)),
+            &format!("cat -- {}", shell_quote_word(&request.path)),
         ]);
         crate::process::configure_background_command(&mut command);
         let output = command.output().await.map_err(docker_error)?;
@@ -114,12 +113,12 @@ impl ContainerBackend for DockerCliContainerBackend {
     ) -> std::result::Result<(), Self::Error> {
         let parent = parent_dir(&request.path);
         let copy_command = if parent.is_empty() {
-            format!("cat > {}", shell_quote(&request.path))
+            format!("cat > {}", shell_quote_word(&request.path))
         } else {
             format!(
                 "mkdir -p {} && cat > {}",
-                shell_quote(&parent),
-                shell_quote(&request.path)
+                shell_quote_word(&parent),
+                shell_quote_word(&request.path)
             )
         };
         let mut command = Command::new(&self.binary);
@@ -296,8 +295,8 @@ mod tests {
             &script,
             format!(
                 "#!/bin/sh\n: > {}\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\" >> {}; done\nif [ \"$1\" = exec ]; then cat >/dev/null; printf hello; exit 0; fi\nif [ \"$1\" = cp ]; then printf tar; exit 0; fi\nexit 2\n",
-                shell_quote(&log.to_string_lossy()),
-                shell_quote(&log.to_string_lossy())
+                shell_quote_word(&log.to_string_lossy()),
+                shell_quote_word(&log.to_string_lossy())
             ),
         )
         .expect("script");

@@ -494,9 +494,6 @@ name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
-dependencies = [
- "serde_core",
-]
 
 [[package]]
 name = "block-buffer"
@@ -2649,6 +2646,7 @@ dependencies = [
  "lsp-types",
  "pretty_assertions",
  "process-wrap",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -2665,7 +2663,6 @@ name = "pl-model"
 version = "0.1.0"
 dependencies = [
  "async-openai",
- "bitflags 2.13.1",
  "futures",
  "pl-protocol",
  "pl-trace",
@@ -2752,23 +2749,18 @@ dependencies = [
  "fs4",
  "futures",
  "image",
- "include_dir",
  "keyring",
  "minisign-verify",
  "pl-core",
  "pl-lsp",
  "pl-model",
- "pl-output",
- "pl-patch",
  "pl-protocol",
- "pl-skill-core",
  "pl-trace",
  "pretty_assertions",
  "reqwest",
  "rmcp",
  "schemars",
  "sea-orm",
- "secrecy",
  "semver",
  "serde",
  "serde_json",
@@ -2780,7 +2772,6 @@ dependencies = [
  "toml",
  "tracing",
  "url",
- "which",
 ]
 
 [[package]]

@@ -188,7 +188,7 @@ impl ProviderEdit {
                         .and_then(|provider| provider.service_capabilities().ok())
                         .unwrap_or_default(),
                 };
-                let mut config = ProviderConfig::from_endpoint(info, custom_models);
+                let mut config = ProviderConfig::from_explicit_models(info, custom_models);
                 config.bearer_token_env =
                     current_custom.and_then(|provider| provider.bearer_token_env.clone());
                 config

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
 use super::spawn::{TaskExecutorBlueprint, verification_result_map};
 use super::{
-    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRunRecord,
+    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRun,
     ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
@@ -94,7 +94,7 @@ impl TaskCoordinator {
         thread_id: &str,
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
-        active_task_run: Option<&TaskRunRecord>,
+        active_task_run: Option<&TaskRun>,
     ) {
         if active_task_run.is_none() {
             return;
@@ -202,7 +202,7 @@ impl TaskCoordinator {
                         .await?;
                     if let Err(error) = runtime
                         .report_progress(
-                            pl_core::AgentId::new(subagent.id.clone())?,
+                            pl_core::ThreadId::new(subagent.id.clone())?,
                             AgentProgressStage::ReadyForReview,
                             format!(
                                 "completion revision {} is ready for delivery review",

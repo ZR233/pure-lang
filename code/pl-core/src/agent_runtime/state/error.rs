@@ -1,4 +1,4 @@
-use crate::agent_runtime::{AgentId, ThreadId, TurnId};
+use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::AgentLifecycleState;
 
@@ -6,18 +6,18 @@ use super::AgentLifecycleState;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AgentRuntimeError {
     #[error("agent not found: {0}")]
-    NotFound(AgentId),
+    NotFound(ThreadId),
     #[error("agent already exists: {0}")]
-    AlreadyExists(AgentId),
+    AlreadyExists(ThreadId),
     #[error("agent {0} is not active: {1:?}")]
-    NotActive(AgentId, AgentLifecycleState),
+    NotActive(ThreadId, AgentLifecycleState),
     #[error("agent has no active turn: {0}")]
-    NoActiveTurn(AgentId),
+    NoActiveTurn(ThreadId),
     #[error("active turn mismatch: expected {expected}, got {actual}")]
     TurnMismatch { expected: TurnId, actual: TurnId },
     #[error("agent {agent_id} canonical thread mismatch: expected {expected}, got {actual}")]
     ThreadMismatch {
-        agent_id: AgentId,
+        agent_id: ThreadId,
         expected: ThreadId,
         actual: ThreadId,
     },

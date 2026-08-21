@@ -5,7 +5,7 @@ use pl_protocol::PureError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::super::{AgentAccessPolicy, AgentId, AgentSnapshot, AgentTargetSelector};
+use super::super::{AgentAccessPolicy, AgentSnapshot, AgentTargetSelector, ThreadId};
 use super::{ForkTurns, TOOL_SPAWN_AGENT};
 use crate::{AgentSession, AgentSessionForkPolicy, ToolOutput};
 
@@ -28,7 +28,7 @@ pub(super) fn fork_session(
 
 pub(super) fn filter_visible(
     snapshots: &[AgentSnapshot],
-    caller: &AgentId,
+    caller: &ThreadId,
     selector: &AgentTargetSelector,
 ) -> Vec<AgentSnapshot> {
     match selector {
@@ -51,7 +51,7 @@ pub(super) fn filter_visible(
     }
 }
 
-pub(super) fn agent_path(id: &AgentId, snapshots: &[AgentSnapshot]) -> Vec<AgentId> {
+pub(super) fn agent_path(id: &ThreadId, snapshots: &[AgentSnapshot]) -> Vec<ThreadId> {
     let parents = parent_map(snapshots);
     let mut path = vec![id.clone()];
     let mut current = id.clone();
@@ -68,7 +68,7 @@ pub(super) fn agent_path(id: &AgentId, snapshots: &[AgentSnapshot]) -> Vec<Agent
     path
 }
 
-fn parent_map(snapshots: &[AgentSnapshot]) -> BTreeMap<AgentId, Option<AgentId>> {
+fn parent_map(snapshots: &[AgentSnapshot]) -> BTreeMap<ThreadId, Option<ThreadId>> {
     snapshots
         .iter()
         .map(|snapshot| {
@@ -80,7 +80,7 @@ fn parent_map(snapshots: &[AgentSnapshot]) -> BTreeMap<AgentId, Option<AgentId>>
         .collect()
 }
 
-fn root_id(id: &AgentId, parents: &BTreeMap<AgentId, Option<AgentId>>) -> AgentId {
+fn root_id(id: &ThreadId, parents: &BTreeMap<ThreadId, Option<ThreadId>>) -> ThreadId {
     let mut current = id.clone();
     let mut remaining = parents.len();
     while remaining > 0 {
@@ -284,8 +284,8 @@ pub(super) fn parse_input<T: for<'de> Deserialize<'de>>(
         .map_err(|error| tool_error(tool, format!("invalid input: {error}")))
 }
 
-pub(super) fn parse_agent_id(tool: &str, value: String) -> Result<AgentId, PureError> {
-    AgentId::new(value).map_err(|error| tool_error(tool, error.to_string()))
+pub(super) fn parse_agent_id(tool: &str, value: String) -> Result<ThreadId, PureError> {
+    ThreadId::new(value).map_err(|error| tool_error(tool, error.to_string()))
 }
 
 pub(super) fn json_output(value: Value) -> Result<ToolOutput, PureError> {

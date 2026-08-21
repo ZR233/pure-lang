@@ -99,23 +99,7 @@ impl ModelCapabilities {
         self.output.contains(&modality)
     }
 
-    pub fn with_provider_capabilities(
-        mut self,
-        provider: ProviderCapabilities,
-        native_custom_tools: bool,
-    ) -> Self {
-        if !provider.supports_parallel_tool_calls() {
-            self.tools.parallel_tool_calls = false;
-        }
-        if !provider.supports_function_calling() {
-            self.tools = ToolCapabilities::default();
-        }
-        if !provider.supports_vision() {
-            self.input
-                .retain(|modality| *modality != ModelModality::Image);
-            self.output
-                .retain(|modality| *modality != ModelModality::Image);
-        }
+    pub fn with_native_custom_tools(mut self, native_custom_tools: bool) -> Self {
         if !native_custom_tools {
             self.tools.custom_tools = false;
             self.tools.freeform_tools = false;
@@ -168,32 +152,4 @@ pub enum ReasoningInterleavedField {
     Reasoning,
     ReasoningContent,
     ReasoningDetails,
-}
-
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ProviderCapabilities: u32 {
-        const STREAMING             = 0b00000001;
-        const FUNCTION_CALLING      = 0b00000010;
-        const VISION                = 0b00000100;
-        const PARALLEL_TOOL_CALLS   = 0b00001000;
-    }
-}
-
-impl ProviderCapabilities {
-    pub fn supports_streaming(self) -> bool {
-        self.contains(Self::STREAMING)
-    }
-
-    pub fn supports_function_calling(self) -> bool {
-        self.contains(Self::FUNCTION_CALLING)
-    }
-
-    pub fn supports_parallel_tool_calls(self) -> bool {
-        self.contains(Self::PARALLEL_TOOL_CALLS)
-    }
-
-    pub fn supports_vision(self) -> bool {
-        self.contains(Self::VISION)
-    }
 }

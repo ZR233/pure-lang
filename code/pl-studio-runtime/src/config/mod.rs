@@ -32,7 +32,6 @@ pub use store::{ConfigPaths, ConfigStore};
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 14;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
-pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
 const DEFAULT_MODEL_ID: &str = "deepseek-v4-flash";
@@ -91,10 +90,6 @@ impl StudioRole {
     }
 }
 
-pub type StudioRuntimeConfig = RuntimeConfig;
-pub type StudioInstructionsConfig = InstructionsConfig;
-pub type StudioSkillsConfig = SkillsConfig;
-pub type StudioWebSearchConfig = WebSearchConfig;
 pub use pl_model::{WebSearchContextSize, WebSearchLocation, WebSearchMode};
 
 /// Studio 自有的 MCP 配置段。
@@ -158,13 +153,13 @@ pub struct StudioConfig {
     pub schema_version: u32,
     pub models: AgentModelConfig,
     #[serde(default)]
-    pub web_search: StudioWebSearchConfig,
+    pub web_search: WebSearchConfig,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
-    pub runtime: StudioRuntimeConfig,
+    pub runtime: RuntimeConfig,
     #[serde(default, skip_serializing_if = "InstructionsConfig::is_default")]
-    pub instructions: StudioInstructionsConfig,
+    pub instructions: InstructionsConfig,
     #[serde(default, skip_serializing_if = "SkillsConfig::is_default")]
-    pub skills: StudioSkillsConfig,
+    pub skills: SkillsConfig,
     #[serde(default)]
     pub mcp: StudioMcpConfig,
     #[serde(default, skip_serializing_if = "StudioLspConfig::is_default")]
@@ -192,9 +187,9 @@ impl StudioConfig {
                 )
             })
             .collect();
-        let skills = StudioSkillsConfig {
+        let skills = SkillsConfig {
             user_dir: STUDIO_USER_SKILLS_DIR.to_string(),
-            ..StudioSkillsConfig::default()
+            ..SkillsConfig::default()
         };
 
         Self {
@@ -203,9 +198,9 @@ impl StudioConfig {
                 providers: BTreeMap::from([(provider_id, provider)]),
                 routes,
             },
-            web_search: StudioWebSearchConfig::default(),
-            runtime: StudioRuntimeConfig::default(),
-            instructions: StudioInstructionsConfig::default(),
+            web_search: WebSearchConfig::default(),
+            runtime: RuntimeConfig::default(),
+            instructions: InstructionsConfig::default(),
             skills,
             mcp: StudioMcpConfig::default(),
             lsp: StudioLspConfig::default(),
@@ -293,9 +288,8 @@ mod tests {
         assert!(error.contains("schema version"));
     }
 
-    /// 旧 config（无 `[lsp]` 段）在 schema 14 下仍可加载与保存。
     #[test]
-    fn legacy_config_without_lsp_section_still_loads() {
+    fn default_lsp_section_can_be_omitted_from_current_config() {
         let mut config = StudioConfig::default_config();
         config.lsp = StudioLspConfig::default();
         let content = toml::to_string_pretty(&config).unwrap();

@@ -42,14 +42,12 @@ CPU 核心数作为无界默认并发会造成临时端口连接失败，并让�
 `127.0.0.1:0` 动态端口和有界异步等待。
 
 ```powershell
-cargo fmt
-cargo clippy -- -D warnings
-cargo test -p pl-protocol
-cargo test -p pl-trace
-cargo test -p pl-model
-cargo test -p pl-lsp
-cargo test -p pl-core
-cargo test -p pl-studio-bridge
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 cargo xtask verify-gui
-cargo xtask build-gui
 ```
+
+GUI 行为变更在上述确定性门禁之外执行 `cargo xtask verify-gui --integration`；Windows GUI 构建
+按需执行 `cargo xtask build-gui --check-generated`。`live-tests` 依赖外部服务和有效凭据，只能按
+crate 显式 opt-in，不进入默认 workspace 门禁。

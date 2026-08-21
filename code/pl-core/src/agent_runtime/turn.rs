@@ -446,7 +446,7 @@ pub struct AgentTurnCheckpoint {
 #[derive(Clone)]
 pub struct AgentTurnCheckpointHandle {
     runtime: AgentRuntimeHandle,
-    agent_id: super::AgentId,
+    agent_id: super::ThreadId,
     turn_id: TurnId,
     thread_id: ThreadId,
     sequence: Arc<AtomicU64>,
@@ -455,7 +455,7 @@ pub struct AgentTurnCheckpointHandle {
 impl AgentTurnCheckpointHandle {
     pub(crate) fn new(
         runtime: AgentRuntimeHandle,
-        agent_id: super::AgentId,
+        agent_id: super::ThreadId,
         turn_id: TurnId,
         thread_id: ThreadId,
     ) -> Self {

@@ -11,7 +11,7 @@ use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     MergeCleanupEvidence, MergeMethod, MergeRecord, RecordTaskMerge, ReviewVerdict, TaskCommand,
     TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
-    WorkCompletionStatus, WorkUnitStatus,
+    WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -112,14 +112,7 @@ impl StudioStore {
 
             let mut progress = work_unit_state.into_progress();
             progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-            update_work_unit_state(
-                &tx,
-                work_unit,
-                WorkUnitStatus::Merged,
-                ThreadExecutionStatus::Completed,
-                progress,
-            )
-            .await?;
+            update_work_unit_state(&tx, work_unit, WorkUnitState::merged(progress)).await?;
 
             let remaining_approved = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))

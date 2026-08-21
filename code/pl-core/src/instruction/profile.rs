@@ -10,7 +10,6 @@ pub struct InstructionProfile {
     pub(super) base_system_prompt: Option<String>,
     pub(super) developer_blocks: Vec<InstructionBlock>,
     pub(super) user_context_blocks: Vec<InstructionBlock>,
-    workspace_instructions: Option<String>,
 }
 
 impl InstructionProfile {
@@ -45,14 +44,5 @@ impl InstructionProfile {
             content: content.into(),
         });
         self
-    }
-
-    pub fn with_workspace_instructions(mut self, instructions: impl Into<String>) -> Self {
-        self.workspace_instructions = Some(instructions.into());
-        self
-    }
-
-    pub fn workspace_instructions(&self) -> Option<&str> {
-        self.workspace_instructions.as_deref()
     }
 }

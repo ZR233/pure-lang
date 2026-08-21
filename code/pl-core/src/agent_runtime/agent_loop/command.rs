@@ -9,12 +9,12 @@ pub(crate) enum AgentLoopCommand {
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
     },
     SubmitCurrentSession {
-        root_agent_id: AgentId,
+        root_agent_id: ThreadId,
         request: AgentCurrentSessionSubmitRequest,
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
     },
     SubmitInteractionContinuation {
-        root_agent_id: AgentId,
+        root_agent_id: ThreadId,
         request: Box<AgentInteractionContinuationRequest>,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },

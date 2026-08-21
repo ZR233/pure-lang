@@ -5,8 +5,8 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::watch;
 
 use super::{
-    ActiveKind, AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeError,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSnapshot,
+    ActiveKind, AgentActivityState, AgentLifecycleState, AgentRuntimeError, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeResult, AgentSnapshot, ThreadId,
 };
 
 /// Agent Directory 的 canonical 快照。
@@ -43,7 +43,7 @@ pub(crate) struct AgentDirectoryHandle {
 
 #[derive(Debug)]
 struct AgentDirectoryInner {
-    snapshots: RwLock<BTreeMap<AgentId, AgentSnapshot>>,
+    snapshots: RwLock<BTreeMap<ThreadId, AgentSnapshot>>,
     revision: AtomicU64,
     revision_sender: watch::Sender<u64>,
 }
@@ -90,7 +90,7 @@ impl AgentDirectoryHandle {
     }
 
     /// LRU 淘汰驻留 actor 时移除其 directory 条目；返回是否存在。
-    pub(crate) fn remove(&self, agent_id: &AgentId) -> bool {
+    pub(crate) fn remove(&self, agent_id: &ThreadId) -> bool {
         let removed = self
             .inner
             .snapshots
@@ -104,7 +104,7 @@ impl AgentDirectoryHandle {
         removed
     }
 
-    pub(crate) fn snapshot(&self, agent_id: &AgentId) -> AgentRuntimeResult<AgentSnapshot> {
+    pub(crate) fn snapshot(&self, agent_id: &ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
         self.inner
             .snapshots
             .read()

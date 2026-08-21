@@ -6,7 +6,6 @@ license.workspace = true
 
 [features]
 default = []
-typescript = []
 
 [dependencies]
 serde = { workspace = true }

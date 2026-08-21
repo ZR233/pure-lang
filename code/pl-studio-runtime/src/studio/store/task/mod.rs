@@ -22,7 +22,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     BlockedRecovery, BranchLeaseRecord, CreateTaskRun, DesignWorkspaceObservation, FinalizedDesign,
-    TaskCommand, TaskContext, TaskRunRecord, TaskRunState, TaskRunStateKind,
+    TaskCommand, TaskContext, TaskRun, TaskRunState, TaskRunStateKind,
     is_retryable_merge_recovery_message,
 };
 
@@ -30,10 +30,10 @@ impl StudioStore {
     pub(crate) async fn create_task_run_with_lease(
         &self,
         input: CreateTaskRun,
-    ) -> Result<(TaskRunRecord, BranchLeaseRecord)> {
+    ) -> Result<(TaskRun, BranchLeaseRecord)> {
         validate_create_task_run(&input)?;
         let Some(root_thread) = self.read_thread(&input.root_thread_id).await? else {
-            bail!("task root Thread not found or uses a legacy mode");
+            bail!("task root Thread not found");
         };
         if root_thread.mode != "task" {
             bail!("task coordinator requires a task mode root Thread");
@@ -81,7 +81,7 @@ impl StudioStore {
         ))
     }
 
-    pub(crate) async fn read_task_run(&self, task_run_id: &str) -> Result<Option<TaskRunRecord>> {
+    pub(crate) async fn read_task_run(&self, task_run_id: &str) -> Result<Option<TaskRun>> {
         entities::task_run::Entity::find_by_id(task_run_id.to_string())
             .one(&self.db)
             .await?
@@ -89,7 +89,7 @@ impl StudioStore {
             .transpose()
     }
 
-    pub(crate) async fn list_active_task_runs(&self) -> Result<Vec<TaskRunRecord>> {
+    pub(crate) async fn list_active_task_runs(&self) -> Result<Vec<TaskRun>> {
         let models = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::StateKind.is_not_in([
                 TaskRunStateKind::Completed.as_str(),
@@ -103,9 +103,7 @@ impl StudioStore {
         models.into_iter().map(task_run_record).collect()
     }
 
-    pub(crate) async fn list_retryable_blocked_merge_task_runs(
-        &self,
-    ) -> Result<Vec<TaskRunRecord>> {
+    pub(crate) async fn list_retryable_blocked_merge_task_runs(&self) -> Result<Vec<TaskRun>> {
         let models = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::StateKind.eq(TaskRunStateKind::Blocked.as_str()))
             .order_by_asc(entities::task_run::Column::CreatedAt)
@@ -128,7 +126,7 @@ impl StudioStore {
     pub(crate) async fn list_task_runs_for_project(
         &self,
         project_id: &str,
-    ) -> Result<Vec<TaskRunRecord>> {
+    ) -> Result<Vec<TaskRun>> {
         let thread_ids = self.list_project_thread_ids(project_id).await?;
         if thread_ids.is_empty() {
             return Ok(Vec::new());
@@ -145,7 +143,7 @@ impl StudioStore {
     pub(crate) async fn read_active_task_run_for_root_thread(
         &self,
         root_thread_id: &str,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.find_active_task_run_for_root_thread(root_thread_id)
             .await?
             .context("active task run not found for this root Thread")
@@ -154,7 +152,7 @@ impl StudioStore {
     pub(crate) async fn find_latest_task_run_for_root_thread(
         &self,
         root_thread_id: &str,
-    ) -> Result<Option<TaskRunRecord>> {
+    ) -> Result<Option<TaskRun>> {
         entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
             .order_by_desc(entities::task_run::Column::CreatedAt)
@@ -168,7 +166,7 @@ impl StudioStore {
     pub(crate) async fn find_active_task_run_for_root_thread(
         &self,
         root_thread_id: &str,
-    ) -> Result<Option<TaskRunRecord>> {
+    ) -> Result<Option<TaskRun>> {
         let models = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
             .filter(entities::task_run::Column::StateKind.is_not_in([
@@ -204,7 +202,7 @@ impl StudioStore {
         task_run_id: &str,
         next: TaskRunStateKind,
         status_message: Option<String>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.transition_task_run_after_read(task_run_id, next, status_message, None)
             .await
     }
@@ -216,7 +214,7 @@ impl StudioStore {
         next: TaskRunStateKind,
         status_message: Option<String>,
         read_barrier: Option<&tokio::sync::Barrier>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let current = entities::task_run::Entity::find_by_id(task_run_id.to_string())
             .one(&self.db)
             .await?
@@ -428,7 +426,7 @@ impl StudioStore {
 
 #[cfg(test)]
 fn test_transition_command(
-    run: &TaskRunRecord,
+    run: &TaskRun,
     next: TaskRunStateKind,
     status_message: Option<String>,
 ) -> Result<TaskCommand> {
@@ -513,7 +511,7 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRunRecord> {
+pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRun> {
     let state: TaskRunState =
         serde_json::from_str(&model.state_json).context("invalid stored task state JSON")?;
     if state.kind().as_str() != model.state_kind {
@@ -523,7 +521,7 @@ pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRu
             state.kind().as_str()
         );
     }
-    Ok(TaskRunRecord {
+    Ok(TaskRun {
         context: TaskContext {
             id: model.id,
             root_thread_id: model.root_thread_id,

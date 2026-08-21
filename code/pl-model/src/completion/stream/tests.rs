@@ -201,7 +201,7 @@ fn tagged_text_decoder_keeps_raw_reasoning_tags_hidden() {
 #[tokio::test]
 async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls() {
     let stream: CompletionEventStream =
-        futures::stream::pending::<Result<CompletionStreamEvent>>().boxed();
+        futures::stream::pending::<Result<ModelStreamEvent>>().boxed();
     let (event_tx, _) = tokio::sync::broadcast::channel(1);
 
     let error = collect_completion_event_stream_with_idle_timeout(

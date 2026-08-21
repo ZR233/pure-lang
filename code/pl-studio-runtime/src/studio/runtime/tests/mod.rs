@@ -165,7 +165,7 @@ fn test_config(base_url: String) -> StudioConfig {
         wire: std::collections::BTreeMap::new(),
     }];
     let info = ProviderEndpoint::openai(Some(base_url));
-    let provider = crate::ProviderConfig::from_endpoint(info, vec![model]);
+    let provider = crate::ProviderConfig::from_explicit_models(info, vec![model]);
     let provider_id = ProviderId::new("local").unwrap();
     let route = ModelRouteConfig {
         provider: provider_id.clone(),

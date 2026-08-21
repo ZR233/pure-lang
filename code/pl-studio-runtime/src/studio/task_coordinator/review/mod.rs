@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use super::git::{GitDiffSelection, changed_files_between_selected};
 use super::{
     BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
-    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRunRecord,
+    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRun,
     TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
-    WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
+    WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitStatus,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -65,7 +65,7 @@ struct RequestReviewOutput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskStatusOutput {
-    run: TaskRunRecord,
+    run: TaskRun,
     integrated_review_gate: StudioIntegratedReviewGate,
     work_units: Vec<ModelWorkUnit>,
     completions: Vec<ModelCompletion>,
@@ -485,7 +485,7 @@ impl TaskCoordinator {
         &self,
         thread_id: &str,
         guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
@@ -504,8 +504,8 @@ impl TaskCoordinator {
 
     async fn merge_candidates(
         &self,
-        run: &TaskRunRecord,
-        work_units: &[WorkUnitRecord],
+        run: &TaskRun,
+        work_units: &[WorkUnit],
         completions: &[WorkCompletionRecord],
         merges: &[MergeRecord],
         runtime: Option<&AgentRuntimeHandle>,
@@ -578,8 +578,8 @@ impl TaskCoordinator {
 
 impl ModelWorkUnit {
     pub(super) fn new(
-        run: &TaskRunRecord,
-        work_unit: &WorkUnitRecord,
+        run: &TaskRun,
+        work_unit: &WorkUnit,
         handoff: Option<&TaskExecutorHandoff>,
     ) -> Self {
         Self {
@@ -623,7 +623,7 @@ impl ModelWorkUnit {
 }
 
 impl ModelCompletion {
-    pub(super) fn new(run: &TaskRunRecord, completion: &WorkCompletionRecord) -> Self {
+    pub(super) fn new(run: &TaskRun, completion: &WorkCompletionRecord) -> Self {
         Self {
             id: completion.id.clone(),
             task_run_id: completion.task_run_id.clone(),
@@ -700,7 +700,7 @@ fn provider_call_id(value: Option<&str>, tool: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-pub(super) async fn validate_review_repository(run: &TaskRunRecord) -> Result<()> {
+pub(super) async fn validate_review_repository(run: &TaskRun) -> Result<()> {
     let snapshot = super::git::inspect_repository(&run.workspace_root, true).await?;
     let common = git_compatible_path(
         std::fs::canonicalize(&snapshot.git_common_dir).unwrap_or(snapshot.git_common_dir),

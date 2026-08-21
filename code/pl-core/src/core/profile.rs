@@ -15,70 +15,26 @@ use super::TurnEngine;
 /// 工具注册策略。
 ///
 /// 该枚举只描述 `pl-core` 是否应该自动注册默认工具。具体工具执行环境
-/// 仍由工具实现自身决定，宿主可以在 `HostProvided` 模式下注册自己的工具。
+/// 仍由工具实现自身决定；宿主工具始终通过显式注册表发布。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ToolProfile {
     #[default]
     Minimal,
     LocalWorkspace,
-    HostProvided,
-}
-
-/// workspace 运行边界配置。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WorkspaceProfile {
-    pub workspace: Option<AgentWorkspace>,
-    pub instructions: Option<String>,
-}
-
-impl WorkspaceProfile {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self {
-            workspace: Some(AgentWorkspace::local(root)),
-            instructions: None,
-        }
-    }
-
-    pub fn from_agent_workspace(workspace: AgentWorkspace) -> Self {
-        Self {
-            workspace: Some(workspace),
-            instructions: None,
-        }
-    }
-
-    pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
-        self.instructions = Some(instructions.into());
-        self
-    }
-}
-
-/// Core 运行选项。
-///
-/// 这些选项作为初始化级默认值使用；调用 `run_turn_with_options` 时仍可用
-/// turn 级 options 完整覆盖。
-#[derive(Debug, Clone, Default)]
-pub struct CoreRuntimeOptions {
-    pub default_turn_options: TurnOptions,
-}
-
-impl CoreRuntimeOptions {
-    pub fn with_turn_options(mut self, options: TurnOptions) -> Self {
-        self.default_turn_options = options;
-        self
-    }
 }
 
 /// `TurnEngine` 初始化 profile。
 ///
 /// 不同宿主通过该结构选择提示词、workspace 与工具注册策略。pure-studio
-/// 使用 `local_workspace`，服务端 smoke test 可使用默认 `minimal`，外部宿主
-/// 可使用 `host_provided` 后自行注册工具。
+/// 使用 `local_workspace`，服务端 smoke test 与显式注入工具的宿主使用默认
+/// `minimal`。
 #[derive(Debug, Clone, Default)]
 pub struct CoreRuntimeProfile {
     pub instruction_profile: Option<InstructionProfile>,
-    pub workspace_profile: WorkspaceProfile,
+    pub workspace: Option<AgentWorkspace>,
+    pub workspace_instructions: Option<String>,
     pub tool_profile: ToolProfile,
-    pub runtime_options: CoreRuntimeOptions,
+    pub default_turn_options: TurnOptions,
     pub context_compaction: ContextCompactionConfig,
 }
 
@@ -89,32 +45,24 @@ impl CoreRuntimeProfile {
 
     pub fn local_workspace(root: impl Into<PathBuf>) -> Self {
         Self {
-            workspace_profile: WorkspaceProfile::new(root),
+            workspace: Some(AgentWorkspace::local(root)),
             tool_profile: ToolProfile::LocalWorkspace,
-            instruction_profile: None,
-            runtime_options: CoreRuntimeOptions::default(),
-            context_compaction: ContextCompactionConfig::default(),
+            ..Self::default()
         }
     }
 
     pub fn local_agent_workspace(workspace: AgentWorkspace) -> Self {
         Self {
-            workspace_profile: WorkspaceProfile::from_agent_workspace(workspace),
+            workspace: Some(workspace),
             tool_profile: ToolProfile::LocalWorkspace,
-            instruction_profile: None,
-            runtime_options: CoreRuntimeOptions::default(),
-            context_compaction: ContextCompactionConfig::default(),
+            ..Self::default()
         }
     }
 
-    pub fn host_provided(root: impl Into<PathBuf>) -> Self {
-        Self {
-            workspace_profile: WorkspaceProfile::new(root),
-            tool_profile: ToolProfile::HostProvided,
-            instruction_profile: None,
-            runtime_options: CoreRuntimeOptions::default(),
-            context_compaction: ContextCompactionConfig::default(),
-        }
+    /// 设置工具执行上下文使用的 workspace，但不自动注册本地工具。
+    pub fn with_agent_workspace(mut self, workspace: AgentWorkspace) -> Self {
+        self.workspace = Some(workspace);
+        self
     }
 
     pub fn with_instruction_profile(mut self, profile: InstructionProfile) -> Self {
@@ -123,14 +71,7 @@ impl CoreRuntimeProfile {
     }
 
     pub fn with_workspace_instructions(mut self, instructions: impl Into<String>) -> Self {
-        let instructions = instructions.into();
-        self.workspace_profile.instructions = Some(instructions.clone());
-        self.instruction_profile = Some(
-            self.instruction_profile
-                .take()
-                .unwrap_or_default()
-                .with_workspace_instructions(instructions),
-        );
+        self.workspace_instructions = Some(instructions.into());
         self
     }
 
@@ -139,8 +80,8 @@ impl CoreRuntimeProfile {
         self
     }
 
-    pub fn with_runtime_options(mut self, runtime_options: CoreRuntimeOptions) -> Self {
-        self.runtime_options = runtime_options;
+    pub fn with_default_turn_options(mut self, options: TurnOptions) -> Self {
+        self.default_turn_options = options;
         self
     }
 
@@ -219,9 +160,10 @@ impl TurnEngineBuilder {
     pub fn build(self) -> TurnEngine {
         let CoreRuntimeProfile {
             instruction_profile,
-            workspace_profile,
+            workspace,
+            workspace_instructions,
             tool_profile,
-            runtime_options,
+            default_turn_options,
             context_compaction,
         } = self.runtime_profile;
         TurnEngine {
@@ -231,12 +173,12 @@ impl TurnEngineBuilder {
             skill_catalog: self.skill_catalog,
             lsp_runtime: self.lsp_runtime,
             shared_tools: self.shared_tool_registry,
-            workspace: workspace_profile.workspace,
-            workspace_instructions: workspace_profile.instructions,
+            workspace,
+            workspace_instructions,
             instruction_profile,
             tool_profile,
             tool_capabilities: self.tool_capabilities,
-            runtime_options,
+            default_turn_options,
             context_compaction,
             active_subagent: None,
             tools: crate::tool::ToolRegistry::new(),

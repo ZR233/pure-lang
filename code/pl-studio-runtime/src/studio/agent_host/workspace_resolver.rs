@@ -7,7 +7,7 @@ use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::StudioStore;
 use crate::studio::records::{ProjectRecord, ThreadRecord};
-use crate::studio::task_coordinator::{ReviewScope, TaskRunRecord, WorkCompletionRecord};
+use crate::studio::task_coordinator::{ReviewScope, TaskRun, WorkCompletionRecord};
 
 /// 从 Studio durable owner 解析单个 Agent 的 canonical workspace。
 #[derive(Clone)]
@@ -25,7 +25,7 @@ impl AgentWorkspaceResolver {
         identity: &AgentIdentity,
         thread: &ThreadRecord,
         project: &ProjectRecord,
-        active_task_run: Option<&TaskRunRecord>,
+        active_task_run: Option<&TaskRun>,
     ) -> Result<AgentWorkspace> {
         let mode = StudioMode::from_label(&thread.mode);
         if identity.parent_id.is_none() {
@@ -53,7 +53,7 @@ impl AgentWorkspaceResolver {
         &self,
         mode: StudioMode,
         project: &ProjectRecord,
-        active_task_run: Option<&TaskRunRecord>,
+        active_task_run: Option<&TaskRun>,
     ) -> Result<AgentWorkspace> {
         let root = project_workspace(project)?;
         match mode {
@@ -176,7 +176,7 @@ fn project_workspace(project: &ProjectRecord) -> Result<PathBuf> {
     resolve_workspace_root(Path::new(&project.path)).map_err(anyhow::Error::from)
 }
 
-async fn validate_main_workspace(root: &Path, run: &TaskRunRecord) -> Result<PathBuf> {
+async fn validate_main_workspace(root: &Path, run: &TaskRun) -> Result<PathBuf> {
     let root = resolve_workspace_root(root).map_err(anyhow::Error::from)?;
     ensure!(
         same_path(&root, Path::new(&run.workspace_root)),
@@ -189,7 +189,7 @@ async fn validate_main_workspace(root: &Path, run: &TaskRunRecord) -> Result<Pat
 async fn validate_child_workspace(
     stored_path: &str,
     expected_branch: &str,
-    run: &TaskRunRecord,
+    run: &TaskRun,
     require_clean: bool,
 ) -> Result<PathBuf> {
     ensure!(
@@ -282,14 +282,14 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use pl_core::{AgentId, WorkspaceBoundary};
+    use pl_core::{ThreadId, WorkspaceBoundary};
 
     use super::*;
     use crate::studio::agent_host::resources::StudioAgentResources;
     use crate::studio::records::{ThreadKind, ThreadVisibility};
     use crate::studio::task_coordinator::{
         AgentDelivery, AgentWorktreeDelivery, CreateWorkUnit, TaskCoordinator, TaskRunStateKind,
-        WorkCompletionKind, WorkUnitStatus,
+        WorkCompletionKind, WorkUnitState,
     };
 
     #[tokio::test]
@@ -398,7 +398,7 @@ mod tests {
     async fn task_root_mutability_comes_from_the_task_state_capability() {
         let fixture = ResolverFixture::new("planner-mutability").await;
         let identity = AgentIdentity {
-            id: AgentId::new(fixture.root_thread.id.clone()).unwrap(),
+            id: ThreadId::new(fixture.root_thread.id.clone()).unwrap(),
             parent_id: None,
             role: StudioRole::Planner.id(),
             depth: 0,
@@ -543,8 +543,8 @@ mod tests {
         coordinator: Arc<TaskCoordinator>,
         project: ProjectRecord,
         root_thread: ThreadRecord,
-        run: TaskRunRecord,
-        design_run: TaskRunRecord,
+        run: TaskRun,
+        design_run: TaskRun,
         repository: PathBuf,
         worktree: PathBuf,
         branch: String,
@@ -605,12 +605,9 @@ mod tests {
                 })
                 .await
                 .unwrap();
+            let running = WorkUnitState::running(work_unit.state.clone().into_progress());
             let work_unit = store
-                .update_work_unit(
-                    &work_unit.id,
-                    WorkUnitStatus::Running,
-                    Some(executor_agent_id.clone()),
-                )
+                .update_work_unit(&work_unit.id, running, Some(executor_agent_id.clone()))
                 .await
                 .unwrap();
             store
@@ -638,8 +635,8 @@ mod tests {
 
         fn child_identity(&self, agent_id: &str, role: StudioRole) -> AgentIdentity {
             AgentIdentity {
-                id: AgentId::new(agent_id).unwrap(),
-                parent_id: Some(AgentId::new(self.root_thread.id.clone()).unwrap()),
+                id: ThreadId::new(agent_id).unwrap(),
+                parent_id: Some(ThreadId::new(self.root_thread.id.clone()).unwrap()),
                 role: role.id(),
                 depth: 1,
             }
@@ -680,13 +677,10 @@ mod tests {
                 })
                 .await
                 .unwrap();
+            let running = WorkUnitState::running(work_unit.state.clone().into_progress());
             let work_unit = self
                 .store
-                .update_work_unit(
-                    &work_unit.id,
-                    WorkUnitStatus::Running,
-                    Some(agent_id.to_string()),
-                )
+                .update_work_unit(&work_unit.id, running, Some(agent_id.to_string()))
                 .await
                 .unwrap();
             self.store

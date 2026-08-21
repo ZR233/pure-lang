@@ -43,7 +43,6 @@ tempfile = "3"
 ignore = "0.4"
 gray_matter = "0.3.2"
 time = { version = "0.3", features = ["local-offset"] }
-bitflags = { version = "2", features = ["serde"] }
 base64 = "0.22"
 which = "8"
 dunce = "1"

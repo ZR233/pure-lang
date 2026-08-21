@@ -391,8 +391,8 @@ async fn bus_continues_ordinals_after_snapshot_restore() {
     let bus = ThreadEventBus::new(ThreadEventOptions::default());
     let mut restored = ThreadSnapshot::empty("thread-1");
     restored.items = vec![
-        user_message_item("legacy-a", 0),
-        user_message_item("legacy-b", 7),
+        user_message_item("restored-a", 0),
+        user_message_item("restored-b", 7),
     ];
     bus.replace_snapshot(restored).unwrap();
     let handle = bus.handle();
@@ -412,7 +412,7 @@ async fn bus_continues_ordinals_after_snapshot_restore() {
         .collect::<Vec<_>>();
     assert_eq!(
         ordinals,
-        vec![("legacy-a", 0), ("legacy-b", 7), ("turn-new:user", 8)]
+        vec![("restored-a", 0), ("restored-b", 7), ("turn-new:user", 8)]
     );
 }
 

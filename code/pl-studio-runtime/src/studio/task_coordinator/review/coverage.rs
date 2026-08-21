@@ -82,7 +82,7 @@ impl TaskCoordinator {
                 let coverage = round
                     .file_reviews
                     .as_ref()
-                    .context("review file coverage is unknown for this historical round")?;
+                    .context("review round has not published file coverage")?;
                 ensure!(
                     coverage.diagnostics_revision == input.diagnostics_revision,
                     "review coverage diagnostics revision is stale; read task_status and retry"

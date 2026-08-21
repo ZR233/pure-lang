@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::CONFIG_DIR_NAME;
+use crate::config::STUDIO_CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
@@ -20,7 +20,7 @@ impl StudioPaths {
             Some(home) => validate_studio_home(home, "--studio-home")?,
             None => match std::env::var_os(STUDIO_HOME_ENV) {
                 Some(home) => validate_studio_home(PathBuf::from(home), STUDIO_HOME_ENV)?,
-                None => user_home_dir()?.join(CONFIG_DIR_NAME),
+                None => user_home_dir()?.join(STUDIO_CONFIG_DIR_NAME),
             },
         };
         Ok(Self {

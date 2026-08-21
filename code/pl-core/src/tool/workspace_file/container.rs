@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::tool::container::helpers::{preview_error, shell_quote, tool_error};
+use crate::tool::container::helpers::{preview_error, tool_error};
+use crate::tool::shell::shell_quote_word;
 use crate::tool::{
     ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecRequest,
 };
@@ -58,7 +59,7 @@ where
     async fn stat(&self, request: WorkspaceFileStatRequest) -> Result<WorkspaceFileStat> {
         let command = format!(
             "if test -f {path}; then printf 'file\t'; wc -c < {path}; elif test -d {path}; then printf 'dir\t0'; else printf 'missing\t0'; fi",
-            path = shell_quote(&request.path)
+            path = shell_quote_word(&request.path)
         );
         let output = self
             .backend
@@ -138,7 +139,7 @@ where
 
     async fn remove_file(&self, request: WorkspaceFileRemoveRequest) -> Result<()> {
         let path = resolve_container_workspace_path(&request.path, request.cwd.as_deref())?;
-        let command = format!("rm -f -- {}", shell_quote(&path));
+        let command = format!("rm -f -- {}", shell_quote_word(&path));
         let output = self
             .backend
             .exec(ContainerExecRequest {
@@ -168,8 +169,8 @@ where
         let limit = request.max_files.saturating_add(1);
         let rg_command = format!(
             "if ! test -e {path}; then exit 0; elif command -v rg >/dev/null 2>&1; then rg --files -g {glob} {path} | sort | head -n {limit}; else exit 127; fi",
-            path = shell_quote(&request.path),
-            glob = shell_quote(&request.glob),
+            path = shell_quote_word(&request.path),
+            glob = shell_quote_word(&request.glob),
             limit = limit
         );
         let mut output = self
@@ -188,9 +189,9 @@ where
             let type_filter = if request.include_dirs { "" } else { "-type f " };
             let command = format!(
                 "if test -e {path}; then find {path} {type_filter}-name {glob} | sort | head -n {limit}; fi",
-                path = shell_quote(&request.path),
+                path = shell_quote_word(&request.path),
                 type_filter = type_filter,
-                glob = shell_quote(&request.glob),
+                glob = shell_quote_word(&request.glob),
                 limit = limit
             );
             output = self
@@ -208,8 +209,8 @@ where
         } else if request.include_dirs {
             let dir_command = format!(
                 "if test -e {path}; then find {path} -type d -name {glob} | sort | head -n {limit}; fi",
-                path = shell_quote(&request.path),
-                glob = shell_quote(&request.glob),
+                path = shell_quote_word(&request.path),
+                glob = shell_quote_word(&request.glob),
                 limit = limit
             );
             let dirs = self

@@ -362,6 +362,10 @@ PL 只做保证可注册所需的最小 normalize，不得把第三方动态 sch
 
 `apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。失败前已经应用到工作区的 hunk 必须在错误文本中列出 applied changes，不能使用会被误解为 Git commit 的 committed 表述，方便后续模型只处理仍未应用的改动。
 
+Codex patch grammar、hunk 匹配、路径校验与逐文件应用只有 `pl-patch` 一套实现。`pl-core` 只提供
+`WorkspaceFileBackend` 到该引擎的 adapter，并把 canonical outcome 投影为工具输出；不得复制
+parser、matcher、progress 状态机或按 backend 维护第二套 patch 语义。
+
 `exec` 和 `write_stdin` 成功执行时，写回模型上下文的 result 是一个紧凑 JSON 字符串，而不是完整原始输出。字段包括：
 
 - `status`：`running`、`completed`、`failed`、`timedOut` 或 `interrupted`。

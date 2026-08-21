@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use pl_core::AgentId;
+use pl_core::ThreadId;
 use tokio::sync::RwLock;
 
 use crate::studio::task_coordinator::{StudioTaskSpawnPreparation, StudioTaskSpawnRequest};
@@ -18,20 +18,20 @@ pub(super) struct StudioAgentResource {
 
 #[derive(Clone, Default)]
 pub(in crate::studio) struct StudioAgentResources {
-    entries: Arc<RwLock<BTreeMap<AgentId, StudioAgentResource>>>,
+    entries: Arc<RwLock<BTreeMap<ThreadId, StudioAgentResource>>>,
     cleanup_takeovers: Arc<RwLock<BTreeSet<String>>>,
 }
 
 impl StudioAgentResources {
-    pub(super) async fn insert(&self, id: AgentId, resource: StudioAgentResource) {
+    pub(super) async fn insert(&self, id: ThreadId, resource: StudioAgentResource) {
         self.entries.write().await.insert(id, resource);
     }
 
-    pub(super) async fn get(&self, id: &AgentId) -> Option<StudioAgentResource> {
+    pub(super) async fn get(&self, id: &ThreadId) -> Option<StudioAgentResource> {
         self.entries.read().await.get(id).cloned()
     }
 
-    pub(super) async fn remove(&self, id: &AgentId) -> Option<StudioAgentResource> {
+    pub(super) async fn remove(&self, id: &ThreadId) -> Option<StudioAgentResource> {
         self.entries.write().await.remove(id)
     }
 
@@ -45,7 +45,7 @@ impl StudioAgentResources {
             .extend(root_thread_ids.iter().cloned());
     }
 
-    pub(super) async fn release_after_close(&self, id: &AgentId) {
+    pub(super) async fn release_after_close(&self, id: &ThreadId) {
         let takeovers = self.cleanup_takeovers.read().await;
         let mut entries = self.entries.write().await;
         let preserve = entries
@@ -77,11 +77,11 @@ impl StudioAgentResources {
         }
     }
 
-    pub(super) async fn thread_id(&self, id: &AgentId) -> Option<String> {
+    pub(super) async fn thread_id(&self, id: &ThreadId) -> Option<String> {
         Some(id.to_string())
     }
 }
 
-pub(in crate::studio) fn root_agent_id(thread_id: &str) -> AgentId {
-    AgentId::new(thread_id).expect("Studio Thread id 必须非空")
+pub(in crate::studio) fn root_agent_id(thread_id: &str) -> ThreadId {
+    ThreadId::new(thread_id).expect("Studio Thread id 必须非空")
 }

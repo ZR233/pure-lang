@@ -1367,11 +1367,11 @@ mod outcome_tests {
     }
 
     #[test]
-    fn legacy_input_metadata_remains_unwrapped() {
-        let stored = r#"{"kind":"legacy"}"#;
+    fn payload_only_input_metadata_remains_unwrapped() {
+        let stored = r#"{"kind":"taskWake"}"#;
         let (metadata, key, budget_action) = deserialize_input_metadata(stored).unwrap();
 
-        assert_eq!(metadata, serde_json::json!({"kind": "legacy"}));
+        assert_eq!(metadata, serde_json::json!({"kind": "taskWake"}));
         assert_eq!(key, None);
         assert_eq!(budget_action, pl_core::MailboxBudgetAction::Preserve);
     }

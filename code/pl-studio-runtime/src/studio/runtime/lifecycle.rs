@@ -366,7 +366,7 @@ impl StudioRuntime {
     pub(crate) async fn try_get_thread_handle(
         &self,
         thread_id: &str,
-    ) -> Result<Option<(pl_core::AgentRuntimeHandle, pl_core::AgentId)>> {
+    ) -> Result<Option<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)>> {
         let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
             return Ok(None);
         };
@@ -375,7 +375,7 @@ impl StudioRuntime {
             .read_thread(thread_id)
             .await?
             .context("selected Thread not found")?;
-        let agent_id = pl_core::AgentId::new(thread.agent_path)?;
+        let agent_id = pl_core::ThreadId::new(thread.agent_path)?;
         let handle = framework.handle();
         let is_registered = handle
             .directory_snapshot()
@@ -501,7 +501,7 @@ impl StudioRuntime {
                 continue;
             }
             let agent_id = match self.store.read_thread(&thread_id).await {
-                Ok(Some(record)) => match pl_core::AgentId::new(record.agent_path) {
+                Ok(Some(record)) => match pl_core::ThreadId::new(record.agent_path) {
                     Ok(agent_id) => agent_id,
                     Err(error) => {
                         tracing::warn!(

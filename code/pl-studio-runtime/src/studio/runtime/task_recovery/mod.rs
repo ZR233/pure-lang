@@ -3,16 +3,15 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
 use pl_core::{
-    AgentActivityState, AgentId, AgentLifecycleState, AgentSubmitRequest, AgentTurnSubmitPolicy,
-    ConversationRecoveryRequest, ConversationRecoveryTarget, MailboxPresentation,
+    AgentActivityState, AgentLifecycleState, AgentSubmitRequest, AgentTurnSubmitPolicy,
+    ConversationRecoveryRequest, ConversationRecoveryTarget, MailboxPresentation, ThreadId,
 };
 use pl_protocol::{ConversationRecoveryMode, ThreadItemContent, ThreadToolCall, TurnState};
 
 use crate::studio::agent_host::root_agent_id;
 use crate::studio::task_coordinator::git::fingerprint_repository;
 use crate::studio::task_coordinator::{
-    TaskGitFingerprint, TaskRunRecord, TaskRunStateKind, ThreadExecutionStatus, WorkUnitRecord,
-    WorkUnitStatus,
+    TaskGitFingerprint, TaskRun, TaskRunStateKind, ThreadExecutionStatus, WorkUnit, WorkUnitStatus,
 };
 use crate::studio::{
     StudioTaskGitFingerprint, StudioTaskRecoveryPreview, StudioTaskRecoveryRequest,
@@ -92,7 +91,7 @@ impl StudioRuntime {
             request.mode,
         )
         .await?;
-        let target_agent_id = AgentId::new(request.target_thread_id.clone())?;
+        let target_agent_id = ThreadId::new(request.target_thread_id.clone())?;
         let recovery = if let Some(record) = existing_recovery {
             record.into()
         } else {
@@ -300,10 +299,10 @@ impl StudioRuntime {
     async fn recovery_candidate(
         &self,
         runtime: &pl_core::AgentRuntimeHandle,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         thread_id: &str,
         kind: StudioTaskRecoveryTargetKind,
-        unit: Option<&WorkUnitRecord>,
+        unit: Option<&WorkUnit>,
     ) -> Result<Option<Candidate>> {
         let page = self.store.list_thread_turns(thread_id, None, 8).await?;
         let mut histories = page
@@ -363,7 +362,7 @@ impl StudioRuntime {
             .map(|history| history.turn.id.clone())
             .collect::<Vec<_>>();
         let default_input_hashes = flatten_input_hashes(&inputs, &default_turn_ids, false)?;
-        let agent_id = AgentId::new(thread_id.to_string())?;
+        let agent_id = ThreadId::new(thread_id.to_string())?;
         let rewind_preview = if default_input_hashes.is_empty() {
             None
         } else {
@@ -641,9 +640,9 @@ async fn ensure_task_tree_idle(
 }
 
 fn belongs_to_root(
-    parents: &BTreeMap<AgentId, Option<AgentId>>,
-    agent: &AgentId,
-    root: &AgentId,
+    parents: &BTreeMap<ThreadId, Option<ThreadId>>,
+    agent: &ThreadId,
+    root: &ThreadId,
 ) -> bool {
     let mut current = Some(agent.clone());
     while let Some(agent) = current {
@@ -671,7 +670,7 @@ fn ensure_recoverable_phase(phase: TaskRunStateKind) -> Result<()> {
     }
 }
 
-fn eligible_executor(unit: &WorkUnitRecord) -> bool {
+fn eligible_executor(unit: &WorkUnit) -> bool {
     unit.executor_thread_id.is_some()
         && matches!(
             unit.status(),

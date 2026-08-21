@@ -123,8 +123,6 @@ pub struct ModelRequestProfile {
     pub headers: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub body: Map<String, Value>,
-    #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub options: Map<String, Value>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub chat_parallel_tool_calls: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -143,26 +141,11 @@ impl ModelRequestProfile {
         self.api_model.is_none()
             && self.headers.is_empty()
             && self.body.is_empty()
-            && self.options.is_empty()
             && !self.chat_parallel_tool_calls
             && !self.responses_tool_search
             && !self.responses_programmatic_tool_calling
             && self.max_tokens_field.is_default()
             && self.responses_max_tokens_field.is_default()
-    }
-
-    /// 将 JSON object 合并进请求 body；非 object 值会被忽略。
-    ///
-    /// 后合入的字段覆盖先前同名字段。该方法用于把配置来源中的额外请求体片段
-    /// 投影到统一模型请求 profile，避免宿主重复维护 object 合并语义。
-    pub fn extend_body_from_value(&mut self, value: &Value) {
-        if let Some(object) = value.as_object() {
-            self.body.extend(
-                object
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-        }
     }
 }
 
@@ -284,40 +267,5 @@ impl ModelInfo {
     pub fn default_effort(&self) -> Option<String> {
         self.effort_parameter()
             .and_then(|parameter| parameter.candidates.first().cloned())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn request_profile_extends_body_from_json_object_values() {
-        let mut profile = ModelRequestProfile::default();
-
-        profile.extend_body_from_value(&json!({
-            "reasoning": { "effort": "high" },
-            "temperature": 0.2
-        }));
-        profile.extend_body_from_value(&json!({
-            "temperature": 0.4,
-            "top_p": 0.9
-        }));
-        profile.extend_body_from_value(&json!("ignored"));
-
-        assert_eq!(
-            profile.body,
-            json!({
-                "reasoning": { "effort": "high" },
-                "temperature": 0.4,
-                "top_p": 0.9
-            })
-            .as_object()
-            .expect("object")
-            .clone()
-        );
     }
 }

@@ -8,24 +8,24 @@ fn stream_accumulator_merges_chat_tool_call_chunks_by_index() {
 
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: Some("chat_tool_call:0".to_string()),
                 item_id: "call_1".to_string(),
                 call_id: None,
                 name: Some("read_file".to_string()),
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(String::new()),
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(String::new()),
             },
             &event_tx,
         )
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: Some("chat_tool_call:0".to_string()),
                 item_id: String::new(),
                 call_id: None,
                 name: None,
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     "{\"path\":\"Cargo.toml\"}".to_string(),
                 ),
             },
@@ -72,7 +72,7 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputStarted {
+            ModelStreamEvent::ToolInputStarted {
                 stream_id: None,
                 item_id: "call_1".to_string(),
                 call_id: Some("call_1".to_string()),
@@ -85,12 +85,12 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "call_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: Some("exec".to_string()),
-                payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                payload: Some(ToolInputDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),
             },
@@ -171,7 +171,7 @@ fn tagged_stream_flushes_visible_text_before_tool_call() {
     apply_tagged(
         &mut decoder,
         &mut accumulator,
-        StreamEvent::ToolInputStarted {
+        ModelStreamEvent::ToolInputStarted {
             stream_id: Some("chat_tool_call:0".to_string()),
             item_id: "call_1".to_string(),
             call_id: None,
@@ -183,12 +183,12 @@ fn tagged_stream_flushes_visible_text_before_tool_call() {
     apply_tagged(
         &mut decoder,
         &mut accumulator,
-        StreamEvent::ToolCallReady {
+        ModelStreamEvent::ToolCallReady {
             stream_id: Some("chat_tool_call:0".to_string()),
             item_id: "call_1".to_string(),
             call_id: None,
             name: Some("read_file".to_string()),
-            payload: Some(ToolCallDeltaPayload::FunctionArguments(
+            payload: Some(ToolInputDeltaPayload::FunctionArguments(
                 r#"{"path":"Cargo.toml"}"#.to_string(),
             )),
         },
@@ -261,12 +261,12 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolInputDelta {
+            ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: Some("exec".to_string()),
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 ),
             },
@@ -275,12 +275,12 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::ToolCallReady {
+            ModelStreamEvent::ToolCallReady {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
                 name: Some("exec".to_string()),
-                payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                payload: Some(ToolInputDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),
             },

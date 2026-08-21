@@ -287,7 +287,7 @@ impl StudioRuntime {
     async fn reconcile_root_role(
         &self,
         handle: &pl_core::AgentRuntimeHandle,
-        agent_id: &pl_core::AgentId,
+        agent_id: &pl_core::ThreadId,
         thread: &ThreadRecord,
         snapshot: &pl_core::AgentSnapshot,
     ) -> Result<()> {
@@ -314,16 +314,16 @@ impl StudioRuntime {
     pub(in crate::studio) async fn ensure_thread_agent(
         &self,
         thread_id: &str,
-    ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::AgentId)> {
+    ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
         let target = self.read_owned_thread(thread_id).await?;
-        let target_agent_id = pl_core::AgentId::new(target.agent_path.clone())?;
+        let target_agent_id = pl_core::ThreadId::new(target.agent_path.clone())?;
         let target_root_thread_id = target.root_thread_id.clone();
         let mut missing = Vec::new();
         let mut current = target;
         loop {
-            let agent_path = pl_core::AgentId::new(current.agent_path.clone())?;
+            let agent_path = pl_core::ThreadId::new(current.agent_path.clone())?;
             match handle.snapshot(agent_path).await {
                 Ok(_) => break,
                 Err(pl_core::AgentRuntimeError::NotFound(_)) => {}
@@ -399,7 +399,7 @@ impl StudioRuntime {
         handle: &pl_core::AgentRuntimeHandle,
         thread_record: ThreadRecord,
     ) -> Result<pl_core::AgentRegistration> {
-        let agent_id = pl_core::AgentId::new(thread_record.agent_path.clone())?;
+        let agent_id = pl_core::ThreadId::new(thread_record.agent_path.clone())?;
         let (parent_id, role, depth) = match thread_record.thread_kind {
             ThreadKind::Root => {
                 anyhow::ensure!(
@@ -422,7 +422,7 @@ impl StudioRuntime {
                     .as_deref()
                     .context("child Studio Thread has no parent Thread")?;
                 let parent = self.read_owned_thread(parent_thread_id).await?;
-                let parent_id = pl_core::AgentId::new(parent.agent_path)?;
+                let parent_id = pl_core::ThreadId::new(parent.agent_path)?;
                 let parent_snapshot = handle
                     .snapshot(parent_id.clone())
                     .await
@@ -465,9 +465,9 @@ impl StudioRuntime {
             .context("selected Thread not found")
     }
 
-    async fn thread_agent_path(&self, thread_id: &str) -> Result<pl_core::AgentId> {
+    async fn thread_agent_path(&self, thread_id: &str) -> Result<pl_core::ThreadId> {
         let thread = self.read_owned_thread(thread_id).await?;
-        pl_core::AgentId::new(thread.agent_path).map_err(Into::into)
+        pl_core::ThreadId::new(thread.agent_path).map_err(Into::into)
     }
 
     pub async fn resolve_interaction(

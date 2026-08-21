@@ -28,7 +28,7 @@ use crate::completion::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, ModelCompactionRequest,
     ModelCompactionResponse,
 };
-use crate::model::capabilities::{ModelCapabilities, ProviderCapabilities};
+use crate::model::capabilities::ModelCapabilities;
 use crate::model::info::ModelInfo;
 use crate::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 use crate::runtime::openai::sse;
@@ -89,7 +89,6 @@ impl ModelInvocationContext {
 pub struct ModelRuntime {
     endpoint: ProviderEndpoint,
     http_client: reqwest::Client,
-    capabilities: ProviderCapabilities,
     model: ModelInfo,
 }
 
@@ -139,7 +138,6 @@ impl ModelRuntime {
         Ok(Self {
             endpoint,
             http_client,
-            capabilities: ProviderCapabilities::all(),
             model,
         })
     }
@@ -153,10 +151,6 @@ impl ModelRuntime {
     }
     pub fn endpoint(&self) -> &ProviderEndpoint {
         &self.endpoint
-    }
-
-    pub fn capabilities(&self) -> ProviderCapabilities {
-        self.capabilities
     }
 
     pub async fn complete(
@@ -321,20 +315,18 @@ impl ModelRuntime {
     ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
-        let capabilities = self.capabilities;
         let endpoint = self.endpoint.clone();
         let model_info = self.model.clone();
-        let protocol = provider_profile(model_info.transport.protocol).0;
+        let protocol = openai_protocol(model_info.transport.protocol);
         let connection_key = self.connection_fingerprint();
         let transport = self.active_transport(&session);
         async move {
-            let bearer = endpoint.bearer_token.clone();
-            let token = get_auth_token(bearer).await?;
+            let token = endpoint.bearer_token.clone();
 
             let effective_capabilities = model_info
                 .capabilities
                 .clone()
-                .with_provider_capabilities(capabilities, endpoint.uses_native_custom_tools());
+                .with_native_custom_tools(endpoint.uses_native_custom_tools());
             let supports_custom_tools = endpoint.uses_native_custom_tools()
                 && effective_capabilities.supports_custom_tools()
                 && effective_capabilities.supports_freeform_tools();
@@ -402,7 +394,7 @@ impl ModelRuntime {
         self.model
             .capabilities
             .clone()
-            .with_provider_capabilities(self.capabilities, self.endpoint.uses_native_custom_tools())
+            .with_native_custom_tools(self.endpoint.uses_native_custom_tools())
     }
 
     pub fn connection_fingerprint(&self) -> u64 {
@@ -437,22 +429,11 @@ impl ModelRuntime {
 }
 
 /// 按 wire protocol 选择 endpoint；供应商能力由模型目录与数据化 wire policy 收敛。
-fn provider_profile(protocol: ProviderWireProtocol) -> (OpenAiProtocol, ProviderCapabilities) {
+fn openai_protocol(protocol: ProviderWireProtocol) -> OpenAiProtocol {
     match protocol {
-        ProviderWireProtocol::Responses => {
-            (OpenAiProtocol::responses(), ProviderCapabilities::all())
-        }
-        ProviderWireProtocol::ChatCompletions => {
-            (OpenAiProtocol::chat(), ProviderCapabilities::all())
-        }
+        ProviderWireProtocol::Responses => OpenAiProtocol::responses(),
+        ProviderWireProtocol::ChatCompletions => OpenAiProtocol::chat(),
     }
-}
-
-async fn get_auth_token(bearer: Option<String>) -> Result<Option<String>> {
-    if let Some(token) = bearer {
-        return Ok(Some(token));
-    }
-    Ok(None)
 }
 
 #[derive(Debug, Clone)]

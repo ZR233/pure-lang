@@ -89,9 +89,6 @@ pub struct ChatTokenUsage {
     pub cached_prompt_tokens: Option<u64>,
 }
 
-pub(crate) type StreamEvent = ModelStreamEvent;
-pub(crate) type ToolCallDeltaPayload = ToolInputDeltaPayload;
-
 const DEFAULT_TEXT_ID: &str = "final";
 const DEFAULT_REASONING_ID: &str = "thinking";
 
@@ -126,9 +123,9 @@ impl OpenAiStreamDecoder {
         }
     }
 
-    pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<StreamEvent> {
+    pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
         if !self.use_native_phases {
-            return self.normalize_legacy_events(process_sse_events(event));
+            return self.normalize_fallback_events(process_sse_events(event));
         }
 
         match event.kind.as_str() {
@@ -143,7 +140,7 @@ impl OpenAiStreamDecoder {
                     && let Some(item_id) = reasoning_item_id(item)
                 {
                     let (block_id, mut events) = self.ensure_reasoning_block_open(&item_id);
-                    if let Some(StreamEvent::BlockOpened {
+                    if let Some(ModelStreamEvent::BlockOpened {
                         provider_metadata, ..
                     }) = events.first_mut()
                     {
@@ -165,7 +162,7 @@ impl OpenAiStreamDecoder {
                     .unwrap_or(TraceTextChannel::Final);
                 if let Some(delta) = event.delta.clone() {
                     let (block_id, mut events) = self.ensure_text_block_open(&item_id, channel);
-                    events.push(StreamEvent::text_delta(block_id, channel, delta));
+                    events.push(ModelStreamEvent::text_delta(block_id, channel, delta));
                     return events;
                 }
                 return Vec::new();
@@ -190,7 +187,7 @@ impl OpenAiStreamDecoder {
                         .remove(&item_id)
                         .map(|block| block.id)
                         .unwrap_or(block_id);
-                    events.push(StreamEvent::text_completed(
+                    events.push(ModelStreamEvent::text_completed(
                         block_id,
                         channel,
                         authoritative_text,
@@ -214,7 +211,7 @@ impl OpenAiStreamDecoder {
                         .open_reasoning_blocks
                         .remove(&item_id)
                         .unwrap_or(block_id);
-                    events.push(StreamEvent::reasoning_summary_completed(
+                    events.push(ModelStreamEvent::reasoning_summary_completed(
                         block_id,
                         Some(item.clone()),
                         authoritative_summary,
@@ -226,24 +223,27 @@ impl OpenAiStreamDecoder {
                 }
             }
             _ => {
-                tracing::trace!(kind = %event.kind, "sse event: no special handling, delegating to legacy processor");
+                tracing::trace!(kind = %event.kind, "sse event: no special handling, delegating to shared fallback processor");
             }
         }
 
-        self.normalize_legacy_events(process_sse_events(event))
+        self.normalize_fallback_events(process_sse_events(event))
     }
 
-    fn normalize_legacy_events(&mut self, events: Vec<StreamEvent>) -> Vec<StreamEvent> {
+    fn normalize_fallback_events(
+        &mut self,
+        events: Vec<ModelStreamEvent>,
+    ) -> Vec<ModelStreamEvent> {
         let mut normalized = Vec::new();
         for event in events {
             match event {
-                StreamEvent::BlockOpened {
+                ModelStreamEvent::BlockOpened {
                     id,
                     kind: ModelBlockKind::Text { channel },
                     provider_metadata,
                 } => {
                     let (block_id, mut events) = self.ensure_text_block_open(&id, channel);
-                    if let Some(StreamEvent::BlockOpened {
+                    if let Some(ModelStreamEvent::BlockOpened {
                         provider_metadata: metadata,
                         ..
                     }) = events.first_mut()
@@ -253,13 +253,13 @@ impl OpenAiStreamDecoder {
                     let _ = block_id;
                     normalized.extend(events);
                 }
-                StreamEvent::BlockOpened {
+                ModelStreamEvent::BlockOpened {
                     id,
                     kind: ModelBlockKind::ReasoningSummary,
                     provider_metadata,
                 } => {
                     let (block_id, mut events) = self.ensure_reasoning_block_open(&id);
-                    if let Some(StreamEvent::BlockOpened {
+                    if let Some(ModelStreamEvent::BlockOpened {
                         provider_metadata: metadata,
                         ..
                     }) = events.first_mut()
@@ -269,18 +269,18 @@ impl OpenAiStreamDecoder {
                     let _ = block_id;
                     normalized.extend(events);
                 }
-                StreamEvent::BlockOpened {
+                ModelStreamEvent::BlockOpened {
                     id,
                     kind: ModelBlockKind::Plan,
                     provider_metadata,
                 } => {
-                    normalized.push(StreamEvent::BlockOpened {
+                    normalized.push(ModelStreamEvent::BlockOpened {
                         id,
                         kind: ModelBlockKind::Plan,
                         provider_metadata,
                     });
                 }
-                StreamEvent::BlockDelta {
+                ModelStreamEvent::BlockDelta {
                     id,
                     kind: ModelBlockKind::Text { channel },
                     field,
@@ -289,7 +289,7 @@ impl OpenAiStreamDecoder {
                 } => {
                     let (block_id, events) = self.ensure_text_block_open(&id, channel);
                     normalized.extend(events);
-                    normalized.push(StreamEvent::BlockDelta {
+                    normalized.push(ModelStreamEvent::BlockDelta {
                         id: block_id,
                         kind: ModelBlockKind::Text { channel },
                         field,
@@ -297,7 +297,7 @@ impl OpenAiStreamDecoder {
                         section_index,
                     });
                 }
-                StreamEvent::BlockDelta {
+                ModelStreamEvent::BlockDelta {
                     id,
                     kind: ModelBlockKind::ReasoningSummary,
                     field,
@@ -306,7 +306,7 @@ impl OpenAiStreamDecoder {
                 } => {
                     let (block_id, events) = self.ensure_reasoning_block_open(&id);
                     normalized.extend(events);
-                    normalized.push(StreamEvent::BlockDelta {
+                    normalized.push(ModelStreamEvent::BlockDelta {
                         id: block_id,
                         kind: ModelBlockKind::ReasoningSummary,
                         field,
@@ -314,7 +314,7 @@ impl OpenAiStreamDecoder {
                         section_index,
                     });
                 }
-                StreamEvent::BlockClosed {
+                ModelStreamEvent::BlockClosed {
                     id,
                     kind: ModelBlockKind::Text { channel },
                     authoritative_content,
@@ -335,14 +335,14 @@ impl OpenAiStreamDecoder {
                         .remove(&id)
                         .map(|block| block.id)
                         .unwrap_or(block_id);
-                    normalized.push(StreamEvent::BlockClosed {
+                    normalized.push(ModelStreamEvent::BlockClosed {
                         id: block_id,
                         kind: ModelBlockKind::Text { channel },
                         authoritative_content,
                         provider_metadata,
                     });
                 }
-                StreamEvent::BlockClosed {
+                ModelStreamEvent::BlockClosed {
                     id,
                     kind: ModelBlockKind::ReasoningSummary,
                     authoritative_content,
@@ -359,23 +359,23 @@ impl OpenAiStreamDecoder {
                         continue;
                     }
                     let block_id = self.open_reasoning_blocks.remove(&id).unwrap_or(block_id);
-                    normalized.push(StreamEvent::BlockClosed {
+                    normalized.push(ModelStreamEvent::BlockClosed {
                         id: block_id,
                         kind: ModelBlockKind::ReasoningSummary,
                         authoritative_content,
                         provider_metadata,
                     });
                 }
-                event @ (StreamEvent::ToolInputStarted { .. }
-                | StreamEvent::ToolInputDelta { .. }
-                | StreamEvent::ToolCallReady { .. }
-                | StreamEvent::ResponseStarted { .. }) => {
+                event @ (ModelStreamEvent::ToolInputStarted { .. }
+                | ModelStreamEvent::ToolInputDelta { .. }
+                | ModelStreamEvent::ToolCallReady { .. }
+                | ModelStreamEvent::ResponseStarted { .. }) => {
                     normalized.extend(self.close_open_content_blocks());
                     normalized.push(event);
                 }
-                StreamEvent::Completed { response_id } => {
+                ModelStreamEvent::Completed { response_id } => {
                     normalized.extend(self.close_open_content_blocks());
-                    normalized.push(StreamEvent::Completed { response_id });
+                    normalized.push(ModelStreamEvent::Completed { response_id });
                 }
                 other => normalized.push(other),
             }
@@ -387,7 +387,7 @@ impl OpenAiStreamDecoder {
         &mut self,
         item_id: &str,
         channel: TraceTextChannel,
-    ) -> (String, Vec<StreamEvent>) {
+    ) -> (String, Vec<ModelStreamEvent>) {
         if let Some(block) = self.open_text_blocks.get(item_id)
             && block.channel == channel
         {
@@ -395,7 +395,11 @@ impl OpenAiStreamDecoder {
         }
         let mut events = Vec::new();
         if let Some(block) = self.open_text_blocks.remove(item_id) {
-            events.push(StreamEvent::text_completed(block.id, block.channel, None));
+            events.push(ModelStreamEvent::text_completed(
+                block.id,
+                block.channel,
+                None,
+            ));
         }
         let block_id = self.next_text_block_id(item_id);
         self.open_text_blocks.insert(
@@ -405,11 +409,11 @@ impl OpenAiStreamDecoder {
                 channel,
             },
         );
-        events.push(StreamEvent::text_started(block_id.clone(), channel));
+        events.push(ModelStreamEvent::text_started(block_id.clone(), channel));
         (block_id, events)
     }
 
-    fn ensure_reasoning_block_open(&mut self, item_id: &str) -> (String, Vec<StreamEvent>) {
+    fn ensure_reasoning_block_open(&mut self, item_id: &str) -> (String, Vec<ModelStreamEvent>) {
         if let Some(block_id) = self.open_reasoning_blocks.get(item_id) {
             return (block_id.clone(), Vec::new());
         }
@@ -418,17 +422,21 @@ impl OpenAiStreamDecoder {
             .insert(item_id.to_string(), block_id.clone());
         (
             block_id.clone(),
-            vec![StreamEvent::reasoning_summary_started(block_id, None)],
+            vec![ModelStreamEvent::reasoning_summary_started(block_id, None)],
         )
     }
 
-    fn close_open_content_blocks(&mut self) -> Vec<StreamEvent> {
+    fn close_open_content_blocks(&mut self) -> Vec<ModelStreamEvent> {
         let mut events = Vec::new();
         for (_, block) in std::mem::take(&mut self.open_text_blocks) {
-            events.push(StreamEvent::text_completed(block.id, block.channel, None));
+            events.push(ModelStreamEvent::text_completed(
+                block.id,
+                block.channel,
+                None,
+            ));
         }
         for (_, block_id) in std::mem::take(&mut self.open_reasoning_blocks) {
-            events.push(StreamEvent::reasoning_summary_completed(
+            events.push(ModelStreamEvent::reasoning_summary_completed(
                 block_id, None, None,
             ));
         }
@@ -467,7 +475,7 @@ fn text_block_counter_key(item_id: &str) -> String {
 }
 
 /// 将原始 SSE 事件解析为 canonical stream event。
-pub fn process_sse_events(event: &SseStreamEvent) -> Vec<StreamEvent> {
+pub fn process_sse_events(event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
     match process_sse_event(event) {
         Some(StreamEventBatch::Single(event)) => vec![event],
         Some(StreamEventBatch::Many(events)) => events,
@@ -476,8 +484,8 @@ pub fn process_sse_events(event: &SseStreamEvent) -> Vec<StreamEvent> {
 }
 
 enum StreamEventBatch {
-    Single(StreamEvent),
-    Many(Vec<StreamEvent>),
+    Single(ModelStreamEvent),
+    Many(Vec<ModelStreamEvent>),
 }
 
 fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
@@ -489,7 +497,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         if let Some(delta) = &choice.delta.reasoning_content
             && !delta.is_empty()
         {
-            events.push(StreamEvent::ReasoningRawDelta {
+            events.push(ModelStreamEvent::ReasoningRawDelta {
                 id: DEFAULT_REASONING_ID.to_string(),
                 content_index: 0,
                 delta: delta.clone(),
@@ -499,7 +507,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         if let Some(content) = &choice.delta.content
             && !content.is_empty()
         {
-            events.push(StreamEvent::text_delta(
+            events.push(ModelStreamEvent::text_delta(
                 DEFAULT_TEXT_ID.to_string(),
                 TraceTextChannel::Final,
                 content.clone(),
@@ -514,24 +522,24 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                 // Chat Completions 只暴露 item id；确定性赋 call_id = item_id。
                 let call_id = (!item_id.is_empty()).then(|| item_id.clone());
                 if let Some(custom) = &tool_call.custom {
-                    events.push(StreamEvent::ToolInputDelta {
+                    events.push(ModelStreamEvent::ToolInputDelta {
                         stream_id,
                         item_id,
                         call_id,
                         name: custom.name.clone(),
-                        payload_delta: ToolCallDeltaPayload::CustomInput(
+                        payload_delta: ToolInputDeltaPayload::CustomInput(
                             custom.input.clone().unwrap_or_default(),
                         ),
                     });
                     continue;
                 }
                 if let Some(function) = &tool_call.function {
-                    events.push(StreamEvent::ToolInputDelta {
+                    events.push(ModelStreamEvent::ToolInputDelta {
                         stream_id,
                         item_id,
                         call_id,
                         name: function.name.clone(),
-                        payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        payload_delta: ToolInputDeltaPayload::FunctionArguments(
                             function.arguments.clone().unwrap_or_default(),
                         ),
                     });
@@ -582,9 +590,9 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                     .unwrap_or(0),
             });
             if let Some(usage) = usage {
-                events.push(StreamEvent::Usage(usage));
+                events.push(ModelStreamEvent::Usage(usage));
             }
-            events.push(StreamEvent::Completed { response_id: None });
+            events.push(ModelStreamEvent::Completed { response_id: None });
         }
 
         if !events.is_empty() {
@@ -593,15 +601,17 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
     }
 
     match event.kind.as_str() {
-        "response.created" => Some(StreamEventBatch::Single(StreamEvent::ResponseStarted {
-            response_id: event
-                .response
-                .as_ref()
-                .and_then(|r| r.get("id")?.as_str().map(String::from)),
-        })),
+        "response.created" => Some(StreamEventBatch::Single(
+            ModelStreamEvent::ResponseStarted {
+                response_id: event
+                    .response
+                    .as_ref()
+                    .and_then(|r| r.get("id")?.as_str().map(String::from)),
+            },
+        )),
 
         "response.output_text.delta" => event.delta.as_ref().map(|d| {
-            StreamEventBatch::Single(StreamEvent::text_delta(
+            StreamEventBatch::Single(ModelStreamEvent::text_delta(
                 event
                     .item_id
                     .clone()
@@ -614,7 +624,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             event.delta.as_ref().map(|d| {
                 if event.kind == "response.reasoning_summary_text.delta" {
-                    StreamEventBatch::Single(StreamEvent::reasoning_summary_delta(
+                    StreamEventBatch::Single(ModelStreamEvent::reasoning_summary_delta(
                         event
                             .item_id
                             .clone()
@@ -623,7 +633,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                         d.clone(),
                     ))
                 } else {
-                    StreamEventBatch::Single(StreamEvent::ReasoningRawDelta {
+                    StreamEventBatch::Single(ModelStreamEvent::ReasoningRawDelta {
                         id: event
                             .item_id
                             .clone()
@@ -637,12 +647,12 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         "response.function_call_arguments.delta" => {
             let (item_id, call_id) = responses_tool_identity(event);
-            Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
+            Some(StreamEventBatch::Single(ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
                 call_id: Some(call_id),
                 name: None,
-                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(
                     event.delta.clone().unwrap_or_default(),
                 ),
             }))
@@ -650,12 +660,12 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         "response.custom_tool_call_input.delta" => {
             let (item_id, call_id) = responses_tool_identity(event);
-            Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
+            Some(StreamEventBatch::Single(ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
                 call_id: Some(call_id),
                 name: None,
-                payload_delta: ToolCallDeltaPayload::CustomInput(
+                payload_delta: ToolInputDeltaPayload::CustomInput(
                     event.delta.clone().unwrap_or_default(),
                 ),
             }))
@@ -714,9 +724,9 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             });
             let mut events = Vec::new();
             if let Some(usage) = usage {
-                events.push(StreamEvent::Usage(usage));
+                events.push(ModelStreamEvent::Usage(usage));
             }
-            events.push(StreamEvent::Completed {
+            events.push(ModelStreamEvent::Completed {
                 response_id: event
                     .response
                     .as_ref()
@@ -725,7 +735,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             Some(StreamEventBatch::Many(events))
         }
 
-        "response.failed" => Some(StreamEventBatch::Single(StreamEvent::Failed {
+        "response.failed" => Some(StreamEventBatch::Single(ModelStreamEvent::Failed {
             code: event
                 .response
                 .as_ref()
@@ -737,7 +747,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                 .unwrap_or_else(|| "response failed".into()),
         })),
 
-        "response.incomplete" => Some(StreamEventBatch::Single(StreamEvent::Failed {
+        "response.incomplete" => Some(StreamEventBatch::Single(ModelStreamEvent::Failed {
             code: None,
             message: "response incomplete".into(),
         })),

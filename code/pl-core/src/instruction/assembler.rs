@@ -117,12 +117,6 @@ impl InstructionAssembler {
             for block in &profile.user_context_blocks {
                 snapshot.push_user(block.source.clone(), &block.content);
             }
-            if let Some(instructions) = profile.workspace_instructions() {
-                snapshot.push_user(
-                    InstructionSource::new(InstructionSourceKind::ProfileWorkspace, "workspace"),
-                    instructions,
-                );
-            }
         }
 
         Ok(snapshot)

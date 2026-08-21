@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::{AgentId, ThreadId, TurnId};
+use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::{lifecycle::*, mailbox::*, snapshot::*};
 
@@ -8,7 +8,7 @@ use super::{lifecycle::*, mailbox::*, snapshot::*};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeEvent {
-    pub agent_id: AgentId,
+    pub agent_id: ThreadId,
     pub sequence: u64,
     pub created_at: i64,
     pub kind: AgentRuntimeEventKind,
@@ -83,7 +83,7 @@ mod tests {
 
         let snapshot = AgentRegistration {
             identity: AgentIdentity {
-                id: AgentId::new("agent-1").unwrap(),
+                id: ThreadId::new("agent-1").unwrap(),
                 parent_id: None,
                 role: crate::AgentRoleId::new("planner").unwrap(),
                 depth: 0,

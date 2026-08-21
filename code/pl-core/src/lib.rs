@@ -42,9 +42,9 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    CoreRuntimeOptions, CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
+    CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
     SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet, TurnEngine,
-    TurnEngineBuilder, WorkspaceProfile, shared_tool_names, shared_tool_schemas,
+    TurnEngineBuilder, shared_tool_names, shared_tool_schemas,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
@@ -58,9 +58,8 @@ pub use mcp::{
 pub use message::{
     CompletionResponseOutputSnapshot, CompletionResponseSnapshot, append_message_fragment_text,
     assistant_reasoning_message, assistant_text_message, completion_response_message_text,
-    completion_response_preview, completion_response_snapshot, is_compaction_summary_text,
-    message_content_text, message_content_text_lines, text_preview_chars, user_message_text,
-    user_text_message,
+    completion_response_snapshot, is_compaction_summary_text, message_content_text,
+    text_preview_chars, user_message_text, user_text_message,
 };
 pub use model_config::{
     AgentModelConfig, AgentRoleId, ModelCatalog, ModelCatalogId, ModelRouteConfig,
@@ -123,4 +122,7 @@ pub use working_set::{
     REVIEW_CHECKPOINT_SECTION_ID, REVIEW_MANIFEST_SECTION_ID, TurnWorkingSetChange,
     TurnWorkingSetHandle, canonical_content_hash, canonical_json_hash, context_section,
 };
-pub use workspace::{load_workspace_instructions, resolve_workspace_root};
+pub use workspace::{
+    WorkspaceInstructionDocument, WorkspaceInstructions, load_workspace_instruction_documents,
+    resolve_workspace_root,
+};

@@ -610,17 +610,16 @@ mod tests {
         preset.bearer_token = Some("preset-token".to_string());
         preset.bearer_token_env = None;
         let compatible_model = ModelInfo::fallback("compatible-model");
-        let mut compatible_info = ProviderEndpoint::openai_compatible_chat(
-            "Compatible",
-            "https://open.bigmodel.cn/custom/v1",
-        );
+        let mut compatible_info =
+            ProviderEndpoint::compatible("Compatible", "https://open.bigmodel.cn/custom/v1");
         compatible_info.bearer_token = Some("compatible-token".to_string());
-        let compatible = ProviderConfig::from_endpoint(compatible_info, vec![compatible_model]);
+        let compatible =
+            ProviderConfig::from_explicit_models(compatible_info, vec![compatible_model]);
         let unrelated_model = ModelInfo::fallback("unrelated-model");
         let mut unrelated_info =
-            ProviderEndpoint::openai_compatible_chat("Unrelated", "https://example.com/v1");
+            ProviderEndpoint::compatible("Unrelated", "https://example.com/v1");
         unrelated_info.bearer_token = Some("unrelated-token".to_string());
-        let unrelated = ProviderConfig::from_endpoint(unrelated_info, vec![unrelated_model]);
+        let unrelated = ProviderConfig::from_explicit_models(unrelated_info, vec![unrelated_model]);
         let models = AgentModelConfig {
             providers: BTreeMap::from([
                 (ProviderId::new("renamed-preset").unwrap(), preset),
@@ -647,13 +646,12 @@ mod tests {
     #[test]
     fn builtin_zhipu_directory_declares_read_effect_and_injects_vision_secret() {
         let model = ModelInfo::fallback("compatible-model");
-        let mut info =
-            ProviderEndpoint::openai_compatible_chat("Compatible", "https://open.bigmodel.cn/v1");
+        let mut info = ProviderEndpoint::compatible("Compatible", "https://open.bigmodel.cn/v1");
         info.bearer_token = Some("secret".to_string());
         let models = AgentModelConfig {
             providers: BTreeMap::from([(
                 ProviderId::new("compatible").unwrap(),
-                ProviderConfig::from_endpoint(info, vec![model]),
+                ProviderConfig::from_explicit_models(info, vec![model]),
             )]),
             routes: BTreeMap::new(),
         };

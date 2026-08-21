@@ -33,11 +33,11 @@ enum FactoryMode {
 
 #[derive(Clone)]
 struct TestRepository {
-    states: Arc<Mutex<BTreeMap<AgentId, ThreadActorState>>>,
+    states: Arc<Mutex<BTreeMap<ThreadId, ThreadActorState>>>,
     mutations: Arc<Mutex<Vec<ThreadMutation>>>,
     contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
     commits: Arc<Mutex<Vec<ThreadCommit>>>,
-    submissions: Arc<Mutex<BTreeMap<AgentId, Vec<AgentSubmissionRecord>>>>,
+    submissions: Arc<Mutex<BTreeMap<ThreadId, Vec<AgentSubmissionRecord>>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
@@ -99,7 +99,7 @@ impl TestRepository {
         *self.fail_turn_queue.lock().unwrap() = true;
     }
 
-    fn state(&self, id: &AgentId) -> ThreadActorState {
+    fn state(&self, id: &ThreadId) -> ThreadActorState {
         self.states.lock().unwrap()[id].clone()
     }
 
@@ -362,7 +362,7 @@ impl AgentTurnFactory for TestTurnFactory {
                 let route = ResolvedModelRoute {
                     role: crate::AgentRoleId::new("test").unwrap(),
                     provider_id: crate::ProviderId::new("test").unwrap(),
-                    endpoint: ProviderEndpoint::openai_compatible_chat(
+                    endpoint: ProviderEndpoint::compatible(
                         "rollover-test",
                         self.rollover_base_url
                             .clone()
@@ -389,9 +389,9 @@ impl AgentTurnFactory for TestTurnFactory {
 
 #[derive(Debug, Clone, Default)]
 struct TestLifecycle {
-    close_order: Arc<Mutex<Vec<AgentId>>>,
-    spawn_rollbacks: Arc<Mutex<Vec<AgentId>>>,
-    close_rollbacks: Arc<Mutex<Vec<AgentId>>>,
+    close_order: Arc<Mutex<Vec<ThreadId>>>,
+    spawn_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
+    close_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
     fail_prepare_spawn: Arc<Mutex<bool>>,
     fail_activate_spawn: Arc<Mutex<bool>>,
     fail_rollback_spawn: Arc<Mutex<bool>>,
@@ -428,8 +428,8 @@ impl TestLifecycle {
 
 impl AgentLifecycleAdapter for TestLifecycle {
     type Error = TestError;
-    type SpawnLease = AgentId;
-    type CloseLease = AgentId;
+    type SpawnLease = ThreadId;
+    type CloseLease = ThreadId;
 
     async fn prepare_spawn(
         &self,
@@ -578,7 +578,7 @@ impl AgentRuntimeHost for TestHost {
 
 fn identity(id: &str) -> AgentIdentity {
     AgentIdentity {
-        id: AgentId::new(id).unwrap(),
+        id: ThreadId::new(id).unwrap(),
         parent_id: None,
         role: crate::AgentRoleId::new("executor").unwrap(),
         depth: 0,
@@ -637,7 +637,7 @@ fn interaction_continuation(pending: &InteractionRequest) -> AgentInteractionCon
 
 async fn record_pending_interaction(
     handle: &AgentRuntimeHandle,
-    agent_id: AgentId,
+    agent_id: ThreadId,
     thread_id: ThreadId,
     interaction: InteractionRequest,
 ) {
@@ -752,7 +752,7 @@ async fn read_test_http_request(socket: &mut tokio::net::TcpStream) {
     }
 }
 
-fn child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
+fn child_spawn_request(parent_id: ThreadId) -> AgentSpawnRequest {
     AgentSpawnRequest {
         thread_id: ThreadId::new("child-chat").unwrap(),
         parent_id,
@@ -777,13 +777,13 @@ async fn wait_for_prepared_messages(factory: &TestTurnFactory, expected: usize) 
     .expect("turn factory should receive the expected inputs");
 }
 
-async fn wait_for_idle(handle: &AgentRuntimeHandle, agent_id: AgentId) -> AgentWaitResult {
+async fn wait_for_idle(handle: &AgentRuntimeHandle, agent_id: ThreadId) -> AgentWaitResult {
     wait_for_idle_with_timeout(handle, agent_id, Duration::from_secs(1)).await
 }
 
 async fn wait_for_idle_with_timeout(
     handle: &AgentRuntimeHandle,
-    agent_id: AgentId,
+    agent_id: ThreadId,
     timeout: Duration,
 ) -> AgentWaitResult {
     tokio::time::timeout(timeout, handle.wait_until_idle(agent_id))
@@ -800,7 +800,7 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
     handle
@@ -828,7 +828,7 @@ async fn report_progress_appends_durable_submission_with_detail() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
     // 携带 detail 的提交始终追加到 durable 日志。
@@ -897,7 +897,7 @@ async fn conversation_recovery_excludes_rolled_back_provider_context_and_preserv
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let retained_messages = vec![
         crate::user_text_message("retained request"),
         crate::assistant_text_message("retained answer"),
@@ -994,7 +994,7 @@ async fn rebuild_thread_recovers_when_compaction_has_no_rewindable_prefix() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let mut registration = registration("root", "chat");
     registration.session.session =
         AgentSession::from_messages(vec![crate::assistant_text_message(
@@ -1045,7 +1045,7 @@ async fn idle_agent_role_reconfiguration_is_durable_and_updates_directory() {
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let planner = crate::AgentRoleId::new("planner").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
@@ -1069,7 +1069,7 @@ async fn running_agent_rejects_role_reconfiguration() {
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
     handle
@@ -1106,7 +1106,7 @@ async fn wait_agents_observes_turn_that_finished_before_subscription() {
     let host = TestHost::new(repository, FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
     handle
@@ -1151,7 +1151,7 @@ async fn rollover_timeout_commits_budget_outcome_and_wakes_wait_agents() {
     );
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let mut registration = registration("root", "chat");
     registration
         .session
@@ -1222,7 +1222,7 @@ async fn stopping_during_rollover_commits_cancelled_without_partial_replacement(
     );
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let mut registration = registration("root", "chat");
     registration
         .session
@@ -1272,7 +1272,7 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
     );
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let mut registration = registration("root", "chat");
     registration
         .session
@@ -1392,7 +1392,7 @@ async fn submit_rejects_session_not_owned_by_target_agent() {
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let unknown_session = ThreadId::new("child-session").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
@@ -1425,7 +1425,7 @@ async fn current_session_submit_resolves_the_single_owned_session() {
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let session_id = ThreadId::new("root").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
@@ -1455,8 +1455,8 @@ async fn current_session_submit_rejects_a_missing_parent_graph() {
     let host = TestHost::new(TestRepository::empty(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("child").unwrap();
-    let missing_parent = AgentId::new("missing-parent").unwrap();
+    let agent_id = ThreadId::new("child").unwrap();
+    let missing_parent = ThreadId::new("missing-parent").unwrap();
     let mut child_identity = identity("child");
     child_identity.parent_id = Some(missing_parent.clone());
     child_identity.depth = 1;
@@ -1490,7 +1490,7 @@ async fn concurrent_submits_are_serialized_without_losing_inputs() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let session_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
@@ -1528,7 +1528,7 @@ async fn concurrent_start_only_submits_allow_one_turn_and_steer_is_atomic() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
@@ -1582,7 +1582,7 @@ async fn active_refresh_messages_reset_budget_without_replacing_the_turn() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     let active_turn = handle
@@ -1626,7 +1626,7 @@ async fn preserve_message_does_not_refresh_an_active_turn_budget() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
@@ -1659,7 +1659,7 @@ async fn start_or_queue_never_steers_an_active_turn() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
@@ -1713,7 +1713,7 @@ async fn interaction_continuation_starts_idle_fresh_turn_and_deduplicates_stable
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     let pending = pending_user_interaction("ask-idle", &thread_id, "turn-origin");
@@ -1770,7 +1770,7 @@ async fn interaction_continuations_queue_without_steering_origin_or_unrelated_ac
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     let active_turn = handle
@@ -1815,7 +1815,7 @@ async fn interaction_continuation_repository_failure_rolls_back_resolution_and_i
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     let pending = pending_user_interaction("ask-rollback", &thread_id, "turn-origin");
@@ -1856,7 +1856,7 @@ async fn queued_inputs_with_the_same_key_share_the_latest_turn() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
@@ -1924,7 +1924,7 @@ async fn cancellation_aborts_blocked_turn_after_grace_and_records_cancelled_outc
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let mut registration = registration("root", "chat");
     registration
         .session
@@ -1945,7 +1945,7 @@ async fn cancellation_aborts_blocked_turn_after_grace_and_records_cancelled_outc
     assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Cancelled);
     assert_eq!(
         repository
-            .state(&AgentId::new("root").unwrap())
+            .state(&ThreadId::new("root").unwrap())
             .session
             .session
             .messages()
@@ -1961,7 +1961,7 @@ async fn shutdown_durably_cancels_running_turn_before_actor_exit() {
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
         .submit(
@@ -1988,7 +1988,7 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
     let host = TestHost::new(repository, FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
         .submit(
@@ -2034,7 +2034,7 @@ async fn fault_commit_failure_preserves_in_memory_turn_outcome() {
     let host = TestHost::new(repository, FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
         .submit(
@@ -2068,7 +2068,7 @@ async fn turn_started_repository_failure_commits_faulted_state() {
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
         .submit(
@@ -2127,7 +2127,7 @@ async fn turn_activity_change_commits_event_and_snapshot_atomically() {
     let events = host.events.clone();
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     let turn_id = handle
         .submit(
@@ -2182,7 +2182,7 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let snapshot = runtime
         .handle()
-        .snapshot(AgentId::new("root").unwrap())
+        .snapshot(ThreadId::new("root").unwrap())
         .await
         .unwrap();
 
@@ -2194,7 +2194,7 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
     );
     assert_eq!(
         repository
-            .state(&AgentId::new("root").unwrap())
+            .state(&ThreadId::new("root").unwrap())
             .snapshot
             .revision,
         8
@@ -2204,7 +2204,7 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
 
 #[tokio::test]
 async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let session_id = ThreadId::new("root").unwrap();
     let mut state = registration("root", "chat").into_durable_state();
     for (index, message) in ["first", "second"].into_iter().enumerate() {
@@ -2243,7 +2243,7 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
 
 #[tokio::test]
 async fn restored_inputs_wait_for_host_resource_activation() {
-    let agent_id = AgentId::new("root").unwrap();
+    let agent_id = ThreadId::new("root").unwrap();
     let session_id = ThreadId::new("root").unwrap();
     let mut state = registration("root", "chat").into_durable_state();
     state.pending_inputs.push_back(DurableMailboxEnvelope {
@@ -2292,7 +2292,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle
         .register(registration("root", "root-chat"))
         .await
@@ -2354,7 +2354,7 @@ async fn spawn_prepare_failure_has_no_framework_side_effects() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle
         .register(registration("root", "root-chat"))
         .await
@@ -2377,7 +2377,7 @@ async fn spawn_registration_failure_rolls_back_prepared_resources() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle
         .register(registration("root", "root-chat"))
         .await
@@ -2400,7 +2400,7 @@ async fn spawn_activation_failure_is_durably_closed_after_successful_rollback() 
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle
         .register(registration("root", "root-chat"))
         .await
@@ -2439,7 +2439,7 @@ async fn spawn_rollback_failure_is_retained_in_fault_diagnostic() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle
         .register(registration("root", "root-chat"))
         .await
@@ -2470,7 +2470,7 @@ async fn close_prepare_failure_keeps_agent_active() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     host.lifecycle.fail_next_prepare_close();
 
@@ -2496,7 +2496,7 @@ async fn closing_commit_failure_rolls_back_prepared_resources() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     repository.fail_next_lifecycle_commit(AgentLifecycleState::Closing);
 
@@ -2523,7 +2523,7 @@ async fn external_close_failure_rolls_back_and_restores_active_state() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     host.lifecycle.fail_next_commit_close();
 
@@ -2553,7 +2553,7 @@ async fn failed_close_compensation_faults_agent_durably() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     host.lifecycle.fail_next_commit_close();
     host.lifecycle.fail_next_rollback_close();
@@ -2589,7 +2589,7 @@ async fn closed_state_commit_failure_rolls_back_external_close() {
         .await
         .unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     repository.fail_next_lifecycle_commit(AgentLifecycleState::Closed);
 
@@ -2617,7 +2617,7 @@ async fn closing_running_agent_durably_records_cancelled_outcome() {
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
-    let root = AgentId::new("root").unwrap();
+    let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
     handle
         .submit(

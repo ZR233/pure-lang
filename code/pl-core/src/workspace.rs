@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
 
-use crate::config::DEFAULT_PROJECT_DOC_MAX_BYTES;
-
 const DEFAULT_PROJECT_DOC_FILENAMES: &[&str] = &["AGENTS.override.md", "AGENTS.md", "Agents.md"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,19 +83,6 @@ fn is_git_worktree_marker(path: &Path) -> bool {
             .join(git_dir)
     };
     git_dir.join("HEAD").is_file()
-}
-
-/// 读取工作区项目记忆。
-///
-/// 兼容旧调用：只读取工作区根目录这一层，并使用默认候选文件和字节上限。
-pub fn load_workspace_instructions(workspace_dir: &Path) -> Result<String> {
-    Ok(load_workspace_instruction_documents(
-        workspace_dir,
-        workspace_dir,
-        DEFAULT_PROJECT_DOC_MAX_BYTES,
-        &[],
-    )?
-    .content())
 }
 
 /// 按 Codex 风格从 workspace root 到 current dir 链式读取项目记忆。
@@ -224,7 +209,8 @@ mod tests {
 
     #[test]
     fn rejects_missing_directory() {
-        let result = load_workspace_instructions(Path::new("/nonexistent/dir/abc123"));
+        let path = Path::new("/nonexistent/dir/abc123");
+        let result = load_workspace_instruction_documents(path, path, 4096, &[]);
 
         assert!(result.is_err());
     }
@@ -234,9 +220,9 @@ mod tests {
         let dir = temp_dir("missing-agents");
         fs::create_dir_all(&dir).unwrap();
 
-        let result = load_workspace_instructions(&dir).unwrap();
+        let result = load_workspace_instruction_documents(&dir, &dir, 4096, &[]).unwrap();
 
-        assert_eq!(result, "");
+        assert_eq!(result.content(), "");
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -246,9 +232,9 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("Agents.md"), "# Test Project\nRules here").unwrap();
 
-        let result = load_workspace_instructions(&dir).unwrap();
+        let result = load_workspace_instruction_documents(&dir, &dir, 4096, &[]).unwrap();
 
-        assert_eq!(result, "# Test Project\nRules here");
+        assert_eq!(result.content(), "# Test Project\nRules here");
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -259,9 +245,9 @@ mod tests {
         fs::write(dir.join("AGENTS.override.md"), "# Override").unwrap();
         fs::write(dir.join("AGENTS.md"), "# Upper").unwrap();
 
-        let result = load_workspace_instructions(&dir).unwrap();
+        let result = load_workspace_instruction_documents(&dir, &dir, 4096, &[]).unwrap();
 
-        assert_eq!(result, "# Override");
+        assert_eq!(result.content(), "# Override");
         fs::remove_dir_all(dir).unwrap();
     }
 

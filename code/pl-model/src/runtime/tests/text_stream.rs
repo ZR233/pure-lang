@@ -63,7 +63,7 @@ fn stream_accumulator_preserves_response_id() {
 
     accumulator
         .apply(
-            StreamEvent::ResponseStarted {
+            ModelStreamEvent::ResponseStarted {
                 response_id: Some("resp_started".to_string()),
             },
             &event_tx,
@@ -71,7 +71,7 @@ fn stream_accumulator_preserves_response_id() {
         .unwrap();
     accumulator
         .apply(
-            StreamEvent::Completed {
+            ModelStreamEvent::Completed {
                 response_id: Some("resp_completed".to_string()),
             },
             &event_tx,
@@ -146,7 +146,7 @@ fn stream_accumulator_projects_tagged_raw_reasoning_without_visible_text() {
         apply_tagged(
             &mut decoder,
             &mut accumulator,
-            StreamEvent::ReasoningRawDelta {
+            ModelStreamEvent::ReasoningRawDelta {
                 id: "thinking".to_string(),
                 content_index: 0,
                 delta: delta.to_string(),
@@ -267,7 +267,7 @@ fn stream_accumulator_projects_untagged_reasoning_without_visible_text() {
 
     accumulator
         .apply(
-            StreamEvent::ReasoningRawDelta {
+            ModelStreamEvent::ReasoningRawDelta {
                 id: "thinking".to_string(),
                 content_index: 0,
                 delta: "先比较整数位。".to_string(),

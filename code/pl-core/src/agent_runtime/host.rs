@@ -7,8 +7,8 @@ use pl_trace::TraceEvent;
 use crate::ModelContextItem;
 
 use super::{
-    AgentId, AgentRuntimeEvent, AgentSnapshot, AgentTurnPreparationContext, PreparedAgentTurn,
-    ThreadActorState,
+    AgentRuntimeEvent, AgentSnapshot, AgentTurnPreparationContext, PreparedAgentTurn,
+    ThreadActorState, ThreadId,
 };
 
 /// runtime 启动时由 repository 返回的 durable agent。
@@ -60,7 +60,7 @@ impl CommitDurability {
 /// flush；内存 state 在 commit 返回 `Applied` 后由 runtime 更新并广播事件。
 #[derive(Debug, Clone)]
 pub struct ThreadCommit {
-    pub agent_id: AgentId,
+    pub agent_id: ThreadId,
     pub durability: CommitDurability,
     pub expected_revision: Option<u64>,
     pub next_state: ThreadActorState,
@@ -207,7 +207,7 @@ pub enum ThreadCommitOutcome {
 /// repository 已原子提交、可安全发布的事件批次。
 #[derive(Debug, Clone)]
 pub struct AgentCommittedEvent {
-    pub agent_id: AgentId,
+    pub agent_id: ThreadId,
     pub thread_id: Option<super::ThreadId>,
     pub turn_id: Option<super::TurnId>,
     pub runtime_events: Vec<AgentRuntimeEvent>,

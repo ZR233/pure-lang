@@ -224,10 +224,6 @@ pub enum ApplyPatchToolType {
 }
 
 impl ProviderEndpoint {
-    pub fn default_provider() -> Self {
-        Self::deepseek(None)
-    }
-
     pub fn effective_prompt_cache_policy(
         &self,
         model: &crate::ModelInfo,
@@ -304,23 +300,11 @@ impl ProviderEndpoint {
         }
     }
 
-    pub fn openai_compatible_chat(name: impl Into<String>, base_url: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            base_url: base_url.into(),
-            bearer_token: None,
-            http_headers: None,
-            tool_wire_policy: ToolWirePolicy::FunctionFallback,
-            apply_patch_tool_type: None,
-            service_capabilities: ProviderServiceCapabilities::default(),
-        }
-    }
-
-    /// 构造通用 Responses-compatible provider。
+    /// 构造通用 OpenAI-compatible provider。
     ///
-    /// 自定义兼容服务默认使用 HTTP，并采用最保守的 function tool wire；调用方
-    /// 可显式选择 WebSocket，但不会因此继承官方 OpenAI 的 freeform tool 策略。
-    pub fn responses_compatible(name: impl Into<String>, base_url: impl Into<String>) -> Self {
+    /// 协议与连接模式属于绑定模型的 transport profile；endpoint 只采用最保守
+    /// 的 function tool wire，不因兼容服务名称继承官方 OpenAI 能力。
+    pub fn compatible(name: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             base_url: base_url.into(),
@@ -366,14 +350,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_provider_is_deepseek() {
-        let info = ProviderEndpoint::default_provider();
-
-        assert_eq!(info.name, "DeepSeek");
-        assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
-    }
-
-    #[test]
     fn standalone_web_search_dialect_has_a_stable_wire_name() {
         let dialect = StandaloneWebSearchDialect::OpenAiSearchApi;
 
@@ -412,8 +388,8 @@ mod tests {
     }
 
     #[test]
-    fn openai_compatible_chat_provider_can_express_mimo() {
-        let info = ProviderEndpoint::openai_compatible_chat("MiMo", "https://mimo.example.com/v1");
+    fn compatible_provider_can_express_mimo() {
+        let info = ProviderEndpoint::compatible("MiMo", "https://mimo.example.com/v1");
 
         assert_eq!(info.name, "MiMo");
         assert_eq!(info.base_url, "https://mimo.example.com/v1");
@@ -421,8 +397,8 @@ mod tests {
     }
 
     #[test]
-    fn custom_responses_provider_defaults_to_http_and_function_tools() {
-        let info = ProviderEndpoint::responses_compatible("Gateway", "https://gateway.example/v1");
+    fn compatible_provider_defaults_to_function_tools() {
+        let info = ProviderEndpoint::compatible("Gateway", "https://gateway.example/v1");
 
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
         assert_eq!(info.apply_patch_tool_type, None);
@@ -432,10 +408,9 @@ mod tests {
     fn effective_prompt_cache_policy_requires_provider_wire_and_model_capability() {
         let deepseek = ProviderEndpoint::deepseek(None);
         let openai = ProviderEndpoint::openai(None);
-        let compatible =
-            ProviderEndpoint::responses_compatible("Gateway", "https://gateway.example/v1");
+        let compatible = ProviderEndpoint::compatible("Gateway", "https://gateway.example/v1");
         let chat_compatible =
-            ProviderEndpoint::openai_compatible_chat("Chat Gateway", "https://chat.example/v1");
+            ProviderEndpoint::compatible("Chat Gateway", "https://chat.example/v1");
         let deepseek_model = crate::default_models()
             .into_iter()
             .find(|model| model.slug == "deepseek-v4-flash")

@@ -76,11 +76,6 @@ impl ProviderConfig {
         .with_preset(ProviderPresetId::new("deepseek").expect("static provider preset id is valid"))
     }
 
-    /// 从运行时 provider 信息和显式模型目录创建配置。
-    pub fn from_endpoint(endpoint: ProviderEndpoint, models: Vec<ModelInfo>) -> Self {
-        Self::from_explicit_models(endpoint, models)
-    }
-
     /// 从 PL 内置模型目录创建 provider 配置。
     pub fn from_bundled_catalog(
         info: ProviderEndpoint,

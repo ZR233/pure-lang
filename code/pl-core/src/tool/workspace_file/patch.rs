@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use pl_patch::{PatchBackend, PatchError, PatchFileChange, PatchPathDisplay, PatchResult};
 use pl_protocol::{PureError, Result};
 use serde::Serialize;
-
-use crate::tool::file::apply_patch::{CodexPatchHunk, apply_chunks, parse_codex_patch};
 
 use super::backend::*;
 use super::ops::tool_error;
@@ -32,102 +31,6 @@ pub struct WorkspacePatchMove {
     pub to: String,
 }
 
-#[derive(Debug, Default)]
-struct PatchProgress {
-    added: Vec<String>,
-    updated: Vec<String>,
-    deleted: Vec<String>,
-    moved: Vec<WorkspacePatchMove>,
-    in_flight: Option<String>,
-}
-
-impl PatchProgress {
-    fn summary(&self) -> String {
-        let mut output = String::from("Success. Updated the following files:\n");
-        for path in &self.added {
-            output.push_str(&format!("A {path}\n"));
-        }
-        for path in &self.updated {
-            output.push_str(&format!("M {path}\n"));
-        }
-        for path in &self.deleted {
-            output.push_str(&format!("D {path}\n"));
-        }
-        for item in &self.moved {
-            output.push_str(&format!("M {} -> {}\n", item.from, item.to));
-        }
-        output
-    }
-
-    fn failure_suffix(&self) -> String {
-        let completed_changes = !self.added.is_empty()
-            || !self.updated.is_empty()
-            || !self.deleted.is_empty()
-            || !self.moved.is_empty();
-        if !completed_changes && self.in_flight.is_none() {
-            return "\nNo files were modified before failure.".to_string();
-        }
-
-        let mut output = if completed_changes {
-            let mut output = String::from("\nChanges applied before failure:\n");
-            for path in &self.added {
-                output.push_str(&format!("A {path}\n"));
-            }
-            for path in &self.updated {
-                output.push_str(&format!("M {path}\n"));
-            }
-            for path in &self.deleted {
-                output.push_str(&format!("D {path}\n"));
-            }
-            for item in &self.moved {
-                output.push_str(&format!("M {} -> {}\n", item.from, item.to));
-            }
-            output
-        } else {
-            "\nNo changes completed before failure.\n".to_string()
-        };
-        if let Some(change) = &self.in_flight {
-            output.push_str(
-                "An in-flight operation may have partially applied this additional change:\n",
-            );
-            output.push_str(&format!("? {change}\n"));
-        }
-        output
-    }
-
-    fn begin_change(&mut self, change: String) {
-        debug_assert!(self.in_flight.is_none());
-        self.in_flight = Some(change);
-    }
-
-    fn complete_change(&mut self) {
-        debug_assert!(self.in_flight.is_some());
-        self.in_flight = None;
-    }
-
-    fn output(self, cwd: String) -> WorkspacePatchOutput {
-        let summary = self.summary();
-        let mut changed_files = BTreeSet::new();
-        changed_files.extend(self.added.iter().cloned());
-        changed_files.extend(self.updated.iter().cloned());
-        changed_files.extend(self.deleted.iter().cloned());
-        for item in &self.moved {
-            changed_files.insert(item.to.clone());
-        }
-        WorkspacePatchOutput {
-            cwd,
-            added: self.added,
-            updated: self.updated,
-            deleted: self.deleted,
-            moved: self.moved,
-            changed_files: changed_files.into_iter().collect(),
-            stdout: "apply_patch completed".to_string(),
-            stderr: String::new(),
-            summary,
-        }
-    }
-}
-
 pub async fn apply_patch_to_backend<B>(
     backend: &B,
     cwd: String,
@@ -136,132 +39,173 @@ pub async fn apply_patch_to_backend<B>(
 where
     B: WorkspaceFileBackend,
 {
-    let hunks = parse_codex_patch(patch)?;
-    let mut progress = PatchProgress::default();
-    for hunk in hunks {
-        if let Err(error) = apply_hunk(backend, &cwd, hunk, &mut progress).await {
-            let error = error_message(error);
-            return Err(tool_error(
-                TOOL_APPLY_PATCH,
-                format!("{error}{}", progress.failure_suffix()),
-            ));
+    let patch_backend = WorkspacePatchBackend { backend, cwd: &cwd };
+    let outcome = pl_patch::apply_patch(patch, &patch_backend)
+        .await
+        .map_err(|error| tool_error(TOOL_APPLY_PATCH, error.into_message()))?;
+    let summary = outcome.summary(&patch_backend);
+    let mut added = Vec::new();
+    let mut updated = Vec::new();
+    let mut deleted = Vec::new();
+    let mut moved = Vec::new();
+    let mut changed_files = BTreeSet::new();
+
+    for change in outcome.file_changes() {
+        match change {
+            PatchFileChange::Add { path } => {
+                let path = patch_backend.display_path(&path);
+                changed_files.insert(path.clone());
+                added.push(path);
+            }
+            PatchFileChange::Update { path } => {
+                let path = patch_backend.display_path(&path);
+                changed_files.insert(path.clone());
+                updated.push(path);
+            }
+            PatchFileChange::Delete { path } => {
+                let path = patch_backend.display_path(&path);
+                changed_files.insert(path.clone());
+                deleted.push(path);
+            }
+            PatchFileChange::Move { source, target } => {
+                let from = patch_backend.display_path(&source);
+                let to = patch_backend.display_path(&target);
+                changed_files.insert(from.clone());
+                changed_files.insert(to.clone());
+                moved.push(WorkspacePatchMove { from, to });
+            }
         }
     }
-    Ok(progress.output(cwd))
+
+    Ok(WorkspacePatchOutput {
+        cwd,
+        added,
+        updated,
+        deleted,
+        moved,
+        changed_files: changed_files.into_iter().collect(),
+        stdout: "apply_patch completed".to_string(),
+        stderr: String::new(),
+        summary,
+    })
 }
 
-async fn apply_hunk<B>(
-    backend: &B,
-    cwd: &str,
-    hunk: CodexPatchHunk,
-    progress: &mut PatchProgress,
-) -> Result<()>
+#[derive(Debug)]
+struct WorkspacePatchBackend<'a, B> {
+    backend: &'a B,
+    cwd: &'a str,
+}
+
+impl<B> PatchPathDisplay for WorkspacePatchBackend<'_, B> {
+    fn display_path(&self, path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+}
+
+impl<B> PatchBackend for WorkspacePatchBackend<'_, B>
 where
     B: WorkspaceFileBackend,
 {
-    match hunk {
-        CodexPatchHunk::Add { path, content } => {
-            progress.begin_change(format!("A {path}"));
-            backend
-                .write_text(WorkspaceFileWriteRequest {
-                    path: path.clone(),
-                    cwd: Some(cwd.to_string()),
-                    content,
-                })
-                .await?;
-            progress.complete_change();
-            progress.added.push(path);
-        }
-        CodexPatchHunk::Delete { path } => {
-            backend
-                .read_text(WorkspaceFileReadRequest {
-                    path: path.clone(),
-                    cwd: Some(cwd.to_string()),
-                })
-                .await?;
-            progress.begin_change(format!("D {path}"));
-            backend
-                .remove_file(WorkspaceFileRemoveRequest {
-                    path: path.clone(),
-                    cwd: Some(cwd.to_string()),
-                })
-                .await?;
-            progress.complete_change();
-            progress.deleted.push(path);
-        }
-        CodexPatchHunk::Update {
-            path,
-            move_path,
-            chunks,
-        } => {
-            let old_content = backend
-                .read_text(WorkspaceFileReadRequest {
-                    path: path.clone(),
-                    cwd: Some(cwd.to_string()),
-                })
-                .await?;
-            let new_content = if chunks.is_empty() {
-                old_content
-            } else {
-                apply_chunks(&old_content, Path::new(&path), &chunks)?
-            };
-            let target = move_path.unwrap_or_else(|| path.clone());
-            let change = if target == path {
-                format!("M {path}")
-            } else {
-                format!("M {path} -> {target}")
-            };
-            progress.begin_change(change);
-            backend
-                .write_text(WorkspaceFileWriteRequest {
-                    path: target.clone(),
-                    cwd: Some(cwd.to_string()),
-                    content: new_content,
-                })
-                .await?;
-            if target != path {
-                backend
-                    .remove_file(WorkspaceFileRemoveRequest {
-                        path: path.clone(),
-                        cwd: Some(cwd.to_string()),
-                    })
-                    .await?;
-                progress.moved.push(WorkspacePatchMove {
-                    from: path.clone(),
-                    to: target,
-                });
-            }
-            progress.complete_change();
-            progress.updated.push(path);
+    async fn resolve_existing<'a>(&'a self, path: &'a str) -> PatchResult<PathBuf> {
+        self.backend
+            .stat(WorkspaceFileStatRequest {
+                path: path.to_string(),
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await
+            .map_err(patch_error)?;
+        Ok(PathBuf::from(path))
+    }
+
+    async fn resolve_for_write<'a>(&'a self, path: &'a str) -> PatchResult<PathBuf> {
+        Ok(PathBuf::from(path))
+    }
+
+    async fn reject_symlink_write<'a>(&'a self, _path: &'a Path) -> PatchResult<()> {
+        Ok(())
+    }
+
+    async fn ensure_file<'a>(&'a self, path: &'a Path) -> PatchResult<()> {
+        let stat = self
+            .backend
+            .stat(WorkspaceFileStatRequest {
+                path: self.display_path(path),
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await
+            .map_err(patch_error)?;
+        if stat.is_file {
+            Ok(())
+        } else {
+            Err(PatchError::new(format!(
+                "cannot delete '{}': path is not a file",
+                self.display_path(path)
+            )))
         }
     }
-    Ok(())
+
+    async fn read_to_string<'a>(&'a self, path: &'a Path) -> PatchResult<String> {
+        self.backend
+            .read_text(WorkspaceFileReadRequest {
+                path: self.display_path(path),
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await
+            .map_err(patch_error)
+    }
+
+    async fn read_optional_text<'a>(&'a self, path: &'a Path) -> PatchResult<Option<String>> {
+        let path = self.display_path(path);
+        let stat = self
+            .backend
+            .stat(WorkspaceFileStatRequest {
+                path: path.clone(),
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await;
+        if !stat.is_ok_and(|stat| stat.is_file) {
+            return Ok(None);
+        }
+        self.backend
+            .read_text(WorkspaceFileReadRequest {
+                path,
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await
+            .map(Some)
+            .map_err(patch_error)
+    }
+
+    async fn create_parent_dirs<'a>(&'a self, _path: &'a Path) -> PatchResult<()> {
+        Ok(())
+    }
+
+    async fn write_text<'a>(&'a self, path: &'a Path, content: &'a str) -> PatchResult<()> {
+        self.backend
+            .write_text(WorkspaceFileWriteRequest {
+                path: self.display_path(path),
+                cwd: Some(self.cwd.to_string()),
+                content: content.to_string(),
+            })
+            .await
+            .map_err(patch_error)
+    }
+
+    async fn remove_file<'a>(&'a self, path: &'a Path) -> PatchResult<()> {
+        self.backend
+            .remove_file(WorkspaceFileRemoveRequest {
+                path: self.display_path(path),
+                cwd: Some(self.cwd.to_string()),
+            })
+            .await
+            .map_err(patch_error)
+    }
 }
 
-fn error_message(error: PureError) -> String {
-    match error {
+fn patch_error(error: PureError) -> PatchError {
+    let message = match error {
         PureError::ToolExecutionFailed { error, .. } => error,
         error => error.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::PatchProgress;
-
-    #[test]
-    fn failure_suffix_reports_completed_and_in_flight_changes_separately() {
-        let progress = PatchProgress {
-            added: vec!["created.txt".to_string()],
-            in_flight: Some("M source.txt -> target.txt".to_string()),
-            ..PatchProgress::default()
-        };
-
-        let suffix = progress.failure_suffix();
-
-        assert!(suffix.contains("Changes applied before failure:\nA created.txt"));
-        assert!(suffix.contains("in-flight operation may have partially applied"));
-        assert!(suffix.contains("? M source.txt -> target.txt"));
-        assert!(!suffix.contains("Committed changes"));
-    }
+    };
+    PatchError::new(message)
 }

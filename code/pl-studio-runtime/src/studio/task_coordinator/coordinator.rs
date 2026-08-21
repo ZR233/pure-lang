@@ -15,8 +15,8 @@ use super::recovery::{
     validate_snapshot_owner,
 };
 use super::{
-    CreateTaskRun, RecordTaskAgentFailure, TaskRunRecord, TaskRunStateKind,
-    TaskWorktreeOwnerSnapshot, WorkUnitRecord,
+    CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskRunStateKind, TaskWorktreeOwnerSnapshot,
+    WorkUnit,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -47,8 +47,8 @@ struct WorktreeRecoveryGroup {
 }
 
 struct RecoveryCleanupRun {
-    run: TaskRunRecord,
-    work_units: Vec<WorkUnitRecord>,
+    run: TaskRun,
+    work_units: Vec<WorkUnit>,
 }
 
 struct RecoveryCleanupScope {
@@ -64,12 +64,12 @@ pub(crate) struct RecoveryCleanupAuthorization {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TaskRecoveryReport {
-    pub(crate) recovered_runs: Vec<TaskRunRecord>,
+    pub(crate) recovered_runs: Vec<TaskRun>,
     pub(crate) issues: Vec<StudioRecoveryIssue>,
 }
 
 impl std::ops::Deref for TaskRecoveryReport {
-    type Target = [TaskRunRecord];
+    type Target = [TaskRun];
 
     fn deref(&self) -> &Self::Target {
         &self.recovered_runs
@@ -77,16 +77,16 @@ impl std::ops::Deref for TaskRecoveryReport {
 }
 
 impl IntoIterator for TaskRecoveryReport {
-    type Item = TaskRunRecord;
-    type IntoIter = std::vec::IntoIter<TaskRunRecord>;
+    type Item = TaskRun;
+    type IntoIter = std::vec::IntoIter<TaskRun>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.recovered_runs.into_iter()
     }
 }
 
-impl PartialEq<Vec<TaskRunRecord>> for TaskRecoveryReport {
-    fn eq(&self, other: &Vec<TaskRunRecord>) -> bool {
+impl PartialEq<Vec<TaskRun>> for TaskRecoveryReport {
+    fn eq(&self, other: &Vec<TaskRun>) -> bool {
         self.recovered_runs == *other
     }
 }
@@ -213,7 +213,7 @@ impl TaskCoordinator {
         root_thread_id: &str,
         plan: &str,
         repository: impl AsRef<Path>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         if plan.trim().is_empty() {
             bail!("task plan must not be empty");
         }
@@ -493,7 +493,7 @@ impl TaskCoordinator {
     pub(crate) async fn retry_recovery_issue(
         &self,
         issue: &StudioRecoveryIssue,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         if issue.action != StudioRecoveryIssueAction::Retry
             || issue.category != StudioRecoveryIssueCategory::Merge
         {
@@ -539,7 +539,7 @@ impl TaskCoordinator {
     async fn push_recovery_issue(
         &self,
         report: &mut TaskRecoveryReport,
-        run: &TaskRunRecord,
+        run: &TaskRun,
         scope: StudioRecoveryIssueScope,
         category: StudioRecoveryIssueCategory,
         action: StudioRecoveryIssueAction,
@@ -872,7 +872,7 @@ impl TaskCoordinator {
         task_run_id: &str,
         phase: TaskRunStateKind,
         status_message: Option<String>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         if !matches!(
             phase,
             TaskRunStateKind::Completed | TaskRunStateKind::Failed | TaskRunStateKind::Cancelled
@@ -914,7 +914,7 @@ impl TaskCoordinator {
         Ok(())
     }
 
-    pub(super) async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
+    pub(super) async fn block_run(&self, run: &TaskRun, reason: String) -> Result<()> {
         let blocked = self
             .store
             .block_task_and_release_lease(&run.id, &reason)
@@ -923,7 +923,7 @@ impl TaskCoordinator {
         Ok(())
     }
 
-    fn publish_blocked_terminal(&self, run: &TaskRunRecord) -> Result<()> {
+    fn publish_blocked_terminal(&self, run: &TaskRun) -> Result<()> {
         if run.kind() != TaskRunStateKind::Blocked {
             bail!("blocked task fact is not canonical");
         }
@@ -936,7 +936,7 @@ impl TaskCoordinator {
         Ok(())
     }
 
-    pub(super) fn ensure_process_lease_owned(&self, run: &TaskRunRecord) -> Result<()> {
+    pub(super) fn ensure_process_lease_owned(&self, run: &TaskRun) -> Result<()> {
         let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
         let locally_owned = self
             .owned_process_leases
@@ -1080,7 +1080,7 @@ fn recovery_cleanup_revision(
     format!("{:x}", digest.finalize())
 }
 
-fn validate_snapshot(run: &TaskRunRecord, snapshot: &RepositorySnapshot) -> Result<()> {
+fn validate_snapshot(run: &TaskRun, snapshot: &RepositorySnapshot) -> Result<()> {
     validate_snapshot_owner(run, snapshot)?;
     if snapshot.head != run.expected_head {
         bail!(

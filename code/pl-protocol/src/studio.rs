@@ -797,7 +797,7 @@ mod tests {
         let error = serde_json::from_value::<StartTurnRequest>(serde_json::json!({
             "prompt": "hello",
             "attachmentIds": [],
-            "legacy": true,
+            "unknown": true,
         }))
         .unwrap_err();
         assert!(error.to_string().contains("unknown field"));

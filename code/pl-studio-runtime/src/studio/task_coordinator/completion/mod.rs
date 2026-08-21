@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    TaskCoordinator, TaskRunRecord, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
+    TaskCoordinator, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
     ThreadExecutionStatus, WorkUnitStatus,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -26,7 +26,7 @@ struct StopTaskInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskCompletionOutput {
-    run: TaskRunRecord,
+    run: TaskRun,
     integrated_review_gate: StudioIntegratedReviewGate,
 }
 
@@ -55,7 +55,7 @@ impl TaskCompleteOutcome {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskStopOutput {
     status: &'static str,
-    run: TaskRunRecord,
+    run: TaskRun,
     deferred_agent_id: Option<String>,
 }
 
@@ -340,7 +340,7 @@ impl TaskCoordinator {
         &self,
         thread_id: &str,
         guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
@@ -361,7 +361,7 @@ impl TaskCoordinator {
         &self,
         thread_id: &str,
         guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
@@ -377,7 +377,7 @@ impl TaskCoordinator {
         expected_generation: u64,
         reason: &str,
         guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
         let mut run = self
             .store
@@ -411,7 +411,7 @@ impl TaskCoordinator {
         Ok(cancelled)
     }
 
-    async fn awaiting_completion_executor(&self, run: &TaskRunRecord) -> Result<Option<String>> {
+    async fn awaiting_completion_executor(&self, run: &TaskRun) -> Result<Option<String>> {
         let work_unit = self
             .store
             .list_work_units(&run.id)
@@ -424,7 +424,7 @@ impl TaskCoordinator {
         Ok(work_unit.executor_thread_id.clone())
     }
 
-    async fn validate_stop_request(&self, run: &TaskRunRecord) -> Result<()> {
+    async fn validate_stop_request(&self, run: &TaskRun) -> Result<()> {
         self.ensure_process_lease_owned(run)?;
         if run.kind() == TaskRunStateKind::Merging {
             bail!("task_stop requires Planner Git integration to be recorded first");

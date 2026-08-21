@@ -93,10 +93,6 @@ impl ToolVisibilitySet {
         self.names
     }
 
-    pub fn to_btree_set(&self) -> BTreeSet<String> {
-        self.names.clone()
-    }
-
     pub fn filter_schemas<I>(&self, schemas: I) -> Vec<ToolSchema>
     where
         I: IntoIterator<Item = ToolSchema>,

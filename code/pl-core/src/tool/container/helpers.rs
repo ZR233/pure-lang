@@ -2,12 +2,6 @@ use std::fmt;
 
 use pl_protocol::PureError;
 
-use crate::tool::shell::shell_quote_word;
-
-pub(crate) fn shell_quote(value: &str) -> String {
-    shell_quote_word(value)
-}
-
 pub(crate) fn preview_error(stderr: &str, stdout: &str) -> String {
     preview(format!("{stderr}\n{stdout}").trim(), 500)
 }

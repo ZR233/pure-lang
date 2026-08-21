@@ -7,7 +7,7 @@ use crate::studio::task_coordinator::{
     ExecutorContinuationState, RestartAgentReconciliation, ReviewRoundState, ReviewScope,
     ReviewVerdict, TaskCommand, TaskRunStateKind, TaskWorktreeCleanupState,
     TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
-    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
+    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
 };
 
 use super::{
@@ -202,14 +202,8 @@ impl StudioStore {
                 if status == WorkUnitStatus::Pending {
                     let mut progress = state.into_progress();
                     progress.execution_error = Some(RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string());
-                    update_work_unit_state(
-                        &tx,
-                        work_unit,
-                        WorkUnitStatus::Cancelled,
-                        ThreadExecutionStatus::Cancelled,
-                        progress,
-                    )
-                    .await?;
+                    update_work_unit_state(&tx, work_unit, WorkUnitState::cancelled(progress))
+                        .await?;
                     summary.cancelled_work_units += 1;
                 } else if (status == WorkUnitStatus::Running
                     && continuation_state != ExecutorContinuationState::PendingStart)
@@ -220,9 +214,7 @@ impl StudioStore {
                     update_work_unit_state(
                         &tx,
                         work_unit,
-                        WorkUnitStatus::AwaitingCompletion,
-                        ThreadExecutionStatus::Cancelled,
-                        progress,
+                        WorkUnitState::awaiting_cancelled(progress),
                     )
                     .await?;
                 }
@@ -291,12 +283,10 @@ async fn reconcile_pending_reviews_after_restart(
                 .await?;
             }
         }
-        let state = ReviewRoundState::from_parts(
-            ReviewVerdict::Failed,
-            ThreadExecutionStatus::Cancelled,
-            Some(REVIEW_RESTART_DIAGNOSTIC.to_string()),
-            Some(REVIEW_RESTART_DIAGNOSTIC.to_string()),
-        )?;
+        let state = ReviewRoundState::cancelled(
+            REVIEW_RESTART_DIAGNOSTIC.to_string(),
+            REVIEW_RESTART_DIAGNOSTIC.to_string(),
+        );
         update_review_round_state(tx, round, state).await?;
     }
     Ok(cancelled_reviewers)
@@ -353,21 +343,18 @@ async fn restore_delivery_review_after_restart(
     {
         bail!("pending delivery review target does not match its completion");
     }
-    let execution = state.execution_status();
     let progress = state.into_progress();
     update_work_unit_state(
         tx,
         work_unit.clone(),
-        WorkUnitStatus::ReadyForReview,
-        execution,
-        progress,
+        WorkUnitState::ready_for_review(progress),
     )
     .await?;
     Ok(())
 }
 
 fn merge_cleanup_state(
-    work_unit: &crate::studio::task_coordinator::WorkUnitRecord,
+    work_unit: &crate::studio::task_coordinator::WorkUnit,
     merges: &[entities::merge_record::Model],
 ) -> Result<TaskWorktreeCleanupState> {
     if work_unit.status() != WorkUnitStatus::Merged {

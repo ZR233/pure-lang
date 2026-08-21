@@ -100,7 +100,7 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-api",
-                ProviderEndpoint::openai_compatible_chat("MiMo API", MIMO_API_BASE_URL),
+                ProviderEndpoint::compatible("MiMo API", MIMO_API_BASE_URL),
                 "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_API_KEY",
@@ -109,10 +109,7 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-token-plan",
-                ProviderEndpoint::openai_compatible_chat(
-                    "MiMo Token Plan",
-                    MIMO_TOKEN_PLAN_BASE_URL,
-                ),
+                ProviderEndpoint::compatible("MiMo Token Plan", MIMO_TOKEN_PLAN_BASE_URL),
                 "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_TOKEN_PLAN_API_KEY",

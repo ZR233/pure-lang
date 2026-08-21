@@ -77,7 +77,7 @@ pub struct TurnEngine {
     instruction_profile: Option<crate::instruction::InstructionProfile>,
     tool_profile: ToolProfile,
     tool_capabilities: ToolCapabilityConfig,
-    runtime_options: CoreRuntimeOptions,
+    default_turn_options: TurnOptions,
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
     /// 引擎本地注册表：builtin/host/skills/lsp/collaboration 等来源发布于此，
@@ -116,7 +116,7 @@ impl TurnEngine {
                 )
                 .await;
             }
-            ToolProfile::HostProvided | ToolProfile::Minimal => {}
+            ToolProfile::Minimal => {}
         }
     }
 
@@ -357,12 +357,8 @@ impl TurnEngine {
         session: &mut AgentSession,
         request: TurnRequest,
     ) -> Result<TurnResult> {
-        self.run_turn_with_options(
-            session,
-            request,
-            self.runtime_options.default_turn_options.clone(),
-        )
-        .await
+        self.run_turn_with_options(session, request, self.default_turn_options.clone())
+            .await
     }
 
     pub async fn run_turn_with_options(

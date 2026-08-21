@@ -9,17 +9,18 @@ use super::host::{AgentCommitObserver, AgentLifecycleAdapter, ThreadRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommittedEvent, AgentId, AgentRegistration, AgentRuntimeEvent,
+    AgentActivityState, AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
     AgentSpawnRequest, AgentSpawnResult, DurableCommitFacts, DurableMailboxEnvelope,
-    RestoredAgentRuntime, SpawnLifecycleRequest, ThreadCommit, ThreadCommitOutcome, TurnId,
+    RestoredAgentRuntime, SpawnLifecycleRequest, ThreadCommit, ThreadCommitOutcome, ThreadId,
+    TurnId,
 };
 use crate::ThreadEventBus;
 
 mod spawn;
 use spawn::{register_agent, spawn_child_agent};
 
-pub(crate) type AgentRegistry = Arc<RwLock<BTreeMap<AgentId, AgentLoopHandle>>>;
+pub(crate) type AgentRegistry = Arc<RwLock<BTreeMap<ThreadId, AgentLoopHandle>>>;
 
 pub(crate) enum CoordinatorCommand {
     Register {
@@ -33,7 +34,7 @@ pub(crate) enum CoordinatorCommand {
     },
     /// LRU 淘汰：只允许空闲（无活动 Turn、无 pending input）的驻留 actor。
     EvictAgent {
-        agent_id: AgentId,
+        agent_id: ThreadId,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Spawn {
@@ -41,7 +42,7 @@ pub(crate) enum CoordinatorCommand {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSpawnResult>>,
     },
     Close {
-        agent_id: AgentId,
+        agent_id: ThreadId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
     List {
@@ -181,7 +182,7 @@ async fn start_pending_inputs(actors: &AgentRegistry) -> AgentRuntimeResult<()> 
 
 async fn snapshot_for(
     actors: &AgentRegistry,
-    agent_id: &AgentId,
+    agent_id: &ThreadId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let actor = actors
         .read()
@@ -198,7 +199,7 @@ async fn snapshot_for(
 
 async fn close_agent_tree(
     actors: &AgentRegistry,
-    agent_id: &AgentId,
+    agent_id: &ThreadId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let snapshots = list_snapshots(actors).await?;
     if !snapshots
@@ -242,9 +243,9 @@ async fn close_agent_tree(
 }
 
 fn has_ancestor(
-    parents: &BTreeMap<AgentId, Option<AgentId>>,
-    candidate: &AgentId,
-    ancestor: &AgentId,
+    parents: &BTreeMap<ThreadId, Option<ThreadId>>,
+    candidate: &ThreadId,
+    ancestor: &ThreadId,
 ) -> bool {
     let mut current = parents.get(candidate).cloned().flatten();
     let mut remaining = parents.len();
@@ -263,7 +264,7 @@ fn has_ancestor(
 
 async fn close_actor(
     actors: &AgentRegistry,
-    agent_id: &AgentId,
+    agent_id: &ThreadId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let actor = actors
         .read()
@@ -345,7 +346,7 @@ where
 async fn evict_agent(
     actors: &AgentRegistry,
     runtime: &AgentRuntimeHandle,
-    agent_id: &AgentId,
+    agent_id: &ThreadId,
 ) -> AgentRuntimeResult<()> {
     let snapshot = snapshot_for(actors, agent_id).await?;
     if snapshot.active_turn_id.is_some()

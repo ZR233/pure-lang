@@ -279,7 +279,7 @@ struct DesignFixture {
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
     thread_id: String,
-    run: TaskRunRecord,
+    run: TaskRun,
 }
 
 impl DesignFixture {

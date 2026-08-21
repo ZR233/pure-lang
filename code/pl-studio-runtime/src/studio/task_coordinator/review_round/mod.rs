@@ -1,6 +1,6 @@
 //! ReviewRound aggregate with reviewer execution encoded in its lifecycle state.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -59,6 +59,40 @@ impl ReviewRoundState {
         })
     }
 
+    pub(crate) fn running() -> Self {
+        Self::Pending(PendingReviewState {
+            reviewer: PendingReviewerState::Running,
+        })
+    }
+
+    pub(crate) fn pass(summary: String) -> Self {
+        Self::Pass(CompletedReviewState { summary })
+    }
+
+    pub(crate) fn changes_required(summary: String) -> Self {
+        Self::ChangesRequired(CompletedReviewState { summary })
+    }
+
+    pub(crate) fn blocked(summary: String) -> Self {
+        Self::Blocked(CompletedReviewState { summary })
+    }
+
+    pub(crate) fn failed(error: String, summary: String) -> Self {
+        Self::Failed(FailedReviewState {
+            reviewer: FailedReviewerState::Failed,
+            error,
+            summary,
+        })
+    }
+
+    pub(crate) fn cancelled(error: String, summary: String) -> Self {
+        Self::Failed(FailedReviewState {
+            reviewer: FailedReviewerState::Cancelled,
+            error,
+            summary,
+        })
+    }
+
     pub(crate) const fn verdict(&self) -> ReviewVerdict {
         match self {
             Self::Pending(_) => ReviewVerdict::Pending,
@@ -99,59 +133,6 @@ impl ReviewRoundState {
         match self {
             Self::Failed(state) => Some(&state.error),
             _ => None,
-        }
-    }
-
-    pub(crate) fn from_parts(
-        verdict: ReviewVerdict,
-        reviewer: ThreadExecutionStatus,
-        summary: Option<String>,
-        error: Option<String>,
-    ) -> Result<Self> {
-        let completed = || -> Result<CompletedReviewState> {
-            Ok(CompletedReviewState {
-                summary: summary
-                    .clone()
-                    .context("completed review requires a summary")?,
-            })
-        };
-        match (verdict, reviewer) {
-            (ReviewVerdict::Pending, ThreadExecutionStatus::Queued) => {
-                Ok(Self::Pending(PendingReviewState {
-                    reviewer: PendingReviewerState::Queued,
-                }))
-            }
-            (ReviewVerdict::Pending, ThreadExecutionStatus::Running) => {
-                Ok(Self::Pending(PendingReviewState {
-                    reviewer: PendingReviewerState::Running,
-                }))
-            }
-            (ReviewVerdict::Pass, ThreadExecutionStatus::Completed) => Ok(Self::Pass(completed()?)),
-            (ReviewVerdict::ChangesRequired, ThreadExecutionStatus::Completed) => {
-                Ok(Self::ChangesRequired(completed()?))
-            }
-            (ReviewVerdict::Blocked, ThreadExecutionStatus::Completed) => {
-                Ok(Self::Blocked(completed()?))
-            }
-            (ReviewVerdict::Failed, ThreadExecutionStatus::Failed) => {
-                Ok(Self::Failed(FailedReviewState {
-                    reviewer: FailedReviewerState::Failed,
-                    error: error.context("failed review requires an error")?,
-                    summary: summary.context("failed review requires a summary")?,
-                }))
-            }
-            (ReviewVerdict::Failed, ThreadExecutionStatus::Cancelled) => {
-                Ok(Self::Failed(FailedReviewState {
-                    reviewer: FailedReviewerState::Cancelled,
-                    error: error.context("cancelled review requires an error")?,
-                    summary: summary.context("cancelled review requires a summary")?,
-                }))
-            }
-            (verdict, reviewer) => bail!(
-                "invalid ReviewRound state combination: {} + {}",
-                verdict.as_str(),
-                reviewer.as_str()
-            ),
         }
     }
 }
@@ -206,53 +187,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legal_review_states_round_trip_and_reject_split_status_pairs() {
-        let cases = [
-            (ReviewVerdict::Pending, ThreadExecutionStatus::Queued),
-            (ReviewVerdict::Pending, ThreadExecutionStatus::Running),
-            (ReviewVerdict::Pass, ThreadExecutionStatus::Completed),
-            (
-                ReviewVerdict::ChangesRequired,
-                ThreadExecutionStatus::Completed,
-            ),
-            (ReviewVerdict::Blocked, ThreadExecutionStatus::Completed),
-            (ReviewVerdict::Failed, ThreadExecutionStatus::Failed),
-            (ReviewVerdict::Failed, ThreadExecutionStatus::Cancelled),
+    fn states_round_trip_as_a_single_tagged_enum() {
+        let states = [
+            ReviewRoundState::pending(),
+            ReviewRoundState::running(),
+            ReviewRoundState::pass("pass".to_string()),
+            ReviewRoundState::changes_required("changes".to_string()),
+            ReviewRoundState::blocked("blocked".to_string()),
+            ReviewRoundState::failed("failed".to_string(), "summary".to_string()),
+            ReviewRoundState::cancelled("cancelled".to_string(), "summary".to_string()),
         ];
 
-        for (verdict, reviewer) in cases {
-            let completed = reviewer == ThreadExecutionStatus::Completed;
-            let failed = verdict == ReviewVerdict::Failed;
-            let state = ReviewRoundState::from_parts(
-                verdict,
-                reviewer,
-                (completed || failed).then(|| "review summary".to_string()),
-                failed.then(|| "review error".to_string()),
-            )
-            .unwrap();
+        for state in states {
             let value = serde_json::to_value(&state).unwrap();
-            assert_eq!(value["kind"], verdict.as_str());
+            assert_eq!(value["kind"], state.verdict().as_str());
             let decoded: ReviewRoundState = serde_json::from_value(value).unwrap();
             assert_eq!(decoded, state);
         }
-
-        assert!(
-            ReviewRoundState::from_parts(
-                ReviewVerdict::Pass,
-                ThreadExecutionStatus::Running,
-                Some("summary".to_string()),
-                None,
-            )
-            .is_err()
-        );
-        assert!(
-            ReviewRoundState::from_parts(
-                ReviewVerdict::Pass,
-                ThreadExecutionStatus::Completed,
-                None,
-                None,
-            )
-            .is_err()
-        );
     }
 }

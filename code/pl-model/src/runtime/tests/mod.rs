@@ -6,11 +6,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
-use crate::completion::stream::event::ModelStreamEvent;
+use crate::completion::stream::event::{ModelStreamEvent, ToolInputDeltaPayload};
 use crate::completion::stream::{StreamCompletionAccumulator, VisibleOutputDecoder};
 use crate::completion::{CompletionRequest, CompletionTraceContext, ToolCallPayload};
 use crate::runtime::openai::VisibleOutputProtocol;
-use crate::runtime::openai::sse::{StreamEvent, ToolCallDeltaPayload};
 use pl_trace::TraceEventKind;
 
 fn apply_completed(
@@ -18,7 +17,7 @@ fn apply_completed(
     event_tx: &pl_trace::AgentEventSender,
 ) {
     accumulator
-        .apply(StreamEvent::Completed { response_id: None }, event_tx)
+        .apply(ModelStreamEvent::Completed { response_id: None }, event_tx)
         .unwrap();
 }
 
@@ -37,40 +36,40 @@ fn tagged_decoder() -> VisibleOutputDecoder {
     VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText)
 }
 
-fn final_delta(id: &str, delta: &str) -> StreamEvent {
-    StreamEvent::text_delta(
+fn final_delta(id: &str, delta: &str) -> ModelStreamEvent {
+    ModelStreamEvent::text_delta(
         id.to_string(),
         pl_trace::TraceTextChannel::Final,
         delta.to_string(),
     )
 }
 
-fn final_started(id: &str) -> StreamEvent {
-    StreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Final)
+fn final_started(id: &str) -> ModelStreamEvent {
+    ModelStreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Final)
 }
 
-fn commentary_started(id: &str) -> StreamEvent {
-    StreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Commentary)
+fn commentary_started(id: &str) -> ModelStreamEvent {
+    ModelStreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Commentary)
 }
 
 fn completed_text(
     id: &str,
     channel: pl_trace::TraceTextChannel,
     authoritative_text: Option<&str>,
-) -> StreamEvent {
-    StreamEvent::text_completed(
+) -> ModelStreamEvent {
+    ModelStreamEvent::text_completed(
         id.to_string(),
         channel,
         authoritative_text.map(ToOwned::to_owned),
     )
 }
 
-fn summary_delta(id: &str, section_index: u32, delta: &str) -> StreamEvent {
-    StreamEvent::reasoning_summary_delta(id.to_string(), section_index, delta.to_string())
+fn summary_delta(id: &str, section_index: u32, delta: &str) -> ModelStreamEvent {
+    ModelStreamEvent::reasoning_summary_delta(id.to_string(), section_index, delta.to_string())
 }
 
-fn summary_started(id: &str) -> StreamEvent {
-    StreamEvent::reasoning_summary_started(id.to_string(), None)
+fn summary_started(id: &str) -> ModelStreamEvent {
+    ModelStreamEvent::reasoning_summary_started(id.to_string(), None)
 }
 
 fn trace_part_text(item: &pl_trace::TracePart) -> String {

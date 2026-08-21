@@ -10,11 +10,6 @@ pub fn message_content_text(content: &MessageContent) -> String {
     message_content_text_with_separator(content, "")
 }
 
-/// 提取消息内容中的文本片段，并用换行连接多模态文本 part。
-pub fn message_content_text_lines(content: &MessageContent) -> String {
-    message_content_text_with_separator(content, "\n")
-}
-
 /// 生成按字符数截断的自然文本预览。
 ///
 /// 该 helper 会先 trim 首尾空白；未超限时返回完整文本，超限时保留前
@@ -27,33 +22,6 @@ pub fn text_preview_chars(text: &str, max_chars: usize) -> String {
     let mut preview = trimmed.chars().take(max_chars).collect::<String>();
     preview.push_str("...");
     preview
-}
-
-/// 从模型完成响应中生成短预览文本。
-///
-/// 预览按 reasoning、assistant content、tool call 的顺序拼接，并使用与 Codex
-/// 工具事件一致的单行截断格式，便于产品层和服务探活共享同一展示语义。
-pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> String {
-    let mut parts = Vec::new();
-    if let Some(reasoning) = response
-        .reasoning_content
-        .as_deref()
-        .filter(|text| !text.is_empty())
-    {
-        parts.push(reasoning.to_string());
-    }
-    if let Some(content) = response.content.as_deref().filter(|text| !text.is_empty()) {
-        parts.push(content.to_string());
-    }
-    parts.extend(response.tool_calls.iter().map(|call| {
-        format!(
-            "function_call {} {}: {}",
-            call.name,
-            call.call_id,
-            call.payload_text()
-        )
-    }));
-    text_preview(&parts.join("\n"), 500)
 }
 
 /// 模型完成响应面向宿主产品的结构化快照。
@@ -325,21 +293,6 @@ fn text_message(role: MessageRole, content: String) -> Message {
     }
 }
 
-fn text_preview(value: &str, max: usize) -> String {
-    let mut out = value.replace('\n', "\\n");
-    if out.len() > max {
-        let boundary = out
-            .char_indices()
-            .take_while(|(i, c)| i + c.len_utf8() <= max)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        out.truncate(boundary);
-        out.push_str("...");
-    }
-    out
-}
-
 /// 将一条可选 fragment message 的文本追加到基础消息后。
 ///
 /// 空白 fragment 会被忽略；非空 fragment 以空行分隔，保持宿主拼接 skill
@@ -392,27 +345,6 @@ mod tests {
             super::append_message_fragment_text("hello".to_string(), Some(&fragment)),
             "hello\n\nskill one\nskill two"
         );
-    }
-
-    #[test]
-    fn message_content_text_lines_joins_text_parts_with_newlines() {
-        let content = MessageContent::MultiPart(vec![
-            ContentPart::Text {
-                text: "first".to_string(),
-            },
-            ContentPart::Image {
-                source: ImageSource::Attachment {
-                    attachment_id: "image-1".to_string(),
-                },
-                media_type: "image/png".to_string(),
-                filename: None,
-            },
-            ContentPart::Text {
-                text: "second".to_string(),
-            },
-        ]);
-
-        assert_eq!(super::message_content_text_lines(&content), "first\nsecond");
     }
 
     #[test]
@@ -481,30 +413,6 @@ mod tests {
             "Other text",
             "Context checkpoint"
         ));
-    }
-
-    #[test]
-    fn completion_response_preview_includes_reasoning_content_and_tool_calls() {
-        let response = pl_model::CompletionResponse {
-            response_id: Some("resp_1".to_string()),
-            content: Some("answer".to_string()),
-            reasoning_content: Some("thinking".to_string()),
-            tool_calls: vec![pl_model::ToolCall::function(
-                "call_item",
-                "read_file",
-                serde_json::json!({"path": "Cargo.toml"}),
-                "call_1",
-            )],
-            responses_context_items: Vec::new(),
-            orchestration: Default::default(),
-            usage: pl_model::TokenUsage::default(),
-            model: "test-model".to_string(),
-        };
-
-        assert_eq!(
-            super::completion_response_preview(&response),
-            r#"thinking\nanswer\nfunction_call read_file call_1: {"path":"Cargo.toml"}"#
-        );
     }
 
     #[test]
@@ -590,26 +498,6 @@ mod tests {
             super::completion_response_message_text(&response),
             "Task title"
         );
-    }
-
-    #[test]
-    fn completion_response_preview_truncates_on_char_boundary() {
-        let response = pl_model::CompletionResponse {
-            response_id: None,
-            content: Some("你".repeat(200)),
-            reasoning_content: None,
-            tool_calls: Vec::new(),
-            responses_context_items: Vec::new(),
-            orchestration: Default::default(),
-            usage: pl_model::TokenUsage::default(),
-            model: "test-model".to_string(),
-        };
-
-        let preview = super::completion_response_preview(&response);
-
-        assert!(preview.ends_with("..."));
-        assert!(preview.len() <= 503);
-        assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
     }
 
     #[test]

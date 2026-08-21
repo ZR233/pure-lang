@@ -7,7 +7,7 @@ pub(super) struct WorktreeRecoveryPreflight {
 }
 
 pub(super) struct WorktreeRecoveryPreflightFailure {
-    pub(super) runs: Vec<TaskRunRecord>,
+    pub(super) runs: Vec<TaskRun>,
     pub(super) message: String,
 }
 

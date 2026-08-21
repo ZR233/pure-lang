@@ -10,8 +10,8 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     BlockedRecovery, ExecutorContinuationState, ReviewRoundState, ReviewScope, ReviewVerdict,
-    TaskCommand, TaskRunRecord, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    TaskCommand, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitState, WorkUnitStatus,
 };
 
 use super::review::{review_round_state, update_review_round_state};
@@ -47,7 +47,7 @@ impl StudioStore {
         expected_head: &str,
         origin: TaskStopOrigin,
         reason: &TaskStopReason,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
@@ -80,7 +80,7 @@ impl StudioStore {
         task_run_id: &str,
         expected_head: &str,
         expected_generation: u64,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
@@ -111,7 +111,7 @@ impl StudioStore {
         &self,
         task_run_id: &str,
         reason: &str,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
@@ -143,10 +143,7 @@ impl StudioStore {
         finish_transaction(tx, result).await
     }
 
-    pub(crate) async fn retry_blocked_merge_task(
-        &self,
-        expected: &TaskRunRecord,
-    ) -> Result<TaskRunRecord> {
+    pub(crate) async fn retry_blocked_merge_task(&self, expected: &TaskRun) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = entities::task_run::Entity::find_by_id(expected.id.clone())
@@ -200,7 +197,7 @@ impl StudioStore {
         thread_id: &str,
         expected_head: &str,
         gate: &StudioIntegratedReviewGate,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_run_for_session(&tx, thread_id).await?;
@@ -272,11 +269,7 @@ impl StudioStore {
                 let authorize_cleanup = status != WorkUnitStatus::Merged;
                 if cancel || authorize_cleanup {
                     let mut progress = state.clone().into_progress();
-                    let mut next_status = status;
-                    let mut execution = state.execution_status();
                     if cancel {
-                        next_status = WorkUnitStatus::Cancelled;
-                        execution = ThreadExecutionStatus::Cancelled;
                         progress.execution_error = Some(reason.to_string());
                         progress.continuation_state = ExecutorContinuationState::None;
                         progress.continuation_source_turn_id = None;
@@ -286,7 +279,12 @@ impl StudioStore {
                     if authorize_cleanup {
                         progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
                     }
-                    update_work_unit_state(&tx, unit, next_status, execution, progress).await?;
+                    let next_state = if cancel {
+                        WorkUnitState::cancelled(progress)
+                    } else {
+                        state.with_progress(progress)
+                    };
+                    update_work_unit_state(&tx, unit, next_state).await?;
                 }
             }
             for round in entities::review_round::Entity::find()
@@ -298,12 +296,7 @@ impl StudioStore {
                 .await?
             {
                 let _current = review_round_state(&round)?;
-                let state = ReviewRoundState::from_parts(
-                    ReviewVerdict::Failed,
-                    ThreadExecutionStatus::Cancelled,
-                    Some(reason.to_string()),
-                    Some(reason.to_string()),
-                )?;
+                let state = ReviewRoundState::cancelled(reason.to_string(), reason.to_string());
                 update_review_round_state(&tx, round, state).await?;
             }
             Ok(())
@@ -318,7 +311,7 @@ impl StudioStore {
         expected_head: &str,
         expected_generation: u64,
         reason: &str,
-    ) -> Result<TaskRunRecord> {
+    ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
         let result = async {
             let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())

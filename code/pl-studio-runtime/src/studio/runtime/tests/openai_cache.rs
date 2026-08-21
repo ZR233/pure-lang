@@ -343,7 +343,7 @@ fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> Studi
     config.models = AgentModelConfig {
         providers: BTreeMap::from([(
             provider_id,
-            ProviderConfig::from_endpoint(info, vec![model]),
+            ProviderConfig::from_explicit_models(info, vec![model]),
         )]),
         routes: [
             StudioRole::Explorer,

@@ -36,8 +36,6 @@ pub(crate) struct TaskRun {
     pub(crate) updated_at: i64,
 }
 
-pub(crate) type TaskRunRecord = TaskRun;
-
 impl Deref for TaskRun {
     type Target = TaskContext;
 

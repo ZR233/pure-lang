@@ -11,11 +11,15 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, ThreadExecutionStatus, WorkUnitState,
-    WorkUnitStatus,
+    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, WorkUnitState, WorkUnitStatus,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
+
+enum ExecutorAllocationTransition {
+    Activate,
+    Fail(String),
+}
 
 impl StudioStore {
     pub(crate) async fn allocate_executor(
@@ -160,9 +164,7 @@ impl StudioStore {
         self.update_executor_allocation(
             work_unit_id,
             agent_id,
-            WorkUnitStatus::Running,
-            ThreadExecutionStatus::Running,
-            None,
+            ExecutorAllocationTransition::Activate,
         )
         .await
     }
@@ -176,9 +178,7 @@ impl StudioStore {
         self.update_executor_allocation(
             work_unit_id,
             agent_id,
-            WorkUnitStatus::Failed,
-            ThreadExecutionStatus::Failed,
-            Some(error.to_string()),
+            ExecutorAllocationTransition::Fail(error.to_string()),
         )
         .await
     }
@@ -187,9 +187,7 @@ impl StudioStore {
         &self,
         work_unit_id: &str,
         agent_id: &str,
-        work_unit_status: WorkUnitStatus,
-        execution_status: ThreadExecutionStatus,
-        error: Option<String>,
+        transition: ExecutorAllocationTransition,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
@@ -197,11 +195,18 @@ impl StudioStore {
             .one(&tx)
             .await?
             .context("executor work unit not found")?;
-        let state = work_unit_state(&work_unit)?;
-        let mut progress = state.into_progress();
-        progress.execution_error = error;
-        update_work_unit_state(&tx, work_unit, work_unit_status, execution_status, progress)
-            .await?;
+        let mut progress = work_unit_state(&work_unit)?.into_progress();
+        let next_state = match transition {
+            ExecutorAllocationTransition::Activate => {
+                progress.execution_error = None;
+                WorkUnitState::running(progress)
+            }
+            ExecutorAllocationTransition::Fail(error) => {
+                progress.execution_error = Some(error);
+                WorkUnitState::failed(progress)
+            }
+        };
+        update_work_unit_state(&tx, work_unit, next_state).await?;
         tx.commit().await?;
         Ok(())
     }

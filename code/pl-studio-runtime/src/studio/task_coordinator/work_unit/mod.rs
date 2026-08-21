@@ -2,7 +2,7 @@
 
 use std::ops::Deref;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -88,6 +88,77 @@ impl WorkUnitState {
         Self::Pending(WorkUnitProgress::pending())
     }
 
+    pub(crate) fn running(progress: WorkUnitProgress) -> Self {
+        Self::Running(RunningWorkUnitState {
+            execution: RunningExecution::Running,
+            progress,
+        })
+    }
+
+    pub(crate) fn budget_limited(progress: WorkUnitProgress) -> Self {
+        Self::Running(RunningWorkUnitState {
+            execution: RunningExecution::BudgetLimited,
+            progress,
+        })
+    }
+
+    pub(crate) fn awaiting_completed(progress: WorkUnitProgress) -> Self {
+        Self::AwaitingCompletion(AwaitingWorkUnitState {
+            execution: AwaitingExecution::Completed,
+            progress,
+        })
+    }
+
+    pub(crate) fn awaiting_failed(progress: WorkUnitProgress) -> Self {
+        Self::AwaitingCompletion(AwaitingWorkUnitState {
+            execution: AwaitingExecution::Failed,
+            progress,
+        })
+    }
+
+    pub(crate) fn awaiting_cancelled(progress: WorkUnitProgress) -> Self {
+        Self::AwaitingCompletion(AwaitingWorkUnitState {
+            execution: AwaitingExecution::Cancelled,
+            progress,
+        })
+    }
+
+    pub(crate) fn ready_for_review(progress: WorkUnitProgress) -> Self {
+        Self::ReadyForReview(progress)
+    }
+
+    pub(crate) fn reviewing(progress: WorkUnitProgress) -> Self {
+        Self::Reviewing(progress)
+    }
+
+    pub(crate) fn changes_requested(progress: WorkUnitProgress) -> Self {
+        Self::ChangesRequested(progress)
+    }
+
+    pub(crate) fn approved(progress: WorkUnitProgress) -> Self {
+        Self::Approved(progress)
+    }
+
+    pub(crate) fn merged(progress: WorkUnitProgress) -> Self {
+        Self::Merged(progress)
+    }
+
+    pub(crate) fn no_delivery(progress: WorkUnitProgress) -> Self {
+        Self::NoDelivery(progress)
+    }
+
+    pub(crate) fn needs_attention(progress: WorkUnitProgress) -> Self {
+        Self::NeedsAttention(progress)
+    }
+
+    pub(crate) fn failed(progress: WorkUnitProgress) -> Self {
+        Self::Failed(progress)
+    }
+
+    pub(crate) fn cancelled(progress: WorkUnitProgress) -> Self {
+        Self::Cancelled(progress)
+    }
+
     pub(crate) const fn status(&self) -> WorkUnitStatus {
         match self {
             Self::Pending(_) => WorkUnitStatus::Pending,
@@ -163,73 +234,28 @@ impl WorkUnitState {
         }
     }
 
-    pub(crate) fn from_parts(
-        status: WorkUnitStatus,
-        execution: ThreadExecutionStatus,
-        progress: WorkUnitProgress,
-    ) -> Result<Self> {
-        let state = match (status, execution) {
-            (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued) => Self::Pending(progress),
-            (WorkUnitStatus::Running, ThreadExecutionStatus::Running) => {
-                Self::Running(RunningWorkUnitState {
-                    execution: RunningExecution::Running,
-                    progress,
-                })
+    /// 替换状态 payload，同时保留当前 lifecycle variant 与 execution variant。
+    pub(crate) fn with_progress(self, progress: WorkUnitProgress) -> Self {
+        match self {
+            Self::Pending(_) => Self::Pending(progress),
+            Self::Running(mut state) => {
+                state.progress = progress;
+                Self::Running(state)
             }
-            (WorkUnitStatus::Running, ThreadExecutionStatus::BudgetLimited) => {
-                Self::Running(RunningWorkUnitState {
-                    execution: RunningExecution::BudgetLimited,
-                    progress,
-                })
+            Self::AwaitingCompletion(mut state) => {
+                state.progress = progress;
+                Self::AwaitingCompletion(state)
             }
-            (WorkUnitStatus::AwaitingCompletion, ThreadExecutionStatus::Completed) => {
-                Self::AwaitingCompletion(AwaitingWorkUnitState {
-                    execution: AwaitingExecution::Completed,
-                    progress,
-                })
-            }
-            (WorkUnitStatus::AwaitingCompletion, ThreadExecutionStatus::Failed) => {
-                Self::AwaitingCompletion(AwaitingWorkUnitState {
-                    execution: AwaitingExecution::Failed,
-                    progress,
-                })
-            }
-            (WorkUnitStatus::AwaitingCompletion, ThreadExecutionStatus::Cancelled) => {
-                Self::AwaitingCompletion(AwaitingWorkUnitState {
-                    execution: AwaitingExecution::Cancelled,
-                    progress,
-                })
-            }
-            (WorkUnitStatus::ReadyForReview, ThreadExecutionStatus::Completed) => {
-                Self::ReadyForReview(progress)
-            }
-            (WorkUnitStatus::Reviewing, ThreadExecutionStatus::Completed) => {
-                Self::Reviewing(progress)
-            }
-            (WorkUnitStatus::ChangesRequested, ThreadExecutionStatus::Completed) => {
-                Self::ChangesRequested(progress)
-            }
-            (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed) => {
-                Self::Approved(progress)
-            }
-            (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed) => Self::Merged(progress),
-            (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed) => {
-                Self::NoDelivery(progress)
-            }
-            (WorkUnitStatus::NeedsAttention, ThreadExecutionStatus::BudgetLimited) => {
-                Self::NeedsAttention(progress)
-            }
-            (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed) => Self::Failed(progress),
-            (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled) => {
-                Self::Cancelled(progress)
-            }
-            (status, execution) => bail!(
-                "invalid WorkUnit state combination: {} + {}",
-                status.as_str(),
-                execution.as_str()
-            ),
-        };
-        Ok(state)
+            Self::ReadyForReview(_) => Self::ReadyForReview(progress),
+            Self::Reviewing(_) => Self::Reviewing(progress),
+            Self::ChangesRequested(_) => Self::ChangesRequested(progress),
+            Self::Approved(_) => Self::Approved(progress),
+            Self::Merged(_) => Self::Merged(progress),
+            Self::NoDelivery(_) => Self::NoDelivery(progress),
+            Self::NeedsAttention(_) => Self::NeedsAttention(progress),
+            Self::Failed(_) => Self::Failed(progress),
+            Self::Cancelled(_) => Self::Cancelled(progress),
+        }
     }
 }
 
@@ -257,8 +283,6 @@ pub(crate) struct WorkUnit {
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
-
-pub(crate) type WorkUnitRecord = WorkUnit;
 
 impl Deref for WorkUnit {
     type Target = WorkUnitContext;
@@ -323,70 +347,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legal_state_pairs_round_trip_and_reject_cross_product_states() {
-        let legal = [
-            (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued),
-            (WorkUnitStatus::Running, ThreadExecutionStatus::Running),
-            (
-                WorkUnitStatus::Running,
-                ThreadExecutionStatus::BudgetLimited,
-            ),
-            (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Completed,
-            ),
-            (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Failed,
-            ),
-            (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Cancelled,
-            ),
-            (
-                WorkUnitStatus::ReadyForReview,
-                ThreadExecutionStatus::Completed,
-            ),
-            (WorkUnitStatus::Reviewing, ThreadExecutionStatus::Completed),
-            (
-                WorkUnitStatus::ChangesRequested,
-                ThreadExecutionStatus::Completed,
-            ),
-            (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed),
-            (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed),
-            (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed),
-            (
-                WorkUnitStatus::NeedsAttention,
-                ThreadExecutionStatus::BudgetLimited,
-            ),
-            (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed),
-            (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled),
+    fn states_round_trip_as_a_single_tagged_enum() {
+        let states = [
+            WorkUnitState::pending(),
+            WorkUnitState::running(WorkUnitProgress::pending()),
+            WorkUnitState::budget_limited(WorkUnitProgress::pending()),
+            WorkUnitState::awaiting_completed(WorkUnitProgress::pending()),
+            WorkUnitState::awaiting_failed(WorkUnitProgress::pending()),
+            WorkUnitState::awaiting_cancelled(WorkUnitProgress::pending()),
+            WorkUnitState::ready_for_review(WorkUnitProgress::pending()),
+            WorkUnitState::reviewing(WorkUnitProgress::pending()),
+            WorkUnitState::changes_requested(WorkUnitProgress::pending()),
+            WorkUnitState::approved(WorkUnitProgress::pending()),
+            WorkUnitState::merged(WorkUnitProgress::pending()),
+            WorkUnitState::no_delivery(WorkUnitProgress::pending()),
+            WorkUnitState::needs_attention(WorkUnitProgress::pending()),
+            WorkUnitState::failed(WorkUnitProgress::pending()),
+            WorkUnitState::cancelled(WorkUnitProgress::pending()),
         ];
 
-        for (status, execution) in legal {
-            let state =
-                WorkUnitState::from_parts(status, execution, WorkUnitProgress::pending()).unwrap();
+        for state in states {
             let value = serde_json::to_value(&state).unwrap();
-            assert_eq!(value["kind"], status.as_str());
+            assert_eq!(value["kind"], state.status().as_str());
             let decoded: WorkUnitState = serde_json::from_value(value).unwrap();
             assert_eq!(decoded, state);
         }
-
-        assert!(
-            WorkUnitState::from_parts(
-                WorkUnitStatus::Merged,
-                ThreadExecutionStatus::Running,
-                WorkUnitProgress::pending(),
-            )
-            .is_err()
-        );
-        assert!(
-            WorkUnitState::from_parts(
-                WorkUnitStatus::Pending,
-                ThreadExecutionStatus::Completed,
-                WorkUnitProgress::pending(),
-            )
-            .is_err()
-        );
     }
 }

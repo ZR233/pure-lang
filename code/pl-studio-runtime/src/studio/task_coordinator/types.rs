@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{TaskGitFingerprint, TaskRunRecord, TaskRunStateKind, WorkUnitRecord};
+use super::{TaskGitFingerprint, TaskRun, TaskRunStateKind, WorkUnit};
 
 mod merge;
 pub(crate) use merge::*;
@@ -80,7 +80,7 @@ pub(crate) struct RecordTaskAgentFailure {
 }
 
 pub(crate) struct TaskFailureSettlement {
-    pub(crate) run: TaskRunRecord,
+    pub(crate) run: TaskRun,
     pub(crate) terminalized: bool,
 }
 
@@ -152,7 +152,7 @@ pub(crate) struct RestartAgentReconciliation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeOwnerSnapshot {
-    pub(crate) run: TaskRunRecord,
+    pub(crate) run: TaskRun,
     pub(crate) resources: Vec<TaskWorktreeOwnerResource>,
 }
 
@@ -172,7 +172,7 @@ pub(crate) enum TaskWorktreeCleanupState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeOwnerResource {
-    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) work_unit: WorkUnit,
     pub(crate) completion: Option<WorkCompletionRecord>,
     pub(crate) creation_state: TaskWorktreeCreationState,
     pub(crate) cleanup_state: TaskWorktreeCleanupState,
@@ -542,8 +542,8 @@ pub(crate) struct AgentReview {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeliveryScope {
-    pub(crate) run: TaskRunRecord,
-    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) run: TaskRun,
+    pub(crate) work_unit: WorkUnit,
 }
 
 #[cfg(test)]

@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn historical_flat_mailbox_and_recovery_json_remain_deserializable() {
+    fn canonical_flat_mailbox_and_recovery_json_are_deserializable() {
         let envelope = serde_json::from_value::<DurableMailboxEnvelope>(json!({
             "mailId": "mail-1",
             "turnId": "turn-1",

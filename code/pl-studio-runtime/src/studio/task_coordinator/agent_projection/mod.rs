@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::TaskCoordinator;
-use crate::{AgentId, AgentLifecycleState, AgentRuntimeHandle};
+use crate::{AgentLifecycleState, AgentRuntimeHandle, ThreadId};
 
 const CLOSED_PROJECTION_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSED_PROJECTION_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -14,7 +14,7 @@ impl TaskCoordinator {
         runtime: &AgentRuntimeHandle,
         agent_id: &str,
     ) -> Result<()> {
-        let agent_id = AgentId::new(agent_id.to_string())?;
+        let agent_id = ThreadId::new(agent_id.to_string())?;
         let snapshot = runtime
             .snapshot(agent_id.clone())
             .await

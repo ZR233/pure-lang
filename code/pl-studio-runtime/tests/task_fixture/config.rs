@@ -18,7 +18,7 @@ pub(super) fn task_test_config(base_url: String) -> StudioConfig {
     }];
 
     let info = pl_model::ProviderEndpoint::openai(Some(base_url));
-    let provider = ProviderConfig::from_endpoint(info, vec![model]);
+    let provider = ProviderConfig::from_explicit_models(info, vec![model]);
     let provider_id = ProviderId::new("local").unwrap();
     let route = ModelRouteConfig {
         provider: provider_id.clone(),

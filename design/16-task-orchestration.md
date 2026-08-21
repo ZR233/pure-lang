@@ -17,7 +17,8 @@ WorkUnit 生命周期。
 
 每个 agent 固定对应一个 Thread。child 通过 `rootThreadId`、`parentThreadId`、`role` 和
 `agentPath` 表达关系。TaskRun 只绑定 root Thread；executor 和 reviewer 直接由 WorkUnit、
-ReviewRound 引用，不建立 AgentOutcome 镜像。
+ReviewRound 引用，不建立 AgentOutcome 镜像。Rust runtime 同样只使用 `ThreadId` 表达 actor 身份，
+不提供同类型的 `AgentId` 改名别名。
 
 ## 16.2 所有权
 
@@ -69,6 +70,8 @@ finalize”和“设计阶段产生了提交”是两个独立事实。`Reviewin
 WorkUnit 把 lifecycle 与 executor execution 合并为唯一的 `WorkUnitState`，不能分别写入
 `status + executionStatus` 形成非法组合。ReviewRound 同理使用唯一 `ReviewRoundState`，reviewer
 执行进度包含在 pending/failed payload 中，不再独立持久化 `status + reviewerStatus`。WorkUnit
+与 ReviewRound repository 更新入口直接接收完整 state enum 或语义明确的 command；不接受拆开的
+status/execution/progress 参数，也不提供把旧字段组合回 enum 的 `from_parts` 兼容构造器。WorkUnit
 的身份列直接保存 executorThreadId、requestedByCallId、attempt、scopeHints、baseCommit、worktree
 和 branch；ReviewRound 的关系列保存 reviewerThreadId、scope 和目标 completion/HEAD，冻结的
 changed-files、逐文件覆盖与 findings 保持独立审计数据。Delivery round 的文件清单直接复制不可变

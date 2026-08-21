@@ -77,10 +77,10 @@ async fn serve_chat_sequence(
 fn host_config(base_url: String) -> (AgentModelConfig, AgentRoleId) {
     let provider_id = ProviderId::new("fixture").unwrap();
     let role = AgentRoleId::new("executor").unwrap();
-    let mut endpoint = ProviderEndpoint::openai_compatible_chat("Fixture", base_url);
+    let mut endpoint = ProviderEndpoint::compatible("Fixture", base_url);
     endpoint.bearer_token = Some("fixture-token".to_string());
     let model = ModelInfo::fallback("fixture-model");
-    let provider = ProviderConfig::from_endpoint(endpoint, vec![model]);
+    let provider = ProviderConfig::from_explicit_models(endpoint, vec![model]);
     let config = AgentModelConfig {
         providers: BTreeMap::from([(provider_id.clone(), provider)]),
         routes: BTreeMap::from([(

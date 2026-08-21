@@ -473,7 +473,7 @@ fn web_search_settings(
 
 fn web_search_config(
     request: UpdateWebSearchSettingsRequest,
-) -> Result<(u64, crate::StudioWebSearchConfig)> {
+) -> Result<(u64, pl_model::WebSearchConfig)> {
     let mode = match request.mode.trim() {
         "disabled" => WebSearchMode::Disabled,
         "cached" => WebSearchMode::Cached,
@@ -500,7 +500,7 @@ fn web_search_config(
     };
     Ok((
         request.expected_revision,
-        crate::StudioWebSearchConfig {
+        pl_model::WebSearchConfig {
             mode,
             context_size,
             allowed_domains: normalized_string_list(request.allowed_domains),

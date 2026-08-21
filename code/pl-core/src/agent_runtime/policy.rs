@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::{AgentRoleId, ToolEffect, ToolVisibilitySet};
 
-use super::AgentId;
+use super::ThreadId;
 
 /// 协作操作可访问的 agent 集合。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub enum AgentTargetSelector {
     /// 允许访问调用方所属的父子树。
     Tree,
     /// 只允许访问显式列出的 agent。
-    Explicit(BTreeSet<AgentId>),
+    Explicit(BTreeSet<ThreadId>),
     /// 允许访问 runtime 内全部 agent。
     All,
 }

@@ -5,14 +5,14 @@ use anyhow::{Context, Result, bail};
 use super::git::checked_git;
 use crate::agent::worktree::same_worktree_path;
 use crate::studio::task_coordinator::{
-    AgentDelivery, TaskRunRecord, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord,
-    WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
+    AgentDelivery, TaskRun, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord,
+    WorkCompletionStatus, WorkUnit, WorkUnitStatus,
 };
 
 pub(super) fn ensure_preflight_delivery_identity(
     task_run_id: &str,
     agent_id: &str,
-    work_unit: &WorkUnitRecord,
+    work_unit: &WorkUnit,
     completion: &WorkCompletionRecord,
     delivery: &AgentDelivery,
 ) -> Result<()> {
@@ -65,7 +65,7 @@ pub(super) fn ensure_preflight_delivery_identity(
     Ok(())
 }
 
-pub(super) async fn validate_final_head(run: &TaskRunRecord, expected_head: &str) -> Result<()> {
+pub(super) async fn validate_final_head(run: &TaskRun, expected_head: &str) -> Result<()> {
     validate_repository_identity(
         Path::new(&run.workspace_root),
         Path::new(&run.workspace_root),

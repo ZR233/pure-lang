@@ -7,9 +7,7 @@ use serde::Serialize;
 
 use super::super::git::{GitDiffSelection, diff_between};
 use super::super::spawn::TaskExecutorBlueprint;
-use super::super::{
-    ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnitRecord, WorkUnitStatus,
-};
+use super::super::{ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnit, WorkUnitStatus};
 use super::{ModelCompletion, ModelWorkUnit};
 
 const COMMON_TEMPLATE: &str = include_str!("../../../prompts/review/common.md");
@@ -222,8 +220,8 @@ fn render_template<const N: usize>(
     Ok(rendered.join("\n"))
 }
 
-impl From<&WorkUnitRecord> for ReviewFocus {
-    fn from(work_unit: &WorkUnitRecord) -> Self {
+impl From<&WorkUnit> for ReviewFocus {
+    fn from(work_unit: &WorkUnit) -> Self {
         Self {
             work_unit_id: work_unit.id.clone(),
             title: work_unit.title.clone(),

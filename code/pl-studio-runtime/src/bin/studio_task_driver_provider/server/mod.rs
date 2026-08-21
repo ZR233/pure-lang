@@ -274,7 +274,7 @@ fn write_config(home: &Path, base_url: String) -> Result<()> {
         wire: BTreeMap::new(),
     }];
     let info = pl_model::ProviderEndpoint::openai(Some(base_url));
-    let provider = ProviderConfig::from_endpoint(info, vec![model]);
+    let provider = ProviderConfig::from_explicit_models(info, vec![model]);
     let provider_id = ProviderId::new("local")?;
     let route = ModelRouteConfig {
         provider: provider_id.clone(),
