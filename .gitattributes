@@ -1,3 +1,13 @@
+*.gitattributes text eol=lf
+
 code/pure-studio/windows/flutter/generated_plugin_registrant.cc text eol=lf
 code/pure-studio/windows/flutter/generated_plugin_registrant.h text eol=lf
 code/pure-studio/windows/flutter/generated_plugins.cmake text eol=lf
+
+# Flutter/Rust generators emit LF on every platform. Keep generated outputs
+# stable on Windows so code generation does not create CRLF-only worktree diffs.
+code/pure-studio/lib/**/*.g.dart text eol=lf
+code/pure-studio/lib/**/*.freezed.dart text eol=lf
+code/pure-studio/lib/src/l10n/app_localizations*.dart text eol=lf
+code/pure-studio/lib/src/rust/** text eol=lf
+code/pure-studio/rust/src/frb_generated.rs text eol=lf
