@@ -160,6 +160,9 @@ impl StudioRuntimeOptions {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    const CREDENTIAL_ISOLATION_CHILD: &str = "PURE_STUDIO_CREDENTIAL_ISOLATION_CHILD";
+
     #[test]
     fn lock_owner_releases_across_all_clones() {
         let home = tempfile::tempdir().unwrap();
@@ -202,5 +205,47 @@ mod tests {
         first.shutdown_runtime().await.unwrap();
         crate::StudioRuntime::with_options(options()).await.unwrap();
         drop(surviving_clone);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_host_runtime_does_not_require_a_desktop_credential_service() {
+        if std::env::var_os(CREDENTIAL_ISOLATION_CHILD).is_some() {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let home = tempfile::tempdir().unwrap();
+                crate::StudioRuntime::with_options(StudioRuntimeOptions {
+                    studio_home: Some(home.path().to_path_buf()),
+                    host: StudioHostKind::Test,
+                })
+                .await
+                .unwrap();
+            });
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(
+                "studio::runtime_lock::tests::test_host_runtime_does_not_require_a_desktop_credential_service",
+            )
+            .arg("--nocapture")
+            .env(CREDENTIAL_ISOLATION_CHILD, "1")
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                "unix:path=/definitely-missing/pure-studio-ci-bus",
+            )
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "isolated test runtime unexpectedly required the Linux desktop credential service\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

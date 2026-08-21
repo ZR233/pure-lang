@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::config::{ConfigRuntime, ConfigRuntimeSnapshot, ConfigStore};
+use crate::config::{ConfigPaths, ConfigRuntime, ConfigRuntimeSnapshot, ConfigStore};
 use crate::resolve_workspace_root;
 use crate::studio::agent_host::{
     StudioAgentHost, StudioAgentRepository, StudioAgentResources, StudioAgentRuntime,
@@ -45,7 +45,14 @@ impl StudioRuntime {
                 tracing::error!(error = %error, "failed to open Studio storage");
                 pl_protocol::studio::StudioError::storage()
             })?;
-        let config_store = ConfigStore::for_studio_home(resolved.paths.home().to_path_buf());
+        let config_store = match host {
+            crate::StudioHostKind::Test => ConfigStore::new(ConfigPaths::from_config_dir(
+                resolved.paths.home().to_path_buf(),
+            )),
+            crate::StudioHostKind::Desktop | crate::StudioHostKind::HttpServer => {
+                ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
+            }
+        };
         Self::with_runtime_state_and_lock(
             store,
             config_store,
