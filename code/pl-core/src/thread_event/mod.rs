@@ -106,6 +106,17 @@ impl ThreadEventBus {
         Ok(())
     }
 
+    /// 删除 Thread 的权威投影，并通过释放 sender 终止该 Thread 的全部订阅。
+    pub fn remove_thread(&self, thread_id: &str) -> Result<bool, ThreadEventError> {
+        Ok(self
+            .inner
+            .threads
+            .write()
+            .map_err(|_| ThreadEventError::LockPoisoned)?
+            .remove(thread_id)
+            .is_some())
+    }
+
     pub async fn publish(
         &self,
         notification: ThreadNotificationEnvelope,
@@ -368,6 +379,10 @@ pub struct ThreadEventBusHandle {
 impl ThreadEventBusHandle {
     pub fn replace_snapshot(&self, snapshot: ThreadSnapshot) -> Result<(), ThreadEventError> {
         self.bus.replace_snapshot(snapshot)
+    }
+
+    pub(crate) fn remove_thread(&self, thread_id: &str) -> Result<bool, ThreadEventError> {
+        self.bus.remove_thread(thread_id)
     }
 
     pub async fn publish_batch(

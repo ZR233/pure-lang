@@ -2347,6 +2347,49 @@ async fn close_closes_descendants_from_deepest_to_root() {
 }
 
 #[tokio::test]
+async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let root = ThreadId::new("root").unwrap();
+    let child = ThreadId::new("child-chat").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    handle
+        .spawn(AgentSpawnRequest {
+            thread_id: child.clone(),
+            parent_id: root.clone(),
+            role: crate::AgentRoleId::new("worker").unwrap(),
+            session: ThreadContextState::empty(),
+            initial_turn_id: None,
+            initial_message: None,
+            metadata: serde_json::Value::Null,
+        })
+        .await
+        .unwrap();
+
+    let snapshot = handle.retire(root.clone()).await.unwrap();
+
+    assert_eq!(snapshot.lifecycle, AgentLifecycleState::Closed);
+    assert!(handle.list().await.unwrap().is_empty());
+    assert!(handle.directory_snapshot().agents.is_empty());
+    assert!(matches!(
+        handle.snapshot(root.clone()).await,
+        Err(AgentRuntimeError::NotFound(id)) if id == root
+    ));
+    assert!(matches!(
+        handle.snapshot(child.clone()).await,
+        Err(AgentRuntimeError::NotFound(id)) if id == child
+    ));
+    assert!(handle.thread_snapshot(&root).is_err());
+    assert!(handle.thread_snapshot(&child).is_err());
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn spawn_prepare_failure_has_no_framework_side_effects() {
     let repository = TestRepository::empty();
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);

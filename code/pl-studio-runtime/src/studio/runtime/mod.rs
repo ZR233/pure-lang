@@ -397,7 +397,7 @@ impl StudioRuntime {
             .map(|thread_id| root_agent_id(thread_id))
             .collect::<BTreeSet<_>>();
         for root_agent_id in &root_agent_ids {
-            close_agent_if_present(&runtime, root_agent_id.clone())
+            retire_agent_if_present(&runtime, root_agent_id.clone())
                 .boxed()
                 .await?;
         }
@@ -427,7 +427,7 @@ impl StudioRuntime {
             .collect::<Vec<_>>();
         descendants.sort_by_key(|snapshot| snapshot.identity.depth);
         for descendant in descendants {
-            close_agent_if_present(&runtime, descendant.identity.id)
+            retire_agent_if_present(&runtime, descendant.identity.id)
                 .boxed()
                 .await?;
         }
@@ -435,11 +435,11 @@ impl StudioRuntime {
     }
 }
 
-async fn close_agent_if_present(
+async fn retire_agent_if_present(
     runtime: &pl_core::AgentRuntimeHandle,
     agent_id: pl_core::ThreadId,
 ) -> Result<()> {
-    match runtime.close(agent_id).boxed().await {
+    match runtime.retire(agent_id).boxed().await {
         Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
         Err(error) => Err(anyhow::anyhow!(error)),
     }

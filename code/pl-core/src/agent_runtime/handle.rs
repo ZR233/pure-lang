@@ -82,6 +82,14 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// 关闭整棵 Agent 树，并在关闭事务成功后释放 actor、目录与 Thread 事件投影。
+    pub async fn retire(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::Retire { agent_id, reply })
+            .await?;
+        receive(receiver).await?
+    }
+
     /// 向 agent 提交显式输入；活动 turn 收到 steer，空闲 agent 启动下一 turn。
     pub async fn submit(
         &self,

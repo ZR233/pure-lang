@@ -33,6 +33,30 @@ async fn subscription_registers_before_returning_snapshot() {
 }
 
 #[tokio::test]
+async fn removing_thread_releases_snapshot_and_closes_subscription() {
+    let bus = ThreadEventBus::default();
+    bus.replace_snapshot(ThreadSnapshot::empty("thread-1"))
+        .unwrap();
+    let mut subscription = bus
+        .subscribe(ThreadSubscriptionRequest {
+            thread_id: "thread-1".to_string(),
+        })
+        .unwrap();
+
+    assert!(bus.remove_thread("thread-1").unwrap());
+    assert!(matches!(
+        bus.snapshot("thread-1"),
+        Err(ThreadEventError::ThreadNotFound(thread_id)) if thread_id == "thread-1"
+    ));
+    assert!(matches!(
+        subscription.recv().await,
+        Some(ThreadSubscriptionUpdate::Snapshot { .. })
+    ));
+    assert!(subscription.recv().await.is_none());
+    assert!(!bus.remove_thread("thread-1").unwrap());
+}
+
+#[tokio::test]
 async fn product_metadata_rebinds_only_the_subscription_bootstrap() {
     let bus = ThreadEventBus::default();
     bus.replace_snapshot(ThreadSnapshot::empty("thread-1"))

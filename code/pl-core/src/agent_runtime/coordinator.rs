@@ -45,6 +45,11 @@ pub(crate) enum CoordinatorCommand {
         agent_id: ThreadId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
+    /// 完成关闭事务并释放整棵 Thread actor 树及事件投影。
+    Retire {
+        agent_id: ThreadId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     List {
         reply: oneshot::Sender<AgentRuntimeResult<Vec<AgentSnapshot>>>,
     },
@@ -129,6 +134,10 @@ async fn run_coordinator<H>(
                 let result = close_agent_tree(&actors, &agent_id).await;
                 let _ = reply.send(result);
             }
+            CoordinatorCommand::Retire { agent_id, reply } => {
+                let result = retire_agent_tree(&actors, &runtime, &agent_id).await;
+                let _ = reply.send(result);
+            }
             CoordinatorCommand::List { reply } => {
                 let _ = reply.send(list_snapshots(&actors).await);
             }
@@ -201,6 +210,27 @@ async fn close_agent_tree(
     actors: &AgentRegistry,
     agent_id: &ThreadId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
+    let close_order = agent_tree_snapshots(actors, agent_id).await?;
+    close_snapshots(actors, agent_id, &close_order).await
+}
+
+async fn retire_agent_tree(
+    actors: &AgentRegistry,
+    runtime: &AgentRuntimeHandle,
+    agent_id: &ThreadId,
+) -> AgentRuntimeResult<AgentSnapshot> {
+    let close_order = agent_tree_snapshots(actors, agent_id).await?;
+    let target = close_snapshots(actors, agent_id, &close_order).await?;
+    for snapshot in close_order {
+        evict_agent(actors, runtime, &snapshot.identity.id).await?;
+    }
+    Ok(target)
+}
+
+async fn agent_tree_snapshots(
+    actors: &AgentRegistry,
+    agent_id: &ThreadId,
+) -> AgentRuntimeResult<Vec<AgentSnapshot>> {
     let snapshots = list_snapshots(actors).await?;
     if !snapshots
         .iter()
@@ -231,7 +261,14 @@ async fn close_agent_tree(
             .cmp(&left.identity.depth)
             .then_with(|| left.identity.id.cmp(&right.identity.id))
     });
+    Ok(close_order)
+}
 
+async fn close_snapshots(
+    actors: &AgentRegistry,
+    agent_id: &ThreadId,
+    close_order: &[AgentSnapshot],
+) -> AgentRuntimeResult<AgentSnapshot> {
     let mut target = None;
     for snapshot in close_order {
         let closed = close_actor(actors, &snapshot.identity.id).await?;
@@ -376,5 +413,9 @@ async fn evict_agent(
         .map_err(|_| AgentRuntimeError::ChannelClosed)??;
     actors.write().await.remove(agent_id);
     runtime.directory.remove(agent_id);
+    runtime
+        .thread_events
+        .remove_thread(agent_id.as_str())
+        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     Ok(())
 }
