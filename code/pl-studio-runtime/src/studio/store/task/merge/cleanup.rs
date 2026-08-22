@@ -23,16 +23,13 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("recorded merge task run not found")?;
-        let lease = entities::branch_lease::Entity::find()
-            .filter(entities::branch_lease::Column::TaskRunId.eq(run.id.clone()))
+        let lease = entities::project_lease::Entity::find()
+            .filter(entities::project_lease::Column::TaskRunId.eq(run.id.clone()))
             .one(&self.db)
             .await?
-            .context("recorded merge branch lease not found")?;
-        if lease.expected_head != run.expected_head
-            || lease.branch != run.branch
-            || lease.git_common_dir != run.git_common_dir
-        {
-            bail!("recorded merge branch lease no longer matches the task head");
+            .context("recorded merge project lease not found")?;
+        if lease.project_id != run.project_id {
+            bail!("recorded merge project lease no longer matches the TaskRun");
         }
         let work_unit = entities::work_unit::Entity::find_by_id(merge.work_unit_id.clone())
             .one(&self.db)

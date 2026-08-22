@@ -99,7 +99,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<StopTaskInput>::new(
             "task_stop",
-            "Stop the current task after safely settling agents and branch state.",
+            "Stop the current task after safely settling its durable agents and resources.",
         )
         .registered(move |input: StopTaskInput, _context| {
             let coordinator = coordinator.clone();
@@ -141,7 +141,7 @@ impl TaskCoordinator {
                 .preflight_task_stop_request_locked(thread_id, &branch_guard)
                 .await?;
             self.store
-                .request_task_stop(&run.id, &run.expected_head, origin, &reason)
+                .request_task_stop(&run.id, origin, &reason)
                 .await?
         };
         interrupt_task_agents(runtime, thread_id, origin).await?;
@@ -166,7 +166,7 @@ impl TaskCoordinator {
                 .preflight_task_stop_locked(thread_id, &branch_guard)
                 .await?;
             self.store
-                .begin_task_stop(&run.id, &run.expected_head, requested.generation())
+                .begin_task_stop(&run.id, requested.generation())
                 .await?
         };
         self.store
@@ -209,9 +209,9 @@ impl TaskCoordinator {
         if let Some(message) = incomplete_todo_message(todo) {
             return Ok(TaskCompleteOutcome::rejected("todoIncomplete", message));
         }
-        if run.design_finalized_head().is_none() {
+        if run.design().is_none() {
             return Ok(TaskCompleteOutcome::rejected(
-                "repositoryDrift",
+                "designNotFinalized",
                 "task design stage has not been finalized",
             ));
         }
@@ -290,25 +290,13 @@ impl TaskCoordinator {
         }
         if let Err(error) = self.ensure_process_lease_owned(&run) {
             return Ok(TaskCompleteOutcome::rejected(
-                "repositoryDrift",
-                error.to_string(),
-            ));
-        }
-        if let Err(error) = super::review::validate_review_repository(&run).await {
-            return Ok(TaskCompleteOutcome::rejected(
-                "repositoryDrift",
-                error.to_string(),
-            ));
-        }
-        if let Err(error) = super::git::ensure_no_git_operation(&run.workspace_root).await {
-            return Ok(TaskCompleteOutcome::rejected(
-                "repositoryDrift",
+                "leaseConflict",
                 error.to_string(),
             ));
         }
         let completed = self
             .store
-            .complete_task(thread_id, &run.expected_head, &integrated_review_gate)
+            .complete_task(thread_id, &integrated_review_gate)
             .await;
         let completed = match completed {
             Ok(completed) => completed,
@@ -322,8 +310,8 @@ impl TaskCoordinator {
                     ));
                 }
                 return Ok(TaskCompleteOutcome::rejected(
-                    "repositoryDrift",
-                    format!("task completion state changed before commit: {error}"),
+                    "stateConflict",
+                    format!("task completion state changed before accounting: {error}"),
                 ));
             }
         };
@@ -379,7 +367,7 @@ impl TaskCoordinator {
         guard: &super::BranchMutationGuard<'_>,
     ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
-        let mut run = self
+        let run = self
             .store
             .read_task_run(task_run_id)
             .await?
@@ -391,20 +379,9 @@ impl TaskCoordinator {
                 executor_thread_id
             );
         }
-        let has_source_merge = !self.store.list_merge_records(&run.id).await?.is_empty();
-        if !has_source_merge && run.design_phase_commit().is_some() {
-            self.revert_design_for_no_source_cancel_locked(&run.id, guard)
-                .await?;
-            run = self
-                .store
-                .read_task_run(&run.id)
-                .await?
-                .context("task run disappeared after design revert")?;
-        }
-        super::review::validate_review_repository(&run).await?;
         let cancelled = self
             .store
-            .cancel_task_and_release_lease(&run.id, &run.expected_head, expected_generation, reason)
+            .cancel_task_and_release_lease(&run.id, expected_generation, reason)
             .await?;
         self.release_owned_process_lease(&run.id);
         self.publish_terminal_fact(&cancelled.id);
@@ -427,9 +404,8 @@ impl TaskCoordinator {
     async fn validate_stop_request(&self, run: &TaskRun) -> Result<()> {
         self.ensure_process_lease_owned(run)?;
         if run.kind() == TaskRunStateKind::Merging {
-            bail!("task_stop requires Planner Git integration to be recorded first");
+            bail!("task_stop requires the pending merge accounting step to finish first");
         }
-        super::review::validate_review_repository(run).await?;
         Ok(())
     }
 }

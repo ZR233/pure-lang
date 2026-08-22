@@ -10,8 +10,8 @@ use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentReview, BeginIntegratedReview, ReviewExitDiagnostics, ReviewFileCoverage,
     ReviewRoundRecord, ReviewRoundState, ReviewScope, ReviewTarget, ReviewVerdict, TaskCommand,
-    TaskRunStateKind, ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus,
-    WorkUnitState, WorkUnitStatus, decode_review_round_state,
+    TaskRunState, TaskRunStateKind, ThreadExecutionStatus, WorkCompletionKind,
+    WorkCompletionStatus, WorkUnitState, WorkUnitStatus, decode_review_round_state,
 };
 use pl_core::TurnOutcomeKind;
 
@@ -94,7 +94,14 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let run = active_implementation_run(&tx, thread_id).await?;
-            if run.expected_head != request.reviewed_head {
+            let latest_merge = entities::merge_record::Entity::find()
+                .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
+                .order_by_desc(entities::merge_record::Column::CreatedAt)
+                .order_by_desc(entities::merge_record::Column::Id)
+                .one(&tx)
+                .await?
+                .context("integrated review requires durable merge evidence")?;
+            if latest_merge.resulting_head != request.reviewed_head {
                 bail!("integrated review target changed before round creation");
             }
             ensure_review_call_unused(&tx, &run.id, &request.requested_by_call_id).await?;
@@ -281,10 +288,17 @@ impl StudioStore {
                 }
                 ReviewScope::Integrated => {
                     let task = super::task_run_record(run.clone())?;
-                    if round.reviewed_head != run.expected_head
-                        || task.kind() != TaskRunStateKind::Reviewing
-                    {
-                        bail!("integrated review no longer matches current Task HEAD");
+                    let target_matches = matches!(
+                        &task.state,
+                        TaskRunState::Reviewing(state)
+                            if matches!(
+                                state.target(),
+                                ReviewTarget::Integration { reviewed_head }
+                                    if reviewed_head == &round.reviewed_head
+                            )
+                    );
+                    if !target_matches {
+                        bail!("integrated review no longer matches the durable Task target");
                     }
                     match review.verdict {
                         ReviewVerdict::Pass => {}

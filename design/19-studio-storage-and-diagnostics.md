@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v8；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v11；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
@@ -29,7 +29,7 @@ cache 重建。
 - interactions
 - attachments
 - app_settings
-- task_runs、task_failures、work_units、work_completions、review_rounds、merge_records、branch_leases
+- task_runs、task_failures、work_units、work_completions、review_rounds、merge_records、project_leases
 - thread_context_segments、thread_session_state
 
 不存在 history 数据库、storage generation pair、history_gc_jobs、session snapshot JSON、agent
@@ -82,7 +82,8 @@ Conversation recovery 不新增 SQLite 表、不提升 schema 版本。`AgentWor
 conversation transcript、working state、recovery marker、mailbox 状态与 Thread revision 在同一
 事务写入新的 replacement baseline。重复 recoveryId 返回已提交结果；expected runtime/session
 revision 冲突不产生部分更新。Thread 局部重建保留 pinned handoff、Evidence Ledger、session note、
-Task/WorkUnit owner、usage 和全部 Git/工作区状态。
+Task/WorkUnit owner 与 usage。TaskRun 不保存项目 Git snapshot 或 fingerprint；WorkUnit 只保存
+worktree 创建后的资源事实和 caller 声明的审计数据。
 
 `task_failures` 以 `(task_run_id, source_turn_id)` 唯一保存来源 Thread/Turn/agent、WorkUnit 或
 ReviewRound、完整 `TurnFailure`、Task disposition 与 resolved 状态；`task_runs.terminal_failure_id`
@@ -113,13 +114,13 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 ## 19.3 不兼容库重建
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。Studio schema 只保留当前版本 v8 一个事实：不存在跨版本迁移链，任何非 v8
-库（含历史 v4–v7）一律按不兼容处理，不迁移、不归档、不导入：
+fingerprint。Studio schema 只保留当前版本 v11 一个事实：不存在跨版本迁移链，任何非 v11
+库一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v8 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v11 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建
@@ -146,9 +147,9 @@ billing 和 working-context 内容不进入 Flutter timeline。
 
 诊断额外汇总 Driver reconnect、provider retry/fallback、conversation recovery mode/目标 Turn、
 transcript 前后 hash、恢复次数与失败原因，但不记录 prompt 或被移除正文。验收 manifest 固定 prompt
-hash、workspace/Git identity、runId、Task generation、初始时间、全局 deadline、恢复次数和每次
-attempt 日志目录，用于证明原始 prompt 只提交一次以及 recovery 前后 Task/WorkUnit/worktree identity
-与 Git fingerprint 保持不变。
+hash、runId、Task generation、WorkUnit/worktree resource identity、初始时间、全局 deadline、恢复
+次数和每次 attempt 日志目录，用于证明原始 prompt 只提交一次以及 recovery 前后 durable owner
+保持不变；不记录或比较 Task 项目 Git fingerprint。
 
 工具编排诊断仅暴露与 inference/Turn 关联的聚合数值和稳定 enum；schema、工具参数、工具结果、
 program 正文、caller 原始 JSON 与 cache key 均不得进入日志或 Flutter timeline。compaction 指标只保存

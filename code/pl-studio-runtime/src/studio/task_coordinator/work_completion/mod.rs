@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
 use super::spawn::{TaskExecutorBlueprint, verification_result_map};
 use super::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRun,
@@ -34,6 +33,9 @@ struct CompletionResultInput {
     /// Full Git commit id or an unambiguous abbreviation of at least 7 hex characters.
     /// Required for delivery and forbidden for noDelivery.
     head_commit: Option<String>,
+    /// Caller-declared normalized repository-relative paths. Required for delivery and forbidden
+    /// for noDelivery.
+    changed_files: Vec<String>,
     /// Successful outcomes for every command and inspection in the durable handoff.
     #[schemars(length(min = 1))]
     verification_results: Vec<VerificationResultInput>,
@@ -50,6 +52,7 @@ struct VerificationResultInput {
 enum ValidatedCompletionResultInput {
     Delivery {
         head_commit: String,
+        changed_files: Vec<String>,
         verification_results: Vec<VerificationResultInput>,
     },
     NoDelivery {
@@ -61,20 +64,28 @@ impl TryFrom<CompletionResultInput> for ValidatedCompletionResultInput {
     type Error = anyhow::Error;
 
     fn try_from(input: CompletionResultInput) -> Result<Self> {
-        match (input.kind, input.head_commit) {
-            (CompletionResultKindInput::Delivery, Some(head_commit)) => Ok(Self::Delivery {
-                head_commit,
-                verification_results: input.verification_results,
-            }),
-            (CompletionResultKindInput::Delivery, None) => {
+        match (input.kind, input.head_commit, input.changed_files) {
+            (CompletionResultKindInput::Delivery, Some(head_commit), changed_files) => {
+                Ok(Self::Delivery {
+                    head_commit,
+                    changed_files,
+                    verification_results: input.verification_results,
+                })
+            }
+            (CompletionResultKindInput::Delivery, None, _) => {
                 bail!("delivery requires headCommit")
             }
-            (CompletionResultKindInput::NoDelivery, Some(_)) => {
+            (CompletionResultKindInput::NoDelivery, Some(_), _) => {
                 bail!("noDelivery must not include headCommit")
             }
-            (CompletionResultKindInput::NoDelivery, None) => Ok(Self::NoDelivery {
-                verification_results: input.verification_results,
-            }),
+            (CompletionResultKindInput::NoDelivery, None, changed_files) => {
+                if !changed_files.is_empty() {
+                    bail!("noDelivery must not include changedFiles")
+                }
+                Ok(Self::NoDelivery {
+                    verification_results: input.verification_results,
+                })
+            }
         }
     }
 }
@@ -187,7 +198,7 @@ impl TaskCoordinator {
         let coordinator = self.clone();
         FunctionToolDefinition::<CompletionResultInput>::new(
             "report_completion",
-            "Report a clean executor result with verificationResults that exactly cover every handoff check, then end the current turn for delivery review.",
+            "Report caller-declared executor delivery facts with changedFiles and verificationResults, then end the current turn for delivery review.",
         )
         .registered(move |result: CompletionResultInput, context| {
                 let coordinator = coordinator.clone();
@@ -237,18 +248,13 @@ impl TaskCoordinator {
         caller_workspace: &Path,
         result: CompletionResultInput,
     ) -> Result<WorkCompletionRecord> {
-        let repository = inspect_repository(caller_workspace, true).await?;
         let canonical_caller = git_compatible_path(
             std::fs::canonicalize(caller_workspace)
                 .context("failed to resolve caller workspace path")?,
         );
         let scope = self
             .store
-            .resolve_active_completion_scope(
-                &subagent.id,
-                &canonical_caller.to_string_lossy(),
-                &repository.branch,
-            )
+            .resolve_active_completion_scope(&subagent.id, &canonical_caller.to_string_lossy())
             .await?
             .context("active completion scope not found for this executor worktree")?;
         ensure_completion_scope_is_open(&scope)?;
@@ -261,21 +267,21 @@ impl TaskCoordinator {
         match ValidatedCompletionResultInput::try_from(result)? {
             ValidatedCompletionResultInput::Delivery {
                 head_commit,
+                changed_files,
                 verification_results,
             } => {
                 let verification_summary =
                     validated_verification_summary(&handoff.blueprint, verification_results)?;
-                let delivery = self
-                    .validate_delivery(
-                        CompletionValidation {
-                            scope: &scope,
-                            subagent,
-                            caller_workspace,
-                            verification_summary: &verification_summary,
-                        },
-                        &head_commit,
-                    )
-                    .await?;
+                let delivery = self.validate_delivery(
+                    CompletionValidation {
+                        scope: &scope,
+                        subagent,
+                        caller_workspace,
+                        verification_summary: &verification_summary,
+                    },
+                    &head_commit,
+                    changed_files,
+                )?;
                 self.store
                     .create_work_completion(
                         &scope.work_unit.id,
@@ -290,18 +296,12 @@ impl TaskCoordinator {
             } => {
                 let verification_summary =
                     validated_verification_summary(&handoff.blueprint, verification_results)?;
-                let verification_summary = validate_common(
-                    CompletionValidation {
-                        scope: &scope,
-                        subagent,
-                        caller_workspace,
-                        verification_summary: &verification_summary,
-                    },
-                    &repository,
-                )?;
-                if repository.head != scope.work_unit.base_commit {
-                    bail!("noDelivery requires worktree HEAD to equal its base commit");
-                }
+                let verification_summary = validate_common(CompletionValidation {
+                    scope: &scope,
+                    subagent,
+                    caller_workspace,
+                    verification_summary: &verification_summary,
+                })?;
                 self.store
                     .create_work_completion(
                         &scope.work_unit.id,
@@ -314,48 +314,33 @@ impl TaskCoordinator {
         }
     }
 
-    async fn validate_delivery(
+    fn validate_delivery(
         &self,
         validation: CompletionValidation<'_>,
         supplied_head: &str,
+        changed_files: Vec<String>,
     ) -> Result<AgentDelivery> {
-        let snapshot = inspect_repository(validation.caller_workspace, true).await?;
-        let verification_summary = validate_common(validation, &snapshot)?;
+        let verification_summary = validate_common(validation)?;
         let supplied_head = supplied_head.trim();
-        if supplied_head.len() < 7 || !supplied_head.chars().all(|ch| ch.is_ascii_hexdigit()) {
-            bail!("headCommit must be a full commit id or at least 7 hexadecimal characters");
-        }
-        let resolved_supplied_head =
-            resolve_commit_oid(&snapshot.workspace_root, supplied_head).await?;
-        if snapshot.head != resolved_supplied_head {
-            bail!("headCommit does not match worktree HEAD");
+        if supplied_head.is_empty() {
+            bail!("headCommit must not be empty");
         }
         let base_commit = validation.scope.work_unit.base_commit.as_str();
-        if snapshot.head == base_commit {
-            bail!("delivery HEAD must advance beyond its base commit");
-        }
-        if !is_ancestor(&snapshot.workspace_root, base_commit, &snapshot.head).await? {
-            bail!("delivery HEAD must descend from its base commit");
-        }
-        let changed_files =
-            changed_files_between(&snapshot.workspace_root, base_commit, &snapshot.head).await?;
+        let changed_files = normalize_changed_files(changed_files)?;
         Ok(AgentDelivery {
             worktree: AgentWorktreeDelivery {
-                path: snapshot.workspace_root.to_string_lossy().to_string(),
-                branch: snapshot.branch,
+                path: validation.scope.work_unit.worktree_path.clone(),
+                branch: validation.scope.work_unit.branch.clone(),
             },
             base_commit: base_commit.to_string(),
-            head_commit: snapshot.head,
+            head_commit: supplied_head.to_string(),
             changed_files,
             verification_summary: verification_summary.to_string(),
         })
     }
 }
 
-fn validate_common<'a>(
-    validation: CompletionValidation<'a>,
-    repository: &super::git::RepositorySnapshot,
-) -> Result<&'a str> {
+fn validate_common(validation: CompletionValidation<'_>) -> Result<&str> {
     let CompletionValidation {
         scope,
         subagent,
@@ -375,15 +360,35 @@ fn validate_common<'a>(
     if verification_summary.is_empty() {
         bail!("verificationSummary must not be empty");
     }
-    if normalized_path(&repository.git_common_dir)
-        != normalized_path(Path::new(&scope.run.git_common_dir))
-        || normalized_path(caller_workspace)
-            != normalized_path(Path::new(&scope.work_unit.worktree_path))
-        || repository.branch != scope.work_unit.branch
+    if normalized_path(caller_workspace)
+        != normalized_path(Path::new(&scope.work_unit.worktree_path))
     {
-        bail!("caller repository does not match the assigned executor worktree");
+        bail!("caller workspace does not match the assigned executor worktree");
     }
     Ok(verification_summary)
+}
+
+fn normalize_changed_files(changed_files: Vec<String>) -> Result<Vec<String>> {
+    if changed_files.is_empty() {
+        bail!("delivery requires changedFiles")
+    }
+    let mut normalized = Vec::with_capacity(changed_files.len());
+    for path in changed_files {
+        let path = path.trim().replace('\\', "/");
+        if path.is_empty()
+            || path.starts_with('/')
+            || path.contains(":/")
+            || path
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        {
+            bail!("changedFiles must contain normalized repository-relative paths")
+        }
+        normalized.push(path);
+    }
+    normalized.sort();
+    normalized.dedup();
+    Ok(normalized)
 }
 
 fn is_direct_task_child(subagent: &SubagentContext, root_thread_id: &str) -> bool {
@@ -459,11 +464,13 @@ mod tests {
         let properties = schema["properties"].as_object().expect("input properties");
         assert!(properties.contains_key("kind"));
         assert!(properties.contains_key("headCommit"));
+        assert!(properties.contains_key("changedFiles"));
         assert!(properties.contains_key("verificationResults"));
         assert!(!properties.contains_key("result"));
         let required = schema["required"].as_array().expect("required fields");
         assert!(required.iter().any(|field| field == "kind"));
         assert!(required.iter().any(|field| field == "verificationResults"));
+        assert!(required.iter().any(|field| field == "changedFiles"));
         assert!(!required.iter().any(|field| field == "headCommit"));
     }
 
@@ -474,6 +481,7 @@ mod tests {
             serde_json::json!({
                 "kind": "delivery",
                 "headCommit": "0123456789abcdef",
+                "changedFiles": ["src/lib.rs"],
                 "verificationResults": [{"checkId": "check-1", "summary": "tests passed"}]
             }),
         )
@@ -483,6 +491,7 @@ mod tests {
             CompletionResultInput {
                 kind: CompletionResultKindInput::Delivery,
                 head_commit: Some("0123456789abcdef".to_string()),
+                changed_files: vec!["src/lib.rs".to_string()],
                 verification_results: vec![VerificationResultInput {
                     check_id: "check-1".to_string(),
                     summary: "tests passed".to_string(),
@@ -494,6 +503,7 @@ mod tests {
             "report_completion",
             serde_json::json!({
                 "kind": "noDelivery",
+                "changedFiles": [],
                 "verificationResults": [{
                     "checkId": "check-1",
                     "summary": "no repository change required"
@@ -506,6 +516,7 @@ mod tests {
             CompletionResultInput {
                 kind: CompletionResultKindInput::NoDelivery,
                 head_commit: None,
+                changed_files: Vec::new(),
                 verification_results: vec![VerificationResultInput {
                     check_id: "check-1".to_string(),
                     summary: "no repository change required".to_string(),
@@ -520,6 +531,7 @@ mod tests {
             ValidatedCompletionResultInput::try_from(CompletionResultInput {
                 kind: CompletionResultKindInput::Delivery,
                 head_commit: None,
+                changed_files: vec!["src/lib.rs".to_string()],
                 verification_results: vec![],
             })
             .expect_err("delivery without headCommit must fail");
@@ -532,6 +544,7 @@ mod tests {
             ValidatedCompletionResultInput::try_from(CompletionResultInput {
                 kind: CompletionResultKindInput::NoDelivery,
                 head_commit: Some("0123456789abcdef".to_string()),
+                changed_files: Vec::new(),
                 verification_results: vec![],
             })
             .expect_err("noDelivery with headCommit must fail");

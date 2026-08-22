@@ -288,7 +288,8 @@ class _TaskRecoveryFormState extends ConsumerState<_TaskRecoveryForm> {
                     icon: Icons.account_tree_outlined,
                     text: context.l10n.taskRecoveryGitPreserved,
                     detail:
-                        '${target.branch} · ${_shortHash(target.gitFingerprint.head)}\n'
+                        '${target.branch}'
+                        '${target.baseCommit == null ? '' : ' · ${_shortHash(target.baseCommit!)}'}\n'
                         '${target.worktreePath}',
                   ),
                   if (_mode == ConversationRecoveryMode.rebuildThread) ...[
@@ -408,7 +409,6 @@ class _TaskRecoveryFacts extends StatelessWidget {
       children: [
         Chip(label: Text('Task ${preview.runId}')),
         Chip(label: Text(context.taskPhaseLabel(preview.state))),
-        Chip(label: Text('HEAD ${_shortHash(preview.expectedHead)}')),
         if (preview.stopRequested)
           const Chip(
             avatar: Icon(Icons.stop_circle_outlined, size: 16),

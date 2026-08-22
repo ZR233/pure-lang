@@ -23,14 +23,12 @@ impl StudioStore {
         &self,
         agent_id: &str,
         worktree_path: &str,
-        branch: &str,
     ) -> Result<Option<DeliveryScope>> {
         let work_units = entities::work_unit::Entity::find()
             .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
             .all(&self.db)
             .await?;
         let mut matching = Vec::new();
-        let mut fallback = Vec::new();
         for work_unit in work_units {
             let Some(run) = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
                 .filter(entities::task_run::Column::StateKind.is_not_in([
@@ -45,27 +43,19 @@ impl StudioStore {
             else {
                 continue;
             };
-            let matches_caller =
-                work_unit.worktree_path == worktree_path && work_unit.branch == branch;
+            let matches_caller = work_unit.worktree_path == worktree_path;
             let scope = DeliveryScope {
                 run: task_run_record(run)?,
                 work_unit: work_unit_record(work_unit)?,
             };
             if matches_caller {
                 matching.push(scope);
-            } else {
-                fallback.push(scope);
             }
         }
-        let scopes = if matching.is_empty() {
-            &mut fallback
-        } else {
-            &mut matching
-        };
-        match scopes.len() {
+        match matching.len() {
             0 => {}
             1 => {
-                return Ok(scopes.pop());
+                return Ok(matching.pop());
             }
             _ => bail!("ambiguous active completion scope for executor worktree"),
         }

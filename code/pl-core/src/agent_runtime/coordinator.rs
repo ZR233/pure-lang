@@ -12,8 +12,8 @@ use super::{
     AgentActivityState, AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
     AgentSpawnRequest, AgentSpawnResult, DurableCommitFacts, DurableMailboxEnvelope,
-    RestoredAgentRuntime, SpawnLifecycleRequest, ThreadCommit, ThreadCommitOutcome, ThreadId,
-    TurnId,
+    RestoredAgentRuntime, SpawnLifecycleRequest, SpawnRollbackPhase, SpawnRollbackReason,
+    ThreadCommit, ThreadCommitOutcome, ThreadId, TurnId,
 };
 use crate::ThreadEventBus;
 

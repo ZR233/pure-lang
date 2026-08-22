@@ -358,22 +358,6 @@ pub enum StudioTaskRecoveryTargetKind {
     Executor,
 }
 
-/// Git and worktree facts that must remain stable between recovery preview and apply.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StudioTaskGitFingerprint {
-    pub workspace_root: String,
-    pub git_common_dir: String,
-    pub branch: String,
-    pub head: String,
-    pub base_commit: String,
-    pub expected_head: String,
-    pub operation: String,
-    pub index_diff_hash: String,
-    pub working_tree_diff_hash: String,
-    pub untracked_content_hash: String,
-}
-
 /// Terminal Turn available for conversation recovery.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -400,10 +384,10 @@ pub struct StudioTaskRecoveryTarget {
     pub expected_thread_revision: u64,
     pub branch: String,
     pub worktree_path: String,
+    pub base_commit: Option<String>,
     pub turns: Vec<StudioTaskRecoveryTurn>,
     pub default_turn_ids: Vec<String>,
     pub available_modes: Vec<crate::ConversationRecoveryMode>,
-    pub git_fingerprint: StudioTaskGitFingerprint,
 }
 
 /// Stateless recovery preview used as the apply CAS token and fact set.
@@ -416,15 +400,10 @@ pub struct StudioTaskRecoveryPreview {
     pub revision: u64,
     pub task_generation: u64,
     pub state: StudioTaskRecoveryState,
-    pub expected_head: String,
     pub stop_requested: bool,
-    pub branch_lease_id: String,
-    pub branch_lease_branch: String,
-    pub branch_lease_git_common_dir: String,
-    pub branch_lease_expected_head: String,
+    pub project_lease_id: String,
     pub recommended_thread_id: String,
     pub targets: Vec<StudioTaskRecoveryTarget>,
-    pub main_git_fingerprint: StudioTaskGitFingerprint,
     pub completion_revision_fingerprint: String,
     pub review_revision_fingerprint: String,
     pub merge_revision_fingerprint: String,
@@ -476,7 +455,6 @@ pub struct StudioTaskRecoveryResult {
     pub removed_input_count: u64,
     pub stop_cleared: bool,
     pub resume_turn_id: String,
-    pub git_fingerprint: StudioTaskGitFingerprint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

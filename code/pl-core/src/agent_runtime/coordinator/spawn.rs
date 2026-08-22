@@ -150,7 +150,11 @@ where
     let initial_context = match host.lifecycle().initial_context(&lease) {
         Ok(context) => context,
         Err(error) => {
-            return match host.lifecycle().rollback_spawn(lease).await {
+            let reason = SpawnRollbackReason {
+                phase: SpawnRollbackPhase::InitialContext,
+                message: error.to_string(),
+            };
+            return match host.lifecycle().rollback_spawn(lease, reason).await {
                 Ok(()) => Err(AgentRuntimeError::Lifecycle(error.to_string())),
                 Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
                     "spawn context preparation failed: {error}; spawn rollback failed: {rollback_error}"
@@ -189,7 +193,11 @@ where
     let outcome = match persisted {
         Ok(outcome) => outcome,
         Err(error) => {
-            return match host.lifecycle().rollback_spawn(lease).await {
+            let reason = SpawnRollbackReason {
+                phase: SpawnRollbackPhase::AgentRegistration,
+                message: error.to_string(),
+            };
+            return match host.lifecycle().rollback_spawn(lease, reason).await {
                 Ok(()) => Err(AgentRuntimeError::Repository(error.to_string())),
                 Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
                     "agent registration failed: {error}; spawn rollback failed: {rollback_error}"
@@ -202,7 +210,11 @@ where
             expected: None,
             actual: actual_revision,
         };
-        return match host.lifecycle().rollback_spawn(lease).await {
+        let reason = SpawnRollbackReason {
+            phase: SpawnRollbackPhase::AgentRegistration,
+            message: conflict.to_string(),
+        };
+        return match host.lifecycle().rollback_spawn(lease, reason).await {
             Ok(()) => Err(conflict),
             Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
                 "{conflict}; spawn rollback failed: {rollback_error}"
@@ -211,12 +223,43 @@ where
     }
     let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(child_id.as_str());
     thread_snapshot.revision = state.session.thread_revision;
-    runtime
-        .thread_events
-        .replace_snapshot(thread_snapshot)
-        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+    if let Err(error) = runtime.thread_events.replace_snapshot(thread_snapshot) {
+        let rollback_reason = SpawnRollbackReason {
+            phase: SpawnRollbackPhase::AgentRegistration,
+            message: error.to_string(),
+        };
+        let rollback = host
+            .lifecycle()
+            .rollback_spawn(lease, rollback_reason)
+            .await;
+        let (reason, compensation) = match rollback {
+            Ok(()) => (error.to_string(), SpawnCompensation::RolledBack),
+            Err(rollback_error) => {
+                let reason = format!("{error}; spawn rollback failed: {rollback_error}");
+                (reason.clone(), SpawnCompensation::Faulted { reason })
+            }
+        };
+        let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
+        let actor = spawn_agent_loop(
+            host.clone(),
+            compensated,
+            runtime.clone(),
+            options.cancel_grace,
+            true,
+            options.command_capacity,
+        );
+        actors.write().await.insert(child_id, actor);
+        return Err(AgentRuntimeError::ThreadEvents(reason));
+    }
     if let Err(error) = host.lifecycle().activate_spawn(&lease).await {
-        let rollback = host.lifecycle().rollback_spawn(lease).await;
+        let rollback_reason = SpawnRollbackReason {
+            phase: SpawnRollbackPhase::Activation,
+            message: error.to_string(),
+        };
+        let rollback = host
+            .lifecycle()
+            .rollback_spawn(lease, rollback_reason)
+            .await;
         let (reason, compensation) = match rollback {
             Ok(()) => (error.to_string(), SpawnCompensation::RolledBack),
             Err(rollback_error) => {

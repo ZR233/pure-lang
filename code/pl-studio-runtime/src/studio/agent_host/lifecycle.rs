@@ -1,13 +1,18 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pl_core::{AgentLifecycleAdapter, CloseLifecycleRequest, SpawnLifecycleRequest};
+use pl_core::{
+    AgentLifecycleAdapter, CloseLifecycleRequest, SpawnLifecycleRequest, SpawnRollbackPhase,
+    SpawnRollbackReason,
+};
 
-use crate::{PureError, Result, WorktreeHandle, WorktreeManager};
+use crate::{PureError, Result, WorktreeError, WorktreeHandle, WorktreeManager};
 
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
+    ExecutorCloseDisposition, OperationalTaskSpawnFailure, StudioSpawnIntent,
+    StudioTaskSpawnPreparation, StudioTaskSpawnRequest, TaskSpawnCompensation,
+    TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase,
 };
 use crate::studio::{ChildThreadSpec, StudioStore};
 
@@ -89,23 +94,42 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             review_round_id: intent.review_round_id.clone(),
             blueprint: intent.blueprint.clone(),
         };
-        let preparation = self
+        let mut preparation = self
             .coordinator
             .prepare_agent_spawn(&studio_request)
             .await?;
         let worktree = match create_worktree(&preparation, &studio_request).await {
             Ok(worktree) => worktree,
             Err(error) => {
-                return Err(rollback_prepared_spawn(
+                let failure = worktree_spawn_failure(&studio_request, &preparation, &error);
+                return Err(record_prepared_spawn_failure(
                     &self.coordinator,
                     &studio_request,
                     &preparation,
-                    None,
-                    error.to_string(),
+                    failure,
                 )
                 .await);
             }
         };
+        if let Some((manager, handle, actual_base_commit)) = &worktree
+            && let Err(error) = self
+                .coordinator
+                .finalize_executor_worktree(&studio_request, &mut preparation, actual_base_commit)
+                .await
+        {
+            let operation = WorktreeError::Io(format!(
+                "failed to persist executor worktree base and handoff: {error}"
+            ));
+            let failure_error = compensate_created_worktree(manager, handle, operation).await;
+            let failure = worktree_spawn_failure(&studio_request, &preparation, &failure_error);
+            return Err(record_prepared_spawn_failure(
+                &self.coordinator,
+                &studio_request,
+                &preparation,
+                failure,
+            )
+            .await);
+        }
         if let Err(error) = self
             .store
             .create_child_thread(ChildThreadSpec {
@@ -117,12 +141,23 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             })
             .await
         {
+            let failure = operational_spawn_failure(
+                &studio_request,
+                &preparation,
+                TaskSpawnFailureCode::ChildThreadCreate,
+                TaskSpawnFailurePhase::ChildThreadCreate,
+                format!("failed to create Studio child Thread: {error}"),
+                worktree.is_some(),
+                TaskSpawnCompensationState::NotCreated,
+            );
             return Err(rollback_prepared_spawn(
                 &self.coordinator,
                 &studio_request,
                 &preparation,
-                worktree.as_ref(),
-                format!("failed to create Studio child Thread: {error}"),
+                worktree
+                    .as_ref()
+                    .map(|(manager, handle, _)| (manager, handle)),
+                failure,
             )
             .await);
         }
@@ -133,7 +168,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 task_name,
                 request: studio_request,
                 preparation,
-                worktree,
+                worktree: worktree.map(|(manager, handle, _)| (manager, handle)),
             },
         })
     }
@@ -155,36 +190,75 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         Ok(())
     }
 
-    async fn rollback_spawn(&self, lease: Self::SpawnLease) -> Result<()> {
+    async fn rollback_spawn(
+        &self,
+        lease: Self::SpawnLease,
+        reason: SpawnRollbackReason,
+    ) -> Result<()> {
         self.resources.remove(&lease.agent_id).await;
         let mut failures = Vec::new();
+        let (code, phase) = match reason.phase {
+            SpawnRollbackPhase::InitialContext | SpawnRollbackPhase::AgentRegistration => (
+                TaskSpawnFailureCode::AgentRegistration,
+                TaskSpawnFailurePhase::AgentRegistration,
+            ),
+            SpawnRollbackPhase::Activation => (
+                TaskSpawnFailureCode::Activation,
+                TaskSpawnFailurePhase::Activation,
+            ),
+        };
+        let mut failure = operational_spawn_failure(
+            &lease.resource.request,
+            &lease.resource.preparation,
+            code,
+            phase,
+            reason.message,
+            lease.resource.worktree.is_some(),
+            TaskSpawnCompensationState::Unknown,
+        );
+        if let Some((manager, handle)) = &lease.resource.worktree {
+            match manager.discard(handle).await {
+                Ok(()) => {
+                    failure.compensation.worktree = TaskSpawnCompensationState::Removed;
+                }
+                Err(error) => {
+                    failure.compensation.worktree = TaskSpawnCompensationState::CleanupFailed;
+                    failure.cause = error.cause();
+                    failures.push(format!("worktree cleanup failed: {error}"));
+                }
+            }
+        }
+        match self
+            .store
+            .update_thread_status(
+                &lease.resource.thread_id,
+                pl_protocol::ThreadStatus::Failed,
+                None,
+                Some(failure.message.clone()),
+                crate::studio::ids::unix_seconds(),
+            )
+            .await
+        {
+            Ok(()) => {
+                failure.compensation.child_thread = TaskSpawnCompensationState::MarkedFailed;
+            }
+            Err(error) => {
+                failure.compensation.child_thread = TaskSpawnCompensationState::Faulted;
+                failures.push(format!("child Thread compensation failed: {error}"));
+            }
+        }
         if let Err(error) = self
             .coordinator
             .rollback_agent_spawn(
                 &lease.resource.request,
                 &lease.resource.preparation,
-                "framework spawn rolled back",
+                failure,
             )
             .await
         {
-            failures.push(error.to_string());
-        }
-        if let Some((manager, handle)) = &lease.resource.worktree
-            && let Err(error) = manager.discard(handle).await
-        {
-            failures.push(error.to_string());
+            failures.push(format!("spawn failure persistence failed: {error}"));
         }
         if failures.is_empty() {
-            self.store
-                .update_thread_status(
-                    &lease.resource.thread_id,
-                    pl_protocol::ThreadStatus::Failed,
-                    None,
-                    Some("framework spawn rolled back".to_string()),
-                    crate::studio::ids::unix_seconds(),
-                )
-                .await
-                .map_err(|error| lifecycle_error(error.to_string()))?;
             Ok(())
         } else {
             Err(lifecycle_error(failures.join("; ")))
@@ -251,39 +325,132 @@ async fn rollback_prepared_spawn(
     coordinator: &TaskCoordinator,
     request: &StudioTaskSpawnRequest,
     preparation: &StudioTaskSpawnPreparation,
-    worktree: Option<&(WorktreeManager, WorktreeHandle)>,
-    primary_error: String,
+    worktree: Option<(&WorktreeManager, &WorktreeHandle)>,
+    mut failure: TaskSpawnFailure,
 ) -> PureError {
-    let mut failures = vec![primary_error.clone()];
+    let mut failures = vec![failure.message.clone()];
+    if let Some((manager, handle)) = worktree {
+        match manager.discard(handle).await {
+            Ok(()) => failure.compensation.worktree = TaskSpawnCompensationState::Removed,
+            Err(error) => {
+                failure.compensation.worktree = TaskSpawnCompensationState::CleanupFailed;
+                failure.cause = error.cause();
+                failures.push(format!("worktree cleanup failed: {error}"));
+            }
+        }
+    }
     if let Err(error) = coordinator
-        .rollback_agent_spawn(request, preparation, &primary_error)
+        .rollback_agent_spawn(request, preparation, failure)
         .await
     {
-        failures.push(format!("spawn allocation rollback failed: {error}"));
-    }
-    if let Some((manager, handle)) = worktree
-        && let Err(error) = manager.discard(handle).await
-    {
-        failures.push(format!("worktree cleanup failed: {error}"));
+        failures.push(format!("spawn failure persistence failed: {error}"));
     }
     lifecycle_error(failures.join("; "))
 }
 
+async fn record_prepared_spawn_failure(
+    coordinator: &TaskCoordinator,
+    request: &StudioTaskSpawnRequest,
+    preparation: &StudioTaskSpawnPreparation,
+    failure: TaskSpawnFailure,
+) -> PureError {
+    let message = failure.message.clone();
+    match coordinator
+        .rollback_agent_spawn(request, preparation, failure)
+        .await
+    {
+        Ok(()) => lifecycle_error(message),
+        Err(error) => lifecycle_error(format!(
+            "{message}; spawn failure persistence failed: {error}"
+        )),
+    }
+}
+
 async fn create_worktree(
     preparation: &StudioTaskSpawnPreparation,
-    request: &StudioTaskSpawnRequest,
-) -> std::result::Result<Option<(WorktreeManager, WorktreeHandle)>, String> {
+    _request: &StudioTaskSpawnRequest,
+) -> std::result::Result<Option<(WorktreeManager, WorktreeHandle, String)>, WorktreeError> {
     let Some(spec) = preparation.worktree_spec().cloned() else {
         return Ok(None);
     };
     let manager = WorktreeManager::local(spec.repo_root.clone());
-    let handle = manager.create_from_spec(spec).await.map_err(|error| {
-        format!(
-            "failed to create worktree for {}: {error}",
-            request.agent_id
-        )
-    })?;
-    Ok(Some((manager, handle)))
+    let handle = manager.create_from_spec(spec).await?;
+    let actual_base_commit = match manager.resolve_head(&handle).await {
+        Ok(commit) => commit,
+        Err(operation) => {
+            return Err(compensate_created_worktree(&manager, &handle, operation).await);
+        }
+    };
+    Ok(Some((manager, handle, actual_base_commit)))
+}
+
+async fn compensate_created_worktree(
+    manager: &WorktreeManager,
+    handle: &WorktreeHandle,
+    operation: WorktreeError,
+) -> WorktreeError {
+    match manager.discard(handle).await {
+        Ok(()) => WorktreeError::OperationFailedAfterCleanup {
+            operation: Box::new(operation),
+        },
+        Err(cleanup) => WorktreeError::OperationFailedWithCleanup {
+            operation: Box::new(operation),
+            cleanup: Box::new(cleanup),
+        },
+    }
+}
+
+fn worktree_spawn_failure(
+    request: &StudioTaskSpawnRequest,
+    preparation: &StudioTaskSpawnPreparation,
+    error: &WorktreeError,
+) -> TaskSpawnFailure {
+    TaskSpawnFailure::worktree(
+        preparation.task_run_id().unwrap_or_default().to_string(),
+        preparation
+            .lifecycle_token()
+            .unwrap_or_default()
+            .to_string(),
+        request.agent_id.clone(),
+        preparation.spawn_resource().unwrap_or_else(|| {
+            crate::studio::task_coordinator::TaskSpawnResource {
+                repo_root: String::new(),
+                path: String::new(),
+                branch: String::new(),
+                base_ref: "HEAD".to_string(),
+            }
+        }),
+        error,
+    )
+}
+
+fn operational_spawn_failure(
+    request: &StudioTaskSpawnRequest,
+    preparation: &StudioTaskSpawnPreparation,
+    code: TaskSpawnFailureCode,
+    phase: TaskSpawnFailurePhase,
+    message: String,
+    has_worktree: bool,
+    child_thread: TaskSpawnCompensationState,
+) -> TaskSpawnFailure {
+    TaskSpawnFailure::operational(OperationalTaskSpawnFailure {
+        code,
+        phase,
+        message,
+        task_run_id: preparation.task_run_id().map(str::to_string),
+        work_unit_id: preparation.lifecycle_token().map(str::to_string),
+        agent_id: request.agent_id.clone(),
+        resource: preparation.spawn_resource(),
+        compensation: TaskSpawnCompensation {
+            allocation: TaskSpawnCompensationState::MarkedFailed,
+            worktree: if has_worktree {
+                TaskSpawnCompensationState::Unknown
+            } else {
+                TaskSpawnCompensationState::NotCreated
+            },
+            child_thread,
+        },
+    })
 }
 
 fn lifecycle_error(error: impl Into<String>) -> PureError {

@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource, WorktreeBackend,
-    WorktreeCreateFailure, WorktreeError, reconcile_task_worktrees,
+    WorktreeCreateFailure, WorktreeError, WorktreeFailureCauseKind, reconcile_task_worktrees,
     set_after_registration_remove_barrier,
 };
 use super::{WorktreeCreateSpec, WorktreeManager};
@@ -94,6 +94,161 @@ async fn create_from_spec_uses_exact_path_branch_and_base_commit() {
     assert!(!handle.path.join("later.txt").exists());
     manager.discard(&handle).await.unwrap();
     fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn dirty_main_workspace_can_create_worktree_without_copying_uncommitted_changes() {
+    let repo = temp_git_repo();
+    fs::write(repo.join("README.md"), "dirty tracked\n").unwrap();
+    fs::write(repo.join("untracked.txt"), "dirty untracked\n").unwrap();
+    let spec = task_worktree_spec(&repo, "run-dirty", "agent-dirty");
+    let manager = WorktreeManager::local(repo.clone());
+
+    let handle = manager.create_from_spec(spec).await.unwrap();
+
+    assert_eq!(
+        fs::read_to_string(repo.join("README.md")).unwrap(),
+        "dirty tracked\n"
+    );
+    assert!(repo.join("untracked.txt").is_file());
+    assert_eq!(
+        fs::read_to_string(handle.path.join("README.md"))
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "init\n"
+    );
+    assert!(!handle.path.join("untracked.txt").exists());
+    manager.discard(&handle).await.unwrap();
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn non_git_missing_and_unborn_roots_report_bounded_git_failures() {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = std::env::temp_dir().join(format!("pure-worktree-invalid-roots-{stamp}"));
+    let non_git = base.join("non-git");
+    let missing = base.join("missing");
+    let unborn = base.join("unborn");
+    fs::create_dir_all(&non_git).unwrap();
+    fs::create_dir_all(&unborn).unwrap();
+    run_git(&unborn, &["init"]);
+
+    for (name, root) in [
+        ("non-git", non_git),
+        ("missing", missing),
+        ("unborn", unborn),
+    ] {
+        let manager = WorktreeManager::local(root.clone());
+        let error = manager
+            .create_from_spec(task_worktree_spec(&root, "run-invalid", name))
+            .await
+            .expect_err("invalid repository state must fail at worktree creation");
+        let cause = error.cause();
+        assert_eq!(
+            cause.kind,
+            WorktreeFailureCauseKind::GitExited,
+            "{name}: {cause:?}"
+        );
+        assert!(cause.args.as_deref().is_some_and(|args| args.len() <= 1024));
+        assert!(
+            cause
+                .stderr
+                .as_deref()
+                .is_some_and(|stderr| stderr.len() <= 4096)
+        );
+    }
+    fs::remove_dir_all(base).ok();
+}
+
+#[derive(Debug)]
+struct PartialCreateBackend {
+    cleanup_fails: bool,
+}
+
+impl WorktreeBackend for PartialCreateBackend {
+    fn create<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+        target_path: &'a Path,
+        _base_commit: &'a str,
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeCreateFailure>> {
+        async move {
+            fs::create_dir_all(target_path).unwrap();
+            Err(WorktreeCreateFailure::may_have_created(
+                WorktreeError::GitTimedOut {
+                    args: "worktree add".to_string(),
+                },
+            ))
+        }
+        .boxed()
+    }
+
+    fn resolve_head<'a>(
+        &'a self,
+        _worktree_path: &'a Path,
+    ) -> futures::future::BoxFuture<'a, Result<String, WorktreeError>> {
+        async { unreachable!("partial creation never resolves HEAD") }.boxed()
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        target_path: &'a Path,
+        _force: bool,
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+        async move {
+            if target_path.exists() {
+                fs::remove_dir_all(target_path).unwrap();
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn delete_branch<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+    ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+        async move {
+            if self.cleanup_fails {
+                Err(WorktreeError::Io("branch cleanup failed".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+        .boxed()
+    }
+}
+
+#[tokio::test]
+async fn partial_create_reports_cleanup_success_and_failure_distinctly() {
+    for cleanup_fails in [false, true] {
+        let repo = temp_git_repo();
+        let manager = WorktreeManager::with_backend(
+            repo.clone(),
+            Arc::new(PartialCreateBackend { cleanup_fails }),
+        );
+        let spec = task_worktree_spec(&repo, "run-partial-create", "agent-partial-create");
+        let error = manager.create_from_spec(spec.clone()).await.unwrap_err();
+
+        assert!(!spec.path.exists());
+        if cleanup_fails {
+            assert!(error.cleanup_failed());
+            assert_eq!(
+                error.cause().kind,
+                WorktreeFailureCauseKind::OperationAndCleanupFailed
+            );
+        } else {
+            assert!(error.cleanup_succeeded());
+            assert_eq!(error.cause().kind, WorktreeFailureCauseKind::GitTimedOut);
+        }
+        fs::remove_dir_all(repo).ok();
+    }
 }
 
 #[tokio::test]
@@ -294,6 +449,13 @@ impl WorktreeBackend for RemoveReportsFailureAfterDeletingLeaf {
         async { Ok(()) }.boxed()
     }
 
+    fn resolve_head<'a>(
+        &'a self,
+        _worktree_path: &'a Path,
+    ) -> futures::future::BoxFuture<'a, Result<String, WorktreeError>> {
+        async { Ok("head".to_string()) }.boxed()
+    }
+
     fn remove<'a>(
         &'a self,
         _repo_root: &'a Path,
@@ -302,8 +464,9 @@ impl WorktreeBackend for RemoveReportsFailureAfterDeletingLeaf {
     ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
         async move {
             tokio::fs::remove_dir_all(target_path).await.unwrap();
-            Err(WorktreeError::GitCommand {
+            Err(WorktreeError::GitExited {
                 args: "worktree remove --force".to_string(),
+                exit_code: 1,
                 stderr: "Filename too long".to_string(),
             })
         }

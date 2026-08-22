@@ -478,7 +478,7 @@ async fn record_merge_call(state: &ScriptState) -> Result<String> {
         .max_by_key(|completion| completion.revision)
         .context("approved executor completion is absent before merge accounting")?;
     let resulting_head = git_output(&state.workspace, &["rev-parse", "HEAD"])?;
-    if resulting_head == task.expected_head {
+    if resulting_head == completion.base_commit {
         bail!("planner Git merge did not advance the main workspace HEAD");
     }
     Ok(tool_call(
@@ -487,7 +487,7 @@ async fn record_merge_call(state: &ScriptState) -> Result<String> {
         serde_json::json!({
             "executorAgentId": executor_id,
             "completionRevision": completion.revision,
-            "expectedPreviousHead": task.expected_head,
+            "expectedPreviousHead": completion.base_commit,
             "resultingHead": resulting_head,
             "method": "merge",
             "summary": "Planner merged the approved offline executor branch with ordinary Git."

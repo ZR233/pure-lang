@@ -96,8 +96,6 @@ void registerControllerStreamTests() {
           kind: TaskStateKind.implementing,
           generation: 1,
         ),
-        branch: 'pure-task-stale',
-        expectedHead: 'abc123',
         revision: 0,
         workUnits: [],
         completions: [],

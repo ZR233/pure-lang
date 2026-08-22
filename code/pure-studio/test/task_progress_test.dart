@@ -234,7 +234,6 @@ Map<String, dynamic> _snapshot({required String activity}) => {
     'phase': 'implementing',
     'statusMessage': null,
     'taskGeneration': 0,
-    'expectedHead': 'abc',
     'workUnits': [
       {
         'id': 'work-unit-1',
@@ -261,7 +260,6 @@ Map<String, dynamic> _completedSnapshot() => {
   'task': {
     'runId': 'task-run-1',
     'phase': 'completed',
-    'expectedHead': 'head-2',
     'integratedReviewGate': {
       'status': 'notRequiredSingleExecutorEquivalent',
       'workUnitId': 'work-unit-1',

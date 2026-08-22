@@ -468,11 +468,6 @@ function Assert-TaskRecoveryEvidence {
     if ($null -eq $target['attempt'] -or [int]$target['attempt'] -lt 1) {
         throw 'Task recovery Preview did not preserve the executor attempt identity'
     }
-    $previewGit = $target['gitFingerprint'] | ConvertTo-Json -Depth 12 -Compress
-    $resultGit = $result['gitFingerprint'] | ConvertTo-Json -Depth 12 -Compress
-    if ($previewGit -cne $resultGit) {
-        throw 'Task recovery mutated the target Git fingerprint'
-    }
     if ([int]$result['removedItemCount'] -gt 0 -and
         $result['beforeTranscriptHash'] -eq $result['afterTranscriptHash']) {
         throw 'Task recovery removed transcript items without changing its hash'
@@ -514,7 +509,6 @@ function Update-ManifestFromSnapshots {
                 $Manifest['runId'] = $task['runId']
                 $Manifest['taskGeneration'] = $task['taskGeneration']
                 $Manifest['latestPhase'] = $task['phase']
-                $Manifest['expectedHead'] = $task['expectedHead']
                 $Manifest['workUnitIds'] = @($task['workUnits'] | ForEach-Object { $_['id'] })
                 $Manifest['latestTaskIdentity'] = [ordered]@{
                     runId = $task['runId']
@@ -732,7 +726,6 @@ try {
             runId = $null
             taskGeneration = $null
             latestPhase = $null
-            expectedHead = $null
             workUnitIds = @()
             attempts = @()
         }

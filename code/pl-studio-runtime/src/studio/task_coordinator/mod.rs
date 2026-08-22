@@ -22,8 +22,10 @@ pub(crate) use recovery::MERGE_RECOVERY_BLOCK_PREFIX;
 pub(crate) use recovery::is_retryable_merge_recovery_message;
 pub(crate) use review_round::*;
 pub(crate) use spawn::{
-    StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
-    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
+    OperationalTaskSpawnFailure, StudioSpawnIntent, StudioTaskSpawnPreparation,
+    StudioTaskSpawnRequest, TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
+    TaskSpawnCompensation, TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode,
+    TaskSpawnFailurePhase, TaskSpawnResource,
 };
 pub(crate) use task_run::*;
 pub(crate) use types::*;

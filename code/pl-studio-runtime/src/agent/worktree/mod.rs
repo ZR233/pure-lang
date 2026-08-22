@@ -9,7 +9,7 @@ mod error;
 mod manager;
 mod reconcile;
 pub use backend::{LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure};
-pub use error::WorktreeError;
+pub use error::{WorktreeError, WorktreeFailureCause, WorktreeFailureCauseKind};
 pub use manager::git_compatible_path;
 pub use manager::{WorktreeCreateSpec, WorktreeHandle, WorktreeManager, WorktreeRef};
 pub use reconcile::{

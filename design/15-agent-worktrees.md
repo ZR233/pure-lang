@@ -17,11 +17,13 @@
 单次 agent turn 终态绑定。
 
 Task executor 只能由 `task_spawn_executor` 创建。Task planner 必须先调用
-`task_finalize_design` 进入 `Implementing`；有设计阶段 workspace 变化时，finalize 创建的提交会推进
-Task expected HEAD，因此 executor worktree 从该 HEAD 创建并自然继承全部文档、代码和其他修改。
+`task_finalize_design` 进入 `Implementing`。finalize 只记录摘要并推进 Task 状态，不读取或修改 Git；
+executor worktree 始终由资源适配层从创建时的 `HEAD` 建立。planner 若希望 executor 获得主
+workspace 的既有修改，必须自行提交；未提交修改不会被 worktree 隐式复制。
 `scopeHints` 是可选的仓库相对关注路径，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
 它不是文件授权、并发互斥或 completion 门禁。executor 可以修改自身 worktree 内任意仓库文件，
-真正不变量是 canonical worktree、Git identity、clean delivery 与完整 base-to-HEAD diff。
+真正不变量是 durable owner 与 canonical worktree 资源身份；completion 的 commit 与 changed files
+是 executor 声明的审计事实，不由 TaskService 查询 Git 复核。
 
 ## 与既有约定的关系
 
@@ -60,7 +62,7 @@ Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。�
 `workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
 每个 durable `WorkUnit` 还保存 typed `worktreeDisposition = protect |
-cleanupRequested`。新记录默认 `protect`；v10 不导入旧记录或运行 backfill。普通 Cancelled、
+cleanupRequested`。新记录默认 `protect`；v11 不导入旧记录或运行 backfill。普通 Cancelled、
 Failed、blocked 或无证据的 terminal 记录继续保护，不能把状态枚举本身当成删除授权。
 Task executor discard 必须在释放物理资源之前事务性持久化 `cleanupRequested`；即使
 WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
@@ -71,8 +73,8 @@ WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
   随 agent 产品资源同生共死；root agent 为 `None`。
 - `AgentWorkspace { root, boundary, mutability }`：`pl-core` 的通用 turn/tool 边界，不携带
   Studio Task 类型。Studio 用 durable owner 解析实例；Task child 一律 `confined`。
-- `WorktreeRef { relativePath, branch, baseCommit, headCommit }`：只向 Planner 暴露相对
-  locator 与 Git identity；reviewer 不需要物理 locator，因为其 canonical root 已是目标 worktree。
+- `TaskSpawnResource { repoRoot, path, branch, baseRef }`：在结构化 spawn failure 中报告实际资源
+  目标；WorkUnit 在创建成功后保存解析出的实际 `baseCommit`。
 - `CloseDisposition::Discard` 只负责放弃未采纳产物；Planner 使用普通 Git 自主整合，随后由
   `task_record_merge` 记录结果。`close_agent` 不隐式合并。
 - `WorktreeError`：`manager` 内部错误类型，向 `PureError::ToolExecutionFailed`
@@ -99,8 +101,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   「turn 完成 ≠ agent 释放」语义一致。approved executor 关闭后进入
   `PreserveForMerge`，由成功 merge record 清理；noDelivery、明确 discard 与已记录资源才允许
   走 cleanup。
-- runtime 不兜底 `git add -A` 或 commit。executor 必须自行提交并用
-  `report_completion` 报告干净 worktree 与验证摘要；delivery reviewer 通过后 planner
+- runtime 不兜底 `git add -A` 或 commit。executor 自行决定并声明 `headCommit`、`changedFiles`
+  与验证摘要；TaskService 不验证 clean、HEAD、ancestor 或真实 diff。delivery reviewer 通过后 planner
   才能关闭 executor、执行普通 Git，并用 `task_record_merge` 记账。
 - `close(Discard)` 或级联关闭：`git worktree remove --force` + 删除 subagent 分支。
 - spawn 失败回滚（包括 worktree 创建部分成功、持久化激活失败或
@@ -118,7 +120,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   项目级 `<repo_root>/.pure/` 是运行态产物。
 - 命名：`<repo_root>/.pure/worktrees/<task_run_id>/<agent_id>/`。
 - 分支：`pure-task-<task_run_id>-<agent_id>`，经 `GitPolicy::validate_branch` 校验。
-- **`.gitignore` 必须忽略 `.pure/`**，否则 worktree 会污染主仓库索引；启用时检测并提示。
+- 推荐 `.gitignore` 忽略 `.pure/`。TaskService 不在确认、finalize 或后续阶段检查该设置；若
+  `git worktree add` 因项目布局失败，由资源适配层返回结构化原因。
 - Windows 上持久化的 repository、Git common directory 与 worktree 路径统一使用 native
   non-verbatim absolute representation；canonical 安全校验可以临时产生 extended path，但跨
   Task/工具/子进程边界前必须移除 `\\?\` / `\\?\UNC\` 前缀，避免同一目录因两种表示导致
@@ -127,7 +130,7 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 ## 启用时机
 
 孤儿 GC 只在 Studio 启动恢复阶段运行，并以持久化 `TaskRun`、`WorkUnit`、
-`ReviewRound` 与 `BranchLease` 为唯一所有权来源。普通 root Turn、后续 Turn、Thread
+`ReviewRound` 与 `ProjectLease` 为唯一所有权来源。普通 root Turn、后续 Turn、Thread
 选择切换和 `enable_worktrees` 都不得扫描或删除其他 Thread 的 worktree。
 
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
@@ -146,15 +149,11 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   任意部分存在仍 block。`Running`、`AwaitingCompletion`、`ReadyForReview`、
   `Reviewing`、`ChangesRequested`、`Approved` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
-- 启动先读取完整 durable ownership snapshot，再解析全部已知 Task workspace 的 canonical
-  Git common directory，并按 common
-  directory 聚合 durable owner；同组只读取一次 Git inventory，并同时覆盖组内所有
-  canonical `.pure/worktrees` root。只有 blocked、terminal 或 cleanup-pending 记录时也必须
-  执行；active run 只有在所属 common-directory group 对账成功后才能进入 Recovery
-  continuation。任何已知 workspace（包括仅有 terminal owner 的 workspace）无法完成 Git
-  identity 预检时，该 common-directory group 不执行 GC、不恢复 agent，并产生对应
-  项目/Thread issue；其他已完整识别 owner 且通过预检的安全 group 可以继续。SQLite、schema
-  或完整 ownership snapshot 本身无法读取时才是应用致命错误。
+- 启动先读取完整 durable ownership snapshot。TaskRun、Merging 和 conversation recovery 只依据
+  durable state、generation/revision 与 agent 状态恢复，不读取项目 Git，也不因 dirty、HEAD 或
+  operation 标记进入 Blocked。只有明确执行 worktree 对账或清理时，资源适配层才读取 registration、
+  leaf path、Pure-owned branch 与待删除 branch HEAD；这些事实只决定资源能否安全清理，不反向充当
+  Task 状态门禁。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction
   与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
   `git worktree remove` 返回后、任何 fallback 文件系统删除之前必须再次证明，覆盖 Git

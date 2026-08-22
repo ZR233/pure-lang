@@ -93,9 +93,7 @@ impl AgentWorkspaceResolver {
             run.root_thread_id == thread.root_thread_id,
             "executor WorkUnit belongs to another TaskRun root"
         );
-        let root =
-            validate_child_workspace(&work_unit.worktree_path, &work_unit.branch, &run, false)
-                .await?;
+        let root = validate_child_workspace(&work_unit.worktree_path, &work_unit.branch, &run)?;
         Ok(AgentWorkspace::confined(
             root,
             WorkspaceMutability::ReadWrite,
@@ -135,34 +133,20 @@ impl AgentWorkspaceResolver {
                     .await?
                     .context("delivery review completion not found")?;
                 validate_delivery_target(&round, &completion)?;
-                let root = validate_child_workspace(
-                    &completion.worktree_path,
-                    &completion.branch,
-                    &run,
-                    true,
-                )
-                .await?;
-                let snapshot =
-                    crate::studio::task_coordinator::git::inspect_repository(&root, true).await?;
+                let root =
+                    validate_child_workspace(&completion.worktree_path, &completion.branch, &run)?;
                 let expected_head = completion
                     .head_commit
                     .as_deref()
                     .unwrap_or(completion.base_commit.as_str());
                 ensure!(
-                    snapshot.head == expected_head && round.reviewed_head == expected_head,
-                    "delivery review worktree HEAD no longer matches its Completion revision"
+                    round.reviewed_head == expected_head,
+                    "delivery review no longer matches its Completion revision"
                 );
                 root
             }
             ReviewScope::Integrated => {
-                let root = validate_main_workspace(Path::new(&run.workspace_root), &run).await?;
-                let snapshot =
-                    crate::studio::task_coordinator::git::inspect_repository(&root, true).await?;
-                ensure!(
-                    snapshot.head == run.expected_head && round.reviewed_head == run.expected_head,
-                    "integrated review no longer matches the TaskRun HEAD"
-                );
-                root
+                validate_main_workspace(Path::new(&run.workspace_root), &run).await?
             }
         };
         Ok(AgentWorkspace::confined(
@@ -182,15 +166,13 @@ async fn validate_main_workspace(root: &Path, run: &TaskRun) -> Result<PathBuf> 
         same_path(&root, Path::new(&run.workspace_root)),
         "TaskRun main workspace does not match the project workspace"
     );
-    validate_repository_identity(&root, &run.git_common_dir, &run.branch, false).await?;
     Ok(root)
 }
 
-async fn validate_child_workspace(
+fn validate_child_workspace(
     stored_path: &str,
     expected_branch: &str,
     run: &TaskRun,
-    require_clean: bool,
 ) -> Result<PathBuf> {
     ensure!(
         expected_branch.starts_with("pure-task-"),
@@ -204,32 +186,7 @@ async fn validate_child_workspace(
         path_is_descendant(&root, &worktree_root),
         "Task child workspace is outside .pure/worktrees"
     );
-    validate_repository_identity(&root, &run.git_common_dir, expected_branch, require_clean)
-        .await?;
     Ok(root)
-}
-
-async fn validate_repository_identity(
-    root: &Path,
-    expected_common_dir: &str,
-    expected_branch: &str,
-    require_clean: bool,
-) -> Result<()> {
-    let snapshot =
-        crate::studio::task_coordinator::git::inspect_repository(root, require_clean).await?;
-    ensure!(
-        same_path(&snapshot.workspace_root, root),
-        "Git top-level does not match the canonical Agent workspace"
-    );
-    ensure!(
-        same_path(&snapshot.git_common_dir, Path::new(expected_common_dir)),
-        "Agent workspace Git common directory does not match its TaskRun"
-    );
-    ensure!(
-        snapshot.branch == expected_branch,
-        "Agent workspace branch does not match its durable owner"
-    );
-    Ok(())
 }
 
 fn validate_delivery_target(
@@ -313,7 +270,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delivery_reviewer_uses_executor_worktree_read_only_and_requires_clean_state() {
+    async fn delivery_reviewer_uses_executor_worktree_read_only() {
         let fixture = ResolverFixture::new("delivery-review-workspace").await;
         std::fs::write(fixture.worktree.join("sentinel.txt"), "executor\n").unwrap();
         git(&fixture.worktree, &["add", "sentinel.txt"]);
@@ -329,7 +286,7 @@ mod tests {
                         path: canonical_text(&fixture.worktree),
                         branch: fixture.branch.clone(),
                     },
-                    base_commit: fixture.run.base_commit.clone(),
+                    base_commit: git_output(&fixture.repository, &["rev-parse", "HEAD"]),
                     head_commit: head,
                     changed_files: vec!["sentinel.txt".to_string()],
                     verification_summary: "focused checks passed".to_string(),
@@ -383,14 +340,13 @@ mod tests {
         );
 
         std::fs::write(fixture.worktree.join("dirty.txt"), "dirty\n").unwrap();
-        assert!(
-            fixture
-                .resolver()
-                .resolve(&identity, &thread, &fixture.project, None)
-                .await
-                .is_err(),
-            "delivery reviewer must reject a Completion worktree that drifted dirty"
-        );
+        let dirty_workspace = fixture
+            .resolver()
+            .resolve(&identity, &thread, &fixture.project, None)
+            .await
+            .unwrap();
+        assert!(same_path(dirty_workspace.root(), &fixture.worktree));
+        assert_eq!(dirty_workspace.mutability(), WorkspaceMutability::ReadOnly);
         fixture.cleanup();
     }
 
@@ -468,7 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_workspace_resolution_fails_closed_for_invalid_durable_owners() {
+    async fn child_workspace_resolution_uses_durable_path_without_inspecting_git_state() {
         let fixture = ResolverFixture::new("invalid-child-owner").await;
 
         let unknown_id = "unknown-executor";
@@ -485,11 +441,11 @@ mod tests {
         assert!(error.to_string().contains("no durable WorkUnit owner"));
 
         git(&fixture.worktree, &["switch", "-c", "pure-task-drifted"]);
-        let error = fixture
+        let drifted = fixture
             .resolve_executor(&fixture.executor_agent_id)
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("branch does not match"));
+            .unwrap();
+        assert!(same_path(drifted.root(), &fixture.worktree));
 
         let missing_id = "missing-workspace";
         let missing_path = fixture
@@ -517,12 +473,8 @@ mod tests {
         fixture
             .allocate_executor(foreign_id, &foreign_path, &foreign_branch)
             .await;
-        let error = fixture.resolve_executor(foreign_id).await.unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("common directory does not match")
-        );
+        let foreign = fixture.resolve_executor(foreign_id).await.unwrap();
+        assert!(same_path(foreign.root(), &foreign_path));
 
         let external_id = "external-workspace";
         let external_path = temporary_project("external-workspace");
@@ -581,6 +533,7 @@ mod tests {
             std::fs::create_dir_all(worktree.parent().unwrap()).unwrap();
             let branch = format!("pure-task-{}-{executor_agent_id}", run.id);
             let worktree_text = worktree.to_string_lossy().to_string();
+            let base_commit = git_output(&repository, &["rev-parse", "HEAD"]);
             git(
                 &repository,
                 &[
@@ -589,7 +542,7 @@ mod tests {
                     "-b",
                     &branch,
                     &worktree_text,
-                    &run.expected_head,
+                    &base_commit,
                 ],
             );
             let worktree = std::fs::canonicalize(worktree).unwrap();
@@ -598,7 +551,7 @@ mod tests {
                     task_run_id: run.id.clone(),
                     title: "executor delivery".to_string(),
                     scope_hints: vec!["src".to_string()],
-                    base_commit: run.expected_head.clone(),
+                    base_commit,
                     worktree_path: canonical_text(&worktree),
                     branch: branch.clone(),
                     attempt: 1,
@@ -670,7 +623,7 @@ mod tests {
                     task_run_id: self.run.id.clone(),
                     title: agent_id.to_string(),
                     scope_hints: Vec::new(),
-                    base_commit: self.run.expected_head.clone(),
+                    base_commit: git_output(&self.repository, &["rev-parse", "HEAD"]),
                     worktree_path: path.to_string_lossy().to_string(),
                     branch: branch.to_string(),
                     attempt: 1,

@@ -99,9 +99,9 @@ impl StudioStore {
             let run = if terminalized {
                 settle_task_children(&tx, &failure_model.task_run_id, &input.failure.message)
                     .await?;
-                entities::branch_lease::Entity::delete_many()
+                entities::project_lease::Entity::delete_many()
                     .filter(
-                        entities::branch_lease::Column::TaskRunId
+                        entities::project_lease::Column::TaskRunId
                             .eq(failure_model.task_run_id.clone()),
                     )
                     .exec(&tx)

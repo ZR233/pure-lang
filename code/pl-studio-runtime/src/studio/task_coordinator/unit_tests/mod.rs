@@ -13,32 +13,20 @@ use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
     AgentSession, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
-    InteractionStatus, StudioMode, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
-    StudioStore, TurnOptions, TurnWorkingSetHandle,
+    InteractionStatus, StudioMode, StudioStore, TurnOptions, TurnWorkingSetHandle,
 };
 use pl_core::tool::cache::TurnToolCacheHandle;
 
 async fn finalize_test_design(store: &StudioStore, run: &TaskRun) -> TaskRun {
-    assert!(
-        store
-            .finalize_task_design(
-                &run.id,
-                &run.expected_head,
-                &run.expected_head,
-                None,
-                "test design finalized",
-                &run.latest_design_observation()
-                    .expect("design baseline")
-                    .fingerprint,
-            )
-            .await
-            .unwrap()
-    );
-    store.read_task_run(&run.id).await.unwrap().unwrap()
+    store
+        .finalize_task_design(&run.id, "test design finalized")
+        .await
+        .unwrap()
+        .expect("design transition")
 }
 
 #[tokio::test]
-async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
+async fn executor_spawn_call_is_idempotent_before_worktree_materialization() {
     let repository = init_repository("executor-spawn-idempotent-handoff");
     let store = task_store(&repository).await;
     let session = task_session(&store, &repository).await;
@@ -86,18 +74,15 @@ async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
         Some("thread-task-stable")
     );
     assert_eq!(store.list_work_units(&run.id).await.unwrap().len(), 1);
-    let section = first.initial_context().first().expect("handoff section");
-    let handoff = TaskExecutorHandoff::from_context_section(section).unwrap();
-    assert_eq!(handoff.ownership.task_run_id, run.id);
-    assert_eq!(handoff.ownership.requesting_call_id, "call-stable");
-    assert_eq!(
-        handoff.blueprint.objective,
-        "move transport selection to ModelInfo"
-    );
-    assert_eq!(handoff.blueprint.scope.scope_hints, vec!["code/pl-model"]);
-    assert_eq!(
-        handoff.blueprint.verification.commands[0].command,
-        "cargo test -p pl-model"
+    assert!(first.initial_context().is_empty());
+    let error = store
+        .read_work_unit_handoff(&semantic_duplicate.work_unit.id)
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("executor session state is missing")
     );
 
     coordinator.suspend();
@@ -171,26 +156,28 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
             .await
             .is_err()
     );
-    assert!(
+    assert_eq!(
         fixture
             .store
             .list_work_units(&fixture.run_id)
             .await
             .unwrap()
-            .is_empty()
+            .len(),
+        1
     );
     let rounds = fixture
         .store
         .list_review_rounds(&fixture.run_id)
         .await
         .unwrap();
-    assert_eq!(rounds[0].id, round.id);
+    let persisted = rounds.last().unwrap();
+    assert_eq!(persisted.id, round.id);
     assert_eq!(
-        rounds[0].reviewer_thread_id.as_deref(),
+        persisted.reviewer_thread_id.as_deref(),
         Some("agent-reviewer")
     );
-    assert_eq!(rounds[0].requested_by_call_id, "call-review");
-    assert_eq!(rounds[0].reviewer_status(), ThreadExecutionStatus::Running);
+    assert_eq!(persisted.requested_by_call_id, "call-review");
+    assert_eq!(persisted.reviewer_status(), ThreadExecutionStatus::Running);
     fixture.cleanup();
 }
 
@@ -255,7 +242,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         } if review_round_id == &round.id
     ));
     let retry = fixture.begin_integrated_review("call-review-retry").await;
-    assert_eq!(retry.round, 2);
+    assert_eq!(retry.round, 3);
     assert_eq!(retry.reviewed_head, round.reviewed_head);
     fixture.cleanup();
 }
@@ -310,7 +297,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
                     "summary":"implementation matches the reviewed design",
                     "designReferences":[{"path":"design/guide.md","section":"Review design"}],
                     "findings":[],
-                    "fileReviews":[]
+                    "fileReviews":[{"path":"src/review_fixture.rs","reviewed":true}]
                 }),
                 session_id: "reviewer-turn".to_string(),
                 tool_id: "call-review-exit".to_string(),
@@ -349,10 +336,11 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
         .list_review_rounds(&fixture.run_id)
         .await
         .unwrap();
-    assert_eq!(rounds[0].verdict(), ReviewVerdict::Pass);
-    assert_eq!(rounds[0].design_references[0].path, "design/guide.md");
+    let persisted = rounds.last().unwrap();
+    assert_eq!(persisted.verdict(), ReviewVerdict::Pass);
+    assert_eq!(persisted.design_references[0].path, "design/guide.md");
     assert_eq!(
-        rounds[0].reviewer_status(),
+        persisted.reviewer_status(),
         ThreadExecutionStatus::Completed
     );
     fixture.cleanup();
@@ -443,14 +431,19 @@ async fn rejected_review_exit_can_page_diagnostics_and_retry_in_the_same_turn() 
             .kind(),
         TaskRunStateKind::Reviewing
     );
-    assert!(
-        fixture
-            .store
-            .list_pending_task_planner_wakes()
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let pending_wakes = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(pending_wakes.len(), 1);
+    assert!(matches!(
+        pending_wakes[0].source,
+        TaskPlannerWakeSource::Review {
+            scope: ReviewScope::Delivery,
+            ..
+        }
+    ));
 
     let coverage_tool = fixture
         .coordinator
@@ -553,31 +546,20 @@ async fn rejected_review_exit_can_page_diagnostics_and_retry_in_the_same_turn() 
 
 #[tokio::test]
 async fn completion_requires_current_design_and_pass_then_atomically_releases_lease() {
-    let fixture = ReviewFixture::new_design_updating("task-completion-gate").await;
-    let run = fixture
-        .store
-        .read_task_run(&fixture.run_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let fixture = ReviewFixture::new("task-completion-gate").await;
     let error = fixture
         .store
         .complete_task(
             &fixture.root_thread_id,
-            &run.expected_head,
             &crate::StudioIntegratedReviewGate::SatisfiedByReview {
                 review_round_id: "missing".to_string(),
-                reviewed_head: run.expected_head.clone(),
+                reviewed_head: "missing-review-head".to_string(),
             },
         )
         .await
         .unwrap_err();
     let message = format!("{error:#}");
-    assert!(
-        message.contains("completable task run not found"),
-        "unexpected completion error: {message}"
-    );
-    finalize_test_design(&fixture.store, &run).await;
+    assert!(message.contains("integrated review gate no longer matches task phase"));
     fixture
         .begin_integrated_review("call-complete-review")
         .await;
@@ -638,10 +620,9 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .store
         .complete_task(
             &fixture.root_thread_id,
-            &run.expected_head,
             &crate::StudioIntegratedReviewGate::SatisfiedByReview {
                 review_round_id: round.id.clone(),
-                reviewed_head: run.expected_head.clone(),
+                reviewed_head: round.reviewed_head.clone(),
             },
         )
         .await
@@ -663,10 +644,9 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .store
         .complete_task(
             &fixture.root_thread_id,
-            &run.expected_head,
             &crate::StudioIntegratedReviewGate::SatisfiedByReview {
                 review_round_id: round.id,
-                reviewed_head: run.expected_head.clone(),
+                reviewed_head: round.reviewed_head,
             },
         )
         .await
@@ -677,7 +657,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
     assert!(
         fixture
             .store
-            .read_branch_lease(&fixture.run_id)
+            .read_project_lease(&fixture.run_id)
             .await
             .unwrap()
             .is_none()
@@ -695,12 +675,6 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
     fixture.commit_file("code/pure-studio/lib/invalid_for_analyzer.dart");
     let delivery_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
     let delivery = fixture.submit(&delivery_head).await.unwrap();
-    let run = fixture
-        .store
-        .read_task_run(&fixture.task_run_id)
-        .await
-        .unwrap()
-        .unwrap();
     let resulting_head =
         integrate_planner_delivery(&fixture, MergeMethod::CherryPick, &delivery.head_commit);
     fixture
@@ -710,7 +684,7 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
             TaskRecordMergeInput {
                 executor_agent_id: fixture.subagent.id.clone(),
                 completion_revision: 1,
-                expected_previous_head: run.expected_head.clone(),
+                expected_previous_head: fixture.base_commit.clone(),
                 resulting_head: resulting_head.clone(),
                 method: MergeMethod::CherryPick,
                 summary: "record Flutter delivery".to_string(),
@@ -726,20 +700,6 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
         "# Completion design\n",
     )
     .unwrap();
-    git(&fixture.repository, &["add", "design/guide.md"]);
-    git(
-        &fixture.repository,
-        &["commit", "-m", "document Flutter delivery"],
-    );
-    let design_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
-    assert!(
-        fixture
-            .store
-            .compare_and_set_task_head(&fixture.task_run_id, &resulting_head, &design_head)
-            .await
-            .unwrap()
-    );
-
     let round = begin_integrated_review_for_fixture(
         &fixture.store,
         &fixture.root_thread_id,
@@ -865,7 +825,7 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
     assert!(
         fixture
             .store
-            .read_branch_lease(&fixture.task_run_id)
+            .read_project_lease(&fixture.task_run_id)
             .await
             .unwrap()
             .is_some()
@@ -905,7 +865,7 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
     assert!(
         fixture
             .store
-            .read_branch_lease(&fixture.task_run_id)
+            .read_project_lease(&fixture.task_run_id)
             .await
             .unwrap()
             .is_none()
@@ -993,7 +953,6 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
         .store
         .request_task_stop(
             &run.id,
-            &run.expected_head,
             TaskStopOrigin::UserRequest,
             &TaskStopReason::new("user stopped task").unwrap(),
         )
@@ -1001,7 +960,7 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
         .unwrap();
     fixture
         .store
-        .begin_task_stop(&run.id, &run.expected_head, requested.generation())
+        .begin_task_stop(&run.id, requested.generation())
         .await
         .unwrap();
     fixture
@@ -1011,12 +970,7 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
         .unwrap();
     let cancelled = fixture
         .store
-        .cancel_task_and_release_lease(
-            &run.id,
-            &run.expected_head,
-            requested.generation(),
-            "user stopped task",
-        )
+        .cancel_task_and_release_lease(&run.id, requested.generation(), "user stopped task")
         .await
         .unwrap();
 
@@ -1025,7 +979,7 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
     assert!(
         fixture
             .store
-            .read_branch_lease(&fixture.run_id)
+            .read_project_lease(&fixture.run_id)
             .await
             .unwrap()
             .is_none()
@@ -1046,7 +1000,6 @@ async fn restart_resumes_stopping_without_starting_a_model() {
         .store
         .request_task_stop(
             &run.id,
-            &run.expected_head,
             TaskStopOrigin::PlannerDecision,
             &TaskStopReason::new("resume deterministic stop").unwrap(),
         )
@@ -1054,7 +1007,7 @@ async fn restart_resumes_stopping_without_starting_a_model() {
         .unwrap();
     fixture
         .store
-        .begin_task_stop(&run.id, &run.expected_head, requested.generation())
+        .begin_task_stop(&run.id, requested.generation())
         .await
         .unwrap();
     fixture.coordinator.suspend();
@@ -1080,7 +1033,7 @@ async fn restart_resumes_stopping_without_starting_a_model() {
     assert!(
         fixture
             .store
-            .read_branch_lease(&fixture.run_id)
+            .read_project_lease(&fixture.run_id)
             .await
             .unwrap()
             .is_none()
@@ -1377,18 +1330,22 @@ async fn planner_git_methods_are_recorded_and_cleanup_is_idempotent() {
         fixture.commit_file("src/outside_hint.rs");
         let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
         let delivery = fixture.submit(&source_head).await.unwrap();
-        let run = fixture
-            .store
-            .read_task_run(&fixture.task_run_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(run.kind(), TaskRunStateKind::Merging);
-        let resulting_head = integrate_planner_delivery(&fixture, method, &delivery.head_commit);
+        assert_eq!(
+            fixture
+                .store
+                .read_task_run(&fixture.task_run_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .kind(),
+            TaskRunStateKind::Merging
+        );
+        let _workspace_head = integrate_planner_delivery(&fixture, method, &delivery.head_commit);
+        let resulting_head = delivery.head_commit.clone();
         let input = TaskRecordMergeInput {
             executor_agent_id: fixture.subagent.id.clone(),
             completion_revision: 1,
-            expected_previous_head: run.expected_head.clone(),
+            expected_previous_head: fixture.base_commit.clone(),
             resulting_head: resulting_head.clone(),
             method,
             summary: format!("recorded {} integration", method.as_str()),
@@ -1537,9 +1494,9 @@ async fn same_executor_rework_versions_keep_the_final_equivalent_delivery_exempt
 }
 
 #[tokio::test]
-async fn implementation_change_after_equivalent_merge_requires_integrated_review() {
+async fn workspace_change_after_equivalent_merge_does_not_change_durable_gate() {
     let fixture = DeliveryFixture::new("single-equivalence-extra-change", vec!["src"]).await;
-    let (mut run, work_units, completions, merges, reviews) =
+    let (run, work_units, completions, merges, reviews) =
         prepare_equivalent_single_executor(&fixture).await;
     std::fs::write(fixture.repository.join("extra.txt"), "planner change\n").unwrap();
     git(&fixture.repository, &["add", "extra.txt"]);
@@ -1547,20 +1504,21 @@ async fn implementation_change_after_equivalent_merge_requires_integrated_review
         &fixture.repository,
         &["commit", "-m", "planner implementation change"],
     );
-    let changed_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
-    run.context.expected_head = changed_head;
-
-    assert!(matches!(
+    assert_eq!(
         super::review::integrated_review_gate(&run, &work_units, &completions, &merges, &reviews,)
             .await,
-        crate::StudioIntegratedReviewGate::Required { .. }
-    ));
+        crate::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id: fixture.work_unit_id.clone(),
+            completion_revision: 1,
+            merge_record_id: merges[0].id.clone(),
+        }
+    );
 
     fixture.cleanup();
 }
 
 #[tokio::test]
-async fn post_merge_design_only_commit_requires_integrated_review() {
+async fn post_merge_design_only_commit_does_not_change_durable_gate() {
     let fixture = DeliveryFixture::new("single-equivalence-design-only", vec!["src"]).await;
     let (run, work_units, completions, merges, reviews) =
         prepare_equivalent_single_executor(&fixture).await;
@@ -1575,57 +1533,42 @@ async fn post_merge_design_only_commit_requires_integrated_review() {
         &fixture.repository,
         &["commit", "-m", "document final design"],
     );
-    let design_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
-    assert!(
-        fixture
-            .store
-            .compare_and_set_task_head(&fixture.task_run_id, &run.expected_head, &design_head)
-            .await
-            .unwrap()
-    );
-    let run = fixture
-        .store
-        .read_task_run(&fixture.task_run_id)
-        .await
-        .unwrap()
-        .unwrap();
-
-    assert!(matches!(
+    assert_eq!(
         super::review::integrated_review_gate(&run, &work_units, &completions, &merges, &reviews,)
             .await,
-        crate::StudioIntegratedReviewGate::Required { .. }
-    ));
+        crate::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id: fixture.work_unit_id.clone(),
+            completion_revision: 1,
+            merge_record_id: merges[0].id.clone(),
+        }
+    );
 
     fixture.cleanup();
 }
 
 #[tokio::test]
-async fn task_record_merge_rejects_stale_dirty_and_unfinished_git_state() {
-    for failure in ["stale", "dirty", "unfinished"] {
-        let fixture =
-            DeliveryFixture::new(&format!("record-reject-{failure}"), vec!["src/delivery.rs"])
-                .await;
+async fn task_record_merge_ignores_workspace_git_state_and_treats_heads_as_opaque() {
+    for workspace_state in ["caller-declared", "dirty", "unfinished"] {
+        let fixture = DeliveryFixture::new(
+            &format!("record-{workspace_state}"),
+            vec!["src/delivery.rs"],
+        )
+        .await;
         fixture.commit_file("src/delivery.rs");
         let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
         let delivery = fixture.submit(&source_head).await.unwrap();
-        let run = fixture
-            .store
-            .read_task_run(&fixture.task_run_id)
-            .await
-            .unwrap()
-            .unwrap();
         let resulting_head =
             integrate_planner_delivery(&fixture, MergeMethod::Merge, &delivery.head_commit);
         let mut input = TaskRecordMergeInput {
             executor_agent_id: fixture.subagent.id.clone(),
             completion_revision: 1,
-            expected_previous_head: run.expected_head.clone(),
+            expected_previous_head: fixture.base_commit.clone(),
             resulting_head,
             method: MergeMethod::Merge,
-            summary: format!("reject {failure}"),
+            summary: format!("record {workspace_state}"),
         };
-        match failure {
-            "stale" => input.expected_previous_head = delivery.head_commit,
+        match workspace_state {
+            "caller-declared" => input.expected_previous_head = "opaque-previous-head".to_string(),
             "dirty" => {
                 std::fs::write(fixture.repository.join("untracked.txt"), "dirty\n").unwrap();
             }
@@ -1645,26 +1588,12 @@ async fn task_record_merge_rejects_stale_dirty_and_unfinished_git_state() {
             _ => unreachable!(),
         }
 
-        let error = fixture
+        let record = fixture
             .coordinator
             .record_planner_merge(&fixture.root_thread_id, input, None)
             .await
-            .unwrap_err()
-            .to_string();
-        match failure {
-            "stale" => assert!(error.contains("expectedPreviousHead"), "{error}"),
-            "dirty" => assert!(error.contains("clean"), "{error}"),
-            "unfinished" => assert!(error.contains("unfinished Git merge"), "{error}"),
-            _ => unreachable!(),
-        }
-        assert!(
-            fixture
-                .store
-                .list_merge_records(&fixture.task_run_id)
-                .await
-                .unwrap()
-                .is_empty()
-        );
+            .unwrap();
+        assert_eq!(record.summary, format!("record {workspace_state}"));
         fixture.cleanup();
     }
 }
@@ -1762,7 +1691,7 @@ async fn task_status_exposes_only_relative_worktree_locators() {
         .await
         .unwrap();
     let handoff: serde_json::Value = serde_json::from_str(&handoff.into_model_output()).unwrap();
-    assert_eq!(handoff["version"], 3);
+    assert_eq!(handoff["version"], 4);
     assert_eq!(handoff["ownership"]["workUnitId"], fixture.work_unit_id);
     assert_eq!(
         handoff["blueprint"]["implementationSteps"]
@@ -1917,35 +1846,42 @@ struct ReviewFixture {
 
 impl ReviewFixture {
     async fn new(name: &str) -> Self {
-        let mut fixture = Self::new_design_updating(name).await;
-        let run = fixture
-            .store
-            .transition_task_run(&fixture.run_id, TaskRunStateKind::Implementing, None)
+        let delivery_fixture = DeliveryFixture::new(name, vec!["src"]).await;
+        delivery_fixture.commit_file("src/review_fixture.rs");
+        let delivery_head = git_output(&delivery_fixture.worktree, &["rev-parse", "HEAD"]);
+        delivery_fixture.submit(&delivery_head).await.unwrap();
+        delivery_fixture
+            .coordinator
+            .record_planner_merge(
+                &delivery_fixture.root_thread_id,
+                TaskRecordMergeInput {
+                    executor_agent_id: delivery_fixture.subagent.id.clone(),
+                    completion_revision: 1,
+                    expected_previous_head: delivery_fixture.base_commit.clone(),
+                    resulting_head: format!("integrated-review-{delivery_head}"),
+                    method: MergeMethod::Manual,
+                    summary: "seed integrated review fixture".to_string(),
+                },
+                None,
+            )
             .await
             .unwrap();
-        fixture.run_id = run.id.clone();
-        fixture
-    }
-
-    async fn new_design_updating(name: &str) -> Self {
-        let repository = init_repository(name);
+        let DeliveryFixture {
+            repository,
+            store,
+            coordinator,
+            root_thread_id,
+            task_run_id,
+            ..
+        } = delivery_fixture;
         std::fs::create_dir_all(repository.join("design")).unwrap();
         std::fs::write(repository.join("design/guide.md"), "# Review design\n").unwrap();
-        git(&repository, &["add", "design/guide.md"]);
-        git(&repository, &["commit", "-m", "add review design"]);
-        let store = task_store(&repository).await;
-        let session = task_session(&store, &repository).await;
-        let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
-        let run = coordinator
-            .start_confirmed_task(&session.id, "review this implementation", &repository)
-            .await
-            .unwrap();
         Self {
             repository,
             store,
             coordinator,
-            root_thread_id: session.id,
-            run_id: run.id.clone(),
+            root_thread_id,
+            run_id: task_run_id,
         }
     }
 
@@ -1964,18 +1900,21 @@ impl ReviewFixture {
         call_id: &str,
         changed_files: Vec<String>,
     ) -> ReviewRoundRecord {
-        let run = self
+        let reviewed_head = self
             .store
-            .read_task_run(&self.run_id)
+            .list_merge_records(&self.run_id)
             .await
             .unwrap()
-            .unwrap();
+            .last()
+            .expect("integrated review merge")
+            .resulting_head
+            .clone();
         self.store
             .begin_integrated_review(
                 &self.root_thread_id,
                 BeginIntegratedReview {
                     requested_by_call_id: call_id.to_string(),
-                    reviewed_head: run.expected_head.clone(),
+                    reviewed_head,
                     changed_files,
                 },
             )
@@ -2042,21 +1981,33 @@ async fn begin_integrated_review_for_fixture(
     task_run_id: &str,
     call_id: &str,
 ) -> ReviewRoundRecord {
-    let run = store.read_task_run(task_run_id).await.unwrap().unwrap();
-    let changed_files = super::git::changed_files_between_selected(
-        &run.workspace_root,
-        &run.base_commit,
-        &run.expected_head,
-        super::git::GitDiffSelection::ExcludeDesign,
-    )
-    .await
-    .unwrap();
+    let merges = store.list_merge_records(task_run_id).await.unwrap();
+    let reviewed_head = merges
+        .last()
+        .expect("integrated review merge")
+        .resulting_head
+        .clone();
+    let merged_completion_ids = merges
+        .iter()
+        .map(|merge| merge.completion_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut changed_files = store
+        .list_work_completions(task_run_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
+        .flat_map(|completion| completion.changed_files)
+        .filter(|path| !path.starts_with("design/"))
+        .collect::<Vec<_>>();
+    changed_files.sort();
+    changed_files.dedup();
     store
         .begin_integrated_review(
             root_thread_id,
             BeginIntegratedReview {
                 requested_by_call_id: call_id.to_string(),
-                reviewed_head: run.expected_head.clone(),
+                reviewed_head,
                 changed_files,
             },
         )
@@ -2088,6 +2039,7 @@ impl DeliveryFixture {
             .await
             .unwrap();
         let run = finalize_test_design(&store, &run).await;
+        let base_commit = git_output(&repository, &["rev-parse", "HEAD"]);
         let worktree = crate::agent::worktree::git_compatible_path(
             repository
                 .join(".pure/worktrees")
@@ -2104,7 +2056,7 @@ impl DeliveryFixture {
                 "-b",
                 &branch,
                 &worktree_text,
-                &run.base_commit,
+                &base_commit,
             ],
         );
         let work_unit = store
@@ -2112,7 +2064,7 @@ impl DeliveryFixture {
                 task_run_id: run.id.clone(),
                 title: "Implement delivery".to_string(),
                 scope_hints: scope_hints.clone(),
-                base_commit: run.expected_head.clone(),
+                base_commit: base_commit.clone(),
                 worktree_path: std::fs::canonicalize(&worktree)
                     .unwrap()
                     .to_string_lossy()
@@ -2183,7 +2135,7 @@ impl DeliveryFixture {
             repository,
             worktree,
             branch,
-            base_commit: run.base_commit.clone(),
+            base_commit,
             subagent,
         }
     }
@@ -2197,13 +2149,12 @@ impl DeliveryFixture {
     }
 
     async fn submit(&self, head: &str) -> anyhow::Result<AgentDelivery> {
-        let snapshot = super::git::inspect_repository(&self.worktree, true).await?;
-        let resolved = super::git::resolve_commit_oid(&self.worktree, head).await?;
-        if resolved != snapshot.head {
-            anyhow::bail!("headCommit does not match worktree HEAD");
-        }
-        let changed_files =
-            super::git::changed_files_between(&self.worktree, &self.base_commit, &resolved).await?;
+        let head = head.trim().to_string();
+        let range = format!("{}..{head}", self.base_commit);
+        let changed_files = git_output(&self.worktree, &["diff", "--name-only", &range])
+            .lines()
+            .map(str::to_string)
+            .collect();
         let work_unit = self.work_unit().await;
         let delivery = AgentDelivery {
             worktree: AgentWorktreeDelivery {
@@ -2213,7 +2164,7 @@ impl DeliveryFixture {
                 branch: self.branch.clone(),
             },
             base_commit: self.base_commit.clone(),
-            head_commit: resolved,
+            head_commit: head,
             changed_files,
             verification_summary: "cargo test passed".to_string(),
         };
@@ -2360,14 +2311,9 @@ async fn prepare_equivalent_single_executor(
     fixture.commit_file("src/delivery.rs");
     let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
     let delivery = fixture.submit(&source_head).await.unwrap();
-    let run = fixture
-        .store
-        .read_task_run(&fixture.task_run_id)
-        .await
-        .unwrap()
-        .unwrap();
-    let resulting_head =
+    let _workspace_head =
         integrate_planner_delivery(fixture, MergeMethod::CherryPick, &delivery.head_commit);
+    let resulting_head = delivery.head_commit.clone();
     fixture
         .coordinator
         .record_planner_merge(
@@ -2375,7 +2321,7 @@ async fn prepare_equivalent_single_executor(
             TaskRecordMergeInput {
                 executor_agent_id: fixture.subagent.id.clone(),
                 completion_revision: 1,
-                expected_previous_head: run.expected_head.clone(),
+                expected_previous_head: fixture.base_commit.clone(),
                 resulting_head: resulting_head.clone(),
                 method: MergeMethod::CherryPick,
                 summary: "record equivalent integration".to_string(),
@@ -2596,8 +2542,8 @@ async fn persist_closed_executor_thread(
 }
 
 #[tokio::test]
-async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lease_failure() {
-    let project = temporary_project("start-initializes-files");
+async fn task_start_accepts_non_repository_without_modifying_it_and_uses_project_lease() {
+    let project = temporary_project("start-non-repository");
     std::fs::write(project.join("README.md"), "initial\n").unwrap();
     std::fs::write(project.join(".gitignore"), "ignored.txt\n").unwrap();
     std::fs::write(project.join("ignored.txt"), "secret\n").unwrap();
@@ -2614,37 +2560,22 @@ async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lea
         .await
         .unwrap();
 
-    assert_eq!(run.branch, "main");
-    assert_eq!(git_output(&project, &["rev-list", "--count", "HEAD"]), "1");
+    assert_eq!(run.project_id, session.project_id);
+    assert!(!project.join(".git").exists());
     assert_eq!(
-        git_output(&project, &["log", "-1", "--pretty=%s"]),
-        "chore: initialize Pure Studio workspace"
+        std::fs::read_to_string(project.join("README.md")).unwrap(),
+        "initial\n"
     );
     assert_eq!(
-        git_output(&project, &["ls-tree", "-r", "--name-only", "HEAD"]),
-        ".gitignore\nREADME.md"
+        std::fs::read_to_string(project.join("ignored.txt")).unwrap(),
+        "secret\n"
     );
-    assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
-    let internal_worktree = project.join(".pure/worktrees/run/agent");
-    std::fs::create_dir_all(&internal_worktree).unwrap();
-    std::fs::write(internal_worktree.join("internal.txt"), "runtime\n").unwrap();
-    let command_output = project.join("target/pure/session/tool");
-    std::fs::create_dir_all(&command_output).unwrap();
-    std::fs::write(command_output.join("output.log"), "command output\n").unwrap();
-    assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
-    let private_excludes = std::fs::read_to_string(project.join(".git/info/exclude")).unwrap();
-    for expected in [".pure/worktrees/", "target/pure/"] {
-        assert!(
-            private_excludes.lines().any(|line| line.trim() == expected),
-            "missing private exclude `{expected}`"
-        );
-    }
 
     coordinator
         .start_confirmed_task(&competing_session.id, "competing plan", &project)
         .await
-        .expect_err("active branch lease must still reject a competing task");
-    assert_eq!(git_output(&project, &["rev-list", "--count", "HEAD"]), "1");
+        .expect_err("active project lease must reject a competing task");
+    assert!(!project.join(".git").exists());
 
     coordinator
         .finish_task(
@@ -2676,7 +2607,7 @@ async fn coordinator_recovers_active_task_after_restart() {
     assert_eq!(recovered, vec![run.clone()]);
     assert!(
         recovered_coordinator
-            .verify_expected_head(&run.id)
+            .verify_process_lease(&run.id)
             .await
             .unwrap()
     );
@@ -2684,6 +2615,33 @@ async fn coordinator_recovers_active_task_after_restart() {
         .finish_task(&run.id, TaskRunStateKind::Cancelled, None)
         .await
         .unwrap();
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn coordinator_recovers_dirty_design_updating_task_after_restart() {
+    let repository = init_repository("dirty-design-recovery");
+    std::fs::write(repository.join("existing.txt"), "keep for planner\n").unwrap();
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&session.id, "inspect existing changes", &repository)
+            .await
+            .unwrap()
+    };
+
+    let recovered_coordinator = TaskCoordinator::new(store.clone());
+    let report = recovered_coordinator.recover_active_tasks().await.unwrap();
+
+    assert_eq!(report.recovered_runs, vec![run.clone()]);
+    assert!(report.issues.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(repository.join("existing.txt")).unwrap(),
+        "keep for planner\n"
+    );
+    recovered_coordinator.suspend();
     remove_repository(repository);
 }
 
@@ -2720,7 +2678,7 @@ async fn merging_restart_keeps_clean_unchanged_task_resumable() {
     assert!(
         fixture
             .store
-            .read_branch_lease(&before.id)
+            .read_project_lease(&before.id)
             .await
             .unwrap()
             .is_some()
@@ -2730,7 +2688,7 @@ async fn merging_restart_keeps_clean_unchanged_task_resumable() {
 }
 
 #[tokio::test]
-async fn changed_head_restart_retries_then_records_planner_merge() {
+async fn changed_workspace_head_does_not_block_merging_recovery() {
     let fixture = DeliveryFixture::new("merging-recovery-changed-head", vec!["src"]).await;
     fixture.commit_file("src/delivery.rs");
     let delivery_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
@@ -2748,38 +2706,20 @@ async fn changed_head_restart_retries_then_records_planner_merge() {
     let recovered = TaskCoordinator::new(fixture.store.clone());
     let report = recovered.recover_active_tasks().await.unwrap();
 
-    assert!(report.recovered_runs.is_empty());
-    assert_eq!(report.issues.len(), 1);
-    let issue = &report.issues[0];
-    assert_eq!(issue.category, StudioRecoveryIssueCategory::Merge);
-    assert_eq!(issue.action, StudioRecoveryIssueAction::Retry);
-    assert!(issue.message.contains("HEAD changed"));
-    let blocked = fixture
+    assert_eq!(report.recovered_runs, vec![before.clone()]);
+    assert!(report.issues.is_empty());
+    let recovered_run = fixture
         .store
         .read_task_run(&before.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(blocked.kind(), TaskRunStateKind::Blocked);
-    assert_eq!(blocked.terminal_generation(), None);
+    assert_eq!(recovered_run.kind(), TaskRunStateKind::Merging);
+    assert_eq!(recovered_run.generation(), before.generation());
     assert!(
         fixture
             .store
-            .read_branch_lease(&before.id)
-            .await
-            .unwrap()
-            .is_none()
-    );
-
-    let retried = recovered.retry_recovery_issue(issue).await.unwrap();
-    assert_eq!(retried.kind(), TaskRunStateKind::Merging);
-    assert_eq!(retried.expected_head, before.expected_head);
-    assert_eq!(retried.generation(), blocked.generation() + 1);
-    assert_eq!(retried.terminal_generation(), None);
-    assert!(
-        fixture
-            .store
-            .read_branch_lease(&before.id)
+            .read_project_lease(&before.id)
             .await
             .unwrap()
             .is_some()
@@ -2791,7 +2731,7 @@ async fn changed_head_restart_retries_then_records_planner_merge() {
             TaskRecordMergeInput {
                 executor_agent_id: fixture.subagent.id.clone(),
                 completion_revision: 1,
-                expected_previous_head: before.expected_head.clone(),
+                expected_previous_head: fixture.base_commit.clone(),
                 resulting_head: resulting_head.clone(),
                 method: MergeMethod::CherryPick,
                 summary: "record recovered planner cherry-pick".to_string(),
@@ -2814,7 +2754,7 @@ async fn changed_head_restart_retries_then_records_planner_merge() {
 }
 
 #[tokio::test]
-async fn unfinished_merge_restart_retry_preserves_git_operation_for_planner() {
+async fn unfinished_merge_marker_does_not_block_recovery_or_get_modified() {
     let fixture = DeliveryFixture::new("merging-recovery-unfinished", vec!["src"]).await;
     fixture.commit_file("src/delivery.rs");
     let delivery_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
@@ -2838,19 +2778,12 @@ async fn unfinished_merge_restart_retry_preserves_git_operation_for_planner() {
 
     let recovered = TaskCoordinator::new(fixture.store.clone());
     let report = recovered.recover_active_tasks().await.unwrap();
-    assert!(report.recovered_runs.is_empty());
-    assert_eq!(report.issues.len(), 1);
-    assert_eq!(report.issues[0].action, StudioRecoveryIssueAction::Retry);
-    assert!(report.issues[0].message.contains("unfinished Git merge"));
-
-    let retried = recovered
-        .retry_recovery_issue(&report.issues[0])
-        .await
-        .unwrap();
-    assert_eq!(retried.kind(), TaskRunStateKind::Merging);
+    assert_eq!(report.recovered_runs.len(), 1);
+    assert_eq!(report.recovered_runs[0].kind(), TaskRunStateKind::Merging);
+    assert!(report.issues.is_empty());
     assert!(
         merge_head.is_file(),
-        "retry must not abort the Planner merge"
+        "recovery must not abort the Planner merge"
     );
     assert!(!git_output(&fixture.repository, &["status", "--porcelain=v1"]).is_empty());
 
@@ -2883,21 +2816,12 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
         .create_thread(&missing_project.id, "Blocked", StudioMode::Task)
         .await
         .unwrap();
-    let git_common_dir = std::fs::canonicalize(repository.join(".git")).unwrap();
     let blocked_run = store
         .create_task_run_with_lease(CreateTaskRun {
+            project_id: missing_project.id.clone(),
             root_thread_id: missing_session.id,
             plan: "blocked plan".to_string(),
             workspace_root: missing_workspace.to_string_lossy().to_string(),
-            git_common_dir: git_common_dir.to_string_lossy().to_string(),
-            branch: "missing-workspace-branch".to_string(),
-            head_commit: active_run.base_commit.clone(),
-            design_baseline: test_task_git_fingerprint(
-                missing_workspace.to_string_lossy(),
-                git_common_dir.to_string_lossy(),
-                "missing-workspace-branch",
-                active_run.base_commit.clone(),
-            ),
         })
         .await
         .unwrap()
@@ -2928,12 +2852,13 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
             "HEAD",
         ],
     );
+    let blocked_base_commit = git_output(&repository, &["rev-parse", "HEAD"]);
     let unit = store
         .create_work_unit(CreateWorkUnit {
             task_run_id: blocked_run.id.clone(),
             title: "blocked owned".to_string(),
             scope_hints: vec!["code".to_string()],
-            base_commit: blocked_run.base_commit.clone(),
+            base_commit: blocked_base_commit,
             worktree_path: protected_path_arg,
             branch: protected_branch.clone(),
             attempt: 1,
@@ -3004,21 +2929,9 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
             .iter()
             .map(|run| run.id.as_str())
             .collect::<Vec<_>>(),
-        vec![safe_run.id.as_str()]
+        vec![active_run.id.as_str(), safe_run.id.as_str()]
     );
-    assert_eq!(report.issues.len(), 2);
-    assert!(
-        report
-            .issues
-            .iter()
-            .all(|issue| issue.category == StudioRecoveryIssueCategory::Repository)
-    );
-    assert!(
-        report
-            .issues
-            .iter()
-            .all(|issue| issue.message.contains("known task workspace"))
-    );
+    assert_eq!(report.issues.len(), 1);
     assert!(protected_path.is_dir());
     assert!(orphan_path.is_dir());
     assert!(safe_owned.is_dir());
@@ -3067,7 +2980,7 @@ async fn create_running_recovery_worktree(
             task_run_id: run.id.clone(),
             title: agent_id.to_string(),
             scope_hints: vec![format!("code/{agent_id}")],
-            base_commit: run.base_commit.clone(),
+            base_commit: git_output(git_repository, &["rev-parse", "HEAD"]),
             worktree_path: worktree_arg,
             branch,
             attempt: 1,

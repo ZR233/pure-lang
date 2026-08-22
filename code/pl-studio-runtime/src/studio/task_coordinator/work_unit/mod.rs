@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ExecutorContinuationState, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    ExecutorContinuationState, TaskSpawnFailure, TaskWorktreeDisposition, ThreadExecutionStatus,
+    WorkUnitStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +16,8 @@ pub(crate) struct WorkUnitProgress {
     pub(crate) worktree_disposition: TaskWorktreeDisposition,
     pub(crate) execution_summary: Option<String>,
     pub(crate) execution_error: Option<String>,
+    #[serde(default)]
+    pub(crate) spawn_failure: Option<TaskSpawnFailure>,
     pub(crate) budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
     pub(crate) budget_slice_count: u32,
     pub(crate) continuation_state: ExecutorContinuationState,
@@ -28,6 +31,7 @@ impl WorkUnitProgress {
             worktree_disposition: TaskWorktreeDisposition::Protect,
             execution_summary: None,
             execution_error: None,
+            spawn_failure: None,
             budget_limit: None,
             budget_slice_count: 1,
             continuation_state: ExecutorContinuationState::None,
@@ -315,6 +319,10 @@ impl WorkUnit {
 
     pub(crate) fn execution_error(&self) -> Option<&str> {
         self.progress().execution_error.as_deref()
+    }
+
+    pub(crate) fn spawn_failure(&self) -> Option<&TaskSpawnFailure> {
+        self.progress().spawn_failure.as_ref()
     }
 
     pub(crate) fn budget_limit(&self) -> Option<&pl_protocol::BudgetLimitSnapshot> {

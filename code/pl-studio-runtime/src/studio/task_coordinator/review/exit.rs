@@ -12,7 +12,6 @@ use super::super::{
     ReviewVerdict, TaskCoordinator, TaskPlannerWakeRequest, TaskPlannerWakeSource,
 };
 use super::trace::inspect_review_trace;
-use super::validate_review_repository;
 use crate::AgentRuntimeHandle;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::turn::ToolEffect;
@@ -137,7 +136,6 @@ impl TaskCoordinator {
                     .store
                     .read_active_task_run_for_root_thread(&thread_id)
                     .await?;
-                validate_review_repository(&run).await?;
                 let round = coordinator
                     .store
                     .find_review_round_for_reviewer(&reviewer.id)

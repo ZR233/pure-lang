@@ -1,8 +1,5 @@
 use anyhow::{Context, Result, bail};
 
-use super::super::git::{
-    ensure_no_git_operation, inspect_repository, is_ancestor, resolve_tree_oid,
-};
 use super::super::{
     MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRun, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitStatus,
@@ -10,7 +7,7 @@ use super::super::{
 use crate::StudioIntegratedReviewGate;
 
 pub(crate) async fn integrated_review_gate(
-    run: &TaskRun,
+    _run: &TaskRun,
     work_units: &[WorkUnit],
     completions: &[WorkCompletionRecord],
     merges: &[MergeRecord],
@@ -21,15 +18,21 @@ pub(crate) async fn integrated_review_gate(
         .filter(|review| review.scope == ReviewScope::Integrated)
         .collect::<Vec<_>>();
     if let Some(latest) = integrated_reviews.iter().max_by_key(|review| review.round) {
-        if latest.verdict() == ReviewVerdict::Pass && latest.reviewed_head == run.expected_head {
+        let latest_merge_head = merges
+            .iter()
+            .max_by_key(|merge| (merge.created_at, &merge.id))
+            .map(|merge| merge.resulting_head.as_str());
+        if latest.verdict() == ReviewVerdict::Pass
+            && latest_merge_head == Some(latest.reviewed_head.as_str())
+        {
             return StudioIntegratedReviewGate::SatisfiedByReview {
                 review_round_id: latest.id.clone(),
                 reviewed_head: latest.reviewed_head.clone(),
             };
         }
         return required(format!(
-            "已有综合审查轮次 {}，但它未通过当前任务提交 {}",
-            latest.id, run.expected_head
+            "已有综合审查轮次 {}，但它未通过最新的持久化合并声明",
+            latest.id
         ));
     }
 
@@ -48,7 +51,7 @@ pub(crate) async fn integrated_review_gate(
         Ok(candidate) => candidate,
         Err(error) => return required(error.to_string()),
     };
-    if let Err(error) = prove_single_executor_equivalence(run, reviews, &candidate).await {
+    if let Err(error) = prove_single_executor_equivalence(reviews, &candidate) {
         return required(format!("无法复用交付审查：{error}"));
     }
     StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
@@ -58,8 +61,7 @@ pub(crate) async fn integrated_review_gate(
     }
 }
 
-async fn prove_single_executor_equivalence(
-    run: &TaskRun,
+fn prove_single_executor_equivalence(
     reviews: &[ReviewRoundRecord],
     candidate: &SingleExecutorCandidate<'_>,
 ) -> Result<()> {
@@ -73,6 +75,9 @@ async fn prove_single_executor_equivalence(
         .context("获准 delivery completion 缺少提交")?;
     if delivery_head != candidate.merge.delivery_head {
         bail!("MergeRecord 的交付提交不是获准 completion 提交")
+    }
+    if candidate.merge.resulting_head != candidate.merge.delivery_head {
+        bail!("合并结果声明与获准交付声明不同")
     }
 
     let delivery_review = reviews
@@ -99,32 +104,6 @@ async fn prove_single_executor_equivalence(
         bail!("仍有任务审查者未结束")
     }
 
-    super::validate_review_repository(run).await?;
-    ensure_no_git_operation(&run.workspace_root).await?;
-    let repository = inspect_repository(&run.workspace_root, true).await?;
-    if repository.head != run.expected_head {
-        bail!("主工作区提交已漂移")
-    }
-
-    let delivery_tree = resolve_tree_oid(&run.workspace_root, delivery_head).await?;
-    let merged_tree =
-        resolve_tree_oid(&run.workspace_root, &candidate.merge.resulting_head).await?;
-    if delivery_tree != merged_tree {
-        bail!("合并结果的完整版本树与获准交付不同")
-    }
-    if !is_ancestor(
-        &run.workspace_root,
-        &candidate.merge.resulting_head,
-        &run.expected_head,
-    )
-    .await?
-    {
-        bail!("当前任务提交不继承已记录的合并结果")
-    }
-    let current_tree = resolve_tree_oid(&run.workspace_root, &run.expected_head).await?;
-    if current_tree != delivery_tree {
-        bail!("交付审查后当前任务的完整版本树发生变化")
-    }
     Ok(())
 }
 

@@ -84,7 +84,6 @@ String taskProgressFingerprint(Map<String, dynamic> snapshot) {
     'phase': task['phase'],
     'statusMessage': task['statusMessage'],
     'taskGeneration': task['taskGeneration'],
-    'expectedHead': task['expectedHead'],
     'integratedReviewGate': task['integratedReviewGate'],
     'workUnits': _normalized(
       task['workUnits'],
@@ -253,8 +252,7 @@ void validateTaskCompletion(
                 review['id'] == gate['reviewRoundId'] &&
                 review['scope'] == 'integrated' &&
                 review['verdict'] == 'pass' &&
-                review['reviewedHead'] == gate['reviewedHead'] &&
-                review['reviewedHead'] == task['expectedHead'],
+                review['reviewedHead'] == gate['reviewedHead'],
           )
           .toList();
       if (matchingReviews.length != 1) {

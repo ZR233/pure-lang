@@ -18,9 +18,9 @@ pub use handle::AgentRuntimeHandle;
 pub use host::{
     AgentCommitObserver, AgentCommittedEvent, AgentLifecycleAdapter, AgentRuntimeHost,
     AgentTurnFactory, CloseLifecycleRequest, CommitDurability, DurableCommitFacts,
-    RestoredAgentRuntime, RestoredThreadSnapshot, SpawnLifecycleRequest, ThreadCommit,
-    ThreadCommitOutcome, ThreadContextMutation, ThreadMutation, ThreadProjectionCommit,
-    ThreadRepository,
+    RestoredAgentRuntime, RestoredThreadSnapshot, SpawnLifecycleRequest, SpawnRollbackPhase,
+    SpawnRollbackReason, ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadMutation,
+    ThreadProjectionCommit, ThreadRepository,
 };
 pub use id::{ThreadId, TurnId};
 pub use policy::{

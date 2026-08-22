@@ -9,14 +9,13 @@ use pl_core::{
 use pl_protocol::{ConversationRecoveryMode, ThreadItemContent, ThreadToolCall, TurnState};
 
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::task_coordinator::git::fingerprint_repository;
 use crate::studio::task_coordinator::{
-    TaskGitFingerprint, TaskRun, TaskRunStateKind, ThreadExecutionStatus, WorkUnit, WorkUnitStatus,
+    TaskRun, TaskRunStateKind, ThreadExecutionStatus, WorkUnit, WorkUnitStatus,
 };
 use crate::studio::{
-    StudioTaskGitFingerprint, StudioTaskRecoveryPreview, StudioTaskRecoveryRequest,
-    StudioTaskRecoveryResult, StudioTaskRecoveryState, StudioTaskRecoveryTarget,
-    StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
+    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
+    StudioTaskRecoveryState, StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind,
+    StudioTaskRecoveryTurn,
 };
 
 use super::StudioRuntime;
@@ -118,28 +117,6 @@ impl StudioRuntime {
                 .map_err(anyhow::Error::msg)?
         };
 
-        let main_after = studio_git_fingerprint(
-            fingerprint_repository(
-                &request.preview.main_git_fingerprint.workspace_root,
-                &request.preview.main_git_fingerprint.base_commit,
-                &request.preview.main_git_fingerprint.expected_head,
-            )
-            .await?,
-        );
-        let target_after = studio_git_fingerprint(
-            fingerprint_repository(
-                &target.git_fingerprint.workspace_root,
-                &target.git_fingerprint.base_commit,
-                &target.git_fingerprint.expected_head,
-            )
-            .await?,
-        );
-        if main_after != request.preview.main_git_fingerprint
-            || target_after != target.git_fingerprint
-        {
-            bail!("Git/worktree fingerprint changed during conversation recovery");
-        }
-
         let phase = task_kind_from_recovery_state(request.preview.state);
         let stop_cleared = if request.preview.stop_requested {
             self.store
@@ -147,7 +124,6 @@ impl StudioRuntime {
                     &request.preview.run_id,
                     request.preview.task_generation,
                     phase,
-                    &request.preview.expected_head,
                 )
                 .await?
         } else {
@@ -187,7 +163,6 @@ impl StudioRuntime {
             removed_input_count: recovery.removed_input_count,
             stop_cleared,
             resume_turn_id: resume_turn_id.to_string(),
-            git_fingerprint: target_after,
         })
     }
 
@@ -202,14 +177,11 @@ impl StudioRuntime {
         ensure_recoverable_phase(run.kind())?;
         let lease = self
             .store
-            .read_branch_lease(&run.id)
+            .read_project_lease(&run.id)
             .await?
-            .context("Task recovery requires the durable branch lease")?;
-        if lease.branch != run.branch
-            || lease.git_common_dir != run.git_common_dir
-            || lease.expected_head != run.expected_head
-        {
-            bail!("Task recovery branch lease does not match the TaskRun");
+            .context("Task recovery requires the durable project lease")?;
+        if lease.project_id != run.project_id {
+            bail!("Task recovery project lease does not match the TaskRun");
         }
         let runtime = self.agent_framework().await?.handle();
         ensure_task_tree_idle(&runtime, root_thread_id).await?;
@@ -218,10 +190,6 @@ impl StudioRuntime {
         let completions = self.store.list_work_completions(&run.id).await?;
         let reviews = self.store.list_review_rounds(&run.id).await?;
         let merges = self.store.list_merge_records(&run.id).await?;
-        let main_git_fingerprint = studio_git_fingerprint(
-            fingerprint_repository(&run.workspace_root, &run.base_commit, &run.expected_head)
-                .await?,
-        );
         let mut candidates = Vec::new();
         for unit in work_units.iter().filter(|unit| eligible_executor(unit)) {
             let Some(thread_id) = unit.executor_thread_id.as_deref() else {
@@ -279,15 +247,10 @@ impl StudioRuntime {
             revision: run.revision,
             task_generation: run.generation(),
             state: recovery_state_from_task_kind(run.kind()),
-            expected_head: run.expected_head.clone(),
             stop_requested: run.is_stop_requested(),
-            branch_lease_id: lease.id,
-            branch_lease_branch: lease.branch,
-            branch_lease_git_common_dir: lease.git_common_dir,
-            branch_lease_expected_head: lease.expected_head,
+            project_lease_id: lease.id,
             recommended_thread_id,
             targets,
-            main_git_fingerprint,
             completion_revision_fingerprint: record_fingerprint(&completions)?,
             review_revision_fingerprint: record_fingerprint(&reviews)?,
             merge_revision_fingerprint: record_fingerprint(&merges)?,
@@ -407,20 +370,17 @@ impl StudioRuntime {
                     Some(unit.continuation_revision()),
                     unit.branch.clone(),
                     unit.worktree_path.clone(),
-                    unit.base_commit.clone(),
+                    Some(unit.base_commit.clone()),
                 ),
                 None => (
                     None,
                     None,
                     None,
-                    run.branch.clone(),
+                    String::new(),
                     run.workspace_root.clone(),
-                    run.base_commit.clone(),
+                    None,
                 ),
             };
-        let git_fingerprint = studio_git_fingerprint(
-            fingerprint_repository(&worktree_path, &base_commit, &run.expected_head).await?,
-        );
         let has_failure = failure_index.is_some();
         let priority = match (kind, has_failure) {
             (StudioTaskRecoveryTargetKind::Executor, true) => 0,
@@ -445,10 +405,10 @@ impl StudioRuntime {
                 expected_thread_revision: revision_preview.expected_thread_revision,
                 branch,
                 worktree_path,
+                base_commit,
                 turns,
                 default_turn_ids,
                 available_modes,
-                git_fingerprint,
             },
         }))
     }
@@ -467,7 +427,6 @@ impl StudioRuntime {
             || run.revision != preview.revision
             || run.generation() != preview.task_generation
             || recovery_state_from_task_kind(run.kind()) != preview.state
-            || run.expected_head != preview.expected_head
             || (!allow_cleared_stop && run.is_stop_requested() != preview.stop_requested)
             || (allow_cleared_stop && run.is_stop_requested() && !preview.stop_requested)
         {
@@ -475,15 +434,11 @@ impl StudioRuntime {
         }
         let lease = self
             .store
-            .read_branch_lease(&run.id)
+            .read_project_lease(&run.id)
             .await?
-            .context("Task recovery branch lease disappeared")?;
-        if lease.id != preview.branch_lease_id
-            || lease.branch != preview.branch_lease_branch
-            || lease.git_common_dir != preview.branch_lease_git_common_dir
-            || lease.expected_head != preview.branch_lease_expected_head
-        {
-            bail!("Task recovery branch lease changed");
+            .context("Task recovery project lease disappeared")?;
+        if lease.id != preview.project_lease_id || lease.project_id != run.project_id {
+            bail!("Task recovery project lease changed");
         }
         match target.kind {
             StudioTaskRecoveryTargetKind::Planner => {
@@ -512,30 +467,11 @@ impl StudioRuntime {
                     || Some(unit.continuation_revision()) != target.continuation_revision
                     || unit.branch != target.branch
                     || unit.worktree_path != target.worktree_path
-                    || unit.base_commit != target.git_fingerprint.base_commit
+                    || target.base_commit.as_deref() != Some(unit.base_commit.as_str())
                 {
                     bail!("Task recovery WorkUnit identity or continuation changed");
                 }
             }
-        }
-        let main = studio_git_fingerprint(
-            fingerprint_repository(
-                &preview.main_git_fingerprint.workspace_root,
-                &preview.main_git_fingerprint.base_commit,
-                &preview.main_git_fingerprint.expected_head,
-            )
-            .await?,
-        );
-        let target_git = studio_git_fingerprint(
-            fingerprint_repository(
-                &target.git_fingerprint.workspace_root,
-                &target.git_fingerprint.base_commit,
-                &target.git_fingerprint.expected_head,
-            )
-            .await?,
-        );
-        if main != preview.main_git_fingerprint || target_git != target.git_fingerprint {
-            bail!("Task recovery Git fingerprint changed");
         }
         let completions = self.store.list_work_completions(&run.id).await?;
         let reviews = self.store.list_review_rounds(&run.id).await?;
@@ -547,21 +483,6 @@ impl StudioRuntime {
             bail!("Task Completion/Review/Merge facts changed");
         }
         Ok(())
-    }
-}
-
-fn studio_git_fingerprint(fingerprint: TaskGitFingerprint) -> StudioTaskGitFingerprint {
-    StudioTaskGitFingerprint {
-        workspace_root: fingerprint.workspace_root,
-        git_common_dir: fingerprint.git_common_dir,
-        branch: fingerprint.branch,
-        head: fingerprint.head,
-        base_commit: fingerprint.base_commit,
-        expected_head: fingerprint.expected_head,
-        operation: fingerprint.operation,
-        index_diff_hash: fingerprint.index_diff_hash,
-        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
-        untracked_content_hash: fingerprint.untracked_content_hash,
     }
 }
 
@@ -780,7 +701,6 @@ mod tests {
     use pl_protocol::ThreadToolCall;
 
     use super::*;
-    use crate::studio::StudioTaskGitFingerprint;
 
     fn target(turn_ids: &[&str]) -> StudioTaskRecoveryTarget {
         StudioTaskRecoveryTarget {
@@ -807,18 +727,7 @@ mod tests {
                 .collect(),
             default_turn_ids: vec![turn_ids.last().unwrap().to_string()],
             available_modes: vec![ConversationRecoveryMode::RewindTail],
-            git_fingerprint: StudioTaskGitFingerprint {
-                workspace_root: "worktree".to_string(),
-                git_common_dir: ".git".to_string(),
-                branch: "task/work-1".to_string(),
-                head: "head".to_string(),
-                base_commit: "base".to_string(),
-                expected_head: "head".to_string(),
-                operation: "none".to_string(),
-                index_diff_hash: "index".to_string(),
-                working_tree_diff_hash: "working".to_string(),
-                untracked_content_hash: "untracked".to_string(),
-            },
+            base_commit: Some("base".to_string()),
         }
     }
 

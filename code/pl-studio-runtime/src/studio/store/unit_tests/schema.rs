@@ -11,8 +11,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v10_with_data_carrying_state_enums() {
-    let root = unique_test_root("schema-v10");
+async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
+    let root = unique_test_root("schema-v11");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -38,7 +38,7 @@ async fn creates_canonical_schema_v10_with_data_carrying_state_enums() {
         "work_completions",
         "review_rounds",
         "merge_records",
-        "branch_leases",
+        "project_leases",
     ] {
         assert!(
             table_exists(store.database(), table).await,
@@ -183,7 +183,7 @@ async fn creates_canonical_schema_v10_with_data_carrying_state_enums() {
 }
 
 #[tokio::test]
-async fn schema_v9_database_is_rebuilt_to_v10_without_migration() {
+async fn schema_v9_database_is_rebuilt_to_v11_without_migration() {
     let root = unique_test_root("schema-v7-rebuild");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
@@ -197,7 +197,7 @@ async fn schema_v9_database_is_rebuilt_to_v10_without_migration() {
         .await
         .unwrap();
     drop(store);
-    // 旧库只有版本号低于 v10；Studio schema 单版本精确重建，不再迁移。
+    // 旧库只有版本号低于 v11；Studio schema 单版本精确重建，不再迁移。
     create_database(&database_path, "PRAGMA user_version = 9;").await;
 
     let rebuilt = StudioStore::open(&database_path).await.unwrap();
@@ -206,7 +206,7 @@ async fn schema_v9_database_is_rebuilt_to_v10_without_migration() {
         schema_version(rebuilt.database()).await,
         STUDIO_DATABASE_SCHEMA_VERSION
     );
-    // 重建丢弃旧数据，而不是把 v9 行迁移进 v10。
+    // 重建丢弃旧数据，而不是把 v9 行迁移进 v11。
     assert!(rebuilt.list_projects().await.unwrap().is_empty());
 
     drop(rebuilt);

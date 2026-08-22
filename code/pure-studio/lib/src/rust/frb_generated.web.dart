@@ -702,11 +702,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTaskFailureDto dco_decode_bridge_task_failure_dto(dynamic raw);
 
   @protected
-  BridgeTaskGitFingerprintDto dco_decode_bridge_task_git_fingerprint_dto(
-    dynamic raw,
-  );
-
-  @protected
   BridgeTaskMergeDto dco_decode_bridge_task_merge_dto(dynamic raw);
 
   @protected
@@ -2169,11 +2164,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeTaskFailureDto sse_decode_bridge_task_failure_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeTaskGitFingerprintDto sse_decode_bridge_task_git_fingerprint_dto(
     SseDeserializer deserializer,
   );
 
@@ -3950,12 +3940,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_task_failure_dto(
     BridgeTaskFailureDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_task_git_fingerprint_dto(
-    BridgeTaskGitFingerprintDto self,
     SseSerializer serializer,
   );
 

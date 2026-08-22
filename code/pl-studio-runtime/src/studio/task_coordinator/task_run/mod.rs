@@ -14,13 +14,10 @@ use super::{TaskStopOrigin, TaskStopReason};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskContext {
     pub(crate) id: String,
+    pub(crate) project_id: String,
     pub(crate) root_thread_id: String,
     pub(crate) plan: String,
     pub(crate) workspace_root: String,
-    pub(crate) git_common_dir: String,
-    pub(crate) branch: String,
-    pub(crate) base_commit: String,
-    pub(crate) expected_head: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,14 +63,6 @@ impl TaskRun {
         self.stop_request().map(|request| &request.reason)
     }
 
-    pub(crate) fn design_finalized_head(&self) -> Option<&str> {
-        self.design().map(|design| design.head.as_str())
-    }
-
-    pub(crate) fn design_phase_commit(&self) -> Option<&str> {
-        self.design().and_then(|design| design.commit.as_deref())
-    }
-
     #[cfg(test)]
     pub(crate) fn design_summary(&self) -> Option<&str> {
         self.design().map(|design| design.summary.as_str())
@@ -91,10 +80,6 @@ impl TaskRun {
         self.state.terminal_failure_id()
     }
 
-    pub(crate) fn latest_design_observation(&self) -> Option<&DesignWorkspaceObservation> {
-        self.state.latest_design_observation()
-    }
-
     pub(crate) fn decide(&self, command: TaskCommand) -> Result<TransitionDecision> {
         self.state.clone().decide(command)
     }
@@ -102,7 +87,6 @@ impl TaskRun {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TaskCommand {
-    ObserveDesign(DesignWorkspaceObservation),
     FinalizeDesign(FinalizedDesign),
     BeginImplementing,
     BeginMerging {
@@ -141,7 +125,7 @@ pub(crate) struct TransitionDecision {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TaskDurableEffect {
-    ReleaseBranchLease,
+    ReleaseProjectLease,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,7 +153,7 @@ impl TransitionDecision {
     fn terminal(next_state: TaskRunState) -> Self {
         Self {
             next_state,
-            durable_effects: vec![TaskDurableEffect::ReleaseBranchLease],
+            durable_effects: vec![TaskDurableEffect::ReleaseProjectLease],
             external_effects: Vec::new(),
         }
     }
@@ -180,9 +164,6 @@ impl TaskRunState {
         let generation = self.generation();
         let design = self.design().clone();
         match (self, command) {
-            (Self::DesignUpdating(state), TaskCommand::ObserveDesign(observation)) => Ok(
-                TransitionDecision::state(Self::DesignUpdating(state.observe(observation)?)),
-            ),
             (Self::DesignUpdating(_), TaskCommand::FinalizeDesign(design)) => {
                 Ok(TransitionDecision::state(Self::Implementing(
                     ImplementingState::new(design, generation),
@@ -292,7 +273,6 @@ impl TaskRunState {
 impl TaskCommand {
     fn name(&self) -> &'static str {
         match self {
-            Self::ObserveDesign(_) => "observeDesign",
             Self::FinalizeDesign(_) => "finalizeDesign",
             Self::BeginImplementing => "beginImplementing",
             Self::BeginMerging { .. } => "beginMerging",

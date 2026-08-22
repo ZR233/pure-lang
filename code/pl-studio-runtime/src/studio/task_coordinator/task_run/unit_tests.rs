@@ -6,11 +6,6 @@ fn lifecycle_transition_table_accepts_every_declared_path() {
     let cases = vec![
         (
             state(TaskRunStateKind::DesignUpdating),
-            TaskCommand::ObserveDesign(observation(1)),
-            TaskRunStateKind::DesignUpdating,
-        ),
-        (
-            state(TaskRunStateKind::DesignUpdating),
             TaskCommand::FinalizeDesign(finalized_design()),
             TaskRunStateKind::Implementing,
         ),
@@ -107,7 +102,7 @@ fn every_nonterminal_state_can_stop_block_fail_and_cancel() {
         assert_eq!(failed.next_state.kind(), TaskRunStateKind::Failed);
         assert_eq!(
             failed.durable_effects,
-            vec![TaskDurableEffect::ReleaseBranchLease]
+            vec![TaskDurableEffect::ReleaseProjectLease]
         );
 
         let cancelled = state(kind)
@@ -131,7 +126,7 @@ fn completion_is_limited_to_delivery_bearing_states() {
         assert_eq!(decision.next_state.kind(), TaskRunStateKind::Completed);
         assert_eq!(
             decision.durable_effects,
-            vec![TaskDurableEffect::ReleaseBranchLease]
+            vec![TaskDurableEffect::ReleaseProjectLease]
         );
     }
     for kind in [
@@ -226,37 +221,11 @@ fn every_state_payload_round_trips_with_one_canonical_discriminator() {
     }
 }
 
-#[test]
-fn design_observations_are_strictly_ordered_and_preserve_the_baseline() {
-    let baseline = fingerprint();
-    let initial = TaskRunState::new(baseline.clone());
-    let observed = initial
-        .clone()
-        .decide(TaskCommand::ObserveDesign(observation(1)))
-        .unwrap()
-        .next_state;
-    let TaskRunState::DesignUpdating(observed) = observed else {
-        panic!("design observation must stay in designUpdating");
-    };
-    assert_eq!(observed.baseline(), &baseline);
-    assert_eq!(observed.latest_observation().sequence, 1);
-    assert_eq!(
-        observed.latest_observation().tool_call_id.as_deref(),
-        Some("call-1")
-    );
-
-    assert!(
-        initial
-            .decide(TaskCommand::ObserveDesign(observation(2)))
-            .is_err()
-    );
-}
-
 fn state(kind: TaskRunStateKind) -> TaskRunState {
     let design = finalized_design();
     let progress = DesignProgress::from_finalized(design.clone());
     match kind {
-        TaskRunStateKind::DesignUpdating => TaskRunState::new(fingerprint()),
+        TaskRunStateKind::DesignUpdating => TaskRunState::new(),
         TaskRunStateKind::Implementing => {
             TaskRunState::Implementing(ImplementingState::new(design, 3))
         }
@@ -296,40 +265,13 @@ fn state(kind: TaskRunStateKind) -> TaskRunState {
 
 fn finalized_design() -> FinalizedDesign {
     FinalizedDesign {
-        head: "2222222".to_string(),
-        commit: Some("2222222".to_string()),
         summary: "design summary".to_string(),
-        fingerprint: fingerprint(),
     }
 }
 
 fn review_target() -> ReviewTarget {
     ReviewTarget::Integration {
         reviewed_head: "2222222".to_string(),
-    }
-}
-
-fn fingerprint() -> TaskGitFingerprint {
-    TaskGitFingerprint {
-        workspace_root: "/workspace".to_string(),
-        git_common_dir: "/workspace/.git".to_string(),
-        branch: "main".to_string(),
-        head: "1111111".to_string(),
-        base_commit: "1111111".to_string(),
-        expected_head: "1111111".to_string(),
-        operation: "none".to_string(),
-        index_diff_hash: "index".to_string(),
-        working_tree_diff_hash: "worktree".to_string(),
-        untracked_content_hash: "untracked".to_string(),
-    }
-}
-
-fn observation(sequence: u64) -> DesignWorkspaceObservation {
-    DesignWorkspaceObservation {
-        sequence,
-        turn_id: Some("turn-1".to_string()),
-        tool_call_id: Some(format!("call-{sequence}")),
-        fingerprint: fingerprint(),
     }
 }
 
@@ -370,7 +312,6 @@ fn all_kinds() -> [TaskRunStateKind; 10] {
 
 fn commands() -> Vec<TaskCommand> {
     vec![
-        TaskCommand::ObserveDesign(observation(1)),
         TaskCommand::FinalizeDesign(finalized_design()),
         TaskCommand::BeginImplementing,
         TaskCommand::BeginMerging {

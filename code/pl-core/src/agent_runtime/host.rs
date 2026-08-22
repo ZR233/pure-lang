@@ -298,6 +298,21 @@ pub struct SpawnLifecycleRequest {
     pub metadata: serde_json::Value,
 }
 
+/// The framework stage that caused a prepared spawn lease to be rolled back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnRollbackPhase {
+    InitialContext,
+    AgentRegistration,
+    Activation,
+}
+
+/// Structured framework failure passed to the product lifecycle during rollback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnRollbackReason {
+    pub phase: SpawnRollbackPhase,
+    pub message: String,
+}
+
 /// close 外部资源的准备上下文。
 #[derive(Debug, Clone)]
 pub struct CloseLifecycleRequest {
@@ -334,6 +349,7 @@ pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
     fn rollback_spawn(
         &self,
         lease: Self::SpawnLease,
+        reason: SpawnRollbackReason,
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     fn prepare_close(

@@ -103,32 +103,6 @@ enum ConversationRecoveryMode { rewindTail, rebuildThread }
 
 enum TaskRecoveryTargetKind { planner, executor }
 
-class TaskGitFingerprint {
-  const TaskGitFingerprint({
-    required this.workspaceRoot,
-    required this.gitCommonDir,
-    required this.branch,
-    required this.head,
-    required this.baseCommit,
-    required this.expectedHead,
-    required this.operation,
-    required this.indexDiffHash,
-    required this.workingTreeDiffHash,
-    required this.untrackedContentHash,
-  });
-
-  final String workspaceRoot;
-  final String gitCommonDir;
-  final String branch;
-  final String head;
-  final String baseCommit;
-  final String expectedHead;
-  final String operation;
-  final String indexDiffHash;
-  final String workingTreeDiffHash;
-  final String untrackedContentHash;
-}
-
 class TaskRecoveryTurn {
   const TaskRecoveryTurn({
     required this.turnId,
@@ -157,10 +131,10 @@ class TaskRecoveryTarget {
     required this.expectedThreadRevision,
     required this.branch,
     required this.worktreePath,
+    required this.baseCommit,
     required this.turns,
     required this.defaultTurnIds,
     required this.availableModes,
-    required this.gitFingerprint,
     this.workUnitId,
     this.attempt,
     this.continuationRevision,
@@ -175,10 +149,10 @@ class TaskRecoveryTarget {
   final int expectedThreadRevision;
   final String branch;
   final String worktreePath;
+  final String? baseCommit;
   final List<TaskRecoveryTurn> turns;
   final List<String> defaultTurnIds;
   final List<ConversationRecoveryMode> availableModes;
-  final TaskGitFingerprint gitFingerprint;
 }
 
 class TaskRecoveryPreview {
@@ -189,15 +163,10 @@ class TaskRecoveryPreview {
     required this.revision,
     required this.taskGeneration,
     required this.state,
-    required this.expectedHead,
     required this.stopRequested,
-    required this.branchLeaseId,
-    required this.branchLeaseBranch,
-    required this.branchLeaseGitCommonDir,
-    required this.branchLeaseExpectedHead,
+    required this.projectLeaseId,
     required this.recommendedThreadId,
     required this.targets,
-    required this.mainGitFingerprint,
     required this.completionRevisionFingerprint,
     required this.reviewRevisionFingerprint,
     required this.mergeRevisionFingerprint,
@@ -209,15 +178,10 @@ class TaskRecoveryPreview {
   final int revision;
   final int taskGeneration;
   final TaskStateKind state;
-  final String expectedHead;
   final bool stopRequested;
-  final String branchLeaseId;
-  final String branchLeaseBranch;
-  final String branchLeaseGitCommonDir;
-  final String branchLeaseExpectedHead;
+  final String projectLeaseId;
   final String recommendedThreadId;
   final List<TaskRecoveryTarget> targets;
-  final TaskGitFingerprint mainGitFingerprint;
   final String completionRevisionFingerprint;
   final String reviewRevisionFingerprint;
   final String mergeRevisionFingerprint;
@@ -262,7 +226,6 @@ class TaskRecoveryResult {
     required this.removedInputCount,
     required this.stopCleared,
     required this.resumeTurnId,
-    required this.gitFingerprint,
     this.workUnitId,
   });
 
@@ -281,5 +244,4 @@ class TaskRecoveryResult {
   final int removedInputCount;
   final bool stopCleared;
   final String resumeTurnId;
-  final TaskGitFingerprint gitFingerprint;
 }

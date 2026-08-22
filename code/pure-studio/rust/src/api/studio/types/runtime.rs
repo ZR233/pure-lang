@@ -163,21 +163,6 @@ pub enum BridgeTaskRecoveryTargetKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeTaskGitFingerprintDto {
-    pub workspace_root: String,
-    pub git_common_dir: String,
-    pub branch: String,
-    pub head: String,
-    pub base_commit: String,
-    pub expected_head: String,
-    pub operation: String,
-    pub index_diff_hash: String,
-    pub working_tree_diff_hash: String,
-    pub untracked_content_hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct BridgeTaskRecoveryTurnDto {
     pub turn_id: String,
     pub status: String,
@@ -200,10 +185,10 @@ pub struct BridgeTaskRecoveryTargetDto {
     pub expected_thread_revision: u64,
     pub branch: String,
     pub worktree_path: String,
+    pub base_commit: Option<String>,
     pub turns: Vec<BridgeTaskRecoveryTurnDto>,
     pub default_turn_ids: Vec<String>,
     pub available_modes: Vec<BridgeConversationRecoveryMode>,
-    pub git_fingerprint: BridgeTaskGitFingerprintDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -215,15 +200,10 @@ pub struct BridgeTaskRecoveryPreviewDto {
     pub revision: u64,
     pub task_generation: u64,
     pub state: BridgeTaskRecoveryState,
-    pub expected_head: String,
     pub stop_requested: bool,
-    pub branch_lease_id: String,
-    pub branch_lease_branch: String,
-    pub branch_lease_git_common_dir: String,
-    pub branch_lease_expected_head: String,
+    pub project_lease_id: String,
     pub recommended_thread_id: String,
     pub targets: Vec<BridgeTaskRecoveryTargetDto>,
-    pub main_git_fingerprint: BridgeTaskGitFingerprintDto,
     pub completion_revision_fingerprint: String,
     pub review_revision_fingerprint: String,
     pub merge_revision_fingerprint: String,
@@ -273,7 +253,6 @@ pub struct BridgeTaskRecoveryResultDto {
     pub removed_input_count: u64,
     pub stop_cleared: bool,
     pub resume_turn_id: String,
-    pub git_fingerprint: BridgeTaskGitFingerprintDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,8 +260,6 @@ pub struct BridgeTaskRecoveryResultDto {
 pub struct BridgeTaskRuntimeDto {
     pub run_id: String,
     pub state: BridgeTaskState,
-    pub branch: String,
-    pub expected_head: String,
     pub revision: u64,
     pub integrated_review_gate: BridgeIntegratedReviewGateDto,
     pub failures: Vec<BridgeTaskFailureDto>,
@@ -323,10 +300,7 @@ pub struct BridgeTaskStateData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeFinalizedDesign {
-    pub head: String,
-    pub commit: Option<String>,
     pub summary: String,
-    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

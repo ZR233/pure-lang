@@ -16,8 +16,6 @@ void registerTaskRecoveryTests() {
           kind: TaskStateKind.implementing,
           generation: 1,
         ),
-        branch: 'main',
-        expectedHead: 'head',
         revision: 0,
         workUnits: [workUnit],
         completions: const [],
@@ -79,8 +77,6 @@ void registerTaskRecoveryTests() {
           generation: preview.taskGeneration,
           statusMessage: 'paused',
         ),
-        branch: 'codex/task-46',
-        expectedHead: preview.expectedHead,
         revision: preview.revision,
         workUnits: const [],
         completions: const [],
@@ -131,7 +127,6 @@ void registerTaskRecoveryTests() {
           removedInputCount: 1,
           stopCleared: true,
           resumeTurnId: 'resume-turn',
-          gitFingerprint: preview.targets.first.gitFingerprint,
         );
 
       await tester.pumpWidget(
@@ -267,18 +262,6 @@ TaskWorkUnitView _taskRecoveryWorkUnit({
 );
 
 TaskRecoveryPreview _taskRecoveryPreviewFixture() {
-  const mainFingerprint = TaskGitFingerprint(
-    workspaceRoot: r'C:\workspace',
-    gitCommonDir: r'C:\workspace\.git',
-    branch: 'codex/task-46',
-    head: '0123456789abcdef',
-    baseCommit: 'base',
-    expectedHead: '0123456789abcdef',
-    operation: 'none',
-    indexDiffHash: 'index',
-    workingTreeDiffHash: 'working-tree',
-    untrackedContentHash: 'untracked',
-  );
   return TaskRecoveryPreview(
     previewToken: 'preview-token',
     rootThreadId: 'session-1',
@@ -286,12 +269,8 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
     revision: 8,
     taskGeneration: 3,
     state: TaskStateKind.implementing,
-    expectedHead: '0123456789abcdef',
     stopRequested: true,
-    branchLeaseId: 'lease-1',
-    branchLeaseBranch: 'codex/task-46',
-    branchLeaseGitCommonDir: r'C:\workspace\.git',
-    branchLeaseExpectedHead: '0123456789abcdef',
+    projectLeaseId: 'lease-1',
     recommendedThreadId: 'executor-1',
     targets: [
       TaskRecoveryTarget(
@@ -304,6 +283,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
         expectedThreadRevision: 9,
         branch: 'codex/task-46-wu-1',
         worktreePath: r'C:\workspace-wu-1',
+        baseCommit: '0123456789abcdef',
         turns: [
           TaskRecoveryTurn(
             turnId: 'turn-1',
@@ -338,7 +318,6 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
           ConversationRecoveryMode.rewindTail,
           ConversationRecoveryMode.rebuildThread,
         ],
-        gitFingerprint: mainFingerprint,
       ),
       TaskRecoveryTarget(
         threadId: 'session-1',
@@ -347,6 +326,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
         expectedThreadRevision: 13,
         branch: 'codex/task-46',
         worktreePath: r'C:\workspace',
+        baseCommit: null,
         turns: [
           TaskRecoveryTurn(
             turnId: 'planner-turn',
@@ -360,10 +340,8 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
         ],
         defaultTurnIds: const ['planner-turn'],
         availableModes: const [ConversationRecoveryMode.rebuildThread],
-        gitFingerprint: mainFingerprint,
       ),
     ],
-    mainGitFingerprint: mainFingerprint,
     completionRevisionFingerprint: 'completions',
     reviewRevisionFingerprint: 'reviews',
     mergeRevisionFingerprint: 'merges',

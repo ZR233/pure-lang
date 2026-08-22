@@ -118,19 +118,14 @@ pub(crate) fn bridge_task_recovery_preview(
         revision: preview.revision,
         task_generation: preview.task_generation,
         state: bridge_task_recovery_state(preview.state),
-        expected_head: preview.expected_head,
         stop_requested: preview.stop_requested,
-        branch_lease_id: preview.branch_lease_id,
-        branch_lease_branch: preview.branch_lease_branch,
-        branch_lease_git_common_dir: preview.branch_lease_git_common_dir,
-        branch_lease_expected_head: preview.branch_lease_expected_head,
+        project_lease_id: preview.project_lease_id,
         recommended_thread_id: preview.recommended_thread_id,
         targets: preview
             .targets
             .into_iter()
             .map(bridge_task_recovery_target)
             .collect(),
-        main_git_fingerprint: preview.main_git_fingerprint.into(),
         completion_revision_fingerprint: preview.completion_revision_fingerprint,
         review_revision_fingerprint: preview.review_revision_fingerprint,
         merge_revision_fingerprint: preview.merge_revision_fingerprint,
@@ -205,7 +200,6 @@ pub(crate) fn bridge_task_recovery_result(
         removed_input_count: result.removed_input_count,
         stop_cleared: result.stop_cleared,
         resume_turn_id: result.resume_turn_id,
-        git_fingerprint: result.git_fingerprint.into(),
     }
 }
 
@@ -223,6 +217,7 @@ fn bridge_task_recovery_target(target: StudioTaskRecoveryTarget) -> BridgeTaskRe
         expected_thread_revision: target.expected_thread_revision,
         branch: target.branch,
         worktree_path: target.worktree_path,
+        base_commit: target.base_commit,
         turns: target
             .turns
             .into_iter()
@@ -242,24 +237,6 @@ fn bridge_task_recovery_target(target: StudioTaskRecoveryTarget) -> BridgeTaskRe
             .into_iter()
             .map(BridgeConversationRecoveryMode::from)
             .collect(),
-        git_fingerprint: target.git_fingerprint.into(),
-    }
-}
-
-impl From<StudioTaskGitFingerprint> for BridgeTaskGitFingerprintDto {
-    fn from(fingerprint: StudioTaskGitFingerprint) -> Self {
-        Self {
-            workspace_root: fingerprint.workspace_root,
-            git_common_dir: fingerprint.git_common_dir,
-            branch: fingerprint.branch,
-            head: fingerprint.head,
-            base_commit: fingerprint.base_commit,
-            expected_head: fingerprint.expected_head,
-            operation: fingerprint.operation,
-            index_diff_hash: fingerprint.index_diff_hash,
-            working_tree_diff_hash: fingerprint.working_tree_diff_hash,
-            untracked_content_hash: fingerprint.untracked_content_hash,
-        }
     }
 }
 
@@ -273,12 +250,8 @@ fn task_recovery_preview_from_bridge(
         revision: preview.revision,
         task_generation: preview.task_generation,
         state: protocol_task_recovery_state(preview.state),
-        expected_head: preview.expected_head,
         stop_requested: preview.stop_requested,
-        branch_lease_id: preview.branch_lease_id,
-        branch_lease_branch: preview.branch_lease_branch,
-        branch_lease_git_common_dir: preview.branch_lease_git_common_dir,
-        branch_lease_expected_head: preview.branch_lease_expected_head,
+        project_lease_id: preview.project_lease_id,
         recommended_thread_id: preview.recommended_thread_id,
         targets: preview
             .targets
@@ -298,6 +271,7 @@ fn task_recovery_preview_from_bridge(
                 expected_thread_revision: target.expected_thread_revision,
                 branch: target.branch,
                 worktree_path: target.worktree_path,
+                base_commit: target.base_commit,
                 turns: target
                     .turns
                     .into_iter()
@@ -317,30 +291,11 @@ fn task_recovery_preview_from_bridge(
                     .into_iter()
                     .map(ConversationRecoveryMode::from)
                     .collect(),
-                git_fingerprint: target.git_fingerprint.into(),
             })
             .collect(),
-        main_git_fingerprint: preview.main_git_fingerprint.into(),
         completion_revision_fingerprint: preview.completion_revision_fingerprint,
         review_revision_fingerprint: preview.review_revision_fingerprint,
         merge_revision_fingerprint: preview.merge_revision_fingerprint,
-    }
-}
-
-impl From<BridgeTaskGitFingerprintDto> for StudioTaskGitFingerprint {
-    fn from(fingerprint: BridgeTaskGitFingerprintDto) -> Self {
-        Self {
-            workspace_root: fingerprint.workspace_root,
-            git_common_dir: fingerprint.git_common_dir,
-            branch: fingerprint.branch,
-            head: fingerprint.head,
-            base_commit: fingerprint.base_commit,
-            expected_head: fingerprint.expected_head,
-            operation: fingerprint.operation,
-            index_diff_hash: fingerprint.index_diff_hash,
-            working_tree_diff_hash: fingerprint.working_tree_diff_hash,
-            untracked_content_hash: fingerprint.untracked_content_hash,
-        }
     }
 }
 
@@ -380,8 +335,6 @@ pub(crate) fn bridge_task_runtime(
     BridgeTaskRuntimeDto {
         run_id: task.run_id,
         state: bridge_task_state(task.state),
-        branch: task.branch,
-        expected_head: task.expected_head,
         revision: task.revision,
         integrated_review_gate: match task.integrated_review_gate {
             pl_studio_runtime::StudioIntegratedReviewGate::Required { reason } => {
@@ -549,10 +502,7 @@ fn bridge_task_state_data(data: StudioTaskStateData) -> BridgeTaskStateData {
         generation: data.generation,
         status_message: data.status_message,
         finalized_design: data.finalized_design.map(|design| BridgeFinalizedDesign {
-            head: design.head,
-            commit: design.commit,
             summary: design.summary,
-            fingerprint: design.fingerprint,
         }),
         stop_request: data.stop_request.map(|request| BridgeTaskStopRequest {
             origin: request.origin,

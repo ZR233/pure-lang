@@ -4,8 +4,8 @@ use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本；任何非 v10 库都按不兼容处理并精确重建。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 10;
+/// 唯一支持的 Studio schema 版本；任何非 v11 库都按不兼容处理并精确重建。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 11;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_task_run_table(db).await?;
@@ -19,7 +19,7 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .register(entity::task_failure::Entity)
         .register(entity::work_completion::Entity)
         .register(entity::merge_record::Entity)
-        .register(entity::branch_lease::Entity)
+        .register(entity::project_lease::Entity)
         .register(entity::thread::Entity)
         .register(entity::thread_input::Entity)
         .register(entity::thread_submission::Entity)
@@ -40,13 +40,10 @@ async fn create_task_run_table(db: &DatabaseConnection) -> Result<()> {
         r#"
         CREATE TABLE IF NOT EXISTS task_runs (
             id TEXT PRIMARY KEY NOT NULL,
+            project_id TEXT NOT NULL,
             root_thread_id TEXT NOT NULL,
             plan TEXT NOT NULL,
             workspace_root TEXT NOT NULL,
-            git_common_dir TEXT NOT NULL,
-            branch TEXT NOT NULL,
-            base_commit TEXT NOT NULL,
-            expected_head TEXT NOT NULL,
             state_json TEXT NOT NULL CHECK (json_valid(state_json)),
             state_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.kind')
@@ -60,6 +57,7 @@ async fn create_task_run_table(db: &DatabaseConnection) -> Result<()> {
             revision INTEGER NOT NULL CHECK (revision >= 0),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
             FOREIGN KEY (root_thread_id) REFERENCES threads(id) ON DELETE CASCADE
         )
         "#,
@@ -174,10 +172,9 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::attachment::Column::ThreadId)
             .to_owned(),
         Index::create()
-            .name("idx_branch_leases_common_branch")
-            .table(entity::branch_lease::Entity)
-            .col(entity::branch_lease::Column::GitCommonDir)
-            .col(entity::branch_lease::Column::Branch)
+            .name("idx_project_leases_project")
+            .table(entity::project_lease::Entity)
+            .col(entity::project_lease::Column::ProjectId)
             .unique()
             .to_owned(),
         Index::create()

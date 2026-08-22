@@ -456,6 +456,7 @@ impl AgentLifecycleAdapter for TestLifecycle {
     async fn rollback_spawn(
         &self,
         lease: Self::SpawnLease,
+        _reason: SpawnRollbackReason,
     ) -> std::result::Result<(), Self::Error> {
         self.spawn_rollbacks.lock().unwrap().push(lease);
         if std::mem::take(&mut *self.fail_rollback_spawn.lock().unwrap()) {

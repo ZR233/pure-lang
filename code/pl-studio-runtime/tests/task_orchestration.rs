@@ -133,7 +133,11 @@ async fn run_offline_task_flow() -> Result<()> {
     assert!(!design.contains("Implementation status: completed and merged."));
     assert_eq!(
         git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,
-        task.expected_head
+        task.merges
+            .last()
+            .context("merge record")?
+            .resulting_head
+            .as_str()
     );
     assert!(git_output(&fixture.workspace, &["status", "--porcelain"])?.is_empty());
 
@@ -234,14 +238,25 @@ async fn run_offline_required_review_flow() -> Result<()> {
         other => anyhow::bail!("unexpected final integrated review gate: {other:?}"),
     };
     assert_eq!(review_round_id, &task.reviews[1].id);
-    assert_eq!(reviewed_head, &task.expected_head);
+    assert_eq!(
+        reviewed_head,
+        task.merges
+            .last()
+            .context("merge record")?
+            .resulting_head
+            .as_str()
+    );
     assert_eq!(
         normalized_text(&fixture.workspace.join(PLANNER_FOLLOWUP_PATH))?,
         PLANNER_FOLLOWUP_CONTENT
     );
     assert_eq!(
         git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,
-        task.expected_head
+        task.merges
+            .last()
+            .context("merge record")?
+            .resulting_head
+            .as_str()
     );
     assert!(git_output(&fixture.workspace, &["status", "--porcelain"])?.is_empty());
 

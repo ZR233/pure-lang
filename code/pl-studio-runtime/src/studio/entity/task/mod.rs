@@ -1,4 +1,4 @@
-//! Task lifecycle, allocation, review, merge, and branch-lease entities.
+//! Task lifecycle, allocation, review, merge, and project-lease entities.
 
 use sea_orm::entity::prelude::*;
 
@@ -10,13 +10,10 @@ pub mod task_run {
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
+        pub project_id: String,
         pub root_thread_id: String,
         pub plan: String,
         pub workspace_root: String,
-        pub git_common_dir: String,
-        pub branch: String,
-        pub base_commit: String,
-        pub expected_head: String,
         pub state_json: String,
         pub state_kind: String,
         pub revision: i64,
@@ -264,19 +261,18 @@ pub mod merge_record {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub mod branch_lease {
+pub mod project_lease {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "branch_leases")]
+    #[sea_orm(table_name = "project_leases")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
         #[sea_orm(unique)]
         pub task_run_id: String,
-        pub git_common_dir: String,
-        pub branch: String,
-        pub expected_head: String,
+        #[sea_orm(unique)]
+        pub project_id: String,
         pub acquired_at: i64,
         pub updated_at: i64,
     }

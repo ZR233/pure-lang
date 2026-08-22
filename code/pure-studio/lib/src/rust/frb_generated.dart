@@ -3206,14 +3206,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeFinalizedDesign dco_decode_bridge_finalized_design(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
-    return BridgeFinalizedDesign(
-      head: dco_decode_String(arr[0]),
-      commit: dco_decode_opt_String(arr[1]),
-      summary: dco_decode_String(arr[2]),
-      fingerprint: dco_decode_String(arr[3]),
-    );
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return BridgeFinalizedDesign(summary: dco_decode_String(arr[0]));
   }
 
   @protected
@@ -4315,28 +4310,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskGitFingerprintDto dco_decode_bridge_task_git_fingerprint_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
-    return BridgeTaskGitFingerprintDto(
-      workspaceRoot: dco_decode_String(arr[0]),
-      gitCommonDir: dco_decode_String(arr[1]),
-      branch: dco_decode_String(arr[2]),
-      head: dco_decode_String(arr[3]),
-      baseCommit: dco_decode_String(arr[4]),
-      expectedHead: dco_decode_String(arr[5]),
-      operation: dco_decode_String(arr[6]),
-      indexDiffHash: dco_decode_String(arr[7]),
-      workingTreeDiffHash: dco_decode_String(arr[8]),
-      untrackedContentHash: dco_decode_String(arr[9]),
-    );
-  }
-
-  @protected
   BridgeTaskMergeDto dco_decode_bridge_task_merge_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -4366,8 +4339,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return BridgeTaskRecoveryPreviewDto(
       previewToken: dco_decode_String(arr[0]),
       rootThreadId: dco_decode_String(arr[1]),
@@ -4375,18 +4348,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: dco_decode_u_64(arr[3]),
       taskGeneration: dco_decode_u_64(arr[4]),
       state: dco_decode_bridge_task_recovery_state(arr[5]),
-      expectedHead: dco_decode_String(arr[6]),
-      stopRequested: dco_decode_bool(arr[7]),
-      branchLeaseId: dco_decode_String(arr[8]),
-      branchLeaseBranch: dco_decode_String(arr[9]),
-      branchLeaseGitCommonDir: dco_decode_String(arr[10]),
-      branchLeaseExpectedHead: dco_decode_String(arr[11]),
-      recommendedThreadId: dco_decode_String(arr[12]),
-      targets: dco_decode_list_bridge_task_recovery_target_dto(arr[13]),
-      mainGitFingerprint: dco_decode_bridge_task_git_fingerprint_dto(arr[14]),
-      completionRevisionFingerprint: dco_decode_String(arr[15]),
-      reviewRevisionFingerprint: dco_decode_String(arr[16]),
-      mergeRevisionFingerprint: dco_decode_String(arr[17]),
+      stopRequested: dco_decode_bool(arr[6]),
+      projectLeaseId: dco_decode_String(arr[7]),
+      recommendedThreadId: dco_decode_String(arr[8]),
+      targets: dco_decode_list_bridge_task_recovery_target_dto(arr[9]),
+      completionRevisionFingerprint: dco_decode_String(arr[10]),
+      reviewRevisionFingerprint: dco_decode_String(arr[11]),
+      mergeRevisionFingerprint: dco_decode_String(arr[12]),
     );
   }
 
@@ -4414,8 +4382,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 16)
-      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeTaskRecoveryResultDto(
       recoveryId: dco_decode_String(arr[0]),
       runId: dco_decode_String(arr[1]),
@@ -4432,7 +4400,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       removedInputCount: dco_decode_u_64(arr[12]),
       stopCleared: dco_decode_bool(arr[13]),
       resumeTurnId: dco_decode_String(arr[14]),
-      gitFingerprint: dco_decode_bridge_task_git_fingerprint_dto(arr[15]),
     );
   }
 
@@ -4460,12 +4427,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       expectedThreadRevision: dco_decode_u_64(arr[6]),
       branch: dco_decode_String(arr[7]),
       worktreePath: dco_decode_String(arr[8]),
-      turns: dco_decode_list_bridge_task_recovery_turn_dto(arr[9]),
-      defaultTurnIds: dco_decode_list_String(arr[10]),
+      baseCommit: dco_decode_opt_String(arr[9]),
+      turns: dco_decode_list_bridge_task_recovery_turn_dto(arr[10]),
+      defaultTurnIds: dco_decode_list_String(arr[11]),
       availableModes: dco_decode_list_bridge_conversation_recovery_mode(
-        arr[11],
+        arr[12],
       ),
-      gitFingerprint: dco_decode_bridge_task_git_fingerprint_dto(arr[12]),
     );
   }
 
@@ -4596,25 +4563,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTaskRuntimeDto dco_decode_bridge_task_runtime_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeTaskRuntimeDto(
       runId: dco_decode_String(arr[0]),
       state: dco_decode_bridge_task_state(arr[1]),
-      branch: dco_decode_String(arr[2]),
-      expectedHead: dco_decode_String(arr[3]),
-      revision: dco_decode_u_64(arr[4]),
+      revision: dco_decode_u_64(arr[2]),
       integratedReviewGate: dco_decode_bridge_integrated_review_gate_dto(
+        arr[3],
+      ),
+      failures: dco_decode_list_bridge_task_failure_dto(arr[4]),
+      terminalFailure: dco_decode_opt_box_autoadd_bridge_task_failure_dto(
         arr[5],
       ),
-      failures: dco_decode_list_bridge_task_failure_dto(arr[6]),
-      terminalFailure: dco_decode_opt_box_autoadd_bridge_task_failure_dto(
-        arr[7],
-      ),
-      workUnits: dco_decode_list_bridge_task_work_unit_dto(arr[8]),
-      completions: dco_decode_list_bridge_task_completion_dto(arr[9]),
-      merges: dco_decode_list_bridge_task_merge_dto(arr[10]),
-      reviews: dco_decode_list_bridge_task_review_dto(arr[11]),
+      workUnits: dco_decode_list_bridge_task_work_unit_dto(arr[6]),
+      completions: dco_decode_list_bridge_task_completion_dto(arr[7]),
+      merges: dco_decode_list_bridge_task_merge_dto(arr[8]),
+      reviews: dco_decode_list_bridge_task_review_dto(arr[9]),
     );
   }
 
@@ -7500,16 +7465,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_head = sse_decode_String(deserializer);
-    var var_commit = sse_decode_opt_String(deserializer);
     var var_summary = sse_decode_String(deserializer);
-    var var_fingerprint = sse_decode_String(deserializer);
-    return BridgeFinalizedDesign(
-      head: var_head,
-      commit: var_commit,
-      summary: var_summary,
-      fingerprint: var_fingerprint,
-    );
+    return BridgeFinalizedDesign(summary: var_summary);
   }
 
   @protected
@@ -8904,35 +8861,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskGitFingerprintDto sse_decode_bridge_task_git_fingerprint_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_workspaceRoot = sse_decode_String(deserializer);
-    var var_gitCommonDir = sse_decode_String(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_head = sse_decode_String(deserializer);
-    var var_baseCommit = sse_decode_String(deserializer);
-    var var_expectedHead = sse_decode_String(deserializer);
-    var var_operation = sse_decode_String(deserializer);
-    var var_indexDiffHash = sse_decode_String(deserializer);
-    var var_workingTreeDiffHash = sse_decode_String(deserializer);
-    var var_untrackedContentHash = sse_decode_String(deserializer);
-    return BridgeTaskGitFingerprintDto(
-      workspaceRoot: var_workspaceRoot,
-      gitCommonDir: var_gitCommonDir,
-      branch: var_branch,
-      head: var_head,
-      baseCommit: var_baseCommit,
-      expectedHead: var_expectedHead,
-      operation: var_operation,
-      indexDiffHash: var_indexDiffHash,
-      workingTreeDiffHash: var_workingTreeDiffHash,
-      untrackedContentHash: var_untrackedContentHash,
-    );
-  }
-
-  @protected
   BridgeTaskMergeDto sse_decode_bridge_task_merge_dto(
     SseDeserializer deserializer,
   ) {
@@ -8980,17 +8908,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_revision = sse_decode_u_64(deserializer);
     var var_taskGeneration = sse_decode_u_64(deserializer);
     var var_state = sse_decode_bridge_task_recovery_state(deserializer);
-    var var_expectedHead = sse_decode_String(deserializer);
     var var_stopRequested = sse_decode_bool(deserializer);
-    var var_branchLeaseId = sse_decode_String(deserializer);
-    var var_branchLeaseBranch = sse_decode_String(deserializer);
-    var var_branchLeaseGitCommonDir = sse_decode_String(deserializer);
-    var var_branchLeaseExpectedHead = sse_decode_String(deserializer);
+    var var_projectLeaseId = sse_decode_String(deserializer);
     var var_recommendedThreadId = sse_decode_String(deserializer);
     var var_targets = sse_decode_list_bridge_task_recovery_target_dto(
-      deserializer,
-    );
-    var var_mainGitFingerprint = sse_decode_bridge_task_git_fingerprint_dto(
       deserializer,
     );
     var var_completionRevisionFingerprint = sse_decode_String(deserializer);
@@ -9003,15 +8924,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: var_revision,
       taskGeneration: var_taskGeneration,
       state: var_state,
-      expectedHead: var_expectedHead,
       stopRequested: var_stopRequested,
-      branchLeaseId: var_branchLeaseId,
-      branchLeaseBranch: var_branchLeaseBranch,
-      branchLeaseGitCommonDir: var_branchLeaseGitCommonDir,
-      branchLeaseExpectedHead: var_branchLeaseExpectedHead,
+      projectLeaseId: var_projectLeaseId,
       recommendedThreadId: var_recommendedThreadId,
       targets: var_targets,
-      mainGitFingerprint: var_mainGitFingerprint,
       completionRevisionFingerprint: var_completionRevisionFingerprint,
       reviewRevisionFingerprint: var_reviewRevisionFingerprint,
       mergeRevisionFingerprint: var_mergeRevisionFingerprint,
@@ -9059,9 +8975,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_removedInputCount = sse_decode_u_64(deserializer);
     var var_stopCleared = sse_decode_bool(deserializer);
     var var_resumeTurnId = sse_decode_String(deserializer);
-    var var_gitFingerprint = sse_decode_bridge_task_git_fingerprint_dto(
-      deserializer,
-    );
     return BridgeTaskRecoveryResultDto(
       recoveryId: var_recoveryId,
       runId: var_runId,
@@ -9078,7 +8991,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       removedInputCount: var_removedInputCount,
       stopCleared: var_stopCleared,
       resumeTurnId: var_resumeTurnId,
-      gitFingerprint: var_gitFingerprint,
     );
   }
 
@@ -9107,12 +9019,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_expectedThreadRevision = sse_decode_u_64(deserializer);
     var var_branch = sse_decode_String(deserializer);
     var var_worktreePath = sse_decode_String(deserializer);
+    var var_baseCommit = sse_decode_opt_String(deserializer);
     var var_turns = sse_decode_list_bridge_task_recovery_turn_dto(deserializer);
     var var_defaultTurnIds = sse_decode_list_String(deserializer);
     var var_availableModes = sse_decode_list_bridge_conversation_recovery_mode(
-      deserializer,
-    );
-    var var_gitFingerprint = sse_decode_bridge_task_git_fingerprint_dto(
       deserializer,
     );
     return BridgeTaskRecoveryTargetDto(
@@ -9125,10 +9035,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       expectedThreadRevision: var_expectedThreadRevision,
       branch: var_branch,
       worktreePath: var_worktreePath,
+      baseCommit: var_baseCommit,
       turns: var_turns,
       defaultTurnIds: var_defaultTurnIds,
       availableModes: var_availableModes,
-      gitFingerprint: var_gitFingerprint,
     );
   }
 
@@ -9304,8 +9214,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_runId = sse_decode_String(deserializer);
     var var_state = sse_decode_bridge_task_state(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_expectedHead = sse_decode_String(deserializer);
     var var_revision = sse_decode_u_64(deserializer);
     var var_integratedReviewGate = sse_decode_bridge_integrated_review_gate_dto(
       deserializer,
@@ -9322,8 +9230,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return BridgeTaskRuntimeDto(
       runId: var_runId,
       state: var_state,
-      branch: var_branch,
-      expectedHead: var_expectedHead,
       revision: var_revision,
       integratedReviewGate: var_integratedReviewGate,
       failures: var_failures,
@@ -12984,10 +12890,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.head, serializer);
-    sse_encode_opt_String(self.commit, serializer);
     sse_encode_String(self.summary, serializer);
-    sse_encode_String(self.fingerprint, serializer);
   }
 
   @protected
@@ -14037,24 +13940,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_task_git_fingerprint_dto(
-    BridgeTaskGitFingerprintDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.workspaceRoot, serializer);
-    sse_encode_String(self.gitCommonDir, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_String(self.head, serializer);
-    sse_encode_String(self.baseCommit, serializer);
-    sse_encode_String(self.expectedHead, serializer);
-    sse_encode_String(self.operation, serializer);
-    sse_encode_String(self.indexDiffHash, serializer);
-    sse_encode_String(self.workingTreeDiffHash, serializer);
-    sse_encode_String(self.untrackedContentHash, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_task_merge_dto(
     BridgeTaskMergeDto self,
     SseSerializer serializer,
@@ -14088,18 +13973,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.revision, serializer);
     sse_encode_u_64(self.taskGeneration, serializer);
     sse_encode_bridge_task_recovery_state(self.state, serializer);
-    sse_encode_String(self.expectedHead, serializer);
     sse_encode_bool(self.stopRequested, serializer);
-    sse_encode_String(self.branchLeaseId, serializer);
-    sse_encode_String(self.branchLeaseBranch, serializer);
-    sse_encode_String(self.branchLeaseGitCommonDir, serializer);
-    sse_encode_String(self.branchLeaseExpectedHead, serializer);
+    sse_encode_String(self.projectLeaseId, serializer);
     sse_encode_String(self.recommendedThreadId, serializer);
     sse_encode_list_bridge_task_recovery_target_dto(self.targets, serializer);
-    sse_encode_bridge_task_git_fingerprint_dto(
-      self.mainGitFingerprint,
-      serializer,
-    );
     sse_encode_String(self.completionRevisionFingerprint, serializer);
     sse_encode_String(self.reviewRevisionFingerprint, serializer);
     sse_encode_String(self.mergeRevisionFingerprint, serializer);
@@ -14140,7 +14017,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.removedInputCount, serializer);
     sse_encode_bool(self.stopCleared, serializer);
     sse_encode_String(self.resumeTurnId, serializer);
-    sse_encode_bridge_task_git_fingerprint_dto(self.gitFingerprint, serializer);
   }
 
   @protected
@@ -14167,13 +14043,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.expectedThreadRevision, serializer);
     sse_encode_String(self.branch, serializer);
     sse_encode_String(self.worktreePath, serializer);
+    sse_encode_opt_String(self.baseCommit, serializer);
     sse_encode_list_bridge_task_recovery_turn_dto(self.turns, serializer);
     sse_encode_list_String(self.defaultTurnIds, serializer);
     sse_encode_list_bridge_conversation_recovery_mode(
       self.availableModes,
       serializer,
     );
-    sse_encode_bridge_task_git_fingerprint_dto(self.gitFingerprint, serializer);
   }
 
   @protected
@@ -14306,8 +14182,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.runId, serializer);
     sse_encode_bridge_task_state(self.state, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_String(self.expectedHead, serializer);
     sse_encode_u_64(self.revision, serializer);
     sse_encode_bridge_integrated_review_gate_dto(
       self.integratedReviewGate,

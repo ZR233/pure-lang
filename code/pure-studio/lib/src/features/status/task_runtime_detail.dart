@@ -44,14 +44,6 @@ class TaskRuntimeDetail extends StatelessWidget {
                         '${task.stopRequestedReason ?? '-'}',
                     valueMaxLines: 2,
                   ),
-                StatusDetailRow(
-                  label: context.l10n.statusTaskBranch,
-                  value: task.branch,
-                ),
-                StatusDetailRow(
-                  label: context.l10n.statusTaskHead,
-                  value: _shortCommit(task.expectedHead),
-                ),
               ],
             ),
             if (task.failures.isNotEmpty) ...[

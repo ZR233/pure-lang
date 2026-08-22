@@ -138,9 +138,9 @@ pub struct StudioRecoveryCleanupPreview {
 }
 
 pub use pl_protocol::studio::{
-    StudioTaskGitFingerprint, StudioTaskRecoveryPreview, StudioTaskRecoveryRequest,
-    StudioTaskRecoveryResult, StudioTaskRecoveryState, StudioTaskRecoveryTarget,
-    StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
+    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
+    StudioTaskRecoveryState, StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind,
+    StudioTaskRecoveryTurn,
 };
 /// UI 可读取的 Studio runtime 快照。
 ///

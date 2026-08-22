@@ -6,13 +6,9 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use tokio::sync::{MutexGuard, broadcast};
 
-use super::git::{
-    RepositorySnapshot, fingerprint_repository, inspect_repository, inspect_worktree_changes,
-    prepare_repository_for_task,
-};
+use super::git::inspect_worktree_changes;
 use super::recovery::{
     MergingRecovery, inspect_merging_recovery, is_retryable_merge_recovery_message,
-    validate_snapshot_owner,
 };
 use super::{
     CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskRunStateKind, TaskWorktreeOwnerSnapshot,
@@ -37,8 +33,7 @@ use recovery::resolve_worktree_recovery_groups;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BranchKey {
-    common_dir: String,
-    branch: String,
+    project_id: String,
 }
 
 struct WorktreeRecoveryGroup {
@@ -92,15 +87,9 @@ impl PartialEq<Vec<TaskRun>> for TaskRecoveryReport {
 }
 
 impl BranchKey {
-    fn new(common_dir: &Path, branch: &str) -> Self {
-        let common_dir = common_dir.to_string_lossy().replace('\\', "/");
+    fn new(project_id: &str) -> Self {
         Self {
-            common_dir: if cfg!(windows) {
-                common_dir.to_lowercase()
-            } else {
-                common_dir
-            },
-            branch: branch.to_string(),
+            project_id: project_id.to_string(),
         }
     }
 }
@@ -113,8 +102,6 @@ pub(crate) struct TaskCoordinator {
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
     branch_mutation_owner: Arc<()>,
     terminal_fact_tx: broadcast::Sender<String>,
-    #[cfg(test)]
-    pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -178,8 +165,6 @@ impl TaskCoordinator {
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_owner: Arc::new(()),
             terminal_fact_tx,
-            #[cfg(test)]
-            design_after_commit_barrier: Mutex::new(None),
         }
     }
 
@@ -217,24 +202,22 @@ impl TaskCoordinator {
         if plan.trim().is_empty() {
             bail!("task plan must not be empty");
         }
-        let snapshot = prepare_repository_for_task(repository).await?;
-        let design_baseline =
-            fingerprint_repository(&snapshot.workspace_root, &snapshot.head, &snapshot.head)
-                .await?;
-        let key = BranchKey::new(&snapshot.git_common_dir, &snapshot.branch);
+        let root_thread = self
+            .store
+            .read_thread(root_thread_id)
+            .await?
+            .context("task root Thread not found")?;
+        let key = BranchKey::new(&root_thread.project_id);
         let owner_token = new_id("task-owner");
         acquire_process_lease(&key, &owner_token)?;
 
         let result = self
             .store
             .create_task_run_with_lease(CreateTaskRun {
+                project_id: root_thread.project_id,
                 root_thread_id: root_thread_id.to_string(),
                 plan: plan.trim().to_string(),
-                workspace_root: snapshot.workspace_root.to_string_lossy().to_string(),
-                git_common_dir: snapshot.git_common_dir.to_string_lossy().to_string(),
-                branch: snapshot.branch,
-                head_commit: snapshot.head,
-                design_baseline,
+                workspace_root: repository.as_ref().to_string_lossy().to_string(),
             })
             .await;
         let (run, _) = match result {
@@ -257,7 +240,7 @@ impl TaskCoordinator {
         let mut prepared = Vec::new();
         let mut failed_agent_runs = HashSet::new();
         for run in self.store.list_active_task_runs().await? {
-            let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+            let key = BranchKey::new(&run.project_id);
             if let Err(error) = acquire_process_lease(&key, &run.id) {
                 let message = error.to_string();
                 self.block_run(&run, message.clone()).await?;
@@ -358,6 +341,10 @@ impl TaskCoordinator {
             if skipped_groups.contains(&key) {
                 continue;
             }
+            if group.owners.iter().all(|owner| owner.resources.is_empty()) {
+                successful_groups.insert(key);
+                continue;
+            }
             if let Err(error) = self
                 .reconcile_durable_worktrees(&group.repositories, &group.owners)
                 .await
@@ -400,50 +387,7 @@ impl TaskCoordinator {
             if run.kind() == TaskRunStateKind::Merging {
                 match inspect_merging_recovery(&run).await {
                     MergingRecovery::Resume => report.recovered_runs.push(run),
-                    MergingRecovery::Retry(message) => {
-                        self.block_run(&run, message.clone()).await?;
-                        self.push_recovery_issue(
-                            &mut report,
-                            &run,
-                            StudioRecoveryIssueScope::Thread,
-                            StudioRecoveryIssueCategory::Merge,
-                            StudioRecoveryIssueAction::Retry,
-                            message,
-                        )
-                        .await?;
-                    }
                 }
-                continue;
-            }
-            let snapshot = match inspect_repository(&run.workspace_root, true).await {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    let message = format!("repository recovery failed: {error}");
-                    self.block_run(&run, message.clone()).await?;
-                    self.push_recovery_issue(
-                        &mut report,
-                        &run,
-                        StudioRecoveryIssueScope::Project,
-                        StudioRecoveryIssueCategory::Repository,
-                        StudioRecoveryIssueAction::RemoveProject,
-                        message,
-                    )
-                    .await?;
-                    continue;
-                }
-            };
-            if let Err(reason) = validate_snapshot(&run, &snapshot) {
-                let message = reason.to_string();
-                self.block_run(&run, message.clone()).await?;
-                self.push_recovery_issue(
-                    &mut report,
-                    &run,
-                    StudioRecoveryIssueScope::Project,
-                    StudioRecoveryIssueCategory::Repository,
-                    StudioRecoveryIssueAction::RemoveProject,
-                    message,
-                )
-                .await?;
                 continue;
             }
             if run.kind() == TaskRunStateKind::Stopping {
@@ -515,12 +459,7 @@ impl TaskCoordinator {
         {
             bail!("merge recovery state changed before retry");
         }
-        let snapshot = inspect_repository(&run.workspace_root, false)
-            .await
-            .context("merge recovery could not inspect the canonical repository")?;
-        validate_snapshot_owner(&run, &snapshot)?;
-
-        let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+        let key = BranchKey::new(&run.project_id);
         acquire_process_lease(&key, &run.id)?;
         let retried = match self.store.retry_blocked_merge_task(&run).await {
             Ok(retried) => retried,
@@ -845,25 +784,13 @@ impl TaskCoordinator {
     }
 
     #[cfg(test)]
-    pub(crate) async fn verify_expected_head(&self, task_run_id: &str) -> Result<bool> {
+    pub(crate) async fn verify_process_lease(&self, task_run_id: &str) -> Result<bool> {
         let run = self
             .store
             .read_task_run(task_run_id)
             .await?
             .context("task run not found")?;
-        let snapshot = match inspect_repository(&run.workspace_root, true).await {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                self.block_run(&run, format!("repository verification failed: {error}"))
-                    .await?;
-                return Ok(false);
-            }
-        };
-        if let Err(reason) = validate_snapshot(&run, &snapshot) {
-            self.block_run(&run, reason.to_string()).await?;
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(self.ensure_process_lease_owned(&run).is_ok())
     }
 
     #[cfg(test)]
@@ -883,7 +810,7 @@ impl TaskCoordinator {
             .store
             .transition_task_run(task_run_id, phase, status_message)
             .await?;
-        self.store.release_branch_lease(task_run_id).await?;
+        self.store.release_project_lease(task_run_id).await?;
         self.release_owned_process_lease(task_run_id);
         Ok(run)
     }
@@ -928,16 +855,13 @@ impl TaskCoordinator {
             bail!("blocked task fact is not canonical");
         }
         self.release_owned_process_lease(&run.id);
-        release_process_lease(
-            &BranchKey::new(Path::new(&run.git_common_dir), &run.branch),
-            &run.id,
-        );
+        release_process_lease(&BranchKey::new(&run.project_id), &run.id);
         self.publish_terminal_fact(&run.id);
         Ok(())
     }
 
     pub(super) fn ensure_process_lease_owned(&self, run: &TaskRun) -> Result<()> {
-        let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+        let key = BranchKey::new(&run.project_id);
         let locally_owned = self
             .owned_process_leases
             .lock()
@@ -950,7 +874,7 @@ impl TaskCoordinator {
             .get(&key)
             .is_some_and(|owner| owner == &run.id);
         if !locally_owned || !globally_owned {
-            bail!("task process branch lease is not owned by this coordinator");
+            bail!("task process lease is not owned by this coordinator");
         }
         Ok(())
     }
@@ -1080,18 +1004,6 @@ fn recovery_cleanup_revision(
     format!("{:x}", digest.finalize())
 }
 
-fn validate_snapshot(run: &TaskRun, snapshot: &RepositorySnapshot) -> Result<()> {
-    validate_snapshot_owner(run, snapshot)?;
-    if snapshot.head != run.expected_head {
-        bail!(
-            "task HEAD drifted: expected {}, actual {}",
-            run.expected_head,
-            snapshot.head
-        );
-    }
-    Ok(())
-}
-
 fn process_leases() -> &'static Mutex<HashMap<BranchKey, String>> {
     static LEASES: OnceLock<Mutex<HashMap<BranchKey, String>>> = OnceLock::new();
     LEASES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -1102,7 +1014,7 @@ fn acquire_process_lease(key: &BranchKey, owner: &str) -> Result<()> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(existing) = leases.get(key) {
-        bail!("branch is already owned by task {existing}");
+        bail!("project is already owned by task {existing}");
     }
     leases.insert(key.clone(), owner.to_string());
     Ok(())
@@ -1114,9 +1026,9 @@ fn replace_process_lease_owner(key: &BranchKey, current: &str, next: &str) -> Re
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let owner = leases
         .get_mut(key)
-        .context("process branch lease disappeared")?;
+        .context("process project lease disappeared")?;
     if owner != current {
-        bail!("process branch lease owner changed unexpectedly");
+        bail!("process project lease owner changed unexpectedly");
     }
     *owner = next.to_string();
     Ok(())

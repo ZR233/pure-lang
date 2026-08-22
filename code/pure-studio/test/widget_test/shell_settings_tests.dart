@@ -700,8 +700,6 @@ void registerShellSettingsTests() {
                   kind: TaskStateKind.implementing,
                   statusMessage: 'Executor delivery ready',
                 ),
-                branch: 'codex/task-mode',
-                expectedHead: '1234567890abcdef',
                 revision: 0,
                 workUnits: [],
                 completions: [],

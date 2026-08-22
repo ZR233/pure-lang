@@ -5,9 +5,10 @@ use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     ExecutorContinuationState, RestartAgentReconciliation, ReviewRoundState, ReviewScope,
-    ReviewVerdict, TaskCommand, TaskRunStateKind, TaskWorktreeCleanupState,
-    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
-    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
+    ReviewTarget, ReviewVerdict, TaskCommand, TaskRunState, TaskRunStateKind,
+    TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
+    TaskWorktreeOwnerSnapshot, ThreadExecutionStatus, WorkCompletionStatus, WorkUnitState,
+    WorkUnitStatus,
 };
 
 use super::{
@@ -29,7 +30,6 @@ impl StudioStore {
         task_run_id: &str,
         expected_generation: u64,
         expected_phase: TaskRunStateKind,
-        expected_head: &str,
     ) -> Result<bool> {
         if !matches!(
             expected_phase,
@@ -51,21 +51,17 @@ impl StudioStore {
             let record = task_run_record(run.clone())?;
             if record.generation() != expected_generation
                 || record.kind() != expected_phase
-                || run.expected_head != expected_head
                 || record.kind().is_terminal()
             {
                 bail!("Task recovery facts changed before StopRequested could be cleared");
             }
-            let lease = entities::branch_lease::Entity::find()
-                .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+            let lease = entities::project_lease::Entity::find()
+                .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
                 .one(&tx)
                 .await?
-                .context("Task recovery branch lease not found")?;
-            if lease.expected_head != expected_head
-                || lease.branch != run.branch
-                || lease.git_common_dir != run.git_common_dir
-            {
-                bail!("Task recovery branch lease changed before StopRequested clear");
+                .context("Task recovery project lease not found")?;
+            if lease.project_id != run.project_id {
+                bail!("Task recovery project lease changed before StopRequested clear");
             }
             if !record.is_stop_requested() {
                 return Ok(false);
@@ -88,32 +84,7 @@ impl StudioStore {
     pub(crate) async fn list_all_task_worktree_owners(
         &self,
     ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
-        let mut common_dirs = entities::task_run::Entity::find()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|run| run.git_common_dir)
-            .collect::<Vec<_>>();
-        common_dirs.sort();
-        common_dirs.dedup();
-        let mut owners = Vec::new();
-        for common_dir in common_dirs {
-            owners.extend(
-                self.list_task_worktree_owners_by_git_common_dir(&common_dir)
-                    .await?,
-            );
-        }
-        Ok(owners)
-    }
-
-    pub(crate) async fn list_task_worktree_owners_by_git_common_dir(
-        &self,
-        git_common_dir: &str,
-    ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
-        let runs = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::GitCommonDir.eq(git_common_dir.to_string()))
-            .all(&self.db)
-            .await?;
+        let runs = entities::task_run::Entity::find().all(&self.db).await?;
         self.task_worktree_owners_for_runs(runs).await
     }
 
@@ -265,11 +236,20 @@ async fn reconcile_pending_reviews_after_restart(
                 restore_delivery_review_after_restart(tx, &round, work_units).await?;
             }
             ReviewScope::Integrated => {
+                let record = task_run_record(run.clone())?;
+                let target_matches = matches!(
+                    &record.state,
+                    TaskRunState::Reviewing(state)
+                        if matches!(
+                            state.target(),
+                            ReviewTarget::Integration { reviewed_head }
+                                if reviewed_head == &round.reviewed_head
+                        )
+                );
                 if round.work_unit_id.is_some()
                     || round.completion_id.is_some()
                     || round.completion_revision.is_some()
-                    || round.reviewed_head != run.expected_head
-                    || task_run_record(run.clone())?.kind() != TaskRunStateKind::Reviewing
+                    || !target_matches
                 {
                     bail!("pending integrated review does not match the task run");
                 }

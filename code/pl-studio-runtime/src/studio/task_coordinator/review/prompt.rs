@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 use serde::Serialize;
 
-use super::super::git::{GitDiffSelection, diff_between};
 use super::super::spawn::TaskExecutorBlueprint;
 use super::super::{ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnit, WorkUnitStatus};
 use super::{ModelCompletion, ModelWorkUnit};
@@ -75,18 +74,7 @@ pub(crate) async fn build_review_prompt(
                 .filter(|work_unit| work_unit.id != completion.work_unit_id)
                 .map(ReviewFocus::from)
                 .collect::<Vec<_>>();
-            let diff = match completion.head_commit.as_deref() {
-                Some(head) => {
-                    diff_between(
-                        &completion.worktree_path,
-                        &completion.base_commit,
-                        head,
-                        GitDiffSelection::All,
-                    )
-                    .await?
-                }
-                None => String::new(),
-            };
+            let diff = "TaskService 不读取 Git diff；请以冻结的 changedFiles 与 Completion 声明为审计范围，并直接读取对应文件。".to_string();
             render_template(
                 DELIVERY_TEMPLATE,
                 [
@@ -118,13 +106,7 @@ pub(crate) async fn build_review_prompt(
             )?
         }
         ReviewScope::Integrated => {
-            let diff = diff_between(
-                &run.workspace_root,
-                &run.base_commit,
-                &run.expected_head,
-                GitDiffSelection::ExcludeDesign,
-            )
-            .await?;
+            let diff = "TaskService 不读取 Git diff；请以持久化 Completion/Merge 声明和冻结的 changedFiles 为审计范围。".to_string();
             let completions = coordinator
                 .store
                 .list_work_completions(&run.id)
@@ -142,7 +124,7 @@ pub(crate) async fn build_review_prompt(
             render_template(
                 INTEGRATED_TEMPLATE,
                 [
-                    ("TASK_HEAD", run.expected_head.clone()),
+                    ("TASK_HEAD", round.reviewed_head.clone()),
                     (
                         "CHANGED_FILES_JSON",
                         serde_json::to_string_pretty(&changed_files)?,

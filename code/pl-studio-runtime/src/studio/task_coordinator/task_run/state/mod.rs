@@ -72,46 +72,8 @@ impl TaskRunStateKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TaskGitFingerprint {
-    pub(crate) workspace_root: String,
-    pub(crate) git_common_dir: String,
-    pub(crate) branch: String,
-    pub(crate) head: String,
-    pub(crate) base_commit: String,
-    pub(crate) expected_head: String,
-    pub(crate) operation: String,
-    pub(crate) index_diff_hash: String,
-    pub(crate) working_tree_diff_hash: String,
-    pub(crate) untracked_content_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct FinalizedDesign {
-    pub(crate) head: String,
-    pub(crate) commit: Option<String>,
     pub(crate) summary: String,
-    pub(crate) fingerprint: TaskGitFingerprint,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DesignWorkspaceObservation {
-    pub(crate) sequence: u64,
-    pub(crate) turn_id: Option<String>,
-    pub(crate) tool_call_id: Option<String>,
-    pub(crate) fingerprint: TaskGitFingerprint,
-}
-
-impl DesignWorkspaceObservation {
-    pub(crate) fn baseline(fingerprint: TaskGitFingerprint) -> Self {
-        Self {
-            sequence: 0,
-            turn_id: None,
-            tool_call_id: None,
-            fingerprint,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,8 +142,8 @@ pub(crate) enum TaskRunState {
 }
 
 impl TaskRunState {
-    pub(crate) fn new(baseline: TaskGitFingerprint) -> Self {
-        Self::DesignUpdating(DesignUpdatingState::new(baseline))
+    pub(crate) const fn new() -> Self {
+        Self::DesignUpdating(DesignUpdatingState::new())
     }
 
     pub(crate) const fn kind(&self) -> TaskRunStateKind {
@@ -253,13 +215,6 @@ impl TaskRunState {
     pub(crate) fn terminal_failure_id(&self) -> Option<&str> {
         match self {
             Self::Failed(state) => state.failure_id(),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn latest_design_observation(&self) -> Option<&DesignWorkspaceObservation> {
-        match self {
-            Self::DesignUpdating(state) => Some(state.latest_observation()),
             _ => None,
         }
     }

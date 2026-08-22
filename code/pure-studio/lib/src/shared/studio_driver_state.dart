@@ -174,14 +174,9 @@ abstract final class StudioDriverState {
     'runId': preview.runId,
     'taskGeneration': preview.taskGeneration,
     'phase': preview.state.name,
-    'expectedHead': preview.expectedHead,
     'stopRequested': preview.stopRequested,
-    'branchLeaseId': preview.branchLeaseId,
-    'branchLeaseBranch': preview.branchLeaseBranch,
-    'branchLeaseGitCommonDir': preview.branchLeaseGitCommonDir,
-    'branchLeaseExpectedHead': preview.branchLeaseExpectedHead,
+    'projectLeaseId': preview.projectLeaseId,
     'recommendedThreadId': preview.recommendedThreadId,
-    'mainGitFingerprint': _gitFingerprintJson(preview.mainGitFingerprint),
     'targets': [
       for (final target in preview.targets)
         {
@@ -194,6 +189,7 @@ abstract final class StudioDriverState {
           'expectedThreadRevision': target.expectedThreadRevision,
           'branch': target.branch,
           'worktreePath': target.worktreePath,
+          'baseCommit': target.baseCommit,
           'defaultTurnIds': target.defaultTurnIds,
           'availableModes': target.availableModes
               .map((mode) => mode.name)
@@ -209,7 +205,6 @@ abstract final class StudioDriverState {
                 'toolSummaries': turn.toolSummaries,
               },
           ],
-          'gitFingerprint': _gitFingerprintJson(target.gitFingerprint),
         },
     ],
   };
@@ -232,29 +227,11 @@ abstract final class StudioDriverState {
     'removedInputCount': result.removedInputCount,
     'stopCleared': result.stopCleared,
     'resumeTurnId': result.resumeTurnId,
-    'gitFingerprint': _gitFingerprintJson(result.gitFingerprint),
-  };
-
-  static Map<String, Object?> _gitFingerprintJson(
-    TaskGitFingerprint fingerprint,
-  ) => {
-    'workspaceRoot': fingerprint.workspaceRoot,
-    'gitCommonDir': fingerprint.gitCommonDir,
-    'branch': fingerprint.branch,
-    'head': fingerprint.head,
-    'baseCommit': fingerprint.baseCommit,
-    'expectedHead': fingerprint.expectedHead,
-    'operation': fingerprint.operation,
-    'indexDiffHash': fingerprint.indexDiffHash,
-    'workingTreeDiffHash': fingerprint.workingTreeDiffHash,
-    'untrackedContentHash': fingerprint.untrackedContentHash,
   };
 
   static Map<String, Object?> _taskJson(TaskRuntimeView task) => {
     'runId': task.runId,
     'phase': task.state.kind.name,
-    'branch': task.branch,
-    'expectedHead': task.expectedHead,
     'statusMessage': task.statusMessage,
     'taskGeneration': task.taskGeneration,
     'integratedReviewGate': _integratedReviewGateJson(

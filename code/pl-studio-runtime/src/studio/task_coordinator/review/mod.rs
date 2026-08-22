@@ -13,7 +13,6 @@ use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::git::{GitDiffSelection, changed_files_between_selected};
 use super::{
     BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
     ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRun,
@@ -251,7 +250,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<RequestIntegratedReviewInput>::new(
             "task_request_integrated_review",
-            "Start one fresh read-only integrated review for the current Task HEAD.",
+            "Start one fresh read-only integrated review for the durable integration declarations.",
         )
         .registered(move |_: RequestIntegratedReviewInput, context| {
             let coordinator = coordinator.clone();
@@ -266,26 +265,38 @@ impl TaskCoordinator {
                 let run = coordinator
                     .preflight_integrated_review_locked(&thread_id, &guard)
                     .await?;
-                let changed_files = changed_files_between_selected(
-                    &run.workspace_root,
-                    &run.base_commit,
-                    &run.expected_head,
-                    GitDiffSelection::ExcludeDesign,
-                )
-                .await?;
+                let merges = coordinator.store.list_merge_records(&run.id).await?;
+                let completions = coordinator.store.list_work_completions(&run.id).await?;
+                let reviewed_head = merges
+                    .iter()
+                    .max_by_key(|merge| (merge.created_at, &merge.id))
+                    .map(|merge| merge.resulting_head.clone())
+                    .context("integrated review requires durable merge evidence")?;
+                let merged_completion_ids = merges
+                    .iter()
+                    .map(|merge| merge.completion_id.as_str())
+                    .collect::<std::collections::HashSet<_>>();
+                let mut changed_files = completions
+                    .iter()
+                    .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
+                    .flat_map(|completion| completion.changed_files.iter().cloned())
+                    .filter(|path| !path.starts_with("design/"))
+                    .collect::<Vec<_>>();
+                changed_files.sort();
+                changed_files.dedup();
                 let round = coordinator
                     .store
                     .begin_integrated_review(
                         &thread_id,
                         BeginIntegratedReview {
                             requested_by_call_id: call_id.clone(),
-                            reviewed_head: run.expected_head.clone(),
+                            reviewed_head: reviewed_head.clone(),
                             changed_files,
                         },
                     )
                     .await?;
                 drop(guard);
-                debug_assert_eq!(round.reviewed_head, run.expected_head);
+                debug_assert_eq!(round.reviewed_head, reviewed_head);
                 coordinator
                     .spawn_reviewer(&thread_id, round, &call_id, &runtime)
                     .await
@@ -498,7 +509,6 @@ impl TaskCoordinator {
             bail!("integrated review requires implementing or reworking");
         }
         self.ensure_process_lease_owned(&run)?;
-        validate_review_repository(&run).await?;
         Ok(run)
     }
 
@@ -559,6 +569,13 @@ impl TaskCoordinator {
                 .head_commit
                 .clone()
                 .context("approved delivery Completion has no head commit")?;
+            let expected_task_head = merges
+                .iter()
+                .max_by_key(|merge| (merge.created_at, &merge.id))
+                .map_or_else(
+                    || completion.base_commit.clone(),
+                    |merge| merge.resulting_head.clone(),
+                );
             candidates.push(MergeCandidate {
                 executor_agent_id: executor_agent_id.to_string(),
                 completion_revision: completion.revision,
@@ -569,7 +586,7 @@ impl TaskCoordinator {
                 branch: work_unit.branch.clone(),
                 base_commit: completion.base_commit.clone(),
                 head_commit,
-                expected_task_head: run.expected_head.clone(),
+                expected_task_head,
             });
         }
         Ok(candidates)
@@ -674,8 +691,12 @@ fn relative_worktree_locator(workspace_root: &str, worktree_path: &str) -> Resul
 }
 
 fn model_worktree_locator(workspace_root: &str, worktree_path: &str) -> Option<String> {
-    let workspace_root = git_compatible_path(PathBuf::from(workspace_root));
-    let worktree_path = git_compatible_path(PathBuf::from(worktree_path));
+    let workspace_root = git_compatible_path(
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| PathBuf::from(workspace_root)),
+    );
+    let worktree_path = git_compatible_path(
+        std::fs::canonicalize(worktree_path).unwrap_or_else(|_| PathBuf::from(worktree_path)),
+    );
     let relative = worktree_path.strip_prefix(workspace_root).ok()?;
     let components = relative
         .components()
@@ -698,28 +719,4 @@ fn provider_call_id(value: Option<&str>, tool: &str) -> Result<String> {
         bail!("{tool} requires a non-empty provider call id");
     }
     Ok(value.to_string())
-}
-
-pub(super) async fn validate_review_repository(run: &TaskRun) -> Result<()> {
-    let snapshot = super::git::inspect_repository(&run.workspace_root, true).await?;
-    let common = git_compatible_path(
-        std::fs::canonicalize(&snapshot.git_common_dir).unwrap_or(snapshot.git_common_dir),
-    )
-    .to_string_lossy()
-    .replace('\\', "/");
-    let expected_common = git_compatible_path(
-        std::fs::canonicalize(&run.git_common_dir)
-            .unwrap_or_else(|_| std::path::PathBuf::from(&run.git_common_dir)),
-    )
-    .to_string_lossy()
-    .replace('\\', "/");
-    let equal_common = if cfg!(windows) {
-        common.eq_ignore_ascii_case(&expected_common)
-    } else {
-        common == expected_common
-    };
-    if !equal_common || snapshot.branch != run.branch || snapshot.head != run.expected_head {
-        bail!("task branch identity or HEAD drifted before review");
-    }
-    Ok(())
 }

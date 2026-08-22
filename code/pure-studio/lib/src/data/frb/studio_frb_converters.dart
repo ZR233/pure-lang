@@ -65,8 +65,6 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
   return TaskRuntimeView(
     runId: task.runId,
     state: _taskStateFromFrb(task.state),
-    branch: task.branch,
-    expectedHead: task.expectedHead,
     revision: task.revision.toInt(),
     integratedReviewGate: switch (task.integratedReviewGate) {
       frb.BridgeIntegratedReviewGateDto_Required(:final reason) =>
@@ -707,15 +705,10 @@ TaskRecoveryPreview _taskRecoveryPreviewFromFrb(
       frb.BridgeTaskRecoveryState.failed => TaskStateKind.failed,
       frb.BridgeTaskRecoveryState.cancelled => TaskStateKind.cancelled,
     },
-    expectedHead: preview.expectedHead,
     stopRequested: preview.stopRequested,
-    branchLeaseId: preview.branchLeaseId,
-    branchLeaseBranch: preview.branchLeaseBranch,
-    branchLeaseGitCommonDir: preview.branchLeaseGitCommonDir,
-    branchLeaseExpectedHead: preview.branchLeaseExpectedHead,
+    projectLeaseId: preview.projectLeaseId,
     recommendedThreadId: preview.recommendedThreadId,
     targets: preview.targets.map(_taskRecoveryTargetFromFrb).toList(),
-    mainGitFingerprint: _taskGitFingerprintFromFrb(preview.mainGitFingerprint),
     completionRevisionFingerprint: preview.completionRevisionFingerprint,
     reviewRevisionFingerprint: preview.reviewRevisionFingerprint,
     mergeRevisionFingerprint: preview.mergeRevisionFingerprint,
@@ -740,6 +733,7 @@ TaskRecoveryTarget _taskRecoveryTargetFromFrb(
     expectedThreadRevision: target.expectedThreadRevision.toInt(),
     branch: target.branch,
     worktreePath: target.worktreePath,
+    baseCommit: target.baseCommit,
     turns: [
       for (final turn in target.turns)
         TaskRecoveryTurn(
@@ -756,24 +750,6 @@ TaskRecoveryTarget _taskRecoveryTargetFromFrb(
     availableModes: target.availableModes
         .map(_conversationRecoveryModeFromFrb)
         .toList(),
-    gitFingerprint: _taskGitFingerprintFromFrb(target.gitFingerprint),
-  );
-}
-
-TaskGitFingerprint _taskGitFingerprintFromFrb(
-  frb.BridgeTaskGitFingerprintDto fingerprint,
-) {
-  return TaskGitFingerprint(
-    workspaceRoot: fingerprint.workspaceRoot,
-    gitCommonDir: fingerprint.gitCommonDir,
-    branch: fingerprint.branch,
-    head: fingerprint.head,
-    baseCommit: fingerprint.baseCommit,
-    expectedHead: fingerprint.expectedHead,
-    operation: fingerprint.operation,
-    indexDiffHash: fingerprint.indexDiffHash,
-    workingTreeDiffHash: fingerprint.workingTreeDiffHash,
-    untrackedContentHash: fingerprint.untrackedContentHash,
   );
 }
 
@@ -812,12 +788,8 @@ frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
       TaskStateKind.failed => frb.BridgeTaskRecoveryState.failed,
       TaskStateKind.cancelled => frb.BridgeTaskRecoveryState.cancelled,
     },
-    expectedHead: preview.expectedHead,
     stopRequested: preview.stopRequested,
-    branchLeaseId: preview.branchLeaseId,
-    branchLeaseBranch: preview.branchLeaseBranch,
-    branchLeaseGitCommonDir: preview.branchLeaseGitCommonDir,
-    branchLeaseExpectedHead: preview.branchLeaseExpectedHead,
+    projectLeaseId: preview.projectLeaseId,
     recommendedThreadId: preview.recommendedThreadId,
     targets: [
       for (final target in preview.targets)
@@ -838,6 +810,7 @@ frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
           expectedThreadRevision: BigInt.from(target.expectedThreadRevision),
           branch: target.branch,
           worktreePath: target.worktreePath,
+          baseCommit: target.baseCommit,
           turns: [
             for (final turn in target.turns)
               frb.BridgeTaskRecoveryTurnDto(
@@ -854,30 +827,11 @@ frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
           availableModes: target.availableModes
               .map(_conversationRecoveryModeToFrb)
               .toList(),
-          gitFingerprint: _taskGitFingerprintToFrb(target.gitFingerprint),
         ),
     ],
-    mainGitFingerprint: _taskGitFingerprintToFrb(preview.mainGitFingerprint),
     completionRevisionFingerprint: preview.completionRevisionFingerprint,
     reviewRevisionFingerprint: preview.reviewRevisionFingerprint,
     mergeRevisionFingerprint: preview.mergeRevisionFingerprint,
-  );
-}
-
-frb.BridgeTaskGitFingerprintDto _taskGitFingerprintToFrb(
-  TaskGitFingerprint fingerprint,
-) {
-  return frb.BridgeTaskGitFingerprintDto(
-    workspaceRoot: fingerprint.workspaceRoot,
-    gitCommonDir: fingerprint.gitCommonDir,
-    branch: fingerprint.branch,
-    head: fingerprint.head,
-    baseCommit: fingerprint.baseCommit,
-    expectedHead: fingerprint.expectedHead,
-    operation: fingerprint.operation,
-    indexDiffHash: fingerprint.indexDiffHash,
-    workingTreeDiffHash: fingerprint.workingTreeDiffHash,
-    untrackedContentHash: fingerprint.untrackedContentHash,
   );
 }
 
@@ -900,7 +854,6 @@ TaskRecoveryResult _taskRecoveryResultFromFrb(
     removedInputCount: result.removedInputCount.toInt(),
     stopCleared: result.stopCleared,
     resumeTurnId: result.resumeTurnId,
-    gitFingerprint: _taskGitFingerprintFromFrb(result.gitFingerprint),
   );
 }
 

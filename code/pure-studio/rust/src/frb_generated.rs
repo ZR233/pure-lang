@@ -2825,15 +2825,9 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeFailedReviewerState
 impl SseDecode for crate::api::studio::types::runtime::BridgeFinalizedDesign {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_head = <String>::sse_decode(deserializer);
-        let mut var_commit = <Option<String>>::sse_decode(deserializer);
         let mut var_summary = <String>::sse_decode(deserializer);
-        let mut var_fingerprint = <String>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeFinalizedDesign {
-            head: var_head,
-            commit: var_commit,
             summary: var_summary,
-            fingerprint: var_fingerprint,
         };
     }
 }
@@ -4405,34 +4399,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskFailureDto {
     }
 }
 
-impl SseDecode for crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_workspaceRoot = <String>::sse_decode(deserializer);
-        let mut var_gitCommonDir = <String>::sse_decode(deserializer);
-        let mut var_branch = <String>::sse_decode(deserializer);
-        let mut var_head = <String>::sse_decode(deserializer);
-        let mut var_baseCommit = <String>::sse_decode(deserializer);
-        let mut var_expectedHead = <String>::sse_decode(deserializer);
-        let mut var_operation = <String>::sse_decode(deserializer);
-        let mut var_indexDiffHash = <String>::sse_decode(deserializer);
-        let mut var_workingTreeDiffHash = <String>::sse_decode(deserializer);
-        let mut var_untrackedContentHash = <String>::sse_decode(deserializer);
-        return crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto {
-            workspace_root: var_workspaceRoot,
-            git_common_dir: var_gitCommonDir,
-            branch: var_branch,
-            head: var_head,
-            base_commit: var_baseCommit,
-            expected_head: var_expectedHead,
-            operation: var_operation,
-            index_diff_hash: var_indexDiffHash,
-            working_tree_diff_hash: var_workingTreeDiffHash,
-            untracked_content_hash: var_untrackedContentHash,
-        };
-    }
-}
-
 impl SseDecode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4479,19 +4445,11 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryPreview
         let mut var_taskGeneration = <u64>::sse_decode(deserializer);
         let mut var_state =
             <crate::api::studio::types::runtime::BridgeTaskRecoveryState>::sse_decode(deserializer);
-        let mut var_expectedHead = <String>::sse_decode(deserializer);
         let mut var_stopRequested = <bool>::sse_decode(deserializer);
-        let mut var_branchLeaseId = <String>::sse_decode(deserializer);
-        let mut var_branchLeaseBranch = <String>::sse_decode(deserializer);
-        let mut var_branchLeaseGitCommonDir = <String>::sse_decode(deserializer);
-        let mut var_branchLeaseExpectedHead = <String>::sse_decode(deserializer);
+        let mut var_projectLeaseId = <String>::sse_decode(deserializer);
         let mut var_recommendedThreadId = <String>::sse_decode(deserializer);
         let mut var_targets =
             <Vec<crate::api::studio::types::runtime::BridgeTaskRecoveryTargetDto>>::sse_decode(
-                deserializer,
-            );
-        let mut var_mainGitFingerprint =
-            <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_decode(
                 deserializer,
             );
         let mut var_completionRevisionFingerprint = <String>::sse_decode(deserializer);
@@ -4504,15 +4462,10 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryPreview
             revision: var_revision,
             task_generation: var_taskGeneration,
             state: var_state,
-            expected_head: var_expectedHead,
             stop_requested: var_stopRequested,
-            branch_lease_id: var_branchLeaseId,
-            branch_lease_branch: var_branchLeaseBranch,
-            branch_lease_git_common_dir: var_branchLeaseGitCommonDir,
-            branch_lease_expected_head: var_branchLeaseExpectedHead,
+            project_lease_id: var_projectLeaseId,
             recommended_thread_id: var_recommendedThreadId,
             targets: var_targets,
-            main_git_fingerprint: var_mainGitFingerprint,
             completion_revision_fingerprint: var_completionRevisionFingerprint,
             review_revision_fingerprint: var_reviewRevisionFingerprint,
             merge_revision_fingerprint: var_mergeRevisionFingerprint,
@@ -4567,10 +4520,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryResultD
         let mut var_removedInputCount = <u64>::sse_decode(deserializer);
         let mut var_stopCleared = <bool>::sse_decode(deserializer);
         let mut var_resumeTurnId = <String>::sse_decode(deserializer);
-        let mut var_gitFingerprint =
-            <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_decode(
-                deserializer,
-            );
         return crate::api::studio::types::runtime::BridgeTaskRecoveryResultDto {
             recovery_id: var_recoveryId,
             run_id: var_runId,
@@ -4587,7 +4536,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryResultD
             removed_input_count: var_removedInputCount,
             stop_cleared: var_stopCleared,
             resume_turn_id: var_resumeTurnId,
-            git_fingerprint: var_gitFingerprint,
         };
     }
 }
@@ -4627,6 +4575,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryTargetD
         let mut var_expectedThreadRevision = <u64>::sse_decode(deserializer);
         let mut var_branch = <String>::sse_decode(deserializer);
         let mut var_worktreePath = <String>::sse_decode(deserializer);
+        let mut var_baseCommit = <Option<String>>::sse_decode(deserializer);
         let mut var_turns =
             <Vec<crate::api::studio::types::runtime::BridgeTaskRecoveryTurnDto>>::sse_decode(
                 deserializer,
@@ -4635,10 +4584,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryTargetD
         let mut var_availableModes = <Vec<
             crate::api::studio::types::runtime::BridgeConversationRecoveryMode,
         >>::sse_decode(deserializer);
-        let mut var_gitFingerprint =
-            <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_decode(
-                deserializer,
-            );
         return crate::api::studio::types::runtime::BridgeTaskRecoveryTargetDto {
             thread_id: var_threadId,
             kind: var_kind,
@@ -4649,10 +4594,10 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRecoveryTargetD
             expected_thread_revision: var_expectedThreadRevision,
             branch: var_branch,
             worktree_path: var_worktreePath,
+            base_commit: var_baseCommit,
             turns: var_turns,
             default_turn_ids: var_defaultTurnIds,
             available_modes: var_availableModes,
-            git_fingerprint: var_gitFingerprint,
         };
     }
 }
@@ -4846,8 +4791,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
         let mut var_runId = <String>::sse_decode(deserializer);
         let mut var_state =
             <crate::api::studio::types::runtime::BridgeTaskState>::sse_decode(deserializer);
-        let mut var_branch = <String>::sse_decode(deserializer);
-        let mut var_expectedHead = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
         let mut var_integratedReviewGate =
             <crate::api::studio::types::runtime::BridgeIntegratedReviewGateDto>::sse_decode(
@@ -4877,8 +4820,6 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
         return crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
             run_id: var_runId,
             state: var_state,
-            branch: var_branch,
-            expected_head: var_expectedHead,
             revision: var_revision,
             integrated_review_gate: var_integratedReviewGate,
             failures: var_failures,
@@ -8478,13 +8419,7 @@ impl
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeFinalizedDesign {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.head.into_into_dart().into_dart(),
-            self.commit.into_into_dart().into_dart(),
-            self.summary.into_into_dart().into_dart(),
-            self.fingerprint.into_into_dart().into_dart(),
-        ]
-        .into_dart()
+        [self.summary.into_into_dart().into_dart()].into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -10424,39 +10359,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart
-    for crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto
-{
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.workspace_root.into_into_dart().into_dart(),
-            self.git_common_dir.into_into_dart().into_dart(),
-            self.branch.into_into_dart().into_dart(),
-            self.head.into_into_dart().into_dart(),
-            self.base_commit.into_into_dart().into_dart(),
-            self.expected_head.into_into_dart().into_dart(),
-            self.operation.into_into_dart().into_dart(),
-            self.index_diff_hash.into_into_dart().into_dart(),
-            self.working_tree_diff_hash.into_into_dart().into_dart(),
-            self.untracked_content_hash.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto
-{
-}
-impl
-    flutter_rust_bridge::IntoIntoDart<
-        crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto,
-    > for crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto
-{
-    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeTaskMergeDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -10501,17 +10403,10 @@ impl flutter_rust_bridge::IntoDart
             self.revision.into_into_dart().into_dart(),
             self.task_generation.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
-            self.expected_head.into_into_dart().into_dart(),
             self.stop_requested.into_into_dart().into_dart(),
-            self.branch_lease_id.into_into_dart().into_dart(),
-            self.branch_lease_branch.into_into_dart().into_dart(),
-            self.branch_lease_git_common_dir
-                .into_into_dart()
-                .into_dart(),
-            self.branch_lease_expected_head.into_into_dart().into_dart(),
+            self.project_lease_id.into_into_dart().into_dart(),
             self.recommended_thread_id.into_into_dart().into_dart(),
             self.targets.into_into_dart().into_dart(),
-            self.main_git_fingerprint.into_into_dart().into_dart(),
             self.completion_revision_fingerprint
                 .into_into_dart()
                 .into_dart(),
@@ -10586,7 +10481,6 @@ impl flutter_rust_bridge::IntoDart
             self.removed_input_count.into_into_dart().into_dart(),
             self.stop_cleared.into_into_dart().into_dart(),
             self.resume_turn_id.into_into_dart().into_dart(),
-            self.git_fingerprint.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10648,10 +10542,10 @@ impl flutter_rust_bridge::IntoDart
             self.expected_thread_revision.into_into_dart().into_dart(),
             self.branch.into_into_dart().into_dart(),
             self.worktree_path.into_into_dart().into_dart(),
+            self.base_commit.into_into_dart().into_dart(),
             self.turns.into_into_dart().into_dart(),
             self.default_turn_ids.into_into_dart().into_dart(),
             self.available_modes.into_into_dart().into_dart(),
-            self.git_fingerprint.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10873,8 +10767,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
         [
             self.run_id.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
-            self.branch.into_into_dart().into_dart(),
-            self.expected_head.into_into_dart().into_dart(),
             self.revision.into_into_dart().into_dart(),
             self.integrated_review_gate.into_into_dart().into_dart(),
             self.failures.into_into_dart().into_dart(),
@@ -13471,10 +13363,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeFailedReviewerState
 impl SseEncode for crate::api::studio::types::runtime::BridgeFinalizedDesign {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.head, serializer);
-        <Option<String>>::sse_encode(self.commit, serializer);
         <String>::sse_encode(self.summary, serializer);
-        <String>::sse_encode(self.fingerprint, serializer);
     }
 }
 
@@ -14617,22 +14506,6 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskFailureDto {
     }
 }
 
-impl SseEncode for crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.workspace_root, serializer);
-        <String>::sse_encode(self.git_common_dir, serializer);
-        <String>::sse_encode(self.branch, serializer);
-        <String>::sse_encode(self.head, serializer);
-        <String>::sse_encode(self.base_commit, serializer);
-        <String>::sse_encode(self.expected_head, serializer);
-        <String>::sse_encode(self.operation, serializer);
-        <String>::sse_encode(self.index_diff_hash, serializer);
-        <String>::sse_encode(self.working_tree_diff_hash, serializer);
-        <String>::sse_encode(self.untracked_content_hash, serializer);
-    }
-}
-
 impl SseEncode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -14664,19 +14537,11 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRecoveryPreview
         <crate::api::studio::types::runtime::BridgeTaskRecoveryState>::sse_encode(
             self.state, serializer,
         );
-        <String>::sse_encode(self.expected_head, serializer);
         <bool>::sse_encode(self.stop_requested, serializer);
-        <String>::sse_encode(self.branch_lease_id, serializer);
-        <String>::sse_encode(self.branch_lease_branch, serializer);
-        <String>::sse_encode(self.branch_lease_git_common_dir, serializer);
-        <String>::sse_encode(self.branch_lease_expected_head, serializer);
+        <String>::sse_encode(self.project_lease_id, serializer);
         <String>::sse_encode(self.recommended_thread_id, serializer);
         <Vec<crate::api::studio::types::runtime::BridgeTaskRecoveryTargetDto>>::sse_encode(
             self.targets,
-            serializer,
-        );
-        <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_encode(
-            self.main_git_fingerprint,
             serializer,
         );
         <String>::sse_encode(self.completion_revision_fingerprint, serializer);
@@ -14722,10 +14587,6 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRecoveryResultD
         <u64>::sse_encode(self.removed_input_count, serializer);
         <bool>::sse_encode(self.stop_cleared, serializer);
         <String>::sse_encode(self.resume_turn_id, serializer);
-        <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_encode(
-            self.git_fingerprint,
-            serializer,
-        );
     }
 }
 
@@ -14767,16 +14628,13 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRecoveryTargetD
         <u64>::sse_encode(self.expected_thread_revision, serializer);
         <String>::sse_encode(self.branch, serializer);
         <String>::sse_encode(self.worktree_path, serializer);
+        <Option<String>>::sse_encode(self.base_commit, serializer);
         <Vec<crate::api::studio::types::runtime::BridgeTaskRecoveryTurnDto>>::sse_encode(
             self.turns, serializer,
         );
         <Vec<String>>::sse_encode(self.default_turn_ids, serializer);
         <Vec<crate::api::studio::types::runtime::BridgeConversationRecoveryMode>>::sse_encode(
             self.available_modes,
-            serializer,
-        );
-        <crate::api::studio::types::runtime::BridgeTaskGitFingerprintDto>::sse_encode(
-            self.git_fingerprint,
             serializer,
         );
     }
@@ -14932,8 +14790,6 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.run_id, serializer);
         <crate::api::studio::types::runtime::BridgeTaskState>::sse_encode(self.state, serializer);
-        <String>::sse_encode(self.branch, serializer);
-        <String>::sse_encode(self.expected_head, serializer);
         <u64>::sse_encode(self.revision, serializer);
         <crate::api::studio::types::runtime::BridgeIntegratedReviewGateDto>::sse_encode(
             self.integrated_review_gate,

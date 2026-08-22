@@ -385,18 +385,10 @@ async fn archive_project_refuses_a_durable_active_task() {
         .unwrap();
     store
         .create_task_run_with_lease(CreateTaskRun {
+            project_id: project.id.clone(),
             root_thread_id: thread.id.clone(),
             plan: "# Plan".to_string(),
             workspace_root: "C:/work/archive-active-task".to_string(),
-            git_common_dir: "C:/work/archive-active-task/.git".to_string(),
-            branch: "main".to_string(),
-            head_commit: "1111111".to_string(),
-            design_baseline: crate::studio::task_coordinator::test_task_git_fingerprint(
-                "C:/work/archive-active-task",
-                "C:/work/archive-active-task/.git",
-                "main",
-                "1111111",
-            ),
         })
         .await
         .unwrap();
@@ -445,18 +437,10 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
         .unwrap();
     busy_store
         .create_task_run_with_lease(CreateTaskRun {
+            project_id: project.id.clone(),
             root_thread_id: session.id,
             plan: "# Plan".to_string(),
             workspace_root: "C:/work/update-busy".to_string(),
-            git_common_dir: "C:/work/update-busy/.git".to_string(),
-            branch: "main".to_string(),
-            head_commit: "1111111".to_string(),
-            design_baseline: crate::studio::task_coordinator::test_task_git_fingerprint(
-                "C:/work/update-busy",
-                "C:/work/update-busy/.git",
-                "main",
-                "1111111",
-            ),
         })
         .await
         .unwrap();
@@ -497,96 +481,6 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
 
     let _ = tokio::fs::remove_dir_all(busy_home).await;
     let _ = tokio::fs::remove_dir_all(idle_home).await;
-}
-
-#[tokio::test]
-async fn failed_task_preflight_keeps_plan_confirmation_pending() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let repository = std::env::temp_dir().join(format!("pure-plan-preflight-{unique}"));
-    std::fs::create_dir_all(&repository).unwrap();
-    for args in [
-        vec!["init", "-b", "main"],
-        vec!["config", "user.email", "pure@example.com"],
-        vec!["config", "user.name", "Pure Tests"],
-    ] {
-        let status = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&repository)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success());
-    }
-    std::fs::write(repository.join("README.md"), "initial\n").unwrap();
-    for args in [vec!["add", "README.md"], vec!["commit", "-m", "initial"]] {
-        let status = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&repository)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success());
-    }
-    std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
-
-    assert_failed_task_preflight_keeps_confirmation_pending(&repository, "dirty").await;
-    let _ = std::fs::remove_dir_all(repository);
-}
-
-async fn assert_failed_task_preflight_keeps_confirmation_pending(
-    repository: &std::path::Path,
-    suffix: &str,
-) {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project(&repository).await.unwrap();
-    let session = store
-        .create_thread(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let interaction = pending_interaction(
-        &format!("plan-confirm-{suffix}"),
-        &session.id,
-        InteractionKind::PlanConfirmation,
-        InteractionPayload::PlanConfirmation {
-            plan_id: format!("plan-{suffix}"),
-            content: "Implement the plan after updating `design/task.md`.".to_string(),
-        },
-    );
-    store.upsert_interaction(&interaction).await.unwrap();
-    let home = std::env::temp_dir().join(format!(
-        "pure-plan-preflight-home-{suffix}-{}",
-        std::process::id()
-    ));
-    let runtime = StudioRuntime::with_runtime_state(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-        StudioRuntimeState::new(),
-    )
-    .unwrap();
-
-    runtime
-        .resolve_interaction(
-            interaction.interaction_id.clone(),
-            crate::InteractionResolution::PlanConfirmation {
-                decision: crate::PlanConfirmationResolution::ImplementFreshContext,
-                content: None,
-                reason: None,
-            },
-        )
-        .await
-        .expect_err("repository preparation must fail before resolving confirmation");
-
-    let stored = store
-        .read_interaction(&interaction.interaction_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.status, InteractionStatus::Pending);
-    assert!(store.list_active_task_runs().await.unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[tokio::test]
@@ -1204,7 +1098,7 @@ async fn fresh_task_run_turn_exposes_normal_tools_and_finalizes_without_edits() 
     assert_eq!(durable.id, run.id);
     assert_eq!(durable.root_thread_id, thread.id);
     assert_eq!(durable.kind(), TaskRunStateKind::Implementing);
-    assert_eq!(durable.design_phase_commit(), None);
+    assert!(durable.design_summary().is_some());
 
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -1380,7 +1274,7 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         .await
         .unwrap();
     assert_eq!(durable_run.kind(), TaskRunStateKind::Implementing);
-    assert_eq!(durable_run.design_phase_commit(), None);
+    assert!(durable_run.design_summary().is_some());
 
     let owner = crate::studio::agent_host::root_agent_id(&thread.id);
     let mail_id =

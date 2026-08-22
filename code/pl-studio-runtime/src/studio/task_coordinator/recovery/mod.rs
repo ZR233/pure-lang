@@ -16,7 +16,6 @@ mod merge;
 pub(crate) use merge::MERGE_RECOVERY_BLOCK_PREFIX;
 pub(crate) use merge::{
     MergingRecovery, inspect_merging_recovery, is_retryable_merge_recovery_message,
-    validate_snapshot_owner,
 };
 
 impl TaskCoordinator {

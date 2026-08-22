@@ -67,8 +67,8 @@ impl StudioStore {
                 progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
                 update_work_unit_state(&tx, work_unit, state.with_progress(progress)).await?;
             }
-            entities::branch_lease::Entity::delete_many()
-                .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+            entities::project_lease::Entity::delete_many()
+                .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
                 .exec(&tx)
                 .await?;
             Ok(())

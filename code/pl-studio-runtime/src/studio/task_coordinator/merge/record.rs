@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -7,10 +6,10 @@ use serde::Deserialize;
 
 use super::cleanup::cleanup_accepted_delivery;
 use super::scope::delivery_from_completion;
-use super::validation::{ensure_preflight_delivery_identity, validate_repository_identity};
+use super::validation::ensure_preflight_delivery_identity;
 use crate::studio::task_coordinator::{
-    AgentDelivery, BranchLeaseRecord, MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator,
-    TaskMergeScope, TaskRun, TaskRunStateKind, WorkCompletionRecord, WorkUnit,
+    MergeMethod, MergeRecord, ProjectLeaseRecord, RecordTaskMerge, TaskCoordinator, TaskMergeScope,
+    TaskRun, TaskRunStateKind, WorkCompletionRecord, WorkUnit,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, ToolEffect};
@@ -23,11 +22,11 @@ pub(crate) struct TaskRecordMergeInput {
     /// Accepted completion revision.
     #[schemars(range(min = 1))]
     pub(crate) completion_revision: u32,
-    /// Durable Task head before integration.
+    /// Caller-declared durable ledger value before integration.
     pub(crate) expected_previous_head: String,
-    /// Task head after integration.
+    /// Caller-declared durable ledger value after integration.
     pub(crate) resulting_head: String,
-    /// Git integration method used by the planner.
+    /// Integration method declared by the planner.
     pub(crate) method: MergeMethod,
     /// Concise integration summary.
     pub(crate) summary: String,
@@ -43,7 +42,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<TaskRecordMergeInput>::new(
             "task_record_merge",
-            "Validate and record Git integration already performed by the current Task planner.",
+            "Record integration facts declared by the current Task planner.",
         )
         .registered(move |input: TaskRecordMergeInput, context| {
             let coordinator = coordinator.clone();
@@ -99,57 +98,17 @@ impl TaskCoordinator {
             .await?;
         self.ensure_process_lease_owned(&scope.run)?;
 
-        let expected_previous_head = crate::studio::task_coordinator::git::resolve_commit_oid(
-            &scope.run.workspace_root,
-            input.expected_previous_head.trim(),
-        )
-        .await?;
-        let resulting_head = crate::studio::task_coordinator::git::resolve_commit_oid(
-            &scope.run.workspace_root,
-            input.resulting_head.trim(),
-        )
-        .await?;
+        let expected_previous_head = input.expected_previous_head.trim().to_string();
+        let resulting_head = input.resulting_head.trim().to_string();
         ensure!(
-            expected_previous_head == scope.run.expected_head
-                && expected_previous_head == scope.lease.expected_head,
-            "expectedPreviousHead does not match the durable Task head"
+            scope.lease.project_id == scope.run.project_id,
+            "project lease does not match the durable TaskRun"
         );
         ensure!(
             resulting_head != expected_previous_head,
             "resultingHead must advance beyond expectedPreviousHead"
         );
 
-        validate_repository_identity(
-            Path::new(&scope.run.workspace_root),
-            Path::new(&scope.run.workspace_root),
-            Path::new(&scope.run.git_common_dir),
-            &scope.run.branch,
-            &resulting_head,
-            true,
-        )
-        .await?;
-        validate_repository_identity(
-            Path::new(&scope.work_unit.worktree_path),
-            Path::new(&scope.work_unit.worktree_path),
-            Path::new(&scope.run.git_common_dir),
-            &scope.work_unit.branch,
-            &scope.delivery.head_commit,
-            true,
-        )
-        .await?;
-        crate::studio::task_coordinator::git::ensure_no_git_operation(Path::new(
-            &scope.run.workspace_root,
-        ))
-        .await?;
-        ensure!(
-            crate::studio::task_coordinator::git::is_ancestor(
-                &scope.run.workspace_root,
-                &expected_previous_head,
-                &resulting_head,
-            )
-            .await?,
-            "expectedPreviousHead must be an ancestor of resultingHead"
-        );
         let record = self
             .store
             .record_task_merge(RecordTaskMerge {
@@ -185,9 +144,9 @@ impl TaskCoordinator {
         }
         let lease = self
             .store
-            .read_branch_lease(&run.id)
+            .read_project_lease(&run.id)
             .await?
-            .context("task branch lease not found")?;
+            .context("task project lease not found")?;
         let work_units = self
             .store
             .list_work_units(&run.id)
@@ -230,7 +189,6 @@ impl TaskCoordinator {
             lease,
             work_unit,
             completion,
-            delivery,
         })
     }
 
@@ -293,8 +251,7 @@ fn validate_recorded_input(
 
 struct PlannerMergeScope {
     run: TaskRun,
-    lease: BranchLeaseRecord,
+    lease: ProjectLeaseRecord,
     work_unit: WorkUnit,
     completion: WorkCompletionRecord,
-    delivery: AgentDelivery,
 }

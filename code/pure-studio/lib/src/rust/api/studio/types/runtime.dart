@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentActivity {
   idle,
@@ -225,31 +225,19 @@ enum BridgeExecutorContinuationState {
 enum BridgeFailedReviewerState { failed, cancelled }
 
 class BridgeFinalizedDesign {
-  final String head;
-  final String? commit;
   final String summary;
-  final String fingerprint;
 
-  const BridgeFinalizedDesign({
-    required this.head,
-    this.commit,
-    required this.summary,
-    required this.fingerprint,
-  });
+  const BridgeFinalizedDesign({required this.summary});
 
   @override
-  int get hashCode =>
-      head.hashCode ^ commit.hashCode ^ summary.hashCode ^ fingerprint.hashCode;
+  int get hashCode => summary.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeFinalizedDesign &&
           runtimeType == other.runtimeType &&
-          head == other.head &&
-          commit == other.commit &&
-          summary == other.summary &&
-          fingerprint == other.fingerprint;
+          summary == other.summary;
 }
 
 @freezed
@@ -906,61 +894,6 @@ class BridgeTaskFailureDto {
           createdAt == other.createdAt;
 }
 
-class BridgeTaskGitFingerprintDto {
-  final String workspaceRoot;
-  final String gitCommonDir;
-  final String branch;
-  final String head;
-  final String baseCommit;
-  final String expectedHead;
-  final String operation;
-  final String indexDiffHash;
-  final String workingTreeDiffHash;
-  final String untrackedContentHash;
-
-  const BridgeTaskGitFingerprintDto({
-    required this.workspaceRoot,
-    required this.gitCommonDir,
-    required this.branch,
-    required this.head,
-    required this.baseCommit,
-    required this.expectedHead,
-    required this.operation,
-    required this.indexDiffHash,
-    required this.workingTreeDiffHash,
-    required this.untrackedContentHash,
-  });
-
-  @override
-  int get hashCode =>
-      workspaceRoot.hashCode ^
-      gitCommonDir.hashCode ^
-      branch.hashCode ^
-      head.hashCode ^
-      baseCommit.hashCode ^
-      expectedHead.hashCode ^
-      operation.hashCode ^
-      indexDiffHash.hashCode ^
-      workingTreeDiffHash.hashCode ^
-      untrackedContentHash.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskGitFingerprintDto &&
-          runtimeType == other.runtimeType &&
-          workspaceRoot == other.workspaceRoot &&
-          gitCommonDir == other.gitCommonDir &&
-          branch == other.branch &&
-          head == other.head &&
-          baseCommit == other.baseCommit &&
-          expectedHead == other.expectedHead &&
-          operation == other.operation &&
-          indexDiffHash == other.indexDiffHash &&
-          workingTreeDiffHash == other.workingTreeDiffHash &&
-          untrackedContentHash == other.untrackedContentHash;
-}
-
 class BridgeTaskMergeDto {
   final String id;
   final String workUnitId;
@@ -1039,15 +972,10 @@ class BridgeTaskRecoveryPreviewDto {
   final BigInt revision;
   final BigInt taskGeneration;
   final BridgeTaskRecoveryState state;
-  final String expectedHead;
   final bool stopRequested;
-  final String branchLeaseId;
-  final String branchLeaseBranch;
-  final String branchLeaseGitCommonDir;
-  final String branchLeaseExpectedHead;
+  final String projectLeaseId;
   final String recommendedThreadId;
   final List<BridgeTaskRecoveryTargetDto> targets;
-  final BridgeTaskGitFingerprintDto mainGitFingerprint;
   final String completionRevisionFingerprint;
   final String reviewRevisionFingerprint;
   final String mergeRevisionFingerprint;
@@ -1059,15 +987,10 @@ class BridgeTaskRecoveryPreviewDto {
     required this.revision,
     required this.taskGeneration,
     required this.state,
-    required this.expectedHead,
     required this.stopRequested,
-    required this.branchLeaseId,
-    required this.branchLeaseBranch,
-    required this.branchLeaseGitCommonDir,
-    required this.branchLeaseExpectedHead,
+    required this.projectLeaseId,
     required this.recommendedThreadId,
     required this.targets,
-    required this.mainGitFingerprint,
     required this.completionRevisionFingerprint,
     required this.reviewRevisionFingerprint,
     required this.mergeRevisionFingerprint,
@@ -1081,15 +1004,10 @@ class BridgeTaskRecoveryPreviewDto {
       revision.hashCode ^
       taskGeneration.hashCode ^
       state.hashCode ^
-      expectedHead.hashCode ^
       stopRequested.hashCode ^
-      branchLeaseId.hashCode ^
-      branchLeaseBranch.hashCode ^
-      branchLeaseGitCommonDir.hashCode ^
-      branchLeaseExpectedHead.hashCode ^
+      projectLeaseId.hashCode ^
       recommendedThreadId.hashCode ^
       targets.hashCode ^
-      mainGitFingerprint.hashCode ^
       completionRevisionFingerprint.hashCode ^
       reviewRevisionFingerprint.hashCode ^
       mergeRevisionFingerprint.hashCode;
@@ -1105,15 +1023,10 @@ class BridgeTaskRecoveryPreviewDto {
           revision == other.revision &&
           taskGeneration == other.taskGeneration &&
           state == other.state &&
-          expectedHead == other.expectedHead &&
           stopRequested == other.stopRequested &&
-          branchLeaseId == other.branchLeaseId &&
-          branchLeaseBranch == other.branchLeaseBranch &&
-          branchLeaseGitCommonDir == other.branchLeaseGitCommonDir &&
-          branchLeaseExpectedHead == other.branchLeaseExpectedHead &&
+          projectLeaseId == other.projectLeaseId &&
           recommendedThreadId == other.recommendedThreadId &&
           targets == other.targets &&
-          mainGitFingerprint == other.mainGitFingerprint &&
           completionRevisionFingerprint ==
               other.completionRevisionFingerprint &&
           reviewRevisionFingerprint == other.reviewRevisionFingerprint &&
@@ -1175,7 +1088,6 @@ class BridgeTaskRecoveryResultDto {
   final BigInt removedInputCount;
   final bool stopCleared;
   final String resumeTurnId;
-  final BridgeTaskGitFingerprintDto gitFingerprint;
 
   const BridgeTaskRecoveryResultDto({
     required this.recoveryId,
@@ -1193,7 +1105,6 @@ class BridgeTaskRecoveryResultDto {
     required this.removedInputCount,
     required this.stopCleared,
     required this.resumeTurnId,
-    required this.gitFingerprint,
   });
 
   @override
@@ -1212,8 +1123,7 @@ class BridgeTaskRecoveryResultDto {
       removedItemCount.hashCode ^
       removedInputCount.hashCode ^
       stopCleared.hashCode ^
-      resumeTurnId.hashCode ^
-      gitFingerprint.hashCode;
+      resumeTurnId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1234,8 +1144,7 @@ class BridgeTaskRecoveryResultDto {
           removedItemCount == other.removedItemCount &&
           removedInputCount == other.removedInputCount &&
           stopCleared == other.stopCleared &&
-          resumeTurnId == other.resumeTurnId &&
-          gitFingerprint == other.gitFingerprint;
+          resumeTurnId == other.resumeTurnId;
 }
 
 enum BridgeTaskRecoveryState {
@@ -1261,10 +1170,10 @@ class BridgeTaskRecoveryTargetDto {
   final BigInt expectedThreadRevision;
   final String branch;
   final String worktreePath;
+  final String? baseCommit;
   final List<BridgeTaskRecoveryTurnDto> turns;
   final List<String> defaultTurnIds;
   final List<BridgeConversationRecoveryMode> availableModes;
-  final BridgeTaskGitFingerprintDto gitFingerprint;
 
   const BridgeTaskRecoveryTargetDto({
     required this.threadId,
@@ -1276,10 +1185,10 @@ class BridgeTaskRecoveryTargetDto {
     required this.expectedThreadRevision,
     required this.branch,
     required this.worktreePath,
+    this.baseCommit,
     required this.turns,
     required this.defaultTurnIds,
     required this.availableModes,
-    required this.gitFingerprint,
   });
 
   @override
@@ -1293,10 +1202,10 @@ class BridgeTaskRecoveryTargetDto {
       expectedThreadRevision.hashCode ^
       branch.hashCode ^
       worktreePath.hashCode ^
+      baseCommit.hashCode ^
       turns.hashCode ^
       defaultTurnIds.hashCode ^
-      availableModes.hashCode ^
-      gitFingerprint.hashCode;
+      availableModes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1312,10 +1221,10 @@ class BridgeTaskRecoveryTargetDto {
           expectedThreadRevision == other.expectedThreadRevision &&
           branch == other.branch &&
           worktreePath == other.worktreePath &&
+          baseCommit == other.baseCommit &&
           turns == other.turns &&
           defaultTurnIds == other.defaultTurnIds &&
-          availableModes == other.availableModes &&
-          gitFingerprint == other.gitFingerprint;
+          availableModes == other.availableModes;
 }
 
 enum BridgeTaskRecoveryTargetKind { planner, executor }
@@ -1516,8 +1425,6 @@ sealed class BridgeTaskReviewTarget with _$BridgeTaskReviewTarget {
 class BridgeTaskRuntimeDto {
   final String runId;
   final BridgeTaskState state;
-  final String branch;
-  final String expectedHead;
   final BigInt revision;
   final BridgeIntegratedReviewGateDto integratedReviewGate;
   final List<BridgeTaskFailureDto> failures;
@@ -1530,8 +1437,6 @@ class BridgeTaskRuntimeDto {
   const BridgeTaskRuntimeDto({
     required this.runId,
     required this.state,
-    required this.branch,
-    required this.expectedHead,
     required this.revision,
     required this.integratedReviewGate,
     required this.failures,
@@ -1546,8 +1451,6 @@ class BridgeTaskRuntimeDto {
   int get hashCode =>
       runId.hashCode ^
       state.hashCode ^
-      branch.hashCode ^
-      expectedHead.hashCode ^
       revision.hashCode ^
       integratedReviewGate.hashCode ^
       failures.hashCode ^
@@ -1564,8 +1467,6 @@ class BridgeTaskRuntimeDto {
           runtimeType == other.runtimeType &&
           runId == other.runId &&
           state == other.state &&
-          branch == other.branch &&
-          expectedHead == other.expectedHead &&
           revision == other.revision &&
           integratedReviewGate == other.integratedReviewGate &&
           failures == other.failures &&

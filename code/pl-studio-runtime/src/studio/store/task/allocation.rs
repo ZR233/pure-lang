@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    TransactionTrait, sea_query::Expr,
 };
 
 use super::task_run_record;
@@ -11,14 +11,15 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, WorkUnitState, WorkUnitStatus,
+    AllocateExecutor, BlockedRecovery, ExecutorAllocation, TaskCommand, TaskRunStateKind,
+    TaskSpawnFailure, WorkUnit, WorkUnitState, WorkUnitStatus,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
 
 enum ExecutorAllocationTransition {
     Activate,
-    Fail(String),
+    Fail(Box<TaskSpawnFailure>),
 }
 
 impl StudioStore {
@@ -137,7 +138,7 @@ impl StudioStore {
                 task_run_id: Set(run.id.clone()),
                 title: Set(title),
                 scope_hints_json: Set(scope_hints_json),
-                base_commit: Set(run.expected_head.clone()),
+                base_commit: Set("HEAD".to_string()),
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
                 attempt: Set(attempt_i32),
@@ -169,18 +170,79 @@ impl StudioStore {
         .await
     }
 
-    pub(crate) async fn fail_executor(
+    pub(crate) async fn record_executor_spawn_failure(
         &self,
         work_unit_id: &str,
         agent_id: &str,
-        error: &str,
+        failure: TaskSpawnFailure,
     ) -> Result<()> {
         self.update_executor_allocation(
             work_unit_id,
             agent_id,
-            ExecutorAllocationTransition::Fail(error.to_string()),
+            ExecutorAllocationTransition::Fail(Box::new(failure)),
         )
         .await
+    }
+
+    pub(crate) async fn record_executor_worktree_base(
+        &self,
+        work_unit_id: &str,
+        agent_id: &str,
+        actual_base_commit: &str,
+    ) -> Result<WorkUnit> {
+        let actual_base_commit = actual_base_commit.trim();
+        if actual_base_commit.is_empty() {
+            bail!("executor worktree resolved an empty base commit");
+        }
+        let tx = self.db.begin().await?;
+        let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
+            .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
+            .one(&tx)
+            .await?
+            .context("executor work unit not found while recording worktree base")?;
+        let state = work_unit_state(&model)?;
+        if state.status() != WorkUnitStatus::Pending {
+            bail!("executor worktree base can only be recorded for a pending WorkUnit");
+        }
+        if model.base_commit == actual_base_commit {
+            let work_unit = work_unit_record(model)?;
+            tx.commit().await?;
+            return Ok(work_unit);
+        }
+        if model.base_commit != "HEAD" {
+            bail!("executor WorkUnit base commit changed before worktree creation completed");
+        }
+        let next_revision = model
+            .revision
+            .checked_add(1)
+            .context("WorkUnit revision overflow")?;
+        let update = entities::work_unit::Entity::update_many()
+            .col_expr(
+                entities::work_unit::Column::BaseCommit,
+                Expr::value(actual_base_commit.to_string()),
+            )
+            .col_expr(
+                entities::work_unit::Column::Revision,
+                Expr::value(next_revision),
+            )
+            .col_expr(
+                entities::work_unit::Column::UpdatedAt,
+                Expr::value(unix_seconds()),
+            )
+            .filter(entities::work_unit::Column::Id.eq(model.id.clone()))
+            .filter(entities::work_unit::Column::Revision.eq(model.revision))
+            .exec(&tx)
+            .await?;
+        if update.rows_affected != 1 {
+            bail!("WorkUnit base commit update lost its revision CAS");
+        }
+        let updated = entities::work_unit::Entity::find_by_id(model.id)
+            .one(&tx)
+            .await?
+            .context("WorkUnit disappeared after base commit update")?;
+        let work_unit = work_unit_record(updated)?;
+        tx.commit().await?;
+        Ok(work_unit)
     }
 
     async fn update_executor_allocation(
@@ -196,17 +258,66 @@ impl StudioStore {
             .await?
             .context("executor work unit not found")?;
         let mut progress = work_unit_state(&work_unit)?.into_progress();
-        let next_state = match transition {
+        let next_state = match &transition {
             ExecutorAllocationTransition::Activate => {
                 progress.execution_error = None;
+                progress.spawn_failure = None;
                 WorkUnitState::running(progress)
             }
-            ExecutorAllocationTransition::Fail(error) => {
-                progress.execution_error = Some(error);
-                WorkUnitState::failed(progress)
+            ExecutorAllocationTransition::Fail(failure) => {
+                let failure = failure.as_ref();
+                if let Some(existing) = progress.spawn_failure.as_ref() {
+                    if existing == failure {
+                        tx.commit().await?;
+                        return Ok(());
+                    }
+                    bail!("executor WorkUnit already records a different spawn failure");
+                }
+                if !matches!(
+                    work_unit_state(&work_unit)?.status(),
+                    WorkUnitStatus::Pending
+                        | WorkUnitStatus::Failed
+                        | WorkUnitStatus::NeedsAttention
+                ) {
+                    bail!("executor spawn failure cannot overwrite an active WorkUnit");
+                }
+                progress.execution_error = Some(failure.message.clone());
+                progress.spawn_failure = Some(failure.clone());
+                if failure.needs_attention() {
+                    WorkUnitState::needs_attention(progress)
+                } else {
+                    WorkUnitState::failed(progress)
+                }
             }
         };
         update_work_unit_state(&tx, work_unit, next_state).await?;
+        if let ExecutorAllocationTransition::Fail(failure) = &transition
+            && failure.needs_attention()
+        {
+            let run = entities::task_run::Entity::find_by_id(
+                failure
+                    .task_run_id
+                    .as_deref()
+                    .context("spawn failure omitted its TaskRun owner")?
+                    .to_string(),
+            )
+            .one(&tx)
+            .await?
+            .context("TaskRun not found while blocking failed executor allocation")?;
+            let record = task_run_record(run.clone())?;
+            if !record.kind().is_terminal() && record.kind() != TaskRunStateKind::Blocked {
+                super::apply_task_command(
+                    &tx,
+                    run,
+                    TaskCommand::Block {
+                        message: failure.message.clone(),
+                        recovery: BlockedRecovery::ManualOnly,
+                    },
+                )
+                .await?;
+                super::delete_blocked_project_lease(&tx, &record.id).await?;
+            }
+        }
         tx.commit().await?;
         Ok(())
     }

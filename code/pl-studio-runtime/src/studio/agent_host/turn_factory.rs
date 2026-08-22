@@ -608,8 +608,8 @@ fn anyhow_error(error: impl std::fmt::Display) -> PureError {
 mod tests {
     use super::*;
     use crate::studio::task_coordinator::{
-        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskGitFingerprint, TaskRun,
-        TaskRunState, TaskStopOrigin, TaskStopReason, TaskStopRequest,
+        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskRun, TaskRunState,
+        TaskStopOrigin, TaskStopReason, TaskStopRequest,
     };
 
     #[test]
@@ -678,20 +678,14 @@ mod tests {
         TaskRun {
             context: TaskContext {
                 id: "task-run".to_string(),
+                project_id: "project".to_string(),
                 root_thread_id: "session".to_string(),
                 plan: "plan".to_string(),
                 workspace_root: "C:/workspace".to_string(),
-                git_common_dir: "C:/workspace/.git".to_string(),
-                branch: "main".to_string(),
-                base_commit: "base".to_string(),
-                expected_head: "head".to_string(),
             },
             state: TaskRunState::Stopping(StoppingState::new(
                 DesignProgress::from_finalized(FinalizedDesign {
-                    head: "head".to_string(),
-                    commit: Some("head".to_string()),
                     summary: "design complete".to_string(),
-                    fingerprint: test_fingerprint(),
                 }),
                 7,
                 TaskStopRequest {
@@ -703,21 +697,6 @@ mod tests {
             revision: 1,
             created_at: 1,
             updated_at: 1,
-        }
-    }
-
-    fn test_fingerprint() -> TaskGitFingerprint {
-        TaskGitFingerprint {
-            workspace_root: "C:/workspace".to_string(),
-            git_common_dir: "C:/workspace/.git".to_string(),
-            branch: "main".to_string(),
-            head: "head".to_string(),
-            base_commit: "base".to_string(),
-            expected_head: "head".to_string(),
-            operation: "none".to_string(),
-            index_diff_hash: "index".to_string(),
-            working_tree_diff_hash: "worktree".to_string(),
-            untracked_content_hash: "untracked".to_string(),
         }
     }
 }

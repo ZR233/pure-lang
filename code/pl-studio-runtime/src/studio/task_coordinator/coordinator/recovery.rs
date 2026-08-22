@@ -17,53 +17,29 @@ pub(super) async fn resolve_worktree_recovery_groups(
     let mut owners_by_group = HashMap::<String, Vec<TaskWorktreeOwnerSnapshot>>::new();
     let mut run_groups = HashMap::new();
     for owner in owners {
-        let group_key = canonical_path_key(Path::new(&owner.run.git_common_dir));
+        let group_key = owner.run.project_id.clone();
         run_groups.insert(owner.run.id.clone(), group_key.clone());
         owners_by_group.entry(group_key).or_default().push(owner);
     }
 
     let mut groups = HashMap::new();
-    let mut failures = Vec::new();
+    let failures = Vec::new();
     for (group_key, group_owners) in owners_by_group {
         let mut repositories = Vec::<PathBuf>::new();
         let mut inspected_workspaces = HashSet::new();
-        let mut failure = None;
         for owner in &group_owners {
             let workspace = workspace_key(&owner.run.workspace_root);
             if !inspected_workspaces.insert(workspace) {
                 continue;
             }
-            let snapshot = match inspect_repository(&owner.run.workspace_root, false).await {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    failure = Some(format!(
-                        "failed to resolve Git common directory for known task workspace {}: {error}",
-                        owner.run.workspace_root
-                    ));
-                    break;
-                }
-            };
-            if canonical_path_key(&snapshot.git_common_dir) != group_key {
-                failure = Some(format!(
-                    "known task workspace {} no longer belongs to its durable Git common directory",
-                    owner.run.workspace_root
-                ));
-                break;
-            }
-            let repository_key = canonical_path_key(&snapshot.workspace_root);
+            let repository = PathBuf::from(&owner.run.workspace_root);
+            let repository_key = canonical_path_key(&repository);
             if !repositories
                 .iter()
                 .any(|repository| canonical_path_key(repository) == repository_key)
             {
-                repositories.push(snapshot.workspace_root);
+                repositories.push(repository);
             }
-        }
-        if let Some(message) = failure {
-            failures.push(WorktreeRecoveryPreflightFailure {
-                runs: group_owners.iter().map(|owner| owner.run.clone()).collect(),
-                message,
-            });
-            continue;
         }
         groups.insert(
             group_key,

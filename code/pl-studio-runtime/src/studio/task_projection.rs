@@ -139,8 +139,6 @@ fn studio_task_runtime(
     Ok(StudioTaskRuntime {
         run_id: run.id.clone(),
         state: studio_task_state(&run)?,
-        branch: run.branch.clone(),
-        expected_head: run.expected_head.clone(),
         revision: run.revision,
         integrated_review_gate,
         failures,
@@ -239,10 +237,7 @@ fn studio_task_state(run: &TaskRun) -> Result<StudioTaskState> {
         finalized_design: match run.state.design() {
             DesignProgress::Updating => None,
             DesignProgress::Finalized(design) => Some(StudioFinalizedDesign {
-                head: design.head.clone(),
-                commit: design.commit.clone(),
                 summary: design.summary.clone(),
-                fingerprint: serde_json::to_string(&design.fingerprint)?,
             }),
         },
         stop_request: run

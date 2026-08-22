@@ -6,8 +6,7 @@ use std::time::Duration;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use pl_core::tool::{
-    ExecutionBackend, ExecutionOutput, ExecutionRequest, GitPolicy, LocalExecutionBackend,
-    LocalExecutionFailure,
+    ExecutionOutput, ExecutionRequest, GitPolicy, LocalExecutionBackend, LocalExecutionFailure,
 };
 
 use super::error::WorktreeError;
@@ -76,6 +75,12 @@ pub trait WorktreeBackend: fmt::Debug + Send + Sync {
         base_commit: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeCreateFailure>>;
 
+    /// Resolve the commit actually checked out in a newly created worktree.
+    fn resolve_head<'a>(
+        &'a self,
+        worktree_path: &'a Path,
+    ) -> BoxFuture<'a, Result<String, WorktreeError>>;
+
     /// 移除 worktree；`force` 为真时忽略未提交改动。
     fn remove<'a>(
         &'a self,
@@ -122,8 +127,9 @@ impl LocalWorktreeBackend {
     async fn run_git(&self, cwd: &Path, args: &[String]) -> Result<ExecutionOutput, WorktreeError> {
         let output = self.run_git_output(cwd, args).await?;
         if output.status != 0 {
-            return Err(WorktreeError::GitCommand {
+            return Err(WorktreeError::GitExited {
                 args: args.join(" "),
+                exit_code: output.status,
                 stderr: output.stderr,
             });
         }
@@ -137,12 +143,19 @@ impl LocalWorktreeBackend {
         args: &[String],
     ) -> Result<ExecutionOutput, WorktreeError> {
         let request = self.git_request(cwd, args);
+        let args = args.join(" ");
         self.backend
-            .run(request)
+            .run_classified(request)
             .await
-            .map_err(|error| WorktreeError::GitCommand {
-                args: args.join(" "),
-                stderr: error,
+            .map_err(|failure| match failure {
+                LocalExecutionFailure::BeforeSpawn(message) => {
+                    WorktreeError::GitLaunchFailed { args, message }
+                }
+                LocalExecutionFailure::AfterSpawn(message) => WorktreeError::GitStatusUnknown {
+                    args,
+                    stderr: message,
+                },
+                LocalExecutionFailure::TimedOut => WorktreeError::GitTimedOut { args },
             })
     }
 
@@ -165,9 +178,19 @@ impl LocalWorktreeBackend {
                         CreateFailureDisposition::MayHaveCreated
                     }
                 };
-                let error = WorktreeError::GitCommand {
-                    args: args.join(" "),
-                    stderr: failure.to_string(),
+                let arguments = args.join(" ");
+                let error = match failure {
+                    LocalExecutionFailure::BeforeSpawn(message) => WorktreeError::GitLaunchFailed {
+                        args: arguments,
+                        message,
+                    },
+                    LocalExecutionFailure::AfterSpawn(message) => WorktreeError::GitStatusUnknown {
+                        args: arguments,
+                        stderr: message,
+                    },
+                    LocalExecutionFailure::TimedOut => {
+                        WorktreeError::GitTimedOut { args: arguments }
+                    }
                 };
                 match disposition {
                     CreateFailureDisposition::NoSideEffects => {
@@ -180,7 +203,7 @@ impl LocalWorktreeBackend {
             })?;
         if output.status == -1 {
             return Err(WorktreeCreateFailure::may_have_created(
-                WorktreeError::GitCommand {
+                WorktreeError::GitStatusUnknown {
                     args: args.join(" "),
                     stderr: output.stderr,
                 },
@@ -188,8 +211,9 @@ impl LocalWorktreeBackend {
         }
         if output.status != 0 {
             return Err(WorktreeCreateFailure::no_side_effects(
-                WorktreeError::GitCommand {
+                WorktreeError::GitExited {
                     args: args.join(" "),
+                    exit_code: output.status,
                     stderr: output.stderr,
                 },
             ));
@@ -263,6 +287,25 @@ impl WorktreeBackend for LocalWorktreeBackend {
             args.push(target);
             self.run_git(repo_root, &args).await?;
             Ok(())
+        }
+        .boxed()
+    }
+
+    fn resolve_head<'a>(
+        &'a self,
+        worktree_path: &'a Path,
+    ) -> BoxFuture<'a, Result<String, WorktreeError>> {
+        async move {
+            let args = vec!["rev-parse".to_string(), "HEAD".to_string()];
+            let output = self.run_git(worktree_path, &args).await?;
+            let head = output.stdout.trim();
+            if head.is_empty() {
+                return Err(WorktreeError::GitStatusUnknown {
+                    args: args.join(" "),
+                    stderr: "git rev-parse HEAD returned an empty value".to_string(),
+                });
+            }
+            Ok(head.to_string())
         }
         .boxed()
     }

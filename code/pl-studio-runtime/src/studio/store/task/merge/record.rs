@@ -30,19 +30,13 @@ impl StudioStore {
                 [] => bail!("merging TaskRun not found"),
                 _ => bail!("multiple merging TaskRuns found"),
             };
-            if run.expected_head != input.expected_previous_head {
-                bail!("TaskRun head changed before merge accounting");
-            }
-            let lease = entities::branch_lease::Entity::find()
-                .filter(entities::branch_lease::Column::TaskRunId.eq(run.id.clone()))
+            let lease = entities::project_lease::Entity::find()
+                .filter(entities::project_lease::Column::TaskRunId.eq(run.id.clone()))
                 .one(&tx)
                 .await?
-                .context("task branch lease not found")?;
-            if lease.expected_head != input.expected_previous_head
-                || lease.branch != run.branch
-                || lease.git_common_dir != run.git_common_dir
-            {
-                bail!("BranchLease changed before merge accounting");
+                .context("task project lease not found")?;
+            if lease.project_id != run.project_id {
+                bail!("ProjectLease changed before merge accounting");
             }
 
             let work_unit = entities::work_unit::Entity::find_by_id(input.work_unit_id.clone())
@@ -79,14 +73,34 @@ impl StudioStore {
                 .head_commit
                 .clone()
                 .context("approved delivery Completion has no head commit")?;
-            if entities::merge_record::Entity::find()
+            if let Some(existing) = entities::merge_record::Entity::find()
                 .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
                 .filter(entities::merge_record::Column::CompletionId.eq(completion.id.clone()))
                 .one(&tx)
                 .await?
-                .is_some()
             {
-                bail!("executor Completion already has a recorded merge");
+                if existing.work_unit_id != work_unit.id
+                    || existing.completion_revision != i32::try_from(input.completion_revision)?
+                    || existing.executor_agent_id != input.executor_agent_id
+                    || existing.expected_previous_head != input.expected_previous_head
+                    || existing.resulting_head != input.resulting_head
+                    || existing.delivery_head != delivery_head
+                    || existing.method != input.method.as_str()
+                    || existing.summary != input.summary
+                {
+                    bail!("executor Completion already has a different recorded merge");
+                }
+                return merge_record(existing);
+            }
+            if let Some(previous) = entities::merge_record::Entity::find()
+                .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
+                .order_by_desc(entities::merge_record::Column::CreatedAt)
+                .order_by_desc(entities::merge_record::Column::Id)
+                .one(&tx)
+                .await?
+                && previous.resulting_head != input.expected_previous_head
+            {
+                bail!("merge ledger expectedPreviousHead does not match the prior resultingHead");
             }
 
             let now = unix_seconds();
@@ -143,30 +157,9 @@ impl StudioStore {
             } else {
                 record.decide(TaskCommand::BeginImplementing)?.next_state
             };
-            super::super::compare_and_swap_task_run(
-                &tx,
-                &run,
-                Some(&next_state),
-                Some(&input.resulting_head),
-            )
-            .await?
-            .context("TaskRun merge accounting lost its revision CAS")?;
-
-            let lease_update = entities::branch_lease::Entity::update_many()
-                .set(entities::branch_lease::ActiveModel {
-                    expected_head: Set(input.resulting_head),
-                    updated_at: Set(now),
-                    ..Default::default()
-                })
-                .filter(entities::branch_lease::Column::Id.eq(lease.id))
-                .filter(
-                    entities::branch_lease::Column::ExpectedHead.eq(input.expected_previous_head),
-                )
-                .exec(&tx)
-                .await?;
-            if lease_update.rows_affected != 1 {
-                bail!("BranchLease merge accounting lost its expected-head CAS");
-            }
+            super::super::compare_and_swap_task_run(&tx, &run, Some(&next_state))
+                .await?
+                .context("TaskRun merge accounting lost its revision CAS")?;
 
             merge_record(merge)
         }

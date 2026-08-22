@@ -1,7 +1,7 @@
 use super::*;
 use crate::studio::task_coordinator::{
     CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource,
-    TaskRunStateKind, WorkUnitState, test_task_git_fingerprint,
+    TaskRunStateKind, WorkUnitState,
 };
 use crate::{StudioProductEventKind, ThreadVisibility};
 use pl_protocol::ThreadItemContent;
@@ -362,18 +362,10 @@ async fn mode_switch_is_rejected_while_a_task_is_active() {
         .unwrap();
     store
         .create_task_run_with_lease(CreateTaskRun {
+            project_id: project.id.clone(),
             root_thread_id: thread.id.clone(),
             plan: "# Plan\n\nImplement the requested change.".to_string(),
             workspace_root: workspace.to_string_lossy().into_owned(),
-            git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
-            branch: "main".to_string(),
-            head_commit: "1111111".to_string(),
-            design_baseline: test_task_git_fingerprint(
-                workspace.to_string_lossy(),
-                workspace.join(".git").to_string_lossy(),
-                "main",
-                "1111111",
-            ),
         })
         .await
         .unwrap();
@@ -495,18 +487,10 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         .unwrap();
     let (run, _) = store
         .create_task_run_with_lease(CreateTaskRun {
+            project_id: project.id.clone(),
             root_thread_id: thread.id.clone(),
             plan: "# Plan\n\nImplement the requested change.".to_string(),
             workspace_root: workspace.to_string_lossy().into_owned(),
-            git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
-            branch: "main".to_string(),
-            head_commit: "1111111".to_string(),
-            design_baseline: test_task_git_fingerprint(
-                workspace.to_string_lossy(),
-                workspace.join(".git").to_string_lossy(),
-                "main",
-                "1111111",
-            ),
         })
         .await
         .unwrap();
@@ -524,7 +508,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
             task_run_id: run.id.clone(),
             title: "Implement".to_string(),
             scope_hints: vec!["src".to_string()],
-            base_commit: run.base_commit.clone(),
+            base_commit: "caller-declared-base".to_string(),
             worktree_path: workspace.join("executor").to_string_lossy().into_owned(),
             branch: "task-executor".to_string(),
             attempt: 1,
@@ -829,7 +813,7 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         task.state,
         crate::protocol::StudioTaskState::DesignUpdating(_)
     ));
-    assert_eq!(task.branch, run.branch);
+    assert_eq!(task.revision, run.revision);
     runtime
         .task_coordinator
         .finish_task(&run.id, TaskRunStateKind::Cancelled, None)

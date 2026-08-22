@@ -373,8 +373,6 @@ class TaskRuntimeView {
   const TaskRuntimeView({
     required this.runId,
     required this.state,
-    required this.branch,
-    required this.expectedHead,
     required this.revision,
     this.integratedReviewGate = const IntegratedReviewGateView.required(
       reason: 'review gate unavailable',
@@ -389,8 +387,6 @@ class TaskRuntimeView {
 
   final String runId;
   final TaskStateView state;
-  final String branch;
-  final String expectedHead;
   final int revision;
   final IntegratedReviewGateView integratedReviewGate;
   final List<TaskFailureView> failures;

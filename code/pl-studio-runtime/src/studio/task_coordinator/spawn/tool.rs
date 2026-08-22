@@ -5,11 +5,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    StudioSpawnIntent, StudioTaskExecutorIntent, TaskExecutorAcceptanceCriterion,
-    TaskExecutorBlueprint, TaskExecutorDependency, TaskExecutorEvidence,
-    TaskExecutorImplementationStep, TaskExecutorScope, TaskExecutorVerificationContract,
+    OperationalTaskSpawnFailure, StudioSpawnIntent, StudioTaskExecutorIntent,
+    TaskExecutorAcceptanceCriterion, TaskExecutorBlueprint, TaskExecutorDependency,
+    TaskExecutorEvidence, TaskExecutorImplementationStep, TaskExecutorScope,
+    TaskExecutorVerificationContract, TaskSpawnCompensation, TaskSpawnCompensationState,
+    TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase, TaskSpawnResource,
 };
-use crate::studio::task_coordinator::{AllocateExecutor, TaskCoordinator, TaskRunStateKind};
+use crate::studio::task_coordinator::{
+    AllocateExecutor, TaskCoordinator, TaskRun, TaskRunStateKind, WorkUnitStatus,
+};
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
@@ -64,6 +68,7 @@ impl TaskSpawnExecutorInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskSpawnExecutorOutput {
+    status: &'static str,
     agent_id: String,
     thread_id: String,
     turn_id: String,
@@ -101,24 +106,87 @@ impl TaskCoordinator {
             let thread_id = thread_id.clone();
             let coordinator = Arc::clone(&coordinator);
             async move {
-                if let Some(rejection) = coordinator
+                let rejection = match coordinator
                     .executor_spawn_phase_rejection(&thread_id)
-                    .await?
+                    .await
                 {
+                    Ok(rejection) => rejection,
+                    Err(error) => {
+                        return spawn_failure(TaskSpawnFailure::allocation(
+                            None,
+                            String::new(),
+                            format!("failed to read Task executor gate: {error}"),
+                        ));
+                    }
+                };
+                if let Some(rejection) = rejection {
                     return spawn_rejection(rejection);
                 }
+                let active_run = match coordinator
+                    .store
+                    .read_active_task_run_for_root_thread(&thread_id)
+                    .await
+                {
+                    Ok(run) => run,
+                    Err(error) => {
+                        return spawn_failure(TaskSpawnFailure::allocation(
+                            None,
+                            String::new(),
+                            format!("failed to read active TaskRun: {error}"),
+                        ));
+                    }
+                };
+                let current_phase = active_run.kind().as_str();
                 // Blueprint validation and context budgeting must precede every durable allocation.
-                let blueprint = arguments.into_blueprint()?;
-                let blueprint_fingerprint = blueprint.fingerprint()?;
+                let blueprint = match arguments.into_blueprint() {
+                    Ok(blueprint) => blueprint,
+                    Err(error) => {
+                        return spawn_rejection(input_rejection(
+                            "invalid_executor_blueprint",
+                            error.to_string(),
+                            current_phase,
+                        ));
+                    }
+                };
+                let blueprint_fingerprint = match blueprint.fingerprint() {
+                    Ok(fingerprint) => fingerprint,
+                    Err(error) => {
+                        return spawn_rejection(input_rejection(
+                            "invalid_executor_blueprint",
+                            error.to_string(),
+                            current_phase,
+                        ));
+                    }
+                };
                 let scope_hints = blueprint.scope.scope_hints.clone();
-                let constraint = executor_constraint(&scope_hints)?;
-                let call_id = context
-                    .provider_call_id
-                    .as_deref()
-                    .context("task_spawn_executor requires a provider call id")?
-                    .to_string();
-                let (requested_thread_id, _) = executor_runtime_ids(&thread_id, &call_id)?;
-                let allocation = coordinator
+                let constraint = match executor_constraint(&scope_hints) {
+                    Ok(constraint) => constraint,
+                    Err(error) => {
+                        return spawn_rejection(input_rejection(
+                            "executor_context_too_large",
+                            error.to_string(),
+                            current_phase,
+                        ));
+                    }
+                };
+                let Some(call_id) = context.provider_call_id.as_deref().map(str::to_string) else {
+                    return spawn_rejection(input_rejection(
+                        "missing_provider_call_id",
+                        "task_spawn_executor requires a provider call id".to_string(),
+                        current_phase,
+                    ));
+                };
+                let (requested_thread_id, _) = match executor_runtime_ids(&thread_id, &call_id) {
+                    Ok(ids) => ids,
+                    Err(error) => {
+                        return spawn_rejection(input_rejection(
+                            "invalid_spawn_identity",
+                            error.to_string(),
+                            current_phase,
+                        ));
+                    }
+                };
+                let allocation = match coordinator
                     .reserve_executor_spawn(AllocateExecutor {
                         thread_id: thread_id.clone(),
                         title: blueprint.task_name.clone(),
@@ -127,17 +195,82 @@ impl TaskCoordinator {
                         requested_by_call_id: call_id,
                     })
                     .await
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                {
+                    Ok(allocation) => allocation,
+                    Err(error) => {
+                        let message = error.to_string();
+                        if let Some(rejection) = allocation_rejection(&message, current_phase) {
+                            return spawn_rejection(rejection);
+                        }
+                        return spawn_failure(TaskSpawnFailure::allocation(
+                            Some(active_run.id.clone()),
+                            requested_thread_id.to_string(),
+                            message,
+                        ));
+                    }
+                };
+                if let Some(failure) = allocation.work_unit.spawn_failure() {
+                    return spawn_failure(failure.clone());
+                }
                 if allocation.reused {
-                    let (_, existing) = coordinator
-                        .store
-                        .read_work_unit_handoff(&allocation.work_unit.id)
-                        .await?
-                        .context("reused executor allocation has no durable handoff")?;
-                    ensure_reused_blueprint_matches(
-                        &existing.blueprint_fingerprint,
-                        &blueprint_fingerprint,
-                    )?;
+                    if matches!(
+                        allocation.work_unit.status(),
+                        WorkUnitStatus::Failed | WorkUnitStatus::NeedsAttention
+                    ) {
+                        return spawn_failure(missing_persisted_failure(
+                            &allocation.run,
+                            &allocation.work_unit,
+                            "reused executor allocation is failed but has no structured failure",
+                        ));
+                    }
+                    if allocation.work_unit.status() == WorkUnitStatus::Running
+                        && runtime
+                            .snapshot(requested_thread_id.clone())
+                            .await
+                            .is_ok()
+                    {
+                        let (_, existing) = match coordinator
+                            .store
+                            .read_work_unit_handoff(&allocation.work_unit.id)
+                            .await
+                        {
+                            Ok(Some(existing)) => existing,
+                            Ok(None) => {
+                                return spawn_failure(missing_persisted_failure(
+                                    &allocation.run,
+                                    &allocation.work_unit,
+                                    "running executor allocation has no durable handoff",
+                                ));
+                            }
+                            Err(error) => {
+                                return spawn_failure(missing_persisted_failure(
+                                    &allocation.run,
+                                    &allocation.work_unit,
+                                    &format!("failed to read reused executor handoff: {error}"),
+                                ));
+                            }
+                        };
+                        if let Err(error) = ensure_reused_blueprint_matches(
+                            &existing.blueprint_fingerprint,
+                            &blueprint_fingerprint,
+                        ) {
+                            return spawn_rejection(input_rejection(
+                                "idempotency_conflict",
+                                error.to_string(),
+                                current_phase,
+                            ));
+                        }
+                        let canonical_call_id = allocation.work_unit.requested_by_call_id.clone();
+                        let (child_thread_id, initial_turn_id) =
+                            executor_runtime_ids(&thread_id, &canonical_call_id)?;
+                        return spawn_output(
+                            child_thread_id,
+                            initial_turn_id,
+                            scope_hints,
+                            blueprint_fingerprint,
+                            true,
+                        );
+                    }
                 }
                 let canonical_call_id = allocation.work_unit.requested_by_call_id.clone();
                 let (child_thread_id, initial_turn_id) =
@@ -147,22 +280,13 @@ impl TaskCoordinator {
                 {
                     bail!("durable executor identity does not match its canonical allocation");
                 }
-                if runtime.snapshot(child_thread_id.clone()).await.is_ok() {
-                    return spawn_output(
-                        child_thread_id,
-                        initial_turn_id,
-                        scope_hints,
-                        blueprint_fingerprint,
-                        true,
-                    );
-                }
                 let intent = StudioSpawnIntent::task_executor(StudioTaskExecutorIntent {
                     thread_id: thread_id.clone(),
                     requesting_tool_call_id: canonical_call_id,
                     subagent_constraint: constraint,
                     blueprint,
                 });
-                let result = runtime
+                let result = match runtime
                     .spawn(AgentSpawnRequest {
                         thread_id: child_thread_id.clone(),
                         parent_id: crate::studio::agent_host::root_agent_id(&thread_id),
@@ -174,7 +298,51 @@ impl TaskCoordinator {
                         metadata: serde_json::to_value(intent)?,
                     })
                     .await
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        let work_unit = match coordinator
+                            .store
+                            .read_work_unit(&allocation.work_unit.id)
+                            .await
+                        {
+                            Ok(Some(work_unit)) => work_unit,
+                            Ok(None) => {
+                                return spawn_failure(missing_persisted_failure(
+                                    &allocation.run,
+                                    &allocation.work_unit,
+                                    &format!("executor spawn failed and WorkUnit disappeared: {error}"),
+                                ));
+                            }
+                            Err(read_error) => {
+                                return spawn_failure(missing_persisted_failure(
+                                    &allocation.run,
+                                    &allocation.work_unit,
+                                    &format!(
+                                        "executor spawn failed: {error}; failed to read WorkUnit failure: {read_error}"
+                                    ),
+                                ));
+                            }
+                        };
+                        if let Some(failure) = work_unit.spawn_failure() {
+                            return spawn_failure(failure.clone());
+                        }
+                        let fallback = missing_persisted_failure(
+                            &allocation.run,
+                            &work_unit,
+                            &format!("executor spawn failed before recording its cause: {error}"),
+                        );
+                        let _ = coordinator
+                            .store
+                            .record_executor_spawn_failure(
+                                &work_unit.id,
+                                child_thread_id.as_str(),
+                                fallback.clone(),
+                            )
+                            .await;
+                        return spawn_failure(fallback);
+                    }
+                };
                 let turn_id = result
                     .initial_turn_id
                     .context("task executor spawn did not create an initial turn")?;
@@ -255,6 +423,7 @@ fn spawn_output(
     reused: bool,
 ) -> Result<ToolExecutionResult<serde_json::Value>> {
     ToolExecutionResult::<serde_json::Value>::json(TaskSpawnExecutorOutput {
+        status: "spawned",
         agent_id: child_thread_id.to_string(),
         thread_id: child_thread_id.to_string(),
         turn_id: turn_id.to_string(),
@@ -263,6 +432,91 @@ fn spawn_output(
         reused,
     })
     .map_err(anyhow::Error::from)
+}
+
+fn spawn_failure(failure: TaskSpawnFailure) -> Result<ToolExecutionResult<serde_json::Value>> {
+    Ok(ToolExecutionResult::<serde_json::Value>::failure(
+        serde_json::to_string(&failure)?,
+    ))
+}
+
+fn input_rejection(
+    code: &'static str,
+    message: String,
+    current_phase: &'static str,
+) -> TaskSpawnExecutorRejection {
+    TaskSpawnExecutorRejection {
+        status: "rejected",
+        code,
+        recoverable: true,
+        message,
+        current_phase,
+        required_phases: vec![
+            TaskRunStateKind::Implementing.as_str(),
+            TaskRunStateKind::Reworking.as_str(),
+        ],
+        next_action: Some("retry_task_spawn_executor"),
+    }
+}
+
+fn allocation_rejection(
+    message: &str,
+    current_phase: &'static str,
+) -> Option<TaskSpawnExecutorRejection> {
+    let (code, next_action) = if message.contains("concurrency limit") {
+        (
+            "executor_concurrency_limit",
+            Some("close_or_complete_executor"),
+        )
+    } else if message.contains("call id is already owned")
+        || message.contains("different allocation")
+    {
+        ("idempotency_conflict", None)
+    } else if message.contains("stop was requested") {
+        ("task_stop_requested", None)
+    } else if message.contains("requires task phase") {
+        ("task_phase_mismatch", None)
+    } else {
+        return None;
+    };
+    Some(TaskSpawnExecutorRejection {
+        status: "rejected",
+        code,
+        recoverable: true,
+        message: message.to_string(),
+        current_phase,
+        required_phases: vec![
+            TaskRunStateKind::Implementing.as_str(),
+            TaskRunStateKind::Reworking.as_str(),
+        ],
+        next_action,
+    })
+}
+
+fn missing_persisted_failure(
+    run: &TaskRun,
+    work_unit: &super::super::WorkUnit,
+    message: &str,
+) -> TaskSpawnFailure {
+    TaskSpawnFailure::operational(OperationalTaskSpawnFailure {
+        code: TaskSpawnFailureCode::AgentRegistration,
+        phase: TaskSpawnFailurePhase::AgentRegistration,
+        message: message.to_string(),
+        task_run_id: Some(run.id.clone()),
+        work_unit_id: Some(work_unit.id.clone()),
+        agent_id: work_unit.executor_thread_id.clone().unwrap_or_default(),
+        resource: Some(TaskSpawnResource {
+            repo_root: run.workspace_root.clone(),
+            path: work_unit.worktree_path.clone(),
+            branch: work_unit.branch.clone(),
+            base_ref: work_unit.base_commit.clone(),
+        }),
+        compensation: TaskSpawnCompensation {
+            allocation: TaskSpawnCompensationState::Faulted,
+            worktree: TaskSpawnCompensationState::Unknown,
+            child_thread: TaskSpawnCompensationState::Unknown,
+        },
+    })
 }
 
 fn spawn_rejection(
@@ -315,7 +569,7 @@ fn executor_runtime_ids(thread_id: &str, call_id: &str) -> Result<(ThreadId, Tur
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::studio::task_coordinator::{CreateTaskRun, test_task_git_fingerprint};
+    use crate::studio::task_coordinator::CreateTaskRun;
     use crate::{StudioMode, StudioStore};
 
     #[tokio::test]
@@ -328,18 +582,10 @@ mod tests {
             .unwrap();
         store
             .create_task_run_with_lease(CreateTaskRun {
+                project_id: project.id.clone(),
                 root_thread_id: thread.id.clone(),
                 plan: "implement the confirmed plan".to_string(),
                 workspace_root: "C:/work/spawn-gate".to_string(),
-                git_common_dir: "C:/work/spawn-gate/.git".to_string(),
-                branch: "main".to_string(),
-                head_commit: "1111111".to_string(),
-                design_baseline: test_task_git_fingerprint(
-                    "C:/work/spawn-gate",
-                    "C:/work/spawn-gate/.git",
-                    "main",
-                    "1111111",
-                ),
             })
             .await
             .unwrap();
@@ -453,5 +699,41 @@ mod tests {
                 .to_string(),
             "executor allocation conflicts with the existing implementation blueprint"
         );
+    }
+
+    #[test]
+    fn failed_outcome_preserves_structured_worktree_cause_and_compensation() {
+        let error = crate::agent::worktree::WorktreeError::OperationFailedAfterCleanup {
+            operation: Box::new(crate::agent::worktree::WorktreeError::GitExited {
+                args: "worktree add --detach".to_string(),
+                exit_code: 128,
+                stderr: "fatal: invalid reference: HEAD".to_string(),
+            }),
+        };
+        let failure = TaskSpawnFailure::worktree(
+            "task-run".to_string(),
+            "work-unit".to_string(),
+            "agent".to_string(),
+            TaskSpawnResource {
+                repo_root: "C:/repo".to_string(),
+                path: "C:/repo/.pure/worktrees/task-run/agent".to_string(),
+                branch: "pure-task-task-run-agent".to_string(),
+                base_ref: "HEAD".to_string(),
+            },
+            &error,
+        );
+
+        let output = spawn_failure(failure).unwrap();
+        assert!(!output.success);
+        assert!(!output.ends_turn);
+        let value: serde_json::Value = serde_json::from_str(&output.model_output).unwrap();
+        assert_eq!(value["status"], "failed");
+        assert_eq!(value["code"], "worktree_create_failed");
+        assert_eq!(value["phase"], "worktreeCreate");
+        assert_eq!(value["cause"]["kind"], "gitExited");
+        assert_eq!(value["cause"]["exitCode"], 128);
+        assert_eq!(value["compensation"]["allocation"], "markedFailed");
+        assert_eq!(value["compensation"]["worktree"], "removed");
+        assert_eq!(value["nextAction"], "retry_task_spawn_executor");
     }
 }

@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct StudioTaskRuntime {
     pub run_id: String,
     pub state: StudioTaskState,
-    pub branch: String,
-    pub expected_head: String,
     pub revision: u64,
     pub integrated_review_gate: StudioIntegratedReviewGate,
     pub failures: Vec<StudioTaskFailureRuntime>,
@@ -47,10 +45,7 @@ pub struct StudioTaskStateData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioFinalizedDesign {
-    pub head: String,
-    pub commit: Option<String>,
     pub summary: String,
-    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

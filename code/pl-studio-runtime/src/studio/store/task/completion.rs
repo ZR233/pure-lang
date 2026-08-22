@@ -44,7 +44,6 @@ impl StudioStore {
     pub(crate) async fn request_task_stop(
         &self,
         task_run_id: &str,
-        expected_head: &str,
         origin: TaskStopOrigin,
         reason: &TaskStopReason,
     ) -> Result<TaskRun> {
@@ -55,10 +54,10 @@ impl StudioStore {
                 .await?
                 .context("task run not found while requesting stop")?;
             let record = super::task_run_record(run.clone())?;
-            if run.expected_head != expected_head || record.kind().is_terminal() {
-                bail!("task stop no longer matches the active task HEAD");
+            if record.kind().is_terminal() {
+                bail!("task stop no longer matches an active TaskRun");
             }
-            validate_lease(&tx, &run, expected_head).await?;
+            validate_lease(&tx, &run).await?;
             if record.is_stop_requested() {
                 return Ok(record);
             }
@@ -78,7 +77,6 @@ impl StudioStore {
     pub(crate) async fn begin_task_stop(
         &self,
         task_run_id: &str,
-        expected_head: &str,
         expected_generation: u64,
     ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
@@ -88,8 +86,8 @@ impl StudioStore {
                 .await?
                 .context("task run not found while beginning stop")?;
             let record = super::task_run_record(run.clone())?;
-            if run.expected_head != expected_head || record.kind().is_terminal() {
-                bail!("task stop no longer matches the active task HEAD");
+            if record.kind().is_terminal() {
+                bail!("task stop no longer matches an active TaskRun");
             }
             if !record.is_stop_requested() {
                 bail!("task stop must be requested before entering stopping");
@@ -97,7 +95,7 @@ impl StudioStore {
             if record.generation() != expected_generation {
                 bail!("task stop generation changed before entering stopping");
             }
-            validate_lease(&tx, &run, expected_head).await?;
+            validate_lease(&tx, &run).await?;
             if record.kind() != TaskRunStateKind::Stopping {
                 bail!("task stop request did not enter the stopping state");
             }
@@ -136,7 +134,7 @@ impl StudioStore {
                 },
             )
             .await?;
-            super::delete_blocked_branch_lease(&tx, task_run_id).await?;
+            super::delete_blocked_project_lease(&tx, task_run_id).await?;
             super::task_run_record(blocked)
         }
         .await;
@@ -156,26 +154,22 @@ impl StudioStore {
                 || record.revision != expected.revision
                 || run.updated_at != expected.updated_at
                 || run.workspace_root != expected.workspace_root
-                || run.git_common_dir != expected.git_common_dir
-                || run.branch != expected.branch
-                || run.expected_head != expected.expected_head
+                || run.project_id != expected.project_id
                 || record.status_message() != expected.status_message()
             {
                 bail!("merge recovery state changed before retry");
             }
             let now = unix_seconds();
-            entities::branch_lease::ActiveModel {
-                id: Set(new_id("branch-lease")),
+            entities::project_lease::ActiveModel {
+                id: Set(new_id("project-lease")),
                 task_run_id: Set(run.id.clone()),
-                git_common_dir: Set(run.git_common_dir.clone()),
-                branch: Set(run.branch.clone()),
-                expected_head: Set(run.expected_head.clone()),
+                project_id: Set(run.project_id.clone()),
                 acquired_at: Set(now),
                 updated_at: Set(now),
             }
             .insert(&tx)
             .await
-            .context("merge recovery could not reacquire the durable branch lease")?;
+            .context("merge recovery could not reacquire the durable project lease")?;
 
             let updated = super::apply_task_command(
                 &tx,
@@ -195,7 +189,6 @@ impl StudioStore {
     pub(crate) async fn complete_task(
         &self,
         thread_id: &str,
-        expected_head: &str,
         gate: &StudioIntegratedReviewGate,
     ) -> Result<TaskRun> {
         let tx = self.db.begin().await?;
@@ -208,15 +201,14 @@ impl StudioStore {
                 TaskRunStateKind::Implementing
                     | TaskRunStateKind::Reworking
                     | TaskRunStateKind::Reviewing
-            ) || run.expected_head != expected_head
-                || record.design().is_none()
+            ) || record.design().is_none()
             {
-                bail!("task completion requires a finalized design stage at the current task HEAD");
+                bail!("task completion requires a finalized design stage");
             }
             if record.is_stop_requested() {
                 bail!("task completion is unavailable after stop was requested");
             }
-            validate_lease(&tx, &run, expected_head).await?;
+            validate_lease(&tx, &run).await?;
             validate_completion_children(&tx, &run, phase, gate).await?;
             validate_no_pending_interactions(&tx, &run.root_thread_id).await?;
             let completed =
@@ -308,7 +300,6 @@ impl StudioStore {
     pub(crate) async fn cancel_task_and_release_lease(
         &self,
         task_run_id: &str,
-        expected_head: &str,
         expected_generation: u64,
         reason: &str,
     ) -> Result<TaskRun> {
@@ -328,16 +319,13 @@ impl StudioStore {
                 }
                 bail!("task terminal fact belongs to another generation");
             }
-            if run.expected_head != expected_head {
-                bail!("task stop no longer matches the active task HEAD");
-            }
             if phase != TaskRunStateKind::Stopping || !record.is_stop_requested() {
                 bail!("task cancellation requires requested stopping phase");
             }
             if record.generation() != expected_generation {
                 bail!("task stop generation changed before cancellation");
             }
-            validate_lease(&tx, &run, expected_head).await?;
+            validate_lease(&tx, &run).await?;
             let cancelled = super::write_task_terminal_fact(
                 &tx,
                 run,
@@ -447,8 +435,8 @@ async fn validate_completion_children(
             review_round_id,
             reviewed_head,
         } => {
-            if phase != TaskRunStateKind::Reviewing || reviewed_head != &run.expected_head {
-                bail!("integrated review gate no longer matches task phase or HEAD")
+            if phase != TaskRunStateKind::Reviewing {
+                bail!("integrated review gate no longer matches task phase")
             }
             let review = reviews
                 .iter()
@@ -456,7 +444,7 @@ async fn validate_completion_children(
                 .context("integrated review gate round disappeared")?;
             if review.scope != ReviewScope::Integrated.as_str()
                 || review.state_kind != ReviewVerdict::Pass.as_str()
-                || review.reviewed_head != run.expected_head
+                || review.reviewed_head != *reviewed_head
             {
                 bail!("integrated review gate no longer identifies a passing current review")
             }
@@ -590,29 +578,25 @@ async fn active_run_for_session(
 async fn validate_lease(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
-    expected_head: &str,
 ) -> Result<()> {
-    let lease = entities::branch_lease::Entity::find()
-        .filter(entities::branch_lease::Column::TaskRunId.eq(run.id.clone()))
+    let lease = entities::project_lease::Entity::find()
+        .filter(entities::project_lease::Column::TaskRunId.eq(run.id.clone()))
         .one(tx)
         .await?
-        .context("task branch lease not found")?;
-    if lease.expected_head != expected_head
-        || lease.branch != run.branch
-        || lease.git_common_dir != run.git_common_dir
-    {
-        bail!("task run and branch lease drifted before terminalization");
+        .context("task project lease not found")?;
+    if lease.project_id != run.project_id {
+        bail!("TaskRun and project lease drifted before terminalization");
     }
     Ok(())
 }
 
 async fn delete_lease(tx: &sea_orm::DatabaseTransaction, task_run_id: &str) -> Result<()> {
-    let deleted = entities::branch_lease::Entity::delete_many()
-        .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+    let deleted = entities::project_lease::Entity::delete_many()
+        .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
         .exec(tx)
         .await?;
     if deleted.rows_affected != 1 {
-        bail!("terminalization must release exactly one task branch lease");
+        bail!("terminalization must release exactly one task project lease");
     }
     Ok(())
 }

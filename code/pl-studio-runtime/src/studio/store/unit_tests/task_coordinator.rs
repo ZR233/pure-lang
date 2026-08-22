@@ -1,20 +1,12 @@
 use super::*;
 use crate::studio::task_coordinator::*;
 
-fn create_input(root_thread_id: &str) -> CreateTaskRun {
+fn create_input(project_id: &str, root_thread_id: &str) -> CreateTaskRun {
     CreateTaskRun {
+        project_id: project_id.to_string(),
         root_thread_id: root_thread_id.to_string(),
         plan: "# Plan\n\nImplement it".to_string(),
         workspace_root: "C:/work/task".to_string(),
-        git_common_dir: "C:/work/task/.git".to_string(),
-        branch: "main".to_string(),
-        head_commit: "1111111".to_string(),
-        design_baseline: test_task_git_fingerprint(
-            "C:/work/task",
-            "C:/work/task/.git",
-            "main",
-            "1111111",
-        ),
     }
 }
 
@@ -26,15 +18,8 @@ async fn allocation_fixture(name: &str, phase: TaskRunStateKind) -> (StudioStore
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id);
+    let mut input = create_input(&project.id, &session.id);
     input.workspace_root = workspace_root.clone();
-    input.git_common_dir = format!("{workspace_root}/.git");
-    input.design_baseline = test_task_git_fingerprint(
-        &input.workspace_root,
-        &input.git_common_dir,
-        &input.branch,
-        &input.head_commit,
-    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
     let run = move_test_run_to(&store, run, phase).await;
     (store, session.id, run)
@@ -77,7 +62,7 @@ async fn move_test_run_to(
 }
 
 #[tokio::test]
-async fn task_run_and_branch_lease_are_created_atomically() {
+async fn task_run_and_project_lease_are_created_atomically() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task").await.unwrap();
     let session = store
@@ -90,20 +75,19 @@ async fn task_run_and_branch_lease_are_created_atomically() {
         .unwrap();
 
     let (run, lease) = store
-        .create_task_run_with_lease(create_input(&session.id))
+        .create_task_run_with_lease(create_input(&project.id, &session.id))
         .await
         .unwrap();
     let error = store
-        .create_task_run_with_lease(create_input(&competing_session.id))
+        .create_task_run_with_lease(create_input(&project.id, &competing_session.id))
         .await
         .expect_err("same branch must have one lease");
 
     assert!(error.to_string().contains("already leased"));
     assert_eq!(run.kind(), TaskRunStateKind::DesignUpdating);
-    assert_eq!(run.base_commit, "1111111");
-    assert_eq!(run.expected_head, "1111111");
+    assert_eq!(run.project_id, project.id);
     assert_eq!(lease.task_run_id, run.id);
-    assert_eq!(lease.expected_head, "1111111");
+    assert_eq!(lease.project_id, project.id);
     assert_eq!(store.list_active_task_runs().await.unwrap(), vec![run]);
 }
 
@@ -115,15 +99,8 @@ async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
         .create_thread(&project.id, "Retry merge", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id);
+    let mut input = create_input(&project.id, &session.id);
     input.workspace_root = "C:/work/retry-merge".to_string();
-    input.git_common_dir = "C:/work/retry-merge/.git".to_string();
-    input.design_baseline = test_task_git_fingerprint(
-        &input.workspace_root,
-        &input.git_common_dir,
-        &input.branch,
-        &input.head_commit,
-    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
     let run = move_test_run_to(&store, run, TaskRunStateKind::Merging).await;
 
@@ -134,7 +111,7 @@ async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
         .unwrap();
     assert_eq!(blocked.kind(), TaskRunStateKind::Blocked);
     assert_eq!(blocked.terminal_generation(), None);
-    assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
+    assert!(store.read_project_lease(&run.id).await.unwrap().is_none());
     assert_eq!(
         store
             .list_retryable_blocked_merge_task_runs()
@@ -148,10 +125,8 @@ async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
     assert_eq!(retried.generation(), blocked.generation() + 1);
     assert_eq!(retried.terminal_generation(), None);
     assert_eq!(retried.status_message(), None);
-    let lease = store.read_branch_lease(&run.id).await.unwrap().unwrap();
-    assert_eq!(lease.git_common_dir, retried.git_common_dir);
-    assert_eq!(lease.branch, retried.branch);
-    assert_eq!(lease.expected_head, retried.expected_head);
+    let lease = store.read_project_lease(&run.id).await.unwrap().unwrap();
+    assert_eq!(lease.project_id, retried.project_id);
     assert!(
         store
             .list_retryable_blocked_merge_task_runs()
@@ -177,22 +152,14 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id);
+    let mut input = create_input(&project.id, &session.id);
     input.workspace_root = "C:/work/task-stop".to_string();
-    input.git_common_dir = "C:/work/task-stop/.git".to_string();
-    input.design_baseline = test_task_git_fingerprint(
-        &input.workspace_root,
-        &input.git_common_dir,
-        &input.branch,
-        &input.head_commit,
-    );
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
     let run = move_test_run_to(&store, run, TaskRunStateKind::Implementing).await;
 
     let requested = store
         .request_task_stop(
             &run.id,
-            &run.expected_head,
             TaskStopOrigin::UserRequest,
             &TaskStopReason::new("test stop").unwrap(),
         )
@@ -200,7 +167,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         .unwrap();
     assert!(requested.is_stop_requested());
     assert_eq!(requested.kind(), TaskRunStateKind::Stopping);
-    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
     let allocation = store
         .allocate_executor(AllocateExecutor {
             thread_id: session.id.clone(),
@@ -217,19 +184,14 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     assert!(error.to_string().contains("after task stop was requested"));
 
     let stopping = store
-        .begin_task_stop(&run.id, &run.expected_head, requested.generation())
+        .begin_task_stop(&run.id, requested.generation())
         .await
         .unwrap();
     assert_eq!(stopping.kind(), TaskRunStateKind::Stopping);
-    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
 
     let cancelled = store
-        .cancel_task_and_release_lease(
-            &run.id,
-            &run.expected_head,
-            requested.generation(),
-            "test stop",
-        )
+        .cancel_task_and_release_lease(&run.id, requested.generation(), "test stop")
         .await
         .unwrap();
     assert_eq!(cancelled.kind(), TaskRunStateKind::Cancelled);
@@ -239,12 +201,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     );
     assert_eq!(
         store
-            .cancel_task_and_release_lease(
-                &run.id,
-                &run.expected_head,
-                requested.generation(),
-                "duplicate stop",
-            )
+            .cancel_task_and_release_lease(&run.id, requested.generation(), "duplicate stop",)
             .await
             .unwrap()
             .terminal_generation(),
@@ -260,7 +217,6 @@ async fn task_recovery_cannot_exit_the_stopping_state() {
     let requested = store
         .request_task_stop(
             &run.id,
-            &run.expected_head,
             TaskStopOrigin::UserRequest,
             &TaskStopReason::new("pause before recovery").unwrap(),
         )
@@ -268,12 +224,7 @@ async fn task_recovery_cannot_exit_the_stopping_state() {
         .unwrap();
 
     let error = store
-        .clear_task_stop_for_recovery(
-            &run.id,
-            requested.generation(),
-            TaskRunStateKind::Stopping,
-            &run.expected_head,
-        )
+        .clear_task_stop_for_recovery(&run.id, requested.generation(), TaskRunStateKind::Stopping)
         .await
         .unwrap_err();
     assert!(error.to_string().contains("during phase stopping"));
@@ -371,6 +322,92 @@ async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
 }
 
 #[tokio::test]
+async fn structured_spawn_failure_round_trips_and_cleanup_failure_blocks_task() {
+    for cleanup_fails in [false, true] {
+        let (store, thread_id, run) = allocation_fixture(
+            if cleanup_fails {
+                "spawn-cleanup-failed"
+            } else {
+                "spawn-recoverable-failed"
+            },
+            TaskRunStateKind::Implementing,
+        )
+        .await;
+        let allocation = store
+            .allocate_executor(AllocateExecutor {
+                thread_id,
+                title: "create structured failure".to_string(),
+                scope_hints: vec!["src".to_string()],
+                agent_id: "agent-structured-failure".to_string(),
+                requested_by_call_id: "call-structured-failure".to_string(),
+            })
+            .await
+            .unwrap();
+        let operation = crate::agent::worktree::WorktreeError::GitExited {
+            args: "worktree add".to_string(),
+            exit_code: 128,
+            stderr: "fatal: cannot create worktree".to_string(),
+        };
+        let error = if cleanup_fails {
+            crate::agent::worktree::WorktreeError::OperationFailedWithCleanup {
+                operation: Box::new(operation),
+                cleanup: Box::new(crate::agent::worktree::WorktreeError::Io(
+                    "branch cleanup failed".to_string(),
+                )),
+            }
+        } else {
+            operation
+        };
+        let failure = TaskSpawnFailure::worktree(
+            run.id.clone(),
+            allocation.work_unit.id.clone(),
+            "agent-structured-failure".to_string(),
+            TaskSpawnResource {
+                repo_root: run.workspace_root.clone(),
+                path: allocation.work_unit.worktree_path.clone(),
+                branch: allocation.work_unit.branch.clone(),
+                base_ref: "HEAD".to_string(),
+            },
+            &error,
+        );
+
+        store
+            .record_executor_spawn_failure(
+                &allocation.work_unit.id,
+                "agent-structured-failure",
+                failure.clone(),
+            )
+            .await
+            .unwrap();
+
+        let work_unit = store
+            .read_work_unit(&allocation.work_unit.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(work_unit.spawn_failure(), Some(&failure));
+        let encoded = serde_json::to_value(&work_unit.state).unwrap();
+        let decoded: WorkUnitState = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, work_unit.state);
+        let persisted_run = store.read_task_run(&run.id).await.unwrap().unwrap();
+        if cleanup_fails {
+            assert_eq!(work_unit.status(), WorkUnitStatus::NeedsAttention);
+            assert_eq!(persisted_run.kind(), TaskRunStateKind::Blocked);
+            assert!(matches!(
+                persisted_run.state,
+                TaskRunState::Blocked(ref state)
+                    if state.recovery() == &BlockedRecovery::ManualOnly
+            ));
+            assert!(store.read_project_lease(&run.id).await.unwrap().is_none());
+        } else {
+            assert_eq!(work_unit.status(), WorkUnitStatus::Failed);
+            assert_eq!(persisted_run.kind(), TaskRunStateKind::Implementing);
+            assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
+        }
+    }
+}
+
+#[tokio::test]
 async fn task_projection_rejects_executor_without_durable_handoff() {
     let (store, root_thread_id, run) = allocation_fixture(
         "projection-missing-executor-handoff",
@@ -382,7 +419,7 @@ async fn task_projection_rejects_executor_without_durable_handoff() {
             task_run_id: run.id.clone(),
             title: "Implement projection".to_string(),
             scope_hints: vec!["src".to_string()],
-            base_commit: run.base_commit.clone(),
+            base_commit: "base".to_string(),
             worktree_path: format!("C:/work/{}/.pure/worktrees/orphan", run.id),
             branch: format!("pure-task-{}-orphan", run.id),
             attempt: 1,
@@ -425,7 +462,10 @@ async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking(
         .await
         .unwrap();
     store
-        .fail_executor(&first.work_unit.id, "agent-first", "terminal test")
+        .update_work_unit_state_for_test(
+            &first.work_unit.id,
+            WorkUnitState::failed(first.work_unit.state.clone().into_progress()),
+        )
         .await
         .unwrap();
     let after_terminal = store
@@ -1095,7 +1135,7 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
         .await
         .unwrap();
     let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
+        .create_task_run_with_lease(create_input(&project.id, &session.id))
         .await
         .unwrap();
     let read_barrier = tokio::sync::Barrier::new(2);
@@ -1154,7 +1194,7 @@ async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
     assert!(settlement.terminalized);
     assert_eq!(settlement.run.kind(), TaskRunStateKind::Failed);
     assert!(settlement.run.terminal_failure_id().is_some());
-    assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
+    assert!(store.read_project_lease(&run.id).await.unwrap().is_none());
     let failures = store.list_task_failures(&run.id).await.unwrap();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].disposition, TaskFailureDisposition::Fatal);
@@ -1243,7 +1283,7 @@ async fn recoverable_provider_failure_keeps_task_and_lease_active() {
     assert!(!settlement.terminalized);
     assert_eq!(settlement.run.kind(), TaskRunStateKind::Implementing);
     assert!(settlement.run.terminal_failure_id().is_none());
-    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
     assert_eq!(
         store.list_task_failures(&run.id).await.unwrap()[0].disposition,
         TaskFailureDisposition::Recoverable
@@ -1321,15 +1361,8 @@ impl ExecutorFixture {
             .create_thread(&project.id, "Task", StudioMode::Task)
             .await
             .unwrap();
-        let mut input = create_input(&session.id);
+        let mut input = create_input(&project.id, &session.id);
         input.workspace_root = format!("C:/work/{name}");
-        input.git_common_dir = format!("C:/work/{name}/.git");
-        input.design_baseline = test_task_git_fingerprint(
-            &input.workspace_root,
-            &input.git_common_dir,
-            &input.branch,
-            &input.head_commit,
-        );
         let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
         let run = move_test_run_to(&store, run, TaskRunStateKind::Implementing).await;
         let agent_id = format!("agent-{name}");
@@ -1338,7 +1371,7 @@ impl ExecutorFixture {
                 task_run_id: run.id.clone(),
                 title: "Implement core".to_string(),
                 scope_hints: vec!["src".to_string()],
-                base_commit: run.base_commit.clone(),
+                base_commit: "base".to_string(),
                 worktree_path: format!("C:/work/{name}/.pure/worktrees/{}", run.id),
                 branch: format!("pure-task-{}-{name}", run.id),
                 attempt: 1,

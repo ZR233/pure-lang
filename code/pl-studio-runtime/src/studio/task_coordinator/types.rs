@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{TaskGitFingerprint, TaskRun, TaskRunStateKind, WorkUnit};
+use super::{TaskRun, TaskRunStateKind, WorkUnit};
 
 mod merge;
 pub(crate) use merge::*;
@@ -134,12 +134,10 @@ impl std::ops::Deref for TaskStopReason {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BranchLeaseRecord {
+pub(crate) struct ProjectLeaseRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
-    pub(crate) git_common_dir: String,
-    pub(crate) branch: String,
-    pub(crate) expected_head: String,
+    pub(crate) project_id: String,
     pub(crate) acquired_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -182,51 +180,17 @@ pub(crate) struct TaskWorktreeOwnerResource {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesignFinalizeOutput {
     pub(crate) task_run_id: String,
-    pub(crate) previous_head: String,
-    pub(crate) finalized_head: String,
-    pub(crate) phase_commit: Option<String>,
-    pub(crate) changed_files: Vec<String>,
+    pub(crate) summary: String,
+    pub(crate) revision: u64,
     pub(crate) state: TaskRunStateKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DesignCancellationRevert {
-    pub(crate) task_run_id: String,
-    pub(crate) previous_head: String,
-    pub(crate) revert_commit: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateTaskRun {
+    pub(crate) project_id: String,
     pub(crate) root_thread_id: String,
     pub(crate) plan: String,
     pub(crate) workspace_root: String,
-    pub(crate) git_common_dir: String,
-    pub(crate) branch: String,
-    pub(crate) head_commit: String,
-    pub(crate) design_baseline: TaskGitFingerprint,
-}
-
-#[cfg(test)]
-pub(crate) fn test_task_git_fingerprint(
-    workspace_root: impl Into<String>,
-    git_common_dir: impl Into<String>,
-    branch: impl Into<String>,
-    head: impl Into<String>,
-) -> TaskGitFingerprint {
-    let head = head.into();
-    TaskGitFingerprint {
-        workspace_root: workspace_root.into(),
-        git_common_dir: git_common_dir.into(),
-        branch: branch.into(),
-        head: head.clone(),
-        base_commit: head.clone(),
-        expected_head: head,
-        operation: "none".to_string(),
-        index_diff_hash: "empty-index".to_string(),
-        working_tree_diff_hash: "empty-worktree".to_string(),
-        untracked_content_hash: "empty-untracked".to_string(),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

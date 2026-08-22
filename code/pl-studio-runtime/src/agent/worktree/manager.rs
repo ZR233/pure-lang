@@ -180,7 +180,9 @@ impl WorktreeManager {
                 return Err(operation);
             }
             return match self.discard(&handle).await {
-                Ok(()) => Err(operation),
+                Ok(()) => Err(WorktreeError::OperationFailedAfterCleanup {
+                    operation: Box::new(operation),
+                }),
                 Err(cleanup) => Err(WorktreeError::OperationFailedWithCleanup {
                     operation: Box::new(operation),
                     cleanup: Box::new(cleanup),
@@ -188,6 +190,11 @@ impl WorktreeManager {
             };
         }
         Ok(handle)
+    }
+
+    /// Resolve the actual base commit after `git worktree add` succeeds.
+    pub async fn resolve_head(&self, handle: &WorktreeHandle) -> Result<String, WorktreeError> {
+        self.inner.backend.resolve_head(&handle.path).await
     }
 
     /// 明确丢弃并删除 worktree 与其分支，聚合所有失败的清理步骤。

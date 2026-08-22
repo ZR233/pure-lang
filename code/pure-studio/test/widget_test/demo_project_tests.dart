@@ -62,8 +62,6 @@ void registerDemoProjectTests() {
               task: TaskRuntimeView(
                 runId: 'task-run-active',
                 state: TaskStateView.facts(kind: TaskStateKind.implementing),
-                branch: 'codex/task-mode',
-                expectedHead: '1234567890abcdef',
                 revision: 0,
                 workUnits: [],
                 completions: [],
