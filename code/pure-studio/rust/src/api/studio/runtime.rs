@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pl_studio_runtime::{StudioRuntime, StudioRuntimeStatus};
+use pl_studio_runtime::{StudioRuntime, StudioRuntimeStateKind};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
@@ -35,14 +35,14 @@ pub(crate) fn installed_bridge() -> Result<&'static BridgeRuntime, BridgeError> 
 
 pub(crate) async fn active_bridge() -> Result<&'static BridgeRuntime, BridgeError> {
     let bridge = installed_bridge()?;
-    match bridge.studio.runtime_snapshot().await?.status {
-        StudioRuntimeStatus::Ready => Ok(bridge),
-        StudioRuntimeStatus::Uninitialized | StudioRuntimeStatus::Initializing => {
+    match bridge.studio.runtime_snapshot().await?.state.kind() {
+        StudioRuntimeStateKind::Ready => Ok(bridge),
+        StudioRuntimeStateKind::Uninitialized | StudioRuntimeStateKind::Initializing => {
             Err(BridgeError::not_initialized())
         }
-        StudioRuntimeStatus::ShuttingDown
-        | StudioRuntimeStatus::Stopped
-        | StudioRuntimeStatus::Failed => Err(BridgeError::runtime_stopped()),
+        StudioRuntimeStateKind::ShuttingDown
+        | StudioRuntimeStateKind::Stopped
+        | StudioRuntimeStateKind::Failed => Err(BridgeError::runtime_stopped()),
     }
 }
 

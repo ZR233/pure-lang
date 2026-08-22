@@ -33,6 +33,11 @@ title 或 status 的事实源。
 - `interactionChanged`
 - `threadRuntimeUpdated`
 
+Turn、Item 与 Interaction 的通知 payload 都携带 canonical tagged state，而不是 status string 与
+平行 failure/reason/timestamp。Turn 终态固定为 Completed、Cancelled、Failed、BudgetLimited；
+取消原因和预算 rollover 结果位于对应终态 payload。Item terminal error、tool result、denial与
+完成时间同样只存在于适用的 state variant。
+
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
 固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。
 terminal Item 携带完整 authoritative payload并清除 UI overlay。

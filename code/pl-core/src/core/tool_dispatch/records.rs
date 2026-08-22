@@ -1,14 +1,17 @@
 use std::path::PathBuf;
 
 use pl_protocol::PureError;
-use pl_trace::{AgentEvent, TraceEventKind, TracePartStatus};
+use pl_trace::{
+    AgentEvent, TraceEventKind, TracePartAction, TracePartCompletion, TraceToolActivePhase,
+    TraceToolFailure, TraceToolFailureKind, TraceToolOutput,
+};
 
 use crate::tool::model_visible_tool_output;
 use crate::tool::{ToolOutput, ToolRuntimeEvent};
 
 use super::display::display_result_for_tool;
 use super::unix_seconds;
-use super::{ToolExecutionError, ToolExecutionRecord};
+use super::{ToolExecutionError, ToolExecutionOutcome, ToolExecutionRecord};
 
 #[derive(Debug, Clone)]
 pub(super) struct ToolOutputEnvelope {
@@ -23,10 +26,13 @@ pub(super) struct ToolOutputEnvelope {
 pub(super) fn emit_tool_snapshot(
     recorder: &mut crate::trace::TraceRecorder,
     item: &mut pl_trace::TracePart,
-    status: TracePartStatus,
+    phase: TraceToolActivePhase,
 ) {
-    item.status = status;
-    item.updated_at = unix_seconds();
+    let now = unix_seconds();
+    if let Err(error) = item.apply(item.command(now, TracePartAction::EnterToolPhase { phase })) {
+        tracing::error!(%error, "failed to advance active tool trace state");
+        return;
+    }
     recorder.update_item_snapshot(item.clone());
 }
 
@@ -35,35 +41,39 @@ pub(super) fn finalize_tool_item(
     mut item: pl_trace::TracePart,
     record: &ToolExecutionRecord,
 ) {
-    item.status = record.status;
-    item.updated_at = unix_seconds();
-    if let Some(tool) = &mut item.tool {
-        tool.result = Some(record.display_result.clone());
-        tool.exit_code = record.exit_code;
-        tool.timed_out = record.timed_out;
-        tool.output_artifacts = output_artifacts(&record.runtime_events);
-        tool.audit_metadata = audit_metadata(&record.runtime_events);
-        tool.output_metrics = output_metrics(&record.runtime_events);
-    }
-    if let Some(revision) = record.revision {
-        item.revision = item.revision.max(revision);
-    }
-    let status = item.status;
-    match status {
-        TracePartStatus::Failed
-        | TracePartStatus::Denied
-        | TracePartStatus::Interrupted
-        | TracePartStatus::BudgetLimited => {
-            recorder.fail_item(item, record.display_result.clone());
+    let output = TraceToolOutput::new(record.display_result.clone()).with_details(
+        record.exit_code,
+        output_artifacts(&record.runtime_events),
+        audit_metadata(&record.runtime_events),
+        output_metrics(&record.runtime_events),
+    );
+    let action = match record.outcome {
+        ToolExecutionOutcome::Succeeded => {
+            TracePartAction::Complete(TracePartCompletion::Tool { output })
         }
-        TracePartStatus::Started
-        | TracePartStatus::Streaming
-        | TracePartStatus::AwaitingApproval
-        | TracePartStatus::Approved
-        | TracePartStatus::Running
-        | TracePartStatus::Completed => recorder.complete_item(item),
+        ToolExecutionOutcome::Failed(kind) => TracePartAction::FailTool {
+            failure: TraceToolFailure::new(kind, record.display_result.clone()),
+            output: Some(output),
+        },
+        ToolExecutionOutcome::Denied => TracePartAction::DenyTool {
+            reason: record.display_result.clone(),
+        },
+        ToolExecutionOutcome::Cancelled => TracePartAction::Cancel {
+            reason: record.display_result.clone(),
+        },
+    };
+    let now = unix_seconds();
+    if let Err(error) = item.apply(item.command(now, action)) {
+        tracing::error!(%error, "failed to terminalize tool trace item");
+        return;
     }
-    if status == TracePartStatus::Completed {
+    match record.outcome {
+        ToolExecutionOutcome::Succeeded => recorder.complete_item(item),
+        ToolExecutionOutcome::Failed(_)
+        | ToolExecutionOutcome::Denied
+        | ToolExecutionOutcome::Cancelled => recorder.fail_item(item),
+    }
+    if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {
             match event {
                 ToolRuntimeEvent::InteractionRequested { interaction } => {
@@ -97,7 +107,7 @@ pub(super) fn finalize_tool_item(
 pub(super) async fn ready_tool_execution_record(
     tool_call: pl_model::ToolCall,
     error: ToolExecutionError,
-    status: TracePartStatus,
+    outcome: ToolExecutionOutcome,
     exit_code: Option<i32>,
     timed_out: bool,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
@@ -113,7 +123,7 @@ pub(super) async fn ready_tool_execution_record(
                 timed_out,
                 runtime_events: Vec::new(),
             },
-            status,
+            outcome,
         )),
         ToolExecutionError::Fatal(message) => Err(ToolExecutionError::Fatal(message)),
     }
@@ -124,8 +134,9 @@ pub(super) fn tool_execution_record(
     tool_name: String,
     result: std::result::Result<ToolOutput, PureError>,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
-    let (envelope, status) = match result {
+    let (envelope, outcome) = match result {
         Ok(output) => {
+            let timed_out = output.timed_out;
             let execution_failed = output
                 .runtime_events
                 .iter()
@@ -161,13 +172,15 @@ pub(super) fn tool_execution_record(
                     full_output_file: (!output.output_file.as_os_str().is_empty())
                         .then_some(output.output_file),
                     exit_code: output.exit_code,
-                    timed_out: output.timed_out,
+                    timed_out,
                     runtime_events,
                 },
-                if execution_failed {
-                    TracePartStatus::Failed
+                if timed_out {
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::TimedOut)
+                } else if execution_failed {
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution)
                 } else {
-                    TracePartStatus::Completed
+                    ToolExecutionOutcome::Succeeded
                 },
             )
         }
@@ -178,7 +191,7 @@ pub(super) fn tool_execution_record(
         }
     };
     Ok(tool_execution_record_from_envelope(
-        tool_call, tool_name, envelope, status,
+        tool_call, tool_name, envelope, outcome,
     ))
 }
 
@@ -186,7 +199,7 @@ fn tool_execution_record_from_envelope(
     tool_call: pl_model::ToolCall,
     tool_name: String,
     envelope: ToolOutputEnvelope,
-    status: TracePartStatus,
+    outcome: ToolExecutionOutcome,
 ) -> ToolExecutionRecord {
     let ToolOutputEnvelope {
         model_visible_text,
@@ -196,18 +209,6 @@ fn tool_execution_record_from_envelope(
         timed_out,
         runtime_events,
     } = envelope;
-    let revision = runtime_events.iter().find_map(|event| match event {
-        ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
-        ToolRuntimeEvent::InteractionRequested { .. }
-        | ToolRuntimeEvent::SkillActivated { .. }
-        | ToolRuntimeEvent::AuditMetadata { .. }
-        | ToolRuntimeEvent::ExecutionFailed
-        | ToolRuntimeEvent::OutputArtifacts { .. }
-        | ToolRuntimeEvent::CacheHit { .. }
-        | ToolRuntimeEvent::OutputMetrics { .. }
-        | ToolRuntimeEvent::OutputBudget { .. }
-        | ToolRuntimeEvent::EndTurn => None,
-    });
     let (raw_bytes, model_visible_bytes, artifact_bytes) = runtime_events
         .iter()
         .find_map(|event| match event {
@@ -244,7 +245,7 @@ fn tool_execution_record_from_envelope(
         cache_hit,
         "tool output projected"
     );
-    let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
+    let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, outcome);
     ToolExecutionRecord {
         id: tool_call.id.clone(),
         call_id: tool_call.call_id.clone(),
@@ -253,10 +254,9 @@ fn tool_execution_record_from_envelope(
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
         result: model_visible_text,
         display_result,
-        status,
+        outcome,
         exit_code,
         timed_out,
-        revision,
         runtime_events,
         execution_millis: 0,
     }
@@ -343,7 +343,7 @@ pub(super) fn interrupted_tool_execution_record(
             timed_out: false,
             runtime_events: Vec::new(),
         },
-        TracePartStatus::Interrupted,
+        ToolExecutionOutcome::Cancelled,
     )
 }
 
@@ -362,6 +362,6 @@ pub(super) fn respond_to_model_tool_execution_record(
             timed_out: false,
             runtime_events: Vec::new(),
         },
-        TracePartStatus::Failed,
+        ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
     )
 }

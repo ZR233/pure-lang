@@ -3,12 +3,9 @@ use serde_json::{Value, json};
 
 use super::redaction::{trace_preview_output, trace_preview_value};
 
-/// 工具生命周期投影阶段。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolLifecyclePhase {
-    Started,
-    Finished { success: bool },
-}
+mod state;
+
+pub use state::*;
 
 /// 从 pl-core trace 中抽出的工具生命周期通用视图。
 ///
@@ -16,23 +13,17 @@ pub enum ToolLifecyclePhase {
 /// call id、参数 JSON、预览截断、输出 artifact 和耗时计算。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolLifecycleProjection {
-    phase: ToolLifecyclePhase,
     call_id: String,
     tool_name: String,
     arguments: Value,
     arguments_preview: String,
-    output: String,
-    output_preview: String,
-    output_artifacts: Vec<Value>,
-    output_metrics: Option<pl_trace::TraceToolOutputMetrics>,
-    duration_ms: Option<u64>,
     started_at_unix: i64,
-    completed_at_unix: Option<i64>,
+    state: ToolLifecycleState,
 }
 
 impl ToolLifecycleProjection {
-    pub fn phase(&self) -> &ToolLifecyclePhase {
-        &self.phase
+    pub fn state(&self) -> &ToolLifecycleState {
+        &self.state
     }
 
     pub fn call_id(&self) -> &str {
@@ -51,24 +42,24 @@ impl ToolLifecycleProjection {
         &self.arguments_preview
     }
 
-    pub fn output(&self) -> &str {
-        &self.output
+    pub fn output(&self) -> Option<&str> {
+        self.state.output()
     }
 
-    pub fn output_preview(&self) -> &str {
-        &self.output_preview
+    pub fn output_preview(&self) -> Option<&str> {
+        self.state.output_preview()
     }
 
     pub fn output_artifacts(&self) -> &[Value] {
-        &self.output_artifacts
+        self.state.output_artifacts()
     }
 
     pub fn output_metrics(&self) -> Option<&pl_trace::TraceToolOutputMetrics> {
-        self.output_metrics.as_ref()
+        self.state.output_metrics()
     }
 
     pub fn duration_ms(&self) -> Option<u64> {
-        self.duration_ms
+        self.state.duration_ms()
     }
 
     pub fn started_at_unix(&self) -> i64 {
@@ -76,12 +67,12 @@ impl ToolLifecycleProjection {
     }
 
     pub fn completed_at_unix(&self) -> Option<i64> {
-        self.completed_at_unix
+        self.state.completed_at_unix()
     }
 
     /// 返回工具完成时间；缺失时回退到开始时间。
     pub fn completed_at_unix_or_started(&self) -> i64 {
-        self.completed_at_unix.unwrap_or(self.started_at_unix)
+        self.completed_at_unix().unwrap_or(self.started_at_unix)
     }
 
     /// 将 trace 中保存的 artifact JSON 解码为产品层的 artifact 类型。
@@ -93,7 +84,7 @@ impl ToolLifecycleProjection {
     where
         T: DeserializeOwned,
     {
-        self.output_artifacts
+        self.output_artifacts()
             .iter()
             .filter_map(|value| serde_json::from_value(value.clone()).ok())
             .collect()
@@ -207,27 +198,13 @@ pub fn tool_lifecycle_projection(
 ) -> Option<ToolLifecycleProjection> {
     match &event.kind {
         pl_trace::TraceEventKind::TracePartStarted { item } => {
-            if item.status == pl_trace::TracePartStatus::Started {
-                projection_from_trace_part(item, ToolLifecyclePhase::Started, preview_chars)
-            } else {
-                None
-            }
+            projection_from_trace_part(item, preview_chars)
         }
-        pl_trace::TraceEventKind::TracePartCompleted { item } => projection_from_trace_part(
-            item,
-            ToolLifecyclePhase::Finished { success: true },
-            preview_chars,
-        ),
-        pl_trace::TraceEventKind::TracePartFailed {
-            item,
-            error: _error,
-        } => projection_from_trace_part(
-            item,
-            ToolLifecyclePhase::Finished { success: false },
-            preview_chars,
-        ),
+        pl_trace::TraceEventKind::TracePartCompleted { item }
+        | pl_trace::TraceEventKind::TracePartFailed { item } => {
+            projection_from_trace_part(item, preview_chars)
+        }
         pl_trace::TraceEventKind::TracePartDelta { event: _event } => None,
-        pl_trace::TraceEventKind::PlanLifecycleChanged { event: _event } => None,
         pl_trace::TraceEventKind::InteractionChanged { event: _event } => None,
         pl_trace::TraceEventKind::EnabledToolsRecorded { event: _event } => None,
         pl_trace::TraceEventKind::SkillActivated {
@@ -238,38 +215,74 @@ pub fn tool_lifecycle_projection(
 
 fn projection_from_trace_part(
     item: &pl_trace::TracePart,
-    phase: ToolLifecyclePhase,
     preview_chars: usize,
 ) -> Option<ToolLifecycleProjection> {
-    let tool = item.tool.as_ref()?;
-    let arguments = arguments_value(&tool.arguments);
+    let tool = item.tool()?;
+    let invocation = tool.invocation();
+    let arguments = arguments_value(invocation.arguments());
     let arguments_preview = trace_preview_value(&arguments, preview_chars);
-    let (output, output_preview, output_artifacts, duration_ms, completed_at_unix) = match &phase {
-        ToolLifecyclePhase::Started => (String::new(), String::new(), Vec::new(), None, None),
-        ToolLifecyclePhase::Finished { success: _success } => {
-            let output = tool.result.clone().unwrap_or_default();
-            (
-                output.clone(),
-                trace_preview_output(&output, preview_chars),
-                tool.output_artifacts.clone(),
-                duration_ms(item.created_at, item.updated_at),
-                Some(item.updated_at),
-            )
+    let state = match tool.state() {
+        pl_trace::TraceToolState::Started(_) | pl_trace::TraceToolState::Streaming(_) => {
+            ToolLifecycleState::Started(StartedToolLifecycle {})
+        }
+        pl_trace::TraceToolState::AwaitingApproval(_)
+        | pl_trace::TraceToolState::Approved(_)
+        | pl_trace::TraceToolState::Running(_) => {
+            ToolLifecycleState::Running(RunningToolLifecycle {})
+        }
+        pl_trace::TraceToolState::Succeeded(state) => {
+            let output = state.output().result().to_string();
+            ToolLifecycleState::Succeeded(SucceededToolLifecycle {
+                output_preview: trace_preview_output(&output, preview_chars),
+                output,
+                output_artifacts: state.output().output_artifacts().to_vec(),
+                output_metrics: state.output().metrics().cloned(),
+                completed_at_unix: item.updated_at(),
+                duration_ms: duration_ms(item.created_at(), item.updated_at()),
+            })
+        }
+        pl_trace::TraceToolState::Failed(state) => {
+            let output = state.output().map_or_else(
+                || state.failure().message().to_string(),
+                |output| output.result().to_string(),
+            );
+            ToolLifecycleState::Failed(FailedToolLifecycle {
+                output_preview: trace_preview_output(&output, preview_chars),
+                output,
+                output_artifacts: state
+                    .output()
+                    .map_or_else(Vec::new, |output| output.output_artifacts().to_vec()),
+                output_metrics: state.output().and_then(|output| output.metrics()).cloned(),
+                completed_at_unix: item.updated_at(),
+                duration_ms: duration_ms(item.created_at(), item.updated_at()),
+            })
+        }
+        pl_trace::TraceToolState::Denied(state) => {
+            let reason = state.reason().to_string();
+            ToolLifecycleState::Denied(DeniedToolLifecycle {
+                reason_preview: trace_preview_output(&reason, preview_chars),
+                reason,
+                completed_at_unix: item.updated_at(),
+                duration_ms: duration_ms(item.created_at(), item.updated_at()),
+            })
+        }
+        pl_trace::TraceToolState::Cancelled(state) => {
+            let cause = format!("{:?}", state.cause());
+            ToolLifecycleState::Cancelled(CancelledToolLifecycle {
+                cause_preview: trace_preview_output(&cause, preview_chars),
+                cause,
+                completed_at_unix: item.updated_at(),
+                duration_ms: duration_ms(item.created_at(), item.updated_at()),
+            })
         }
     };
     Some(ToolLifecycleProjection {
-        phase,
         call_id: tool_call_id(tool),
-        tool_name: tool.name.clone(),
+        tool_name: invocation.name().to_string(),
         arguments,
         arguments_preview,
-        output,
-        output_preview,
-        output_artifacts,
-        output_metrics: tool.output_metrics.clone(),
-        duration_ms,
-        started_at_unix: item.created_at,
-        completed_at_unix,
+        started_at_unix: item.created_at(),
+        state,
     })
 }
 
@@ -289,23 +302,25 @@ fn tool_result_matches(record: &pl_protocol::ToolResultRecord, call_id: &str) ->
 }
 
 fn tool_call_id(tool: &pl_trace::TraceToolPart) -> String {
-    tool.call_id
-        .clone()
-        .unwrap_or_else(|| tool.tool_call_id.clone())
+    tool.invocation()
+        .call_id()
+        .unwrap_or_else(|| tool.invocation().tool_call_id())
+        .to_string()
 }
 
-fn duration_ms(created_at: i64, updated_at: i64) -> Option<u64> {
+fn duration_ms(created_at: i64, updated_at: i64) -> u64 {
     updated_at
         .saturating_sub(created_at)
         .try_into()
-        .ok()
-        .map(|seconds: u64| seconds.saturating_mul(1000))
+        .unwrap_or(0_u64)
+        .saturating_mul(1000)
 }
 
 #[cfg(test)]
 mod tests {
     use pl_trace::{
-        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
+        TraceEvent, TraceEventKind, TracePart, TracePartAction, TracePartCommand,
+        TracePartCompletion, TracePartSource, TracePartState, TraceToolInvocation, TraceToolOutput,
         TraceToolPart,
     };
     use pretty_assertions::assert_eq;
@@ -322,7 +337,7 @@ mod tests {
                 sequence: 1,
                 timestamp: 10,
                 kind: TraceEventKind::TracePartStarted {
-                    item: tool_part(TracePartStatus::Started, None, Vec::new()),
+                    item: tool_part(None, Vec::new()),
                 },
             },
             TraceEvent {
@@ -331,7 +346,6 @@ mod tests {
                 timestamp: 12,
                 kind: TraceEventKind::TracePartCompleted {
                     item: tool_part(
-                        TracePartStatus::Completed,
                         Some(r#"{"ok":true,"api_key":"secret"}"#),
                         vec![json!({"id": "artifact-1"})],
                     ),
@@ -345,35 +359,30 @@ mod tests {
             projections,
             vec![
                 ToolLifecycleProjection {
-                    phase: ToolLifecyclePhase::Started,
                     call_id: "call-1".to_string(),
                     tool_name: "exec".to_string(),
                     arguments: json!({"token": "secret", "path": "src"}),
                     arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
                         .to_string(),
-                    output: String::new(),
-                    output_preview: String::new(),
-                    output_artifacts: Vec::new(),
-                    output_metrics: None,
-                    duration_ms: None,
                     started_at_unix: 10,
-                    completed_at_unix: None,
+                    state: ToolLifecycleState::Started(StartedToolLifecycle {}),
                 },
                 ToolLifecycleProjection {
-                    phase: ToolLifecyclePhase::Finished { success: true },
                     call_id: "call-1".to_string(),
                     tool_name: "exec".to_string(),
                     arguments: json!({"token": "secret", "path": "src"}),
                     arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
                         .to_string(),
-                    output: r#"{"ok":true,"api_key":"secret"}"#.to_string(),
-                    output_preview: "{\n  \"api_key\": \"<redacted>\",\n  \"ok\": true\n}"
-                        .to_string(),
-                    output_artifacts: vec![json!({"id": "artifact-1"})],
-                    output_metrics: None,
-                    duration_ms: Some(2_000),
                     started_at_unix: 10,
-                    completed_at_unix: Some(12),
+                    state: ToolLifecycleState::Succeeded(SucceededToolLifecycle {
+                        output: r#"{"ok":true,"api_key":"secret"}"#.to_string(),
+                        output_preview: "{\n  \"api_key\": \"<redacted>\",\n  \"ok\": true\n}"
+                            .to_string(),
+                        output_artifacts: vec![json!({"id": "artifact-1"})],
+                        output_metrics: None,
+                        duration_ms: 2_000,
+                        completed_at_unix: 12,
+                    }),
                 },
             ]
         );
@@ -450,45 +459,37 @@ mod tests {
         assert!(!empty.inferred_success());
     }
 
-    fn tool_part(
-        status: TracePartStatus,
-        result: Option<&str>,
-        output_artifacts: Vec<serde_json::Value>,
-    ) -> TracePart {
-        TracePart {
-            turn_id: "turn".to_string(),
-            item_id: "item".to_string(),
-            started_sequence: 1,
-            revision: 0,
-            kind: TracePartKind::Tool,
-            status,
-            created_at: 10,
-            updated_at: 12,
-            source: TracePartSource::Runtime,
-            text_channel: None,
-            content: String::new(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            reasoning_content_chunks: Vec::new(),
-            tool: Some(TraceToolPart {
-                tool_call_id: "trace-call".to_string(),
-                call_id: Some("call-1".to_string()),
-                provider_item_id: None,
-                name: "exec".to_string(),
-                arguments: r#"{"token":"secret","path":"src"}"#.to_string(),
-                result: result.map(ToString::to_string),
-                exit_code: None,
-                timed_out: false,
+    fn tool_part(result: Option<&str>, output_artifacts: Vec<serde_json::Value>) -> TracePart {
+        let invocation = TraceToolInvocation::new(
+            "trace-call".to_string(),
+            "exec".to_string(),
+            r#"{"token":"secret","path":"src"}"#.to_string(),
+        )
+        .with_provider_identity(Some("call-1".to_string()), None);
+        let mut item = TracePart::new(
+            "turn".to_string(),
+            "item".to_string(),
+            1,
+            10,
+            TracePartSource::Runtime,
+            TracePartState::Tool(TraceToolPart::started(invocation)),
+        );
+        if let Some(result) = result {
+            let output = TraceToolOutput::new(result.to_string()).with_details(
+                None,
                 output_artifacts,
-                audit_metadata: Vec::new(),
-                output_metrics: None,
-                working_directory: None,
-                denial_reason: None,
-            }),
-            agent: None,
-            inference: None,
-            usage: None,
+                Vec::new(),
+                None,
+            );
+            let command = TracePartCommand {
+                item_id: item.item_id().to_string(),
+                expected_revision: item.revision(),
+                updated_at: 12,
+                action: TracePartAction::Complete(TracePartCompletion::Tool { output }),
+            };
+            item.apply(command).expect("valid completed tool part");
         }
+        item
     }
 
     fn tool_call_message(

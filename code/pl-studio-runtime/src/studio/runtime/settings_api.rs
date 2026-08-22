@@ -349,8 +349,17 @@ fn settings_view(
             id: server.id,
             transport: server.config.transport.as_str().to_string(),
             endpoint: server.config.endpoint_summary(),
-            enabled: server.config.enabled,
-            status: server.status_kind.as_str().to_string(),
+            configuration: match server.status_kind {
+                pl_core::McpServerStatusKind::Enabled => {
+                    pl_protocol::studio::StudioMcpServerConfiguration::Enabled
+                }
+                pl_core::McpServerStatusKind::Disabled => {
+                    pl_protocol::studio::StudioMcpServerConfiguration::Disabled
+                }
+                pl_core::McpServerStatusKind::MissingCredential => {
+                    pl_protocol::studio::StudioMcpServerConfiguration::MissingCredential
+                }
+            },
             source_kind: server.source_kind.as_str().to_string(),
             mutation_policy: server.mutation_policy.as_str().to_string(),
         })

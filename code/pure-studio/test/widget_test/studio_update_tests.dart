@@ -15,7 +15,7 @@ void registerStudioUpdateTests() {
     final state = container.read(studioUpdateControllerProvider);
     await Future<void>.delayed(Duration.zero);
 
-    expect(state.phase, StudioUpdatePhase.disabled);
+    expect(state, isA<DisabledUpdaterStateSnapshot>());
     expect(api.checkCount, 0);
   });
 
@@ -27,8 +27,8 @@ void registerStudioUpdateTests() {
     await _flushUpdateController();
 
     expect(
-      available.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.available,
+      available.read(studioUpdateControllerProvider),
+      isA<AvailableUpdaterStateSnapshot>(),
     );
     expect(
       available.read(studioUpdateControllerProvider).update?.version,
@@ -43,8 +43,8 @@ void registerStudioUpdateTests() {
     await _flushUpdateController();
 
     expect(
-      current.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.idle,
+      current.read(studioUpdateControllerProvider),
+      isA<UpToDateUpdaterStateSnapshot>(),
     );
     expect(currentApi.checkCount, 0);
   });
@@ -60,14 +60,17 @@ void registerStudioUpdateTests() {
     await container.read(studioUpdateControllerProvider.notifier).check();
 
     final failed = container.read(studioUpdateControllerProvider);
-    expect(failed.phase, StudioUpdatePhase.failed);
-    expect(failed.errorCode, 'checkFailed');
+    expect(failed, isA<CheckFailedUpdaterStateSnapshot>());
+    expect(
+      (failed as CheckFailedUpdaterStateSnapshot).error.code,
+      'checkFailed',
+    );
 
     api.checkError = null;
     await container.read(studioUpdateControllerProvider.notifier).check();
     expect(
-      container.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.upToDate,
+      container.read(studioUpdateControllerProvider),
+      isA<UpToDateUpdaterStateSnapshot>(),
     );
   });
 
@@ -83,42 +86,55 @@ void registerStudioUpdateTests() {
         .install();
     await api.installStarted.future;
     api.emit(
-      const StudioUpdateInstallEvent(
-        kind: StudioUpdateInstallEventKind.started,
+      DownloadingUpdaterStateSnapshot(
+        revision: 2,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+        update: _updateInfo(),
+        downloaded: 0,
         total: 100,
       ),
     );
     api.emit(
-      const StudioUpdateInstallEvent(
-        kind: StudioUpdateInstallEventKind.progress,
+      DownloadingUpdaterStateSnapshot(
+        revision: 3,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(3000),
+        update: _updateInfo(),
         downloaded: 25,
         total: 100,
       ),
     );
     await _flushUpdateController();
-    expect(container.read(studioUpdateControllerProvider).progress, 0.25);
+    final downloading = container.read(studioUpdateControllerProvider);
+    expect(downloading, isA<DownloadingUpdaterStateSnapshot>());
+    expect((downloading as DownloadingUpdaterStateSnapshot).downloaded, 25);
 
     api.emit(
-      const StudioUpdateInstallEvent(
-        kind: StudioUpdateInstallEventKind.verifying,
+      VerifyingUpdaterStateSnapshot(
+        revision: 4,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(4000),
+        update: _updateInfo(),
+        downloaded: 25,
+        total: 100,
       ),
     );
     await _flushUpdateController();
     expect(
-      container.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.verifying,
+      container.read(studioUpdateControllerProvider),
+      isA<VerifyingUpdaterStateSnapshot>(),
     );
 
     api.emit(
-      const StudioUpdateInstallEvent(
-        kind: StudioUpdateInstallEventKind.installerLaunched,
+      InstallerLaunchedUpdaterStateSnapshot(
+        revision: 5,
+        launchedAt: DateTime.fromMillisecondsSinceEpoch(5000),
+        update: _updateInfo(),
       ),
     );
     await api.closeInstallEvents();
     await install;
     expect(
-      container.read(studioUpdateControllerProvider).phase,
-      StudioUpdatePhase.installerLaunched,
+      container.read(studioUpdateControllerProvider),
+      isA<InstallerLaunchedUpdaterStateSnapshot>(),
     );
   });
 
@@ -132,8 +148,11 @@ void registerStudioUpdateTests() {
     await container.read(studioUpdateControllerProvider.notifier).install();
 
     final state = container.read(studioUpdateControllerProvider);
-    expect(state.phase, StudioUpdatePhase.failed);
-    expect(state.errorCode, 'runtimeBusy');
+    expect(state, isA<InstallFailedUpdaterStateSnapshot>());
+    expect(
+      (state as InstallFailedUpdaterStateSnapshot).error.code,
+      'runtimeBusy',
+    );
     expect(api.installCount, 0);
   });
 
@@ -156,10 +175,6 @@ void registerStudioUpdateTests() {
           .cancelInstall();
 
       expect(api.operation.cancelled, isTrue);
-      expect(
-        container.read(studioUpdateControllerProvider).errorCode,
-        'cancelled',
-      );
       await api.closeInstallEvents();
       await install;
     },
@@ -181,8 +196,9 @@ void registerStudioUpdateTests() {
                 ),
                 _testTurn(
                   threadId: 'session-1',
-                  state: const StudioTurnState.inProgress(
-                    StudioTurnActivity.responding,
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.responding,
                   ),
                 ),
               ),
@@ -309,7 +325,7 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
   UpdaterStateSnapshot checkResult;
   Object? checkError;
   final installStarted = Completer<void>();
-  final _installEvents = StreamController<StudioUpdateInstallEvent>();
+  final _installEvents = StreamController<UpdaterStateSnapshot>();
   int checkCount = 0;
   int installCount = 0;
   String? openedNotesUrl;
@@ -337,7 +353,7 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
     openedNotesUrl = url;
   }
 
-  void emit(StudioUpdateInstallEvent event) => _installEvents.add(event);
+  void emit(UpdaterStateSnapshot state) => _installEvents.add(state);
 
   Future<void> closeInstallEvents() => _installEvents.close();
 }
@@ -345,11 +361,11 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
 class _FakeStudioUpdateOperation implements StudioUpdateOperation {
   _FakeStudioUpdateOperation(this._events);
 
-  final StreamController<StudioUpdateInstallEvent> _events;
+  final StreamController<UpdaterStateSnapshot> _events;
   bool cancelled = false;
 
   @override
-  Stream<StudioUpdateInstallEvent> get events => _events.stream;
+  Stream<UpdaterStateSnapshot> get events => _events.stream;
 
   @override
   Future<void> cancel() async {
@@ -360,25 +376,20 @@ class _FakeStudioUpdateOperation implements StudioUpdateOperation {
   void dispose() {}
 }
 
-UpdaterStateSnapshot _availableUpdateSnapshot() => UpdaterStateSnapshot(
-  meta: ObservedStateMeta(
-    revision: 1,
-    phase: ObservedStatePhase.ready,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-    lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-    stale: false,
-  ),
+UpdaterStateSnapshot _availableUpdateSnapshot() =>
+    AvailableUpdaterStateSnapshot(
+      revision: 1,
+      checkedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+      update: _updateInfo(),
+    );
+
+StudioUpdateInfoView _updateInfo() => StudioUpdateInfoView(
   version: '1.1.0',
   publishedAt: DateTime.fromMillisecondsSinceEpoch(1000),
   notesUrl: 'https://github.com/ZR233/pure-lang/releases/tag/v1.1.0',
 );
 
-UpdaterStateSnapshot _upToDateSnapshot() => UpdaterStateSnapshot(
-  meta: ObservedStateMeta(
-    revision: 1,
-    phase: ObservedStatePhase.ready,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-    lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-    stale: false,
-  ),
+UpdaterStateSnapshot _upToDateSnapshot() => UpToDateUpdaterStateSnapshot(
+  revision: 1,
+  checkedAt: DateTime.fromMillisecondsSinceEpoch(1000),
 );

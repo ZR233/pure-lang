@@ -1,7 +1,10 @@
 use anyhow::Result;
 
 use crate::studio::ids::unix_seconds;
-use crate::{InteractionRequest, InteractionResolution, InteractionStatus};
+use crate::{
+    InteractionCommand, InteractionRequest, InteractionResolution, ResolvePlanConfirmation,
+    ResolveToolApproval, ResolveUserInput,
+};
 
 use super::StudioRuntime;
 
@@ -19,10 +22,41 @@ impl StudioRuntime {
             pl_core::AgentInteractionContinuationRequest::stable_mail_id(&current.interaction_id);
         let now = unix_seconds();
         let mut resolved = current.clone();
-        resolved.status = InteractionStatus::Resolved;
-        resolved.updated_at = now;
-        resolved.resolved_at = Some(now);
-        resolved.resolution = Some(resolution);
+        let operation_id = format!("resolve:{}", current.interaction_id);
+        let command = match resolution {
+            InteractionResolution::UserInput(value) => {
+                InteractionCommand::ResolveUserInput(ResolveUserInput {
+                    interaction_id: current.interaction_id.clone(),
+                    expected_revision: current.revision,
+                    operation_id,
+                    resolved_at: now,
+                    answers: value.answers,
+                })
+            }
+            InteractionResolution::ToolApproval(value) => {
+                InteractionCommand::ResolveToolApproval(ResolveToolApproval {
+                    interaction_id: current.interaction_id.clone(),
+                    expected_revision: current.revision,
+                    operation_id,
+                    resolved_at: now,
+                    decision: value.decision,
+                    reason: value.reason,
+                })
+            }
+            InteractionResolution::PlanConfirmation(value) => {
+                InteractionCommand::ResolvePlanConfirmation(ResolvePlanConfirmation {
+                    interaction_id: current.interaction_id.clone(),
+                    expected_revision: current.revision,
+                    operation_id,
+                    resolved_at: now,
+                    decision: value.decision,
+                    content: value.content,
+                    reason: value.reason,
+                })
+            }
+        };
+        let decision = resolved.decide(command)?;
+        resolved.apply(decision, now);
 
         handle
             .submit_interaction_continuation(

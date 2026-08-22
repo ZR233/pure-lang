@@ -50,6 +50,6 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
       isRoot &&
       runtime.hasActiveTask &&
       !isBusy &&
-      (rootThread.status == 'interrupted' ||
+      (rootThread.status == ThreadStatusView.faulted ||
           runtime.task!.hasRecoverableExecutorFailure);
 }

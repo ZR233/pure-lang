@@ -7,7 +7,7 @@ use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
 use pl_protocol::{InferenceOrchestrationMetrics, ToolCallKind};
-use pl_trace::TracePartStatus;
+use pl_trace::{TracePartAction, TraceToolActivePhase, TraceToolFailureKind, TraceToolInvocation};
 use tokio::sync::RwLock;
 
 use crate::ToolCompletion;
@@ -44,12 +44,32 @@ pub(super) struct ToolExecutionRecord {
     pub(super) result: String,
     pub(super) display_result: String,
     pub(super) arguments: String,
-    pub(super) status: TracePartStatus,
+    pub(super) outcome: ToolExecutionOutcome,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
-    pub(super) revision: Option<u64>,
     pub(super) runtime_events: Vec<ToolRuntimeEvent>,
     pub(super) execution_millis: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ToolExecutionOutcome {
+    Succeeded,
+    Failed(TraceToolFailureKind),
+    Denied,
+    Cancelled,
+}
+
+impl ToolExecutionOutcome {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed(TraceToolFailureKind::Execution) => "failed",
+            Self::Failed(TraceToolFailureKind::TimedOut) => "timedOut",
+            Self::Failed(TraceToolFailureKind::BudgetLimited) => "budgetLimited",
+            Self::Denied => "denied",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 pub(super) struct ScheduledToolExecution<'a> {
@@ -161,24 +181,28 @@ pub(super) async fn execute_tool_call_batch(
                 recorder.start_item(item.clone());
                 item
             });
-        if let Some(tool) = &mut item.tool {
-            tool.tool_call_id = trace_part_id.clone();
-            tool.call_id = Some(tool_call.call_id.clone());
-            tool.provider_item_id = Some(tool_call.id.clone());
-            tool.name = tool_call.name.clone();
-            tool.arguments = tool_call.payload_text();
+        let invocation = TraceToolInvocation::new(
+            trace_part_id.clone(),
+            tool_call.name.clone(),
+            tool_call.payload_text(),
+        )
+        .with_provider_identity(Some(tool_call.call_id.clone()), Some(tool_call.id.clone()));
+        if let Err(error) = item.apply(item.command(
+            unix_seconds(),
+            TracePartAction::UpdateToolInvocation { invocation },
+        )) {
+            tracing::error!(%error, "failed to update tool invocation before dispatch");
         }
         budget_tracker.record_tool_call(&tool_call.name);
 
         if let Some(message) = tool_call.invalid_arguments_message() {
-            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(message),
-                    TracePartStatus::Failed,
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
                     false,
                 )
@@ -200,17 +224,13 @@ pub(super) async fn execute_tool_call_batch(
         if !allowed {
             let name = &tool_call.name;
             let message = format!("Tool disabled by execution policy: {name}");
-            if let Some(tool) = &mut item.tool {
-                tool.denial_reason = Some(message.clone());
-            }
-            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Denied);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(message),
-                    TracePartStatus::Denied,
+                    ToolExecutionOutcome::Denied,
                     None,
                     false,
                 )
@@ -228,7 +248,6 @@ pub(super) async fn execute_tool_call_batch(
                 available = ?available,
                 "model requested an unknown tool"
             );
-            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
             let name = &tool_call.name;
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
@@ -236,7 +255,7 @@ pub(super) async fn execute_tool_call_batch(
                 future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(format!("Unknown tool: {name}")),
-                    TracePartStatus::Failed,
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
                     false,
                 )
@@ -289,7 +308,7 @@ pub(super) async fn execute_tool_call_batch(
                     ToolApprovalDecision::Approved
                 }
                 PermissionDecision::NeedsUserApproval { workspace_access } => {
-                    emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                    emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("工具 `{name}` 正在等待授权。"));
                     let decision = request_user_approval(
@@ -301,18 +320,10 @@ pub(super) async fn execute_tool_call_batch(
                     if matches!(decision, ToolApprovalDecision::Approved) {
                         execution_workspace_access = workspace_access;
                     }
-                    match &decision {
-                        ToolApprovalDecision::Approved => {}
-                        ToolApprovalDecision::Denied { reason } => {
-                            if let Some(tool) = &mut item.tool {
-                                tool.denial_reason = Some(reason.clone());
-                            }
-                        }
-                    }
                     decision
                 }
                 PermissionDecision::NeedsAiReview { workspace_access } => {
-                    emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                    emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("正在审查工具 `{name}`。"));
                     let mut review_context = tool_context.clone();
@@ -324,26 +335,17 @@ pub(super) async fn execute_tool_call_batch(
                     if matches!(decision, ToolApprovalDecision::Approved) {
                         execution_workspace_access = workspace_access;
                     }
-                    match &decision {
-                        ToolApprovalDecision::Approved => {}
-                        ToolApprovalDecision::Denied { reason } => {
-                            if let Some(tool) = &mut item.tool {
-                                tool.denial_reason = Some(reason.clone());
-                            }
-                        }
-                    }
                     decision
                 }
             };
         if is_cancelled(context.options) {
-            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Interrupted);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
-                    TracePartStatus::Interrupted,
+                    ToolExecutionOutcome::Cancelled,
                     None,
                     false,
                 )
@@ -359,8 +361,8 @@ pub(super) async fn execute_tool_call_batch(
             ToolApprovalDecision::Approved => {
                 let mut tool_context = tool_context;
                 tool_context.workspace_access = execution_workspace_access;
-                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
-                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
+                emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
+                emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Running);
                 progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
@@ -373,7 +375,7 @@ pub(super) async fn execute_tool_call_batch(
                     arguments: invocation.payload.arguments_for_tool(),
                     session_id: context.session_id.to_string(),
                     tool_id: invocation.runtime_tool_call_id.clone(),
-                    revision_base: item.revision,
+                    revision_base: item.revision(),
                 };
                 let cache_policy = tool.cache_policy(&tool_input.arguments);
                 let invalidates_cache = tool.invalidates_cache(&tool_input.arguments);
@@ -420,7 +422,7 @@ pub(super) async fn execute_tool_call_batch(
                             future: ready_tool_execution_record(
                                 tool_call.clone(),
                                 ToolExecutionError::RespondToModel(receipt),
-                                TracePartStatus::Completed,
+                                ToolExecutionOutcome::Succeeded,
                                 Some(0),
                                 false,
                             )
@@ -482,10 +484,6 @@ pub(super) async fn execute_tool_call_batch(
                 });
             }
             ToolApprovalDecision::Denied { reason } => {
-                if let Some(tool) = &mut item.tool {
-                    tool.denial_reason = Some(reason.clone());
-                }
-                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Denied);
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -494,7 +492,7 @@ pub(super) async fn execute_tool_call_batch(
                         ToolExecutionError::RespondToModel(format!(
                             "Tool execution denied: {reason}"
                         )),
-                        TracePartStatus::Denied,
+                        ToolExecutionOutcome::Denied,
                         None,
                         false,
                     )
@@ -679,7 +677,7 @@ async fn notify_tool_completion(
     callback(ToolCompletion {
         call_id: record.call_id.clone(),
         name: record.name.clone(),
-        status: record.status.as_str().to_string(),
+        status: record.outcome.as_str().to_string(),
         result: record.result.clone(),
         exit_code: record.exit_code,
         timed_out: record.timed_out,

@@ -90,28 +90,31 @@ class ProviderUsagePanel extends StatelessWidget {
                   : context.l10n.settingsUsageNotLoaded,
               tone: loading ? UsageTone.neutral : UsageTone.muted,
             )
-          else if (usage.status == 'ready' &&
-              usage.usageKind == 'deepseekBalance' &&
-              usage.balance != null)
-            _DeepSeekUsage(usage: usage.balance!)
-          else if (usage.status == 'ready' &&
-              usage.usageKind == 'zhipuCodingPlan' &&
-              usage.codingPlan != null)
-            _ZhipuCodingPlanUsage(usage: usage.codingPlan!)
           else
-            ProviderUsageMessage(
-              icon:
-                  usage.status == 'failed' ||
-                      usage.status == 'missingCredential'
-                  ? Icons.error_outline
-                  : Icons.info_outline,
-              message: providerUsageMessage(context, provider, usage),
-              tone: usage.status == 'failed'
-                  ? UsageTone.failed
-                  : usage.status == 'missingCredential'
-                  ? UsageTone.warning
-                  : UsageTone.muted,
-            ),
+            switch (usage.state) {
+              ReadyProviderUsageView(
+                data: DeepSeekBalanceProviderUsageView(:final balance),
+              ) =>
+                _DeepSeekUsage(usage: balance),
+              ReadyProviderUsageView(
+                data: ZhipuCodingPlanProviderUsageView(:final codingPlan),
+              ) =>
+                _ZhipuCodingPlanUsage(usage: codingPlan),
+              UnsupportedProviderUsageView() ||
+              MissingCredentialProviderUsageView() ||
+              FailedProviderUsageView() => ProviderUsageMessage(
+                icon: usage.state is UnsupportedProviderUsageView
+                    ? Icons.info_outline
+                    : Icons.error_outline,
+                message: providerUsageMessage(context, provider, usage),
+                tone: switch (usage.state) {
+                  FailedProviderUsageView() => UsageTone.failed,
+                  MissingCredentialProviderUsageView() => UsageTone.warning,
+                  UnsupportedProviderUsageView() => UsageTone.muted,
+                  ReadyProviderUsageView() => UsageTone.neutral,
+                },
+              ),
+            },
         ],
       ),
     );

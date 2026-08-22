@@ -1,5 +1,4 @@
-use pl_trace::TracePartStatus;
-
+use crate::core::tool_dispatch::ToolExecutionOutcome;
 use crate::trace::TraceRecorder;
 
 pub(super) fn record_plan_exit_items(
@@ -8,7 +7,8 @@ pub(super) fn record_plan_exit_items(
     tool_results: &[super::super::tool_dispatch::ToolExecutionRecord],
 ) {
     for tool_result in tool_results {
-        if tool_result.name != "plan_exit" || tool_result.status != TracePartStatus::Completed {
+        if tool_result.name != "plan_exit" || tool_result.outcome != ToolExecutionOutcome::Succeeded
+        {
             continue;
         }
         if let Some(content) = plan_exit_content(&tool_result.arguments) {

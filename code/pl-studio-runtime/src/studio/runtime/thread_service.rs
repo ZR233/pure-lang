@@ -282,9 +282,9 @@ impl StudioRuntime {
             .snapshot(agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        if snapshot.active_turn_id.is_some()
+        if snapshot.active_turn_id().is_some()
             || snapshot.pending_inputs > 0
-            || snapshot.activity != pl_core::AgentActivityState::Idle
+            || !snapshot.state.is_idle()
         {
             bail!("thread mode cannot change while the Thread is running or has pending input");
         }
@@ -379,7 +379,7 @@ impl StudioRuntime {
         if let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? {
             return match handle.snapshot(agent_id).await {
                 Ok(snapshot) => {
-                    Ok(snapshot.active_turn_id.is_some() || snapshot.pending_inputs > 0)
+                    Ok(snapshot.active_turn_id().is_some() || snapshot.pending_inputs > 0)
                 }
                 Err(crate::AgentRuntimeError::NotFound(_)) => {
                     self.store.thread_has_active_work(thread_id).await

@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
-    InteractionResolution, InteractionStatus, PlanConfirmationResolution, StudioMode,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    InteractionResolution, InteractionStatus, PlanConfirmationResolution,
+    PlanConfirmationResolutionPayload, StudioMergeMethod, StudioMode, StudioReviewScope,
+    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskCompletionContent,
 };
 use task_fixture::{
     DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, PLANNER_FOLLOWUP_CONTENT,
@@ -39,20 +40,20 @@ async fn run_offline_task_flow() -> Result<()> {
         })
         .await?;
     let confirmation = fixture.wait_for_plan_confirmation().await?;
-    assert_eq!(confirmation.status, InteractionStatus::Pending);
+    assert_eq!(confirmation.status(), InteractionStatus::Pending);
 
     let resolution = fixture
         .runtime
         .resolve_interaction(
             confirmation.interaction_id.clone(),
-            InteractionResolution::PlanConfirmation {
+            InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
                 decision: PlanConfirmationResolution::ImplementFreshContext,
                 content: None,
                 reason: None,
-            },
+            }),
         )
         .await?;
-    assert_eq!(resolution.interaction.status, InteractionStatus::Resolved);
+    assert_eq!(resolution.interaction.status(), InteractionStatus::Resolved);
 
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
@@ -66,7 +67,7 @@ async fn run_offline_task_flow() -> Result<()> {
     let work_unit = &task.work_units[0];
     assert!(matches!(
         &work_unit.state,
-        pl_studio_runtime::StudioTaskWorkUnitState::Merged(_)
+        pl_studio_runtime::StudioTaskWorkUnitState::Completed(_)
     ));
     assert!(work_unit.agent_id.is_some());
     assert!(!Path::new(&work_unit.worktree_path).exists());
@@ -80,20 +81,23 @@ async fn run_offline_task_flow() -> Result<()> {
         .iter()
         .find(|completion| completion.executor_agent_id == executor_id)
         .context("executor completion is absent")?;
-    assert!(executor_completion.head_commit.is_some());
+    assert!(matches!(
+        &executor_completion.content,
+        StudioTaskCompletionContent::Delivery(_)
+    ));
     let reviewer = task
         .reviews
         .iter()
-        .find(|review| review.reviewer_agent_id.is_some())
+        .find(|review| review.state.reviewer_agent_id().is_some())
         .context("review round is absent")?;
     assert!(matches!(
         &reviewer.state,
-        pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+        pl_studio_runtime::StudioTaskReviewState::Passed { .. }
     ));
 
     assert_eq!(task.merges.len(), 1);
     let merge = &task.merges[0];
-    assert_eq!(merge.method, "merge");
+    assert_eq!(merge.method, StudioMergeMethod::Merge);
     let merge_commit = merge.resulting_head.as_str();
     assert_eq!(
         git_output(
@@ -109,11 +113,11 @@ async fn run_offline_task_flow() -> Result<()> {
     assert_eq!(merge_parents.split_whitespace().count(), 2);
 
     assert_eq!(task.reviews.len(), 1);
-    assert_eq!(task.reviews[0].scope, "delivery");
+    assert_eq!(task.reviews[0].scope, StudioReviewScope::Delivery);
     for review in &task.reviews {
         assert!(matches!(
             &review.state,
-            pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+            pl_studio_runtime::StudioTaskReviewState::Passed { .. }
         ));
         assert_eq!(review.design_references.len(), 1);
         assert_eq!(review.design_references[0].path, "design/task-flow.md");
@@ -146,13 +150,11 @@ async fn run_offline_task_flow() -> Result<()> {
         .read_interaction(&confirmation.interaction_id)
         .await?
         .context("plan confirmation was not persisted")?;
-    assert_eq!(persisted_confirmation.status, InteractionStatus::Resolved);
+    assert_eq!(persisted_confirmation.status(), InteractionStatus::Resolved);
     assert!(matches!(
-        persisted_confirmation.resolution,
-        Some(InteractionResolution::PlanConfirmation {
-            decision: PlanConfirmationResolution::ImplementFreshContext,
-            ..
-        })
+        persisted_confirmation.resolution(),
+        Some(InteractionResolution::PlanConfirmation(payload))
+            if payload.decision == PlanConfirmationResolution::ImplementFreshContext
     ));
     assert!(
         fixture
@@ -209,11 +211,11 @@ async fn run_offline_required_review_flow() -> Result<()> {
         .runtime
         .resolve_interaction(
             confirmation.interaction_id,
-            InteractionResolution::PlanConfirmation {
+            InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
                 decision: PlanConfirmationResolution::ImplementFreshContext,
                 content: None,
                 reason: None,
-            },
+            }),
         )
         .await?;
 
@@ -224,11 +226,11 @@ async fn run_offline_required_review_flow() -> Result<()> {
     assert_eq!(task.work_units.len(), 1);
     assert_eq!(task.merges.len(), 1);
     assert_eq!(task.reviews.len(), 2);
-    assert_eq!(task.reviews[0].scope, "delivery");
-    assert_eq!(task.reviews[1].scope, "integrated");
+    assert_eq!(task.reviews[0].scope, StudioReviewScope::Delivery);
+    assert_eq!(task.reviews[1].scope, StudioReviewScope::Integrated);
     assert!(task.reviews.iter().all(|review| matches!(
         &review.state,
-        pl_studio_runtime::StudioTaskReviewState::Pass { .. }
+        pl_studio_runtime::StudioTaskReviewState::Passed { .. }
     )));
     let (review_round_id, reviewed_head) = match &task.integrated_review_gate {
         pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use pl_protocol::{ModelContextItem, ResponsesContextItem, ResponsesContextItemKind, Result};
-use pl_trace::TracePartStatus;
+use pl_trace::{TracePartAction, TracePartCompletion, TraceToolOutput};
 
 use crate::session::AgentSession;
 use crate::tool::{ClientToolSearchResolution, ToolInventory};
@@ -191,10 +191,15 @@ pub(super) fn record_client_tool_search_items(
             Some(summary.call_id.clone()),
             None,
         );
-        if let Some(tool) = &mut item.tool {
-            tool.result = Some(tool_search_summary_result(summary));
+        let now = crate::time::unix_seconds();
+        let output = TraceToolOutput::new(tool_search_summary_result(summary));
+        if let Err(error) = item.apply(item.command(
+            now,
+            TracePartAction::Complete(TracePartCompletion::Tool { output }),
+        )) {
+            tracing::error!(%error, "failed to complete client tool search trace");
+            continue;
         }
-        item.status = TracePartStatus::Completed;
         recorder.start_item(item.clone());
         recorder.complete_item(item);
     }

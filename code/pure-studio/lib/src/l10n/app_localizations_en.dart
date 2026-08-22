@@ -789,6 +789,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String timelineToolCancelled(String name) {
+    return '$name cancelled';
+  }
+
+  @override
   String timelineToolAwaitingApproval(String name) {
     return '$name awaiting approval';
   }

@@ -36,13 +36,13 @@ where
                 }
                 if let Err(error) = append_output_chunk(&entry, stream, chunk).await {
                     let mut state = entry.state.lock().await;
-                    state.record_error(error);
+                    state.record_output_error(error);
                 }
                 entry.notify.notify_waiters();
             }
             Err(error) => {
                 let mut state = entry.state.lock().await;
-                state.record_error(format!("failed to read process output: {error}"));
+                state.record_output_error(format!("failed to read process output: {error}"));
                 break;
             }
         }

@@ -5,16 +5,16 @@ void registerTaskRecoveryTests() {
     final base = _emptyState();
     final root = base.selectedThread!.copyWith(
       mode: StudioMode.task,
-      status: 'idle',
+      status: ThreadStatusView.idle,
       rootThreadId: 'session-1',
     );
 
     AgentWorkspaceView workspaceFor(TaskWorkUnitView workUnit) {
       final task = TaskRuntimeView(
         runId: 'run-46',
-        state: TaskStateView.facts(
-          kind: TaskStateKind.implementing,
+        state: const ImplementingTaskStateView(
           generation: 1,
+          design: TaskFinalizedDesignView('test design'),
         ),
         revision: 0,
         workUnits: [workUnit],
@@ -43,8 +43,18 @@ void registerTaskRecoveryTests() {
     expect(
       workspaceFor(
         _taskRecoveryWorkUnit(
-          status: TaskWorkUnitStateKind.awaitingCompletion,
-          execution: TaskWorkUnitExecution.failed,
+          state: WaitingReviewTaskWorkUnitStateView(
+            AwaitingReportTaskWaitingReviewView(
+              outcome: const FailedTaskExecutorOutcomeView(
+                sourceTurnId: 'turn-failed',
+                detail: 'provider failed',
+              ),
+              continuation: IdleTaskExecutorContinuationView(
+                revision: BigInt.zero,
+                sliceCount: 1,
+              ),
+            ),
+          ),
         ),
       ).isTaskPaused,
       isTrue,
@@ -52,8 +62,13 @@ void registerTaskRecoveryTests() {
     expect(
       workspaceFor(
         _taskRecoveryWorkUnit(
-          status: TaskWorkUnitStateKind.running,
-          execution: TaskWorkUnitExecution.running,
+          state: RunningTaskWorkUnitStateView(
+            activity: const AllocatedTaskRunningActivityView(),
+            continuation: IdleTaskExecutorContinuationView(
+              revision: BigInt.zero,
+              sliceCount: 1,
+            ),
+          ),
         ),
       ).isTaskPaused,
       isFalse,
@@ -67,15 +82,14 @@ void registerTaskRecoveryTests() {
       final base = _emptyState();
       final root = base.selectedThread!.copyWith(
         mode: StudioMode.task,
-        status: 'interrupted',
+        status: ThreadStatusView.faulted,
         rootThreadId: 'session-1',
       );
       final task = TaskRuntimeView(
         runId: preview.runId,
-        state: TaskStateView.facts(
-          kind: TaskStateKind.implementing,
+        state: ImplementingTaskStateView(
           generation: preview.taskGeneration,
-          statusMessage: 'paused',
+          design: const TaskFinalizedDesignView('test design'),
         ),
         revision: preview.revision,
         workUnits: const [],
@@ -204,7 +218,7 @@ void registerTaskRecoveryTests() {
   testWidgets(
     'rolled back Timeline rows remain visible with weak audit label',
     (tester) async {
-      final item = ThreadItemView(
+      final item = _threadItemFixture(
         id: 'rolled-item',
         threadId: 'session-1',
         turnId: 'rolled-turn',
@@ -241,19 +255,11 @@ void registerTaskRecoveryTests() {
 }
 
 TaskWorkUnitView _taskRecoveryWorkUnit({
-  required TaskWorkUnitStateKind status,
-  required TaskWorkUnitExecution execution,
+  required TaskWorkUnitStateView state,
 }) => TaskWorkUnitView(
   id: 'wu-1',
   title: 'executor',
-  state: TaskWorkUnitStateView.facts(
-    kind: status,
-    execution: execution,
-    executionError: execution == TaskWorkUnitExecution.failed
-        ? 'provider failed'
-        : null,
-    continuationRevision: BigInt.zero,
-  ),
+  state: state,
   worktreePath: r'C:\workspace-wu-1',
   branch: 'task-wu-1',
   agentId: 'executor-1',
@@ -287,7 +293,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
         turns: [
           TaskRecoveryTurn(
             turnId: 'turn-1',
-            status: 'completed',
+            state: TaskRecoveryTurnState.completed,
             updatedAt: _fixtureDate(1),
             itemCount: 2,
             inputCount: 1,
@@ -296,7 +302,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
           ),
           TaskRecoveryTurn(
             turnId: 'turn-2',
-            status: 'failed',
+            state: TaskRecoveryTurnState.failed,
             updatedAt: _fixtureDate(2),
             itemCount: 4,
             inputCount: 1,
@@ -305,7 +311,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
           ),
           TaskRecoveryTurn(
             turnId: 'turn-3',
-            status: 'interrupted',
+            state: TaskRecoveryTurnState.cancelled,
             updatedAt: _fixtureDate(3),
             itemCount: 3,
             inputCount: 1,
@@ -330,7 +336,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
         turns: [
           TaskRecoveryTurn(
             turnId: 'planner-turn',
-            status: 'interrupted',
+            state: TaskRecoveryTurnState.cancelled,
             updatedAt: _fixtureDate(4),
             itemCount: 2,
             inputCount: 1,

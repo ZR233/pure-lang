@@ -5,11 +5,11 @@ use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope};
 use pl_trace::TraceEvent;
 use tokio::sync::mpsc;
 
-use super::state::{AgentRuntimeError, derive_activity};
+use super::state::AgentRuntimeError;
 use super::*;
 use crate::thread_event::ObservedTurnEvent;
 pub(crate) use command::{AgentLoopCommand, AgentLoopHandle};
-use running_turn::{RunningTurn, turn_outcome};
+use running_turn::{RunningTurn, TurnExecutionTerminal, turn_outcome};
 
 mod checkpoint;
 mod command;
@@ -89,7 +89,7 @@ where
 {
     async fn run(mut self) {
         if self.dispatch_enabled
-            && self.state.snapshot.lifecycle == AgentLifecycleState::Active
+            && self.state.snapshot.state.is_queued()
             && self.state.has_triggering_input()
         {
             self.begin_next_turn().boxed().await;
@@ -144,10 +144,10 @@ where
                         }
                         AgentLoopCommand::SetActivity {
                             turn_id,
-                            kind,
+                            activity,
                             reply,
                         } => {
-                            let result = self.set_activity(turn_id, kind).boxed().await;
+                            let result = self.set_activity(turn_id, activity).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::Checkpoint { checkpoint, reply } => {
@@ -245,7 +245,8 @@ where
                 actual: turn_id,
             });
         }
-        self.interrupt_active_turn("interrupted").await
+        self.interrupt_active_turn(pl_protocol::TurnCancellationCause::UserRequested)
+            .await
     }
 
     async fn flush_pending_traces(&mut self) -> AgentRuntimeResult<()> {
@@ -282,7 +283,7 @@ where
             .active
             .as_ref()
             .map(|active| active.turn_id.clone())
-            .or_else(|| self.state.snapshot.active_turn_id.clone());
+            .or_else(|| self.state.snapshot.active_turn_id().cloned());
         let thread_id = self
             .active
             .as_ref()
@@ -296,7 +297,15 @@ where
             .clone()
             .zip(thread_id.clone())
             .map(|(turn_id, thread_id)| {
-                turn_outcome(turn_id, thread_id, Err(reason.clone()), false).0
+                turn_outcome(
+                    turn_id,
+                    thread_id,
+                    TurnExecutionTerminal::WorkerFailed {
+                        error: reason.clone(),
+                    },
+                    None,
+                )
+                .outcome
             });
         tracing::error!(
             agent_id = %self.state.snapshot.identity.id,
@@ -307,8 +316,21 @@ where
         );
         self.stop_active_turn();
         let mut next = self.state.clone();
-        next.snapshot.lifecycle = AgentLifecycleState::Faulted;
-        next.snapshot.active_turn_id = None;
+        if let Err(error) = next.snapshot.transition(AgentCommand::Fault {
+            error: pl_protocol::StateError {
+                code: "agentRuntimeFault".to_string(),
+                message: reason.clone(),
+                retryable: false,
+            },
+            turn_id: turn_id.clone(),
+        }) {
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                transition_error = %error,
+                "agent fault transition was rejected"
+            );
+            return;
+        }
         next.active_input = None;
         if fault_outcome.is_some() {
             next.snapshot.last_turn = fault_outcome.clone();
@@ -331,9 +353,21 @@ where
             reason_bytes = reason.len(),
             "failed to persist the faulted runtime event; using in-memory fallback"
         );
-        self.state.snapshot.lifecycle = AgentLifecycleState::Faulted;
-        self.state.snapshot.activity = derive_activity(AgentLifecycleState::Faulted, None, false);
-        self.state.snapshot.active_turn_id = None;
+        if self
+            .state
+            .snapshot
+            .transition(AgentCommand::Fault {
+                error: pl_protocol::StateError {
+                    code: "agentRuntimeFault".to_string(),
+                    message: reason.clone(),
+                    retryable: false,
+                },
+                turn_id,
+            })
+            .is_err()
+        {
+            return;
+        }
         self.state.active_input = None;
         if fault_outcome.is_some() {
             self.state.snapshot.last_turn = fault_outcome;

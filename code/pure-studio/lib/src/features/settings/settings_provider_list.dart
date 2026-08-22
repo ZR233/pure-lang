@@ -334,25 +334,29 @@ class ProviderListUsage extends StatelessWidget {
         tone: UsageTone.neutral,
       );
     }
-    if (usage == null || usage.status != 'ready') {
+    if (usage == null || usage.state is! ReadyProviderUsageView) {
       final message = usage == null
           ? providerUsageSummary(context, provider, null, loading)
           : providerUsageSummary(context, provider, usage, loading);
-      final tone = usage?.status == 'failed'
-          ? UsageTone.failed
-          : usage?.status == 'missingCredential'
-          ? UsageTone.warning
-          : UsageTone.muted;
+      final tone = switch (usage?.state) {
+        FailedProviderUsageView() => UsageTone.failed,
+        MissingCredentialProviderUsageView() => UsageTone.warning,
+        UnsupportedProviderUsageView() ||
+        ReadyProviderUsageView() ||
+        null => UsageTone.muted,
+      };
       return ProviderUsageMessage(
-        icon: usage?.status == 'failed'
+        icon: usage?.state is FailedProviderUsageView
             ? Icons.error_outline
             : Icons.info_outline,
         message: message,
         tone: tone,
       );
     }
-    if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
-      return _ProviderQuotaList(limits: usage.codingPlan!.limits);
+    if (usage.state case ReadyProviderUsageView(
+      data: ZhipuCodingPlanProviderUsageView(:final codingPlan),
+    )) {
+      return _ProviderQuotaList(limits: codingPlan.limits);
     }
     return ProviderUsageMessage(
       icon: Icons.account_balance_wallet_outlined,

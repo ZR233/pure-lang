@@ -6,8 +6,7 @@ use std::sync::{Arc, Mutex};
 use pl_core::{
     AgentModelConfig, AgentRoleId, AgentSession, ModelInfo, ModelRouteConfig, ModelTurnClient,
     ModelTurnOptions, ModelTurnRequest, ProviderConfig, ProviderEndpoint, ProviderId, TurnBudget,
-    TurnEngineBuilder, TurnRequest, TurnResultStatus, WebSearchAvailability, WebSearchConfig,
-    plan_web_search,
+    TurnEngineBuilder, TurnRequest, WebSearchAvailability, WebSearchConfig, plan_web_search,
 };
 use pl_protocol::MessageRole;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -158,7 +157,7 @@ async fn facade_supports_route_two_turns_snapshots_engine_and_web_search() {
         )
         .await
         .unwrap();
-    assert_eq!(turn.status, TurnResultStatus::Completed);
+    assert!(turn.is_completed());
     assert_eq!(turn.content, "engine answer");
 
     let search = plan_web_search(&config, &route, &WebSearchConfig::default()).unwrap();

@@ -10,10 +10,10 @@ pub(super) fn delivery_from_completion(completion: &WorkCompletionRecord) -> Res
         },
         base_commit: completion.base_commit.clone(),
         head_commit: completion
-            .head_commit
-            .clone()
+            .head_commit()
+            .map(str::to_string)
             .context("approved delivery completion has no head commit")?,
-        changed_files: completion.changed_files.clone(),
+        changed_files: completion.changed_files().to_vec(),
         verification_summary: completion.verification_summary.clone(),
     })
 }

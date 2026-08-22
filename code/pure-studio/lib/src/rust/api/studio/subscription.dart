@@ -14,9 +14,11 @@ import 'types/response.dart';
 import 'types/runtime.dart';
 import 'types/settings.dart';
 import 'types/thread_stream.dart';
+import 'types/thread_stream/item.dart';
+import 'types/updater.dart';
 part 'subscription.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_phase`, `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
+// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_progress`, `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 

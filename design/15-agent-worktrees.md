@@ -61,11 +61,12 @@ Studio 产品层的 `pl-studio-runtime::agent::worktree` 模块按端口-适配�
 Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。创建过程只绑定主
 `workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
-每个 durable `WorkUnit` 还保存 typed `worktreeDisposition = protect |
-cleanupRequested`。新记录默认 `protect`；v11 不导入旧记录或运行 backfill。普通 Cancelled、
-Failed、blocked 或无证据的 terminal 记录继续保护，不能把状态枚举本身当成删除授权。
-Task executor discard 必须在释放物理资源之前事务性持久化 `cleanupRequested`；即使
-WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
+每个 durable `WorkUnit` 的 `Failed`、`Cancelled` 状态都保存 typed
+`worktreeDisposition = protect | cleanupRequested`；其他非终态隐式保护，Completed
+表示已具备清理授权。新记录默认保护；v11 不导入旧记录或运行 backfill。应用重启取消
+活跃 executor 必须进入 `Cancelled::protect`；用户停止、recovery cleanup 与 planner
+discard 才进入 `Cancelled::cleanupRequested`，不能把 Cancelled/Failed 枚举本身当成
+删除授权。
 
 ## 关键类型（接口契约）
 
@@ -83,23 +84,28 @@ WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
 ## 生命周期状态机
 
 ```
-spawn -> running -> awaitingCompletion -> readyForReview
-                    ^                    |
-                    |                    v
-                    +---- changesRequested
-                                         |
-                                         v
-                                   approved -> close(preserve) -> planner Git -> record -> released
-                                         \-> noDelivery -> close(discard) -> released
+Pending -> Running -> WaitingReview::AwaitingReport -> WaitingReview::Ready
+              ^                                      |
+              |                                      v
+              +----------- ChangesRequired <- WaitingReview::Reviewing
+                                                       |
+                                                       v
+                                             ReviewPassed::Delivery
+                                                       |
+                                                       v
+                                                Completed::Merged
+
+WaitingReview::Reviewing -> Completed::NoDelivery
+任意非终态 -> Paused | Failed | Cancelled
 
 released = git worktree remove + 删除分支 + 清空 durable lifecycle resource
 ```
 
 要点：
 
-- 单次 turn 完成不释放 worktree（agent 可经 `send_message` 多轮），与既有
-  「turn 完成 ≠ agent 释放」语义一致。approved executor 关闭后进入
-  `PreserveForMerge`，由成功 merge record 清理；noDelivery、明确 discard 与已记录资源才允许
+- 单次 Turn 完成不释放 worktree（agent 可经 `send_message` 多轮），与既有
+  「Turn 完成 ≠ agent 释放」语义一致。`ReviewPassed::Delivery` executor 关闭后进入
+  `PreserveForMerge`，由成功 merge record 清理；`Completed::NoDelivery`、明确 discard 与已记录资源才允许
   走 cleanup。
 - runtime 不兜底 `git add -A` 或 commit。executor 自行决定并声明 `headCommit`、`changedFiles`
   与验证摘要；TaskService 不验证 clean、HEAD、ancestor 或真实 diff。delivery reviewer 通过后 planner
@@ -136,8 +142,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
 `.pure/worktrees/<taskRunId>` 父目录：
 
-- active、blocked、因重启收束为 cancelled、awaitingCompletion、readyForReview、
-  reviewing、changesRequested、approved 以及 disposition=`protect` 的资源继续保护；
+- Pending、Running、WaitingReview、ReviewPassed、ChangesRequired、Paused，以及
+  Failed/Cancelled 中 disposition=`protect` 的资源继续保护；
   只有 disposition=`cleanupRequested` 的 leaf 才进入 cleanup-pending 重试。
 - 没有 durable owner 的 leaf 只能在完整 ownership snapshot 已建立后按孤儿策略处理；
   durable owner 已终态但未明确授权时仍禁止删除。

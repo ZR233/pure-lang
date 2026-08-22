@@ -178,10 +178,7 @@ impl LiveTaskFixture {
                     bail!(
                         "Task entered blocked or terminal state `{}`: {}\n{}",
                         task_state_name(&task.state),
-                        task_state_data(&task.state)
-                            .status_message
-                            .as_deref()
-                            .unwrap_or("no status message"),
+                        task_state_message(&task.state).unwrap_or("no status message"),
                         self.diagnostics().await
                     );
                 }
@@ -484,18 +481,18 @@ fn task_state_name(state: &StudioTaskState) -> &'static str {
     }
 }
 
-fn task_state_data(state: &StudioTaskState) -> &pl_studio_runtime::StudioTaskStateData {
+fn task_state_message(state: &StudioTaskState) -> Option<&str> {
     match state {
-        StudioTaskState::DesignUpdating(data)
-        | StudioTaskState::Implementing(data)
-        | StudioTaskState::Merging(data)
-        | StudioTaskState::Reviewing(data)
-        | StudioTaskState::Reworking(data)
-        | StudioTaskState::Stopping(data)
-        | StudioTaskState::Blocked(data)
-        | StudioTaskState::Completed(data)
-        | StudioTaskState::Failed(data)
-        | StudioTaskState::Cancelled(data) => data,
+        StudioTaskState::Merging(state) => state.status_message.as_deref(),
+        StudioTaskState::Reviewing(state) => state.status_message.as_deref(),
+        StudioTaskState::Reworking(state) => Some(&state.status_message),
+        StudioTaskState::Stopping(state) => Some(&state.status_message),
+        StudioTaskState::Blocked(state) => Some(&state.message),
+        StudioTaskState::Failed(state) => Some(&state.message),
+        StudioTaskState::Cancelled(state) => Some(&state.message),
+        StudioTaskState::DesignUpdating(_)
+        | StudioTaskState::Implementing(_)
+        | StudioTaskState::Completed(_) => None,
     }
 }
 

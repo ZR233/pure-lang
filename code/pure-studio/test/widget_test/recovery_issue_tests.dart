@@ -95,8 +95,8 @@ void registerRecoveryIssueTests() {
       path: r'C:\missing',
     );
     final state = _noProjectState().copyWith(
-      projectDirectory: const ProjectDirectoryState(values: [brokenProject]),
-      recoveryState: const RecoveryStateSnapshot(
+      projectDirectory: ProjectDirectoryState(values: [brokenProject]),
+      recoveryState: RecoveryStateSnapshot(
         values: [
           StudioRecoveryIssue(
             id: 'issue-project',
@@ -175,7 +175,7 @@ void registerRecoveryIssueTests() {
       ],
     );
     api.recoveryCleanupState = state.copyWith(
-      recoveryState: const RecoveryStateSnapshot(),
+      recoveryState: RecoveryStateSnapshot(),
     );
     await tester.pumpWidget(
       ProviderScope(
@@ -225,8 +225,9 @@ void registerRecoveryIssueTests() {
 
       final state = _twoProjectState(
         selectedProjectId: 'project-a',
-        turnState: const StudioTurnState.inProgress(
-          StudioTurnActivity.responding,
+        turnState: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.responding,
         ),
       );
       final api = _FakeStudioApi(state);
@@ -396,7 +397,7 @@ void registerRecoveryIssueTests() {
     api
       ..recoveryCleanupError = null
       ..recoveryCleanupState = state.copyWith(
-        recoveryState: const RecoveryStateSnapshot(),
+        recoveryState: RecoveryStateSnapshot(),
       )
       ..recoveryPreviews['issue-session'] = const RecoveryCleanupPreview(
         issueId: 'issue-session',
@@ -429,7 +430,7 @@ void registerRecoveryIssueTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final initial = _recoveryIssueState(sessionIssueOnly: true).copyWith(
-        recoveryState: const RecoveryStateSnapshot(
+        recoveryState: RecoveryStateSnapshot(
           values: [
             StudioRecoveryIssue(
               id: 'issue-merge',
@@ -468,7 +469,7 @@ void registerRecoveryIssueTests() {
       api
         ..recoveryRetryError = null
         ..recoveryRetryState = initial.copyWith(
-          recoveryState: const RecoveryStateSnapshot(),
+          recoveryState: RecoveryStateSnapshot(),
           selectedThreadId: 'session-broken',
         );
       await tester.tap(retry);
@@ -550,7 +551,7 @@ StudioState _recoveryIssueState({
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
   return _emptyState().copyWith(
-    projectDirectory: const ProjectDirectoryState(
+    projectDirectory: ProjectDirectoryState(
       values: [
         StudioProject(
           id: 'project-current',

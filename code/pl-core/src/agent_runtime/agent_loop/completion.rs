@@ -1,6 +1,6 @@
 use super::super::{AgentRuntimeEventKind, AgentRuntimeHost};
 use super::AgentLoop;
-use super::running_turn::{TurnCompletion, add_usage, turn_outcome};
+use super::running_turn::{TurnCompletion, TurnSessionDisposition, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
 use crate::thread_event::compaction_observation;
 
@@ -27,9 +27,8 @@ where
             return;
         }
         let compactions = completion
-            .result
-            .as_ref()
-            .ok()
+            .worker_outcome
+            .returned()
             .map_or_else(Vec::new, |result| result.context_compactions.clone());
         for compaction in &compactions {
             if let Err(error) = self
@@ -44,26 +43,26 @@ where
             .active
             .take()
             .expect("validated active turn must still be present");
-        let cancelled = active.cancelling || completion.cancelled;
-        let finalized_with_tool = completion.finalized_with_tool;
-        let (outcome, _, result) = turn_outcome(
+        let finalization = turn_outcome(
             active.turn_id.clone(),
             active.thread_id.clone(),
-            completion.result,
-            cancelled,
+            active.terminal(completion.worker_outcome),
+            Some(active.started_at),
         );
-        let finalized_with_tool = (outcome.kind == super::super::TurnOutcomeKind::Completed)
-            .then_some(finalized_with_tool)
-            .flatten();
+        let outcome = finalization.outcome;
+        let result = finalization.retained_result;
         let mut next = self.state.clone();
         next.session.trace_sequence = next
             .session
             .trace_sequence
             .max(completion.next_trace_sequence);
-        if let Some(completed_session) = completion.session {
-            next.session.session = completed_session;
+        match completion.session {
+            TurnSessionDisposition::Preserve => {}
+            TurnSessionDisposition::Replace(completed_session) => {
+                next.session.session = completed_session;
+            }
         }
-        if let Some(result) = &result {
+        if let Some(result) = result.as_ref() {
             if !next
                 .session
                 .billing_by_turn
@@ -75,19 +74,38 @@ where
                 next.session.last_context_tokens = result.last_context_tokens;
             }
         }
-        next.snapshot.active_turn_id = None;
         for input in &mut next.pending_inputs {
             if !matches!(
                 &input.delivery_state,
-                super::super::MailboxDeliveryState::Claimed { turn_id, .. }
-                    if turn_id == &active.turn_id
+                super::super::MailboxDeliveryState::Claimed(state)
+                    if state.turn_id() == &active.turn_id
             ) {
                 continue;
             }
-            input.delivery_state = super::super::MailboxDeliveryState::Pending;
-            if input.turn_id == active.turn_id {
-                input.turn_id = super::super::TurnId::generate();
+            let turn_id = if input.turn_id == active.turn_id {
+                super::super::TurnId::generate()
+            } else {
+                input.turn_id.clone()
+            };
+            if let Err(error) = input.requeue(turn_id) {
+                self.fault(error.to_string()).await;
+                return;
             }
+        }
+        let next_turn_id = next.triggering_turn_id();
+        let waiting_for_interaction = outcome.outcome.is_interaction_boundary()
+            && matches!(
+                &next.snapshot.state,
+                super::super::AgentState::WaitingInteraction(state)
+                    if state.turn_id() == &active.turn_id
+            );
+        if !waiting_for_interaction
+            && let Err(error) = next
+                .snapshot
+                .transition(super::super::AgentCommand::Settle { next_turn_id })
+        {
+            self.fault(error.to_string()).await;
+            return;
         }
         next.active_input = None;
         next.refresh_mailbox_snapshot();
@@ -97,7 +115,6 @@ where
                 AgentRuntimeEventKind::TurnFinished {
                     outcome: outcome.clone(),
                     snapshot: Box::new(snapshot),
-                    finalized_with_tool: finalized_with_tool.clone(),
                 }
             })
             .await;
@@ -105,7 +122,7 @@ where
             self.fault(error.to_string()).await;
             return;
         }
-        if self.dispatch_enabled && self.state.has_triggering_input() {
+        if !waiting_for_interaction && self.dispatch_enabled && self.state.has_triggering_input() {
             self.begin_next_turn().await;
         }
     }

@@ -1,67 +1,126 @@
 part of 'studio_api.dart';
 
-ObservedStateMeta _observedMetaFromFrb(frb.BridgeObservedStateMeta meta) {
-  return meta.phase.when(
-    uninitialized: () => _observedMeta(meta, ObservedStatePhase.uninitialized),
-    ready: () => _observedMeta(meta, ObservedStatePhase.ready),
-    running: (operation, operationId) => _observedMeta(
-      meta,
-      ObservedStatePhase.running,
-      operation: operation.name,
-      operationId: operationId,
-    ),
-    failed: (operation, error) => _observedMeta(
-      meta,
-      ObservedStatePhase.failed,
-      operation: operation.name,
-      errorCode: error.code,
-      errorMessage: error.message,
-      retryable: error.retryable,
-    ),
-    stopped: () => _observedMeta(meta, ObservedStatePhase.stopped),
-  );
-}
+ObservedResource<T> _uninitializedResource<T>(
+  frb.BridgeUninitializedResource resource,
+) => UninitializedObservedResource<T>(
+  revision: resource.revision.toInt(),
+  updatedAt: resource.updatedAt.toInt(),
+);
 
-ObservedStateMeta _observedMeta(
-  frb.BridgeObservedStateMeta meta,
-  ObservedStatePhase phase, {
-  String? operation,
-  String? operationId,
-  String? errorCode,
-  String? errorMessage,
-  bool retryable = false,
-}) {
-  return ObservedStateMeta(
-    revision: meta.revision.toInt(),
-    phase: phase,
-    updatedAt: _dateFromUnix(meta.updatedAt),
-    lastCheckedAt: meta.lastCheckedAt == null
-        ? null
-        : _dateFromUnix(meta.lastCheckedAt!),
-    stale: meta.stale,
-    operation: operation,
-    operationId: operationId,
-    errorCode: errorCode,
-    errorMessage: errorMessage,
-    retryable: retryable,
-  );
-}
+ObservedResource<T> _loadingResource<T>(frb.BridgeLoadingResource resource) =>
+    LoadingObservedResource<T>(
+      revision: resource.revision.toInt(),
+      operation: resource.operation.name,
+      operationId: resource.operationId,
+      startedAt: resource.startedAt.toInt(),
+    );
+
+ObservedResource<T> _readyResource<T>(
+  frb.BridgeReadyResource resource,
+  T value,
+) => ReadyObservedResource<T>(
+  revision: resource.revision.toInt(),
+  updatedAt: resource.updatedAt.toInt(),
+  lastCheckedAt: resource.lastCheckedAt?.toInt(),
+  value: value,
+);
+
+ObservedResource<T> _refreshingResource<T>(
+  frb.BridgeRefreshingResource resource,
+  T value,
+) => RefreshingObservedResource<T>(
+  revision: resource.revision.toInt(),
+  operation: resource.operation.name,
+  operationId: resource.operationId,
+  startedAt: resource.startedAt.toInt(),
+  lastCheckedAt: resource.lastCheckedAt?.toInt(),
+  value: value,
+);
+
+ObservedResource<T> _staleResource<T>(
+  frb.BridgeStaleResource resource,
+  T value,
+) => StaleObservedResource<T>(
+  revision: resource.revision.toInt(),
+  staleAt: resource.staleAt.toInt(),
+  lastCheckedAt: resource.lastCheckedAt?.toInt(),
+  value: value,
+);
+
+ObservedResourceError _resourceError(frb.BridgeStateError error) =>
+    ObservedResourceError(
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+    );
+
+ObservedResource<T> _degradedResource<T>(
+  frb.BridgeDegradedResource resource,
+  T value,
+) => DegradedObservedResource<T>(
+  revision: resource.revision.toInt(),
+  failedAt: resource.failedAt.toInt(),
+  lastCheckedAt: resource.lastCheckedAt?.toInt(),
+  operation: resource.operation.name,
+  error: _resourceError(resource.error),
+  value: value,
+);
+
+ObservedResource<T> _failedResource<T>(frb.BridgeFailedResource resource) =>
+    FailedObservedResource<T>(
+      revision: resource.revision.toInt(),
+      failedAt: resource.failedAt.toInt(),
+      operation: resource.operation.name,
+      error: _resourceError(resource.error),
+    );
+
+ObservedResource<T> _stoppedResource<T>(frb.BridgeStoppedResource resource) =>
+    StoppedObservedResource<T>(
+      revision: resource.revision.toInt(),
+      stoppedAt: resource.stoppedAt.toInt(),
+    );
 
 SettingsStateSnapshot _settingsStateFromFrb(
   frb.BridgeSettingsStateSnapshot snapshot,
 ) {
-  final settings = snapshot.settings;
-  return SettingsStateSnapshot(
-    meta: _observedMetaFromFrb(snapshot.meta),
-    providers: settings.providers.map(_providerSettingsFromFrb).toList(),
-    defaultProviderId: settings.defaultProviderId,
-    roles: settings.roles.map(_roleSettingsFromFrb).toList(),
-    mcpServers: settings.mcpServers.map(_mcpSettingsFromFrb).toList(),
-    instructions: _instructionsSettingsFromFrb(settings.instructions),
-    skills: _skillsSettingsFromFrb(settings.skills),
-    general: _generalSettingsFromFrb(settings.general),
-    webSearch: _webSearchFromFrb(settings.webSearch),
-    permissionMode: _permissionMode(settings.permissionMode),
+  SettingsStateData convert(frb.BridgeSettingsStateData data) {
+    final settings = data.settings;
+    return SettingsStateData(
+      providers: settings.providers.map(_providerSettingsFromFrb).toList(),
+      defaultProviderId: settings.defaultProviderId,
+      roles: settings.roles.map(_roleSettingsFromFrb).toList(),
+      mcpServers: settings.mcpServers.map(_mcpSettingsFromFrb).toList(),
+      instructions: _instructionsSettingsFromFrb(settings.instructions),
+      skills: _skillsSettingsFromFrb(settings.skills),
+      general: _generalSettingsFromFrb(settings.general),
+      webSearch: _webSearchFromFrb(settings.webSearch),
+      permissionMode: _permissionMode(settings.permissionMode),
+    );
+  }
+
+  return SettingsStateSnapshot.fromState(
+    state: switch (snapshot) {
+      frb.BridgeSettingsStateSnapshot_Uninitialized(:final field0) =>
+        _uninitializedResource(field0),
+      frb.BridgeSettingsStateSnapshot_Loading(:final field0) =>
+        _loadingResource(field0),
+      frb.BridgeSettingsStateSnapshot_Ready(:final resource, :final value) =>
+        _readyResource(resource, convert(value)),
+      frb.BridgeSettingsStateSnapshot_Refreshing(
+        :final resource,
+        :final value,
+      ) =>
+        _refreshingResource(resource, convert(value)),
+      frb.BridgeSettingsStateSnapshot_Stale(:final resource, :final value) =>
+        _staleResource(resource, convert(value)),
+      frb.BridgeSettingsStateSnapshot_Degraded(:final resource, :final value) =>
+        _degradedResource(resource, convert(value)),
+      frb.BridgeSettingsStateSnapshot_Failed(:final field0) => _failedResource(
+        field0,
+      ),
+      frb.BridgeSettingsStateSnapshot_Stopped(:final field0) =>
+        _stoppedResource(field0),
+    },
   );
 }
 

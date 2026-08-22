@@ -450,9 +450,9 @@ async fn responses_websocket_does_not_replay_after_the_stream_starts() {
     assert_eq!(initial["type"], "response.create");
     assert!(events.iter().any(|event| matches!(
         event,
-        AgentEvent::TracePartFailed { item, error }
-            if item.item_id == "turn-1-inf-0-text-final-1"
-                && error.contains("upstream websocket proxy failed")
+        AgentEvent::TracePartFailed { item }
+            if item.item_id() == "turn-1-inf-0-text-final-1"
+                && item.failure().is_some_and(|error| error.contains("upstream websocket proxy failed"))
     )));
 }
 
@@ -1299,18 +1299,18 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
     assert!(trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
-                && item.content == "检查配置。"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                && trace_part_text(item) == "检查配置。"
     )));
     assert!(!trace_events.iter().any(|event| matches!(
         &event.kind,
-        TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan
+        TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Plan
     )));
     assert!(trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
-                && item.content == "Ready"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                && trace_part_text(item) == "Ready"
     )));
 }
 

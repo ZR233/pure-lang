@@ -759,6 +759,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String timelineToolCancelled(String name) {
+    return '$name 已取消';
+  }
+
+  @override
   String timelineToolAwaitingApproval(String name) {
     return '$name 等待授权';
   }
@@ -2388,6 +2393,11 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String timelineToolDenied(String name) {
     return '$name 被拒绝';
+  }
+
+  @override
+  String timelineToolCancelled(String name) {
+    return '$name 已取消';
   }
 
   @override

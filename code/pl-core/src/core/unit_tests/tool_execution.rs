@@ -541,9 +541,10 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
 
     assert_eq!(executions.load(Ordering::SeqCst), 3);
     assert_eq!(records.len(), 3);
-    assert_eq!(records[0].status, TracePartStatus::Failed);
-    assert_eq!(records[1].status, TracePartStatus::Failed);
-    assert_eq!(records[2].status, TracePartStatus::Failed);
+    assert!(records.iter().all(|record| matches!(
+        record.outcome,
+        ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution)
+    )));
 }
 
 #[tokio::test]
@@ -606,9 +607,11 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
 
     assert_eq!(executions.load(Ordering::SeqCst), 3);
     assert_eq!(records.len(), 3);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
-    assert_eq!(records[1].status, TracePartStatus::Completed);
-    assert_eq!(records[2].status, TracePartStatus::Completed);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.outcome == ToolExecutionOutcome::Succeeded)
+    );
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&records[1].result).unwrap()["agentId"],
         "agent-2"
@@ -672,7 +675,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
     assert_eq!(executions.load(Ordering::SeqCst), 4);
     assert_eq!(records.len(), 4);
     for record in &records {
-        assert_eq!(record.status, TracePartStatus::Completed);
+        assert_eq!(record.outcome, ToolExecutionOutcome::Succeeded);
     }
 
     let repeated_response = ToolCall::function(
@@ -710,7 +713,7 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
 
     assert_eq!(executions.load(Ordering::SeqCst), 5);
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
 }
 
 #[tokio::test]
@@ -889,7 +892,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
     )
     .await
     .unwrap();
-    assert_eq!(denied.records[0].status, TracePartStatus::Denied);
+    assert_eq!(denied.records[0].outcome, ToolExecutionOutcome::Denied);
 
     let approvals = std::sync::Arc::new(AtomicUsize::new(0));
     let callback_approvals = approvals.clone();
@@ -903,10 +906,12 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
             let callback_approvals = callback_approvals.clone();
             async move {
                 callback_approvals.fetch_add(1, Ordering::SeqCst);
-                pl_protocol::InteractionResolution::ToolApproval {
-                    decision: pl_protocol::ToolApprovalResolution::Approved,
-                    reason: None,
-                }
+                pl_protocol::InteractionResolution::ToolApproval(
+                    pl_protocol::ToolApprovalResolutionPayload {
+                        decision: pl_protocol::ToolApprovalResolution::Approved,
+                        reason: None,
+                    },
+                )
             }
             .boxed()
         }));
@@ -938,7 +943,7 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         batch
             .records
             .iter()
-            .all(|record| record.status == TracePartStatus::Completed)
+            .all(|record| record.outcome == ToolExecutionOutcome::Succeeded)
     );
     assert_eq!(batch.orchestration.parallel_candidates, 2);
     assert_eq!(batch.orchestration.actual_parallel_calls, 2);
@@ -947,14 +952,13 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         .drain()
         .into_iter()
         .filter_map(|event| match event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Tool => {
+            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Tool => {
                 Some(item)
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -962,8 +966,11 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         .collect::<Vec<_>>();
     assert_eq!(completed.len(), 2);
     assert!(completed.iter().all(|item| {
-        let tool = item.tool.as_ref().expect("MCP trace tool part");
-        tool.output_artifacts.is_empty() && !tool.audit_metadata.is_empty()
+        let output = item
+            .tool()
+            .and_then(pl_trace::TraceToolPart::terminal_output)
+            .expect("MCP trace tool output");
+        output.output_artifacts().is_empty() && !output.audit_metadata().is_empty()
     }));
 
     drop(core);
@@ -1087,9 +1094,12 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
 
     assert_eq!(executions.load(Ordering::SeqCst), 1);
     assert_eq!(records.len(), 3);
-    assert_eq!(records[0].status, TracePartStatus::Failed);
-    assert_eq!(records[1].status, TracePartStatus::Completed);
-    assert_eq!(records[2].status, TracePartStatus::Completed);
+    assert!(matches!(
+        records[0].outcome,
+        ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution),
+    ));
+    assert_eq!(records[1].outcome, ToolExecutionOutcome::Succeeded);
+    assert_eq!(records[2].outcome, ToolExecutionOutcome::Succeeded);
     let duplicate = serde_json::from_str::<serde_json::Value>(&records[2].result).unwrap();
     assert_eq!(duplicate["status"], "duplicateSuppressed");
     assert_eq!(duplicate["reusedFromCallId"], "read-call-1");
@@ -1132,7 +1142,10 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
     .unwrap();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Failed);
+    assert!(matches!(
+        records[0].outcome,
+        ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution),
+    ));
     assert!(records[0].result.contains("Invalid JSON arguments"));
     assert!(records[0].result.contains("github_api_request"));
 }
@@ -1252,21 +1265,23 @@ async fn chat_tool_call_replays_item_id_as_call_id() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].result, "chat-tool-call-1");
     assert_eq!(records[0].call_id, "chat-tool-call-1");
-    let terminal_tool = recorder
+    let terminal_call_id = recorder
         .drain()
         .into_iter()
         .find_map(|event| match event.kind {
-            TraceEventKind::TracePartCompleted { item } => item.tool,
+            TraceEventKind::TracePartCompleted { item } => item
+                .tool()
+                .and_then(|tool| tool.invocation().call_id())
+                .map(ToOwned::to_owned),
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("terminal tool trace");
-    assert_eq!(terminal_tool.call_id.as_deref(), Some("chat-tool-call-1"));
+    assert_eq!(terminal_call_id, "chat-tool-call-1");
 }
 
 #[tokio::test]
@@ -1326,7 +1341,8 @@ async fn tool_execution_reuses_streamed_trace_part() {
         .iter()
         .find_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
-                if item.kind == TracePartKind::Tool && item.item_id == "turn-1-provider-item-1" =>
+                if item.kind() == TracePartKind::Tool
+                    && item.item_id() == "turn-1-provider-item-1" =>
             {
                 Some(item)
             }
@@ -1334,7 +1350,6 @@ async fn tool_execution_reuses_streamed_trace_part() {
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -1342,23 +1357,27 @@ async fn tool_execution_reuses_streamed_trace_part() {
         .expect("completed tool item");
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
-    assert_eq!(terminal_tool.status, TracePartStatus::Completed);
-    let tool = terminal_tool.tool.as_ref().expect("tool trace metadata");
-    assert_eq!(tool.call_id.as_deref(), Some("call-1"));
-    assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
-    assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
+    let tool = terminal_tool.tool().expect("tool trace metadata");
+    assert_eq!(tool.invocation().call_id(), Some("call-1"));
     assert_eq!(
-        read_file_result_text(tool.result.as_deref()),
+        tool.invocation().provider_item_id(),
+        Some("provider-item-1")
+    );
+    assert_eq!(tool.invocation().arguments(), "{\"path\":\"note.txt\"}");
+    assert_eq!(
+        read_file_result_text(
+            tool.terminal_output()
+                .map(pl_trace::TraceToolOutput::result)
+        ),
         "provider item reuse"
     );
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
         vec![
-            TracePartStatus::Started,
-            TracePartStatus::Approved,
-            TracePartStatus::Running,
-            TracePartStatus::Completed,
+            TestToolPhase::Started,
+            TestToolPhase::Running,
+            TestToolPhase::Succeeded,
         ]
     );
     assert!(runtime_progress_texts(&mut event_rx).is_empty());
@@ -1421,14 +1440,13 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
     let completed_tool_ids = events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Tool => {
-                Some(item.item_id.as_str())
+            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Tool => {
+                Some(item.item_id())
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -1436,38 +1454,42 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         .collect::<Vec<_>>();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
     assert_eq!(completed_tool_ids, vec!["turn-1-call-1"]);
     let terminal_tool = events
         .iter()
         .find_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.item_id == "turn-1-call-1" => {
+            TraceEventKind::TracePartCompleted { item } if item.item_id() == "turn-1-call-1" => {
                 Some(item)
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("completed late-provider tool item");
-    let tool = terminal_tool.tool.as_ref().expect("tool trace metadata");
-    assert_eq!(tool.call_id.as_deref(), Some("call-1"));
-    assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
+    let tool = terminal_tool.tool().expect("tool trace metadata");
+    assert_eq!(tool.invocation().call_id(), Some("call-1"));
     assert_eq!(
-        read_file_result_text(tool.result.as_deref()),
+        tool.invocation().provider_item_id(),
+        Some("provider-item-1")
+    );
+    assert_eq!(
+        read_file_result_text(
+            tool.terminal_output()
+                .map(pl_trace::TraceToolOutput::result)
+        ),
         "late provider id"
     );
     assert_eq!(
         tool_statuses(&events, "turn-1-call-1"),
         vec![
-            TracePartStatus::Started,
-            TracePartStatus::Approved,
-            TracePartStatus::Running,
-            TracePartStatus::Completed,
+            TestToolPhase::Started,
+            TestToolPhase::Running,
+            TestToolPhase::Succeeded,
         ]
     );
     assert!(tool_statuses(&events, "turn-1-provider-item-1").is_empty());
@@ -1515,7 +1537,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
     let events = recorder.drain();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
     assert_eq!(
         live_tool_result_deltas(&live_events, "turn-1-provider-item-1"),
         vec!["runtime delta".to_string()]
@@ -1523,10 +1545,9 @@ async fn tool_runtime_deltas_use_trace_part_id() {
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
         vec![
-            TracePartStatus::Started,
-            TracePartStatus::Approved,
-            TracePartStatus::Running,
-            TracePartStatus::Completed,
+            TestToolPhase::Started,
+            TestToolPhase::Running,
+            TestToolPhase::Succeeded,
         ]
     );
 }

@@ -47,14 +47,12 @@ pub enum AgentRuntimeEventKind {
     TurnActivityChanged {
         turn_id: TurnId,
         thread_id: ThreadId,
-        kind: ActiveKind,
+        activity: AgentActivityUpdate,
         snapshot: Box<AgentSnapshot>,
     },
     TurnFinished {
         outcome: AgentTurnOutcome,
         snapshot: Box<AgentSnapshot>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        finalized_with_tool: Option<String>,
     },
     RecoveryCancelledTurn {
         outcome: AgentTurnOutcome,

@@ -1,9 +1,13 @@
 use super::runtime::{
-    BridgeAgentDirectoryEntryDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeObservedStateMeta,
-    BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto, RuntimeSnapshot,
+    BridgeAgentDirectoryEntryDto, BridgeDegradedResource, BridgeFailedResource,
+    BridgeLoadingResource, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeReadyResource,
+    BridgeRefreshingResource, BridgeStaleResource, BridgeStoppedResource,
+    BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto, BridgeUninitializedResource,
+    RuntimeSnapshot,
 };
 use super::settings::BridgeStudioSettingsDto;
 use super::thread_stream::BridgeThread;
+use super::updater::BridgeUpdaterStateSnapshot;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
 
@@ -26,24 +30,65 @@ pub struct BridgeStudioStateSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeProjectDirectoryState {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeProjectDirectoryState {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeProjectDirectoryData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeProjectDirectoryData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeProjectDirectoryData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeProjectDirectoryData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeProjectDirectoryData {
     pub projects: Vec<ProjectDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeThreadDirectoryState {
-    pub meta: BridgeObservedStateMeta,
-    pub threads: Vec<BridgeThread>,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeThreadDirectoryPage {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeThreadDirectoryPageData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeThreadDirectoryPageData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeThreadDirectoryPageData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeThreadDirectoryPageData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
 }
 
-/// Thread directory 分页窗口页（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
+/// Thread directory 分页窗口页数据（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeThreadDirectoryPage {
-    pub meta: BridgeObservedStateMeta,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeThreadDirectoryPageData {
     pub threads: Vec<BridgeThread>,
     /// `None` 表示没有更旧的页。
     pub next_cursor: Option<String>,
@@ -58,9 +103,33 @@ pub struct BridgeListThreadsPageRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeTaskDirectoryState {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeTaskDirectoryState {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeTaskDirectoryData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeTaskDirectoryData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeTaskDirectoryData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeTaskDirectoryData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeTaskDirectoryData {
     pub tasks: Vec<BridgeTaskDirectoryEntry>,
 }
 
@@ -72,47 +141,197 @@ pub struct BridgeTaskDirectoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeAgentDirectoryState {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeAgentDirectoryState {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeAgentDirectoryData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeAgentDirectoryData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeAgentDirectoryData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeAgentDirectoryData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeAgentDirectoryData {
     pub agents: Vec<BridgeAgentDirectoryEntryDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeSettingsStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeSettingsStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeSettingsStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeSettingsStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeSettingsStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeSettingsStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeSettingsStateData {
     pub settings: BridgeStudioSettingsDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeRecoveryStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeRecoveryStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeRecoveryStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeRecoveryStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeRecoveryStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeRecoveryStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeRecoveryStateData {
     pub issues: Vec<BridgeStudioRecoveryIssueDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeMcpStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeMcpStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeMcpStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeMcpStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeMcpStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeMcpStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeMcpStateData {
     pub desired_config_fingerprint: String,
     pub applied_config_fingerprint: String,
     pub health: BridgeMcpHealthDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeLspStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeLspStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeLspStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeLspStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeLspStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeLspStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeLspStateData {
     pub health: BridgeLspHealthDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeSkillsStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
     pub project_id: String,
+    pub state: BridgeSkillsResourceState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeSkillsResourceState {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeSkillsStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeSkillsStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeSkillsStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeSkillsStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeSkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub skills: Vec<SkillSummaryDto>,
@@ -120,26 +339,35 @@ pub struct BridgeSkillsStateSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeProviderUsageStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeProviderUsageStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeProviderUsageStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeProviderUsageStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeProviderUsageStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeProviderUsageStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeProviderUsageStateData {
     pub config_fingerprint: String,
     pub usages: Vec<ProviderUsageDto>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeUpdaterStateSnapshot {
-    pub meta: BridgeObservedStateMeta,
-    pub update: Option<BridgeVerifiedUpdateSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeVerifiedUpdateSummary {
-    pub version: String,
-    pub published_at: i64,
-    pub notes_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -200,12 +428,31 @@ pub struct ProviderUsagesResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageDto {
     pub provider_id: String,
+    pub revision: u64,
     pub updated_at: i64,
-    pub status: String,
-    pub usage_kind: String,
-    pub message: Option<String>,
-    pub balance: Option<DeepSeekBalanceDto>,
-    pub coding_plan: Option<ZhipuCodingPlanUsageDto>,
+    pub state: BridgeProviderUsageState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeProviderUsageState {
+    Unsupported,
+    MissingCredential {
+        message: String,
+    },
+    Ready {
+        data: BridgeProviderUsageData,
+    },
+    Failed {
+        error: super::runtime::BridgeStateError,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeProviderUsageData {
+    DeepSeekBalance(DeepSeekBalanceDto),
+    ZhipuCodingPlan(ZhipuCodingPlanUsageDto),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

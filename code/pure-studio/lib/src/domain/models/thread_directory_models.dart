@@ -1,5 +1,26 @@
 import 'studio_enums.dart';
 
+enum ThreadStatusView {
+  idle,
+  queued,
+  running,
+  waitingTool,
+  waitingInteraction,
+  cancelling,
+  closing,
+  closed,
+  faulted;
+
+  bool get isActive => switch (this) {
+    queued ||
+    running ||
+    waitingTool ||
+    waitingInteraction ||
+    cancelling => true,
+    idle || closing || closed || faulted => false,
+  };
+}
+
 class StudioProject {
   const StudioProject({
     required this.id,
@@ -24,7 +45,7 @@ class StudioThread {
     this.rootThreadId = '',
     this.agentPath = '',
     this.role = 'planner',
-    this.status = 'idle',
+    this.status = ThreadStatusView.idle,
     this.archived = false,
   });
 
@@ -38,7 +59,7 @@ class StudioThread {
   final String rootThreadId;
   final String agentPath;
   final String role;
-  final String status;
+  final ThreadStatusView status;
   final bool archived;
 
   bool get isRoot => parentThreadId == null;
@@ -58,7 +79,7 @@ class StudioThread {
     String? rootThreadId,
     String? agentPath,
     String? role,
-    String? status,
+    ThreadStatusView? status,
     bool? archived,
   }) {
     return StudioThread(
@@ -165,7 +186,7 @@ class ThreadDirectoryWindow {
 
 const Object _sentinel = Object();
 
-/// 关机阶段（与 Rust `StudioShutdownPhase` 一一对应）。
+/// 关机阶段的只读分类；canonical 状态由 [StudioShutdownProgress] 的 sealed variant 表达。
 enum StudioShutdownPhase {
   stoppingSubscriptions,
   cancellingTurns,
@@ -178,13 +199,48 @@ enum StudioShutdownPhase {
   int get index1 => index + 1;
 }
 
-/// 一次关机进度事件；`flushingPersistence` 的完成事件携带 `pendingCommits: 0`。
-class StudioShutdownProgress {
-  const StudioShutdownProgress({
-    required this.phase,
-    required this.pendingCommits,
-  });
+/// 一次关机进度的 canonical 状态；仅持久化刷新状态承载 pending commit 数。
+sealed class StudioShutdownProgress {
+  const StudioShutdownProgress();
 
-  final StudioShutdownPhase phase;
+  StudioShutdownPhase get phase => switch (this) {
+    StoppingSubscriptionsProgress() =>
+      StudioShutdownPhase.stoppingSubscriptions,
+    CancellingTurnsProgress() => StudioShutdownPhase.cancellingTurns,
+    FlushingPersistenceProgress() => StudioShutdownPhase.flushingPersistence,
+    SuspendingTasksProgress() => StudioShutdownPhase.suspendingTasks,
+    StoppingMcpProgress() => StudioShutdownPhase.stoppingMcp,
+    StoppingLspProgress() => StudioShutdownPhase.stoppingLsp,
+    StoppedProgress() => StudioShutdownPhase.stopped,
+  };
+}
+
+final class StoppingSubscriptionsProgress extends StudioShutdownProgress {
+  const StoppingSubscriptionsProgress();
+}
+
+final class CancellingTurnsProgress extends StudioShutdownProgress {
+  const CancellingTurnsProgress();
+}
+
+final class FlushingPersistenceProgress extends StudioShutdownProgress {
+  const FlushingPersistenceProgress({required this.pendingCommits});
+
   final int pendingCommits;
+}
+
+final class SuspendingTasksProgress extends StudioShutdownProgress {
+  const SuspendingTasksProgress();
+}
+
+final class StoppingMcpProgress extends StudioShutdownProgress {
+  const StoppingMcpProgress();
+}
+
+final class StoppingLspProgress extends StudioShutdownProgress {
+  const StoppingLspProgress();
+}
+
+final class StoppedProgress extends StudioShutdownProgress {
+  const StoppedProgress();
 }

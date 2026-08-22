@@ -18,7 +18,7 @@ pub struct StudioStore {
     attachments_dir: PathBuf,
 }
 
-pub(in crate::studio) use agent_framework::RecoverablePlan;
+pub(in crate::studio) use agent_framework::{RecoverablePlan, UnregisteredThreadFault};
 pub use error::StudioDatabaseError;
 pub(in crate::studio) use task::PendingTaskInteractions;
 pub(in crate::studio) use thread::ChildThreadSpec;

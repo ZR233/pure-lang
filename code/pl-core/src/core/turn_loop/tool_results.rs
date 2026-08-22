@@ -247,10 +247,9 @@ mod tests {
             display_result: result.clone(),
             result,
             arguments: "{}".to_string(),
-            status: pl_trace::TracePartStatus::Completed,
+            outcome: crate::core::tool_dispatch::ToolExecutionOutcome::Succeeded,
             exit_code: Some(0),
             timed_out: false,
-            revision: None,
             runtime_events: Vec::new(),
             execution_millis: 0,
         }

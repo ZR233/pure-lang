@@ -185,10 +185,7 @@ fn required_tool(name: &str) -> TurnFinalizationPolicy {
 
 #[cfg(test)]
 mod tests {
-    use pl_core::{
-        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
-        ThreadId,
-    };
+    use pl_core::{AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, ThreadId};
 
     use super::*;
 
@@ -330,9 +327,7 @@ mod tests {
                 role: AgentRoleId::new(role).unwrap(),
                 depth: u32::from(!root),
             },
-            lifecycle: AgentLifecycleState::Active,
-            activity: AgentActivityState::Idle,
-            active_turn_id: None,
+            state: AgentState::idle(),
             pending_inputs: 0,
             progress: None,
             last_turn: None,

@@ -94,7 +94,7 @@ class StudioState {
   WebSearchSettingsView get webSearch => settingsState.webSearch;
   PermissionMode get permissionMode => settingsState.permissionMode;
   List<StudioRecoveryIssue> get recoveryIssues => recoveryState.values;
-  int get settingsRevision => settingsState.meta.revision;
+  int get settingsRevision => settingsState.revision;
 
   ThreadWorkspace? get selectedWorkspace {
     final id = selectedThreadId;
@@ -225,12 +225,9 @@ class StudioState {
                 parentPath: thread.parentThreadId,
                 role: thread.role,
                 task: thread.title,
-                status: thread.status,
-                activity: StudioAgentActivity.idle,
+                state: const IdleStudioAgent(),
                 summary: null,
                 depth: thread.isRoot ? 0 : 1,
-                error: null,
-                reason: null,
                 updatedAt: thread.updatedAt,
               ),
         )

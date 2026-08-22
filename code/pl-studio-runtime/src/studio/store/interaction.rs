@@ -23,12 +23,7 @@ struct RestartUserInputRecoveryReceipt {
 impl StudioStore {
     pub async fn upsert_interaction(&self, interaction: &InteractionRequest) -> Result<()> {
         use entities::interaction;
-        let payload_json = serde_json::to_string(&interaction.payload)?;
-        let resolution_json = interaction
-            .resolution
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
+        let state_json = serde_json::to_string(&interaction.content)?;
         if let Some(existing) = interaction::Entity::find_by_id(interaction.interaction_id.clone())
             .one(&self.db)
             .await?
@@ -39,12 +34,9 @@ impl StudioStore {
             active.item_id = Set(interaction.scope.item_id.clone());
             active.tool_id = Set(interaction.scope.tool_id.clone());
             active.agent_path = Set(interaction.scope.agent_path.clone());
-            active.kind = Set(interaction.kind.as_str().to_string());
-            active.status = Set(interaction.status.as_str().to_string());
-            active.payload_json = Set(payload_json);
-            active.resolution_json = Set(resolution_json);
+            active.revision = Set(i64::try_from(interaction.revision)?);
+            active.state_json = Set(state_json);
             active.updated_at = Set(interaction.updated_at);
-            active.resolved_at = Set(interaction.resolved_at);
             active.update(&self.db).await?;
         } else {
             interaction::ActiveModel {
@@ -54,13 +46,11 @@ impl StudioStore {
                 item_id: Set(interaction.scope.item_id.clone()),
                 tool_id: Set(interaction.scope.tool_id.clone()),
                 agent_path: Set(interaction.scope.agent_path.clone()),
-                kind: Set(interaction.kind.as_str().to_string()),
-                status: Set(interaction.status.as_str().to_string()),
-                payload_json: Set(payload_json),
-                resolution_json: Set(resolution_json),
+                revision: Set(i64::try_from(interaction.revision)?),
+                state_json: Set(state_json),
                 created_at: Set(interaction.created_at),
                 updated_at: Set(interaction.updated_at),
-                resolved_at: Set(interaction.resolved_at),
+                ..Default::default()
             }
             .insert(&self.db)
             .await?;
@@ -87,7 +77,7 @@ impl StudioStore {
         use entities::interaction;
         interaction::Entity::find()
             .filter(interaction::Column::ThreadId.eq(thread_id.to_string()))
-            .filter(interaction::Column::Status.eq("pending"))
+            .filter(interaction::Column::StateKind.eq("pending"))
             .order_by_desc(interaction::Column::UpdatedAt)
             .order_by_desc(interaction::Column::Id)
             .all(&self.db)
@@ -100,8 +90,8 @@ impl StudioStore {
     pub async fn list_threads_with_transient_pending_interactions(&self) -> Result<Vec<String>> {
         use entities::interaction;
         let rows = interaction::Entity::find()
-            .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
-            .filter(interaction::Column::Kind.is_in([
+            .filter(interaction::Column::StateKind.eq(InteractionStatus::Pending.as_str()))
+            .filter(interaction::Column::InteractionKind.is_in([
                 InteractionKind::UserInput.as_str(),
                 InteractionKind::ToolApproval.as_str(),
                 InteractionKind::PlanConfirmation.as_str(),
@@ -129,24 +119,39 @@ impl StudioStore {
             .map(|thread| thread.id)
             .collect::<BTreeSet<_>>();
         let pending_threads = interaction::Entity::find()
-            .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
-            .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
+            .filter(interaction::Column::InteractionKind.eq(InteractionKind::UserInput.as_str()))
+            .filter(interaction::Column::StateKind.eq(InteractionStatus::Pending.as_str()))
             .all(&self.db)
             .await?
             .into_iter()
             .map(|interaction| interaction.thread_id)
             .collect::<BTreeSet<_>>();
-        let restarted_turns = turn::Entity::find()
-            .filter(turn::Column::Status.eq("interrupted"))
-            .filter(turn::Column::Reason.eq("runtime_restarted"))
+        let cancelled_turns = turn::Entity::find()
+            .filter(turn::Column::StateKind.eq("cancelled"))
             .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|turn| (turn.thread_id, turn.id))
-            .collect::<BTreeSet<_>>();
+            .await?;
+        let mut restarted_turns = BTreeSet::new();
+        for turn in cancelled_turns {
+            let state = serde_json::from_str::<pl_protocol::TurnState>(&turn.state_json)?;
+            match state {
+                pl_protocol::TurnState::Cancelled(cancelled)
+                    if cancelled.cause() == &pl_protocol::TurnCancellationCause::Recovery =>
+                {
+                    restarted_turns.insert((turn.thread_id, turn.id));
+                }
+                pl_protocol::TurnState::Cancelled(_) => {}
+                pl_protocol::TurnState::Queued(_)
+                | pl_protocol::TurnState::Running(_)
+                | pl_protocol::TurnState::Completed(_)
+                | pl_protocol::TurnState::Failed(_)
+                | pl_protocol::TurnState::BudgetLimited(_) => {
+                    anyhow::bail!("generated Turn state discriminator mismatch");
+                }
+            }
+        }
         let rows = interaction::Entity::find()
-            .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
-            .filter(interaction::Column::Status.eq(InteractionStatus::Cancelled.as_str()))
+            .filter(interaction::Column::InteractionKind.eq(InteractionKind::UserInput.as_str()))
+            .filter(interaction::Column::StateKind.eq(InteractionStatus::Cancelled.as_str()))
             .order_by_asc(interaction::Column::ThreadId)
             .order_by_desc(interaction::Column::UpdatedAt)
             .order_by_desc(interaction::Column::Id)
@@ -235,9 +240,7 @@ impl StudioStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        InteractionPayload, InteractionResolution, InteractionScope, StudioMode, UserInputAnswer,
-    };
+    use crate::{CancelInteraction, InteractionCommand, InteractionScope, StudioMode};
 
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
@@ -259,27 +262,29 @@ mod tests {
         turn_id: &str,
         updated_at: i64,
     ) -> InteractionRequest {
-        InteractionRequest {
-            interaction_id: interaction_id.to_string(),
-            kind: InteractionKind::UserInput,
-            status: InteractionStatus::Cancelled,
-            scope: InteractionScope {
+        let mut interaction = InteractionRequest::user_input(
+            interaction_id,
+            InteractionScope {
                 thread_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 item_id: Some(interaction_id.to_string()),
                 tool_id: Some(interaction_id.to_string()),
                 agent_path: None,
             },
-            payload: InteractionPayload::UserInput {
-                questions: Vec::new(),
-            },
-            created_at: updated_at,
+            Vec::new(),
             updated_at,
-            resolved_at: Some(updated_at),
-            resolution: Some(InteractionResolution::UserInput {
-                answers: std::collections::HashMap::<String, UserInputAnswer>::new(),
-            }),
-        }
+        );
+        let decision = interaction
+            .decide(InteractionCommand::Cancel(CancelInteraction {
+                interaction_id: interaction_id.to_string(),
+                expected_revision: interaction.revision,
+                operation_id: format!("cancel:{interaction_id}"),
+                cancelled_at: updated_at,
+                reason: "runtime restarted".to_string(),
+            }))
+            .unwrap();
+        interaction.apply(decision, updated_at);
+        interaction
     }
 
     async fn insert_cancelled_turn(
@@ -293,15 +298,22 @@ mod tests {
             .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
                 "INSERT INTO turns (
-                     id, thread_id, ordinal, revision, status, phase, reason,
-                     model_json, usage_json, failure_json, budget_limit_json,
-                     rollover_compacted, rollover_compaction_error, metadata_json, started_at,
-                     updated_at, completed_at
-                 ) VALUES (?, ?, 1, 0, 'interrupted', NULL, 'runtime_restarted',
-                           NULL, '{}', NULL, NULL, 0, NULL, ?, 1, 2, 2)",
+                     id, thread_id, ordinal, revision, state_json,
+                     model_json, usage_json, metadata_json, updated_at
+                 ) VALUES (?, ?, 1, 0, ?, NULL, '{}', ?, 2)",
                 [
                     turn_id.to_string().into(),
                     session_id.to_string().into(),
+                    serde_json::to_string(&pl_protocol::TurnState::Cancelled(
+                        pl_protocol::CancelledTurnState::new(
+                            Some(1),
+                            2,
+                            2,
+                            pl_protocol::TurnCancellationCause::Recovery,
+                        ),
+                    ))
+                    .unwrap()
+                    .into(),
                     metadata.map(|value| value.to_string()).into(),
                 ],
             ))

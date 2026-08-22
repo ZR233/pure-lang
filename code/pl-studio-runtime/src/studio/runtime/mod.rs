@@ -33,12 +33,12 @@ mod thread_service;
 mod updater;
 
 pub(crate) use provider_usage::ProviderUsageRuntime;
-pub use provider_usage::ProviderUsageStateSnapshot;
+pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
 pub(crate) use skill_catalog::SkillCatalogRuntime;
 pub use skill_catalog::SkillsStateSnapshot;
 pub(crate) use updater::StudioUpdateRuntime;
-pub use updater::StudioUpdateStateSnapshot;
+pub use updater::*;
 
 /// Studio UI 提交 prompt 的请求。
 ///
@@ -214,7 +214,7 @@ impl StudioRuntime {
             if snapshot.identity.parent_id.is_some() {
                 continue;
             }
-            let Some(turn_id) = snapshot.active_turn_id.clone() else {
+            let Some(turn_id) = snapshot.active_turn_id().cloned() else {
                 continue;
             };
             turns.push(StudioActiveTurn {
@@ -420,8 +420,8 @@ impl StudioRuntime {
             .into_iter()
             .filter(|snapshot| {
                 !matches!(
-                    snapshot.lifecycle,
-                    pl_core::AgentLifecycleState::Closing | pl_core::AgentLifecycleState::Closed
+                    snapshot.state,
+                    pl_core::AgentState::Closing(_) | pl_core::AgentState::Closed(_)
                 ) && has_project_root(&parents, &snapshot.identity.id, &root_agent_ids)
             })
             .collect::<Vec<_>>();

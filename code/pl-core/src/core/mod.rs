@@ -10,7 +10,7 @@ use pl_model::{
 use pl_protocol::ErrorSeverity;
 use pl_protocol::{Message, MessageContent, MessageRole, PureError, Result};
 #[cfg(test)]
-use pl_trace::{AgentEvent, AgentEventSender, TraceEvent, TracePartStatus};
+use pl_trace::{AgentEvent, AgentEventSender, TraceEvent};
 
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
@@ -31,7 +31,7 @@ use crate::tool::{
 use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
 use crate::trace::TraceRecorder;
 #[cfg(test)]
-use crate::turn::{BudgetTracker, TurnResultStatus};
+use crate::turn::BudgetTracker;
 use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };

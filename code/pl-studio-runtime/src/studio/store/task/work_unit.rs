@@ -13,8 +13,9 @@ use crate::studio::store::StudioStore;
 #[cfg(test)]
 use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationRequest, ExecutorContinuationState, TASK_EXECUTOR_HANDOFF_SECTION_ID,
-    TaskExecutorHandoff, WorkUnit, WorkUnitContext, WorkUnitState, decode_work_unit_state,
+    ExecutorContinuationRequest, ExecutorContinuationStateKind, TASK_EXECUTOR_HANDOFF_SECTION_ID,
+    TaskExecutorHandoff, WorkUnit, WorkUnitCommand, WorkUnitContext, WorkUnitState,
+    decode_work_unit_state,
 };
 
 impl StudioStore {
@@ -186,14 +187,13 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("executor work unit not found")?;
-        let state = work_unit_state(&work_unit)?;
-        let mut progress = state.into_progress();
-        progress.execution_error = Some(error.to_string());
-        progress.continuation_state = ExecutorContinuationState::NeedsAttention;
-        update_work_unit_state(
+        apply_work_unit_command(
             &self.db,
             work_unit,
-            WorkUnitState::needs_attention(progress),
+            WorkUnitCommand::PauseOperational {
+                operation_id: format!("handoff-needs-attention:{executor_agent_id}"),
+                detail: error.to_string(),
+            },
         )
         .await?;
         Ok(())
@@ -209,9 +209,8 @@ impl StudioStore {
             .await?;
         let mut requests = Vec::new();
         for unit in units {
-            let state = work_unit_state(&unit)?;
-            let progress = state.progress();
-            if progress.continuation_state != ExecutorContinuationState::PendingStart {
+            let record = work_unit_record(unit.clone())?;
+            if record.continuation_state() != ExecutorContinuationStateKind::PendingStart {
                 continue;
             }
             requests.push(ExecutorContinuationRequest {
@@ -219,11 +218,11 @@ impl StudioStore {
                     .executor_thread_id
                     .context("pending executor continuation has no executor Thread")?,
                 work_unit_id: unit.id,
-                source_turn_id: progress
-                    .continuation_source_turn_id
-                    .clone()
+                source_turn_id: record
+                    .continuation_source_turn_id()
+                    .map(str::to_string)
                     .context("pending executor continuation has no source Turn")?,
-                slice_count: progress.budget_slice_count,
+                slice_count: record.budget_slice_count(),
             });
         }
         Ok(requests)
@@ -239,11 +238,10 @@ impl StudioStore {
         else {
             return Ok(None);
         };
-        let state = work_unit_state(&unit)?;
+        let record = work_unit_record(unit.clone())?;
         if unit.executor_thread_id.as_deref() != Some(continuation.agent_id.as_str())
-            || state.progress().continuation_source_turn_id.as_deref()
-                != Some(continuation.source_turn_id.as_str())
-            || state.progress().continuation_state != ExecutorContinuationState::PendingStart
+            || record.continuation_source_turn_id() != Some(continuation.source_turn_id.as_str())
+            || record.continuation_state() != ExecutorContinuationStateKind::PendingStart
         {
             return Ok(None);
         }
@@ -256,11 +254,8 @@ impl StudioStore {
         if input.thread_id != continuation.agent_id {
             anyhow::bail!("executor continuation mail belongs to another Thread");
         }
-        match input.state.as_str() {
-            "queued" => Ok(None),
-            "claimed" | "active" | "consumed" => Ok(input.claimed_turn_id.or(Some(input.turn_id))),
-            state => anyhow::bail!("executor continuation mail has unknown state {state}"),
-        }
+        let state: pl_core::MailboxDeliveryState = serde_json::from_str(&input.state_json)?;
+        Ok(state.turn_id().map(ToString::to_string))
     }
 }
 
@@ -288,14 +283,30 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
 
 pub(super) fn work_unit_state(model: &entities::work_unit::Model) -> Result<WorkUnitState> {
     let state = decode_work_unit_state(&model.state_json)?;
-    if state.status().as_str() != model.state_kind {
+    if state.kind().as_str() != model.state_kind {
         anyhow::bail!(
             "stored WorkUnit state discriminator mismatch: JSON is {}, generated column is {}",
-            state.status().as_str(),
+            state.kind().as_str(),
             model.state_kind
         );
     }
     Ok(state)
+}
+
+pub(super) async fn apply_work_unit_command<C>(
+    connection: &C,
+    model: entities::work_unit::Model,
+    command: WorkUnitCommand,
+) -> Result<entities::work_unit::Model>
+where
+    C: ConnectionTrait,
+{
+    let record = work_unit_record(model.clone())?;
+    let decision = record.decide(record.revision, command)?;
+    if !decision.changed() {
+        return Ok(model);
+    }
+    update_work_unit_state(connection, model, decision.next_state()).await
 }
 
 pub(super) async fn update_work_unit_state<C>(

@@ -274,7 +274,7 @@ class _MergeDetail extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _ItemHeading(title: merge.executorAgentId, status: merge.method),
+          _ItemHeading(title: merge.executorAgentId, status: merge.method.name),
           StatusDetailRow(
             label: context.l10n.statusTaskCompletionRevision,
             value: '${merge.completionRevision}',
@@ -321,7 +321,7 @@ class _ReviewDetail extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ItemHeading(
-            title: '${review.scope} · #${review.round}',
+            title: '${review.scope.name} · #${review.round}',
             status: context.taskStatusLabel(review.verdict),
             statusKey: StudioDriverKeys.taskReviewVerdict(review.id),
           ),
@@ -333,7 +333,7 @@ class _ReviewDetail extends StatelessWidget {
             ),
           StatusDetailRow(
             label: context.l10n.statusTaskScope,
-            value: review.scope,
+            value: review.scope.name,
           ),
           if (review.completionRevision case final revision?)
             StatusDetailRow(
@@ -460,10 +460,9 @@ class _SectionDivider extends StatelessWidget {
 String _shortCommit(String value) =>
     value.length <= 10 ? value : value.substring(0, 10);
 
-String _stopOriginLabel(String origin) => switch (origin) {
-  'userRequest' => 'UserRequest',
-  'plannerDecision' => 'PlannerDecision',
-  'runtimeFailure' => 'RuntimeFailure',
-  'applicationShutdown' => 'ApplicationShutdown',
-  _ => origin,
+String _stopOriginLabel(TaskStopOriginView origin) => switch (origin) {
+  TaskStopOriginView.userRequest => 'UserRequest',
+  TaskStopOriginView.plannerDecision => 'PlannerDecision',
+  TaskStopOriginView.runtimeFailure => 'RuntimeFailure',
+  TaskStopOriginView.applicationShutdown => 'ApplicationShutdown',
 };

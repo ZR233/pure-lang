@@ -1,4 +1,8 @@
 use super::*;
+use crate::studio::task_coordinator::{
+    MergeCleanupCommand, MergeCleanupState, MergeCleanupTransitionDecision,
+    MergeCleanupTransitionError, WorkCompletionRecord,
+};
 use schemars::JsonSchema;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -15,9 +19,28 @@ pub(crate) struct MergeRecord {
     pub(crate) delivery_head: String,
     pub(crate) method: MergeMethod,
     pub(crate) summary: String,
-    pub(crate) cleanup: MergeCleanupEvidence,
+    pub(crate) cleanup: MergeCleanupState,
+    pub(crate) revision: u64,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+}
+
+impl MergeRecord {
+    pub(crate) fn decide_cleanup(
+        &self,
+        expected_revision: u64,
+        command: MergeCleanupCommand,
+    ) -> std::result::Result<MergeCleanupTransitionDecision, MergeCleanupTransitionError> {
+        if expected_revision != self.revision {
+            return Err(MergeCleanupTransitionError::StaleRevision {
+                merge_id: self.id.clone(),
+                expected: expected_revision,
+                actual: self.revision,
+                command,
+            });
+        }
+        self.cleanup.decide(&self.id, command)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -63,13 +86,6 @@ pub(crate) struct MergeCandidate {
     pub(crate) base_commit: String,
     pub(crate) head_commit: String,
     pub(crate) expected_task_head: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MergeCleanupEvidence {
-    pub(crate) status: String,
-    pub(crate) detail: Option<String>,
 }
 
 pub(crate) struct TaskMergeScope {

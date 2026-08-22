@@ -41,12 +41,15 @@ pub(super) async fn recover_executor_continuation(
         let agent_id = ThreadId::new(continuation.agent_id.clone())?;
         let snapshot = runtime.snapshot(agent_id).await?;
         if snapshot
-            .active_turn_id
-            .as_ref()
+            .active_turn_id()
             .is_some_and(|active| active.as_str() == turn_id)
         {
             store
-                .mark_executor_turn_started(&continuation.agent_id, MailboxBudgetAction::Preserve)
+                .mark_executor_turn_started(
+                    &continuation.agent_id,
+                    &turn_id,
+                    MailboxBudgetAction::Preserve,
+                )
                 .await?;
             return Ok(());
         }

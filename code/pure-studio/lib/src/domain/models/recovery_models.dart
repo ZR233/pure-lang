@@ -103,10 +103,12 @@ enum ConversationRecoveryMode { rewindTail, rebuildThread }
 
 enum TaskRecoveryTargetKind { planner, executor }
 
+enum TaskRecoveryTurnState { completed, cancelled, failed, budgetLimited }
+
 class TaskRecoveryTurn {
   const TaskRecoveryTurn({
     required this.turnId,
-    required this.status,
+    required this.state,
     required this.updatedAt,
     required this.itemCount,
     required this.inputCount,
@@ -115,7 +117,7 @@ class TaskRecoveryTurn {
   });
 
   final String turnId;
-  final String status;
+  final TaskRecoveryTurnState state;
   final DateTime updatedAt;
   final int itemCount;
   final int inputCount;

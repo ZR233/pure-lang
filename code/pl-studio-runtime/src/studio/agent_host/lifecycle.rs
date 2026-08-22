@@ -14,7 +14,7 @@ use crate::studio::task_coordinator::{
     StudioTaskSpawnPreparation, StudioTaskSpawnRequest, TaskSpawnCompensation,
     TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase,
 };
-use crate::studio::{ChildThreadSpec, StudioStore};
+use crate::studio::{ChildThreadSpec, StudioStore, UnregisteredThreadFault};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
 
@@ -212,7 +212,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             &lease.resource.preparation,
             code,
             phase,
-            reason.message,
+            reason.message.clone(),
             lease.resource.worktree.is_some(),
             TaskSpawnCompensationState::Unknown,
         );
@@ -230,21 +230,19 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         }
         match self
             .store
-            .update_thread_status(
-                &lease.resource.thread_id,
-                pl_protocol::ThreadStatus::Failed,
-                None,
-                Some(failure.message.clone()),
-                crate::studio::ids::unix_seconds(),
-            )
+            .fault_unregistered_child_thread(&lease.resource.thread_id, &reason.message)
             .await
         {
-            Ok(()) => {
+            Ok(UnregisteredThreadFault::Faulted) => {
                 failure.compensation.child_thread = TaskSpawnCompensationState::MarkedFailed;
+            }
+            Ok(UnregisteredThreadFault::RuntimeOwned) => {
+                // repository commit 已建立 runtime revision；core 会在 rollback 返回后
+                // 通过同一个 AgentState 状态机提交 Closed/Faulted compensation。
             }
             Err(error) => {
                 failure.compensation.child_thread = TaskSpawnCompensationState::Faulted;
-                failures.push(format!("child Thread compensation failed: {error}"));
+                failures.push(format!("child Thread fault compensation failed: {error}"));
             }
         }
         if let Err(error) = self

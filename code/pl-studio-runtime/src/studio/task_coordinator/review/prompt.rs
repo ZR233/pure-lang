@@ -6,7 +6,7 @@ use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 use serde::Serialize;
 
 use super::super::spawn::TaskExecutorBlueprint;
-use super::super::{ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnit, WorkUnitStatus};
+use super::super::{ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnit, WorkUnitStateKind};
 use super::{ModelCompletion, ModelWorkUnit};
 
 const COMMON_TEMPLATE: &str = include_str!("../../../prompts/review/common.md");
@@ -18,7 +18,7 @@ const INTEGRATED_TEMPLATE: &str = include_str!("../../../prompts/review/integrat
 struct ReviewFocus {
     work_unit_id: String,
     title: String,
-    status: WorkUnitStatus,
+    status: WorkUnitStateKind,
     scope_hints: Vec<String>,
 }
 
@@ -207,7 +207,7 @@ impl From<&WorkUnit> for ReviewFocus {
         Self {
             work_unit_id: work_unit.id.clone(),
             title: work_unit.title.clone(),
-            status: work_unit.status(),
+            status: work_unit.kind(),
             scope_hints: work_unit.scope_hints.clone(),
         }
     }

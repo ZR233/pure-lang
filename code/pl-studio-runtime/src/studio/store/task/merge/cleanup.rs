@@ -1,16 +1,16 @@
 use anyhow::{Context, Result, bail};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 
 use super::super::task_run_record;
 use super::super::work_completion::{delivery_from_completion, work_completion_record};
-use super::super::work_unit::{work_unit_record, work_unit_state};
+use super::super::work_unit::work_unit_record;
 use super::merge_record;
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    MergeCleanupEvidence, MergeRecord, TaskMergeScope, TaskWorktreeDisposition,
-    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
+    MergeCleanupCommand, MergeCleanupResult, MergeCleanupState, MergeRecord, TaskMergeScope,
+    WorkCompletionStatus, WorkUnitCompletionOutcome, WorkUnitStateKind,
 };
 
 impl StudioStore {
@@ -39,29 +39,32 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("recorded merge completion not found")?;
-        let work_unit_state = work_unit_state(&work_unit)?;
+        let work_unit_record = work_unit_record(work_unit.clone())?;
+        let completion_record = work_completion_record(completion.clone())?;
         if work_unit.task_run_id != run.id
             || work_unit.executor_thread_id.as_deref() != Some(merge.executor_agent_id.as_str())
-            || work_unit_state.execution_status() != ThreadExecutionStatus::Completed
-            || work_unit_state.status() != WorkUnitStatus::Merged
-            || work_unit_state.progress().worktree_disposition
-                != TaskWorktreeDisposition::CleanupRequested
+            || work_unit_record.kind() != WorkUnitStateKind::Completed
+            || !matches!(
+                work_unit_record.completion_outcome(),
+                Some(WorkUnitCompletionOutcome::Merged { merge_record_id })
+                    if merge_record_id == &merge.id
+            )
             || completion.task_run_id != run.id
             || completion.work_unit_id != work_unit.id
             || completion.executor_agent_id != merge.executor_agent_id
             || completion.revision != merge.completion_revision
-            || completion.status != WorkCompletionStatus::Approved.as_str()
+            || completion_record.status() != WorkCompletionStatus::Approved
         {
             bail!("recorded merge work unit and completion identity drifted");
         }
-        let completion = work_completion_record(completion)?;
+        let completion = completion_record;
         let delivery = delivery_from_completion(&completion)?;
         if delivery.head_commit != merge.delivery_head {
             bail!("recorded merge delivery head drifted");
         }
         Ok(TaskMergeScope {
             run: task_run_record(run)?,
-            work_unit: work_unit_record(work_unit)?,
+            work_unit: work_unit_record,
             completion,
             delivery,
             merge: merge_record(merge)?,
@@ -72,29 +75,84 @@ impl StudioStore {
         &self,
         merge_id: &str,
     ) -> Result<MergeRecord> {
-        self.record_merge_cleanup(
-            merge_id,
-            MergeCleanupEvidence {
-                status: "attempting".to_string(),
-                detail: None,
+        let model = entities::merge_record::Entity::find_by_id(merge_id.to_string())
+            .one(&self.db)
+            .await?
+            .context("merge record not found")?;
+        let record = merge_record(model.clone())?;
+        if record.cleanup.is_complete()
+            || matches!(record.cleanup, MergeCleanupState::Attempting(_))
+        {
+            return Ok(record);
+        }
+        let now = unix_seconds();
+        let decision = record.decide_cleanup(
+            record.revision,
+            MergeCleanupCommand::Attempt {
+                operation_id: format!("merge-cleanup:{}:{}", record.id, record.revision + 1),
+                started_at: now,
             },
-        )
-        .await
+        )?;
+        persist_cleanup_decision(&self.db, model, decision, now).await
     }
 
     pub(crate) async fn record_merge_cleanup(
         &self,
         merge_id: &str,
-        cleanup: MergeCleanupEvidence,
+        operation_id: &str,
+        result: MergeCleanupResult,
     ) -> Result<MergeRecord> {
-        let merge = entities::merge_record::Entity::find_by_id(merge_id.to_string())
+        let model = entities::merge_record::Entity::find_by_id(merge_id.to_string())
             .one(&self.db)
             .await?
             .context("merge record not found")?;
-        let mut active: entities::merge_record::ActiveModel = merge.into();
-        active.cleanup_status = Set(cleanup.status);
-        active.cleanup_detail = Set(cleanup.detail);
-        active.updated_at = Set(unix_seconds());
-        merge_record(active.update(&self.db).await?)
+        let record = merge_record(model.clone())?;
+        let now = unix_seconds();
+        let decision = record.decide_cleanup(
+            record.revision,
+            MergeCleanupCommand::Complete {
+                operation_id: operation_id.to_string(),
+                completed_at: now,
+                result,
+            },
+        )?;
+        persist_cleanup_decision(&self.db, model, decision, now).await
     }
+}
+
+async fn persist_cleanup_decision<C>(
+    connection: &C,
+    model: entities::merge_record::Model,
+    decision: crate::studio::task_coordinator::MergeCleanupTransitionDecision,
+    now: i64,
+) -> Result<MergeRecord>
+where
+    C: sea_orm::ConnectionTrait,
+{
+    if !decision.changed() {
+        return merge_record(model);
+    }
+    let state = decision.next_state();
+    let result = entities::merge_record::Entity::update_many()
+        .col_expr(
+            entities::merge_record::Column::CleanupStateJson,
+            Expr::value(serde_json::to_string(&state)?),
+        )
+        .col_expr(
+            entities::merge_record::Column::Revision,
+            Expr::value(model.revision.saturating_add(1)),
+        )
+        .col_expr(entities::merge_record::Column::UpdatedAt, Expr::value(now))
+        .filter(entities::merge_record::Column::Id.eq(model.id.clone()))
+        .filter(entities::merge_record::Column::Revision.eq(model.revision))
+        .exec(connection)
+        .await?;
+    if result.rows_affected != 1 {
+        bail!("merge cleanup update lost its revision CAS");
+    }
+    let model = entities::merge_record::Entity::find_by_id(model.id)
+        .one(connection)
+        .await?
+        .context("merge record disappeared after cleanup update")?;
+    merge_record(model)
 }

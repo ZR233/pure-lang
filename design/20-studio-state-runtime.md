@@ -20,25 +20,42 @@ Project、Thread、Task 和 Recovery 的 canonical facts；内存 owner 只拥�
 
 ## 20.2 公共 observed state
 
-跨 crate 协议统一使用 `ObservedStateMeta`：
+跨 crate 的可观察资源统一使用 `ObservedResource<T>` 聚合，revision 与唯一状态一起发布：
 
 ```text
-ObservedStateMeta
+ObservedResource<T>
 ├─ revision: u64
-├─ phase: Uninitialized | Ready | Running | Failed | Stopped
-├─ updatedAt: i64
-├─ lastCheckedAt: i64?
-└─ stale: bool
+└─ state:
+   ├─ Uninitialized
+   ├─ Loading(operation, operationId)
+   ├─ Ready(value, lastCheckedAt?)
+   ├─ Refreshing(value, operation, operationId)
+   ├─ Stale(value)
+   ├─ Degraded(value, operation, error)
+   ├─ Failed(operation, error)
+   └─ Stopped
 ```
 
-`Running` 和 `Failed` 携带 `StateOperation`；运行中另携带 `operationId`，失败携带 typed
-`StateError { code, message, retryable }`。公开操作集合为 initialize、activate、reload、
-reconcile、discover、check、probe、repair、reset 和 shutdown。
+每个 variant 使用独立 state struct。Refreshing/Degraded 明确拥有 last-known value；Loading/Failed
+明确没有可用 value，因此不再使用 `phase + stale + payload` 推断是否可展示旧数据。失败携带 typed
+`StateError { code, message, retryable }`。公开操作集合为 initialize、activate、reload、reconcile、
+discover、check、probe、repair、reset 和 shutdown。
 
-每次对外可见变化（进入 running、成功或失败）都递增 revision。异步操作捕获 operation id、
+每次对外可见变化都递增 revision。异步操作捕获 operation id、
 desired revision 与无 secret fingerprint；迟到结果只有仍匹配三者时才能提交。失败保留最后一次
-成功 payload 并标记 stale；首次失败使用领域定义的 authoritative empty。只有实际执行外部观察的
-discover/check/probe 更新 `lastCheckedAt`。
+成功 payload 时进入 Degraded，首次失败进入 Failed。只有实际执行外部观察的 discover/check/probe
+更新对应状态中的 `lastCheckedAt`。
+
+Studio runtime 自身使用 Uninitialized、Initializing、Ready、ShuttingDown、Stopped、Failed；禁止
+任意 target transition。MCP、LSP、Provider Usage 和 Updater 在 observed resource 之上继续使用各自
+typed state：server availability、LSP activity、更新下载/校验/启动阶段不降级为字符串或可选字段袋。
+FRB 为每个资源输出具体 tagged union，Flutter 只消费 sealed canonical state。
+
+Updater 的 canonical lifecycle 为 Disabled、Idle、Checking、UpToDate、Available、Downloading、
+Verifying、InstallerLaunched、CheckFailed、InstallFailed。Available 及安装阶段必须携带已验证的完整
+update；下载进度只存在于 Downloading/Verifying，检查错误与安装错误分别只存在于对应失败态。
+Rust install event 先通过命令转换为该状态并 durable commit，FRB 事件与 Dart controller 直接消费完整
+状态，不再各自维护 `phase + update? + error? + progress?`。
 
 ## 20.3 聚合查询与事件
 
@@ -67,9 +84,10 @@ revision），由常驻内存目录索引派生（见 19.6），Flutter 按增�
 transport lag；payload 自带领域 revision。
 
 `subscribeShutdownProgress()` 是独立的短生命周期 typed 流，只在 shutdown 期间可用，不复用
-product stream（它在关机早期被取消）。事件携带阶段 enum、阶段序号与 pending commit 计数，
+product stream（它在关机早期被取消）。事件本身是 sealed 阶段状态，
 固定顺序为 StoppingSubscriptions、CancellingTurns、FlushingPersistence、SuspendingTasks、
-StoppingMcp、StoppingLsp、Stopped；`FlushingPersistence` 的完成事件必须携带 pending=0。并发
+StoppingMcp、StoppingLsp、Stopped；只有 `FlushingPersistence` 承载 pending commit 数，其完成
+事件必须携带 pending=0。并发
 shutdown 调用共享同一次阶段序列，`shutdownRuntimeForUpdate` 的 idle 关机复用同一协议。
 
 Flutter 对每个领域分别保存 canonical snapshot。新 revision 才整体替换，相同 revision 幂等
@@ -176,7 +194,10 @@ owner 为未来 Turn 重建，当前 Turn 保留旧 revision。
 
 Provider Usage 和 Updater 都使用 last-known owner。read 只读缓存，check 才访问网络；失败保留旧
 payload并标 stale。provider config 变化标 stale，删除 provider 时 authoritative 删除。
-持久化复用 `app_settings` 的 `observed:providerUsage:v1` 与 `observed:studioUpdate:v1`，不新增
+Provider Usage 的单 provider 状态为 Unsupported、MissingCredential、Ready、Failed；Ready 内再以
+typed data union 区分 DeepSeek balance 与 Zhipu coding plan。命令携带 provider revision 与 operation
+id，重复 operation 只有 payload 完全一致才 no-op。持久化复用 `app_settings` 的
+`observed:providerUsage:v2` 与 `observed:studioUpdate:v1`，不新增
 数据库 migration。update check 使用编译时当前版本；install 只接受缓存中的
 `expectedRevision + version`，Flutter 不回传 URL、hash 或 manifest。
 

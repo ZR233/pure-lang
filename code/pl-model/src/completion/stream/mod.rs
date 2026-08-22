@@ -12,6 +12,7 @@ use std::time::Duration;
 
 pub(crate) mod event;
 mod lifecycle;
+mod state;
 mod tagged_output;
 mod tool_stream;
 mod trace_projection;
@@ -23,6 +24,7 @@ use crate::runtime::openai::{OpenAiProtocol, VisibleOutputProtocol};
 
 use event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
 use lifecycle::StreamLifecycle;
+use state::{CompletedStream, FailedStream, StreamAccumulatorState};
 use tagged_output::{TaggedOutputDiagnostics, TaggedVisibleOutputAdapter};
 use tool_stream::ToolStream;
 use trace_projection::TraceProjection;
@@ -142,7 +144,7 @@ pub(crate) struct StreamCompletionAccumulator {
     lifecycle: StreamLifecycle,
     final_usage: Option<TokenUsage>,
     response_id: Option<String>,
-    completed: bool,
+    state: StreamAccumulatorState,
     trace: Option<TraceProjection>,
 }
 
@@ -160,7 +162,7 @@ impl StreamCompletionAccumulator {
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
             response_id: None,
-            completed: false,
+            state: StreamAccumulatorState::open(),
             trace: trace.map(TraceProjection::new),
         }
     }
@@ -170,10 +172,19 @@ impl StreamCompletionAccumulator {
         stream_event: ModelStreamEvent,
         event_tx: &AgentEventSender,
     ) -> Result<()> {
-        if self.completed {
-            return Err(PureError::LlmError(
-                "provider stream emitted event after completion".to_string(),
-            ));
+        match &self.state {
+            StreamAccumulatorState::Open(_) => {}
+            StreamAccumulatorState::Completed(_) => {
+                return Err(PureError::LlmError(
+                    "provider stream emitted event after completion".to_string(),
+                ));
+            }
+            StreamAccumulatorState::Failed(failed) => {
+                return Err(PureError::LlmError(format!(
+                    "provider stream emitted event after failure: {}",
+                    failed.message()
+                )));
+            }
         }
         for stream_event in self.lifecycle.normalize(stream_event)? {
             self.apply_normalized(stream_event, event_tx)?;
@@ -389,11 +400,13 @@ impl StreamCompletionAccumulator {
                 if response_id.is_some() {
                     self.response_id = response_id;
                 }
-                self.completed = true;
+                self.state = StreamAccumulatorState::Completed(CompletedStream::new());
             }
             ModelStreamEvent::Failed { code, message } => {
                 let _ = code;
-                return Err(PureError::LlmError(message));
+                let error = PureError::LlmError(message);
+                self.state = StreamAccumulatorState::Failed(FailedStream::new(error.to_string()));
+                return Err(error);
             }
             ModelStreamEvent::ResponseStarted { response_id } => {
                 if self.response_id.is_none() {
@@ -416,9 +429,16 @@ impl StreamCompletionAccumulator {
         event_tx: &AgentEventSender,
         trace_events: &ModelTraceEventBuffer,
     ) -> Result<CompletionResponse> {
-        if !self.completed {
-            let error =
-                PureError::transient_model_transport("provider stream ended before completion");
+        let terminal_error = match &self.state {
+            StreamAccumulatorState::Open(_) => Some(PureError::transient_model_transport(
+                "provider stream ended before completion",
+            )),
+            StreamAccumulatorState::Completed(_) => None,
+            StreamAccumulatorState::Failed(failed) => {
+                Some(PureError::LlmError(failed.message().to_string()))
+            }
+        };
+        if let Some(error) = terminal_error {
             self.fail_attempt(&error, event_tx);
             self.flush_trace_events(trace_events);
             return Err(error);
@@ -482,6 +502,7 @@ impl StreamCompletionAccumulator {
     }
 
     fn fail_attempt(&mut self, error: &PureError, event_tx: &AgentEventSender) {
+        self.state = StreamAccumulatorState::Failed(FailedStream::new(error.to_string()));
         let Some(trace) = self.trace.as_mut() else {
             return;
         };

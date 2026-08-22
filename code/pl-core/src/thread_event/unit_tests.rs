@@ -1,7 +1,8 @@
 use pl_protocol::{
-    AgentMessageChannel, ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField,
-    ThreadItemStatus, ThreadNotification, ThreadNotificationEnvelope, ThreadSubscriptionRequest,
-    ThreadSubscriptionUpdate, Turn, TurnPhase, TurnState,
+    CompletedTurnState, RunningTurnState, ThreadContentLifecycle, ThreadItem, ThreadItemDelta,
+    ThreadItemDeltaState, ThreadItemState, ThreadNotification, ThreadNotificationEnvelope,
+    ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTextChannel, ThreadTextItem, Turn,
+    TurnCompletion, TurnPhase, TurnState,
 };
 use tokio::time::{Duration, timeout};
 
@@ -132,21 +133,19 @@ async fn turn_and_item_lifecycle_updates_the_authoritative_snapshot() {
             delta: ThreadItemDelta {
                 item_id: "item-1".to_string(),
                 revision: 1,
-                field: ThreadItemDeltaField::Text,
-                delta: " world".to_string(),
-                chunk_index: None,
+                delta: ThreadItemDeltaState::Text {
+                    delta: " world".to_string(),
+                },
             },
         },
     ))
     .await
     .unwrap();
-    let mut completed_item = match item_started("hello world") {
-        ThreadNotification::ItemStarted { item } => item,
-        _ => unreachable!("fixture always creates ItemStarted"),
-    };
-    completed_item.revision = 2;
-    completed_item.status = ThreadItemStatus::Completed;
-    completed_item.completed_at = Some(5);
+    let completed_item = Box::new(commentary_item(
+        "hello world",
+        2,
+        ThreadContentLifecycle::completed(5),
+    ));
     bus.publish(notification(
         4,
         ThreadNotification::ItemCompleted {
@@ -159,8 +158,11 @@ async fn turn_and_item_lifecycle_updates_the_authoritative_snapshot() {
         5,
         ThreadNotification::TurnCompleted {
             turn: Turn {
-                state: TurnState::Completed,
-                completed_at: Some(5),
+                state: TurnState::Completed(CompletedTurnState::new(
+                    Some(1),
+                    5,
+                    TurnCompletion::Normal,
+                )),
                 ..active_turn(TurnPhase::Persisting)
             },
         },
@@ -174,10 +176,12 @@ async fn turn_and_item_lifecycle_updates_the_authoritative_snapshot() {
     assert_eq!(snapshot.items.len(), 1);
     assert_eq!(snapshot.items[0].ordinal, 1);
     assert_eq!(snapshot.items[0].revision, 2);
-    assert_eq!(snapshot.items[0].status, ThreadItemStatus::Completed);
     assert!(matches!(
-        &snapshot.items[0].content,
-        ThreadItemContent::AgentMessage { text, .. } if text == "hello world"
+        snapshot.items[0].state(),
+        ThreadItemState::Text(value)
+            if value.channel() == ThreadTextChannel::Commentary
+                && value.text() == "hello world"
+                && matches!(value.lifecycle(), ThreadContentLifecycle::Completed(_))
     ));
 }
 
@@ -210,9 +214,9 @@ async fn lossless_notification_waits_for_subscriber_capacity() {
                     delta: ThreadItemDelta {
                         item_id: "item-1".to_string(),
                         revision: 1,
-                        field: ThreadItemDeltaField::Text,
-                        delta: " world".to_string(),
-                        chunk_index: None,
+                        delta: ThreadItemDeltaState::Text {
+                            delta: " world".to_string(),
+                        },
                     },
                 },
             ))
@@ -276,8 +280,11 @@ async fn best_effort_drop_reports_lag_before_the_next_lossless_notification() {
                 3,
                 ThreadNotification::TurnCompleted {
                     turn: Turn {
-                        state: TurnState::Completed,
-                        completed_at: Some(3),
+                        state: TurnState::Completed(CompletedTurnState::new(
+                            Some(1),
+                            3,
+                            TurnCompletion::Normal,
+                        )),
                         ..active_turn(TurnPhase::Persisting)
                     },
                 },
@@ -313,35 +320,39 @@ fn notification(revision: u64, notification: ThreadNotification) -> ThreadNotifi
 
 fn item_started(text: &str) -> ThreadNotification {
     ThreadNotification::ItemStarted {
-        item: Box::new(ThreadItem {
-            id: "item-1".to_string(),
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            ordinal: 1,
-            revision: 0,
-            status: ThreadItemStatus::Started,
-            created_at: 1,
-            updated_at: 1,
-            completed_at: None,
-            error: None,
-            content: ThreadItemContent::AgentMessage {
-                channel: AgentMessageChannel::Commentary,
-                text: text.to_string(),
-            },
-            usage: None,
-        }),
+        item: Box::new(commentary_item(
+            text,
+            0,
+            ThreadContentLifecycle::streaming(),
+        )),
     }
+}
+
+fn commentary_item(text: &str, revision: u64, lifecycle: ThreadContentLifecycle) -> ThreadItem {
+    ThreadItem::new(
+        "item-1".to_string(),
+        "thread-1".to_string(),
+        "turn-1".to_string(),
+        1,
+        revision,
+        1,
+        1,
+        ThreadItemState::Text(ThreadTextItem::new(
+            ThreadTextChannel::Commentary,
+            text.to_string(),
+            Vec::new(),
+            lifecycle,
+        )),
+    )
 }
 
 fn active_turn(phase: TurnPhase) -> Turn {
     Turn {
         id: "turn-1".to_string(),
         thread_id: "thread-1".to_string(),
-        state: TurnState::InProgress { phase },
-        started_at: Some(1),
+        revision: 0,
+        state: TurnState::Running(RunningTurnState::new(1, phase)),
         updated_at: 1,
-        completed_at: None,
-        failure: None,
     }
 }
 
@@ -441,21 +452,19 @@ async fn bus_continues_ordinals_after_snapshot_restore() {
 }
 
 fn user_message_item(id: &str, ordinal: u64) -> ThreadItem {
-    ThreadItem {
-        id: id.to_string(),
-        thread_id: "thread-1".to_string(),
-        turn_id: "turn-1".to_string(),
+    ThreadItem::new(
+        id.to_string(),
+        "thread-1".to_string(),
+        "turn-1".to_string(),
         ordinal,
-        revision: 0,
-        status: ThreadItemStatus::Completed,
-        created_at: 1,
-        updated_at: 1,
-        completed_at: Some(1),
-        error: None,
-        content: ThreadItemContent::UserMessage {
-            text: format!("message {id}"),
-            attachments: Vec::new(),
-        },
-        usage: None,
-    }
+        0,
+        1,
+        1,
+        ThreadItemState::Text(ThreadTextItem::new(
+            ThreadTextChannel::User,
+            format!("message {id}"),
+            Vec::new(),
+            ThreadContentLifecycle::completed(1),
+        )),
+    )
 }

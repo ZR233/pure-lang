@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use pl_studio_runtime::{StudioRuntime, StudioTaskRuntime};
+use pl_studio_runtime::{StudioReviewScope, StudioRuntime, StudioTaskRuntime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -744,8 +744,8 @@ async fn integrated_reviewer_agent_id(state: &ScriptState) -> Result<String> {
         .await?
         .reviews
         .into_iter()
-        .filter(|review| review.scope == "integrated")
-        .find_map(|review| review.reviewer_agent_id)
+        .filter(|review| review.scope == StudioReviewScope::Integrated)
+        .find_map(|review| review.state.reviewer_agent_id().map(str::to_string))
         .context("integrated reviewer is absent from task projection")
 }
 

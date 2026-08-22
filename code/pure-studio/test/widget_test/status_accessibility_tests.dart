@@ -281,12 +281,16 @@ void registerStatusAccessibilityTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final state = _emptyState().copyWith(
-        lspState: const LspStateSnapshot(
+        lspState: LspStateSnapshot(
           servers: [
             LspServerStateView(
               id: 'rust-analyzer',
               displayName: 'rust-analyzer',
-              availability: 'available',
+              state: LspAvailableState(
+                checkedAt: 0,
+                diagnosticCount: 0,
+                activity: LspIdleActivity(),
+              ),
             ),
           ],
         ),
@@ -366,9 +370,11 @@ void registerStatusAccessibilityTests() {
                 LspServerStateView(
                   id: 'lsp-server-$i',
                   displayName: 'lsp-server-$i',
-                  availability: 'available',
-                  activityKind: 'indexing',
-                  activityPercentage: i * 5,
+                  state: LspAvailableState(
+                    checkedAt: 0,
+                    diagnosticCount: 0,
+                    activity: LspIndexingActivity(percentage: i * 5),
+                  ),
                 ),
             ],
           ),

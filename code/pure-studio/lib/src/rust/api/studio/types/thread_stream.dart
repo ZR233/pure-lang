@@ -7,67 +7,59 @@ import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+
+import 'thread_stream/item.dart';
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-
-enum BridgeAgentMessageChannel { commentary, final_ }
-
-enum BridgeInteractionKind { userInput, toolApproval, planConfirmation }
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 @freezed
-sealed class BridgeInteractionPayload with _$BridgeInteractionPayload {
-  const BridgeInteractionPayload._();
+sealed class BridgeInteractionContent with _$BridgeInteractionContent {
+  const BridgeInteractionContent._();
 
-  const factory BridgeInteractionPayload.userInput({
+  const factory BridgeInteractionContent.userInput({
     required List<BridgeUserQuestion> questions,
-  }) = BridgeInteractionPayload_UserInput;
-  const factory BridgeInteractionPayload.toolApproval({
+    required BridgeUserInputInteractionState state,
+  }) = BridgeInteractionContent_UserInput;
+  const factory BridgeInteractionContent.toolApproval({
     required String name,
     required String argumentsJson,
     String? workingDirectory,
     String? parentAgentId,
-  }) = BridgeInteractionPayload_ToolApproval;
-  const factory BridgeInteractionPayload.planConfirmation({
+    required BridgeToolApprovalInteractionState state,
+  }) = BridgeInteractionContent_ToolApproval;
+  const factory BridgeInteractionContent.planConfirmation({
     required String planId,
     required String content,
-  }) = BridgeInteractionPayload_PlanConfirmation;
+    required BridgePlanConfirmationInteractionState state,
+  }) = BridgeInteractionContent_PlanConfirmation;
 }
 
 class BridgeInteractionRequest {
   final String interactionId;
-  final BridgeInteractionKind kind;
-  final BridgeInteractionStatus status;
   final BridgeInteractionScope scope;
-  final BridgeInteractionPayload payload;
+  final BigInt revision;
+  final BridgeInteractionContent content;
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
-  final PlatformInt64? resolvedAt;
-  final BridgeInteractionResolution? resolution;
 
   const BridgeInteractionRequest({
     required this.interactionId,
-    required this.kind,
-    required this.status,
     required this.scope,
-    required this.payload,
+    required this.revision,
+    required this.content,
     required this.createdAt,
     required this.updatedAt,
-    this.resolvedAt,
-    this.resolution,
   });
 
   @override
   int get hashCode =>
       interactionId.hashCode ^
-      kind.hashCode ^
-      status.hashCode ^
       scope.hashCode ^
-      payload.hashCode ^
+      revision.hashCode ^
+      content.hashCode ^
       createdAt.hashCode ^
-      updatedAt.hashCode ^
-      resolvedAt.hashCode ^
-      resolution.hashCode;
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -75,14 +67,11 @@ class BridgeInteractionRequest {
       other is BridgeInteractionRequest &&
           runtimeType == other.runtimeType &&
           interactionId == other.interactionId &&
-          kind == other.kind &&
-          status == other.status &&
           scope == other.scope &&
-          payload == other.payload &&
+          revision == other.revision &&
+          content == other.content &&
           createdAt == other.createdAt &&
-          updatedAt == other.updatedAt &&
-          resolvedAt == other.resolvedAt &&
-          resolution == other.resolution;
+          updatedAt == other.updatedAt;
 }
 
 @freezed
@@ -138,7 +127,31 @@ class BridgeInteractionScope {
           agentPath == other.agentPath;
 }
 
-enum BridgeInteractionStatus { pending, resolved, cancelled, expired }
+@freezed
+sealed class BridgePlanConfirmationInteractionState
+    with _$BridgePlanConfirmationInteractionState {
+  const BridgePlanConfirmationInteractionState._();
+
+  const factory BridgePlanConfirmationInteractionState.pending({
+    required String operationId,
+  }) = BridgePlanConfirmationInteractionState_Pending;
+  const factory BridgePlanConfirmationInteractionState.resolved({
+    required String operationId,
+    required PlatformInt64 resolvedAt,
+    required BridgePlanConfirmationResolution decision,
+    String? content,
+    String? reason,
+  }) = BridgePlanConfirmationInteractionState_Resolved;
+  const factory BridgePlanConfirmationInteractionState.cancelled({
+    required String operationId,
+    required PlatformInt64 cancelledAt,
+    required String reason,
+  }) = BridgePlanConfirmationInteractionState_Cancelled;
+  const factory BridgePlanConfirmationInteractionState.expired({
+    required String operationId,
+    required PlatformInt64 expiredAt,
+  }) = BridgePlanConfirmationInteractionState_Expired;
+}
 
 enum BridgePlanConfirmationResolution {
   implementFreshContext,
@@ -243,196 +256,6 @@ class BridgeThread {
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt &&
           archived == other.archived;
-}
-
-class BridgeThreadAttachment {
-  final String id;
-  final String mediaType;
-  final String? filename;
-  final int? width;
-  final int? height;
-  final BigInt byteSize;
-  final String? dataUrl;
-
-  const BridgeThreadAttachment({
-    required this.id,
-    required this.mediaType,
-    this.filename,
-    this.width,
-    this.height,
-    required this.byteSize,
-    this.dataUrl,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      mediaType.hashCode ^
-      filename.hashCode ^
-      width.hashCode ^
-      height.hashCode ^
-      byteSize.hashCode ^
-      dataUrl.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeThreadAttachment &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          mediaType == other.mediaType &&
-          filename == other.filename &&
-          width == other.width &&
-          height == other.height &&
-          byteSize == other.byteSize &&
-          dataUrl == other.dataUrl;
-}
-
-class BridgeThreadItem {
-  final String id;
-  final String threadId;
-  final String turnId;
-  final BigInt ordinal;
-  final BigInt revision;
-  final BridgeThreadItemStatus status;
-  final PlatformInt64 createdAt;
-  final PlatformInt64 updatedAt;
-  final PlatformInt64? completedAt;
-  final String? error;
-  final BridgeThreadItemContent content;
-  final BridgeTokenUsageSnapshot? usage;
-
-  const BridgeThreadItem({
-    required this.id,
-    required this.threadId,
-    required this.turnId,
-    required this.ordinal,
-    required this.revision,
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-    this.completedAt,
-    this.error,
-    required this.content,
-    this.usage,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      threadId.hashCode ^
-      turnId.hashCode ^
-      ordinal.hashCode ^
-      revision.hashCode ^
-      status.hashCode ^
-      createdAt.hashCode ^
-      updatedAt.hashCode ^
-      completedAt.hashCode ^
-      error.hashCode ^
-      content.hashCode ^
-      usage.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeThreadItem &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          threadId == other.threadId &&
-          turnId == other.turnId &&
-          ordinal == other.ordinal &&
-          revision == other.revision &&
-          status == other.status &&
-          createdAt == other.createdAt &&
-          updatedAt == other.updatedAt &&
-          completedAt == other.completedAt &&
-          error == other.error &&
-          content == other.content &&
-          usage == other.usage;
-}
-
-@freezed
-sealed class BridgeThreadItemContent with _$BridgeThreadItemContent {
-  const BridgeThreadItemContent._();
-
-  const factory BridgeThreadItemContent.userMessage({
-    required String text,
-    required List<BridgeThreadAttachment> attachments,
-  }) = BridgeThreadItemContent_UserMessage;
-  const factory BridgeThreadItemContent.agentMessage({
-    required BridgeAgentMessageChannel channel,
-    required String text,
-  }) = BridgeThreadItemContent_AgentMessage;
-  const factory BridgeThreadItemContent.reasoning({
-    required List<String> summary,
-    required List<String> content,
-  }) = BridgeThreadItemContent_Reasoning;
-  const factory BridgeThreadItemContent.plan({required String content}) =
-      BridgeThreadItemContent_Plan;
-  const factory BridgeThreadItemContent.toolCall({
-    required BridgeThreadToolCall tool,
-  }) = BridgeThreadItemContent_ToolCall;
-  const factory BridgeThreadItemContent.file({
-    required String path,
-    String? mediaType,
-  }) = BridgeThreadItemContent_File;
-}
-
-class BridgeThreadItemDelta {
-  final String itemId;
-  final BigInt revision;
-  final BridgeThreadItemDeltaField field;
-  final String delta;
-  final int? chunkIndex;
-
-  const BridgeThreadItemDelta({
-    required this.itemId,
-    required this.revision,
-    required this.field,
-    required this.delta,
-    this.chunkIndex,
-  });
-
-  @override
-  int get hashCode =>
-      itemId.hashCode ^
-      revision.hashCode ^
-      field.hashCode ^
-      delta.hashCode ^
-      chunkIndex.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeThreadItemDelta &&
-          runtimeType == other.runtimeType &&
-          itemId == other.itemId &&
-          revision == other.revision &&
-          field == other.field &&
-          delta == other.delta &&
-          chunkIndex == other.chunkIndex;
-}
-
-enum BridgeThreadItemDeltaField {
-  text,
-  reasoningSummary,
-  reasoningContent,
-  planContent,
-  toolArguments,
-  toolResult,
-}
-
-enum BridgeThreadItemStatus {
-  started,
-  streaming,
-  awaitingApproval,
-  approved,
-  denied,
-  running,
-  completed,
-  failed,
-  interrupted,
-  budgetLimited,
 }
 
 class BridgeThreadMcpAvailabilityDescriptor {
@@ -796,7 +619,17 @@ class BridgeThreadSnapshot {
           runtimeAvailability == other.runtimeAvailability;
 }
 
-enum BridgeThreadStatus { idle, running, waiting, completed, failed, closed }
+enum BridgeThreadStatus {
+  idle,
+  queued,
+  running,
+  waitingTool,
+  waitingInteraction,
+  cancelling,
+  closing,
+  closed,
+  faulted,
+}
 
 @freezed
 sealed class BridgeThreadSubscriptionUpdate
@@ -809,65 +642,6 @@ sealed class BridgeThreadSubscriptionUpdate
   const factory BridgeThreadSubscriptionUpdate.notification({
     required BridgeThreadNotificationEnvelope notification,
   }) = BridgeThreadSubscriptionUpdate_Notification;
-}
-
-class BridgeThreadToolCall {
-  final String toolCallId;
-  final String? callId;
-  final String? providerItemId;
-  final String name;
-  final String arguments;
-  final String? result;
-  final List<String> outputArtifactsJson;
-  final int? exitCode;
-  final bool timedOut;
-  final String? workingDirectory;
-  final String? denialReason;
-
-  const BridgeThreadToolCall({
-    required this.toolCallId,
-    this.callId,
-    this.providerItemId,
-    required this.name,
-    required this.arguments,
-    this.result,
-    required this.outputArtifactsJson,
-    this.exitCode,
-    required this.timedOut,
-    this.workingDirectory,
-    this.denialReason,
-  });
-
-  @override
-  int get hashCode =>
-      toolCallId.hashCode ^
-      callId.hashCode ^
-      providerItemId.hashCode ^
-      name.hashCode ^
-      arguments.hashCode ^
-      result.hashCode ^
-      outputArtifactsJson.hashCode ^
-      exitCode.hashCode ^
-      timedOut.hashCode ^
-      workingDirectory.hashCode ^
-      denialReason.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeThreadToolCall &&
-          runtimeType == other.runtimeType &&
-          toolCallId == other.toolCallId &&
-          callId == other.callId &&
-          providerItemId == other.providerItemId &&
-          name == other.name &&
-          arguments == other.arguments &&
-          result == other.result &&
-          outputArtifactsJson == other.outputArtifactsJson &&
-          exitCode == other.exitCode &&
-          timedOut == other.timedOut &&
-          workingDirectory == other.workingDirectory &&
-          denialReason == other.denialReason;
 }
 
 class BridgeTodoItem {
@@ -960,36 +734,55 @@ class BridgeTokenUsageSnapshot {
           totalTokens == other.totalTokens;
 }
 
+@freezed
+sealed class BridgeToolApprovalInteractionState
+    with _$BridgeToolApprovalInteractionState {
+  const BridgeToolApprovalInteractionState._();
+
+  const factory BridgeToolApprovalInteractionState.pending({
+    required String operationId,
+  }) = BridgeToolApprovalInteractionState_Pending;
+  const factory BridgeToolApprovalInteractionState.resolved({
+    required String operationId,
+    required PlatformInt64 resolvedAt,
+    required BridgeToolApprovalResolution decision,
+    String? reason,
+  }) = BridgeToolApprovalInteractionState_Resolved;
+  const factory BridgeToolApprovalInteractionState.cancelled({
+    required String operationId,
+    required PlatformInt64 cancelledAt,
+    required String reason,
+  }) = BridgeToolApprovalInteractionState_Cancelled;
+  const factory BridgeToolApprovalInteractionState.expired({
+    required String operationId,
+    required PlatformInt64 expiredAt,
+  }) = BridgeToolApprovalInteractionState_Expired;
+}
+
 enum BridgeToolApprovalResolution { approved, denied }
 
 class BridgeTurn {
   final String id;
   final String threadId;
+  final BigInt revision;
   final BridgeTurnState state;
-  final BridgeTurnFailureDto? failure;
-  final PlatformInt64? startedAt;
   final PlatformInt64 updatedAt;
-  final PlatformInt64? completedAt;
 
   const BridgeTurn({
     required this.id,
     required this.threadId,
+    required this.revision,
     required this.state,
-    this.failure,
-    this.startedAt,
     required this.updatedAt,
-    this.completedAt,
   });
 
   @override
   int get hashCode =>
       id.hashCode ^
       threadId.hashCode ^
+      revision.hashCode ^
       state.hashCode ^
-      failure.hashCode ^
-      startedAt.hashCode ^
-      updatedAt.hashCode ^
-      completedAt.hashCode;
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -998,12 +791,88 @@ class BridgeTurn {
           runtimeType == other.runtimeType &&
           id == other.id &&
           threadId == other.threadId &&
+          revision == other.revision &&
           state == other.state &&
-          failure == other.failure &&
-          startedAt == other.startedAt &&
-          updatedAt == other.updatedAt &&
-          completedAt == other.completedAt;
+          updatedAt == other.updatedAt;
 }
+
+class BridgeTurnBudgetLimit {
+  final BridgeTurnBudgetLimitKind kind;
+  final BridgeTurnBudgetUsage usage;
+
+  const BridgeTurnBudgetLimit({required this.kind, required this.usage});
+
+  @override
+  int get hashCode => kind.hashCode ^ usage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTurnBudgetLimit &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          usage == other.usage;
+}
+
+enum BridgeTurnBudgetLimitKind {
+  modelStep,
+  toolCall,
+  wait,
+  wallClock,
+  agentCount,
+  agentDepth,
+  finalization,
+}
+
+class BridgeTurnBudgetUsage {
+  final int modelSteps;
+  final int toolCalls;
+  final int waitCalls;
+  final BigInt elapsedMs;
+
+  const BridgeTurnBudgetUsage({
+    required this.modelSteps,
+    required this.toolCalls,
+    required this.waitCalls,
+    required this.elapsedMs,
+  });
+
+  @override
+  int get hashCode =>
+      modelSteps.hashCode ^
+      toolCalls.hashCode ^
+      waitCalls.hashCode ^
+      elapsedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTurnBudgetUsage &&
+          runtimeType == other.runtimeType &&
+          modelSteps == other.modelSteps &&
+          toolCalls == other.toolCalls &&
+          waitCalls == other.waitCalls &&
+          elapsedMs == other.elapsedMs;
+}
+
+@freezed
+sealed class BridgeTurnCancellationCause with _$BridgeTurnCancellationCause {
+  const BridgeTurnCancellationCause._();
+
+  const factory BridgeTurnCancellationCause.userRequested() =
+      BridgeTurnCancellationCause_UserRequested;
+  const factory BridgeTurnCancellationCause.runtimeShutdown() =
+      BridgeTurnCancellationCause_RuntimeShutdown;
+  const factory BridgeTurnCancellationCause.agentClosed() =
+      BridgeTurnCancellationCause_AgentClosed;
+  const factory BridgeTurnCancellationCause.recovery() =
+      BridgeTurnCancellationCause_Recovery;
+  const factory BridgeTurnCancellationCause.coalesced({
+    required String targetTurnId,
+  }) = BridgeTurnCancellationCause_Coalesced;
+}
+
+enum BridgeTurnCompletion { normal, interactionRequested }
 
 class BridgeTurnFailureDto {
   final String category;
@@ -1058,17 +927,49 @@ enum BridgeTurnPhase {
 }
 
 @freezed
+sealed class BridgeTurnRolloverOutcome with _$BridgeTurnRolloverOutcome {
+  const BridgeTurnRolloverOutcome._();
+
+  const factory BridgeTurnRolloverOutcome.notAttempted() =
+      BridgeTurnRolloverOutcome_NotAttempted;
+  const factory BridgeTurnRolloverOutcome.succeeded() =
+      BridgeTurnRolloverOutcome_Succeeded;
+  const factory BridgeTurnRolloverOutcome.failed({required String error}) =
+      BridgeTurnRolloverOutcome_Failed;
+}
+
+@freezed
 sealed class BridgeTurnState with _$BridgeTurnState {
   const BridgeTurnState._();
 
-  const factory BridgeTurnState.queued() = BridgeTurnState_Queued;
-  const factory BridgeTurnState.inProgress({required BridgeTurnPhase phase}) =
-      BridgeTurnState_InProgress;
-  const factory BridgeTurnState.completed() = BridgeTurnState_Completed;
-  const factory BridgeTurnState.failed({required String reason}) =
-      BridgeTurnState_Failed;
-  const factory BridgeTurnState.interrupted({required String reason}) =
-      BridgeTurnState_Interrupted;
+  const factory BridgeTurnState.queued({required PlatformInt64 queuedAt}) =
+      BridgeTurnState_Queued;
+  const factory BridgeTurnState.running({
+    required PlatformInt64 startedAt,
+    required BridgeTurnPhase phase,
+  }) = BridgeTurnState_Running;
+  const factory BridgeTurnState.completed({
+    PlatformInt64? startedAt,
+    required PlatformInt64 completedAt,
+    required BridgeTurnCompletion completion,
+  }) = BridgeTurnState_Completed;
+  const factory BridgeTurnState.cancelled({
+    PlatformInt64? startedAt,
+    required PlatformInt64 requestedAt,
+    required PlatformInt64 completedAt,
+    required BridgeTurnCancellationCause cause,
+  }) = BridgeTurnState_Cancelled;
+  const factory BridgeTurnState.failed({
+    PlatformInt64? startedAt,
+    required PlatformInt64 completedAt,
+    required BridgeTurnFailureDto failure,
+  }) = BridgeTurnState_Failed;
+  const factory BridgeTurnState.budgetLimited({
+    PlatformInt64? startedAt,
+    required PlatformInt64 completedAt,
+    required BridgeTurnBudgetLimit limit,
+    required BridgeTurnRolloverOutcome rollover,
+  }) = BridgeTurnState_BudgetLimited;
 }
 
 class BridgeUserInputAnswer {
@@ -1090,6 +991,30 @@ class BridgeUserInputAnswer {
           runtimeType == other.runtimeType &&
           questionId == other.questionId &&
           answers == other.answers;
+}
+
+@freezed
+sealed class BridgeUserInputInteractionState
+    with _$BridgeUserInputInteractionState {
+  const BridgeUserInputInteractionState._();
+
+  const factory BridgeUserInputInteractionState.pending({
+    required String operationId,
+  }) = BridgeUserInputInteractionState_Pending;
+  const factory BridgeUserInputInteractionState.resolved({
+    required String operationId,
+    required PlatformInt64 resolvedAt,
+    required List<BridgeUserInputAnswer> answers,
+  }) = BridgeUserInputInteractionState_Resolved;
+  const factory BridgeUserInputInteractionState.cancelled({
+    required String operationId,
+    required PlatformInt64 cancelledAt,
+    required String reason,
+  }) = BridgeUserInputInteractionState_Cancelled;
+  const factory BridgeUserInputInteractionState.expired({
+    required String operationId,
+    required PlatformInt64 expiredAt,
+  }) = BridgeUserInputInteractionState_Expired;
 }
 
 class BridgeUserQuestion {

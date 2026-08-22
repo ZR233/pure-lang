@@ -1,3 +1,7 @@
+mod state;
+
+pub(crate) use state::*;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -8,7 +12,7 @@ use serde::Deserialize;
 use super::spawn::{TaskExecutorBlueprint, verification_result_map};
 use super::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRun,
-    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
+    WorkUnitStateKind,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{
@@ -285,8 +289,11 @@ impl TaskCoordinator {
                 self.store
                     .create_work_completion(
                         &scope.work_unit.id,
-                        WorkCompletionKind::Delivery,
-                        Some(&delivery),
+                        WorkCompletionContent::delivery(
+                            delivery.head_commit.clone(),
+                            delivery.changed_files.clone(),
+                        )
+                        .context("validated delivery has an empty head commit")?,
                         delivery.verification_summary.as_str(),
                     )
                     .await
@@ -305,8 +312,7 @@ impl TaskCoordinator {
                 self.store
                     .create_work_completion(
                         &scope.work_unit.id,
-                        WorkCompletionKind::NoDelivery,
-                        None,
+                        WorkCompletionContent::no_delivery(),
                         verification_summary,
                     )
                     .await
@@ -397,14 +403,7 @@ fn is_direct_task_child(subagent: &SubagentContext, root_thread_id: &str) -> boo
 }
 
 fn ensure_completion_scope_is_open(scope: &DeliveryScope) -> Result<()> {
-    if scope.work_unit.execution_status() != ThreadExecutionStatus::Running
-        || !matches!(
-            scope.work_unit.status(),
-            WorkUnitStatus::Running
-                | WorkUnitStatus::AwaitingCompletion
-                | WorkUnitStatus::ChangesRequested
-        )
-    {
+    if scope.work_unit.kind() != WorkUnitStateKind::Running {
         bail!("work unit is not accepting a completion");
     }
     Ok(())

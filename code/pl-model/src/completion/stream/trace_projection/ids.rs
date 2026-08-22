@@ -1,6 +1,9 @@
 //! trace part item id 的解析、别名收敛与段落编号。
 
-use pl_trace::{AgentEvent, TraceEventKind, TracePartKind, TracePartStatus, TraceTextChannel};
+use pl_trace::{
+    AgentEvent, TraceEventKind, TracePartAction, TracePartCompletion, TracePartKind,
+    TracePartState, TraceTextChannel,
+};
 
 use crate::completion::ToolCall;
 
@@ -93,29 +96,33 @@ impl TraceProjection {
         &mut self,
         item_id: &str,
         kind: TracePartKind,
-        text_channel: Option<TraceTextChannel>,
-        authoritative_text: Option<String>,
+        completion: TracePartCompletion,
     ) -> Vec<AgentEvent> {
         let Some(item) = self.started.get_mut(item_id) else {
             return Vec::new();
         };
-        if item.kind != kind
-            || item.text_channel != text_channel
-            || item.status == TracePartStatus::Completed
+        if item.kind() != kind || item.is_terminal() {
+            return Vec::new();
+        }
+        if let (TracePartState::Text(part), TracePartCompletion::Text { .. }) =
+            (item.state(), &completion)
+            && kind == TracePartKind::Text
+            && !matches!(
+                part.channel(),
+                TraceTextChannel::User | TraceTextChannel::Commentary | TraceTextChannel::Final
+            )
         {
             return Vec::new();
         }
-        if let Some(text) = authoritative_text
-            && item.content != text
-        {
-            item.content = text;
+        let now = unix_seconds();
+        if let Err(error) = item.apply(item.command(now, TracePartAction::Complete(completion))) {
+            tracing::error!(%error, "failed to complete resolved trace item");
+            return Vec::new();
         }
-        item.status = TracePartStatus::Completed;
-        item.updated_at = unix_seconds();
         let item = item.clone();
         self.record(
             TraceEventKind::TracePartCompleted { item: item.clone() },
-            item.updated_at,
+            item.updated_at(),
         );
         vec![AgentEvent::TracePartCompleted { item }]
     }

@@ -55,8 +55,7 @@ void registerReducerRecoveryTests() {
         const ThreadItemDeltaView(
           itemId: 'item-1',
           revision: 1,
-          field: 'text',
-          delta: 'gap',
+          state: ThreadTextDeltaView('gap'),
         ),
       ),
     );
@@ -84,7 +83,17 @@ void registerReducerRecoveryTests() {
       current,
       threadId: 'session-1',
       revision: 5,
-      update: ThreadItemUpsert(item.copyWith(text: 'old')),
+      update: ThreadItemUpsert(
+        _threadItemFixture(
+          id: item.id,
+          threadId: item.threadId,
+          turnId: item.turnId,
+          ordinal: item.ordinal,
+          revision: item.revision,
+          status: 'streaming',
+          text: 'old',
+        ),
+      ),
     );
 
     expect(oldWorkspace.resyncThreadId, isNull);
@@ -109,12 +118,9 @@ void registerReducerRecoveryTests() {
       turnId: item.turnId,
       ordinal: 4,
       revision: 1,
-      status: item.status,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
-      kind: item.kind,
-      text: item.text,
-      channel: item.channel,
+      state: item.state,
     );
 
     final result = applyThreadUpdate(
@@ -153,8 +159,7 @@ void registerReducerRecoveryTests() {
         ThreadItemDeltaView(
           itemId: 'item-1',
           revision: 1,
-          field: 'text',
-          delta: 'late',
+          state: ThreadTextDeltaView('late'),
         ),
       ),
     );

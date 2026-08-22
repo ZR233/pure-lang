@@ -6,14 +6,14 @@ use sea_orm::{
     TransactionTrait,
 };
 
+use crate::StudioMode;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
 use crate::studio::store_support::non_empty_title;
-use crate::{StudioMode, ThreadStatus};
-use pl_protocol::LabeledEnum;
+use pl_core::AgentState;
 
 impl StudioStore {
     pub async fn create_thread(
@@ -26,6 +26,7 @@ impl StudioStore {
         let now = unix_seconds();
         let id = new_id("thread");
         let usage_json = serde_json::to_string(&pl_model::TokenUsage::default())?;
+        let state_json = serde_json::to_string(&AgentState::idle())?;
         let model = thread::ActiveModel {
             id: Set(id.clone()),
             project_id: Set(project_id.to_string()),
@@ -35,7 +36,7 @@ impl StudioStore {
             parent_thread_id: Set(None),
             role: Set(mode.root_role().key().to_string()),
             agent_path: Set(id),
-            status: Set(ThreadStatus::Idle.label().to_string()),
+            state_json: Set(state_json),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
@@ -46,6 +47,7 @@ impl StudioStore {
             created_at: Set(now),
             updated_at: Set(now),
             archived: Set(0),
+            ..Default::default()
         }
         .insert(&self.db)
         .await?;
@@ -79,6 +81,7 @@ impl StudioStore {
             .ok_or_else(|| anyhow::anyhow!("父 Thread 不存在: {}", spec.parent_thread_id))?;
         let now = unix_seconds();
         let usage_json = serde_json::to_string(&pl_model::TokenUsage::default())?;
+        let state_json = serde_json::to_string(&AgentState::idle())?;
         let model = thread::ActiveModel {
             id: Set(spec.id.clone()),
             project_id: Set(parent.project_id),
@@ -88,7 +91,7 @@ impl StudioStore {
             parent_thread_id: Set(Some(spec.parent_thread_id)),
             role: Set(spec.role),
             agent_path: Set(spec.id),
-            status: Set(ThreadStatus::Running.label().to_string()),
+            state_json: Set(state_json),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
@@ -99,6 +102,7 @@ impl StudioStore {
             created_at: Set(now),
             updated_at: Set(now),
             archived: Set(0),
+            ..Default::default()
         }
         .insert(&self.db)
         .await?;
@@ -212,28 +216,6 @@ impl StudioStore {
             root: archived,
             removed_thread_ids,
         }))
-    }
-
-    pub(in crate::studio) async fn update_thread_status(
-        &self,
-        thread_id: &str,
-        status: ThreadStatus,
-        _summary: Option<String>,
-        _error: Option<String>,
-        updated_at: i64,
-    ) -> Result<()> {
-        use entities::thread;
-        let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        else {
-            return Ok(());
-        };
-        let mut active: thread::ActiveModel = existing.into();
-        active.status = Set(status.label().to_string());
-        active.updated_at = Set(updated_at);
-        active.update(&self.db).await?;
-        Ok(())
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {

@@ -1,7 +1,7 @@
 use pl_trace::TraceEvent;
 
 use super::super::host::{CommitDurability, ThreadProjectionCommit, transcript_mutation};
-use super::super::state::{ActiveTurnActivity, AgentRuntimeError, derive_activity, unix_timestamp};
+use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::*;
 use super::commit::{CommitPublication, PendingCommit};
 use super::{AgentLoop, notification_turn_id};
@@ -75,7 +75,7 @@ where
         };
         if active.turn_id.as_str() != observed.turn_id
             || active.thread_id.as_str() != observed.thread_id
-            || active.cancelling
+            || active.is_cancelling()
         {
             return Ok(());
         }
@@ -228,23 +228,6 @@ where
             submission,
         } = transition;
         let expected_revision = self.state.snapshot.revision;
-        let active = next_state.snapshot.active_turn_id.as_ref().map(|_| {
-            self.active.as_ref().map_or(
-                ActiveTurnActivity {
-                    kind: ActiveKind::Running,
-                    cancelling: false,
-                },
-                |active| ActiveTurnActivity {
-                    kind: active.kind,
-                    cancelling: active.cancelling,
-                },
-            )
-        });
-        next_state.snapshot.activity = derive_activity(
-            next_state.snapshot.lifecycle,
-            active,
-            next_state.has_triggering_input(),
-        );
         let context = transcript_mutation(
             self.state.session.session.items(),
             next_state.session.session.items(),
@@ -273,10 +256,16 @@ where
                 ));
             }
         };
-        let current_thread_revision = current_thread
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.revision);
-        let mut projected = project_runtime_event(&event, current_thread_revision);
+        let empty_thread;
+        let current_for_projection = match current_thread.as_ref() {
+            Some(current) => current,
+            None => {
+                empty_thread =
+                    pl_protocol::ThreadSnapshot::empty(self.state.snapshot.identity.id.to_string());
+                &empty_thread
+            }
+        };
+        let mut projected = project_runtime_event(&event, current_for_projection);
         if !thread_facts.is_empty() {
             let Some(current) = current_thread.as_ref() else {
                 return Err(AgentRuntimeError::InvalidInput(
@@ -363,8 +352,7 @@ where
 fn observation_durability(observation: &TurnObservation) -> CommitDurability {
     match observation {
         TurnObservation::InteractionChanged { .. } => CommitDurability::Immediate,
-        TurnObservation::DirectoryChanged
-        | TurnObservation::RuntimeDelta(_)
+        TurnObservation::RuntimeDelta(_)
         | TurnObservation::TodoList(_)
         | TurnObservation::ContextCompacted { .. }
         | TurnObservation::Diagnostic => CommitDurability::Batched,

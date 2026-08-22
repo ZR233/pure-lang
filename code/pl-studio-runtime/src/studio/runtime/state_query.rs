@@ -1,9 +1,8 @@
 use anyhow::Result;
-use pl_protocol::ObservedStateMeta;
 
 use crate::{
-    StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot, StudioSkillsStateSnapshot,
-    StudioStateSnapshot, StudioThreadDirectoryPage,
+    StudioSettingsStateSnapshot, StudioSkillsStateSnapshot, StudioStateSnapshot,
+    StudioThreadDirectoryPage,
 };
 
 use super::StudioRuntime;
@@ -35,17 +34,20 @@ impl StudioRuntime {
             .read_agent_directory()
             .await;
         let settings = self.read_settings()?;
-        let recovery = StudioRecoveryStateSnapshot {
-            meta: self.agent_facility.product_events.recovery_meta(),
-            issues: self.recovery_issues(),
-        };
+        let recovery = self
+            .agent_facility
+            .product_events
+            .recovery_state(self.recovery_issues());
         let mcp = self.read_mcp_state().await?;
         let lsp = self.read_lsp_state().await;
-        let mut skills_by_project = Vec::with_capacity(project_directory.projects.len());
-        for project in &project_directory.projects {
-            skills_by_project.push(StudioSkillsStateSnapshot::from(
-                self.skills.read(&project.id).await,
-            ));
+        let mut skills_by_project = Vec::new();
+        if let Some(directory) = project_directory.state.value() {
+            skills_by_project.reserve(directory.projects.len());
+            for project in &directory.projects {
+                skills_by_project.push(StudioSkillsStateSnapshot::from(
+                    self.skills.read(&project.id).await,
+                ));
+            }
         }
         Ok(StudioStateSnapshot {
             runtime,
@@ -54,8 +56,11 @@ impl StudioRuntime {
             task_directory,
             agent_directory,
             settings: StudioSettingsStateSnapshot {
-                meta: ObservedStateMeta::ready(settings.revision, settings.updated_at),
-                settings: settings.settings,
+                state: pl_protocol::ObservedResource::ready(
+                    settings.revision,
+                    settings.updated_at,
+                    settings.settings,
+                ),
             },
             recovery,
             mcp,

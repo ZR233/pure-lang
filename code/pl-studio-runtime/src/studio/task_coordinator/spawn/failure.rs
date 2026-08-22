@@ -3,16 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::agent::worktree::{WorktreeError, WorktreeFailureCause};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum TaskSpawnFailureCode {
-    #[serde(rename = "allocation_failed")]
     Allocation,
-    #[serde(rename = "worktree_create_failed")]
     WorktreeCreate,
-    #[serde(rename = "child_thread_create_failed")]
     ChildThreadCreate,
-    #[serde(rename = "agent_registration_failed")]
     AgentRegistration,
-    #[serde(rename = "activation_failed")]
     Activation,
 }
 
@@ -35,6 +31,13 @@ pub(crate) enum TaskSpawnCompensationState {
     Faulted,
     CleanupFailed,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TaskSpawnNextAction {
+    RetryTaskSpawnExecutor,
+    RecoverWorktreeResources,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,7 +85,7 @@ pub(crate) struct TaskSpawnFailure {
     pub(crate) resource: Option<TaskSpawnResource>,
     pub(crate) cause: WorktreeFailureCause,
     pub(crate) compensation: TaskSpawnCompensation,
-    pub(crate) next_action: String,
+    pub(crate) next_action: TaskSpawnNextAction,
 }
 
 impl TaskSpawnFailure {
@@ -121,9 +124,9 @@ impl TaskSpawnFailure {
                 child_thread: TaskSpawnCompensationState::NotCreated,
             },
             next_action: if error.cleanup_failed() {
-                "recover_worktree_resources".to_string()
+                TaskSpawnNextAction::RecoverWorktreeResources
             } else {
-                "retry_task_spawn_executor".to_string()
+                TaskSpawnNextAction::RetryTaskSpawnExecutor
             },
         }
     }
@@ -159,9 +162,9 @@ impl TaskSpawnFailure {
             resource,
             compensation,
             next_action: if cleanup_failed {
-                "recover_worktree_resources".to_string()
+                TaskSpawnNextAction::RecoverWorktreeResources
             } else {
-                "retry_task_spawn_executor".to_string()
+                TaskSpawnNextAction::RetryTaskSpawnExecutor
             },
         }
     }

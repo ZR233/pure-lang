@@ -11,8 +11,8 @@ use git::git_output;
 use live_fixture::{LIVE_VERIFY_MARKER, LiveTaskFixture, command_output, normalized_text};
 use pl_studio_runtime::{
     InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskReviewState, StudioTaskState,
-    StudioTaskWorkUnitState,
+    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskCompletionContent,
+    StudioTaskCompletionState, StudioTaskReviewState, StudioTaskState, StudioTaskWorkUnitState,
 };
 
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -237,8 +237,10 @@ async fn assert_task_invariants(
     }
 
     if task.completions.iter().any(|completion| {
-        completion.kind == "delivery"
-            && completion.status == "approved"
+        matches!(
+            &completion.content,
+            StudioTaskCompletionContent::Delivery(_)
+        ) && matches!(&completion.state, StudioTaskCompletionState::Approved(_))
             && !task.merges.iter().any(|merge| {
                 merge.completion_id == completion.id
                     && merge.completion_revision == completion.revision
@@ -288,12 +290,16 @@ async fn assert_task_invariants(
         bail!("not every review cited design/shooter.md");
     }
     if !task.completions.iter().all(|completion| {
-        completion.status != "approved"
+        !matches!(&completion.state, StudioTaskCompletionState::Approved(_))
             || task.reviews.iter().any(|review| {
+                let completion_head = match &completion.content {
+                    StudioTaskCompletionContent::Delivery(value) => value.head_commit.as_str(),
+                    StudioTaskCompletionContent::NoDelivery(_) => "",
+                };
                 review.scope == "delivery"
                     && review.completion_id.as_deref() == Some(completion.id.as_str())
                     && review.completion_revision == Some(completion.revision)
-                    && review.reviewed_head == completion.head_commit.as_deref().unwrap_or_default()
+                    && review.reviewed_head == completion_head
                     && matches!(&review.state, StudioTaskReviewState::Pass { .. })
             })
     }) {

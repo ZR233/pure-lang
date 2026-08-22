@@ -10,7 +10,10 @@ mod tool;
 
 use std::collections::HashMap;
 
-use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartStatus};
+use pl_trace::{
+    AgentEvent, TraceEvent, TraceEventKind, TracePart, TracePartAction, TracePartCompletion,
+    TracePartKind, TracePartState, TraceToolFailureKind,
+};
 
 use crate::completion::CompletionTraceContext;
 
@@ -53,7 +56,7 @@ impl TraceProjection {
             .iter()
             .filter(|(_, item)| {
                 matches!(
-                    item.kind,
+                    item.kind(),
                     TracePartKind::Text | TracePartKind::Thinking | TracePartKind::Plan
                 )
             })
@@ -64,15 +67,32 @@ impl TraceProjection {
             let Some(item) = self.started.get_mut(&item_id) else {
                 continue;
             };
-            if item.status == TracePartStatus::Completed {
+            if item.is_terminal() {
                 continue;
             }
-            item.status = TracePartStatus::Completed;
-            item.updated_at = unix_seconds();
+            let completion = match item.state() {
+                TracePartState::Text(_) => TracePartCompletion::Text {
+                    authoritative_content: None,
+                },
+                TracePartState::Thinking(_) => TracePartCompletion::Thinking {
+                    authoritative_summary: None,
+                },
+                TracePartState::Plan(_) => TracePartCompletion::Plan { content: None },
+                TracePartState::Tool(_)
+                | TracePartState::Agent(_)
+                | TracePartState::Turn(_)
+                | TracePartState::Inference(_) => continue,
+            };
+            let now = unix_seconds();
+            if let Err(error) = item.apply(item.command(now, TracePartAction::Complete(completion)))
+            {
+                tracing::error!(%error, "failed to complete streaming trace item");
+                continue;
+            }
             let item = item.clone();
             self.record(
                 TraceEventKind::TracePartCompleted { item: item.clone() },
-                item.updated_at,
+                item.updated_at(),
             );
             events.push(AgentEvent::TracePartCompleted { item });
         }
@@ -84,7 +104,7 @@ impl TraceProjection {
         item_ids.sort_by_key(|item_id| {
             self.started
                 .get(item_id)
-                .map(|item| item.started_sequence)
+                .map(TracePart::started_sequence)
                 .unwrap_or_default()
         });
         let mut events = Vec::new();
@@ -92,24 +112,26 @@ impl TraceProjection {
             let Some(item) = self.started.get_mut(&item_id) else {
                 continue;
             };
-            if item.status == TracePartStatus::Failed {
+            if item.is_terminal() {
                 continue;
             }
-            item.revision += 1;
-            item.status = TracePartStatus::Failed;
-            item.updated_at = unix_seconds();
+            let now = unix_seconds();
+            if let Err(transition_error) = item.apply(item.command(
+                now,
+                TracePartAction::Fail {
+                    error: error.to_string(),
+                    tool_kind: TraceToolFailureKind::Execution,
+                },
+            )) {
+                tracing::error!(%transition_error, "failed to fail open trace item");
+                continue;
+            }
             let item = item.clone();
             self.record(
-                TraceEventKind::TracePartFailed {
-                    item: item.clone(),
-                    error: error.to_string(),
-                },
-                item.updated_at,
+                TraceEventKind::TracePartFailed { item: item.clone() },
+                item.updated_at(),
             );
-            events.push(AgentEvent::TracePartFailed {
-                item,
-                error: error.to_string(),
-            });
+            events.push(AgentEvent::TracePartFailed { item });
         }
         events
     }

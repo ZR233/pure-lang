@@ -56,7 +56,7 @@ impl StudioRuntime {
         self.external_runtimes
             .lsp_state
             .begin(pl_protocol::StateOperation::Activate)
-            .await;
+            .await?;
         self.external_runtimes
             .lsp
             .reconcile_workspace_membership(&workspace_root)
@@ -66,7 +66,7 @@ impl StudioRuntime {
             .probe_lsp_server(&workspace_root)
             .await;
         let health = health(&self.external_runtimes.lsp).await;
-        self.external_runtimes.lsp_state.ready(health, true).await;
+        self.external_runtimes.lsp_state.ready(health, true).await?;
         let _ = self
             .skills
             .discover(project_id, &workspace_root, &settings.config.skills)
@@ -97,13 +97,13 @@ impl StudioRuntime {
         self.external_runtimes
             .lsp_state
             .begin(pl_protocol::StateOperation::Probe)
-            .await;
+            .await?;
         self.external_runtimes
             .lsp
             .probe_lsp_server(workspace_root)
             .await;
         let health = health(&self.external_runtimes.lsp).await;
-        self.external_runtimes.lsp_state.ready(health, true).await;
+        self.external_runtimes.lsp_state.ready(health, true).await?;
         Ok(())
     }
 
@@ -113,7 +113,7 @@ impl StudioRuntime {
         self.external_runtimes
             .lsp_state
             .begin(pl_protocol::StateOperation::Repair)
-            .await;
+            .await?;
         let result = self
             .external_runtimes
             .lsp
@@ -123,14 +123,11 @@ impl StudioRuntime {
         match result {
             Ok(()) => {
                 let health = health(&self.external_runtimes.lsp).await;
-                self.external_runtimes.lsp_state.ready(health, true).await;
+                self.external_runtimes.lsp_state.ready(health, true).await?;
                 Ok(())
             }
             Err(error) => {
-                self.external_runtimes
-                    .lsp_state
-                    .failed(pl_protocol::StateOperation::Repair, &error, true)
-                    .await;
+                self.external_runtimes.lsp_state.failed(&error).await?;
                 Err(error)
             }
         }
@@ -141,7 +138,7 @@ impl StudioRuntime {
         self.external_runtimes
             .lsp_state
             .begin(pl_protocol::StateOperation::Reset)
-            .await;
+            .await?;
         let result = self
             .external_runtimes
             .lsp
@@ -151,14 +148,14 @@ impl StudioRuntime {
         match result {
             Ok(()) => {
                 let health = health(&self.external_runtimes.lsp).await;
-                self.external_runtimes.lsp_state.ready(health, false).await;
+                self.external_runtimes
+                    .lsp_state
+                    .ready(health, false)
+                    .await?;
                 Ok(())
             }
             Err(error) => {
-                self.external_runtimes
-                    .lsp_state
-                    .failed(pl_protocol::StateOperation::Reset, &error, false)
-                    .await;
+                self.external_runtimes.lsp_state.failed(&error).await?;
                 Err(error)
             }
         }

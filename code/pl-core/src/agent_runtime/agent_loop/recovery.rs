@@ -9,9 +9,9 @@ use pl_protocol::{
 use super::super::host::{CommitDurability, ThreadProjectionCommit};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentLifecycleState, AgentRuntimeHost, AgentRuntimeResult, ConversationRecoveryPreview,
-    ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
-    DurableCommitFacts, ThreadContextMutation, ThreadMutation,
+    AgentRuntimeHost, AgentRuntimeResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
+    ConversationRecoveryResult, ConversationRecoveryTarget, DurableCommitFacts,
+    ThreadContextMutation, ThreadMutation,
 };
 use super::AgentLoop;
 use super::commit::{CommitPublication, PendingCommit};
@@ -199,14 +199,14 @@ where
 
     fn validate_recovery_gate(&self) -> AgentRuntimeResult<()> {
         let agent_id = self.state.snapshot.identity.id.clone();
-        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+        if !self.state.snapshot.state.is_accepting_work() {
             return Err(AgentRuntimeError::NotActive(
                 agent_id,
-                self.state.snapshot.lifecycle,
+                self.state.snapshot.state.clone(),
             ));
         }
         if self.active.is_some()
-            || self.state.snapshot.active_turn_id.is_some()
+            || self.state.snapshot.active_turn_id().is_some()
             || self.state.active_input.is_some()
             || !self.state.pending_inputs.is_empty()
             || self.state.snapshot.pending_inputs != 0
@@ -224,7 +224,7 @@ where
         if snapshot
             .interactions
             .iter()
-            .any(|interaction| interaction.status == InteractionStatus::Pending)
+            .any(|interaction| interaction.status() == InteractionStatus::Pending)
         {
             return Err(AgentRuntimeError::InvalidInput(
                 "conversation recovery requires no pending interaction".to_string(),

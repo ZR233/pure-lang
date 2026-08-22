@@ -73,17 +73,20 @@ fn summary_started(id: &str) -> ModelStreamEvent {
 }
 
 fn trace_part_text(item: &pl_trace::TracePart) -> String {
-    match item.kind {
-        TracePartKind::Text | TracePartKind::Plan | TracePartKind::Turn => item.content.clone(),
-        TracePartKind::Thinking => {
-            let summary = item
-                .thinking_chunks
+    match item.state() {
+        pl_trace::TracePartState::Text(text) => text.content().to_string(),
+        pl_trace::TracePartState::Plan(plan) => plan.content().to_string(),
+        pl_trace::TracePartState::Turn(_) => String::new(),
+        pl_trace::TracePartState::Thinking(thinking) => {
+            let summary = thinking
+                .summary()
                 .iter()
                 .map(|chunk| chunk.content.as_str())
                 .collect::<Vec<_>>()
                 .join("");
             if summary.is_empty() {
-                item.reasoning_content_chunks
+                thinking
+                    .content()
                     .iter()
                     .map(|chunk| chunk.content.as_str())
                     .collect::<Vec<_>>()
@@ -92,12 +95,10 @@ fn trace_part_text(item: &pl_trace::TracePart) -> String {
                 summary
             }
         }
-        TracePartKind::Tool => item
-            .tool
-            .as_ref()
-            .map(|tool| tool.arguments.clone())
-            .unwrap_or_default(),
-        TracePartKind::Agent | TracePartKind::Inference => item.content.clone(),
+        pl_trace::TracePartState::Tool(tool) => tool.invocation().arguments().to_string(),
+        pl_trace::TracePartState::Agent(_) | pl_trace::TracePartState::Inference(_) => {
+            String::new()
+        }
     }
 }
 
@@ -110,6 +111,10 @@ fn trace_delta_text(delta: &pl_trace::TraceDelta) -> String {
         | pl_trace::TraceDelta::ToolResult { delta }
         | pl_trace::TraceDelta::Plan { delta } => delta.clone(),
     }
+}
+
+fn trace_text_channel(item: &pl_trace::TracePart) -> Option<pl_trace::TraceTextChannel> {
+    item.text().map(pl_trace::TraceTextPart::channel)
 }
 
 #[derive(Debug)]

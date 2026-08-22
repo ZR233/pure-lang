@@ -14,10 +14,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope,
-    ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRun,
-    TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
-    WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitStatus,
+    BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewRoundStateKind,
+    ReviewScope, ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRun,
+    TaskRunStateKind, WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnit,
+    WorkUnitState, WorkUnitStateKind,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -87,7 +87,7 @@ struct ModelReviewOverview {
     reviewed_head: String,
     verdict: ReviewVerdict,
     reviewer_thread_id: Option<String>,
-    reviewer_status: ThreadExecutionStatus,
+    reviewer_state: ReviewRoundStateKind,
     reviewer_error: Option<String>,
     summary: Option<String>,
     findings_count: usize,
@@ -126,7 +126,8 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             .as_ref()
             .map(|coverage| coverage.diagnostics_revision);
         let verdict = record.verdict();
-        let reviewer_status = record.reviewer_status();
+        let reviewer_state = record.kind();
+        let reviewer_thread_id = record.reviewer_thread_id().map(str::to_string);
         let reviewer_error = record.reviewer_error().map(str::to_string);
         let summary = record.summary().map(str::to_string);
         Self {
@@ -138,8 +139,8 @@ impl From<ReviewRoundRecord> for ModelReviewOverview {
             completion_revision: record.completion_revision,
             reviewed_head: record.reviewed_head,
             verdict,
-            reviewer_thread_id: record.reviewer_thread_id,
-            reviewer_status,
+            reviewer_thread_id,
+            reviewer_state,
             reviewer_error,
             summary,
             findings_count,
@@ -161,24 +162,15 @@ pub(super) struct ModelWorkUnit {
     id: String,
     task_run_id: String,
     title: String,
-    status: WorkUnitStatus,
+    state: WorkUnitState,
     scope_hints: Vec<String>,
     base_commit: String,
     relative_worktree_path: Option<String>,
     branch: String,
-    worktree_disposition: TaskWorktreeDisposition,
     attempt: u32,
     executor_thread_id: Option<String>,
     requested_by_call_id: String,
-    execution_status: ThreadExecutionStatus,
-    execution_summary: Option<String>,
-    execution_error: Option<String>,
-    budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
-    budget_slice_count: u32,
     budget_slice_limit: u32,
-    continuation_state: super::ExecutorContinuationState,
-    continuation_source_turn_id: Option<String>,
-    continuation_revision: u64,
     created_at: i64,
     updated_at: i64,
     blueprint_fingerprint: Option<String>,
@@ -279,7 +271,7 @@ impl TaskCoordinator {
                 let mut changed_files = completions
                     .iter()
                     .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
-                    .flat_map(|completion| completion.changed_files.iter().cloned())
+                    .flat_map(|completion| completion.changed_files().iter().cloned())
                     .filter(|path| !path.starts_with("design/"))
                     .collect::<Vec<_>>();
                 changed_files.sort();
@@ -525,9 +517,7 @@ impl TaskCoordinator {
         }
         let mut candidates = Vec::new();
         for work_unit in work_units {
-            if work_unit.status() != WorkUnitStatus::Approved
-                || work_unit.execution_status() != ThreadExecutionStatus::Completed
-            {
+            if work_unit.kind() != WorkUnitStateKind::ReviewPassed {
                 continue;
             }
             let Some(executor_agent_id) = work_unit.executor_thread_id.as_deref() else {
@@ -552,8 +542,8 @@ impl TaskCoordinator {
             else {
                 continue;
             };
-            if completion.kind != WorkCompletionKind::Delivery
-                || completion.status != WorkCompletionStatus::Approved
+            if completion.kind() != WorkCompletionKind::Delivery
+                || completion.status() != WorkCompletionStatus::Approved
             {
                 continue;
             }
@@ -566,8 +556,8 @@ impl TaskCoordinator {
                 continue;
             }
             let head_commit = completion
-                .head_commit
-                .clone()
+                .head_commit()
+                .map(str::to_string)
                 .context("approved delivery Completion has no head commit")?;
             let expected_task_head = merges
                 .iter()
@@ -603,7 +593,7 @@ impl ModelWorkUnit {
             id: work_unit.id.clone(),
             task_run_id: work_unit.task_run_id.clone(),
             title: work_unit.title.clone(),
-            status: work_unit.status(),
+            state: work_unit.state.clone(),
             scope_hints: work_unit.scope_hints.clone(),
             base_commit: work_unit.base_commit.clone(),
             relative_worktree_path: model_worktree_locator(
@@ -611,21 +601,10 @@ impl ModelWorkUnit {
                 &work_unit.worktree_path,
             ),
             branch: work_unit.branch.clone(),
-            worktree_disposition: work_unit.worktree_disposition(),
             attempt: work_unit.attempt,
             executor_thread_id: work_unit.executor_thread_id.clone(),
             requested_by_call_id: work_unit.requested_by_call_id.clone(),
-            execution_status: work_unit.execution_status(),
-            execution_summary: work_unit.execution_summary().map(str::to_string),
-            execution_error: work_unit.execution_error().map(str::to_string),
-            budget_limit: work_unit.budget_limit().cloned(),
-            budget_slice_count: work_unit.budget_slice_count(),
             budget_slice_limit: super::MAX_EXECUTOR_BUDGET_SLICES,
-            continuation_state: work_unit.continuation_state(),
-            continuation_source_turn_id: work_unit
-                .continuation_source_turn_id()
-                .map(str::to_string),
-            continuation_revision: work_unit.continuation_revision(),
             created_at: work_unit.created_at,
             updated_at: work_unit.updated_at,
             blueprint_fingerprint: handoff.map(|handoff| handoff.blueprint_fingerprint.clone()),
@@ -647,11 +626,11 @@ impl ModelCompletion {
             work_unit_id: completion.work_unit_id.clone(),
             executor_agent_id: completion.executor_agent_id.clone(),
             revision: completion.revision,
-            kind: completion.kind,
-            status: completion.status,
+            kind: completion.kind(),
+            status: completion.status(),
             base_commit: completion.base_commit.clone(),
-            head_commit: completion.head_commit.clone(),
-            changed_files: completion.changed_files.clone(),
+            head_commit: completion.head_commit().map(str::to_string),
+            changed_files: completion.changed_files().to_vec(),
             verification_summary: completion.verification_summary.clone(),
             relative_worktree_path: model_worktree_locator(
                 &run.workspace_root,

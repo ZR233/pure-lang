@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Flutter 本地通用设置的 typed 快照。
 class BridgeGeneralSettingsDto {
@@ -78,13 +78,14 @@ class BridgeInstructionsSettingsDto {
           projectDocFallbackFilenames == other.projectDocFallbackFilenames;
 }
 
+enum BridgeMcpServerConfiguration { enabled, disabled, missingCredential }
+
 /// MCP 设置页的 canonical server 视图。
 class BridgeMcpServerSettingsDto {
   final String id;
   final String transport;
   final String endpoint;
-  final bool enabled;
-  final String status;
+  final BridgeMcpServerConfiguration configuration;
   final String sourceKind;
   final String mutationPolicy;
 
@@ -92,8 +93,7 @@ class BridgeMcpServerSettingsDto {
     required this.id,
     required this.transport,
     required this.endpoint,
-    required this.enabled,
-    required this.status,
+    required this.configuration,
     required this.sourceKind,
     required this.mutationPolicy,
   });
@@ -103,8 +103,7 @@ class BridgeMcpServerSettingsDto {
       id.hashCode ^
       transport.hashCode ^
       endpoint.hashCode ^
-      enabled.hashCode ^
-      status.hashCode ^
+      configuration.hashCode ^
       sourceKind.hashCode ^
       mutationPolicy.hashCode;
 
@@ -116,8 +115,7 @@ class BridgeMcpServerSettingsDto {
           id == other.id &&
           transport == other.transport &&
           endpoint == other.endpoint &&
-          enabled == other.enabled &&
-          status == other.status &&
+          configuration == other.configuration &&
           sourceKind == other.sourceKind &&
           mutationPolicy == other.mutationPolicy;
 }

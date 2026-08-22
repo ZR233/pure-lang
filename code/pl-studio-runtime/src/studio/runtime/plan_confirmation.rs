@@ -1,8 +1,8 @@
 use crate::StudioMode;
 use crate::studio::InteractionEmitter;
 use crate::{
-    InteractionPayload, InteractionRequest, InteractionResolution, InteractionStatus,
-    PlanConfirmationResolution, PlanLifecycleState,
+    InteractionContent, InteractionRequest, InteractionResolution, InteractionStatus,
+    PlanConfirmationResolution, PlanConfirmationResolutionPayload,
 };
 use anyhow::{Context, Result, bail};
 
@@ -20,19 +20,19 @@ impl StudioRuntime {
         emitter: InteractionEmitter,
     ) -> Result<StudioResolveInteractionResponse> {
         let thread_id = current.scope.thread_id.clone();
-        let InteractionPayload::PlanConfirmation { plan_id, content } = &current.payload else {
+        let InteractionContent::PlanConfirmation(plan) = &current.content else {
             unreachable!("plan confirmation resolution was validated before resolving");
         };
-        let InteractionResolution::PlanConfirmation {
-            decision,
-            content: resolution_content,
-            reason,
-        } = resolution
-        else {
+        let plan_id = plan.plan_id();
+        let content = plan.content();
+        let InteractionResolution::PlanConfirmation(resolution) = resolution else {
             unreachable!("resolution kind was validated before resolving");
         };
+        let decision = resolution.decision;
+        let resolution_content = resolution.content;
+        let reason = resolution.reason;
 
-        if current.status != InteractionStatus::Pending {
+        if current.status() != InteractionStatus::Pending {
             return Ok(StudioResolveInteractionResponse {
                 thread_id,
                 interaction: current,
@@ -45,7 +45,7 @@ impl StudioRuntime {
                 let plan_content = resolution_content
                     .clone()
                     .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| content.clone())
+                    .unwrap_or_else(|| content.to_string())
                     .trim()
                     .to_string();
                 if plan_content.is_empty() {
@@ -69,11 +69,13 @@ impl StudioRuntime {
                     .start_confirmed_task(&thread_id, &plan_content, &project.path)
                     .await?;
                 let started = async {
-                    let continuation_resolution = InteractionResolution::PlanConfirmation {
-                        decision: PlanConfirmationResolution::ImplementFreshContext,
-                        content: resolution_content.clone(),
-                        reason: reason.clone(),
-                    };
+                    let continuation_resolution = InteractionResolution::PlanConfirmation(
+                        PlanConfirmationResolutionPayload {
+                            decision: PlanConfirmationResolution::ImplementFreshContext,
+                            content: resolution_content.clone(),
+                            reason: reason.clone(),
+                        },
+                    );
                     let prompt =
                         format!("{IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX}\n\n{plan_content}");
                     let mail_id = pl_core::AgentInteractionContinuationRequest::stable_mail_id(
@@ -99,22 +101,6 @@ impl StudioRuntime {
                             }),
                         )
                         .await?;
-                    self.append_plan_lifecycle_event(
-                        &thread_id,
-                        plan_id,
-                        PlanLifecycleState::Accepted,
-                        None,
-                        reason.filter(|value| !value.trim().is_empty()),
-                    )
-                    .await?;
-                    self.append_plan_lifecycle_event(
-                        &thread_id,
-                        plan_id,
-                        PlanLifecycleState::Implementing,
-                        None,
-                        None,
-                    )
-                    .await?;
                     Ok::<_, anyhow::Error>(resolved)
                 }
                 .await;
@@ -137,65 +123,48 @@ impl StudioRuntime {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .context("plan adjustment is empty")?;
-                let continuation_resolution = InteractionResolution::PlanConfirmation {
-                    decision: PlanConfirmationResolution::ContinuePlanning,
-                    content: resolution_content.clone(),
-                    reason: reason.clone(),
-                };
+                let continuation_resolution =
+                    InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
+                        decision: PlanConfirmationResolution::ContinuePlanning,
+                        content: resolution_content.clone(),
+                        reason: reason.clone(),
+                    });
                 let message = format!(
                     "{CONTINUE_PLANNING_PREFIX}\n\n## 原计划\n\n{}\n\n## 用户调整要求\n\n{adjustment}",
                     content.trim()
                 );
                 let mail_id =
                     pl_core::AgentInteractionContinuationRequest::stable_mail_id(&interaction_id);
-                let resolved = self
-                    .submit_durable_interaction_continuation(
-                        &current,
-                        continuation_resolution,
-                        message,
-                        serde_json::json!({
-                            "interactionResolutionId": interaction_id,
-                            "interactionKind": "planConfirmation",
-                            "originTurnId": current.scope.turn_id,
-                            "planId": plan_id,
-                            "mailId": mail_id,
-                            "attachmentIds": [],
-                        }),
-                    )
-                    .await?;
-                self.append_plan_lifecycle_event(
-                    &thread_id,
-                    plan_id,
-                    PlanLifecycleState::ContinuedPlanning,
-                    None,
-                    reason.or(resolution_content),
+                self.submit_durable_interaction_continuation(
+                    &current,
+                    continuation_resolution,
+                    message,
+                    serde_json::json!({
+                        "interactionResolutionId": interaction_id,
+                        "interactionKind": "planConfirmation",
+                        "originTurnId": current.scope.turn_id,
+                        "planId": plan_id,
+                        "mailId": mail_id,
+                        "attachmentIds": [],
+                    }),
                 )
-                .await?;
-                resolved
+                .await?
             }
             PlanConfirmationResolution::Dismiss => {
-                let resolved = self
-                    .agent_facility
+                self.agent_facility
                     .interactions
                     .resolve(
                         &interaction_id,
-                        InteractionResolution::PlanConfirmation {
-                            decision: PlanConfirmationResolution::Dismiss,
-                            content: resolution_content,
-                            reason: reason.clone(),
-                        },
+                        InteractionResolution::PlanConfirmation(
+                            PlanConfirmationResolutionPayload {
+                                decision: PlanConfirmationResolution::Dismiss,
+                                content: resolution_content,
+                                reason: reason.clone(),
+                            },
+                        ),
                         emitter,
                     )
-                    .await?;
-                self.append_plan_lifecycle_event(
-                    &thread_id,
-                    plan_id,
-                    PlanLifecycleState::Dismissed,
-                    None,
-                    reason,
-                )
-                .await?;
-                resolved
+                    .await?
             }
         };
 

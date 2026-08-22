@@ -34,7 +34,7 @@ void registerTimelineToolTests() {
     await tester.pump();
 
     expect(
-      find.text('reviewMissing\nLatest integrated review must pass'),
+      find.textContaining('reviewMissing\nLatest integrated review must pass'),
       findsOneWidget,
     );
   });
@@ -47,7 +47,7 @@ void registerTimelineToolTests() {
       groupId: 'task-complete-completed-group',
       turnId: 'turn-task-completed',
       name: 'task_complete',
-      status: 'completed',
+      status: 'succeeded',
       result: jsonEncode({
         'status': 'completed',
         'run': {'id': 'task-run-hidden', 'phase': 'completed'},
@@ -84,7 +84,7 @@ void registerTimelineToolTests() {
       groupId: 'message-web-search',
       turnId: 'turn-web-search',
       name: 'web_search',
-      status: 'streaming',
+      status: 'succeeded',
       arguments: jsonEncode({
         'type': 'find_in_page',
         'url': 'https://example.com/page',
@@ -120,14 +120,14 @@ void registerTimelineToolTests() {
     );
     await tester.pump();
 
-    expect(find.text('web_search running'), findsOneWidget);
+    expect(find.text('web_search completed'), findsOneWidget);
     expect(find.text('running'), findsNothing);
     expect(find.text('Finding text on a page'), findsNothing);
     expect(find.textContaining('https://example.com/page'), findsNothing);
     expect(find.text('Result links'), findsNothing);
     expect(find.text('Tool activity'), findsNothing);
 
-    await tester.tap(find.text('web_search running'));
+    await tester.tap(find.text('web_search completed'));
     await tester.pump();
 
     expect(find.text('Finding text on a page'), findsOneWidget);
@@ -149,7 +149,7 @@ void registerTimelineToolTests() {
       groupId: 'message-tool-search',
       turnId: 'turn-tool-search',
       name: 'tool_search',
-      status: 'completed',
+      status: 'succeeded',
       arguments: jsonEncode({'query': 'git status', 'limit': 4}),
       result: jsonEncode({
         'type': 'tool_search',
@@ -212,7 +212,7 @@ void registerTimelineToolTests() {
         groupId: 'message-lsp',
         turnId: 'turn-lsp',
         name: 'lsp_query',
-        status: 'completed',
+        status: 'succeeded',
         arguments: jsonEncode({
           'languageId': 'rust',
           'operation': 'documentSymbol',
@@ -225,7 +225,7 @@ void registerTimelineToolTests() {
         turnId: 'turn-lsp',
         order: 1,
         name: 'lsp_capabilities',
-        status: 'completed',
+        status: 'succeeded',
         arguments: '{}',
       ),
     ];
@@ -325,7 +325,7 @@ void registerTimelineToolTests() {
       order: 0,
       revision: 0,
       text: '',
-      status: 'completed',
+      status: 'succeeded',
       createdAt: DateTime.fromMillisecondsSinceEpoch(0),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       tool: TimelineToolPart(
@@ -662,7 +662,10 @@ void registerTimelineToolTests() {
     expect(find.textContaining('lib/main.dart'), findsOneWidget);
     expect(find.textContaining('exit code 2'), findsOneWidget);
     expect(
-      find.text('lib/main.dart\nexit code 2\nfile missing'),
+      find.descendant(
+        of: find.byKey(const ValueKey('timeline-tool-group-details')),
+        matching: find.textContaining('file missing'),
+      ),
       findsOneWidget,
     );
   });
@@ -874,7 +877,7 @@ void registerTimelineToolTests() {
               turn: _testTurn(
                 threadId: threadId,
                 turnId: turnId,
-                state: StudioTurnState.inProgress(activity),
+                state: RunningStudioTurnState(startedAt: 1, activity: activity),
               ),
             ),
           ),
@@ -901,7 +904,7 @@ void registerTimelineToolTests() {
     );
     expect(find.text('Inspecting the implementation'), findsOneWidget);
 
-    final completedTool = toolItem(status: 'completed', result: 'passed');
+    final completedTool = toolItem(status: 'succeeded', result: 'passed');
     await tester.pumpWidget(
       timelineFor(completedTool, StudioTurnActivity.thinking),
     );

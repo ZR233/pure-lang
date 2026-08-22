@@ -1,6 +1,11 @@
 use super::*;
 use crate::studio::task_coordinator::*;
 
+fn delivery_content(delivery: AgentDelivery) -> WorkCompletionContent {
+    WorkCompletionContent::delivery(delivery.head_commit, delivery.changed_files)
+        .expect("test delivery has a head commit")
+}
+
 fn create_input(project_id: &str, root_thread_id: &str) -> CreateTaskRun {
     CreateTaskRun {
         project_id: project_id.to_string(),
@@ -391,7 +396,11 @@ async fn structured_spawn_failure_round_trips_and_cleanup_failure_blocks_task() 
         assert_eq!(decoded, work_unit.state);
         let persisted_run = store.read_task_run(&run.id).await.unwrap().unwrap();
         if cleanup_fails {
-            assert_eq!(work_unit.status(), WorkUnitStatus::NeedsAttention);
+            assert_eq!(work_unit.kind(), WorkUnitStateKind::Failed);
+            assert_eq!(
+                work_unit.worktree_disposition(),
+                TaskWorktreeDisposition::Protect
+            );
             assert_eq!(persisted_run.kind(), TaskRunStateKind::Blocked);
             assert!(matches!(
                 persisted_run.state,
@@ -400,7 +409,11 @@ async fn structured_spawn_failure_round_trips_and_cleanup_failure_blocks_task() 
             ));
             assert!(store.read_project_lease(&run.id).await.unwrap().is_none());
         } else {
-            assert_eq!(work_unit.status(), WorkUnitStatus::Failed);
+            assert_eq!(work_unit.kind(), WorkUnitStateKind::Failed);
+            assert_eq!(
+                work_unit.worktree_disposition(),
+                TaskWorktreeDisposition::CleanupRequested
+            );
             assert_eq!(persisted_run.kind(), TaskRunStateKind::Implementing);
             assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
         }
@@ -429,7 +442,7 @@ async fn task_projection_rejects_executor_without_durable_handoff() {
     store
         .update_work_unit(
             &work_unit.id,
-            WorkUnitState::running(work_unit.state.clone().into_progress()),
+            WorkUnitState::running_for_test(0),
             Some("missing-executor-session".to_string()),
         )
         .await
@@ -464,7 +477,11 @@ async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking(
     store
         .update_work_unit_state_for_test(
             &first.work_unit.id,
-            WorkUnitState::failed(first.work_unit.state.clone().into_progress()),
+            WorkUnitState::failed_for_test(
+                "test-terminal",
+                "test terminal failure",
+                TaskWorktreeDisposition::CleanupRequested,
+            ),
         )
         .await
         .unwrap();
@@ -509,16 +526,23 @@ async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking(
 }
 
 #[tokio::test]
-async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempotent() {
+async fn executor_close_preserves_cancelled_terminal_and_is_idempotent() {
     let fixture = ExecutorFixture::new("close-cancelled-awaiting-completion").await;
-    let mut progress = fixture.work_unit().await.state.into_progress();
-    progress.continuation_revision = 7;
+    let current = fixture.work_unit().await;
+    let cancelled = current
+        .decide(
+            current.revision,
+            WorkUnitCommand::Cancel {
+                operation_id: "test-close-cancel".to_string(),
+                reason: "test cancellation".to_string(),
+                disposition: TaskWorktreeDisposition::CleanupRequested,
+            },
+        )
+        .unwrap()
+        .next_state();
     fixture
         .store
-        .update_work_unit_state_for_test(
-            &fixture.work_unit.id,
-            WorkUnitState::awaiting_cancelled(progress),
-        )
+        .update_work_unit_state_for_test(&fixture.work_unit.id, cancelled)
         .await
         .unwrap();
 
@@ -547,9 +571,8 @@ async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempote
         ExecutorCloseDisposition::Discard
     );
     let settled = fixture.work_unit().await;
-    assert_eq!(settled.status(), WorkUnitStatus::Cancelled);
-    assert_eq!(settled.execution_status(), ThreadExecutionStatus::Cancelled);
-    assert_eq!(settled.continuation_revision(), 8);
+    assert_eq!(settled.kind(), WorkUnitStateKind::Cancelled);
+    assert_eq!(settled.continuation_revision(), 0);
     assert_eq!(
         settled.worktree_disposition(),
         TaskWorktreeDisposition::CleanupRequested
@@ -567,38 +590,48 @@ async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempote
             .unwrap(),
         ExecutorCloseDisposition::Discard
     );
-    assert_eq!(fixture.work_unit().await.continuation_revision(), 8);
+    assert_eq!(fixture.work_unit().await, settled);
 }
 
 #[tokio::test]
 async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
     let fixture = ExecutorFixture::new("follow-up-restores-running-pair").await;
-    let mut progress = fixture.work_unit().await.state.into_progress();
-    progress.execution_error = Some("transient transport failure".to_string());
-    progress.continuation_revision = 3;
     fixture
         .store
         .update_work_unit_state_for_test(
             &fixture.work_unit.id,
-            WorkUnitState::awaiting_failed(progress),
+            WorkUnitState::awaiting_report_for_test(
+                ExecutorTerminalOutcome::Failed {
+                    source_turn_id: "turn-transient-failure".to_string(),
+                    detail: "transient transport failure".to_string(),
+                },
+                3,
+            ),
         )
         .await
         .unwrap();
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
+        .mark_executor_turn_started(
+            &fixture.agent_id,
+            "turn-follow-up",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
         .await
         .unwrap();
     let started = fixture.work_unit().await;
-    assert_eq!(started.status(), WorkUnitStatus::Running);
-    assert_eq!(started.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(started.kind(), WorkUnitStateKind::Running);
     assert_eq!(started.execution_error(), None);
     assert_eq!(started.continuation_revision(), 4);
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
+        .mark_executor_turn_started(
+            &fixture.agent_id,
+            "turn-follow-up",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
         .await
         .unwrap();
     assert_eq!(fixture.work_unit().await.continuation_revision(), 4);
@@ -610,25 +643,20 @@ async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
         .unwrap();
     assert_eq!(recovery.cancelled_thread_executions, 1);
     let recovered = fixture.work_unit().await;
-    assert_eq!(recovered.status(), WorkUnitStatus::AwaitingCompletion);
-    assert_eq!(
-        recovered.execution_status(),
-        ThreadExecutionStatus::Cancelled
-    );
+    assert_eq!(recovered.kind(), WorkUnitStateKind::Cancelled);
 }
 
 #[tokio::test]
 async fn executor_close_still_rejects_completion_review_states() {
     let fixture = ExecutorFixture::new("close-review-active").await;
-    for transition in [
-        WorkUnitState::ready_for_review,
-        WorkUnitState::reviewing,
-        WorkUnitState::changes_requested,
+    for state in [
+        WorkUnitState::ready_for_review_for_test(),
+        WorkUnitState::reviewing_for_test(),
+        WorkUnitState::changes_required_for_test(0),
     ] {
-        let progress = fixture.work_unit().await.state.into_progress();
         fixture
             .store
-            .update_work_unit_state_for_test(&fixture.work_unit.id, transition(progress))
+            .update_work_unit_state_for_test(&fixture.work_unit.id, state)
             .await
             .unwrap();
         let error = fixture
@@ -654,14 +682,13 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .store
             .create_work_completion(
                 &fixture.work_unit.id,
-                WorkCompletionKind::Delivery,
-                Some(&fixture.delivery(&head)),
+                delivery_content(fixture.delivery(&head)),
                 &format!("verification revision {revision}"),
             )
             .await
             .unwrap();
         assert_eq!(completion.revision, revision);
-        assert_eq!(completion.status, WorkCompletionStatus::ReadyForReview);
+        assert_eq!(completion.status(), WorkCompletionStatus::ReadyForReview);
 
         let finding = ReviewFinding {
             severity: "major".to_string(),
@@ -688,27 +715,27 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .await;
 
         assert_eq!(
-            fixture.work_unit().await.status(),
-            WorkUnitStatus::ChangesRequested
+            fixture.work_unit().await.kind(),
+            WorkUnitStateKind::ChangesRequired
         );
+        let turn_id = format!("turn-rework-{revision}");
         fixture
             .store
-            .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
+            .mark_executor_turn_started(
+                &fixture.agent_id,
+                &turn_id,
+                pl_core::MailboxBudgetAction::Preserve,
+            )
             .await
             .unwrap();
-        assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Running);
-        assert_eq!(
-            fixture.work_unit().await.execution_status(),
-            ThreadExecutionStatus::Running
-        );
+        assert_eq!(fixture.work_unit().await.kind(), WorkUnitStateKind::Running);
     }
 
     let final_completion = fixture
         .store
         .create_work_completion(
             &fixture.work_unit.id,
-            WorkCompletionKind::Delivery,
-            Some(&fixture.delivery("9222222")),
+            delivery_content(fixture.delivery("9222222")),
             "final verification passed",
         )
         .await
@@ -736,10 +763,13 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
     assert!(
         completions[..4]
             .iter()
-            .all(|completion| completion.status == WorkCompletionStatus::ChangesRequired)
+            .all(|completion| completion.status() == WorkCompletionStatus::ChangesRequired)
     );
-    assert_eq!(completions[4].status, WorkCompletionStatus::Approved);
-    assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Approved);
+    assert_eq!(completions[4].status(), WorkCompletionStatus::Approved);
+    assert_eq!(
+        fixture.work_unit().await.kind(),
+        WorkUnitStateKind::ReviewPassed
+    );
 }
 
 #[tokio::test]
@@ -749,8 +779,7 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
         .store
         .create_work_completion(
             &fixture.work_unit.id,
-            WorkCompletionKind::Delivery,
-            Some(&fixture.delivery("1222222")),
+            delivery_content(fixture.delivery("1222222")),
             "verification passed",
         )
         .await
@@ -800,7 +829,7 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
         .unwrap();
 
     assert_eq!(rejected.verdict(), ReviewVerdict::Pending);
-    assert_eq!(rejected.reviewer_status(), ThreadExecutionStatus::Running);
+    assert_eq!(rejected.kind(), ReviewRoundStateKind::Running);
     assert_eq!(rejected.summary(), None);
     assert!(rejected.findings.is_empty());
     let persisted_coverage = rejected.file_reviews.as_ref().unwrap();
@@ -813,10 +842,10 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
             .missing_files,
         vec!["src/lib.rs"]
     );
-    assert_eq!(
-        fixture.work_unit().await.status(),
-        WorkUnitStatus::Reviewing
-    );
+    assert!(matches!(
+        fixture.work_unit().await.waiting_review_phase(),
+        Some(WaitingReviewPhase::Reviewing(_))
+    ));
     assert_eq!(
         fixture
             .store
@@ -853,7 +882,10 @@ async fn rejected_review_persists_partial_coverage_without_advancing_or_waking()
         .unwrap();
     assert_eq!(accepted.verdict(), ReviewVerdict::Pass);
     assert!(accepted.file_reviews.as_ref().unwrap().is_complete());
-    assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Approved);
+    assert_eq!(
+        fixture.work_unit().await.kind(),
+        WorkUnitStateKind::ReviewPassed
+    );
     let wakes = fixture
         .store
         .list_pending_task_planner_wakes()
@@ -896,8 +928,7 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
         .store
         .create_work_completion(
             &fixture.work_unit.id,
-            WorkCompletionKind::Delivery,
-            Some(&fixture.delivery("2222222")),
+            delivery_content(fixture.delivery("2222222")),
             "initial verification",
         )
         .await
@@ -927,26 +958,29 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
     fixture
         .store
         .execute_test_sql(&format!(
-            "INSERT INTO thread_inputs (id, thread_id, mail_id, turn_id, content, metadata_json, presentation, state, claimed_turn_id, checkpoint_seq, queue_ordinal, queued_at, claimed_at, consumed_at) VALUES ('{review_mail_id}', '{}', '{review_mail_id}', 'turn-review', 'review wake', '{{}}', 'hidden', 'consumed', 'turn-review', 1, 0, 1, 1, 1)",
+            "INSERT INTO thread_inputs (id, thread_id, mail_id, turn_id, content, metadata_json, presentation, state_json, queue_ordinal, queued_at) VALUES ('{review_mail_id}', '{}', '{review_mail_id}', 'turn-review', 'review wake', '{{}}', 'hidden', '{{\"kind\":\"consumed\",\"data\":{{\"turnId\":\"turn-review\",\"checkpointSeq\":1}}}}', 0, 1)",
             fixture.run.root_thread_id
         ))
         .await;
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
+        .mark_executor_turn_started(
+            &fixture.agent_id,
+            "turn-rework-failed",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
         .await
         .unwrap();
 
     let outcome = pl_core::AgentTurnOutcome {
         turn_id: pl_core::TurnId::new("turn-rework-failed").unwrap(),
         thread_id: pl_core::ThreadId::new(fixture.agent_id.clone()).unwrap(),
-        kind: pl_core::TurnOutcomeKind::Failed,
-        reason: Some("turn must finalize with report_completion".to_string()),
-        failure: None,
-        budget_limit: None,
-        rollover_compacted: false,
-        rollover_compaction_error: None,
+        outcome: pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
+            pl_protocol::TurnFailureCategory::Internal,
+            "turn must finalize with report_completion",
+        )),
         usage: Default::default(),
+        started_at: None,
         finished_at: 2,
     };
     fixture
@@ -961,11 +995,15 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
         failed.executor_thread_id.as_deref(),
         Some(fixture.agent_id.as_str())
     );
-    assert_eq!(failed.status(), WorkUnitStatus::AwaitingCompletion);
-    assert_eq!(failed.execution_status(), ThreadExecutionStatus::Failed);
+    assert_eq!(failed.kind(), WorkUnitStateKind::WaitingReview);
+    assert!(matches!(
+        failed.waiting_review_phase(),
+        Some(WaitingReviewPhase::AwaitingReport(value))
+            if matches!(value.outcome(), ExecutorTerminalOutcome::Failed { .. })
+    ));
     assert_eq!(
         failed.continuation_state(),
-        ExecutorContinuationState::PlannerWakePending
+        ExecutorContinuationStateKind::PlannerWakePending
     );
     assert_eq!(
         failed.continuation_source_turn_id(),
@@ -1020,16 +1058,19 @@ async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_execut
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.agent_id, pl_core::MailboxBudgetAction::Preserve)
+        .mark_executor_turn_started(
+            &fixture.agent_id,
+            "turn-rework-resumed",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
         .await
         .unwrap();
     let resumed = fixture.work_unit().await;
     assert_eq!(resumed.id, fixture.work_unit.id);
-    assert_eq!(resumed.status(), WorkUnitStatus::Running);
-    assert_eq!(resumed.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(resumed.kind(), WorkUnitStateKind::Running);
     assert_eq!(
         resumed.continuation_state(),
-        ExecutorContinuationState::None
+        ExecutorContinuationStateKind::Idle
     );
     assert!(
         fixture
@@ -1048,8 +1089,7 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         .store
         .create_work_completion(
             &fixture.work_unit.id,
-            WorkCompletionKind::Delivery,
-            Some(&fixture.delivery("2222222")),
+            delivery_content(fixture.delivery("2222222")),
             "cargo test passed",
         )
         .await
@@ -1091,10 +1131,10 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
 
     assert_eq!(first.cancelled_thread_executions, 1);
     assert_eq!(second.cancelled_thread_executions, 0);
-    assert_eq!(
-        fixture.work_unit().await.status(),
-        WorkUnitStatus::ReadyForReview
-    );
+    assert!(matches!(
+        fixture.work_unit().await.waiting_review_phase(),
+        Some(WaitingReviewPhase::Ready(_))
+    ));
     let stored_completion = fixture
         .store
         .list_work_completions(&fixture.run.id)
@@ -1104,7 +1144,7 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         .find(|candidate| candidate.id == completion.id)
         .unwrap();
     assert_eq!(
-        stored_completion.status,
+        stored_completion.status(),
         WorkCompletionStatus::ReadyForReview
     );
     let stored_round = fixture
@@ -1120,10 +1160,7 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         stored_round.summary(),
         Some("reviewer interrupted by application restart before review_exit")
     );
-    assert_eq!(
-        stored_round.reviewer_status(),
-        ThreadExecutionStatus::Cancelled
-    );
+    assert_eq!(stored_round.kind(), ReviewRoundStateKind::Cancelled);
 }
 
 #[tokio::test]
@@ -1197,7 +1234,10 @@ async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
     assert!(store.read_project_lease(&run.id).await.unwrap().is_none());
     let failures = store.list_task_failures(&run.id).await.unwrap();
     assert_eq!(failures.len(), 1);
-    assert_eq!(failures[0].disposition, TaskFailureDisposition::Fatal);
+    assert_eq!(
+        failures[0].state.disposition(),
+        TaskFailureDisposition::Fatal
+    );
 }
 
 #[tokio::test]
@@ -1285,7 +1325,9 @@ async fn recoverable_provider_failure_keeps_task_and_lease_active() {
     assert!(settlement.run.terminal_failure_id().is_none());
     assert!(store.read_project_lease(&run.id).await.unwrap().is_some());
     assert_eq!(
-        store.list_task_failures(&run.id).await.unwrap()[0].disposition,
+        store.list_task_failures(&run.id).await.unwrap()[0]
+            .state
+            .disposition(),
         TaskFailureDisposition::Recoverable
     );
 }
@@ -1318,8 +1360,7 @@ async fn fatal_executor_failure_preserves_worktree_for_manual_cleanup() {
         .unwrap()
         .pop()
         .expect("work unit remains durable");
-    assert_eq!(unit.status(), WorkUnitStatus::Failed);
-    assert_eq!(unit.execution_status(), ThreadExecutionStatus::Failed);
+    assert_eq!(unit.kind(), WorkUnitStateKind::Failed);
     assert_eq!(
         unit.worktree_disposition(),
         TaskWorktreeDisposition::Protect
@@ -1378,7 +1419,7 @@ impl ExecutorFixture {
             })
             .await
             .unwrap();
-        let running = WorkUnitState::running(work_unit.state.clone().into_progress());
+        let running = WorkUnitState::running_for_test(0);
         let work_unit = store
             .update_work_unit(&work_unit.id, running, Some(agent_id.clone()))
             .await
@@ -1496,6 +1537,9 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         panic!("expected task snapshot");
     };
     let first_task = &first_state
+        .state
+        .value()
+        .expect("ready task directory")
         .tasks
         .iter()
         .find(|entry| entry.root_thread_id == fixture.run.root_thread_id)
@@ -1526,6 +1570,9 @@ async fn task_runtime_refresh_tracks_executor_durable_revision() {
         panic!("expected task snapshot after executor progress");
     };
     let second_task = &second_state
+        .state
+        .value()
+        .expect("ready task directory")
         .tasks
         .iter()
         .find(|entry| entry.root_thread_id == fixture.run.root_thread_id)

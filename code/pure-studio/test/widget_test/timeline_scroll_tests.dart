@@ -232,7 +232,11 @@ void registerTimelineScrollTests() {
               rows: rows,
               turn: _testTurn(
                 threadId: threadId,
-                state: const StudioTurnState.completed(),
+                state: const CompletedStudioTurnState(
+                  startedAt: 1,
+                  completedAt: 2,
+                  completion: StudioTurnCompletion.normal,
+                ),
               ),
             ),
           ),

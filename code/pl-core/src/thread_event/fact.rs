@@ -23,14 +23,14 @@ pub(crate) fn project_thread_facts(
     facts: Vec<ThreadNotificationFact>,
 ) -> ThreadProjectionBatch {
     let mut revision = current.revision;
-    let mut active_turn_id = current.active_turn.as_ref().map(|turn| turn.id.clone());
+    let mut active_turn = current.active_turn.clone();
     let mut notifications = Vec::new();
     for mut fact in facts {
         rebind_thread(&mut fact.notification, thread_id);
         if let ThreadNotification::InteractionChanged { interaction } = &fact.notification
             && let Some(turn) = interaction_completion_turn(
                 thread_id,
-                active_turn_id.as_deref(),
+                active_turn.as_ref(),
                 interaction,
                 fact.emitted_at,
             )
@@ -42,16 +42,18 @@ pub(crate) fn project_thread_facts(
                 emitted_at: fact.emitted_at,
                 notification: ThreadNotification::TurnCompleted { turn },
             });
-            active_turn_id = None;
+            active_turn = None;
         }
         match &fact.notification {
             ThreadNotification::TurnStarted { turn } | ThreadNotification::TurnUpdated { turn } => {
-                active_turn_id = Some(turn.id.clone());
+                active_turn = Some(turn.clone());
             }
             ThreadNotification::TurnCompleted { turn }
-                if active_turn_id.as_deref() == Some(turn.id.as_str()) =>
+                if active_turn
+                    .as_ref()
+                    .is_some_and(|active| active.id == turn.id) =>
             {
-                active_turn_id = None;
+                active_turn = None;
             }
             ThreadNotification::TurnCompleted { .. }
             | ThreadNotification::ItemStarted { .. }
@@ -96,9 +98,9 @@ fn rebind_thread(notification: &mut ThreadNotification, thread_id: &str) {
 #[cfg(test)]
 mod tests {
     use pl_protocol::{
-        InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
-        InteractionStatus, THREAD_SCHEMA_VERSION, Thread, ThreadNotification, ThreadSnapshot, Turn,
-        TurnPhase, TurnState,
+        CompletedTurnState, InteractionCommand, InteractionRequest, InteractionScope,
+        InteractionStatus, ResolveUserInput, RunningTurnState, THREAD_SCHEMA_VERSION, Thread,
+        ThreadNotification, ThreadSnapshot, Turn, TurnCompletion, TurnPhase, TurnState,
     };
 
     use super::*;
@@ -145,7 +147,14 @@ mod tests {
             panic!("active origin turn must complete on pending interaction");
         };
         assert_eq!(turn.id, "turn-1");
-        assert_eq!(turn.state, TurnState::Completed);
+        assert_eq!(
+            turn.state,
+            TurnState::Completed(CompletedTurnState::new(
+                Some(1),
+                2,
+                TurnCompletion::InteractionRequested,
+            ))
+        );
     }
 
     fn snapshot(active_turn: Option<Turn>) -> ThreadSnapshot {
@@ -164,35 +173,37 @@ mod tests {
         Turn {
             id: id.to_string(),
             thread_id: "thread-1".to_string(),
-            state: TurnState::InProgress {
-                phase: TurnPhase::Thinking,
-            },
-            failure: None,
-            started_at: Some(1),
+            revision: 0,
+            state: TurnState::Running(RunningTurnState::new(1, TurnPhase::Thinking)),
             updated_at: 1,
-            completed_at: None,
         }
     }
 
     fn interaction(status: InteractionStatus) -> InteractionRequest {
-        InteractionRequest {
-            interaction_id: "ask-1".to_string(),
-            kind: InteractionKind::UserInput,
-            status,
-            scope: InteractionScope {
+        let mut interaction = InteractionRequest::user_input(
+            "ask-1",
+            InteractionScope {
                 thread_id: String::new(),
                 turn_id: "turn-1".to_string(),
                 item_id: None,
                 tool_id: None,
                 agent_path: None,
             },
-            payload: InteractionPayload::UserInput {
-                questions: Vec::new(),
-            },
-            created_at: 1,
-            updated_at: 2,
-            resolved_at: Some(2),
-            resolution: None,
+            Vec::new(),
+            1,
+        );
+        if status == InteractionStatus::Resolved {
+            let decision = interaction
+                .decide(InteractionCommand::ResolveUserInput(ResolveUserInput {
+                    interaction_id: interaction.interaction_id.clone(),
+                    expected_revision: interaction.revision,
+                    operation_id: "resolve-1".to_string(),
+                    resolved_at: 2,
+                    answers: Default::default(),
+                }))
+                .unwrap();
+            interaction.apply(decision, 2);
         }
+        interaction
     }
 }

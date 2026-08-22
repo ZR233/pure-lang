@@ -137,18 +137,12 @@ class TimelineToolGroup {
     if (statuses.any(_isActiveToolStatus)) {
       return 'running';
     }
-    for (final status in const [
-      'failed',
-      'denied',
-      'interrupted',
-      'budgetLimited',
-      'completed',
-    ]) {
+    for (final status in const ['failed', 'denied', 'cancelled', 'succeeded']) {
       if (statuses.contains(status)) {
         return status;
       }
     }
-    return statuses.isEmpty ? 'completed' : statuses.first;
+    return statuses.isEmpty ? 'succeeded' : statuses.first;
   }
 
   int get order => items.isEmpty ? 0 : items.first.part.order;
@@ -379,6 +373,7 @@ String? _plainReasoningSummary(String value) {
 bool isTerminalTimelineStatus(String status) {
   return const {
     'completed',
+    'succeeded',
     'failed',
     'interrupted',
     'cancelled',

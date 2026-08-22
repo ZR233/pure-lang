@@ -1,71 +1,45 @@
-use pl_core::{
-    ActiveKind, AgentActivityState, AgentLifecycleState, AgentProgressStage, AgentSnapshot,
-    TurnOutcomeKind,
+use crate::{
+    StudioAgentProgressRuntime, StudioAgentState, StudioCancellingAgent, StudioClosedAgent,
+    StudioClosingAgent, StudioFaultedAgent, StudioIdleAgent, StudioQueuedAgent, StudioRunningAgent,
+    StudioWaitingInteractionAgent, StudioWaitingToolAgent,
 };
+use pl_core::{AgentProgressStage, AgentState};
 
-use crate::{PlanLifecycleState, StudioAgentActivity, StudioAgentProgressRuntime};
+#[cfg(test)]
+use pl_core::AgentSnapshot;
 
+#[cfg(test)]
 pub(super) fn thread_status(snapshot: &AgentSnapshot) -> pl_protocol::ThreadStatus {
-    match snapshot.lifecycle {
-        AgentLifecycleState::Closing | AgentLifecycleState::Closed => {
-            pl_protocol::ThreadStatus::Closed
-        }
-        AgentLifecycleState::Faulted => pl_protocol::ThreadStatus::Failed,
-        AgentLifecycleState::Active => match snapshot.activity {
-            AgentActivityState::Queued | AgentActivityState::Active(ActiveKind::Running) => {
-                pl_protocol::ThreadStatus::Running
-            }
-            AgentActivityState::Active(
-                ActiveKind::WaitingTool | ActiveKind::WaitingInteraction,
-            )
-            | AgentActivityState::Cancelling => pl_protocol::ThreadStatus::Waiting,
-            AgentActivityState::Idle => pl_protocol::ThreadStatus::Idle,
-        },
-    }
+    super::super::repository::labels::thread_status(&snapshot.state)
 }
 
-pub(super) fn error(snapshot: &AgentSnapshot) -> Option<String> {
-    snapshot
-        .last_turn
-        .as_ref()
-        .filter(|outcome| outcome.kind == TurnOutcomeKind::Failed)
-        .and_then(|outcome| outcome.reason.clone())
-}
-
-pub(super) fn plan_terminal_projection(
-    outcome: TurnOutcomeKind,
-    reason: Option<String>,
-) -> Option<(PlanLifecycleState, Option<String>)> {
-    match outcome {
-        TurnOutcomeKind::Completed => Some((PlanLifecycleState::Implemented, None)),
-        TurnOutcomeKind::Cancelled | TurnOutcomeKind::Failed => {
-            Some((PlanLifecycleState::ImplementationFailed, reason))
+pub(super) fn studio_agent_state(state: &AgentState) -> StudioAgentState {
+    match state {
+        AgentState::Idle(_) => StudioAgentState::Idle(StudioIdleAgent),
+        AgentState::Queued(value) => {
+            StudioAgentState::Queued(StudioQueuedAgent::new(value.turn_id().to_string()))
         }
-        TurnOutcomeKind::BudgetLimited => None,
-    }
-}
-
-pub(super) const fn lifecycle_label(lifecycle: AgentLifecycleState) -> &'static str {
-    match lifecycle {
-        AgentLifecycleState::Active => "active",
-        AgentLifecycleState::Closing => "closing",
-        AgentLifecycleState::Closed => "closed",
-        AgentLifecycleState::Faulted => "faulted",
-    }
-}
-
-pub(super) const fn studio_agent_activity(activity: AgentActivityState) -> StudioAgentActivity {
-    match activity {
-        AgentActivityState::Idle => StudioAgentActivity::Idle,
-        AgentActivityState::Queued => StudioAgentActivity::Queued,
-        AgentActivityState::Active(ActiveKind::Running) => StudioAgentActivity::ActiveRunning,
-        AgentActivityState::Active(ActiveKind::WaitingTool) => {
-            StudioAgentActivity::ActiveWaitingTool
+        AgentState::Running(value) => {
+            StudioAgentState::Running(StudioRunningAgent::new(value.turn_id().to_string()))
         }
-        AgentActivityState::Active(ActiveKind::WaitingInteraction) => {
-            StudioAgentActivity::ActiveWaitingInteraction
+        AgentState::WaitingTool(value) => {
+            StudioAgentState::WaitingTool(StudioWaitingToolAgent::new(value.turn_id().to_string()))
         }
-        AgentActivityState::Cancelling => StudioAgentActivity::Cancelling,
+        AgentState::WaitingInteraction(value) => {
+            StudioAgentState::WaitingInteraction(StudioWaitingInteractionAgent::new(
+                value.turn_id().to_string(),
+                value.interaction_id().to_string(),
+            ))
+        }
+        AgentState::Cancelling(value) => {
+            StudioAgentState::Cancelling(StudioCancellingAgent::new(value.turn_id().to_string()))
+        }
+        AgentState::Closing(_) => StudioAgentState::Closing(StudioClosingAgent),
+        AgentState::Closed(_) => StudioAgentState::Closed(StudioClosedAgent),
+        AgentState::Faulted(value) => StudioAgentState::Faulted(StudioFaultedAgent::new(
+            value.error().clone(),
+            value.turn_id().map(ToString::to_string),
+        )),
     }
 }
 
@@ -105,37 +79,21 @@ pub(crate) fn progress_stage_from_label(label: &str) -> AgentProgressStage {
 
 #[cfg(test)]
 mod tests {
-    use pl_core::{AgentIdentity, AgentRoleId, AgentTurnOutcome, ThreadId, TurnId};
-
     use super::*;
+    use pl_core::{AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, ThreadId};
 
     #[test]
     fn budget_limited_turn_leaves_thread_idle_without_error() {
-        let snapshot = snapshot_with_outcome(TurnOutcomeKind::BudgetLimited);
+        let snapshot = snapshot_without_outcome();
 
         assert_eq!(thread_status(&snapshot), pl_protocol::ThreadStatus::Idle);
-        assert_eq!(error(&snapshot), None);
-    }
-
-    #[test]
-    fn budget_limited_plan_keeps_implementing_lifecycle() {
         assert_eq!(
-            plan_terminal_projection(
-                TurnOutcomeKind::BudgetLimited,
-                Some("budget reached".to_string()),
-            ),
-            None
-        );
-        assert_eq!(
-            plan_terminal_projection(TurnOutcomeKind::Failed, Some("failed".to_string())),
-            Some((
-                PlanLifecycleState::ImplementationFailed,
-                Some("failed".to_string()),
-            ))
+            studio_agent_state(&snapshot.state),
+            StudioAgentState::Idle(StudioIdleAgent)
         );
     }
 
-    fn snapshot_with_outcome(kind: TurnOutcomeKind) -> AgentSnapshot {
+    fn snapshot_without_outcome() -> AgentSnapshot {
         AgentSnapshot {
             identity: AgentIdentity {
                 id: ThreadId::new("agent-1").expect("agent id"),
@@ -143,23 +101,10 @@ mod tests {
                 role: AgentRoleId::new("planner").expect("role id"),
                 depth: 0,
             },
-            lifecycle: AgentLifecycleState::Active,
-            activity: AgentActivityState::Idle,
-            active_turn_id: None,
+            state: AgentState::idle(),
             pending_inputs: 0,
             progress: None,
-            last_turn: Some(AgentTurnOutcome {
-                turn_id: TurnId::new("turn-1").expect("turn id"),
-                thread_id: pl_core::ThreadId::new("session-1").expect("thread id"),
-                kind,
-                reason: Some("budget reached".to_string()),
-                failure: None,
-                budget_limit: None,
-                rollover_compacted: false,
-                rollover_compaction_error: None,
-                usage: Default::default(),
-                finished_at: 7,
-            }),
+            last_turn: None,
             revision: 1,
             event_sequence: 1,
             updated_at: 7,

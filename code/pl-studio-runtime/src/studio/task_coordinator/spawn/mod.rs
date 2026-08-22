@@ -6,7 +6,8 @@ mod tool;
 
 pub(crate) use failure::{
     OperationalTaskSpawnFailure, TaskSpawnCompensation, TaskSpawnCompensationState,
-    TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase, TaskSpawnResource,
+    TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase, TaskSpawnNextAction,
+    TaskSpawnResource,
 };
 pub(crate) use handoff::{
     TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorAcceptanceCriterion, TaskExecutorBlueprint,

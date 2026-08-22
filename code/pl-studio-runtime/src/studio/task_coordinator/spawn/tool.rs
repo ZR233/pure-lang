@@ -12,7 +12,7 @@ use super::{
     TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase, TaskSpawnResource,
 };
 use crate::studio::task_coordinator::{
-    AllocateExecutor, TaskCoordinator, TaskRun, TaskRunStateKind, WorkUnitStatus,
+    AllocateExecutor, TaskCoordinator, TaskRun, TaskRunStateKind, WorkUnitStateKind,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{
@@ -214,8 +214,8 @@ impl TaskCoordinator {
                 }
                 if allocation.reused {
                     if matches!(
-                        allocation.work_unit.status(),
-                        WorkUnitStatus::Failed | WorkUnitStatus::NeedsAttention
+                        allocation.work_unit.kind(),
+                        WorkUnitStateKind::Failed | WorkUnitStateKind::Paused
                     ) {
                         return spawn_failure(missing_persisted_failure(
                             &allocation.run,
@@ -223,7 +223,7 @@ impl TaskCoordinator {
                             "reused executor allocation is failed but has no structured failure",
                         ));
                     }
-                    if allocation.work_unit.status() == WorkUnitStatus::Running
+                    if allocation.work_unit.kind() == WorkUnitStateKind::Running
                         && runtime
                             .snapshot(requested_thread_id.clone())
                             .await
@@ -728,12 +728,12 @@ mod tests {
         assert!(!output.ends_turn);
         let value: serde_json::Value = serde_json::from_str(&output.model_output).unwrap();
         assert_eq!(value["status"], "failed");
-        assert_eq!(value["code"], "worktree_create_failed");
+        assert_eq!(value["code"], "worktreeCreate");
         assert_eq!(value["phase"], "worktreeCreate");
         assert_eq!(value["cause"]["kind"], "gitExited");
         assert_eq!(value["cause"]["exitCode"], 128);
         assert_eq!(value["compensation"]["allocation"], "markedFailed");
         assert_eq!(value["compensation"]["worktree"], "removed");
-        assert_eq!(value["nextAction"], "retry_task_spawn_executor");
+        assert_eq!(value["nextAction"], "retryTaskSpawnExecutor");
     }
 }

@@ -236,9 +236,9 @@ mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
     use pl_core::{
-        ActiveKind, AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId,
-        AgentSnapshot, CommitDurability, DurableCommitFacts, ThreadActorState, ThreadContextState,
-        ThreadId, ThreadMutation, TurnId,
+        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, CommitDurability,
+        DurableCommitFacts, RunningAgentState, ThreadActorState, ThreadContextState, ThreadId,
+        ThreadMutation, TurnId,
     };
     use pl_protocol::{
         AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
@@ -261,24 +261,21 @@ mod tests {
             .await
             .unwrap();
         let turn_id = "turn-billing";
+        let turn_state = pl_protocol::TurnState::Running(pl_protocol::RunningTurnState::new(
+            1,
+            pl_protocol::TurnPhase::Thinking,
+        ));
         turn::ActiveModel {
             id: Set(turn_id.to_string()),
             thread_id: Set(thread.id.clone()),
             ordinal: Set(0),
             revision: Set(0),
-            status: Set("inProgress".to_string()),
-            phase: Set(Some("thinking".to_string())),
-            reason: Set(None),
+            state_json: Set(serde_json::to_string(&turn_state).unwrap()),
             model_json: Set(None),
             usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
-            failure_json: Set(None),
-            budget_limit_json: Set(None),
-            rollover_compacted: Set(0),
-            rollover_compaction_error: Set(None),
             metadata_json: Set(None),
-            started_at: Set(Some(1)),
             updated_at: Set(1),
-            completed_at: Set(None),
+            ..Default::default()
         }
         .insert(store.database())
         .await
@@ -306,7 +303,7 @@ mod tests {
 
         let tx = store.database().begin().await.unwrap();
         let mut partial = identical.clone().into_active_model();
-        partial.reason = Set(Some("must roll back".to_string()));
+        partial.metadata_json = Set(Some("must roll back".to_string()));
         partial.update(&tx).await.unwrap();
         let conflict = billing_record("inference-1", 10, 4, 4);
         let error = persist_inference_billing(&tx, &billing_commit(&thread.id, turn_id, conflict))
@@ -338,19 +335,15 @@ mod tests {
             thread_id: "thread-1".to_string(),
             ordinal: 0,
             revision: 1,
-            status: "inProgress".to_string(),
-            phase: Some("thinking".to_string()),
-            reason: None,
+            state_json: serde_json::to_string(&pl_protocol::TurnState::Running(
+                pl_protocol::RunningTurnState::new(1, pl_protocol::TurnPhase::Thinking),
+            ))
+            .unwrap(),
+            state_kind: "running".to_string(),
             model_json: Some(serde_json::to_string(&billing).unwrap()),
             usage_json: serde_json::to_string(&pl_model::TokenUsage::default()).unwrap(),
-            failure_json: None,
-            budget_limit_json: None,
-            rollover_compacted: 0,
-            rollover_compaction_error: None,
             metadata_json: None,
-            started_at: Some(1),
             updated_at: 1,
-            completed_at: None,
         };
         let projected = pl_model::TokenUsage {
             prompt_tokens: 999,
@@ -477,9 +470,7 @@ mod tests {
         let state = ThreadActorState {
             snapshot: AgentSnapshot {
                 identity,
-                lifecycle: AgentLifecycleState::Active,
-                activity: AgentActivityState::Active(ActiveKind::Running),
-                active_turn_id: Some(turn_id.clone()),
+                state: AgentState::Running(RunningAgentState::new(turn_id.clone())),
                 pending_inputs: 0,
                 progress: None,
                 last_turn: None,

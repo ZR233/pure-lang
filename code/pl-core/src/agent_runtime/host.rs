@@ -117,7 +117,7 @@ impl DurableCommitFacts {
         let turn_id = turn_transition
             .as_ref()
             .and_then(|turn| super::TurnId::new(turn.id.clone()).ok())
-            .or_else(|| state.snapshot.active_turn_id.clone())
+            .or_else(|| state.snapshot.active_turn_id().cloned())
             .or_else(|| {
                 state
                     .snapshot

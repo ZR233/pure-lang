@@ -359,7 +359,7 @@ impl CollaborationTool {
             .snapshot(target.clone())
             .await
             .map_err(|error| tool_error(TOOL_INTERRUPT_AGENT, error.to_string()))?;
-        let turn_id = snapshot.active_turn_id.clone().ok_or_else(|| {
+        let turn_id = snapshot.active_turn_id().cloned().ok_or_else(|| {
             tool_error(
                 TOOL_INTERRUPT_AGENT,
                 format!("agent `{target}` has no active turn"),
@@ -372,8 +372,7 @@ impl CollaborationTool {
         json_output(json!({
             "target": target,
             "previousStatus": {
-                "lifecycle": snapshot.lifecycle,
-                "activity": snapshot.activity,
+                "state": snapshot.state,
                 "lastTurnOutcome": snapshot.last_turn,
             }
         }))
@@ -468,9 +467,7 @@ impl CollaborationTool {
             .await
             .map_err(|error| tool_error(TOOL_READ_AGENT_SESSION, error.to_string()))?;
         let age = summary_age_seconds(&snapshot);
-        if session_read_requires_age_gate(snapshot.lifecycle, snapshot.activity)
-            && age < SESSION_READ_MIN_AGE_SECONDS
-        {
+        if session_read_requires_age_gate(&snapshot.state) && age < SESSION_READ_MIN_AGE_SECONDS {
             return Err(tool_error(
                 TOOL_READ_AGENT_SESSION,
                 format!(

@@ -7,7 +7,8 @@ use crate::studio::entity::turn;
 use super::input_metadata::{deserialize_input_metadata, serialize_input_metadata};
 
 use super::*;
-use pl_core::{MailboxPresentation, TurnOutcomeKind};
+use pl_core::MailboxPresentation;
+use pl_protocol::TurnOutcome;
 
 #[test]
 fn budget_limited_turn_restores_typed_rollover_state() {
@@ -20,33 +21,29 @@ fn budget_limited_turn_restores_typed_rollover_state() {
             elapsed_ms: 1_800_000,
         },
     };
+    let state = pl_protocol::TurnState::BudgetLimited(pl_protocol::BudgetLimitedTurnState::new(
+        Some(1),
+        2,
+        limit,
+        pl_protocol::TurnRolloverOutcome::Succeeded,
+    ));
     let outcome = AgentTurnOutcome::try_from(turn::Model {
         id: "turn-budget".to_string(),
         thread_id: "thread-budget".to_string(),
         ordinal: 0,
         revision: 1,
-        status: "interrupted".to_string(),
-        phase: None,
-        reason: Some("active wall-clock budget reached".to_string()),
+        state_json: serde_json::to_string(&state).unwrap(),
+        state_kind: "budgetLimited".to_string(),
         model_json: None,
         usage_json: serde_json::to_string(&pl_model::TokenUsage::default()).unwrap(),
-        failure_json: None,
-        budget_limit_json: Some(serde_json::to_string(&limit).unwrap()),
-        rollover_compacted: 1,
-        rollover_compaction_error: None,
         metadata_json: None,
-        started_at: Some(1),
         updated_at: 2,
-        completed_at: Some(2),
     })
     .unwrap();
 
-    assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
-    assert_eq!(outcome.budget_limit, Some(limit));
-    assert!(outcome.rollover_compacted);
     assert_eq!(
-        outcome.reason.as_deref(),
-        Some("active wall-clock budget reached")
+        outcome.outcome,
+        TurnOutcome::budget_limited(limit, pl_protocol::TurnRolloverOutcome::Succeeded)
     );
 }
 
@@ -63,7 +60,7 @@ fn input_metadata_round_trips_queue_coalescing_key_without_changing_payload() {
         },
         queue_coalescing_key: Some("task-run:wakes".to_string()),
         budget_action: pl_core::MailboxBudgetAction::Preserve,
-        delivery_state: MailboxDeliveryState::Pending,
+        delivery_state: MailboxDeliveryState::default(),
         queued_at: 1,
     };
 
@@ -88,7 +85,7 @@ fn input_metadata_round_trips_budget_refresh_without_queue_key() {
         },
         queue_coalescing_key: None,
         budget_action: pl_core::MailboxBudgetAction::Refresh,
-        delivery_state: MailboxDeliveryState::Pending,
+        delivery_state: MailboxDeliveryState::default(),
         queued_at: 1,
     };
 

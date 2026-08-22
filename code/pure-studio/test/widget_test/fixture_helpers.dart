@@ -3,7 +3,11 @@ part of '../widget_test.dart';
 Widget _timelineHarness({
   required String threadId,
   required List<ThreadItemView> items,
-  StudioTurnState turnState = const StudioTurnState.completed(),
+  StudioTurnState turnState = const CompletedStudioTurnState(
+    startedAt: null,
+    completedAt: 2,
+    completion: StudioTurnCompletion.normal,
+  ),
   VoidCallback? onLoadOlder,
   bool isLoadingOlder = false,
 }) {
@@ -32,7 +36,7 @@ TimelineEntry _toolTimelinePart({
   String threadId = 'session-1',
   int order = 0,
   int sequence = 0,
-  String status = 'completed',
+  String status = 'succeeded',
   String arguments = '{}',
   String? result,
   List<Object?> outputArtifacts = const [],
@@ -75,7 +79,7 @@ List<TimelineRow> timelineRowsFromFixtureParts(
     final itemCreatedAt =
         part.createdAt ?? createdAt ?? _fixtureDate(index + 1);
     items.add(
-      ThreadItemView(
+      _threadItemFixture(
         id: part.id,
         threadId: part.threadId,
         turnId: part.turnId,

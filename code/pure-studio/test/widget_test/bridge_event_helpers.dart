@@ -31,8 +31,15 @@ ThreadNotificationFrame _threadDeltaFrame({
       ThreadItemDeltaView(
         itemId: itemId,
         revision: itemRevision,
-        field: field,
-        delta: delta,
+        state: switch (field) {
+          'text' => ThreadTextDeltaView(delta),
+          'reasoning.summary' => ThreadThinkingSummaryDeltaView(0, delta),
+          'reasoning.content' => ThreadThinkingContentDeltaView(0, delta),
+          'planContent' => ThreadPlanDeltaView(delta),
+          'tool.arguments' => ThreadToolArgumentsDeltaView(delta),
+          'tool.result' => ThreadToolResultDeltaView(delta),
+          _ => throw ArgumentError.value(field, 'field', 'unknown delta'),
+        },
       ),
     ),
   );
@@ -43,18 +50,12 @@ ThreadNotificationFrame _threadTurnFrame({
   required int workspaceRevision,
   required StudioTurnState state,
   String turnId = 'turn-1',
-  StudioTurnFailureView? failure,
 }) {
   return ThreadNotificationFrame(
     threadId: threadId,
     revision: workspaceRevision,
     update: ThreadTurnUpdate(
-      _testTurn(
-        threadId: threadId,
-        state: state,
-        turnId: turnId,
-        failure: failure,
-      ),
+      _testTurn(threadId: threadId, state: state, turnId: turnId),
     ),
   );
 }

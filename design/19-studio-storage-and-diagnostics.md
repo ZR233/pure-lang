@@ -32,6 +32,11 @@ cache 重建。
 - task_runs、task_failures、work_units、work_completions、review_rounds、merge_records、project_leases
 - thread_context_segments、thread_session_state
 
+Turn、thread input、Item、Interaction、TaskRun、WorkUnit、ReviewRound、WorkCompletion、TaskFailure 与
+Merge cleanup 等具有生命周期的记录只保存一份完整 `state_json`。需要筛选的表使用从
+`state_json.kind` 生成的 stored `state_kind`；应用不得分别写 status、phase、reason、resolvedAt、
+failure 或 terminal flags。身份、外键、ordinal、revision、计费与查询所需的稳定公共列继续关系化。
+
 不存在 history 数据库、storage generation pair、history_gc_jobs、session snapshot JSON、agent
 runtime snapshot、agent outcome 或 durable event journal。
 

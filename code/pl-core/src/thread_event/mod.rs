@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use pl_protocol::{
-    InteractionStatus, Thread, ThreadItem, ThreadItemContent, ThreadItemDelta,
-    ThreadItemDeltaField, ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot,
-    ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
+    InteractionStatus, Thread, ThreadItem, ThreadItemDelta, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadSnapshot, ThreadSubscriptionRequest,
+    ThreadSubscriptionUpdate,
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
@@ -517,7 +517,7 @@ fn apply_notification(
             snapshot
                 .interactions
                 .retain(|candidate| candidate.interaction_id != interaction.interaction_id);
-            if interaction.status == InteractionStatus::Pending {
+            if interaction.status() == InteractionStatus::Pending {
                 snapshot.interactions.push(interaction.as_ref().clone());
             }
         }
@@ -567,43 +567,13 @@ fn apply_delta(items: &mut [ThreadItem], delta: &ThreadItemDelta) -> Result<(), 
             actual: delta.revision,
         });
     }
-    match (&mut item.content, delta.field) {
-        (
-            ThreadItemContent::UserMessage { text, .. }
-            | ThreadItemContent::AgentMessage { text, .. },
-            ThreadItemDeltaField::Text,
-        ) => text.push_str(&delta.delta),
-        (ThreadItemContent::Reasoning { summary, .. }, ThreadItemDeltaField::ReasoningSummary) => {
-            append_chunk(summary, delta.chunk_index, &delta.delta)
-        }
-        (ThreadItemContent::Reasoning { content, .. }, ThreadItemDeltaField::ReasoningContent) => {
-            append_chunk(content, delta.chunk_index, &delta.delta)
-        }
-        (ThreadItemContent::Plan { content }, ThreadItemDeltaField::PlanContent) => {
-            content.push_str(&delta.delta);
-        }
-        (ThreadItemContent::ToolCall { tool }, ThreadItemDeltaField::ToolArguments) => {
-            tool.arguments.push_str(&delta.delta);
-        }
-        (ThreadItemContent::ToolCall { tool }, ThreadItemDeltaField::ToolResult) => {
-            tool.result.get_or_insert_default().push_str(&delta.delta);
-        }
-        (content, field) => {
-            return Err(ThreadEventError::ProjectionInvariant(format!(
-                "delta field {field:?} is incompatible with item {content:?}"
-            )));
-        }
-    }
-    item.revision = delta.revision;
+    item.apply_delta(delta).map_err(|error| {
+        ThreadEventError::ProjectionInvariant(format!(
+            "delta {:?} is incompatible with item {}: {error:?}",
+            delta.delta, item.id
+        ))
+    })?;
     Ok(())
-}
-
-fn append_chunk(chunks: &mut Vec<String>, chunk_index: Option<u32>, delta: &str) {
-    let index = chunk_index.unwrap_or_default() as usize;
-    if chunks.len() <= index {
-        chunks.resize(index + 1, String::new());
-    }
-    chunks[index].push_str(delta);
 }
 
 #[cfg(test)]

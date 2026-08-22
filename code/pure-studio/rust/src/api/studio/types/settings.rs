@@ -263,10 +263,17 @@ pub struct BridgeMcpServerSettingsDto {
     pub id: String,
     pub transport: String,
     pub endpoint: String,
-    pub enabled: bool,
-    pub status: String,
+    pub configuration: BridgeMcpServerConfiguration,
     pub source_kind: String,
     pub mutation_policy: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeMcpServerConfiguration {
+    Enabled,
+    Disabled,
+    MissingCredential,
 }
 
 /// Flutter 本地通用设置的 typed 快照。

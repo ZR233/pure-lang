@@ -157,7 +157,9 @@ impl StudioRuntime {
                 updates.recv().await
             {
                 let health = health(&runtime.external_runtimes.lsp).await;
-                runtime.external_runtimes.lsp_state.refresh(health).await;
+                if let Err(error) = runtime.external_runtimes.lsp_state.refresh(health).await {
+                    tracing::warn!(%error, "failed to refresh LSP observed state");
+                }
             }
         }));
     }
@@ -213,7 +215,7 @@ impl StudioRuntime {
             // busy 的候选移回队尾，等下一轮再试。
             match handle.snapshot(agent_id.clone()).await {
                 Ok(snapshot)
-                    if snapshot.active_turn_id.is_none() && snapshot.pending_inputs == 0 =>
+                    if snapshot.active_turn_id().is_none() && snapshot.pending_inputs == 0 =>
                 {
                     if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
                         && let Err(error) = repository.writer().flush().await

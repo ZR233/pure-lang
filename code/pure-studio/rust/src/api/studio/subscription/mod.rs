@@ -10,11 +10,10 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::event::bridge_product_event;
 use crate::api::studio::convert::thread_stream::bridge_thread_update;
 use crate::api::studio::types::{
-    BridgeError, BridgeProductEventEnvelope, BridgeShutdownPhase, BridgeShutdownProgress,
-    BridgeThreadSubscriptionUpdate,
+    BridgeError, BridgeProductEventEnvelope, BridgeShutdownProgress, BridgeThreadSubscriptionUpdate,
 };
 use crate::frb_generated::StreamSink;
-use pl_studio_runtime::StudioShutdownPhase;
+use pl_studio_runtime::StudioShutdownProgress;
 
 #[derive(Debug, Clone)]
 pub enum BridgeThreadStreamEnvelope {
@@ -335,11 +334,8 @@ pub async fn subscribe_shutdown_progress(
         loop {
             match events.recv().await {
                 Ok(progress) => {
-                    let stopped = progress.phase == StudioShutdownPhase::Stopped;
-                    let event = BridgeShutdownProgress {
-                        phase: bridge_shutdown_phase(progress.phase),
-                        pending_commits: progress.pending_commits,
-                    };
+                    let stopped = progress.is_stopped();
+                    let event = bridge_shutdown_progress(progress);
                     if sink.add(event).is_err() {
                         break;
                     }
@@ -357,15 +353,21 @@ pub async fn subscribe_shutdown_progress(
     Ok(())
 }
 
-fn bridge_shutdown_phase(phase: StudioShutdownPhase) -> BridgeShutdownPhase {
-    match phase {
-        StudioShutdownPhase::StoppingSubscriptions => BridgeShutdownPhase::StoppingSubscriptions,
-        StudioShutdownPhase::CancellingTurns => BridgeShutdownPhase::CancellingTurns,
-        StudioShutdownPhase::FlushingPersistence => BridgeShutdownPhase::FlushingPersistence,
-        StudioShutdownPhase::SuspendingTasks => BridgeShutdownPhase::SuspendingTasks,
-        StudioShutdownPhase::StoppingMcp => BridgeShutdownPhase::StoppingMcp,
-        StudioShutdownPhase::StoppingLsp => BridgeShutdownPhase::StoppingLsp,
-        StudioShutdownPhase::Stopped => BridgeShutdownPhase::Stopped,
+fn bridge_shutdown_progress(progress: StudioShutdownProgress) -> BridgeShutdownProgress {
+    match progress {
+        StudioShutdownProgress::StoppingSubscriptions(_) => {
+            BridgeShutdownProgress::StoppingSubscriptions
+        }
+        StudioShutdownProgress::CancellingTurns(_) => BridgeShutdownProgress::CancellingTurns,
+        StudioShutdownProgress::FlushingPersistence(progress) => {
+            BridgeShutdownProgress::FlushingPersistence {
+                pending_commits: progress.pending_commits(),
+            }
+        }
+        StudioShutdownProgress::SuspendingTasks(_) => BridgeShutdownProgress::SuspendingTasks,
+        StudioShutdownProgress::StoppingMcp(_) => BridgeShutdownProgress::StoppingMcp,
+        StudioShutdownProgress::StoppingLsp(_) => BridgeShutdownProgress::StoppingLsp,
+        StudioShutdownProgress::Stopped(_) => BridgeShutdownProgress::Stopped,
     }
 }
 

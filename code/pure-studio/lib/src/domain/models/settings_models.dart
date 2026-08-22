@@ -17,12 +17,7 @@ class McpServerSettingsView {
     required this.id,
     required this.transport,
     required this.endpoint,
-    required this.enabled,
-    required this.status,
-    this.availabilityKind = '',
-    this.availabilityMessage,
-    this.lastCheckedAt,
-    this.toolCount,
+    required this.state,
     this.sourceKind = 'user',
     this.mutationPolicy = 'userEditable',
   });
@@ -30,19 +25,50 @@ class McpServerSettingsView {
   final String id;
   final String transport;
   final String endpoint;
-  final bool enabled;
-  final String status;
-  final String availabilityKind;
-  final String? availabilityMessage;
-  final DateTime? lastCheckedAt;
-  final int? toolCount;
+  final McpServerState state;
   final String sourceKind;
   final String mutationPolicy;
 
   bool get hasLockedIdentity => mutationPolicy == 'lockedIdentity';
+  bool get enabled => state is! McpDisabledState;
+}
 
-  String get displayedAvailability =>
-      availabilityKind.isEmpty ? status : availabilityKind;
+sealed class McpServerState {
+  const McpServerState();
+}
+
+final class McpDisabledState extends McpServerState {
+  const McpDisabledState({required this.message});
+  final String message;
+}
+
+final class McpMissingCredentialState extends McpServerState {
+  const McpMissingCredentialState({required this.message});
+  final String message;
+}
+
+final class McpCheckingState extends McpServerState {
+  const McpCheckingState({required this.message});
+  final String message;
+}
+
+final class McpAvailableState extends McpServerState {
+  const McpAvailableState({required this.checkedAt, required this.toolCount});
+  final int checkedAt;
+  final int toolCount;
+}
+
+final class McpUnavailableState extends McpServerState {
+  const McpUnavailableState({
+    required this.checkedAt,
+    required this.code,
+    required this.message,
+    required this.retryable,
+  });
+  final int checkedAt;
+  final String code;
+  final String message;
+  final bool retryable;
 }
 
 class InstructionsSettingsView {

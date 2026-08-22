@@ -1,8 +1,6 @@
-use pl_trace::TracePartStatus;
-
 use crate::core::progress::ProgressEmitter;
 
-use super::ToolExecutionRecord;
+use super::{ToolExecutionOutcome, ToolExecutionRecord};
 
 pub(super) fn emit_tool_progress(
     progress: &mut ProgressEmitter,
@@ -31,8 +29,8 @@ pub(super) fn tool_start_progress_message(name: &str) -> String {
 
 pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> String {
     let name = &record.name;
-    match record.status {
-        TracePartStatus::Completed => match name.as_str() {
+    match record.outcome {
+        ToolExecutionOutcome::Succeeded => match name.as_str() {
             "plan_exit" => "计划已生成，等待确认。".to_string(),
             "request_user_input" => "用户输入已收到。".to_string(),
             "update_todo_list" => "Todo list 已更新。".to_string(),
@@ -46,8 +44,8 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
             "close_agent" => "子代理已关闭。".to_string(),
             _ => format!("工具 `{name}` 已完成。"),
         },
-        TracePartStatus::Denied => format!("工具 `{name}` 已拒绝。"),
-        TracePartStatus::Failed => match name.as_str() {
+        ToolExecutionOutcome::Denied => format!("工具 `{name}` 已拒绝。"),
+        ToolExecutionOutcome::Failed(_) => match name.as_str() {
             "plan_exit" => "计划提交失败。".to_string(),
             "request_user_input" => "用户输入请求失败。".to_string(),
             "update_todo_list" => "Todo list 更新失败。".to_string(),
@@ -57,12 +55,6 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
             }
             _ => format!("工具 `{name}` 执行失败。"),
         },
-        TracePartStatus::Interrupted => format!("工具 `{name}` 已中断。"),
-        TracePartStatus::BudgetLimited => format!("工具 `{name}` 因预算限制停止。"),
-        TracePartStatus::Started
-        | TracePartStatus::Streaming
-        | TracePartStatus::AwaitingApproval
-        | TracePartStatus::Approved
-        | TracePartStatus::Running => format!("工具 `{name}` 已结束。"),
+        ToolExecutionOutcome::Cancelled => format!("工具 `{name}` 已取消。"),
     }
 }

@@ -1,21 +1,22 @@
+//! Canonical Studio updater lifecycle and its durable runtime owner.
+
+mod state;
+
+pub use state::*;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateOperation};
-use serde::{Deserialize, Serialize};
+use pl_protocol::StateError;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::studio::ids::unix_seconds;
-use crate::{StudioStore, StudioUpdate, StudioUpdateCheck, StudioUpdater};
+use crate::{
+    StudioStore, StudioUpdate, StudioUpdateCheck, StudioUpdateErrorCode, StudioUpdateEvent,
+    StudioUpdater,
+};
 
-const CACHE_KEY: &str = "observed:studioUpdate:v1";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioUpdateStateSnapshot {
-    pub meta: ObservedStateMeta,
-    pub update: Option<StudioUpdate>,
-}
+const CACHE_KEY: &str = "studioUpdateState:v2";
 
 #[derive(Clone)]
 pub(crate) struct StudioUpdateRuntime {
@@ -32,10 +33,7 @@ impl StudioUpdateRuntime {
             store,
             updater: StudioUpdater::new_default()?,
             command_lock: Arc::new(Mutex::new(())),
-            state: Arc::new(RwLock::new(StudioUpdateStateSnapshot {
-                meta: ObservedStateMeta::uninitialized(unix_seconds()),
-                update: None,
-            })),
+            state: Arc::new(RwLock::new(StudioUpdateStateSnapshot::idle(unix_seconds()))),
             events,
         })
     }
@@ -48,86 +46,43 @@ impl StudioUpdateRuntime {
         Ok(())
     }
 
-    /// 只读已验证 last-known update，不访问网络。
     pub(crate) async fn read(&self) -> StudioUpdateStateSnapshot {
         self.state.read().await.clone()
     }
 
-    /// 使用编译时应用版本检查更新并持久化已验证结果。
     pub(crate) async fn check(&self) -> Result<StudioUpdateStateSnapshot> {
         let _command = self.command_lock.lock().await;
         let previous = self.read().await;
-        let running = StudioUpdateStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Running {
-                    operation: StateOperation::Check,
-                    operation_id: format!("studio-update-check-{}", previous.meta.revision + 1),
-                },
-                updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
-                stale: previous.meta.stale,
-            },
-            update: previous.update,
-        };
-        self.publish(running.clone()).await;
+        let running = self
+            .apply(StudioUpdateCommand::BeginCheck {
+                expected_revision: previous.revision(),
+                operation_id: format!("studio-update-check-{}", previous.revision() + 1),
+                started_at: unix_seconds(),
+            })
+            .await?;
         let result = self.updater.check(env!("CARGO_PKG_VERSION")).await;
         let checked_at = unix_seconds();
-        let next = match result {
-            Ok(StudioUpdateCheck::UpToDate) => StudioUpdateStateSnapshot {
-                meta: ObservedStateMeta {
-                    revision: running.meta.revision.saturating_add(1),
-                    phase: ObservedStatePhase::Ready,
-                    updated_at: checked_at,
-                    last_checked_at: Some(checked_at),
-                    stale: false,
-                },
-                update: None,
+        let command = match result {
+            Ok(StudioUpdateCheck::UpToDate) => StudioUpdateCommand::FinishUpToDate {
+                expected_revision: running.revision(),
+                checked_at,
             },
-            Ok(StudioUpdateCheck::Available(update)) => StudioUpdateStateSnapshot {
-                meta: ObservedStateMeta {
-                    revision: running.meta.revision.saturating_add(1),
-                    phase: ObservedStatePhase::Ready,
-                    updated_at: checked_at,
-                    last_checked_at: Some(checked_at),
-                    stale: false,
-                },
-                update: Some(update),
+            Ok(StudioUpdateCheck::Available(update)) => StudioUpdateCommand::FinishAvailable {
+                expected_revision: running.revision(),
+                checked_at,
+                update,
             },
             Err(error) => {
-                let failed = StudioUpdateStateSnapshot {
-                    meta: ObservedStateMeta {
-                        revision: running.meta.revision.saturating_add(1),
-                        phase: ObservedStatePhase::Failed {
-                            operation: StateOperation::Check,
-                            error: pl_protocol::StateError {
-                                code: error.code().as_str().to_string(),
-                                message: error.to_string(),
-                                retryable: matches!(
-                                    error.code(),
-                                    crate::StudioUpdateErrorCode::Network
-                                        | crate::StudioUpdateErrorCode::Io
-                                ),
-                            },
-                        },
-                        updated_at: checked_at,
-                        last_checked_at: Some(checked_at),
-                        stale: true,
-                    },
-                    update: running.update,
+                let command = StudioUpdateCommand::FailCheck {
+                    expected_revision: running.revision(),
+                    failed_at: checked_at,
+                    error: state_error(&error),
                 };
-                self.store
-                    .save_setting(CACHE_KEY, &serde_json::to_string(&failed)?)
-                    .await?;
-                self.publish(failed).await;
+                self.apply(command).await?;
                 return Err(error.into());
             }
         };
-        self.store
-            .save_setting(CACHE_KEY, &serde_json::to_string(&next)?)
-            .await?;
-        self.publish(next.clone()).await;
-        Ok(next)
+        self.apply(command).await
     }
 
     pub(crate) async fn verified_update(
@@ -137,26 +92,86 @@ impl StudioUpdateRuntime {
     ) -> Result<StudioUpdate> {
         let state = self.read().await;
         anyhow::ensure!(
-            state.meta.revision == expected_revision,
+            state.revision() == expected_revision,
             "update revision conflict: expected {expected_revision}, actual {}",
-            state.meta.revision
+            state.revision()
         );
-        anyhow::ensure!(
-            matches!(state.meta.phase, ObservedStatePhase::Ready) && !state.meta.stale,
-            "cached update is not in a verified ready state"
-        );
-        state
-            .update
-            .filter(|update| update.version == version)
+        let StudioUpdateStateSnapshot::Available(available) = state else {
+            anyhow::bail!("cached update is not in the verified Available state");
+        };
+        (available.update().version == version)
+            .then(|| available.update().clone())
             .context("requested update is not the cached verified update")
+    }
+
+    pub(crate) async fn apply_install_event(
+        &self,
+        update: &StudioUpdate,
+        event: &StudioUpdateEvent,
+    ) -> Result<StudioUpdateStateSnapshot> {
+        let current = self.read().await;
+        let now = unix_seconds();
+        let command = match event {
+            StudioUpdateEvent::Started { total } => StudioUpdateCommand::BeginDownload {
+                expected_revision: current.revision(),
+                updated_at: now,
+                update: update.clone(),
+                total: *total,
+            },
+            StudioUpdateEvent::Progress { downloaded, total } => {
+                StudioUpdateCommand::ReportDownload {
+                    expected_revision: current.revision(),
+                    updated_at: now,
+                    downloaded: *downloaded,
+                    total: *total,
+                }
+            }
+            StudioUpdateEvent::Verifying => StudioUpdateCommand::BeginVerify {
+                expected_revision: current.revision(),
+                updated_at: now,
+            },
+            StudioUpdateEvent::InstallerLaunched => StudioUpdateCommand::MarkInstallerLaunched {
+                expected_revision: current.revision(),
+                launched_at: now,
+            },
+            StudioUpdateEvent::Failed { code, message } => StudioUpdateCommand::FailInstall {
+                expected_revision: current.revision(),
+                failed_at: now,
+                error: StateError {
+                    code: code.clone(),
+                    message: message.clone(),
+                    retryable: code == StudioUpdateErrorCode::Network.as_str()
+                        || code == StudioUpdateErrorCode::Io.as_str(),
+                },
+            },
+        };
+        self.apply(command).await
     }
 
     pub(crate) fn updater(&self) -> StudioUpdater {
         self.updater.clone()
     }
 
-    async fn publish(&self, snapshot: StudioUpdateStateSnapshot) {
-        *self.state.write().await = snapshot.clone();
-        self.events.emit_updater_state(snapshot);
+    async fn apply(&self, command: StudioUpdateCommand) -> Result<StudioUpdateStateSnapshot> {
+        let current = self.read().await;
+        let decision = current.decide(command)?;
+        let next = decision.next_state;
+        self.store
+            .save_setting(CACHE_KEY, &serde_json::to_string(&next)?)
+            .await?;
+        *self.state.write().await = next.clone();
+        self.events.emit_updater_state(next.clone());
+        Ok(next)
+    }
+}
+
+fn state_error(error: &crate::StudioUpdateError) -> StateError {
+    StateError {
+        code: error.code().as_str().to_string(),
+        message: error.to_string(),
+        retryable: matches!(
+            error.code(),
+            StudioUpdateErrorCode::Network | StudioUpdateErrorCode::Io
+        ),
     }
 }

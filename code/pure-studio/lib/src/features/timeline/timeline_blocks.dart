@@ -69,10 +69,11 @@ class _TurnActivityBlock extends StatelessWidget {
 String _turnActivityLabel(BuildContext context, StudioTurnState state) {
   return switch (state.status) {
     StudioTurnStatus.queued => context.l10n.statusTurnQueued,
-    StudioTurnStatus.inProgress => context.turnActivityLabel(state.activity!),
+    StudioTurnStatus.running => context.turnActivityLabel(state.activity!),
     StudioTurnStatus.completed ||
     StudioTurnStatus.failed ||
-    StudioTurnStatus.cancelled => '',
+    StudioTurnStatus.cancelled ||
+    StudioTurnStatus.budgetLimited => '',
   };
 }
 

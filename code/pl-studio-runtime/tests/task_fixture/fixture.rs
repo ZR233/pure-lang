@@ -88,7 +88,7 @@ impl TaskFlowFixture {
                 .list_pending_interactions(&self.thread_id)
                 .await?
                 .into_iter()
-                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
             {
                 return Ok(interaction);
             }

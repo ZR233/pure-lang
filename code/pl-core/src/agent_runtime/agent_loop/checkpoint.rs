@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use super::super::host::{ThreadProjectionCommit, transcript_mutation};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    ActiveKind, AgentInferenceCommit, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentActivityUpdate, AgentCommand, AgentInferenceCommit, AgentProgressCheckpoint,
     AgentProgressReport, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
     AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState, ThreadId,
     ThreadMutation, TurnId,
@@ -22,36 +22,53 @@ where
     pub(super) async fn set_activity(
         &mut self,
         turn_id: TurnId,
-        kind: ActiveKind,
+        activity: AgentActivityUpdate,
     ) -> AgentRuntimeResult<()> {
         let Some(active) = &mut self.active else {
             return Ok(());
         };
         if active.turn_id != turn_id
-            || self.state.snapshot.lifecycle != AgentLifecycleState::Active
-            || active.kind == kind
+            || !self.state.snapshot.state.is_operational()
+            || active.activity == activity
         {
             return Ok(());
         }
-        let previous_kind = active.kind;
+        let previous_activity = active.activity.clone();
         let thread_id = active.thread_id.clone();
-        active.kind = kind;
+        active.activity = activity.clone();
+        let command = match &activity {
+            AgentActivityUpdate::Running => AgentCommand::Resume {
+                turn_id: turn_id.clone(),
+            },
+            AgentActivityUpdate::WaitingTool => AgentCommand::WaitForTool {
+                turn_id: turn_id.clone(),
+            },
+            AgentActivityUpdate::WaitingInteraction { interaction_id } => {
+                AgentCommand::WaitForInteraction {
+                    turn_id: turn_id.clone(),
+                    interaction_id: interaction_id.clone(),
+                }
+            }
+        };
+        let mut next = self.state.clone();
+        next.snapshot
+            .transition(command)
+            .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         let result = self
-            .commit_transition(
-                super::persist::TransitionCommit::new(self.state.clone()),
-                |snapshot| AgentRuntimeEventKind::TurnActivityChanged {
+            .commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
+                AgentRuntimeEventKind::TurnActivityChanged {
                     turn_id: turn_id.clone(),
                     thread_id,
-                    kind,
+                    activity: activity.clone(),
                     snapshot: Box::new(snapshot),
-                },
-            )
+                }
+            })
             .await;
         if result.is_err()
             && let Some(active) = self.active.as_mut()
             && active.turn_id == turn_id
         {
-            active.kind = previous_kind;
+            active.activity = previous_activity;
         }
         result
     }
@@ -66,7 +83,7 @@ where
         };
         if active.turn_id != checkpoint.turn_id
             || active.thread_id != checkpoint.thread_id
-            || active.cancelling
+            || active.is_cancelling()
             || active.cancellation.is_cancelled()
         {
             return Ok(());
@@ -92,8 +109,11 @@ where
         next.snapshot.updated_at = unix_timestamp();
         if let Some(active_input) = next.active_input.as_mut()
             && active_input.turn_id == checkpoint.turn_id
+            && active_input.delivery_state.is_claimed()
         {
-            active_input.consume(checkpoint.sequence);
+            active_input
+                .consume(checkpoint.sequence)
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         }
         if !checkpoint.consumed_mail_ids.is_empty() {
             let consumed = checkpoint
@@ -105,8 +125,8 @@ where
                 !consumed.contains(input.mail_id.as_str())
                     || !matches!(
                         &input.delivery_state,
-                        MailboxDeliveryState::Claimed { turn_id, .. }
-                            if turn_id == &checkpoint.turn_id
+                        MailboxDeliveryState::Claimed(state)
+                            if state.turn_id() == &checkpoint.turn_id
                     )
             });
             next.refresh_mailbox_snapshot();
@@ -200,6 +220,31 @@ where
                 actual: thread_id,
             });
         }
+        let recovered_wait = (self.active.is_none()
+            && self.state.snapshot.state.is_idle()
+            && self.state.pending_inputs.is_empty())
+        .then(|| {
+            facts.iter().find_map(|fact| match &fact.notification {
+                pl_protocol::ThreadNotification::InteractionChanged { interaction }
+                    if interaction.status() == pl_protocol::InteractionStatus::Pending =>
+                {
+                    Some((
+                        interaction.scope.turn_id.clone(),
+                        interaction.interaction_id.clone(),
+                    ))
+                }
+                pl_protocol::ThreadNotification::TurnStarted { .. }
+                | pl_protocol::ThreadNotification::TurnUpdated { .. }
+                | pl_protocol::ThreadNotification::TurnCompleted { .. }
+                | pl_protocol::ThreadNotification::ItemStarted { .. }
+                | pl_protocol::ThreadNotification::ItemDelta { .. }
+                | pl_protocol::ThreadNotification::ItemCompleted { .. }
+                | pl_protocol::ThreadNotification::InteractionChanged { .. }
+                | pl_protocol::ThreadNotification::ThreadRuntimeUpdated { .. }
+                | pl_protocol::ThreadNotification::Lagged { .. } => None,
+            })
+        })
+        .flatten();
         let current = self
             .runtime
             .thread_events
@@ -221,6 +266,15 @@ where
             notifications: projected_thread.notifications.clone(),
         };
         let mut next = self.state.clone();
+        if let Some((turn_id, interaction_id)) = recovered_wait {
+            next.snapshot
+                .transition(AgentCommand::RecoverWaitingInteraction {
+                    turn_id: TurnId::new(turn_id)
+                        .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?,
+                    interaction_id,
+                })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        }
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.thread_revision = projected.through_revision;

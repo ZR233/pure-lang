@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use pl_core::{
-    ActiveKind, AgentActivityState, AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot,
-    AgentTurnOutcome, DurableMailboxEnvelope, RestoredAgentRuntime, RestoredThreadSnapshot,
-    ThreadActorState, ThreadContextState, ThreadId, TurnId,
+    AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot, AgentState, AgentTurnOutcome,
+    DurableMailboxEnvelope, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
+    ThreadContextState, ThreadId,
 };
-use pl_protocol::{PureError, ThreadItem, ThreadItemContent, ThreadSnapshot, Turn};
+use pl_protocol::{PureError, ThreadItem, ThreadItemState, ThreadSnapshot, Turn};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entity::{interaction, item, thread, thread_input, turn};
@@ -15,7 +15,7 @@ use crate::studio::entity::{interaction, item, thread, thread_input, turn};
 use super::StudioAgentRepository;
 use super::billing::{aggregate_billing_usage, restore_billing, runtime_from_context};
 use super::context::{SessionSnapshotAuditError, audit_session_snapshot, restore_session_snapshot};
-use super::labels::lifecycle_from_status;
+use super::labels::agent_state_kind;
 use super::projection::latest_turn;
 use super::{StudioSessionRecoveryFailure, anyhow_into, store_error, u64_from_i64};
 
@@ -27,7 +27,7 @@ impl StudioAgentRepository {
         let mut ids = BTreeSet::new();
         ids.extend(
             thread_input::Entity::find()
-                .filter(thread_input::Column::State.ne("consumed"))
+                .filter(thread_input::Column::StateKind.ne("consumed"))
                 .all(database)
                 .await
                 .map_err(store_error)?
@@ -36,7 +36,7 @@ impl StudioAgentRepository {
         );
         ids.extend(
             interaction::Entity::find()
-                .filter(interaction::Column::Status.eq("pending"))
+                .filter(interaction::Column::StateKind.eq("pending"))
                 .all(database)
                 .await
                 .map_err(store_error)?
@@ -45,7 +45,7 @@ impl StudioAgentRepository {
         );
         ids.extend(
             turn::Entity::find()
-                .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+                .filter(turn::Column::StateKind.is_in(["queued", "running"]))
                 .all(database)
                 .await
                 .map_err(store_error)?
@@ -119,11 +119,18 @@ impl StudioAgentRepository {
     ) -> Result<RestoredAgentRuntime, PureError> {
         let thread_id = ThreadId::new(model.id.clone())?;
         let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
-        let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
         let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
             .await?
             .map(AgentTurnOutcome::try_from)
             .transpose()?;
+        let state: AgentState = serde_json::from_str(&model.state_json)?;
+        if agent_state_kind(&state) != model.state_kind {
+            return Err(store_error(format!(
+                "Agent state discriminator mismatch: JSON is {}, generated column is {}",
+                agent_state_kind(&state),
+                model.state_kind
+            )));
+        }
         let snapshot = AgentSnapshot {
             identity: AgentIdentity {
                 id: thread_id,
@@ -135,12 +142,7 @@ impl StudioAgentRepository {
                 role: AgentRoleId::new(model.role.clone())?,
                 depth: thread_depth(&model.id, parents)?,
             },
-            lifecycle: lifecycle_from_status(&model.status)?,
-            activity: restored_activity(&model.status, active_turn.as_ref(), &pending_inputs),
-            active_turn_id: active_turn
-                .as_ref()
-                .map(|row| TurnId::new(row.id.clone()))
-                .transpose()?,
+            state,
             pending_inputs: pending_inputs.len(),
             progress: None,
             last_turn,
@@ -210,7 +212,7 @@ impl StudioAgentRepository {
     > {
         let rows = thread_input::Entity::find()
             .filter(thread_input::Column::ThreadId.eq(thread_id))
-            .filter(thread_input::Column::State.ne("consumed"))
+            .filter(thread_input::Column::StateKind.ne("consumed"))
             .order_by_asc(thread_input::Column::QueueOrdinal)
             .all(self.store.database())
             .await
@@ -218,7 +220,7 @@ impl StudioAgentRepository {
         let mut pending = VecDeque::new();
         let mut active = None;
         for row in rows {
-            let is_active = row.state == "active";
+            let is_active = row.state_kind == "claimed";
             let input = row.try_into()?;
             if is_active {
                 if active.replace(input).is_some() {
@@ -268,14 +270,14 @@ impl StudioAgentRepository {
             .await
             .map_err(store_error)?
             .into_iter()
-            .map(|row| serde_json::from_str(&row.payload_json).map_err(Into::into))
+            .map(ThreadItem::try_from)
             .collect::<Result<Vec<ThreadItem>, PureError>>()?
             .into_iter()
-            .filter(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+            .filter(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
             .collect();
         let active_turn = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id.clone()))
-            .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+            .filter(turn::Column::StateKind.is_in(["queued", "running"]))
             .order_by_desc(turn::Column::Ordinal)
             .one(self.store.database())
             .await
@@ -284,7 +286,7 @@ impl StudioAgentRepository {
             .transpose()?;
         let interactions = interaction::Entity::find()
             .filter(interaction::Column::ThreadId.eq(thread_id.clone()))
-            .filter(interaction::Column::Status.eq("pending"))
+            .filter(interaction::Column::StateKind.eq("pending"))
             .order_by_asc(interaction::Column::CreatedAt)
             .all(self.store.database())
             .await
@@ -325,25 +327,4 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
         current = parent;
     }
     Ok(depth)
-}
-
-fn restored_activity(
-    status: &str,
-    active_turn: Option<&turn::Model>,
-    pending: &VecDeque<DurableMailboxEnvelope>,
-) -> AgentActivityState {
-    if status == "closed" || status == "failed" {
-        return AgentActivityState::Idle;
-    }
-    match active_turn {
-        Some(turn) if turn.status == "queued" => AgentActivityState::Queued,
-        // 老数据兼容：waitingInteraction phase 的 Turn 在 TryFrom 实现里已降级为
-        // completed，不会进入 active turn 查询；这里不再映射该 phase。
-        Some(turn) => match turn.phase.as_deref() {
-            Some("runningTool") => AgentActivityState::Active(ActiveKind::WaitingTool),
-            _ => AgentActivityState::Active(ActiveKind::Running),
-        },
-        None if !pending.is_empty() => AgentActivityState::Queued,
-        None => AgentActivityState::Idle,
-    }
 }

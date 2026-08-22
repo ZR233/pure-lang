@@ -9,22 +9,66 @@ use crate::agent_runtime::state::AgentRuntimeError;
 use crate::agent_runtime::*;
 
 use super::super::{AgentLoop, AgentLoopCommand};
-use super::{TurnCompletion, execute_turn, turn_outcome};
+use super::{
+    TurnCompletion, TurnExecutionTerminal, TurnSessionDisposition, TurnWorkerOutcome, execute_turn,
+    turn_outcome,
+};
+
+pub(in crate::agent_runtime::agent_loop) enum RunningTurnCancellation {
+    Open,
+    Requested {
+        cause: pl_protocol::TurnCancellationCause,
+    },
+}
 
 pub(in crate::agent_runtime::agent_loop) struct RunningTurn {
     pub(in crate::agent_runtime::agent_loop) turn_id: TurnId,
     pub(in crate::agent_runtime::agent_loop) thread_id: ThreadId,
     pub(in crate::agent_runtime::agent_loop) identity: std::sync::Arc<()>,
     pub(in crate::agent_runtime::agent_loop) start_revision: u64,
+    pub(in crate::agent_runtime::agent_loop) started_at: i64,
     pub(in crate::agent_runtime::agent_loop) cancellation: CancellationToken,
     pub(in crate::agent_runtime::agent_loop) abort_handle: AbortHandle,
     pub(in crate::agent_runtime::agent_loop) settled: oneshot::Receiver<()>,
-    pub(in crate::agent_runtime::agent_loop) cancelling: bool,
-    pub(in crate::agent_runtime::agent_loop) kind: ActiveKind,
+    pub(in crate::agent_runtime::agent_loop) cancellation_state: RunningTurnCancellation,
+    pub(in crate::agent_runtime::agent_loop) activity: AgentActivityUpdate,
     pub(in crate::agent_runtime::agent_loop) checkpoint_sequence: u64,
     pub(in crate::agent_runtime::agent_loop) steer_sender:
         mpsc::UnboundedSender<super::super::DurableMailboxEnvelope>,
     pub(in crate::agent_runtime::agent_loop) budget_refresh: super::super::TurnBudgetRefreshHandle,
+}
+
+impl RunningTurn {
+    pub(in crate::agent_runtime::agent_loop) const fn is_cancelling(&self) -> bool {
+        matches!(
+            self.cancellation_state,
+            RunningTurnCancellation::Requested { .. }
+        )
+    }
+
+    pub(in crate::agent_runtime::agent_loop) fn terminal(
+        &self,
+        outcome: TurnWorkerOutcome,
+    ) -> TurnExecutionTerminal {
+        match (&self.cancellation_state, outcome) {
+            (RunningTurnCancellation::Open, outcome) => outcome.into(),
+            (RunningTurnCancellation::Requested { cause }, TurnWorkerOutcome::Returned(result)) => {
+                TurnExecutionTerminal::CancelledAfterReturn {
+                    cause: cause.clone(),
+                    result: *result,
+                }
+            }
+            (RunningTurnCancellation::Requested { cause }, TurnWorkerOutcome::Failed { .. }) => {
+                TurnExecutionTerminal::CancelledBeforeReturn {
+                    cause: cause.clone(),
+                }
+            }
+        }
+    }
+
+    fn request_cancellation(&mut self, cause: pl_protocol::TurnCancellationCause) {
+        self.cancellation_state = RunningTurnCancellation::Requested { cause };
+    }
 }
 
 impl<H> AgentLoop<H>
@@ -34,7 +78,7 @@ where
     pub(in crate::agent_runtime::agent_loop) async fn begin_next_turn(&mut self) {
         if self.active.is_some()
             || !self.dispatch_enabled
-            || self.state.snapshot.lifecycle != super::super::AgentLifecycleState::Active
+            || !self.state.snapshot.state.is_queued()
             || !self.state.has_triggering_input()
         {
             return;
@@ -63,7 +107,7 @@ where
         let mut leading_inputs = Vec::new();
         if let Some(key) = input.queue_coalescing_key.clone() {
             while next.pending_inputs.front().is_some_and(|candidate| {
-                matches!(candidate.delivery_state, MailboxDeliveryState::Pending)
+                candidate.delivery_state.is_pending()
                     && candidate.queue_coalescing_key.as_deref() == Some(key.as_str())
             }) {
                 leading_inputs.push(input);
@@ -74,15 +118,26 @@ where
             }
         }
         for leading in &mut leading_inputs {
-            leading.claim(input.turn_id.clone());
+            if let Err(error) = leading.claim(input.turn_id.clone()) {
+                self.fault(error.to_string()).await;
+                return;
+            }
         }
         for leading in leading_inputs.iter().rev() {
             next.pending_inputs.push_front(leading.clone());
         }
-        input.claim(input.turn_id.clone());
+        if let Err(error) = input.claim(input.turn_id.clone()) {
+            self.fault(error.to_string()).await;
+            return;
+        }
         next.active_input = Some(input.clone());
         next.refresh_mailbox_snapshot();
-        next.snapshot.active_turn_id = Some(input.turn_id.clone());
+        if let Err(error) = next.snapshot.transition(AgentCommand::Start {
+            turn_id: input.turn_id.clone(),
+        }) {
+            self.fault(error.to_string()).await;
+            return;
+        }
         let committed = self
             .commit_transition(
                 super::super::persist::TransitionCommit::new(next),
@@ -98,7 +153,6 @@ where
         if let Err(error) = committed {
             // The durable state still owns the queued input, but the in-memory
             // fault should identify the turn whose start transition failed.
-            self.state.snapshot.active_turn_id = Some(input.turn_id.clone());
             self.fault(error.to_string()).await;
             return;
         }
@@ -152,10 +206,9 @@ where
         let completion_turn_id = self
             .state
             .snapshot
-            .active_turn_id
-            .clone()
+            .active_turn_id()
+            .cloned()
             .expect("started turn must have an id");
-        let completion_cancellation = cancellation.clone();
         let completion_identity = identity.clone();
         tokio::spawn(async move {
             let completion = match worker.await {
@@ -164,10 +217,10 @@ where
                     turn_id: completion_turn_id,
                     identity: completion_identity,
                     start_revision,
-                    session: None,
-                    result: Err(format!("turn task join failed: {error}")),
-                    finalized_with_tool: None,
-                    cancelled: completion_cancellation.is_cancelled() || error.is_cancelled(),
+                    session: TurnSessionDisposition::Preserve,
+                    worker_outcome: TurnWorkerOutcome::Failed {
+                        error: format!("turn task join failed: {error}"),
+                    },
                     next_trace_sequence: initial_trace_sequence,
                 },
             };
@@ -180,17 +233,18 @@ where
             turn_id: self
                 .state
                 .snapshot
-                .active_turn_id
-                .clone()
+                .active_turn_id()
+                .cloned()
                 .expect("started turn must have an id"),
             thread_id,
             identity,
             start_revision,
+            started_at: self.state.snapshot.updated_at,
             cancellation,
             abort_handle,
             settled,
-            cancelling: false,
-            kind: ActiveKind::Running,
+            cancellation_state: RunningTurnCancellation::Open,
+            activity: AgentActivityUpdate::Running,
             checkpoint_sequence: 0,
             steer_sender,
             budget_refresh,
@@ -199,19 +253,24 @@ where
 
     pub(in crate::agent_runtime::agent_loop) async fn interrupt_active_turn(
         &mut self,
-        reason: &str,
+        cause: pl_protocol::TurnCancellationCause,
     ) -> AgentRuntimeResult<()> {
         let Some(active) = &mut self.active else {
             return Err(AgentRuntimeError::NoActiveTurn(
                 self.state.snapshot.identity.id.clone(),
             ));
         };
-        if active.cancelling {
+        if active.is_cancelling() {
             return Ok(());
         }
-        active.cancelling = true;
+        active.request_cancellation(cause.clone());
         active.cancellation.cancel();
-        let next = self.state.clone();
+        let mut next = self.state.clone();
+        next.snapshot
+            .transition(AgentCommand::Cancel {
+                turn_id: active.turn_id.clone(),
+            })
+            .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         self.commit_transition(
             super::super::persist::TransitionCommit::new(next),
             |snapshot| AgentRuntimeEventKind::StateChanged {
@@ -238,32 +297,35 @@ where
             .active
             .take()
             .expect("running turn must remain until cancellation is committed");
-        let (outcome, _, _) = turn_outcome(
+        let outcome = turn_outcome(
             active.turn_id.clone(),
             active.thread_id,
-            Err(reason.to_string()),
-            true,
-        );
+            TurnExecutionTerminal::CancelledBeforeReturn { cause },
+            Some(active.started_at),
+        )
+        .outcome;
         let mut next = self.state.clone();
         for input in &mut next.pending_inputs {
             if matches!(
                 &input.delivery_state,
-                MailboxDeliveryState::Claimed { turn_id, .. } if turn_id == &active.turn_id
-            ) {
-                input.delivery_state = MailboxDeliveryState::Pending;
-                input.turn_id = TurnId::generate();
+                MailboxDeliveryState::Claimed(state) if state.turn_id() == &active.turn_id
+            ) && let Err(error) = input.requeue(TurnId::generate())
+            {
+                return Err(AgentRuntimeError::InvalidInput(error.to_string()));
             }
         }
         next.active_input = None;
         next.refresh_mailbox_snapshot();
-        next.snapshot.active_turn_id = None;
+        let next_turn_id = next.triggering_turn_id();
+        next.snapshot
+            .transition(AgentCommand::Settle { next_turn_id })
+            .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         next.snapshot.last_turn = Some(outcome.clone());
         self.commit_transition(
             super::super::persist::TransitionCommit::new(next),
             |snapshot| AgentRuntimeEventKind::TurnFinished {
                 outcome,
                 snapshot: Box::new(snapshot),
-                finalized_with_tool: None,
             },
         )
         .await?;

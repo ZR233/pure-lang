@@ -4,12 +4,12 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationState, ReviewScope, ReviewVerdict, TaskPlannerWakeRequest,
-    TaskPlannerWakeSource, ThreadExecutionStatus,
+    ExecutorContinuationStateKind, ReviewRoundStateKind, ReviewScope, TaskPlannerWakeRequest,
+    TaskPlannerWakeSource,
 };
 
 use super::review::review_round_state;
-use super::work_unit::work_unit_state;
+use super::work_unit::work_unit_record;
 
 impl StudioStore {
     pub(crate) async fn list_pending_task_planner_wakes(
@@ -19,20 +19,18 @@ impl StudioStore {
         for run in self.list_active_task_runs().await? {
             let latest_review = entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-                .filter(
-                    entities::review_round::Column::StateKind.ne(ReviewVerdict::Pending.as_str()),
-                )
+                .filter(entities::review_round::Column::StateKind.is_not_in([
+                    ReviewRoundStateKind::PendingDispatch.as_str(),
+                    ReviewRoundStateKind::Dispatched.as_str(),
+                    ReviewRoundStateKind::Running.as_str(),
+                ]))
                 .order_by_desc(entities::review_round::Column::Round)
                 .one(&self.db)
                 .await?;
             let Some(round) = latest_review else {
                 continue;
             };
-            let reviewer_status = review_round_state(&round)?.reviewer_status();
-            if matches!(
-                reviewer_status,
-                ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-            ) {
+            if review_round_state(&round)?.kind().is_active() {
                 continue;
             }
             wakes.push(TaskPlannerWakeRequest {
@@ -67,10 +65,10 @@ impl StudioStore {
         if input.thread_id != wake.root_thread_id {
             bail!("Task Planner wake mail belongs to another Thread");
         }
-        match input.state.as_str() {
-            "queued" | "claimed" | "active" | "consumed" => Ok(true),
-            state => bail!("Task Planner wake mail has unknown state {state}"),
-        }
+        Ok(matches!(
+            input.state_kind.as_str(),
+            "pending" | "claimed" | "consumed"
+        ))
     }
 
     async fn pending_executor_terminal_wakes(&self) -> Result<Vec<TaskPlannerWakeRequest>> {
@@ -81,19 +79,17 @@ impl StudioStore {
             .await?;
         let mut wakes = Vec::with_capacity(units.len());
         for unit in units {
-            let state = work_unit_state(&unit)?;
-            let progress = state.progress();
-            let continuation_state = progress.continuation_state;
+            let record = work_unit_record(unit.clone())?;
+            let continuation_state = record.continuation_state();
             if !matches!(
                 continuation_state,
-                ExecutorContinuationState::PlannerWakePending
-                    | ExecutorContinuationState::NeedsAttention
+                ExecutorContinuationStateKind::PlannerWakePending
+                    | ExecutorContinuationStateKind::NeedsAttention
             ) {
                 continue;
             }
-            if continuation_state == ExecutorContinuationState::NeedsAttention
-                && (state.execution_status() != ThreadExecutionStatus::BudgetLimited
-                    || progress.budget_limit.is_none())
+            if continuation_state == ExecutorContinuationStateKind::NeedsAttention
+                && record.budget_limit().is_none()
             {
                 continue;
             }
@@ -111,9 +107,9 @@ impl StudioStore {
                     executor_thread_id: unit
                         .executor_thread_id
                         .context("executor terminal wake has no executor Thread")?,
-                    source_turn_id: progress
-                        .continuation_source_turn_id
-                        .clone()
+                    source_turn_id: record
+                        .continuation_source_turn_id()
+                        .map(str::to_string)
                         .context("executor terminal wake has no source Turn")?,
                 },
             });

@@ -6,13 +6,16 @@
 import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 
 import 'runtime.dart';
 import 'settings.dart';
 import 'thread_stream.dart';
+import 'updater.dart';
+part 'response.freezed.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeThreadDirectoryState`, `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -39,22 +42,53 @@ class ArchiveThreadResult {
           nextRoot == other.nextRoot;
 }
 
-class BridgeAgentDirectoryState {
-  final BridgeObservedStateMeta meta;
+class BridgeAgentDirectoryData {
   final List<BridgeAgentDirectoryEntryDto> agents;
 
-  const BridgeAgentDirectoryState({required this.meta, required this.agents});
+  const BridgeAgentDirectoryData({required this.agents});
 
   @override
-  int get hashCode => meta.hashCode ^ agents.hashCode;
+  int get hashCode => agents.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeAgentDirectoryState &&
+      other is BridgeAgentDirectoryData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           agents == other.agents;
+}
+
+@freezed
+sealed class BridgeAgentDirectoryState with _$BridgeAgentDirectoryState {
+  const BridgeAgentDirectoryState._();
+
+  const factory BridgeAgentDirectoryState.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeAgentDirectoryState_Uninitialized;
+  const factory BridgeAgentDirectoryState.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeAgentDirectoryState_Loading;
+  const factory BridgeAgentDirectoryState.ready({
+    required BridgeReadyResource resource,
+    required BridgeAgentDirectoryData value,
+  }) = BridgeAgentDirectoryState_Ready;
+  const factory BridgeAgentDirectoryState.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeAgentDirectoryData value,
+  }) = BridgeAgentDirectoryState_Refreshing;
+  const factory BridgeAgentDirectoryState.stale({
+    required BridgeStaleResource resource,
+    required BridgeAgentDirectoryData value,
+  }) = BridgeAgentDirectoryState_Stale;
+  const factory BridgeAgentDirectoryState.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeAgentDirectoryData value,
+  }) = BridgeAgentDirectoryState_Degraded;
+  const factory BridgeAgentDirectoryState.failed(BridgeFailedResource field0) =
+      BridgeAgentDirectoryState_Failed;
+  const factory BridgeAgentDirectoryState.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeAgentDirectoryState_Stopped;
 }
 
 /// `listThreadsPage` 请求；`cursor` 为 `null` 时从最新一页开始。
@@ -76,32 +110,59 @@ class BridgeListThreadsPageRequest {
           limit == other.limit;
 }
 
-class BridgeLspStateSnapshot {
-  final BridgeObservedStateMeta meta;
+class BridgeLspStateData {
   final BridgeLspHealthDto health;
 
-  const BridgeLspStateSnapshot({required this.meta, required this.health});
+  const BridgeLspStateData({required this.health});
 
   @override
-  int get hashCode => meta.hashCode ^ health.hashCode;
+  int get hashCode => health.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeLspStateSnapshot &&
+      other is BridgeLspStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           health == other.health;
 }
 
-class BridgeMcpStateSnapshot {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeLspStateSnapshot with _$BridgeLspStateSnapshot {
+  const BridgeLspStateSnapshot._();
+
+  const factory BridgeLspStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeLspStateSnapshot_Uninitialized;
+  const factory BridgeLspStateSnapshot.loading(BridgeLoadingResource field0) =
+      BridgeLspStateSnapshot_Loading;
+  const factory BridgeLspStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeLspStateData value,
+  }) = BridgeLspStateSnapshot_Ready;
+  const factory BridgeLspStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeLspStateData value,
+  }) = BridgeLspStateSnapshot_Refreshing;
+  const factory BridgeLspStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeLspStateData value,
+  }) = BridgeLspStateSnapshot_Stale;
+  const factory BridgeLspStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeLspStateData value,
+  }) = BridgeLspStateSnapshot_Degraded;
+  const factory BridgeLspStateSnapshot.failed(BridgeFailedResource field0) =
+      BridgeLspStateSnapshot_Failed;
+  const factory BridgeLspStateSnapshot.stopped(BridgeStoppedResource field0) =
+      BridgeLspStateSnapshot_Stopped;
+}
+
+class BridgeMcpStateData {
   final String desiredConfigFingerprint;
   final String appliedConfigFingerprint;
   final BridgeMcpHealthDto health;
 
-  const BridgeMcpStateSnapshot({
-    required this.meta,
+  const BridgeMcpStateData({
     required this.desiredConfigFingerprint,
     required this.appliedConfigFingerprint,
     required this.health,
@@ -109,7 +170,6 @@ class BridgeMcpStateSnapshot {
 
   @override
   int get hashCode =>
-      meta.hashCode ^
       desiredConfigFingerprint.hashCode ^
       appliedConfigFingerprint.hashCode ^
       health.hashCode;
@@ -117,110 +177,319 @@ class BridgeMcpStateSnapshot {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeMcpStateSnapshot &&
+      other is BridgeMcpStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           desiredConfigFingerprint == other.desiredConfigFingerprint &&
           appliedConfigFingerprint == other.appliedConfigFingerprint &&
           health == other.health;
 }
 
-class BridgeProjectDirectoryState {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeMcpStateSnapshot with _$BridgeMcpStateSnapshot {
+  const BridgeMcpStateSnapshot._();
+
+  const factory BridgeMcpStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeMcpStateSnapshot_Uninitialized;
+  const factory BridgeMcpStateSnapshot.loading(BridgeLoadingResource field0) =
+      BridgeMcpStateSnapshot_Loading;
+  const factory BridgeMcpStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeMcpStateData value,
+  }) = BridgeMcpStateSnapshot_Ready;
+  const factory BridgeMcpStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeMcpStateData value,
+  }) = BridgeMcpStateSnapshot_Refreshing;
+  const factory BridgeMcpStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeMcpStateData value,
+  }) = BridgeMcpStateSnapshot_Stale;
+  const factory BridgeMcpStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeMcpStateData value,
+  }) = BridgeMcpStateSnapshot_Degraded;
+  const factory BridgeMcpStateSnapshot.failed(BridgeFailedResource field0) =
+      BridgeMcpStateSnapshot_Failed;
+  const factory BridgeMcpStateSnapshot.stopped(BridgeStoppedResource field0) =
+      BridgeMcpStateSnapshot_Stopped;
+}
+
+class BridgeProjectDirectoryData {
   final List<ProjectDto> projects;
 
-  const BridgeProjectDirectoryState({
-    required this.meta,
-    required this.projects,
-  });
+  const BridgeProjectDirectoryData({required this.projects});
 
   @override
-  int get hashCode => meta.hashCode ^ projects.hashCode;
+  int get hashCode => projects.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeProjectDirectoryState &&
+      other is BridgeProjectDirectoryData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           projects == other.projects;
 }
 
-class BridgeProviderUsageStateSnapshot {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeProjectDirectoryState with _$BridgeProjectDirectoryState {
+  const BridgeProjectDirectoryState._();
+
+  const factory BridgeProjectDirectoryState.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeProjectDirectoryState_Uninitialized;
+  const factory BridgeProjectDirectoryState.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeProjectDirectoryState_Loading;
+  const factory BridgeProjectDirectoryState.ready({
+    required BridgeReadyResource resource,
+    required BridgeProjectDirectoryData value,
+  }) = BridgeProjectDirectoryState_Ready;
+  const factory BridgeProjectDirectoryState.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeProjectDirectoryData value,
+  }) = BridgeProjectDirectoryState_Refreshing;
+  const factory BridgeProjectDirectoryState.stale({
+    required BridgeStaleResource resource,
+    required BridgeProjectDirectoryData value,
+  }) = BridgeProjectDirectoryState_Stale;
+  const factory BridgeProjectDirectoryState.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeProjectDirectoryData value,
+  }) = BridgeProjectDirectoryState_Degraded;
+  const factory BridgeProjectDirectoryState.failed(
+    BridgeFailedResource field0,
+  ) = BridgeProjectDirectoryState_Failed;
+  const factory BridgeProjectDirectoryState.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeProjectDirectoryState_Stopped;
+}
+
+@freezed
+sealed class BridgeProviderUsageData with _$BridgeProviderUsageData {
+  const BridgeProviderUsageData._();
+
+  const factory BridgeProviderUsageData.deepSeekBalance(
+    DeepSeekBalanceDto field0,
+  ) = BridgeProviderUsageData_DeepSeekBalance;
+  const factory BridgeProviderUsageData.zhipuCodingPlan(
+    ZhipuCodingPlanUsageDto field0,
+  ) = BridgeProviderUsageData_ZhipuCodingPlan;
+}
+
+@freezed
+sealed class BridgeProviderUsageState with _$BridgeProviderUsageState {
+  const BridgeProviderUsageState._();
+
+  const factory BridgeProviderUsageState.unsupported() =
+      BridgeProviderUsageState_Unsupported;
+  const factory BridgeProviderUsageState.missingCredential({
+    required String message,
+  }) = BridgeProviderUsageState_MissingCredential;
+  const factory BridgeProviderUsageState.ready({
+    required BridgeProviderUsageData data,
+  }) = BridgeProviderUsageState_Ready;
+  const factory BridgeProviderUsageState.failed({
+    required BridgeStateError error,
+  }) = BridgeProviderUsageState_Failed;
+}
+
+class BridgeProviderUsageStateData {
   final String configFingerprint;
   final List<ProviderUsageDto> usages;
 
-  const BridgeProviderUsageStateSnapshot({
-    required this.meta,
+  const BridgeProviderUsageStateData({
     required this.configFingerprint,
     required this.usages,
   });
 
   @override
-  int get hashCode =>
-      meta.hashCode ^ configFingerprint.hashCode ^ usages.hashCode;
+  int get hashCode => configFingerprint.hashCode ^ usages.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeProviderUsageStateSnapshot &&
+      other is BridgeProviderUsageStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           configFingerprint == other.configFingerprint &&
           usages == other.usages;
 }
 
-class BridgeRecoveryStateSnapshot {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeProviderUsageStateSnapshot
+    with _$BridgeProviderUsageStateSnapshot {
+  const BridgeProviderUsageStateSnapshot._();
+
+  const factory BridgeProviderUsageStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeProviderUsageStateSnapshot_Uninitialized;
+  const factory BridgeProviderUsageStateSnapshot.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeProviderUsageStateSnapshot_Loading;
+  const factory BridgeProviderUsageStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeProviderUsageStateData value,
+  }) = BridgeProviderUsageStateSnapshot_Ready;
+  const factory BridgeProviderUsageStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeProviderUsageStateData value,
+  }) = BridgeProviderUsageStateSnapshot_Refreshing;
+  const factory BridgeProviderUsageStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeProviderUsageStateData value,
+  }) = BridgeProviderUsageStateSnapshot_Stale;
+  const factory BridgeProviderUsageStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeProviderUsageStateData value,
+  }) = BridgeProviderUsageStateSnapshot_Degraded;
+  const factory BridgeProviderUsageStateSnapshot.failed(
+    BridgeFailedResource field0,
+  ) = BridgeProviderUsageStateSnapshot_Failed;
+  const factory BridgeProviderUsageStateSnapshot.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeProviderUsageStateSnapshot_Stopped;
+}
+
+class BridgeRecoveryStateData {
   final List<BridgeStudioRecoveryIssueDto> issues;
 
-  const BridgeRecoveryStateSnapshot({required this.meta, required this.issues});
+  const BridgeRecoveryStateData({required this.issues});
 
   @override
-  int get hashCode => meta.hashCode ^ issues.hashCode;
+  int get hashCode => issues.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeRecoveryStateSnapshot &&
+      other is BridgeRecoveryStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           issues == other.issues;
 }
 
-class BridgeSettingsStateSnapshot {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeRecoveryStateSnapshot with _$BridgeRecoveryStateSnapshot {
+  const BridgeRecoveryStateSnapshot._();
+
+  const factory BridgeRecoveryStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeRecoveryStateSnapshot_Uninitialized;
+  const factory BridgeRecoveryStateSnapshot.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeRecoveryStateSnapshot_Loading;
+  const factory BridgeRecoveryStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeRecoveryStateData value,
+  }) = BridgeRecoveryStateSnapshot_Ready;
+  const factory BridgeRecoveryStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeRecoveryStateData value,
+  }) = BridgeRecoveryStateSnapshot_Refreshing;
+  const factory BridgeRecoveryStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeRecoveryStateData value,
+  }) = BridgeRecoveryStateSnapshot_Stale;
+  const factory BridgeRecoveryStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeRecoveryStateData value,
+  }) = BridgeRecoveryStateSnapshot_Degraded;
+  const factory BridgeRecoveryStateSnapshot.failed(
+    BridgeFailedResource field0,
+  ) = BridgeRecoveryStateSnapshot_Failed;
+  const factory BridgeRecoveryStateSnapshot.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeRecoveryStateSnapshot_Stopped;
+}
+
+class BridgeSettingsStateData {
   final BridgeStudioSettingsDto settings;
 
-  const BridgeSettingsStateSnapshot({
-    required this.meta,
-    required this.settings,
-  });
+  const BridgeSettingsStateData({required this.settings});
 
   @override
-  int get hashCode => meta.hashCode ^ settings.hashCode;
+  int get hashCode => settings.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeSettingsStateSnapshot &&
+      other is BridgeSettingsStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           settings == other.settings;
 }
 
-class BridgeSkillsStateSnapshot {
-  final BridgeObservedStateMeta meta;
-  final String projectId;
+@freezed
+sealed class BridgeSettingsStateSnapshot with _$BridgeSettingsStateSnapshot {
+  const BridgeSettingsStateSnapshot._();
+
+  const factory BridgeSettingsStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeSettingsStateSnapshot_Uninitialized;
+  const factory BridgeSettingsStateSnapshot.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeSettingsStateSnapshot_Loading;
+  const factory BridgeSettingsStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeSettingsStateData value,
+  }) = BridgeSettingsStateSnapshot_Ready;
+  const factory BridgeSettingsStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeSettingsStateData value,
+  }) = BridgeSettingsStateSnapshot_Refreshing;
+  const factory BridgeSettingsStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeSettingsStateData value,
+  }) = BridgeSettingsStateSnapshot_Stale;
+  const factory BridgeSettingsStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeSettingsStateData value,
+  }) = BridgeSettingsStateSnapshot_Degraded;
+  const factory BridgeSettingsStateSnapshot.failed(
+    BridgeFailedResource field0,
+  ) = BridgeSettingsStateSnapshot_Failed;
+  const factory BridgeSettingsStateSnapshot.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeSettingsStateSnapshot_Stopped;
+}
+
+@freezed
+sealed class BridgeSkillsResourceState with _$BridgeSkillsResourceState {
+  const BridgeSkillsResourceState._();
+
+  const factory BridgeSkillsResourceState.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeSkillsResourceState_Uninitialized;
+  const factory BridgeSkillsResourceState.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeSkillsResourceState_Loading;
+  const factory BridgeSkillsResourceState.ready({
+    required BridgeReadyResource resource,
+    required BridgeSkillsStateData value,
+  }) = BridgeSkillsResourceState_Ready;
+  const factory BridgeSkillsResourceState.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeSkillsStateData value,
+  }) = BridgeSkillsResourceState_Refreshing;
+  const factory BridgeSkillsResourceState.stale({
+    required BridgeStaleResource resource,
+    required BridgeSkillsStateData value,
+  }) = BridgeSkillsResourceState_Stale;
+  const factory BridgeSkillsResourceState.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeSkillsStateData value,
+  }) = BridgeSkillsResourceState_Degraded;
+  const factory BridgeSkillsResourceState.failed(BridgeFailedResource field0) =
+      BridgeSkillsResourceState_Failed;
+  const factory BridgeSkillsResourceState.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeSkillsResourceState_Stopped;
+}
+
+class BridgeSkillsStateData {
   final String configFingerprint;
   final BigInt catalogRevision;
   final List<SkillSummaryDto> skills;
   final List<String> warnings;
 
-  const BridgeSkillsStateSnapshot({
-    required this.meta,
-    required this.projectId,
+  const BridgeSkillsStateData({
     required this.configFingerprint,
     required this.catalogRevision,
     required this.skills,
@@ -229,8 +498,6 @@ class BridgeSkillsStateSnapshot {
 
   @override
   int get hashCode =>
-      meta.hashCode ^
-      projectId.hashCode ^
       configFingerprint.hashCode ^
       catalogRevision.hashCode ^
       skills.hashCode ^
@@ -239,14 +506,33 @@ class BridgeSkillsStateSnapshot {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeSkillsStateSnapshot &&
+      other is BridgeSkillsStateData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
-          projectId == other.projectId &&
           configFingerprint == other.configFingerprint &&
           catalogRevision == other.catalogRevision &&
           skills == other.skills &&
           warnings == other.warnings;
+}
+
+class BridgeSkillsStateSnapshot {
+  final String projectId;
+  final BridgeSkillsResourceState state;
+
+  const BridgeSkillsStateSnapshot({
+    required this.projectId,
+    required this.state,
+  });
+
+  @override
+  int get hashCode => projectId.hashCode ^ state.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSkillsStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          projectId == other.projectId &&
+          state == other.state;
 }
 
 class BridgeStudioStateSnapshot {
@@ -314,6 +600,22 @@ class BridgeStudioStateSnapshot {
           updater == other.updater;
 }
 
+class BridgeTaskDirectoryData {
+  final List<BridgeTaskDirectoryEntry> tasks;
+
+  const BridgeTaskDirectoryData({required this.tasks});
+
+  @override
+  int get hashCode => tasks.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskDirectoryData &&
+          runtimeType == other.runtimeType &&
+          tasks == other.tasks;
+}
+
 class BridgeTaskDirectoryEntry {
   final String rootThreadId;
   final BridgeTaskRuntimeDto task;
@@ -335,92 +637,89 @@ class BridgeTaskDirectoryEntry {
           task == other.task;
 }
 
-class BridgeTaskDirectoryState {
-  final BridgeObservedStateMeta meta;
-  final List<BridgeTaskDirectoryEntry> tasks;
+@freezed
+sealed class BridgeTaskDirectoryState with _$BridgeTaskDirectoryState {
+  const BridgeTaskDirectoryState._();
 
-  const BridgeTaskDirectoryState({required this.meta, required this.tasks});
-
-  @override
-  int get hashCode => meta.hashCode ^ tasks.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskDirectoryState &&
-          runtimeType == other.runtimeType &&
-          meta == other.meta &&
-          tasks == other.tasks;
+  const factory BridgeTaskDirectoryState.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeTaskDirectoryState_Uninitialized;
+  const factory BridgeTaskDirectoryState.loading(BridgeLoadingResource field0) =
+      BridgeTaskDirectoryState_Loading;
+  const factory BridgeTaskDirectoryState.ready({
+    required BridgeReadyResource resource,
+    required BridgeTaskDirectoryData value,
+  }) = BridgeTaskDirectoryState_Ready;
+  const factory BridgeTaskDirectoryState.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeTaskDirectoryData value,
+  }) = BridgeTaskDirectoryState_Refreshing;
+  const factory BridgeTaskDirectoryState.stale({
+    required BridgeStaleResource resource,
+    required BridgeTaskDirectoryData value,
+  }) = BridgeTaskDirectoryState_Stale;
+  const factory BridgeTaskDirectoryState.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeTaskDirectoryData value,
+  }) = BridgeTaskDirectoryState_Degraded;
+  const factory BridgeTaskDirectoryState.failed(BridgeFailedResource field0) =
+      BridgeTaskDirectoryState_Failed;
+  const factory BridgeTaskDirectoryState.stopped(BridgeStoppedResource field0) =
+      BridgeTaskDirectoryState_Stopped;
 }
 
-/// Thread directory 分页窗口页（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
-class BridgeThreadDirectoryPage {
-  final BridgeObservedStateMeta meta;
+@freezed
+sealed class BridgeThreadDirectoryPage with _$BridgeThreadDirectoryPage {
+  const BridgeThreadDirectoryPage._();
+
+  const factory BridgeThreadDirectoryPage.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeThreadDirectoryPage_Uninitialized;
+  const factory BridgeThreadDirectoryPage.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeThreadDirectoryPage_Loading;
+  const factory BridgeThreadDirectoryPage.ready({
+    required BridgeReadyResource resource,
+    required BridgeThreadDirectoryPageData value,
+  }) = BridgeThreadDirectoryPage_Ready;
+  const factory BridgeThreadDirectoryPage.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeThreadDirectoryPageData value,
+  }) = BridgeThreadDirectoryPage_Refreshing;
+  const factory BridgeThreadDirectoryPage.stale({
+    required BridgeStaleResource resource,
+    required BridgeThreadDirectoryPageData value,
+  }) = BridgeThreadDirectoryPage_Stale;
+  const factory BridgeThreadDirectoryPage.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeThreadDirectoryPageData value,
+  }) = BridgeThreadDirectoryPage_Degraded;
+  const factory BridgeThreadDirectoryPage.failed(BridgeFailedResource field0) =
+      BridgeThreadDirectoryPage_Failed;
+  const factory BridgeThreadDirectoryPage.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeThreadDirectoryPage_Stopped;
+}
+
+/// Thread directory 分页窗口页数据（按 `updatedAt` 倒序、id 倒序的 keyset cursor）。
+class BridgeThreadDirectoryPageData {
   final List<BridgeThread> threads;
 
   /// `None` 表示没有更旧的页。
   final String? nextCursor;
 
-  const BridgeThreadDirectoryPage({
-    required this.meta,
-    required this.threads,
-    this.nextCursor,
-  });
+  const BridgeThreadDirectoryPageData({required this.threads, this.nextCursor});
 
   @override
-  int get hashCode => meta.hashCode ^ threads.hashCode ^ nextCursor.hashCode;
+  int get hashCode => threads.hashCode ^ nextCursor.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeThreadDirectoryPage &&
+      other is BridgeThreadDirectoryPageData &&
           runtimeType == other.runtimeType &&
-          meta == other.meta &&
           threads == other.threads &&
           nextCursor == other.nextCursor;
-}
-
-class BridgeUpdaterStateSnapshot {
-  final BridgeObservedStateMeta meta;
-  final BridgeVerifiedUpdateSummary? update;
-
-  const BridgeUpdaterStateSnapshot({required this.meta, this.update});
-
-  @override
-  int get hashCode => meta.hashCode ^ update.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeUpdaterStateSnapshot &&
-          runtimeType == other.runtimeType &&
-          meta == other.meta &&
-          update == other.update;
-}
-
-class BridgeVerifiedUpdateSummary {
-  final String version;
-  final PlatformInt64 publishedAt;
-  final String notesUrl;
-
-  const BridgeVerifiedUpdateSummary({
-    required this.version,
-    required this.publishedAt,
-    required this.notesUrl,
-  });
-
-  @override
-  int get hashCode =>
-      version.hashCode ^ publishedAt.hashCode ^ notesUrl.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeVerifiedUpdateSummary &&
-          runtimeType == other.runtimeType &&
-          version == other.version &&
-          publishedAt == other.publishedAt &&
-          notesUrl == other.notesUrl;
 }
 
 class DeepSeekBalanceDto {
@@ -527,32 +826,23 @@ class ProjectDto {
 
 class ProviderUsageDto {
   final String providerId;
+  final BigInt revision;
   final PlatformInt64 updatedAt;
-  final String status;
-  final String usageKind;
-  final String? message;
-  final DeepSeekBalanceDto? balance;
-  final ZhipuCodingPlanUsageDto? codingPlan;
+  final BridgeProviderUsageState state;
 
   const ProviderUsageDto({
     required this.providerId,
+    required this.revision,
     required this.updatedAt,
-    required this.status,
-    required this.usageKind,
-    this.message,
-    this.balance,
-    this.codingPlan,
+    required this.state,
   });
 
   @override
   int get hashCode =>
       providerId.hashCode ^
+      revision.hashCode ^
       updatedAt.hashCode ^
-      status.hashCode ^
-      usageKind.hashCode ^
-      message.hashCode ^
-      balance.hashCode ^
-      codingPlan.hashCode;
+      state.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -560,12 +850,9 @@ class ProviderUsageDto {
       other is ProviderUsageDto &&
           runtimeType == other.runtimeType &&
           providerId == other.providerId &&
+          revision == other.revision &&
           updatedAt == other.updatedAt &&
-          status == other.status &&
-          usageKind == other.usageKind &&
-          message == other.message &&
-          balance == other.balance &&
-          codingPlan == other.codingPlan;
+          state == other.state;
 }
 
 class SkillSummaryDto {

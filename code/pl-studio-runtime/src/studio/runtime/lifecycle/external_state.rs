@@ -43,7 +43,7 @@ impl StudioRuntime {
     pub async fn install_studio_update_after<F, Fut>(
         &self,
         update: crate::StudioUpdate,
-        progress: tokio::sync::mpsc::UnboundedSender<crate::StudioUpdateEvent>,
+        progress: tokio::sync::mpsc::UnboundedSender<StudioUpdateStateSnapshot>,
         cancellation: crate::StudioUpdateCancellation,
         before_launch: F,
     ) -> Result<(), crate::StudioUpdateError>
@@ -51,10 +51,36 @@ impl StudioRuntime {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<(), crate::StudioUpdateError>>,
     {
-        self.updater
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let state_runtime = self.updater.clone();
+        let state_update = update.clone();
+        let forward = tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                let snapshot = state_runtime
+                    .apply_install_event(&state_update, &event)
+                    .await?;
+                let _ = progress.send(snapshot);
+            }
+            Ok::<_, anyhow::Error>(())
+        });
+        let result = self
+            .updater
             .updater()
-            .install_after(update, progress, cancellation, before_launch)
-            .await
+            .install_after(update, event_tx, cancellation, before_launch)
+            .await;
+        let forward_result = forward.await.map_err(|error| {
+            crate::StudioUpdateError::new(
+                crate::StudioUpdateErrorCode::InstallerLaunchFailed,
+                format!("updater state projection task failed: {error}"),
+            )
+        })?;
+        forward_result.map_err(|error| {
+            crate::StudioUpdateError::new(
+                crate::StudioUpdateErrorCode::InstallerLaunchFailed,
+                format!("updater state transition failed: {error:#}"),
+            )
+        })?;
+        result
     }
 
     pub async fn read_lsp_state(&self) -> crate::StudioLspStateSnapshot {

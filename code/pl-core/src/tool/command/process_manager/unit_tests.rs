@@ -1,21 +1,10 @@
 use pretty_assertions::assert_eq;
 
-use super::snapshot::{message_for_state, status_for_state};
+use super::snapshot::message_for_state;
 use super::*;
 
 fn running_state() -> CommandProcessState {
-    CommandProcessState {
-        phase: CommandProcessPhase::Running,
-        exit_code: None,
-        stdout_open: true,
-        stderr_open: true,
-        stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-        stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-        pending_stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-        pending_stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-        output_revision: 0,
-        error: None,
-    }
+    CommandProcessState::new(true, true)
 }
 
 #[test]
@@ -37,14 +26,23 @@ fn process_exit_waits_for_output_streams_before_final_status() {
     let mut state = running_state();
 
     state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
-    assert_eq!(status_for_state(&state), "running");
+    assert!(matches!(
+        state.lifecycle,
+        CommandProcessLifecycle::Draining(_)
+    ));
     assert!(!state.can_accept_input());
 
     state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
-    assert_eq!(status_for_state(&state), "running");
+    assert!(matches!(
+        state.lifecycle,
+        CommandProcessLifecycle::Draining(_)
+    ));
 
     state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
-    assert_eq!(status_for_state(&state), "completed");
+    assert!(matches!(
+        state.lifecycle.final_result(),
+        Some(CommandProcessFinalResult::Succeeded { exit_code: 0 })
+    ));
     assert!(state.is_final());
 }
 
@@ -52,18 +50,27 @@ fn process_exit_waits_for_output_streams_before_final_status() {
 fn termination_reason_survives_until_streams_are_drained() {
     let mut state = running_state();
 
-    state.apply_transition(CommandProcessTransition::TimedOut);
-    assert_eq!(status_for_state(&state), "running");
-    assert!(state.timed_out());
+    state.apply_transition(CommandProcessTransition::TimeOut);
+    assert!(matches!(
+        state.lifecycle,
+        CommandProcessLifecycle::Terminating(_)
+    ));
+    assert!(state.lifecycle.is_timed_out());
 
     state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: None });
-    assert_eq!(status_for_state(&state), "running");
+    assert!(matches!(
+        state.lifecycle,
+        CommandProcessLifecycle::Draining(_)
+    ));
 
     state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
     state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
 
-    assert_eq!(status_for_state(&state), "timedOut");
-    assert!(state.timed_out());
+    assert!(matches!(
+        state.lifecycle.final_result(),
+        Some(CommandProcessFinalResult::TimedOut)
+    ));
+    assert!(state.lifecycle.is_timed_out());
     assert!(state.is_final());
 }
 
@@ -83,7 +90,7 @@ fn draining_output_message_only_suggests_polling() {
 #[test]
 fn terminating_message_only_suggests_polling() {
     let mut timed_out = running_state();
-    timed_out.apply_transition(CommandProcessTransition::TimedOut);
+    timed_out.apply_transition(CommandProcessTransition::TimeOut);
     let timeout_message = message_for_state(
         &timed_out,
         Some("proc-1"),
@@ -96,14 +103,14 @@ fn terminating_message_only_suggests_polling() {
     assert!(!timeout_message.contains("send input"));
 
     let mut interrupted = running_state();
-    interrupted.apply_transition(CommandProcessTransition::Interrupted);
+    interrupted.apply_transition(CommandProcessTransition::Cancel);
     let interrupted_message = message_for_state(
         &interrupted,
         Some("proc-2"),
         std::path::Path::new("output.log"),
     );
 
-    assert!(interrupted_message.contains("was interrupted"));
+    assert!(interrupted_message.contains("was cancelled"));
     assert!(interrupted_message.contains("termination is in progress"));
     assert!(interrupted_message.contains("empty chars"));
     assert!(!interrupted_message.contains("send input"));

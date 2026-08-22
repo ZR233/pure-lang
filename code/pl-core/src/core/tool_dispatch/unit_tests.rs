@@ -3,9 +3,10 @@ use pretty_assertions::assert_eq;
 use super::display::redact_user_input_display_result;
 use super::progress_messages::{tool_start_progress_message, tool_terminal_progress_message};
 use super::records::finalize_tool_item;
-use super::{ToolExecutionError, ToolExecutionRecord, notify_tool_completion};
+use super::{
+    ToolExecutionError, ToolExecutionOutcome, ToolExecutionRecord, notify_tool_completion,
+};
 use pl_protocol::ToolCallKind;
-use pl_trace::TracePartStatus;
 
 fn completed_record(name: &str) -> ToolExecutionRecord {
     ToolExecutionRecord {
@@ -16,10 +17,9 @@ fn completed_record(name: &str) -> ToolExecutionRecord {
         result: String::new(),
         display_result: String::new(),
         arguments: "{}".to_string(),
-        status: TracePartStatus::Completed,
+        outcome: ToolExecutionOutcome::Succeeded,
         exit_code: None,
         timed_out: false,
-        revision: None,
         runtime_events: Vec::new(),
         execution_millis: 0,
     }
@@ -133,30 +133,33 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
             pl_trace::TraceEventKind::TracePartStarted { .. }
             | pl_trace::TraceEventKind::TracePartDelta { .. }
             | pl_trace::TraceEventKind::TracePartFailed { .. }
-            | pl_trace::TraceEventKind::PlanLifecycleChanged { .. }
             | pl_trace::TraceEventKind::InteractionChanged { .. }
             | pl_trace::TraceEventKind::SkillActivated { .. }
             | pl_trace::TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("completed tool item");
 
+    let output = completed
+        .tool()
+        .and_then(pl_trace::TraceToolPart::terminal_output)
+        .expect("completed tool output");
     assert_eq!(
-        completed.tool.as_ref().unwrap().output_artifacts,
+        output.output_artifacts(),
         vec![serde_json::json!({
             "id": "artifact-1",
             "stream": "stdout",
         })]
     );
     assert_eq!(
-        completed.tool.as_ref().unwrap().audit_metadata,
+        output.audit_metadata(),
         vec![serde_json::json!({
             "kind": "mcpCallToolResult",
             "result": { "structuredContent": { "answer": 42 } },
         })]
     );
     assert_eq!(
-        completed.tool.as_ref().unwrap().output_metrics,
-        Some(pl_trace::TraceToolOutputMetrics {
+        output.metrics(),
+        Some(&pl_trace::TraceToolOutputMetrics {
             raw_bytes: 20_000,
             model_visible_bytes: 12_000,
             artifact_bytes: 8_000,
@@ -189,7 +192,7 @@ async fn completed_tool_callback_receives_the_canonical_terminal_record() {
     assert_eq!(observations.len(), 1);
     assert_eq!(observations[0].call_id, "call-1");
     assert_eq!(observations[0].name, "exec");
-    assert_eq!(observations[0].status, "completed");
+    assert_eq!(observations[0].status, "succeeded");
     assert_eq!(observations[0].result, "generated file");
     assert_eq!(observations[0].exit_code, Some(0));
 }

@@ -9,13 +9,14 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    BlockedRecovery, ExecutorContinuationState, ReviewRoundState, ReviewScope, ReviewVerdict,
-    TaskCommand, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitState, WorkUnitStatus,
+    BlockedRecovery, ReviewRoundCommand, ReviewRoundStateKind, ReviewScope, TaskCommand, TaskRun,
+    TaskRunStateKind, TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, WorkUnitCommand,
+    WorkUnitCompletionOutcome, WorkUnitStateKind,
 };
 
 use super::review::{review_round_state, update_review_round_state};
-use super::work_unit::{update_work_unit_state, work_unit_state};
+use super::work_completion::work_completion_record;
+use super::work_unit::{apply_work_unit_command, work_unit_record};
 
 #[derive(Debug, thiserror::Error)]
 #[error("task root thread still has {total} pending interactions")]
@@ -245,50 +246,41 @@ impl StudioStore {
                 .all(&tx)
                 .await?
             {
-                let state = work_unit_state(&unit)?;
-                let status = state.status();
-                let cancel = matches!(
-                    status,
-                    WorkUnitStatus::Pending
-                        | WorkUnitStatus::Running
-                        | WorkUnitStatus::AwaitingCompletion
-                        | WorkUnitStatus::ReadyForReview
-                        | WorkUnitStatus::Reviewing
-                        | WorkUnitStatus::ChangesRequested
-                        | WorkUnitStatus::Approved
-                        | WorkUnitStatus::NeedsAttention
-                );
-                let authorize_cleanup = status != WorkUnitStatus::Merged;
-                if cancel || authorize_cleanup {
-                    let mut progress = state.clone().into_progress();
-                    if cancel {
-                        progress.execution_error = Some(reason.to_string());
-                        progress.continuation_state = ExecutorContinuationState::None;
-                        progress.continuation_source_turn_id = None;
-                        progress.continuation_revision =
-                            progress.continuation_revision.saturating_add(1);
-                    }
-                    if authorize_cleanup {
-                        progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-                    }
-                    let next_state = if cancel {
-                        WorkUnitState::cancelled(progress)
-                    } else {
-                        state.with_progress(progress)
-                    };
-                    update_work_unit_state(&tx, unit, next_state).await?;
+                let record = work_unit_record(unit.clone())?;
+                if !record.kind().is_terminal() {
+                    apply_work_unit_command(
+                        &tx,
+                        unit,
+                        WorkUnitCommand::Cancel {
+                            operation_id: format!("task-stop:{task_run_id}:{expected_generation}"),
+                            reason: reason.to_string(),
+                            disposition: TaskWorktreeDisposition::CleanupRequested,
+                        },
+                    )
+                    .await?;
                 }
             }
             for round in entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
-                .filter(
-                    entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()),
-                )
+                .filter(entities::review_round::Column::StateKind.is_in([
+                    ReviewRoundStateKind::PendingDispatch.as_str(),
+                    ReviewRoundStateKind::Dispatched.as_str(),
+                    ReviewRoundStateKind::Running.as_str(),
+                ]))
                 .all(&tx)
                 .await?
             {
-                let _current = review_round_state(&round)?;
-                let state = ReviewRoundState::cancelled(reason.to_string(), reason.to_string());
+                let current = review_round_state(&round)?;
+                let state = current
+                    .decide(
+                        &round.id,
+                        ReviewRoundCommand::Cancel {
+                            reviewer_thread_id: current.reviewer_thread_id().map(str::to_string),
+                            reason: reason.to_string(),
+                            summary: reason.to_string(),
+                        },
+                    )?
+                    .next_state();
                 update_review_round_state(&tx, round, state).await?;
             }
             Ok(())
@@ -351,7 +343,7 @@ async fn validate_no_pending_interactions(
     // 其残留 Interaction 不再阻塞完成。
     let pending = entities::interaction::Entity::find()
         .filter(entities::interaction::Column::ThreadId.eq(root_thread_id.to_string()))
-        .filter(entities::interaction::Column::Status.eq("pending"))
+        .filter(entities::interaction::Column::StateKind.eq("pending"))
         .order_by_asc(entities::interaction::Column::CreatedAt)
         .order_by_asc(entities::interaction::Column::Id)
         .all(tx)
@@ -366,7 +358,7 @@ async fn validate_no_pending_interactions(
         .map(|interaction| {
             format!(
                 "{}/{} ({})",
-                interaction.thread_id, interaction.id, interaction.kind
+                interaction.thread_id, interaction.id, interaction.interaction_kind
             )
         })
         .collect();
@@ -384,28 +376,11 @@ async fn validate_completion_children(
         .all(tx)
         .await?;
     if units.iter().any(|unit| {
-        work_unit_state(unit)
-            .map(|state| {
-                !matches!(
-                    state.status(),
-                    WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery
-                )
-            })
+        work_unit_record(unit.clone())
+            .map(|record| record.kind() != WorkUnitStateKind::Completed)
             .unwrap_or(true)
     }) {
         bail!("all executor deliveries must be terminal and consumed before completion");
-    }
-    if units.iter().any(|unit| {
-        work_unit_state(unit)
-            .map(|state| {
-                matches!(
-                    state.execution_status(),
-                    ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-                )
-            })
-            .unwrap_or(true)
-    }) {
-        bail!("all task agents must be terminal before completion");
     }
     let merges = entities::merge_record::Entity::find()
         .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
@@ -417,12 +392,7 @@ async fn validate_completion_children(
         .await?;
     if reviews.iter().any(|review| {
         review_round_state(review)
-            .map(|state| {
-                matches!(
-                    state.reviewer_status(),
-                    ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-                )
-            })
+            .map(|state| state.kind().is_active())
             .unwrap_or(true)
     }) {
         bail!("all task reviewers must be terminal before completion");
@@ -443,7 +413,7 @@ async fn validate_completion_children(
                 .find(|review| review.id == *review_round_id)
                 .context("integrated review gate round disappeared")?;
             if review.scope != ReviewScope::Integrated.as_str()
-                || review.state_kind != ReviewVerdict::Pass.as_str()
+                || review.state_kind != ReviewRoundStateKind::Passed.as_str()
                 || review.reviewed_head != *reviewed_head
             {
                 bail!("integrated review gate no longer identifies a passing current review")
@@ -451,9 +421,16 @@ async fn validate_completion_children(
         }
         StudioIntegratedReviewGate::NotRequiredNoDelivery => {
             if !merges.is_empty()
-                || units
-                    .iter()
-                    .any(|unit| unit.state_kind != WorkUnitStatus::NoDelivery.as_str())
+                || units.iter().any(|unit| {
+                    work_unit_record(unit.clone())
+                        .map(|record| {
+                            !matches!(
+                                record.completion_outcome(),
+                                Some(WorkUnitCompletionOutcome::NoDelivery { .. })
+                            )
+                        })
+                        .unwrap_or(true)
+                })
             {
                 bail!("no-delivery review exemption no longer matches task children")
             }
@@ -507,8 +484,13 @@ async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<
     let [merge] = merges else {
         bail!("single-executor review exemption requires exactly one merge record")
     };
+    let unit_record = work_unit_record(unit.clone())?;
     if unit.id != work_unit_id
-        || unit.state_kind != WorkUnitStatus::Merged.as_str()
+        || !matches!(
+            unit_record.completion_outcome(),
+            Some(WorkUnitCompletionOutcome::Merged { merge_record_id })
+                if merge_record_id == &merge.id
+        )
         || merge.id != merge_record_id
         || merge.work_unit_id != unit.id
         || merge.completion_revision != i32::try_from(completion_revision)?
@@ -525,13 +507,14 @@ async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<
         .one(tx)
         .await?
         .context("single-executor approved completion disappeared")?;
+    let completion_record = work_completion_record(completion.clone())?;
     if completion.task_run_id != run.id
         || completion.work_unit_id != unit.id
         || completion.revision != i32::try_from(completion_revision)?
-        || completion.kind != "delivery"
-        || completion.status != "approved"
+        || completion_record.kind().as_str() != "delivery"
+        || completion_record.status().as_str() != "approved"
         || completion.base_commit != merge.expected_previous_head
-        || completion.head_commit.as_deref() != Some(merge.delivery_head.as_str())
+        || completion_record.head_commit() != Some(merge.delivery_head.as_str())
     {
         bail!("single-executor approved completion changed before completion")
     }
@@ -539,7 +522,7 @@ async fn validate_single_executor_gate(validation: SingleExecutorGateValidation<
         .iter()
         .filter(|review| {
             review.scope == ReviewScope::Delivery.as_str()
-                && review.state_kind == ReviewVerdict::Pass.as_str()
+                && review.state_kind == ReviewRoundStateKind::Passed.as_str()
         })
         .collect::<Vec<_>>();
     let [review] = passing_delivery_reviews.as_slice() else {

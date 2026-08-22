@@ -560,7 +560,13 @@ class _McpSettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final availabilityMessage = server.availabilityMessage;
+    final unavailable = switch (server.state) {
+      McpUnavailableState() => server.state as McpUnavailableState,
+      McpDisabledState() ||
+      McpMissingCredentialState() ||
+      McpCheckingState() ||
+      McpAvailableState() => null,
+    };
     return Padding(
       key: StudioDriverKeys.mcpServerRow(server.id),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -600,15 +606,14 @@ class _McpSettingsRow extends StatelessWidget {
               ),
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: server.displayedAvailability,
+                label: _mcpAvailabilityLabel(server.state),
               ),
             ],
           ),
-          if (server.availabilityKind == 'unavailable' &&
-              availabilityMessage != null) ...[
+          if (unavailable != null) ...[
             const SizedBox(height: 8),
             Text(
-              availabilityMessage,
+              unavailable.message,
               key: StudioDriverKeys.mcpServerError(server.id),
               style: context.text.bodySmall?.copyWith(
                 color: context.colors.error,
@@ -691,9 +696,14 @@ class _LspTabState extends ConsumerState<LspTab> {
               for (final server in widget.state.servers)
                 _LspSettingsRow(
                   server: server,
-                  onRepair: server.availability == 'missingServerComponent'
-                      ? () => unawaited(_run(() => _repair(server.id)))
-                      : null,
+                  onRepair: switch (server.state) {
+                    LspUnavailableState(code: 'lspComponentMissing') =>
+                      () => unawaited(_run(() => _repair(server.id))),
+                    LspCheckingState() ||
+                    LspAvailableState() ||
+                    LspUnavailableState() ||
+                    LspDisabledState() => null,
+                  },
                   onReset: widget.projectId == null
                       ? null
                       : () => unawaited(_run(() => _resetServer(server.id))),
@@ -798,18 +808,19 @@ class _LspSettingsRow extends StatelessWidget {
             children: [
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: server.availability,
+                label: _lspAvailabilityLabel(server.state),
               ),
-              SettingsInfoPill(
-                icon: Icons.rule_outlined,
-                label: server.diagnosticCount.toString(),
-              ),
-              if (server.activityKind != 'idle')
+              if (server.state case LspAvailableState(:final diagnosticCount))
                 SettingsInfoPill(
-                  icon: server.activityKind == 'indexing'
+                  icon: Icons.rule_outlined,
+                  label: diagnosticCount.toString(),
+                ),
+              if (_activeLspActivity(server) case final activity?)
+                SettingsInfoPill(
+                  icon: activity is LspIndexingActivity
                       ? Icons.manage_search_outlined
                       : Icons.sync_outlined,
-                  label: _lspActivityPillLabel(context, server),
+                  label: _lspActivityPillLabel(context, activity),
                 ),
             ],
           ),
@@ -817,11 +828,11 @@ class _LspSettingsRow extends StatelessWidget {
             const SizedBox(height: 8),
             Text(activityDetail, style: context.text.bodySmall),
           ],
-          if (server.message case final message?) ...[
+          if (_lspInformationalMessage(server.state) case final message?) ...[
             const SizedBox(height: 8),
             Text(message, style: context.text.bodySmall),
           ],
-          if (server.lastError case final error?) ...[
+          if (server.state case LspUnavailableState(message: final error)) ...[
             const SizedBox(height: 8),
             Text(
               error,
@@ -836,23 +847,65 @@ class _LspSettingsRow extends StatelessWidget {
   }
 }
 
-String _lspActivityPillLabel(BuildContext context, LspServerStateView server) {
-  final label = switch (server.activityKind) {
-    'indexing' => context.l10n.settingsLspActivityIndexing,
-    'busy' => context.l10n.settingsLspActivityBusy,
-    final kind => kind,
+String _mcpAvailabilityLabel(McpServerState state) => switch (state) {
+  McpDisabledState() => 'disabled',
+  McpMissingCredentialState() => 'missingCredential',
+  McpCheckingState() => 'checking',
+  McpAvailableState() => 'available',
+  McpUnavailableState() => 'unavailable',
+};
+
+String _lspAvailabilityLabel(LspServerState state) => switch (state) {
+  LspCheckingState() => 'checking',
+  LspAvailableState() => 'available',
+  LspUnavailableState() => 'unavailable',
+  LspDisabledState() => 'disabled',
+};
+
+String? _lspInformationalMessage(LspServerState state) => switch (state) {
+  LspCheckingState(:final message) ||
+  LspDisabledState(:final message) => message,
+  LspAvailableState() || LspUnavailableState() => null,
+};
+
+LspActivity? _activeLspActivity(LspServerStateView server) {
+  return switch (server.state) {
+    LspAvailableState(activity: final activity)
+        when activity is! LspIdleActivity =>
+      activity,
+    LspAvailableState() ||
+    LspCheckingState() ||
+    LspUnavailableState() ||
+    LspDisabledState() => null,
   };
-  final percentage = server.activityPercentage;
+}
+
+String _lspActivityPillLabel(BuildContext context, LspActivity activity) {
+  final label = switch (activity) {
+    LspIndexingActivity() => context.l10n.settingsLspActivityIndexing,
+    LspBusyActivity() => context.l10n.settingsLspActivityBusy,
+    LspIdleActivity() => 'idle',
+  };
+  final percentage = switch (activity) {
+    LspBusyActivity(:final percentage) ||
+    LspIndexingActivity(:final percentage) => percentage,
+    LspIdleActivity() => null,
+  };
   return percentage == null
       ? label
       : '$label · ${context.l10n.statusLspActivityPercentage(percentage)}';
 }
 
 String? _lspActivityDetail(LspServerStateView server) {
+  final activity = _activeLspActivity(server);
   final parts = [
-    if (server.activityTitle case final title?)
+    if (activity
+        case LspBusyActivity(title: final title?) ||
+            LspIndexingActivity(title: final title?))
       if (title.isNotEmpty) title,
-    if (server.activityMessage case final message?)
+    if (activity
+        case LspBusyActivity(message: final message?) ||
+            LspIndexingActivity(message: final message?))
       if (message.isNotEmpty) message,
   ];
   return parts.isEmpty ? null : parts.join(' · ');

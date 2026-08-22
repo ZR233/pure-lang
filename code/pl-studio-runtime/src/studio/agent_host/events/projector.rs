@@ -1,8 +1,7 @@
 use pl_core::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentSnapshot, MailboxBudgetAction, ThreadId, TurnOutcomeKind,
+    AgentSnapshot, AgentState, MailboxBudgetAction, ThreadId,
 };
-use pl_protocol::LabeledEnum;
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::watch;
 
@@ -16,9 +15,7 @@ use crate::studio::{ProductEventBus, StudioStore};
 use super::super::resources::StudioAgentResources;
 use super::super::{StudioPlanConfirmationProjector, wait_for_runtime};
 use super::continuation::submit_executor_continuation;
-use super::mapping::{
-    error, lifecycle_label, plan_terminal_projection, studio_agent_activity, thread_status,
-};
+use super::mapping::studio_agent_state;
 use super::planner_wake::materialize_pending_task_planner_wakes;
 
 pub(super) struct StudioAgentEventProjector {
@@ -113,6 +110,7 @@ impl StudioAgentEventProjector {
                     self.store
                         .mark_executor_turn_started(
                             event.agent_id.as_str(),
+                            input.turn_id.as_str(),
                             MailboxBudgetAction::Refresh,
                         )
                         .await
@@ -122,7 +120,10 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted {
-                input, snapshot, ..
+                turn_id,
+                input,
+                snapshot,
+                ..
             } => {
                 if let Some(thread_id) = thread_id.as_deref() {
                     self.store
@@ -135,7 +136,11 @@ impl StudioAgentEventProjector {
                     && self.resources.get(&snapshot.identity.id).await.is_some();
                 if is_task_executor {
                     self.store
-                        .mark_executor_turn_started(event.agent_id.as_str(), input.budget_action)
+                        .mark_executor_turn_started(
+                            event.agent_id.as_str(),
+                            turn_id.as_str(),
+                            input.budget_action,
+                        )
                         .await
                         .at("markExecutorTurnStarted")?;
                 }
@@ -147,7 +152,7 @@ impl StudioAgentEventProjector {
             }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
                 let terminalized = if let (Some(failure), Some(thread_id)) =
-                    (outcome.failure.clone(), thread_id.as_deref())
+                    (outcome.outcome.failure().cloned(), thread_id.as_deref())
                 {
                     let thread = self
                         .store
@@ -206,11 +211,7 @@ impl StudioAgentEventProjector {
                     }
                 } else if is_reviewer {
                     self.store
-                        .settle_reviewer_turn_finished(
-                            event.agent_id.as_str(),
-                            outcome.kind,
-                            outcome.reason.as_deref(),
-                        )
+                        .settle_reviewer_turn_finished(event.agent_id.as_str(), &outcome.outcome)
                         .await
                         .at("settleReviewerTurnFinished")?;
                 }
@@ -224,17 +225,6 @@ impl StudioAgentEventProjector {
                     )
                     .await
                     .at("recoverTaskPlannerWakes")?;
-                }
-                if let Some(thread_id) = thread_id.as_deref() {
-                    self.project_plan_lifecycle(
-                        event.agent_id.as_str(),
-                        thread_id,
-                        outcome.turn_id.as_str(),
-                        outcome.kind,
-                        outcome.reason.clone(),
-                    )
-                    .await
-                    .at("projectPlanLifecycle")?;
                 }
                 self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
@@ -259,7 +249,9 @@ impl StudioAgentEventProjector {
     ) -> anyhow::Result<()> {
         for trace in traces {
             match trace.kind {
-                TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
+                TraceEventKind::TracePartCompleted { item }
+                    if item.kind() == TracePartKind::Plan =>
+                {
                     self.plan_confirmations
                         .project(agent_id, thread_id, &item)
                         .await?;
@@ -270,38 +262,9 @@ impl StudioAgentEventProjector {
                 | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => {}
             }
         }
-        Ok(())
-    }
-
-    async fn project_plan_lifecycle(
-        &self,
-        agent_id: &str,
-        thread_id: &str,
-        turn_id: &str,
-        outcome: TurnOutcomeKind,
-        reason: Option<String>,
-    ) -> anyhow::Result<()> {
-        let metadata = self.store.agent_turn_metadata(agent_id, turn_id).await?;
-        let Some(lifecycle) = metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get("planLifecycle"))
-            .filter(|value| !value.is_null())
-        else {
-            return Ok(());
-        };
-        let Some(plan_id) = lifecycle.get("planId").and_then(serde_json::Value::as_str) else {
-            return Ok(());
-        };
-        let Some((state, reason)) = plan_terminal_projection(outcome, reason) else {
-            return Ok(());
-        };
-        // Plan 本身已经由 Trace 投影为 ThreadItem；终态属于 Task 产品状态，
-        // 不再复制成第二条会话事实。
-        let _ = (agent_id, thread_id, turn_id, plan_id, state, reason);
         Ok(())
     }
 
@@ -314,19 +277,6 @@ impl StudioAgentEventProjector {
             return Ok(());
         };
         let resource = self.resources.get(&snapshot.identity.id).await;
-        let status = thread_status(&snapshot);
-        let snapshot_error = error(&snapshot);
-        let summary = resource.as_ref().map(|resource| resource.task_name.clone());
-        self.store
-            .update_thread_status(
-                thread_id,
-                status,
-                summary,
-                snapshot_error.clone(),
-                snapshot.updated_at,
-            )
-            .await
-            .at("updateAgentThreadStatus")?;
         if let Some(thread) = self
             .store
             .read_thread(thread_id)
@@ -364,19 +314,12 @@ impl StudioAgentEventProjector {
                         || thread.title.clone(),
                         |resource| resource.task_name.clone(),
                     ),
-                    status: status.label().to_string(),
                     summary: snapshot
                         .progress
                         .as_ref()
                         .map(|progress| progress.report.summary.clone()),
                     depth: snapshot.identity.depth,
-                    error: snapshot_error,
-                    reason: snapshot
-                        .last_turn
-                        .as_ref()
-                        .and_then(|outcome| outcome.reason.clone()),
-                    lifecycle: lifecycle_label(snapshot.lifecycle).to_string(),
-                    activity: studio_agent_activity(snapshot.activity),
+                    state: studio_agent_state(&snapshot.state),
                     progress,
                     updated_at: snapshot.updated_at,
                     summary_age_seconds,
@@ -389,7 +332,7 @@ impl StudioAgentEventProjector {
                 .await
                 .at("emitThreadDirectory")?;
         }
-        if snapshot.lifecycle == pl_core::AgentLifecycleState::Closed {
+        if matches!(snapshot.state, AgentState::Closed(_)) {
             self.resources
                 .release_after_close(&snapshot.identity.id)
                 .await;

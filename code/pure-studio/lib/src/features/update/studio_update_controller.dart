@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../data/frb/studio_api.dart' show FrbStudioApi;
+import '../../data/frb/studio_api.dart' show FrbStudioApi, updaterStateFromFrb;
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
@@ -32,84 +32,6 @@ final studioRuntimeBusyProvider = Provider<bool>((ref) {
   return studio?.isBusy == true || studio?.runtime.hasActiveTask == true;
 });
 
-enum StudioUpdatePhase {
-  disabled,
-  idle,
-  checking,
-  upToDate,
-  available,
-  downloading,
-  verifying,
-  installerLaunched,
-  failed,
-}
-
-class StudioUpdateInfo {
-  const StudioUpdateInfo({
-    required this.revision,
-    required this.version,
-    required this.publishedAt,
-    required this.notesUrl,
-  });
-
-  final int revision;
-  final String version;
-  final DateTime publishedAt;
-  final String notesUrl;
-}
-
-class StudioUpdateState {
-  const StudioUpdateState({
-    required this.phase,
-    required this.currentVersion,
-    this.update,
-    this.downloaded = 0,
-    this.total = 0,
-    this.errorCode,
-    this.errorMessage,
-  });
-
-  final StudioUpdatePhase phase;
-  final String currentVersion;
-  final StudioUpdateInfo? update;
-  final int downloaded;
-  final int total;
-  final String? errorCode;
-  final String? errorMessage;
-
-  bool get hasUpdate =>
-      update != null && phase != StudioUpdatePhase.installerLaunched;
-
-  double? get progress {
-    if (total <= 0) return null;
-    return (downloaded / total).clamp(0, 1);
-  }
-}
-
-enum StudioUpdateInstallEventKind {
-  started,
-  progress,
-  verifying,
-  installerLaunched,
-  failed,
-}
-
-class StudioUpdateInstallEvent {
-  const StudioUpdateInstallEvent({
-    required this.kind,
-    this.downloaded = 0,
-    this.total = 0,
-    this.code,
-    this.message,
-  });
-
-  final StudioUpdateInstallEventKind kind;
-  final int downloaded;
-  final int total;
-  final String? code;
-  final String? message;
-}
-
 abstract class StudioUpdateApi {
   Future<UpdaterStateSnapshot> check();
 
@@ -122,7 +44,7 @@ abstract class StudioUpdateApi {
 }
 
 abstract class StudioUpdateOperation {
-  Stream<StudioUpdateInstallEvent> get events;
+  Stream<UpdaterStateSnapshot> get events;
 
   Future<void> cancel();
 
@@ -135,17 +57,7 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
   @override
   Future<UpdaterStateSnapshot> check() async {
     await FrbStudioApi.ensureReady();
-    final snapshot = await frb.checkStudioUpdate();
-    return UpdaterStateSnapshot(
-      meta: _metaFromBridge(snapshot.meta),
-      version: snapshot.update?.version,
-      publishedAt: snapshot.update == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch(
-              snapshot.update!.publishedAt * 1000,
-            ),
-      notesUrl: snapshot.update?.notesUrl,
-    );
+    return updaterStateFromFrb(await frb.checkStudioUpdate());
   }
 
   @override
@@ -169,60 +81,6 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
       url,
     ], mode: ProcessStartMode.detached);
   }
-
-  static StudioUpdateInstallEvent _installEventFromBridge(
-    frb.BridgeStudioUpdateEventDto event,
-  ) {
-    return switch (event) {
-      frb.BridgeStudioUpdateEventDto_Started(:final total) =>
-        StudioUpdateInstallEvent(
-          kind: StudioUpdateInstallEventKind.started,
-          total: total.toInt(),
-        ),
-      frb.BridgeStudioUpdateEventDto_Progress(
-        :final downloaded,
-        :final total,
-      ) =>
-        StudioUpdateInstallEvent(
-          kind: StudioUpdateInstallEventKind.progress,
-          downloaded: downloaded.toInt(),
-          total: total.toInt(),
-        ),
-      frb.BridgeStudioUpdateEventDto_Verifying() =>
-        const StudioUpdateInstallEvent(
-          kind: StudioUpdateInstallEventKind.verifying,
-        ),
-      frb.BridgeStudioUpdateEventDto_InstallerLaunched() =>
-        const StudioUpdateInstallEvent(
-          kind: StudioUpdateInstallEventKind.installerLaunched,
-        ),
-      frb.BridgeStudioUpdateEventDto_Failed(:final code, :final message) =>
-        StudioUpdateInstallEvent(
-          kind: StudioUpdateInstallEventKind.failed,
-          code: code,
-          message: message,
-        ),
-    };
-  }
-
-  static ObservedStateMeta _metaFromBridge(frb.BridgeObservedStateMeta meta) {
-    final phase = meta.phase.when(
-      uninitialized: () => ObservedStatePhase.uninitialized,
-      ready: () => ObservedStatePhase.ready,
-      running: (_, _) => ObservedStatePhase.running,
-      failed: (_, _) => ObservedStatePhase.failed,
-      stopped: () => ObservedStatePhase.stopped,
-    );
-    return ObservedStateMeta(
-      revision: meta.revision.toInt(),
-      phase: phase,
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(meta.updatedAt * 1000),
-      lastCheckedAt: meta.lastCheckedAt == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch(meta.lastCheckedAt! * 1000),
-      stale: meta.stale,
-    );
-  }
 }
 
 class _FrbStudioUpdateOperation implements StudioUpdateOperation {
@@ -232,13 +90,11 @@ class _FrbStudioUpdateOperation implements StudioUpdateOperation {
   bool _disposed = false;
 
   @override
-  Stream<StudioUpdateInstallEvent> get events => _events();
+  Stream<UpdaterStateSnapshot> get events => _events();
 
-  Stream<StudioUpdateInstallEvent> _events() async* {
+  Stream<UpdaterStateSnapshot> _events() async* {
     try {
-      yield* _handle.progressStream().map(
-        FrbStudioUpdateApi._installEventFromBridge,
-      );
+      yield* _handle.progressStream().map(updaterStateFromFrb);
     } finally {
       dispose();
     }
@@ -266,7 +122,7 @@ class StudioUpdateController extends _$StudioUpdateController {
   bool get _enabled => ref.read(studioUpdateEnabledProvider);
 
   @override
-  StudioUpdateState build() {
+  UpdaterStateSnapshot build() {
     ref.onDispose(() {
       final operation = _activeOperation;
       _activeOperation = null;
@@ -274,82 +130,66 @@ class StudioUpdateController extends _$StudioUpdateController {
         operation.dispose();
       }
     });
-    final currentVersion = ref.watch(studioVersionProvider);
     final enabled = ref.watch(studioUpdateEnabledProvider);
     final observed = ref.watch(
       studioControllerProvider.select((value) => value.value?.updaterState),
     );
-    final available = enabled && observed?.version != null;
-    return StudioUpdateState(
-      phase: !enabled
-          ? StudioUpdatePhase.disabled
-          : available
-          ? StudioUpdatePhase.available
-          : StudioUpdatePhase.idle,
-      currentVersion: currentVersion,
-      update: available
-          ? StudioUpdateInfo(
-              revision: observed!.meta.revision,
-              version: observed.version!,
-              publishedAt: observed.publishedAt!,
-              notesUrl: observed.notesUrl!,
-            )
-          : null,
-    );
+    if (!enabled) {
+      return DisabledUpdaterStateSnapshot(
+        revision: observed?.revision ?? 0,
+        updatedAt:
+            observed?.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+      );
+    }
+    return observed ??
+        UpdaterStateSnapshot.idle(
+          revision: 0,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        );
   }
 
   Future<void> check() async {
-    if (!_enabled || state.phase == StudioUpdatePhase.checking) return;
-    state = StudioUpdateState(
-      phase: StudioUpdatePhase.checking,
-      currentVersion: state.currentVersion,
-    );
+    if (!_enabled || state is CheckingUpdaterStateSnapshot) return;
     try {
-      final result = await _api.check();
-      final version = result.version;
-      state = version == null
-          ? StudioUpdateState(
-              phase: StudioUpdatePhase.upToDate,
-              currentVersion: state.currentVersion,
-            )
-          : StudioUpdateState(
-              phase: StudioUpdatePhase.available,
-              currentVersion: state.currentVersion,
-              update: StudioUpdateInfo(
-                revision: result.meta.revision,
-                version: version,
-                publishedAt: result.publishedAt!,
-                notesUrl: result.notesUrl!,
-              ),
-            );
+      state = await _api.check();
     } catch (error) {
-      _fail('checkFailed', error.toString());
+      if (state is! CheckFailedUpdaterStateSnapshot) {
+        state = CheckFailedUpdaterStateSnapshot(
+          revision: state.revision + 1,
+          failedAt: DateTime.now(),
+          error: UpdaterErrorView(
+            code: 'checkFailed',
+            message: error.toString(),
+            retryable: true,
+          ),
+        );
+      }
     }
   }
 
   Future<void> install() async {
     final update = state.update;
-    if (!_enabled || update == null || _isInstalling(state.phase)) return;
+    if (!_enabled || update == null || _isInstalling(state)) return;
     if (ref.read(studioRuntimeBusyProvider)) {
-      _fail('runtimeBusy', 'Studio runtime has an active turn or task');
+      _installFailure(
+        'runtimeBusy',
+        'Studio runtime has an active turn or task',
+      );
       return;
     }
-    state = StudioUpdateState(
-      phase: StudioUpdatePhase.downloading,
-      currentVersion: state.currentVersion,
-      update: update,
-    );
     try {
       final operation = await _api.startInstall(
-        expectedRevision: update.revision,
+        expectedRevision: state.revision,
         version: update.version,
       );
       _activeOperation = operation;
-      await for (final event in operation.events) {
-        _applyInstallEvent(event);
+      await for (final snapshot in operation.events) {
+        state = snapshot;
       }
     } catch (error) {
-      _fail('installFailed', error.toString());
+      if (state is! InstallFailedUpdaterStateSnapshot) {
+        _installFailure('installFailed', error.toString());
+      }
     } finally {
       final operation = _activeOperation;
       _activeOperation = null;
@@ -364,10 +204,7 @@ class StudioUpdateController extends _$StudioUpdateController {
     }
     try {
       await operation.cancel();
-      _fail('cancelled', 'Studio update installation was cancelled');
-    } catch (error) {
-      _fail('cancellationTooLate', error.toString());
-    }
+    } catch (_) {}
   }
 
   Future<void> openReleaseNotes() async {
@@ -375,60 +212,22 @@ class StudioUpdateController extends _$StudioUpdateController {
     if (update == null) return;
     try {
       await _api.openReleaseNotes(update.notesUrl);
-    } catch (error) {
-      _fail('releaseNotesFailed', error.toString());
-    }
+    } catch (_) {}
   }
 
-  void _applyInstallEvent(StudioUpdateInstallEvent event) {
+  void _installFailure(String code, String message) {
     final update = state.update;
     if (update == null) return;
-    switch (event.kind) {
-      case StudioUpdateInstallEventKind.started:
-      case StudioUpdateInstallEventKind.progress:
-        state = StudioUpdateState(
-          phase: StudioUpdatePhase.downloading,
-          currentVersion: state.currentVersion,
-          update: update,
-          downloaded: event.downloaded,
-          total: event.total,
-        );
-      case StudioUpdateInstallEventKind.verifying:
-        state = StudioUpdateState(
-          phase: StudioUpdatePhase.verifying,
-          currentVersion: state.currentVersion,
-          update: update,
-          downloaded: state.downloaded,
-          total: state.total,
-        );
-      case StudioUpdateInstallEventKind.installerLaunched:
-        state = StudioUpdateState(
-          phase: StudioUpdatePhase.installerLaunched,
-          currentVersion: state.currentVersion,
-          update: update,
-          downloaded: state.downloaded,
-          total: state.total,
-        );
-      case StudioUpdateInstallEventKind.failed:
-        _fail(event.code ?? 'installFailed', event.message ?? 'Update failed');
-    }
-  }
-
-  void _fail(String code, String message) {
-    state = StudioUpdateState(
-      phase: StudioUpdatePhase.failed,
-      currentVersion: state.currentVersion,
-      update: state.update,
-      downloaded: state.downloaded,
-      total: state.total,
-      errorCode: code,
-      errorMessage: message,
+    state = InstallFailedUpdaterStateSnapshot(
+      revision: state.revision + 1,
+      failedAt: DateTime.now(),
+      update: update,
+      error: UpdaterErrorView(code: code, message: message, retryable: true),
     );
   }
 }
 
-bool _isInstalling(StudioUpdatePhase phase) {
-  return phase == StudioUpdatePhase.downloading ||
-      phase == StudioUpdatePhase.verifying ||
-      phase == StudioUpdatePhase.installerLaunched;
-}
+bool _isInstalling(UpdaterStateSnapshot state) =>
+    state is DownloadingUpdaterStateSnapshot ||
+    state is VerifyingUpdaterStateSnapshot ||
+    state is InstallerLaunchedUpdaterStateSnapshot;

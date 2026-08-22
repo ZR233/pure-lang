@@ -5,16 +5,18 @@ use std::sync::{
 };
 
 use anyhow::Result;
-use pl_protocol::{ObservedStateMeta, Thread};
+use pl_protocol::{ObservedResource, Thread};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::{
-    ProviderUsageStateSnapshot, SkillsStateSnapshot, StudioAgentDirectoryEntry,
-    StudioAgentDirectoryState, StudioLspStateSnapshot, StudioMcpStateSnapshot,
-    StudioProductEventEnvelope, StudioProductEventKind, StudioProjectDirectoryState,
-    StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot, StudioTaskDirectoryEntry,
-    StudioTaskDirectoryState, StudioThreadDirectoryDelta, StudioThreadDirectoryPage,
-    StudioThreadDirectoryState, StudioUpdateStateSnapshot,
+    ProviderUsageStateSnapshot, SkillsStateSnapshot, StudioAgentDirectoryData,
+    StudioAgentDirectoryEntry, StudioAgentDirectoryState, StudioLspStateSnapshot,
+    StudioMcpStateSnapshot, StudioProductEventEnvelope, StudioProductEventKind,
+    StudioProjectDirectoryData, StudioProjectDirectoryState, StudioRecoveryStateSnapshot,
+    StudioSettingsStateSnapshot, StudioTaskDirectoryData, StudioTaskDirectoryEntry,
+    StudioTaskDirectoryState, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
+    StudioThreadDirectoryPage, StudioThreadDirectoryPageData, StudioThreadDirectoryState,
+    StudioUpdateStateSnapshot,
 };
 
 use super::{StudioStore, ids::unix_seconds};
@@ -125,15 +127,23 @@ impl ProductEventBus {
 
     pub async fn read_project_directory(&self) -> Result<StudioProjectDirectoryState> {
         Ok(StudioProjectDirectoryState {
-            meta: self.meta(&self.revisions.project),
-            projects: self.store.list_projects().await?,
+            state: self.resource(
+                &self.revisions.project,
+                StudioProjectDirectoryData {
+                    projects: self.store.list_projects().await?,
+                },
+            ),
         })
     }
 
     pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
         Ok(StudioThreadDirectoryState {
-            meta: self.meta(&self.revisions.thread),
-            threads: self.sorted_thread_index(),
+            state: self.resource(
+                &self.revisions.thread,
+                StudioThreadDirectoryData {
+                    threads: self.sorted_thread_index(),
+                },
+            ),
         })
     }
 
@@ -160,9 +170,13 @@ impl ProductEventBus {
             None
         };
         Ok(StudioThreadDirectoryPage {
-            meta: self.meta(&self.revisions.thread),
-            threads: page,
-            next_cursor,
+            state: self.resource(
+                &self.revisions.thread,
+                StudioThreadDirectoryPageData {
+                    threads: page,
+                    next_cursor,
+                },
+            ),
         })
     }
 
@@ -185,9 +199,11 @@ impl ProductEventBus {
             }
         }
         self.bump(&self.revisions.thread);
+        let (revision, updated_at) = self.revision(&self.revisions.thread);
         Ok(self.emit(StudioProductEventKind::ThreadDirectoryChanged(
             StudioThreadDirectoryDelta {
-                meta: self.meta(&self.revisions.thread),
+                revision,
+                updated_at,
                 upserted,
                 removed,
             },
@@ -237,20 +253,33 @@ impl ProductEventBus {
 
     pub async fn read_task_directory(&self) -> Result<StudioTaskDirectoryState> {
         Ok(StudioTaskDirectoryState {
-            meta: self.meta(&self.revisions.task),
-            tasks: self.load_tasks().await?,
+            state: self.resource(
+                &self.revisions.task,
+                StudioTaskDirectoryData {
+                    tasks: self.load_tasks().await?,
+                },
+            ),
         })
     }
 
     pub async fn read_agent_directory(&self) -> StudioAgentDirectoryState {
         StudioAgentDirectoryState {
-            meta: self.meta(&self.revisions.agent),
-            agents: self.agents.lock().await.values().cloned().collect(),
+            state: self.resource(
+                &self.revisions.agent,
+                StudioAgentDirectoryData {
+                    agents: self.agents.lock().await.values().cloned().collect(),
+                },
+            ),
         }
     }
 
-    pub fn recovery_meta(&self) -> ObservedStateMeta {
-        self.meta(&self.revisions.recovery)
+    pub fn recovery_state(
+        &self,
+        issues: Vec<crate::StudioRecoveryIssue>,
+    ) -> StudioRecoveryStateSnapshot {
+        StudioRecoveryStateSnapshot {
+            state: self.resource(&self.revisions.recovery, issues),
+        }
     }
 
     pub async fn emit_project_directory(&self) -> Result<StudioProductEventEnvelope> {
@@ -290,8 +319,7 @@ impl ProductEventBus {
         self.bump(&self.revisions.task);
         Ok(Some(self.emit(
             StudioProductEventKind::TaskDirectoryChanged(StudioTaskDirectoryState {
-                meta: self.meta(&self.revisions.task),
-                tasks,
+                state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
             }),
         )))
     }
@@ -311,10 +339,7 @@ impl ProductEventBus {
     ) -> StudioProductEventEnvelope {
         self.bump(&self.revisions.recovery);
         self.emit(StudioProductEventKind::RecoveryStateChanged(
-            StudioRecoveryStateSnapshot {
-                meta: self.recovery_meta(),
-                issues,
-            },
+            self.recovery_state(issues),
         ))
     }
 
@@ -378,14 +403,21 @@ impl ProductEventBus {
         state.updated_at.store(unix_seconds(), Ordering::Release);
     }
 
-    fn meta(&self, state: &DomainRevision) -> ObservedStateMeta {
+    fn resource<T>(&self, state: &DomainRevision, value: T) -> ObservedResource<T> {
         let revision = state.revision.load(Ordering::Acquire);
         let updated_at = state.updated_at.load(Ordering::Acquire);
         if revision == 0 {
-            ObservedStateMeta::uninitialized(updated_at)
+            ObservedResource::uninitialized(updated_at)
         } else {
-            ObservedStateMeta::ready(revision, updated_at)
+            ObservedResource::ready(revision, updated_at, value)
         }
+    }
+
+    fn revision(&self, state: &DomainRevision) -> (u64, i64) {
+        (
+            state.revision.load(Ordering::Acquire),
+            state.updated_at.load(Ordering::Acquire),
+        )
     }
 }
 
@@ -439,48 +471,69 @@ mod tests {
             .read_thread_directory_page(None, 3)
             .await
             .expect("first page");
-        assert_eq!(first.threads.len(), 3);
-        let cursor = first.next_cursor.expect("first page has more");
+        let first_data = first.state.value().expect("ready first page");
+        assert_eq!(first_data.threads.len(), 3);
+        let cursor = first_data.next_cursor.clone().expect("first page has more");
 
         let second = runtime
             .read_thread_directory_page(Some(&cursor), 3)
             .await
             .expect("second page");
-        assert_eq!(second.threads.len(), 3);
+        let second_data = second.state.value().expect("ready second page");
+        assert_eq!(second_data.threads.len(), 3);
         assert_ne!(
-            second.threads.first().unwrap().id,
-            first.threads.last().unwrap().id
+            second_data.threads.first().unwrap().id,
+            first_data.threads.last().unwrap().id
         );
 
-        let cursor = second.next_cursor.expect("second page has more");
+        let cursor = second_data
+            .next_cursor
+            .clone()
+            .expect("second page has more");
         let third = runtime
             .read_thread_directory_page(Some(&cursor), 3)
             .await
             .expect("third page");
-        assert_eq!(third.threads.len(), 1);
-        assert!(third.next_cursor.is_none());
+        let third_data = third.state.value().expect("ready third page");
+        assert_eq!(third_data.threads.len(), 1);
+        assert!(third_data.next_cursor.is_none());
 
         let all = runtime.read_thread_directory().await.expect("full read");
-        assert_eq!(all.threads.len(), 7);
+        assert_eq!(all.state.value().expect("ready directory").threads.len(), 7);
     }
 
     #[tokio::test]
     async fn thread_delta_updates_index_and_emits_removed_ids() {
         let runtime = seed_directory_threads(1).await;
         let threads = runtime.read_thread_directory().await.expect("read");
-        let thread = threads.threads.first().expect("seeded thread").clone();
+        let thread = threads
+            .state
+            .value()
+            .expect("ready directory")
+            .threads
+            .first()
+            .expect("seeded thread")
+            .clone();
 
         runtime
             .apply_thread_delta(Vec::new(), vec![thread.id.clone()])
             .await
             .expect("delta");
         let after = runtime.read_thread_directory().await.expect("read");
-        assert!(after.threads.is_empty());
+        assert!(
+            after
+                .state
+                .value()
+                .expect("ready directory")
+                .threads
+                .is_empty()
+        );
 
         let page = runtime
             .read_thread_directory_page(None, 10)
             .await
             .expect("page");
+        let page = page.state.value().expect("ready page");
         assert!(page.threads.is_empty());
         assert!(page.next_cursor.is_none());
     }

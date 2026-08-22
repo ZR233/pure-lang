@@ -53,7 +53,8 @@ extension StudioLocalizationsX on BuildContext {
 
   String taskStatusLabel(String status) {
     return switch (status) {
-      'pending' => l10n.statusTaskStatusPending,
+      'pending' || 'pendingDispatch' => l10n.statusTaskStatusPending,
+      'dispatched' => l10n.statusTaskStatusQueued,
       'queued' => l10n.statusTaskStatusQueued,
       'running' => l10n.statusTaskStatusRunning,
       'awaitingCompletion' => l10n.statusTaskStatusAwaitingCompletion,
@@ -69,23 +70,22 @@ extension StudioLocalizationsX on BuildContext {
       'needsAttention' => l10n.statusTaskStatusNeedsAttention,
       'failed' => l10n.statusTaskStatusFailed,
       'cancelled' => l10n.statusTaskStatusCancelled,
-      'pass' => l10n.statusTaskStatusPass,
+      'passed' => l10n.statusTaskStatusPass,
       'changesRequired' => l10n.statusTaskStatusChangesRequired,
       'blocked' => l10n.statusTaskStatusBlocked,
       _ => status,
     };
   }
 
-  String taskBudgetKindLabel(String kind) {
+  String taskBudgetKindLabel(TaskBudgetLimitKindView kind) {
     return switch (kind) {
-      'modelStep' => l10n.statusTaskBudgetModelStep,
-      'toolCall' => l10n.statusTaskBudgetToolCall,
-      'wait' => l10n.statusTaskBudgetWait,
-      'wallClock' => l10n.statusTaskBudgetWallClock,
-      'agentCount' => l10n.statusTaskBudgetAgentCount,
-      'agentDepth' => l10n.statusTaskBudgetAgentDepth,
-      'finalization' => l10n.statusTaskBudgetFinalization,
-      _ => kind,
+      TaskBudgetLimitKindView.modelStep => l10n.statusTaskBudgetModelStep,
+      TaskBudgetLimitKindView.toolCall => l10n.statusTaskBudgetToolCall,
+      TaskBudgetLimitKindView.wait => l10n.statusTaskBudgetWait,
+      TaskBudgetLimitKindView.wallClock => l10n.statusTaskBudgetWallClock,
+      TaskBudgetLimitKindView.agentCount => l10n.statusTaskBudgetAgentCount,
+      TaskBudgetLimitKindView.agentDepth => l10n.statusTaskBudgetAgentDepth,
+      TaskBudgetLimitKindView.finalization => l10n.statusTaskBudgetFinalization,
     };
   }
 

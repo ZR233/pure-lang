@@ -411,9 +411,14 @@ fn runtime_progress_texts(
     let mut texts = Vec::new();
     while let Ok(event) = event_rx.try_recv() {
         if let AgentEvent::TracePartCompleted { item } = event
-            && item.source == TracePartSource::Runtime
+            && item.source() == TracePartSource::Runtime
         {
-            texts.push(item.content);
+            texts.push(
+                item.text()
+                    .expect("runtime progress text")
+                    .content()
+                    .to_string(),
+            );
         }
     }
     texts

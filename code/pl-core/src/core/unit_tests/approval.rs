@@ -38,17 +38,17 @@ async fn request_approval_allows_external_path_after_user_approval() {
         TurnOptions::default().with_interaction_callback(std::sync::Arc::new(move |interaction| {
             let seen_interaction = seen_interaction_for_callback.clone();
             async move {
-                match &interaction.payload {
-                    InteractionPayload::ToolApproval { name, .. } => {
-                        assert_eq!(name, "read_file")
+                match &interaction.content {
+                    InteractionContent::ToolApproval(approval) => {
+                        assert_eq!(approval.request().name, "read_file")
                     }
                     other => panic!("unexpected payload: {other:?}"),
                 }
                 *seen_interaction.lock().unwrap() = Some(interaction);
-                InteractionResolution::ToolApproval {
+                InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                     decision: ToolApprovalResolution::Approved,
                     reason: None,
-                }
+                })
             }
             .boxed()
         }));
@@ -78,7 +78,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
     .unwrap();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Completed);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
     assert!(records[0].result.contains("external ok"));
     assert!(seen_interaction.lock().unwrap().is_some());
     assert!(runtime_progress_texts(&mut event_rx).is_empty());
@@ -87,11 +87,11 @@ async fn request_approval_allows_external_path_after_user_approval() {
     assert_eq!(
         tool_statuses(&events, "turn-1-call-1"),
         vec![
-            TracePartStatus::Started,
-            TracePartStatus::AwaitingApproval,
-            TracePartStatus::Approved,
-            TracePartStatus::Running,
-            TracePartStatus::Completed,
+            TestToolPhase::Started,
+            TestToolPhase::AwaitingApproval,
+            TestToolPhase::Approved,
+            TestToolPhase::Running,
+            TestToolPhase::Succeeded,
         ]
     );
     let _ = tokio::fs::remove_dir_all(workspace_root).await;
@@ -134,18 +134,17 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
     let events = recorder.drain();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Failed);
+    assert_eq!(
+        records[0].outcome,
+        ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution),
+    );
     assert_eq!(records[0].id, "provider-item-1");
     assert_eq!(records[0].call_id, "call-1");
     assert!(records[0].result.contains("Unknown tool: missing_tool"));
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
-        vec![
-            TracePartStatus::Started,
-            TracePartStatus::Failed,
-            TracePartStatus::Failed,
-        ]
+        vec![TestToolPhase::Started, TestToolPhase::Failed,]
     );
 }
 
@@ -188,7 +187,7 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
     let events = recorder.drain();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Denied);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Denied);
     assert!(
         records[0]
             .result
@@ -197,30 +196,32 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
-        vec![
-            TracePartStatus::Started,
-            TracePartStatus::Denied,
-            TracePartStatus::Denied,
-        ]
+        vec![TestToolPhase::Started, TestToolPhase::Denied,]
     );
     let terminal = events
         .iter()
         .find_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item } => Some(item),
-            TraceEventKind::TracePartFailed { item, .. } => Some(item),
+            TraceEventKind::TracePartFailed { item } => Some(item),
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("terminal tool item");
     assert_eq!(
-        terminal
-            .tool
-            .as_ref()
-            .and_then(|tool| tool.denial_reason.as_deref()),
+        terminal.tool().and_then(|tool| match tool.state() {
+            pl_trace::TraceToolState::Denied(state) => Some(state.reason()),
+            pl_trace::TraceToolState::Started(_)
+            | pl_trace::TraceToolState::Streaming(_)
+            | pl_trace::TraceToolState::AwaitingApproval(_)
+            | pl_trace::TraceToolState::Approved(_)
+            | pl_trace::TraceToolState::Running(_)
+            | pl_trace::TraceToolState::Succeeded(_)
+            | pl_trace::TraceToolState::Failed(_)
+            | pl_trace::TraceToolState::Cancelled(_) => None,
+        }),
         Some("Tool disabled by execution policy: write_file")
     );
 }
@@ -269,32 +270,33 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
     let events = recorder.drain();
 
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Interrupted);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Cancelled);
     assert_eq!(records[0].result, "Tool execution interrupted");
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
         vec![
-            TracePartStatus::Started,
-            TracePartStatus::Approved,
-            TracePartStatus::Running,
-            TracePartStatus::Interrupted,
+            TestToolPhase::Started,
+            TestToolPhase::Running,
+            TestToolPhase::Cancelled,
         ]
     );
     let terminal = events
         .iter()
         .find_map(|event| match &event.kind {
-            TraceEventKind::TracePartFailed { item, .. } => Some(item),
+            TraceEventKind::TracePartFailed { item } => Some(item),
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("interrupted tool item");
-    assert_eq!(terminal.status, TracePartStatus::Interrupted);
+    assert!(matches!(
+        terminal.tool().map(pl_trace::TraceToolPart::state),
+        Some(pl_trace::TraceToolState::Cancelled(_)),
+    ));
 }
 
 #[test]

@@ -1,15 +1,12 @@
 use anyhow::{Context, Result};
 
-use pl_protocol::{LabeledEnum, ThreadStatus};
+use pl_core::AgentState;
 
 use crate::studio::entity as entities;
 use crate::studio::records::{
     AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility,
 };
-use crate::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionScope, InteractionStatus,
-};
+use crate::{InteractionContent, InteractionRequest, InteractionScope};
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     ProjectRecord {
@@ -24,9 +21,30 @@ pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
     let mode = crate::StudioMode::from_label(&model.mode)
         .map_err(|error| anyhow::anyhow!(error.to_string()))
         .with_context(|| format!("unsupported Thread mode in studio db: {}", model.id))?;
-    let status = ThreadStatus::from_label(&model.status)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
-        .with_context(|| format!("unsupported Thread status in studio db: {}", model.id))?;
+    let state: AgentState = serde_json::from_str(&model.state_json)
+        .with_context(|| format!("invalid Agent state in studio db: {}", model.id))?;
+    let status = match &state {
+        AgentState::Idle(_) => pl_protocol::ThreadStatus::Idle,
+        AgentState::Queued(_) => pl_protocol::ThreadStatus::Queued,
+        AgentState::Running(_) => pl_protocol::ThreadStatus::Running,
+        AgentState::WaitingTool(_) => pl_protocol::ThreadStatus::WaitingTool,
+        AgentState::WaitingInteraction(_) => pl_protocol::ThreadStatus::WaitingInteraction,
+        AgentState::Cancelling(_) => pl_protocol::ThreadStatus::Cancelling,
+        AgentState::Closing(_) => pl_protocol::ThreadStatus::Closing,
+        AgentState::Closed(_) => pl_protocol::ThreadStatus::Closed,
+        AgentState::Faulted(_) => pl_protocol::ThreadStatus::Faulted,
+    };
+    let error = match &state {
+        AgentState::Faulted(state) => Some(state.error().message.clone()),
+        AgentState::Idle(_)
+        | AgentState::Queued(_)
+        | AgentState::Running(_)
+        | AgentState::WaitingTool(_)
+        | AgentState::WaitingInteraction(_)
+        | AgentState::Cancelling(_)
+        | AgentState::Closing(_)
+        | AgentState::Closed(_) => None,
+    };
     Ok(ThreadRecord {
         id: model.id.clone(),
         project_id: model.project_id,
@@ -50,7 +68,7 @@ pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
         role: model.role,
         status,
         summary: None,
-        error: None,
+        error,
         runtime_updated_at: Some(model.updated_at),
     })
 }
@@ -71,30 +89,10 @@ pub fn attachment_record(model: entities::attachment::Model) -> AttachmentRecord
 }
 
 pub fn interaction_record(model: entities::interaction::Model) -> Result<InteractionRequest> {
-    let payload =
-        serde_json::from_str::<InteractionPayload>(&model.payload_json).with_context(|| {
-            let id = &model.id;
-            format!("failed to parse interaction payload: {id}")
-        })?;
-    let resolution = model
-        .resolution_json
-        .as_deref()
-        .map(serde_json::from_str::<InteractionResolution>)
-        .transpose()
-        .with_context(|| {
-            let id = &model.id;
-            format!("failed to parse interaction resolution: {id}")
-        })?;
-    let kind = InteractionKind::from_label(&model.kind)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
-        .with_context(|| format!("unsupported interaction kind in studio db: {}", model.id))?;
-    let status = InteractionStatus::from_label(&model.status)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
-        .with_context(|| format!("unsupported interaction status in studio db: {}", model.id))?;
-    Ok(InteractionRequest {
+    let content: InteractionContent = serde_json::from_str(&model.state_json)
+        .with_context(|| format!("invalid Interaction state in studio db: {}", model.id))?;
+    let interaction = InteractionRequest {
         interaction_id: model.id,
-        kind,
-        status,
         scope: InteractionScope {
             thread_id: model.thread_id,
             turn_id: model.turn_id,
@@ -102,10 +100,18 @@ pub fn interaction_record(model: entities::interaction::Model) -> Result<Interac
             tool_id: model.tool_id,
             agent_path: model.agent_path,
         },
-        payload,
+        revision: u64::try_from(model.revision)?,
+        content,
         created_at: model.created_at,
         updated_at: model.updated_at,
-        resolved_at: model.resolved_at,
-        resolution,
-    })
+    };
+    anyhow::ensure!(
+        interaction.kind().as_str() == model.interaction_kind,
+        "stored Interaction kind discriminator mismatch"
+    );
+    anyhow::ensure!(
+        interaction.status().as_str() == model.state_kind,
+        "stored Interaction state discriminator mismatch"
+    );
+    Ok(interaction)
 }

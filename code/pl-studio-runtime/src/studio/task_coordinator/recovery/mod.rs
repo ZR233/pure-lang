@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use super::{
-    TaskCoordinator, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeDisposition,
-    TaskWorktreeOwnerSnapshot, WorkCompletionRecord,
+    MergeCleanupResult, TaskCoordinator, TaskWorktreeCleanupState, TaskWorktreeCreationState,
+    TaskWorktreeDisposition, TaskWorktreeOwnerSnapshot, WorkCompletionRecord,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -75,19 +75,18 @@ impl TaskCoordinator {
     async fn replay_accepted_cleanup(&self, merge_id: &str) -> Result<()> {
         let scope = self.store.read_accepted_merge_scope(merge_id).await?;
         self.validate_accepted_cleanup_replay(&scope).await?;
-        self.store.record_merge_cleanup_attempting(merge_id).await?;
+        let attempt = self.store.record_merge_cleanup_attempting(merge_id).await?;
+        let operation_id = attempt
+            .cleanup
+            .operation_id()
+            .context("merge cleanup replay has no operation id")?
+            .to_string();
         let cleanup = super::merge::cleanup_accepted_delivery(&scope, None).await;
         self.store
-            .record_merge_cleanup(merge_id, cleanup.clone())
+            .record_merge_cleanup(merge_id, &operation_id, cleanup.clone())
             .await?;
-        if cleanup.status == "failed" {
-            bail!(
-                "accepted cleanup replay failed: {}",
-                cleanup
-                    .detail
-                    .as_deref()
-                    .unwrap_or("unknown cleanup failure")
-            );
+        if let MergeCleanupResult::Failed { detail } = cleanup {
+            bail!("accepted cleanup replay failed: {detail}",);
         }
         Ok(())
     }
@@ -100,5 +99,5 @@ fn protected_expected_head(
     if disposition == DurableWorktreeDisposition::Cleanup {
         return None;
     }
-    completion.and_then(|completion| completion.head_commit.clone())
+    completion.and_then(|completion| completion.head_commit().map(str::to_string))
 }

@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::TaskCoordinator;
-use crate::{AgentLifecycleState, AgentRuntimeHandle, ThreadId};
+use crate::{AgentRuntimeHandle, AgentState, ThreadId};
 
 const CLOSED_PROJECTION_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSED_PROJECTION_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -19,7 +19,7 @@ impl TaskCoordinator {
             .snapshot(agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if snapshot.lifecycle != AgentLifecycleState::Closed {
+        if !matches!(snapshot.state, AgentState::Closed(_)) {
             return Ok(());
         }
         self.await_closed_thread(agent_id.as_str()).await

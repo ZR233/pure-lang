@@ -1,14 +1,9 @@
 use crate::api::studio::bridge_runtime::active_bridge;
-use crate::api::studio::types::{
-    BridgeError, BridgeStudioUpdateEventDto, BridgeUpdaterStateSnapshot,
-    BridgeVerifiedUpdateSummary,
-};
+use crate::api::studio::convert::runtime::bridge_update_state;
+use crate::api::studio::types::{BridgeError, BridgeUpdaterStateSnapshot};
 use crate::frb_generated::StreamSink;
 use anyhow::Result;
-use pl_studio_runtime::{
-    StudioUpdateCancellation, StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent,
-    StudioUpdateStateSnapshot,
-};
+use pl_studio_runtime::{StudioUpdateCancellation, StudioUpdateError, StudioUpdateErrorCode};
 use std::sync::{Arc, OnceLock, Weak};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
@@ -26,13 +21,13 @@ struct BridgeStudioUpdateOperationInner {
     cancellation: StudioUpdateCancellation,
     task: Mutex<Option<JoinHandle<()>>>,
     sink_task: Mutex<Option<JoinHandle<()>>>,
-    progress_receiver: Mutex<Option<mpsc::Receiver<BridgeStudioUpdateEventDto>>>,
+    progress_receiver: Mutex<Option<mpsc::Receiver<BridgeUpdaterStateSnapshot>>>,
 }
 
 impl BridgeStudioUpdateOperation {
     pub async fn progress_stream(
         &self,
-        sink: StreamSink<BridgeStudioUpdateEventDto>,
+        sink: StreamSink<BridgeUpdaterStateSnapshot>,
     ) -> Result<(), BridgeError> {
         let mut receiver = self
             .inner
@@ -118,8 +113,12 @@ pub async fn install_studio_update(
     let task = tokio::spawn(async move {
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let forward = tokio::spawn(async move {
-            while let Some(event) = progress_rx.recv().await {
-                if bridge_progress_tx.send(bridge_event(event)).await.is_err() {
+            while let Some(state) = progress_rx.recv().await {
+                if bridge_progress_tx
+                    .send(bridge_update_state(state))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -167,31 +166,6 @@ pub(crate) async fn cancel_all_update_operations() {
 
 fn update_operations() -> &'static Mutex<Vec<Weak<BridgeStudioUpdateOperationInner>>> {
     UPDATE_OPERATIONS.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-fn bridge_update_state(state: StudioUpdateStateSnapshot) -> BridgeUpdaterStateSnapshot {
-    BridgeUpdaterStateSnapshot {
-        meta: state.meta.into(),
-        update: state.update.map(|update| BridgeVerifiedUpdateSummary {
-            version: update.version,
-            published_at: update.published_at,
-            notes_url: update.notes_url,
-        }),
-    }
-}
-
-fn bridge_event(event: StudioUpdateEvent) -> BridgeStudioUpdateEventDto {
-    match event {
-        StudioUpdateEvent::Started { total } => BridgeStudioUpdateEventDto::Started { total },
-        StudioUpdateEvent::Progress { downloaded, total } => {
-            BridgeStudioUpdateEventDto::Progress { downloaded, total }
-        }
-        StudioUpdateEvent::Verifying => BridgeStudioUpdateEventDto::Verifying,
-        StudioUpdateEvent::InstallerLaunched => BridgeStudioUpdateEventDto::InstallerLaunched,
-        StudioUpdateEvent::Failed { code, message } => {
-            BridgeStudioUpdateEventDto::Failed { code, message }
-        }
-    }
 }
 
 fn runtime_error(error: BridgeError) -> StudioUpdateError {

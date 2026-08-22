@@ -10,11 +10,11 @@ impl StudioRuntime {
         let canonical = super::super::settings_api::settings_snapshot(settings)?;
         self.agent_facility.product_events.emit_settings_state(
             crate::StudioSettingsStateSnapshot {
-                meta: pl_protocol::ObservedStateMeta::ready(
+                state: pl_protocol::ObservedResource::ready(
                     canonical.revision,
                     canonical.updated_at,
+                    canonical.settings,
                 ),
-                settings: canonical.settings,
             },
         );
         Ok(())

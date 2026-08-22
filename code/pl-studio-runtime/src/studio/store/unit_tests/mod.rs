@@ -46,7 +46,7 @@ async fn archive_thread_rolls_back_the_complete_tree_on_update_failure() {
 }
 
 #[tokio::test]
-async fn thread_directory_rejects_unknown_mode_and_status_labels() {
+async fn thread_directory_rejects_unknown_mode_and_state_variants() {
     let store = StudioStore::open_memory().await.unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let project = store.upsert_project(workspace.path()).await.unwrap();
@@ -67,19 +67,47 @@ async fn thread_directory_rejects_unknown_mode_and_status_labels() {
     assert!(mode_error.to_string().contains("unsupported Thread mode"));
     assert!(mode_error.to_string().contains(&thread.id));
 
-    store
+    let state_error = store
         .database()
         .execute_unprepared(&format!(
-            "UPDATE threads SET mode = 'simple', status = 'legacy' WHERE id = '{}'",
+            "UPDATE threads SET mode = 'simple', state_json = '{{\"kind\":\"legacy\",\"data\":{{}}}}' WHERE id = '{}'",
             thread.id
         ))
         .await
+        .unwrap_err();
+    assert!(state_error.to_string().contains("CHECK constraint failed"));
+}
+
+#[tokio::test]
+async fn unregistered_child_spawn_failure_is_persisted_as_canonical_faulted_state() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let root = store
+        .create_thread(&project.id, "Root", StudioMode::Task)
+        .await
         .unwrap();
-    let status_error = store.read_thread(&thread.id).await.unwrap_err();
-    assert!(
-        status_error
-            .to_string()
-            .contains("unsupported Thread status")
+    let child_id = format!("{}-executor", root.id);
+    store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: child_id.clone(),
+            parent_thread_id: root.id,
+            agent_path: child_id.clone(),
+            role: "executor".to_string(),
+            title: "Executor".to_string(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store
+            .fault_unregistered_child_thread(&child_id, "registration failed")
+            .await
+            .unwrap(),
+        super::UnregisteredThreadFault::Faulted
     );
-    assert!(status_error.to_string().contains(&thread.id));
+    assert_eq!(
+        store.read_thread(&child_id).await.unwrap().unwrap().status,
+        pl_protocol::ThreadStatus::Faulted
+    );
 }

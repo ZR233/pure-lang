@@ -1,6 +1,6 @@
 use crate::agent_runtime::{ThreadId, TurnId};
 
-use super::AgentLifecycleState;
+use super::AgentState;
 
 /// 非泛型 handle 使用的 runtime 错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -10,7 +10,7 @@ pub enum AgentRuntimeError {
     #[error("agent already exists: {0}")]
     AlreadyExists(ThreadId),
     #[error("agent {0} is not active: {1:?}")]
-    NotActive(ThreadId, AgentLifecycleState),
+    NotActive(ThreadId, AgentState),
     #[error("agent has no active turn: {0}")]
     NoActiveTurn(ThreadId),
     #[error("active turn mismatch: expected {expected}, got {actual}")]

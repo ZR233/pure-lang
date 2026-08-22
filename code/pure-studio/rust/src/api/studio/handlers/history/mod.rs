@@ -1,6 +1,7 @@
 use crate::api::studio::bridge_runtime::active_bridge;
+use crate::api::studio::convert::runtime::bridge_thread_directory_page;
 use crate::api::studio::convert::thread_stream::{
-    bridge_thread, bridge_thread_item, bridge_thread_snapshot, bridge_turn,
+    bridge_thread_item, bridge_thread_snapshot, bridge_turn,
 };
 use crate::api::studio::types::{
     BridgeError, BridgeListThreadsPageRequest, BridgeThreadContextDisposition,
@@ -20,11 +21,7 @@ pub async fn list_threads_page(
             usize::try_from(request.limit).map_err(anyhow::Error::from)?,
         )
         .await?;
-    Ok(BridgeThreadDirectoryPage {
-        meta: page.meta.into(),
-        threads: page.threads.into_iter().map(bridge_thread).collect(),
-        next_cursor: page.next_cursor,
-    })
+    Ok(bridge_thread_directory_page(page.state))
 }
 
 pub async fn read_thread(thread_id: String) -> Result<BridgeThreadSnapshot, BridgeError> {

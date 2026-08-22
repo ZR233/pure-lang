@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, bail};
 
 use super::super::{
-    MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRun, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitStatus,
+    MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRun, WorkCompletionKind,
+    WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitCompletionOutcome,
+    WorkUnitStateKind,
 };
 use crate::StudioIntegratedReviewGate;
 
@@ -37,10 +38,12 @@ pub(crate) async fn integrated_review_gate(
     }
 
     if merges.is_empty() {
-        return if work_units
-            .iter()
-            .all(|work_unit| work_unit.status() == WorkUnitStatus::NoDelivery)
-        {
+        return if work_units.iter().all(|work_unit| {
+            matches!(
+                work_unit.completion_outcome(),
+                Some(WorkUnitCompletionOutcome::NoDelivery { .. })
+            )
+        }) {
             StudioIntegratedReviewGate::NotRequiredNoDelivery
         } else {
             required("仍有工作单未完成无需交付结算")
@@ -70,8 +73,7 @@ fn prove_single_executor_equivalence(
     }
     let delivery_head = candidate
         .completion
-        .head_commit
-        .as_deref()
+        .head_commit()
         .context("获准 delivery completion 缺少提交")?;
     if delivery_head != candidate.merge.delivery_head {
         bail!("MergeRecord 的交付提交不是获准 completion 提交")
@@ -91,16 +93,13 @@ fn prove_single_executor_equivalence(
                 && review.reviewed_head == delivery_head
         })
         .context("获准 completion 没有对应的通过交付审查")?;
-    if !is_terminal(reviewed_status(delivery_review)) {
+    if !delivery_review.kind().is_terminal() {
         bail!("交付审查者尚未结束")
     }
-    if !is_terminal(candidate.work_unit.execution_status()) {
+    if !candidate.work_unit.kind().is_terminal() {
         bail!("执行者尚未结束")
     }
-    if reviews
-        .iter()
-        .any(|review| !is_terminal(review.reviewer_status()))
-    {
+    if reviews.iter().any(|review| review.kind().is_active()) {
         bail!("仍有任务审查者未结束")
     }
 
@@ -126,7 +125,12 @@ fn single_executor_candidate<'a>(
         .executor_thread_id
         .as_deref()
         .context("唯一工作单缺少执行者身份")?;
-    if work_unit.status() != WorkUnitStatus::Merged {
+    if work_unit.kind() != WorkUnitStateKind::Completed
+        || !matches!(
+            work_unit.completion_outcome(),
+            Some(WorkUnitCompletionOutcome::Merged { .. })
+        )
+    {
         bail!("唯一工作单尚未完成合并")
     }
     let [merge] = merges else {
@@ -137,12 +141,12 @@ fn single_executor_candidate<'a>(
     }
     let approved = completions
         .iter()
-        .filter(|completion| completion.status == WorkCompletionStatus::Approved)
+        .filter(|completion| completion.status() == WorkCompletionStatus::Approved)
         .collect::<Vec<_>>();
     let [completion] = approved.as_slice() else {
         bail!("任务不是恰好一个获准 completion")
     };
-    if completion.kind != WorkCompletionKind::Delivery
+    if completion.kind() != WorkCompletionKind::Delivery
         || completion.work_unit_id != work_unit.id
         || completion.executor_agent_id != executor_id
         || merge.completion_id != completion.id
@@ -164,17 +168,6 @@ fn single_executor_candidate<'a>(
         completion,
         merge,
     })
-}
-
-fn reviewed_status(review: &ReviewRoundRecord) -> ThreadExecutionStatus {
-    review.reviewer_status()
-}
-
-fn is_terminal(status: ThreadExecutionStatus) -> bool {
-    !matches!(
-        status,
-        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-    )
 }
 
 fn required(reason: impl Into<String>) -> StudioIntegratedReviewGate {

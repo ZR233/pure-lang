@@ -288,7 +288,10 @@ void registerShellSettingsTests() {
       _emptyState(),
       _testTurn(
         threadId: 'session-1',
-        state: const StudioTurnState.inProgress(StudioTurnActivity.responding),
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.responding,
+        ),
       ),
     );
     final api = _FakeStudioApi(state);
@@ -413,8 +416,9 @@ void registerShellSettingsTests() {
       final api = _FakeStudioApi(
         _twoProjectState(
           selectedProjectId: 'project-a',
-          turnState: const StudioTurnState.inProgress(
-            StudioTurnActivity.responding,
+          turnState: const RunningStudioTurnState(
+            startedAt: 1,
+            activity: StudioTurnActivity.responding,
           ),
         ),
       );
@@ -598,7 +602,11 @@ void registerShellSettingsTests() {
                 _emptyState(),
                 _testTurn(
                   threadId: 'session-1',
-                  state: const StudioTurnState.completed(),
+                  state: const CompletedStudioTurnState(
+                    startedAt: 1,
+                    completedAt: 2,
+                    completion: StudioTurnCompletion.normal,
+                  ),
                 ),
               ),
               const [
@@ -696,9 +704,9 @@ void registerShellSettingsTests() {
               rootThreadId: 'session-1',
               task: TaskRuntimeView(
                 runId: 'task-run-1',
-                state: TaskStateView.facts(
-                  kind: TaskStateKind.implementing,
-                  statusMessage: 'Executor delivery ready',
+                state: const ImplementingTaskStateView(
+                  generation: 0,
+                  design: TaskFinalizedDesignView('test design'),
                 ),
                 revision: 0,
                 workUnits: [],
@@ -737,9 +745,7 @@ void registerShellSettingsTests() {
       findsOneWidget,
     );
     expect(
-      find.byKey(
-        StudioDriverKeys.taskStatus('task-run-1', 'Executor delivery ready'),
-      ),
+      find.byKey(StudioDriverKeys.taskStatus('task-run-1', '')),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -768,7 +774,9 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final state = _stateWithPlannerModels();
-    final thread = state.selectedThread!.copyWith(status: 'running');
+    final thread = state.selectedThread!.copyWith(
+      status: ThreadStatusView.running,
+    );
     final api = _FakeStudioApi(
       state.copyWith(
         threadDirectory: ThreadDirectoryWindow(threads: [thread]),
@@ -941,8 +949,7 @@ void registerShellSettingsTests() {
       id: 'dart',
       transport: 'stdio',
       endpoint: 'dart mcp-server',
-      enabled: true,
-      status: 'ready',
+      state: McpAvailableState(checkedAt: 0, toolCount: 4),
     );
     final state =
         _withSettingsFixture(
@@ -950,7 +957,7 @@ void registerShellSettingsTests() {
           mcpServers: const [server],
         ).copyWith(
           mcpState: McpStateSnapshot(
-            meta: _testObservedMeta(1),
+            revision: 1,
             activeServers: const ['dart'],
             servers: const [server],
           ),
@@ -986,19 +993,18 @@ void registerShellSettingsTests() {
       id: 'zhipu_vision',
       transport: 'stdio',
       endpoint: 'npx',
-      enabled: true,
-      status: 'enabled',
-      availabilityKind: 'unavailable',
-      availabilityMessage: 'MCP connection failed: credential [REDACTED]',
+      state: McpUnavailableState(
+        checkedAt: 0,
+        code: 'mcpServerUnavailable',
+        message: 'MCP connection failed: credential [REDACTED]',
+        retryable: true,
+      ),
     );
     const available = McpServerSettingsView(
       id: 'dart',
       transport: 'stdio',
       endpoint: 'dart mcp-server',
-      enabled: true,
-      status: 'enabled',
-      availabilityKind: 'available',
-      toolCount: 4,
+      state: McpAvailableState(checkedAt: 0, toolCount: 4),
     );
     final state =
         _withSettingsFixture(
@@ -1006,7 +1012,7 @@ void registerShellSettingsTests() {
           mcpServers: const [unavailable, available],
         ).copyWith(
           mcpState: McpStateSnapshot(
-            meta: _testObservedMeta(1),
+            revision: 1,
             activeServers: const ['dart'],
             servers: const [unavailable, available],
           ),
@@ -1042,14 +1048,15 @@ void registerShellSettingsTests() {
     const server = LspServerStateView(
       id: 'rust-analyzer',
       displayName: 'rust-analyzer',
-      availability: 'missingServerComponent',
-      message: 'component missing',
+      state: LspUnavailableState(
+        checkedAt: 0,
+        code: 'lspComponentMissing',
+        message: 'component missing',
+        retryable: true,
+      ),
     );
     final state = _emptyState().copyWith(
-      lspState: LspStateSnapshot(
-        meta: _testObservedMeta(1),
-        servers: const [server],
-      ),
+      lspState: LspStateSnapshot(revision: 1, servers: const [server]),
     );
     final api = _FakeStudioApi(state);
     await _pumpSettingsPage(tester, api);
@@ -1092,21 +1099,28 @@ void registerShellSettingsTests() {
       LspServerStateView(
         id: 'rust-analyzer',
         displayName: 'rust-analyzer',
-        availability: 'available',
-        activityKind: 'indexing',
-        activityTitle: 'Roots Scanned',
-        activityMessage: '166/408',
-        activityPercentage: 40,
+        state: LspAvailableState(
+          checkedAt: 0,
+          diagnosticCount: 0,
+          activity: LspIndexingActivity(
+            title: 'Roots Scanned',
+            message: '166/408',
+            percentage: 40,
+          ),
+        ),
       ),
       LspServerStateView(
         id: 'dart',
         displayName: 'dart',
-        availability: 'available',
-        activityKind: 'busy',
+        state: LspAvailableState(
+          checkedAt: 0,
+          diagnosticCount: 0,
+          activity: LspBusyActivity(),
+        ),
       ),
     ];
     final state = _emptyState().copyWith(
-      lspState: LspStateSnapshot(meta: _testObservedMeta(1), servers: servers),
+      lspState: LspStateSnapshot(revision: 1, servers: servers),
     );
     final api = _FakeStudioApi(state);
     await _pumpSettingsPage(tester, api);
@@ -1736,20 +1750,22 @@ void registerShellSettingsTests() {
         ProviderUsageView(
           providerId: 'zhipu-coding-plan',
           updatedAt: 1,
-          status: 'ready',
-          usageKind: 'zhipuCodingPlan',
-          codingPlan: ZhipuCodingPlanUsageView(
-            limits: [
-              ZhipuQuotaLimitView(
-                window: 'weekly',
-                label: 'weekly',
-                percentage: 40,
-                total: 100,
-                remaining: 60,
-                nextResetAt: 1735689600,
-                usageDetails: [],
+          state: ReadyProviderUsageView(
+            data: ZhipuCodingPlanProviderUsageView(
+              codingPlan: ZhipuCodingPlanUsageView(
+                limits: [
+                  ZhipuQuotaLimitView(
+                    window: 'weekly',
+                    label: 'weekly',
+                    percentage: 40,
+                    total: 100,
+                    remaining: 60,
+                    nextResetAt: 1735689600,
+                    usageDetails: [],
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ],
@@ -1796,18 +1812,26 @@ void registerShellSettingsTests() {
 
   for (final usageState in const [
     (
-      status: 'missingCredential',
+      label: 'missingCredential',
+      state: MissingCredentialProviderUsageView(
+        message: 'Provider API key is not configured',
+      ),
       shortMessage: 'Missing key',
       verboseMessage: 'Provider API key is not configured',
     ),
     (
-      status: 'failed',
+      label: 'failed',
+      state: FailedProviderUsageView(
+        code: 'providerUsageQueryFailed',
+        message: 'Usage query failed',
+        retryable: true,
+      ),
       shortMessage: 'Usage failed',
       verboseMessage: 'Usage query failed',
     ),
   ]) {
     testWidgets(
-      'provider list shows compact ${usageState.status} hint without quota',
+      'provider list shows compact ${usageState.label} hint without quota',
       (tester) async {
         _configureSettingsTestView(tester);
         final api = _FakeStudioApi(
@@ -1816,8 +1840,7 @@ void registerShellSettingsTests() {
             ProviderUsageView(
               providerId: 'zhipu-coding-plan',
               updatedAt: 1,
-              status: usageState.status,
-              usageKind: 'zhipuCodingPlan',
+              state: usageState.state,
             ),
           ],
         );
@@ -1848,22 +1871,20 @@ void registerShellSettingsTests() {
             id: 'local',
             transport: 'stdio',
             endpoint: 'npx',
-            enabled: true,
-            status: 'enabled',
+            state: McpCheckingState(message: 'pending'),
           ),
           McpServerSettingsView(
             id: 'remote',
             transport: 'http',
             endpoint: 'https://example.test/mcp',
-            enabled: false,
-            status: 'disabled',
+            state: McpDisabledState(message: 'disabled'),
           ),
         ],
       );
       final api = _FakeStudioApi(
         settingsState.copyWith(
           mcpState: McpStateSnapshot(
-            meta: _testObservedMeta(1),
+            revision: 1,
             servers: settingsState.mcpServers,
           ),
         ),
@@ -1912,15 +1933,14 @@ void registerShellSettingsTests() {
             id: 'local',
             transport: 'stdio',
             endpoint: 'npx',
-            enabled: true,
-            status: 'enabled',
+            state: McpCheckingState(message: 'pending'),
           ),
         ],
       );
       final api = _FakeStudioApi(
         settingsState.copyWith(
           mcpState: McpStateSnapshot(
-            meta: _testObservedMeta(1),
+            revision: 1,
             activeServers: const ['local'],
             servers: settingsState.mcpServers,
           ),
@@ -2229,61 +2249,65 @@ const _providerListUsages = [
   ProviderUsageView(
     providerId: 'deepseek',
     updatedAt: 1735689600,
-    status: 'ready',
-    usageKind: 'deepseekBalance',
-    balance: DeepSeekBalanceUsageView(
-      isAvailable: true,
-      balances: [
-        DeepSeekBalanceInfoView(
-          currency: 'CNY',
-          totalBalance: '88.00',
-          grantedBalance: '8.00',
-          toppedUpBalance: '80.00',
+    state: ReadyProviderUsageView(
+      data: DeepSeekBalanceProviderUsageView(
+        balance: DeepSeekBalanceUsageView(
+          isAvailable: true,
+          balances: [
+            DeepSeekBalanceInfoView(
+              currency: 'CNY',
+              totalBalance: '88.00',
+              grantedBalance: '8.00',
+              toppedUpBalance: '80.00',
+            ),
+          ],
         ),
-      ],
+      ),
     ),
   ),
   ProviderUsageView(
     providerId: 'zhipu-coding-plan',
     updatedAt: 1735689600,
-    status: 'ready',
-    usageKind: 'zhipuCodingPlan',
-    codingPlan: ZhipuCodingPlanUsageView(
-      level: 'Pro',
-      limits: [
-        ZhipuQuotaLimitView(
-          window: 'mcpMonthly',
-          label: 'mcp',
-          percentage: 20,
-          nextResetAt: 1735689600,
-          usageDetails: [],
+    state: ReadyProviderUsageView(
+      data: ZhipuCodingPlanProviderUsageView(
+        codingPlan: ZhipuCodingPlanUsageView(
+          level: 'Pro',
+          limits: [
+            ZhipuQuotaLimitView(
+              window: 'mcpMonthly',
+              label: 'mcp',
+              percentage: 20,
+              nextResetAt: 1735689600,
+              usageDetails: [],
+            ),
+            ZhipuQuotaLimitView(
+              window: 'other',
+              label: 'Other injected quota',
+              percentage: 10,
+              nextResetAt: 1735689600,
+              usageDetails: [],
+            ),
+            ZhipuQuotaLimitView(
+              window: 'weekly',
+              label: 'weekly',
+              percentage: 50,
+              total: 200,
+              remaining: 100,
+              nextResetAt: 1735689600,
+              usageDetails: [],
+            ),
+            ZhipuQuotaLimitView(
+              window: 'fiveHour',
+              label: 'five hour',
+              percentage: 75,
+              total: 100,
+              remaining: 25,
+              nextResetAt: 1735689600,
+              usageDetails: [],
+            ),
+          ],
         ),
-        ZhipuQuotaLimitView(
-          window: 'other',
-          label: 'Other injected quota',
-          percentage: 10,
-          nextResetAt: 1735689600,
-          usageDetails: [],
-        ),
-        ZhipuQuotaLimitView(
-          window: 'weekly',
-          label: 'weekly',
-          percentage: 50,
-          total: 200,
-          remaining: 100,
-          nextResetAt: 1735689600,
-          usageDetails: [],
-        ),
-        ZhipuQuotaLimitView(
-          window: 'fiveHour',
-          label: 'five hour',
-          percentage: 75,
-          total: 100,
-          remaining: 25,
-          nextResetAt: 1735689600,
-          usageDetails: [],
-        ),
-      ],
+      ),
     ),
   ),
 ];

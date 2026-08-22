@@ -9,11 +9,11 @@ use super::host::{AgentCommitObserver, AgentLifecycleAdapter, ThreadRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent,
-    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentSpawnRequest, AgentSpawnResult, DurableCommitFacts, DurableMailboxEnvelope,
-    RestoredAgentRuntime, SpawnLifecycleRequest, SpawnRollbackPhase, SpawnRollbackReason,
-    ThreadCommit, ThreadCommitOutcome, ThreadId, TurnId,
+    AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest,
+    AgentSpawnResult, AgentState, DurableCommitFacts, DurableMailboxEnvelope, RestoredAgentRuntime,
+    SpawnLifecycleRequest, SpawnRollbackPhase, SpawnRollbackReason, ThreadCommit,
+    ThreadCommitOutcome, ThreadId, TurnId,
 };
 use crate::ThreadEventBus;
 
@@ -386,12 +386,14 @@ async fn evict_agent(
     agent_id: &ThreadId,
 ) -> AgentRuntimeResult<()> {
     let snapshot = snapshot_for(actors, agent_id).await?;
-    if snapshot.active_turn_id.is_some()
-        || snapshot.pending_inputs > 0
-        || matches!(
-            snapshot.activity,
-            AgentActivityState::Active(_) | AgentActivityState::Cancelling
-        )
+    if matches!(
+        snapshot.state,
+        AgentState::Queued(_)
+            | AgentState::Running(_)
+            | AgentState::WaitingTool(_)
+            | AgentState::WaitingInteraction(_)
+            | AgentState::Cancelling(_)
+    ) || snapshot.pending_inputs > 0
     {
         return Err(AgentRuntimeError::InvalidInput(format!(
             "agent {agent_id} is busy and cannot be evicted"

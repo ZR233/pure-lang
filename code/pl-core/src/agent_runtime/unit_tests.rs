@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pl_protocol::{
-    ConversationRecoveryMode, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, ThreadNotification,
-    TurnBillingRecord,
+    ConversationRecoveryMode, InteractionCommand, InteractionRequest, InteractionScope,
+    InteractionStatus, ResolveUserInput, ThreadNotification, TurnBillingRecord, TurnOutcome,
 };
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -31,6 +30,21 @@ enum FactoryMode {
     BudgetLimited,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailingAgentState {
+    Closing,
+    Closed,
+}
+
+impl FailingAgentState {
+    fn matches(self, state: &AgentState) -> bool {
+        matches!(
+            (self, state),
+            (Self::Closing, AgentState::Closing(_)) | (Self::Closed, AgentState::Closed(_))
+        )
+    }
+}
+
 #[derive(Clone)]
 struct TestRepository {
     states: Arc<Mutex<BTreeMap<ThreadId, ThreadActorState>>>,
@@ -41,7 +55,7 @@ struct TestRepository {
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
-    fail_lifecycle: Arc<Mutex<Option<AgentLifecycleState>>>,
+    fail_lifecycle: Arc<Mutex<Option<FailingAgentState>>>,
     fail_fault: Arc<Mutex<bool>>,
     fail_turn_queue: Arc<Mutex<bool>>,
     fail_turn_started: Arc<Mutex<bool>>,
@@ -83,8 +97,8 @@ impl TestRepository {
         *self.fail_registration.lock().unwrap() = true;
     }
 
-    fn fail_next_lifecycle_commit(&self, lifecycle: AgentLifecycleState) {
-        *self.fail_lifecycle.lock().unwrap() = Some(lifecycle);
+    fn fail_next_lifecycle_commit(&self, state: FailingAgentState) {
+        *self.fail_lifecycle.lock().unwrap() = Some(state);
     }
 
     fn fail_next_turn_started_commit(&self) {
@@ -163,7 +177,7 @@ impl ThreadRepository for TestRepository {
             .fail_lifecycle
             .lock()
             .unwrap()
-            .is_some_and(|lifecycle| lifecycle == commit.next_state.snapshot.lifecycle);
+            .is_some_and(|target| target.matches(&commit.next_state.snapshot.state));
         if should_fail_lifecycle {
             self.fail_lifecycle.lock().unwrap().take();
             return Err(TestError("lifecycle commit failed".to_string()));
@@ -595,35 +609,32 @@ fn pending_user_interaction(
     thread_id: &ThreadId,
     turn_id: &str,
 ) -> InteractionRequest {
-    InteractionRequest {
-        interaction_id: interaction_id.to_string(),
-        kind: InteractionKind::UserInput,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    InteractionRequest::user_input(
+        interaction_id,
+        InteractionScope {
             thread_id: thread_id.to_string(),
             turn_id: turn_id.to_string(),
             item_id: Some(format!("{interaction_id}:item")),
             tool_id: Some(format!("{interaction_id}:tool")),
             agent_path: None,
         },
-        payload: InteractionPayload::UserInput {
-            questions: Vec::new(),
-        },
-        created_at: 1,
-        updated_at: 1,
-        resolved_at: None,
-        resolution: None,
-    }
+        Vec::new(),
+        1,
+    )
 }
 
 fn interaction_continuation(pending: &InteractionRequest) -> AgentInteractionContinuationRequest {
     let mut resolved = pending.clone();
-    resolved.status = InteractionStatus::Resolved;
-    resolved.updated_at = 2;
-    resolved.resolved_at = Some(2);
-    resolved.resolution = Some(InteractionResolution::UserInput {
-        answers: Default::default(),
-    });
+    let decision = resolved
+        .decide(InteractionCommand::ResolveUserInput(ResolveUserInput {
+            interaction_id: resolved.interaction_id.clone(),
+            expected_revision: resolved.revision,
+            operation_id: "resolve-test".to_string(),
+            resolved_at: 2,
+            answers: Default::default(),
+        }))
+        .unwrap();
+    resolved.apply(decision, 2);
     let mail_id = AgentInteractionContinuationRequest::stable_mail_id(&pending.interaction_id);
     AgentInteractionContinuationRequest::new(
         resolved,
@@ -813,9 +824,11 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
         .unwrap();
     let waited = handle.wait_until_idle(agent_id.clone()).await.unwrap();
 
-    assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Active);
-    assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
-    assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Failed);
+    assert!(matches!(waited.snapshot.state, AgentState::Idle(_)));
+    assert!(matches!(
+        waited.last_turn.unwrap().outcome,
+        TurnOutcome::Failed(_)
+    ));
     assert_eq!(repository.state(&agent_id).snapshot, waited.snapshot);
     assert_eq!(host.events.runtime_len(), 4);
     runtime.shutdown().await.unwrap();
@@ -1130,14 +1143,14 @@ async fn wait_agents_observes_turn_that_finished_before_subscription() {
     assert_eq!(result.reason, AgentDirectoryWaitReason::Terminal);
     assert_eq!(result.messages.len(), 1);
     assert_eq!(result.messages[0].identity.id, agent_id);
-    assert_eq!(result.messages[0].lifecycle, AgentLifecycleState::Active);
+    assert!(matches!(result.messages[0].state, AgentState::Idle(_)));
     let outcome = result.messages[0]
         .last_turn_outcome
         .as_ref()
         .expect("terminal wait result must include the canonical turn outcome");
-    assert_eq!(outcome.kind, TurnOutcomeKind::Failed);
+    assert!(matches!(outcome.outcome, TurnOutcome::Failed(_)));
     assert_eq!(outcome.thread_id, ThreadId::new("root").unwrap());
-    assert!(outcome.reason.is_some());
+    assert!(outcome.outcome.failure().is_some());
     runtime.shutdown().await.unwrap();
 }
 
@@ -1181,11 +1194,10 @@ async fn rollover_timeout_commits_budget_outcome_and_wakes_wait_agents() {
         .last_turn_outcome
         .as_ref()
         .expect("wait_agents must return the canonical budget outcome");
-    assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
-    let budget_limit = outcome
-        .budget_limit
-        .as_ref()
-        .expect("budget terminal must preserve measured usage");
+    let TurnOutcome::BudgetLimited(budget) = &outcome.outcome else {
+        panic!("budget terminal must preserve measured usage");
+    };
+    let budget_limit = budget.limit();
     assert_eq!(budget_limit.kind, pl_protocol::BudgetLimitKind::WallClock);
     assert_eq!(budget_limit.usage.model_steps, 0);
     assert_eq!(budget_limit.usage.tool_calls, 0);
@@ -1195,14 +1207,11 @@ async fn rollover_timeout_commits_budget_outcome_and_wakes_wait_agents() {
         Some(outcome),
         "wait_agents must return the complete persisted outcome, including measured elapsed time"
     );
-    assert_eq!(outcome.reason.as_deref(), Some("budgetLimited"));
-    assert!(!outcome.rollover_compacted);
-    assert!(
-        outcome
-            .rollover_compaction_error
-            .as_deref()
-            .is_some_and(|error| error.contains("timed out after 2000ms"))
-    );
+    assert!(matches!(
+        budget.rollover(),
+        pl_protocol::TurnRolloverOutcome::Failed { error }
+            if error.contains("timed out after 2000ms")
+    ));
     assert_eq!(outcome.usage, pl_model::TokenUsage::default());
     assert_eq!(
         repository.state(&agent_id).session.session.messages().len(),
@@ -1251,10 +1260,7 @@ async fn stopping_during_rollover_commits_cancelled_without_partial_replacement(
     let outcome = waited
         .last_turn
         .expect("cancelled turn outcome is required");
-    assert_eq!(outcome.kind, TurnOutcomeKind::Cancelled);
-    assert_eq!(outcome.budget_limit, None);
-    assert!(!outcome.rollover_compacted);
-    assert_eq!(outcome.rollover_compaction_error, None);
+    assert!(matches!(outcome.outcome, TurnOutcome::Cancelled(_)));
     assert_eq!(
         repository.state(&agent_id).session.session.messages().len(),
         1
@@ -1291,9 +1297,11 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
     let waited =
         wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(10)).await;
     let outcome = waited.last_turn.expect("budget outcome is required");
-    assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
-    assert!(outcome.rollover_compacted);
-    assert_eq!(outcome.rollover_compaction_error, None);
+    assert!(matches!(
+        outcome.outcome,
+        TurnOutcome::BudgetLimited(ref budget)
+            if matches!(budget.rollover(), pl_protocol::TurnRolloverOutcome::Succeeded)
+    ));
 
     let commits = repository.commits();
     let terminal_commits = commits
@@ -1315,9 +1323,8 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
         .filter_map(|event| match &event.kind {
             pl_trace::TraceEventKind::TracePartStarted { item }
             | pl_trace::TraceEventKind::TracePartCompleted { item }
-            | pl_trace::TraceEventKind::TracePartFailed { item, .. } => Some(item),
+            | pl_trace::TraceEventKind::TracePartFailed { item } => Some(item),
             pl_trace::TraceEventKind::TracePartDelta { .. }
-            | pl_trace::TraceEventKind::PlanLifecycleChanged { .. }
             | pl_trace::TraceEventKind::InteractionChanged { .. }
             | pl_trace::TraceEventKind::SkillActivated { .. }
             | pl_trace::TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -1327,11 +1334,11 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
     assert!(
         trace_parts
             .iter()
-            .all(|item| item.turn_id == turn_id.as_str()),
+            .all(|item| item.turn_id() == turn_id.as_str()),
         "attached rollover trace items must remain owned by the persisted Turn"
     );
     assert!(trace_parts.iter().any(|item| {
-        item.item_id
+        item.item_id()
             .starts_with(&format!("{turn_id}:rollover-compaction:progress:"))
     }));
     let context = terminal
@@ -1373,7 +1380,11 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
             | AgentRuntimeEventKind::Faulted { .. } => None,
         })
         .expect("terminal commit must carry TurnFinished");
-    assert!(event_outcome.rollover_compacted);
+    assert!(matches!(
+        event_outcome.outcome,
+        TurnOutcome::BudgetLimited(ref budget)
+            if matches!(budget.rollover(), pl_protocol::TurnRolloverOutcome::Succeeded)
+    ));
     assert_eq!(
         terminal.next_state.snapshot.last_turn.as_ref(),
         Some(event_outcome)
@@ -1698,7 +1709,7 @@ async fn start_or_queue_never_steers_an_active_turn() {
     assert!(durable.active_input.is_some());
     assert!(durable.pending_inputs.iter().any(|input| {
         input.mail_id == "mail:next"
-            && matches!(input.delivery_state, MailboxDeliveryState::Pending)
+            && matches!(input.delivery_state, MailboxDeliveryState::Pending(_))
     }));
 
     host.turn_factory.blocker.notify_one();
@@ -1801,10 +1812,10 @@ async fn interaction_continuations_queue_without_steering_origin_or_unrelated_ac
 
     assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
     let durable = repository.state(&agent_id);
-    assert_eq!(durable.snapshot.active_turn_id.as_ref(), Some(&active_turn));
+    assert_eq!(durable.snapshot.active_turn_id(), Some(&active_turn));
     assert_eq!(durable.pending_inputs.len(), 2);
     assert!(durable.pending_inputs.iter().all(|input| {
-        matches!(input.delivery_state, MailboxDeliveryState::Pending)
+        matches!(input.delivery_state, MailboxDeliveryState::Pending(_))
             && input.queue_coalescing_key.is_none()
     }));
     runtime.shutdown().await.unwrap();
@@ -1843,7 +1854,7 @@ async fn interaction_continuation_repository_failure_rolls_back_resolution_and_i
             .interactions
             .iter()
             .find(|interaction| interaction.interaction_id == pending.interaction_id)
-            .map(|interaction| interaction.status.clone()),
+            .map(InteractionRequest::status),
         Some(InteractionStatus::Pending)
     );
     runtime.shutdown().await.unwrap();
@@ -1890,10 +1901,7 @@ async fn queued_inputs_with_the_same_key_share_the_latest_turn() {
     wait_for_prepared_messages(&host.turn_factory, 2).await;
 
     let durable = repository.state(&agent_id);
-    assert_eq!(
-        durable.snapshot.active_turn_id,
-        Some(queued_turns[2].clone())
-    );
+    assert_eq!(durable.snapshot.active_turn_id(), Some(&queued_turns[2]));
     assert_eq!(
         durable
             .active_input
@@ -1904,7 +1912,7 @@ async fn queued_inputs_with_the_same_key_share_the_latest_turn() {
     assert_eq!(durable.pending_inputs.len(), 2);
     assert!(durable.pending_inputs.iter().all(|input| matches!(
         &input.delivery_state,
-        MailboxDeliveryState::Claimed { turn_id, .. } if turn_id == &queued_turns[2]
+        MailboxDeliveryState::Claimed(state) if state.turn_id() == &queued_turns[2]
     )));
     assert_eq!(
         host.turn_factory.prepared_batches.lock().unwrap()[1],
@@ -1943,7 +1951,10 @@ async fn cancellation_aborts_blocked_turn_after_grace_and_records_cancelled_outc
     handle.cancel_turn(agent_id.clone(), turn_id).await.unwrap();
     let waited = wait_for_idle(&handle, agent_id).await;
 
-    assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Cancelled);
+    assert!(matches!(
+        waited.last_turn.unwrap().outcome,
+        TurnOutcome::Cancelled(_)
+    ));
     assert_eq!(
         repository
             .state(&ThreadId::new("root").unwrap())
@@ -1975,11 +1986,14 @@ async fn shutdown_durably_cancels_running_turn_before_actor_exit() {
     runtime.shutdown().await.unwrap();
 
     let state = repository.state(&agent_id);
-    assert_eq!(state.snapshot.activity, AgentActivityState::Idle);
-    assert_eq!(state.snapshot.active_turn_id, None);
+    assert!(matches!(state.snapshot.state, AgentState::Idle(_)));
+    assert_eq!(state.snapshot.active_turn_id(), None);
     let outcome = state.snapshot.last_turn.unwrap();
-    assert_eq!(outcome.kind, TurnOutcomeKind::Cancelled);
-    assert_eq!(outcome.reason.as_deref(), Some("runtime_shutdown"));
+    assert!(matches!(
+        outcome.outcome,
+        TurnOutcome::Cancelled(ref cancelled)
+            if matches!(cancelled.cause(), pl_protocol::TurnCancellationCause::RuntimeShutdown)
+    ));
 }
 
 #[tokio::test]
@@ -2001,16 +2015,17 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
     let waited = wait_for_idle(&handle, agent_id.clone()).await;
     let snapshot = waited.snapshot;
 
-    assert_eq!(snapshot.lifecycle, AgentLifecycleState::Faulted);
-    assert_eq!(
-        waited.last_turn.as_ref().map(|outcome| outcome.kind),
-        Some(TurnOutcomeKind::Failed)
-    );
+    assert!(matches!(snapshot.state, AgentState::Faulted(_)));
+    assert!(matches!(
+        waited.last_turn.as_ref().map(|outcome| &outcome.outcome),
+        Some(TurnOutcome::Failed(_))
+    ));
     assert!(
         waited
             .last_turn
             .as_ref()
-            .and_then(|outcome| outcome.reason.as_deref())
+            .and_then(|outcome| outcome.outcome.failure())
+            .map(|failure| failure.message.as_str())
             .is_some_and(|reason| reason.contains("terminal commit failed"))
     );
     let error = handle
@@ -2020,10 +2035,10 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
         )
         .await
         .unwrap_err();
-    assert_eq!(
+    assert!(matches!(
         error,
-        AgentRuntimeError::NotActive(agent_id, AgentLifecycleState::Faulted)
-    );
+        AgentRuntimeError::NotActive(id, AgentState::Faulted(_)) if id == agent_id
+    ));
     runtime.shutdown().await.unwrap();
 }
 
@@ -2047,16 +2062,16 @@ async fn fault_commit_failure_preserves_in_memory_turn_outcome() {
 
     let waited = wait_for_idle(&handle, agent_id).await;
 
-    assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Faulted);
-    assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
+    assert!(matches!(waited.snapshot.state, AgentState::Faulted(_)));
     let outcome = waited
         .last_turn
         .expect("in-memory fallback must retain the failed turn outcome");
-    assert_eq!(outcome.kind, TurnOutcomeKind::Failed);
+    assert!(matches!(outcome.outcome, TurnOutcome::Failed(_)));
     assert!(
         outcome
-            .reason
-            .as_deref()
+            .outcome
+            .failure()
+            .map(|failure| failure.message.as_str())
             .is_some_and(|reason| reason.contains("terminal commit failed"))
     );
     runtime.shutdown().await.unwrap();
@@ -2080,22 +2095,21 @@ async fn turn_started_repository_failure_commits_faulted_state() {
         .unwrap();
 
     let waited = wait_for_idle(&handle, agent_id.clone()).await;
-    assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Faulted);
-    assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
-    assert_eq!(waited.snapshot.active_turn_id, None);
+    assert!(matches!(waited.snapshot.state, AgentState::Faulted(_)));
     let failed_turn = waited.last_turn.expect("failed turn should be visible");
-    assert_eq!(failed_turn.kind, TurnOutcomeKind::Failed);
+    assert_eq!(waited.snapshot.active_turn_id(), Some(&failed_turn.turn_id));
+    assert!(matches!(failed_turn.outcome, TurnOutcome::Failed(_)));
     assert!(
         failed_turn
-            .reason
-            .as_deref()
+            .outcome
+            .failure()
+            .map(|failure| failure.message.as_str())
             .is_some_and(|reason| reason.contains("turn started commit failed"))
     );
 
     let durable = repository.state(&agent_id).snapshot;
-    assert_eq!(durable.lifecycle, AgentLifecycleState::Faulted);
-    assert_eq!(durable.activity, AgentActivityState::Idle);
-    assert_eq!(durable.active_turn_id, None);
+    assert!(matches!(durable.state, AgentState::Faulted(_)));
+    assert_eq!(durable.active_turn_id(), Some(&failed_turn.turn_id));
     assert_eq!(durable.pending_inputs, 1);
     assert_eq!(durable.last_turn, waited.snapshot.last_turn);
     runtime.shutdown().await.unwrap();
@@ -2105,8 +2119,7 @@ async fn turn_started_repository_failure_commits_faulted_state() {
         .await
         .unwrap();
     let recovered = wait_for_idle(&restarted.handle(), agent_id.clone()).await;
-    assert_eq!(recovered.snapshot.lifecycle, AgentLifecycleState::Faulted);
-    assert_eq!(recovered.snapshot.activity, AgentActivityState::Idle);
+    assert!(matches!(recovered.snapshot.state, AgentState::Faulted(_)));
     assert_eq!(recovered.snapshot.pending_inputs, 1);
     assert_eq!(
         restarted_host
@@ -2139,15 +2152,16 @@ async fn turn_activity_change_commits_event_and_snapshot_atomically() {
         .unwrap();
 
     handle
-        .set_activity(agent_id.clone(), turn_id.clone(), ActiveKind::WaitingTool)
+        .set_activity(
+            agent_id.clone(),
+            turn_id.clone(),
+            AgentActivityUpdate::WaitingTool,
+        )
         .await
         .unwrap();
 
     let snapshot = handle.snapshot(agent_id.clone()).await.unwrap();
-    assert_eq!(
-        snapshot.activity,
-        AgentActivityState::Active(ActiveKind::WaitingTool)
-    );
+    assert!(matches!(snapshot.state, AgentState::WaitingTool(_)));
     let activity_event = {
         let committed = events.runtime.lock().unwrap();
         committed
@@ -2155,15 +2169,17 @@ async fn turn_activity_change_commits_event_and_snapshot_atomically() {
             .find_map(|event| match &event.kind {
                 AgentRuntimeEventKind::TurnActivityChanged {
                     turn_id: event_turn_id,
-                    kind,
+                    activity,
                     snapshot,
                     ..
-                } if event_turn_id == &turn_id => Some((*kind, snapshot.as_ref().clone())),
+                } if event_turn_id == &turn_id => {
+                    Some((activity.clone(), snapshot.as_ref().clone()))
+                }
                 _ => None,
             })
             .expect("activity change must publish a committed runtime event")
     };
-    assert_eq!(activity_event.0, ActiveKind::WaitingTool);
+    assert_eq!(activity_event.0, AgentActivityUpdate::WaitingTool);
     assert_eq!(activity_event.1, snapshot);
     assert_eq!(repository.state(&agent_id).snapshot, snapshot);
     handle.cancel_turn(agent_id, turn_id).await.unwrap();
@@ -2175,8 +2191,17 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
     let mut state = registration("root", "chat").into_durable_state();
     state.snapshot.revision = 7;
     state.snapshot.event_sequence = 11;
-    state.snapshot.activity = AgentActivityState::Active(ActiveKind::Running);
-    state.snapshot.active_turn_id = Some(TurnId::new("old-turn").unwrap());
+    let old_turn = TurnId::new("old-turn").unwrap();
+    state
+        .snapshot
+        .transition(AgentCommand::Queue {
+            turn_id: old_turn.clone(),
+        })
+        .unwrap();
+    state
+        .snapshot
+        .transition(AgentCommand::Start { turn_id: old_turn })
+        .unwrap();
     let repository = TestRepository::with_state(state);
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
 
@@ -2187,11 +2212,11 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
         .await
         .unwrap();
 
-    assert_eq!(snapshot.activity, AgentActivityState::Idle);
+    assert!(matches!(snapshot.state, AgentState::Idle(_)));
     assert_eq!(snapshot.revision, 8);
     assert_eq!(
-        snapshot.last_turn.unwrap().reason,
-        Some("runtime_restarted".to_string())
+        snapshot.last_turn.unwrap().outcome,
+        TurnOutcome::cancelled(pl_protocol::TurnCancellationCause::Recovery)
     );
     assert_eq!(
         repository
@@ -2220,7 +2245,12 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
             queued_at: index as i64,
         });
     }
-    state.snapshot.activity = AgentActivityState::Queued;
+    state
+        .snapshot
+        .transition(AgentCommand::Queue {
+            turn_id: TurnId::new("turn-0").unwrap(),
+        })
+        .unwrap();
     state.snapshot.pending_inputs = state.pending_inputs.len();
     let repository = TestRepository::with_state(state);
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);
@@ -2257,7 +2287,12 @@ async fn restored_inputs_wait_for_host_resource_activation() {
         delivery_state: Default::default(),
         queued_at: 1,
     });
-    state.snapshot.activity = AgentActivityState::Queued;
+    state
+        .snapshot
+        .transition(AgentCommand::Queue {
+            turn_id: TurnId::new("restored-turn").unwrap(),
+        })
+        .unwrap();
     state.snapshot.pending_inputs = 1;
     let host = TestHost::new(TestRepository::with_state(state), FactoryMode::Fail);
     let mut options = test_options();
@@ -2331,18 +2366,18 @@ async fn close_closes_descendants_from_deepest_to_root() {
 
     let snapshot = handle.close(root.clone()).await.unwrap();
 
-    assert_eq!(snapshot.lifecycle, AgentLifecycleState::Closed);
+    assert!(matches!(snapshot.state, AgentState::Closed(_)));
     assert_eq!(
         host.lifecycle.close_order.lock().unwrap().clone(),
         vec![grandchild.clone(), child.clone(), root]
     );
     assert_eq!(
-        handle.snapshot(child).await.unwrap().lifecycle,
-        AgentLifecycleState::Closed
+        handle.snapshot(child).await.unwrap().state,
+        AgentState::Closed(ClosedAgentState::new())
     );
     assert_eq!(
-        handle.snapshot(grandchild).await.unwrap().lifecycle,
-        AgentLifecycleState::Closed
+        handle.snapshot(grandchild).await.unwrap().state,
+        AgentState::Closed(ClosedAgentState::new())
     );
     runtime.shutdown().await.unwrap();
 }
@@ -2374,7 +2409,7 @@ async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
 
     let snapshot = handle.retire(root.clone()).await.unwrap();
 
-    assert_eq!(snapshot.lifecycle, AgentLifecycleState::Closed);
+    assert!(matches!(snapshot.state, AgentState::Closed(_)));
     assert!(handle.list().await.unwrap().is_empty());
     assert!(handle.directory_snapshot().agents.is_empty());
     assert!(matches!(
@@ -2465,7 +2500,7 @@ async fn spawn_activation_failure_is_durably_closed_after_successful_rollback() 
 
     assert!(error.to_string().contains("activate spawn failed"));
     assert_eq!(children.len(), 1);
-    assert_eq!(children[0].lifecycle, AgentLifecycleState::Closed);
+    assert!(matches!(children[0].state, AgentState::Closed(_)));
     assert_eq!(children[0].pending_inputs, 0);
     assert_eq!(
         repository.state(&children[0].identity.id).snapshot,
@@ -2502,7 +2537,7 @@ async fn spawn_rollback_failure_is_retained_in_fault_diagnostic() {
         .into_iter()
         .find(|snapshot| snapshot.identity.parent_id.is_some())
         .expect("faulted child");
-    assert_eq!(child.lifecycle, AgentLifecycleState::Faulted);
+    assert!(matches!(child.state, AgentState::Faulted(_)));
     runtime.shutdown().await.unwrap();
 }
 
@@ -2521,14 +2556,14 @@ async fn close_prepare_failure_keeps_agent_active() {
     let error = handle.close(root.clone()).await.unwrap_err();
 
     assert!(error.to_string().contains("prepare close failed"));
-    assert_eq!(
-        handle.snapshot(root.clone()).await.unwrap().lifecycle,
-        AgentLifecycleState::Active
-    );
-    assert_eq!(
-        repository.state(&root).snapshot.lifecycle,
-        AgentLifecycleState::Active
-    );
+    assert!(matches!(
+        handle.snapshot(root.clone()).await.unwrap().state,
+        AgentState::Idle(_)
+    ));
+    assert!(matches!(
+        repository.state(&root).snapshot.state,
+        AgentState::Idle(_)
+    ));
     runtime.shutdown().await.unwrap();
 }
 
@@ -2542,15 +2577,15 @@ async fn closing_commit_failure_rolls_back_prepared_resources() {
     let handle = runtime.handle();
     let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
-    repository.fail_next_lifecycle_commit(AgentLifecycleState::Closing);
+    repository.fail_next_lifecycle_commit(FailingAgentState::Closing);
 
     let error = handle.close(root.clone()).await.unwrap_err();
 
     assert!(error.to_string().contains("lifecycle commit failed"));
-    assert_eq!(
-        repository.state(&root).snapshot.lifecycle,
-        AgentLifecycleState::Active
-    );
+    assert!(matches!(
+        repository.state(&root).snapshot.state,
+        AgentState::Idle(_)
+    ));
     assert_eq!(host.lifecycle.close_order.lock().unwrap().len(), 0);
     assert_eq!(
         host.lifecycle.close_rollbacks.lock().unwrap().as_slice(),
@@ -2574,14 +2609,14 @@ async fn external_close_failure_rolls_back_and_restores_active_state() {
     let error = handle.close(root.clone()).await.unwrap_err();
 
     assert!(error.to_string().contains("commit close failed"));
-    assert_eq!(
-        handle.snapshot(root.clone()).await.unwrap().lifecycle,
-        AgentLifecycleState::Active
-    );
-    assert_eq!(
-        repository.state(&root).snapshot.lifecycle,
-        AgentLifecycleState::Active
-    );
+    assert!(matches!(
+        handle.snapshot(root.clone()).await.unwrap().state,
+        AgentState::Idle(_)
+    ));
+    assert!(matches!(
+        repository.state(&root).snapshot.state,
+        AgentState::Idle(_)
+    ));
     assert_eq!(
         host.lifecycle.close_rollbacks.lock().unwrap().as_slice(),
         &[root]
@@ -2605,23 +2640,18 @@ async fn failed_close_compensation_faults_agent_durably() {
     let error = handle.close(root.clone()).await.unwrap_err();
 
     assert!(error.to_string().contains("close rollback failed"));
-    assert_eq!(
-        handle.snapshot(root.clone()).await.unwrap().lifecycle,
-        AgentLifecycleState::Faulted
-    );
-    assert_eq!(
-        repository.state(&root).snapshot.lifecycle,
-        AgentLifecycleState::Faulted
-    );
-    assert_eq!(
-        handle
-            .wait_until_idle(root)
-            .await
-            .unwrap()
-            .snapshot
-            .lifecycle,
-        AgentLifecycleState::Faulted
-    );
+    assert!(matches!(
+        handle.snapshot(root.clone()).await.unwrap().state,
+        AgentState::Faulted(_)
+    ));
+    assert!(matches!(
+        repository.state(&root).snapshot.state,
+        AgentState::Faulted(_)
+    ));
+    assert!(matches!(
+        handle.wait_until_idle(root).await.unwrap().snapshot.state,
+        AgentState::Faulted(_)
+    ));
     runtime.shutdown().await.unwrap();
 }
 
@@ -2635,15 +2665,15 @@ async fn closed_state_commit_failure_rolls_back_external_close() {
     let handle = runtime.handle();
     let root = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
-    repository.fail_next_lifecycle_commit(AgentLifecycleState::Closed);
+    repository.fail_next_lifecycle_commit(FailingAgentState::Closed);
 
     let error = handle.close(root.clone()).await.unwrap_err();
 
     assert!(error.to_string().contains("lifecycle commit failed"));
-    assert_eq!(
-        repository.state(&root).snapshot.lifecycle,
-        AgentLifecycleState::Active
-    );
+    assert!(matches!(
+        repository.state(&root).snapshot.state,
+        AgentState::Idle(_)
+    ));
     assert_eq!(
         host.lifecycle.close_order.lock().unwrap().as_slice(),
         std::slice::from_ref(&root)
@@ -2673,15 +2703,12 @@ async fn closing_running_agent_durably_records_cancelled_outcome() {
 
     let snapshot = handle.close(root.clone()).await.unwrap();
 
-    assert_eq!(snapshot.lifecycle, AgentLifecycleState::Closed);
-    assert_eq!(
-        snapshot.last_turn.as_ref().unwrap().kind,
-        TurnOutcomeKind::Cancelled
-    );
-    assert_eq!(
-        snapshot.last_turn.as_ref().unwrap().reason.as_deref(),
-        Some("agent_close_requested")
-    );
+    assert!(matches!(snapshot.state, AgentState::Closed(_)));
+    assert!(matches!(
+        snapshot.last_turn.as_ref().map(|outcome| &outcome.outcome),
+        Some(TurnOutcome::Cancelled(cancelled))
+            if matches!(cancelled.cause(), pl_protocol::TurnCancellationCause::AgentClosed)
+    ));
     assert_eq!(repository.state(&root).snapshot, snapshot);
     runtime.shutdown().await.unwrap();
 }

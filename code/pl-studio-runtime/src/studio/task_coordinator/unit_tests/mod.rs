@@ -5,17 +5,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::canonical_content_hash;
 use pl_protocol::AgentWorkingState;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 
 use super::merge::TaskRecordMergeInput;
 use super::test_support::executor_blueprint;
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
-    AgentSession, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
-    InteractionStatus, StudioMode, StudioStore, TurnOptions, TurnWorkingSetHandle,
+    AgentSession, InteractionCommand, InteractionRequest, InteractionScope, StudioMode,
+    StudioStore, TurnOptions, TurnWorkingSetHandle,
 };
 use pl_core::tool::cache::TurnToolCacheHandle;
+
+fn delivery_content(delivery: &AgentDelivery) -> WorkCompletionContent {
+    WorkCompletionContent::delivery(delivery.head_commit.clone(), delivery.changed_files.clone())
+        .expect("test delivery has a head commit")
+}
 
 async fn finalize_test_design(store: &StudioStore, run: &TaskRun) -> TaskRun {
     store
@@ -172,12 +177,9 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
         .unwrap();
     let persisted = rounds.last().unwrap();
     assert_eq!(persisted.id, round.id);
-    assert_eq!(
-        persisted.reviewer_thread_id.as_deref(),
-        Some("agent-reviewer")
-    );
+    assert_eq!(persisted.reviewer_thread_id(), Some("agent-reviewer"));
     assert_eq!(persisted.requested_by_call_id, "call-review");
-    assert_eq!(persisted.reviewer_status(), ThreadExecutionStatus::Running);
+    assert_eq!(persisted.kind(), ReviewRoundStateKind::Running);
     fixture.cleanup();
 }
 
@@ -206,8 +208,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .store
         .settle_reviewer_turn_finished(
             "agent-reviewer-terminal",
-            crate::TurnOutcomeKind::Completed,
-            Some("returned text instead of review_exit"),
+            &crate::TurnOutcome::completed(crate::TurnCompletion::Normal),
         )
         .await
         .unwrap();
@@ -227,7 +228,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .pop()
         .unwrap();
     assert_eq!(round.verdict(), ReviewVerdict::Failed);
-    assert_eq!(round.reviewer_status(), ThreadExecutionStatus::Failed);
+    assert_eq!(round.kind(), ReviewRoundStateKind::Failed);
     let wakes = fixture
         .store
         .list_pending_task_planner_wakes()
@@ -339,10 +340,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     let persisted = rounds.last().unwrap();
     assert_eq!(persisted.verdict(), ReviewVerdict::Pass);
     assert_eq!(persisted.design_references[0].path, "design/guide.md");
-    assert_eq!(
-        persisted.reviewer_status(),
-        ThreadExecutionStatus::Completed
-    );
+    assert_eq!(persisted.kind(), ReviewRoundStateKind::Passed);
     fixture.cleanup();
 }
 
@@ -415,10 +413,7 @@ async fn rejected_review_exit_can_page_diagnostics_and_retry_in_the_same_turn() 
         .pop()
         .unwrap();
     assert_eq!(persisted_rejection.verdict(), ReviewVerdict::Pending);
-    assert_eq!(
-        persisted_rejection.reviewer_status(),
-        ThreadExecutionStatus::Running
-    );
+    assert_eq!(persisted_rejection.kind(), ReviewRoundStateKind::Running);
     assert_eq!(persisted_rejection.summary(), None);
     assert!(persisted_rejection.findings.is_empty());
     assert_eq!(
@@ -596,25 +591,18 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .await
         .unwrap();
 
-    let mut pending = InteractionRequest {
-        interaction_id: "completion-gate-pending".to_string(),
-        kind: InteractionKind::UserInput,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    let mut pending = InteractionRequest::user_input(
+        "completion-gate-pending",
+        InteractionScope {
             thread_id: fixture.root_thread_id.clone(),
             turn_id: "completion-gate-turn".to_string(),
             item_id: Some("completion-gate-item".to_string()),
             tool_id: None,
             agent_path: None,
         },
-        payload: InteractionPayload::UserInput {
-            questions: Vec::new(),
-        },
-        created_at: 1,
-        updated_at: 1,
-        resolved_at: None,
-        resolution: None,
-    };
+        Vec::new(),
+        1,
+    );
     fixture.store.upsert_interaction(&pending).await.unwrap();
     let pending_error = fixture
         .store
@@ -629,15 +617,15 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap_err();
     let pending_error = pending_error
         .downcast_ref::<crate::studio::store::PendingTaskInteractions>()
-        .expect("pending interaction must be a typed completion rejection");
+        .unwrap_or_else(|| {
+            panic!("pending interaction must be a typed completion rejection: {pending_error:#}")
+        });
     assert!(
         pending_error
             .user_message()
             .contains("completion-gate-pending")
     );
-    pending.status = InteractionStatus::Cancelled;
-    pending.updated_at = 2;
-    pending.resolved_at = Some(2);
+    cancel_test_interaction(&mut pending, 2);
     fixture.store.upsert_interaction(&pending).await.unwrap();
 
     let completed = fixture
@@ -748,47 +736,33 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
         .await
         .unwrap();
 
-    let mut pending = InteractionRequest {
-        interaction_id: "pending-root-plan".to_string(),
-        kind: InteractionKind::PlanConfirmation,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    let mut pending = InteractionRequest::plan_confirmation(
+        "pending-root-plan",
+        InteractionScope {
             thread_id: fixture.root_thread_id.clone(),
             turn_id: "turn-root-plan".to_string(),
             item_id: Some("item-root-plan".to_string()),
             tool_id: None,
             agent_path: None,
         },
-        payload: InteractionPayload::PlanConfirmation {
-            plan_id: "item-root-plan".to_string(),
-            content: "root must resolve its own interaction".to_string(),
-        },
-        created_at: 1,
-        updated_at: 1,
-        resolved_at: None,
-        resolution: None,
-    };
+        "item-root-plan",
+        "root must resolve its own interaction",
+        1,
+    );
     fixture.store.upsert_interaction(&pending).await.unwrap();
-    let child_pending = InteractionRequest {
-        interaction_id: "pending-child-plan".to_string(),
-        kind: InteractionKind::PlanConfirmation,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    let child_pending = InteractionRequest::plan_confirmation(
+        "pending-child-plan",
+        InteractionScope {
             thread_id: fixture.subagent.id.clone(),
             turn_id: "turn-child-plan".to_string(),
             item_id: Some("item-child-plan".to_string()),
             tool_id: None,
             agent_path: Some(fixture.subagent.id.clone()),
         },
-        payload: InteractionPayload::PlanConfirmation {
-            plan_id: "item-child-plan".to_string(),
-            content: "settled child interactions must not block completion".to_string(),
-        },
-        created_at: 1,
-        updated_at: 1,
-        resolved_at: None,
-        resolution: None,
-    };
+        "item-child-plan",
+        "settled child interactions must not block completion",
+        1,
+    );
     fixture
         .store
         .upsert_interaction(&child_pending)
@@ -839,14 +813,12 @@ async fn task_complete_blocks_only_on_root_interaction_without_running_project_c
         vec![pending.clone()]
     );
 
-    pending.status = InteractionStatus::Cancelled;
-    pending.updated_at = 2;
-    pending.resolved_at = Some(2);
+    cancel_test_interaction(&mut pending, 2);
     fixture.store.upsert_interaction(&pending).await.unwrap();
 
     // root 自身 Interaction 已解决；已结算子 Thread 的残留 Interaction 不再阻塞完成。
     let (ends_turn, json) = call_task_complete(&fixture, "call-complete").await;
-    assert!(ends_turn);
+    assert!(ends_turn, "task_complete rejected completion: {json:#}");
     assert_eq!(json["status"], "completed");
     assert_eq!(json["run"]["state"]["kind"], "completed");
     assert_eq!(
@@ -1049,12 +1021,11 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
     fixture.commit_file("src/lib.rs");
     let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
     fixture.submit(&source_head).await.unwrap();
-    let progress = fixture.work_unit().await.state.into_progress();
     fixture
         .store
         .update_work_unit(
             &fixture.work_unit_id,
-            WorkUnitState::merged(progress),
+            WorkUnitState::completed_merged_for_test("merge-late-terminal"),
             Some(fixture.subagent.id.clone()),
         )
         .await
@@ -1064,15 +1035,17 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
         .store
         .settle_executor_turn_finished(
             &fixture.subagent.id,
-            &executor_outcome(crate::TurnOutcomeKind::Failed, Some("late executor error")),
+            &executor_outcome(crate::TurnOutcome::failed(crate::TurnFailure::permanent(
+                crate::TurnFailureCategory::Internal,
+                "late executor error",
+            ))),
         )
         .await
         .unwrap();
 
-    assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Merged);
     assert_eq!(
-        fixture.work_unit().await.execution_status(),
-        ThreadExecutionStatus::Completed
+        fixture.work_unit().await.kind(),
+        WorkUnitStateKind::Completed
     );
     fixture.cleanup();
 }
@@ -1080,6 +1053,15 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
 #[tokio::test]
 async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
     let fixture = DeliveryFixture::new("budget-awaiting-completion", vec!["src"]).await;
+    fixture
+        .store
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-budget-1",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
+        .await
+        .unwrap();
 
     let continuation = fixture
         .store
@@ -1089,16 +1071,12 @@ async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
         .expect("continuation request");
 
     let work_unit = fixture.work_unit().await;
-    assert_eq!(work_unit.status(), WorkUnitStatus::Running);
-    assert_eq!(
-        work_unit.execution_status(),
-        ThreadExecutionStatus::BudgetLimited
-    );
+    assert_eq!(work_unit.kind(), WorkUnitStateKind::Running);
     assert_eq!(work_unit.execution_error(), None);
     assert_eq!(work_unit.budget_slice_count(), 2);
     assert_eq!(
         work_unit.continuation_state(),
-        ExecutorContinuationState::PendingStart
+        ExecutorContinuationStateKind::PendingStart
     );
     assert_eq!(continuation.work_unit_id, fixture.work_unit_id);
     assert_eq!(continuation.source_turn_id, "turn-budget-1");
@@ -1115,25 +1093,32 @@ async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Preserve)
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-budget-2",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
         .await
         .unwrap();
     let automatic = fixture.work_unit().await;
     assert_eq!(automatic.budget_slice_count(), 2);
     assert_eq!(
         automatic.continuation_state(),
-        ExecutorContinuationState::None
+        ExecutorContinuationStateKind::Idle
     );
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-budget-refreshed",
+            pl_core::MailboxBudgetAction::Refresh,
+        )
         .await
         .unwrap();
     let refreshed = fixture.work_unit().await;
     assert_eq!(refreshed.id, fixture.work_unit_id);
-    assert_eq!(refreshed.status(), WorkUnitStatus::Running);
-    assert_eq!(refreshed.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(refreshed.kind(), WorkUnitStateKind::Running);
     assert_eq!(refreshed.budget_slice_count(), 1);
     assert_eq!(refreshed.budget_limit(), None);
     assert_eq!(refreshed.execution_error(), None);
@@ -1144,6 +1129,15 @@ async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
 #[tokio::test]
 async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_tranche() {
     let fixture = DeliveryFixture::new("budget-four-slices", vec!["src"]).await;
+    fixture
+        .store
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-budget-1",
+            pl_core::MailboxBudgetAction::Preserve,
+        )
+        .await
+        .unwrap();
 
     for source_slice in 1..4 {
         let turn_id = format!("turn-budget-{source_slice}");
@@ -1158,6 +1152,7 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
             .store
             .mark_executor_turn_started(
                 &fixture.subagent.id,
+                &format!("turn-budget-{}", source_slice + 1),
                 pl_core::MailboxBudgetAction::Preserve,
             )
             .await
@@ -1176,11 +1171,11 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
             .is_none()
     );
     let exhausted = fixture.work_unit().await;
-    assert_eq!(exhausted.status(), WorkUnitStatus::NeedsAttention);
+    assert_eq!(exhausted.kind(), WorkUnitStateKind::Paused);
     assert_eq!(exhausted.budget_slice_count(), 4);
     assert_eq!(
         exhausted.continuation_state(),
-        ExecutorContinuationState::NeedsAttention
+        ExecutorContinuationStateKind::NeedsAttention
     );
 
     let wakes = fixture
@@ -1202,19 +1197,22 @@ async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_
 
     fixture
         .store
-        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-budget-resumed",
+            pl_core::MailboxBudgetAction::Refresh,
+        )
         .await
         .unwrap();
     let resumed = fixture.work_unit().await;
     assert_eq!(resumed.id, fixture.work_unit_id);
-    assert_eq!(resumed.status(), WorkUnitStatus::Running);
-    assert_eq!(resumed.execution_status(), ThreadExecutionStatus::Running);
+    assert_eq!(resumed.kind(), WorkUnitStateKind::Running);
     assert_eq!(resumed.budget_slice_count(), 1);
     assert_eq!(resumed.budget_limit(), None);
     assert_eq!(resumed.execution_error(), None);
     assert_eq!(
         resumed.continuation_state(),
-        ExecutorContinuationState::None
+        ExecutorContinuationStateKind::Idle
     );
     assert_eq!(resumed.continuation_source_turn_id(), None);
     assert!(
@@ -1237,23 +1235,32 @@ async fn non_wall_clock_and_rollover_failure_do_not_auto_continue() {
             budget_outcome(
                 "turn-tool-call",
                 crate::BudgetLimitKind::ToolCall,
-                true,
-                None,
+                crate::TurnRolloverOutcome::Succeeded,
             ),
-            "tool budget reached",
+            "executor stopped at the toolCall budget limit",
         ),
         (
             "budget-compaction-failed",
             budget_outcome(
                 "turn-compaction-failed",
                 crate::BudgetLimitKind::WallClock,
-                false,
-                Some("rollover compaction failed"),
+                crate::TurnRolloverOutcome::Failed {
+                    error: "rollover compaction failed".to_string(),
+                },
             ),
             "rollover compaction failed",
         ),
     ] {
         let fixture = DeliveryFixture::new(slug, vec!["src"]).await;
+        fixture
+            .store
+            .mark_executor_turn_started(
+                &fixture.subagent.id,
+                outcome.turn_id.as_str(),
+                pl_core::MailboxBudgetAction::Preserve,
+            )
+            .await
+            .unwrap();
         assert!(
             fixture
                 .store
@@ -1263,11 +1270,11 @@ async fn non_wall_clock_and_rollover_failure_do_not_auto_continue() {
                 .is_none()
         );
         let work_unit = fixture.work_unit().await;
-        assert_eq!(work_unit.status(), WorkUnitStatus::NeedsAttention);
+        assert_eq!(work_unit.kind(), WorkUnitStateKind::Paused);
         assert_eq!(work_unit.budget_slice_count(), 1);
         assert_eq!(
             work_unit.continuation_state(),
-            ExecutorContinuationState::NeedsAttention
+            ExecutorContinuationStateKind::NeedsAttention
         );
         assert_eq!(work_unit.execution_error(), Some(expected_error));
         assert_eq!(
@@ -1294,21 +1301,17 @@ async fn non_budget_needs_attention_rejects_message_recovery() {
 
     let error = fixture
         .store
-        .mark_executor_turn_started(&fixture.subagent.id, pl_core::MailboxBudgetAction::Refresh)
+        .mark_executor_turn_started(
+            &fixture.subagent.id,
+            "turn-invalid-handoff",
+            pl_core::MailboxBudgetAction::Refresh,
+        )
         .await
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("executor cannot start a turn while work unit is needsAttention")
-    );
+    assert!(error.to_string().contains("rejects command"));
     let unchanged = fixture.work_unit().await;
-    assert_eq!(unchanged.status(), WorkUnitStatus::NeedsAttention);
-    assert_eq!(
-        unchanged.execution_status(),
-        ThreadExecutionStatus::BudgetLimited
-    );
+    assert_eq!(unchanged.kind(), WorkUnitStateKind::Paused);
     assert_eq!(unchanged.budget_limit(), None);
     fixture.cleanup();
 }
@@ -1358,12 +1361,12 @@ async fn planner_git_methods_are_recorded_and_cleanup_is_idempotent() {
             .unwrap();
         assert_eq!(record.method, method);
         assert_eq!(record.resulting_head, resulting_head);
-        assert!(matches!(
-            record.cleanup.status.as_str(),
-            "discarded" | "alreadyAbsent"
-        ));
+        assert!(record.cleanup.is_complete());
         assert!(!fixture.worktree.exists());
-        assert_eq!(fixture.work_unit().await.status(), WorkUnitStatus::Merged);
+        assert_eq!(
+            fixture.work_unit().await.kind(),
+            WorkUnitStateKind::Completed
+        );
 
         let retried = fixture
             .coordinator
@@ -1400,7 +1403,11 @@ async fn planner_git_methods_are_recorded_and_cleanup_is_idempotent() {
             method.as_str()
         );
         let (ends_turn, completed) = call_task_complete(&fixture, "complete-equivalent").await;
-        assert!(ends_turn);
+        assert!(
+            ends_turn,
+            "task_complete rejected {} completion: {completed:#}",
+            method.as_str()
+        );
         assert_eq!(completed["status"], "completed");
         assert_eq!(
             completed["integratedReviewGate"]["status"],
@@ -1435,7 +1442,12 @@ async fn single_executor_equivalence_rejects_extra_executor_or_unreadable_delive
     ));
 
     let mut missing_commit = completions.clone();
-    missing_commit[0].head_commit = Some("0000000000000000000000000000000000000000".to_string());
+    let changed_files = missing_commit[0].changed_files().to_vec();
+    missing_commit[0].content = WorkCompletionContent::delivery(
+        "0000000000000000000000000000000000000000".to_string(),
+        changed_files,
+    )
+    .expect("test delivery has a head commit");
     let mut missing_commit_merge = merges.clone();
     missing_commit_merge[0].delivery_head = "0000000000000000000000000000000000000000".to_string();
     let mut missing_commit_reviews = reviews.clone();
@@ -1465,7 +1477,11 @@ async fn same_executor_rework_versions_keep_the_final_equivalent_delivery_exempt
     let mut rejected_completion = completions[0].clone();
     rejected_completion.id = "completion-revision-1".to_string();
     rejected_completion.revision = 1;
-    rejected_completion.status = WorkCompletionStatus::ChangesRequired;
+    rejected_completion.state = WorkCompletionState::ChangesRequired(ReviewedCompletion::new(
+        "review-rejected".to_string(),
+        1,
+    ));
+    rejected_completion.state_revision = 1;
     completions[0].id = "completion-revision-2".to_string();
     completions[0].revision = 2;
     merges[0].completion_id = completions[0].id.clone();
@@ -1474,7 +1490,10 @@ async fn same_executor_rework_versions_keep_the_final_equivalent_delivery_exempt
     rejected_review.id = "delivery-review-revision-1".to_string();
     rejected_review.completion_id = Some(rejected_completion.id.clone());
     rejected_review.completion_revision = Some(1);
-    rejected_review.state = ReviewRoundState::changes_required("changes required".to_string());
+    rejected_review.state = ReviewRoundState::ChangesRequired(ChangesRequiredReview::new(
+        "agent-reviewer".to_string(),
+        "changes required".to_string(),
+    ));
     reviews[0].completion_id = Some(completions[0].id.clone());
     reviews[0].completion_revision = Some(2);
     completions.insert(0, rejected_completion);
@@ -1714,30 +1733,25 @@ async fn closed_thread_projection_barrier_waits_for_durable_status() {
     .await
     .unwrap();
     let updated_at = crate::studio::ids::unix_seconds() + 1;
-    fixture
-        .store
-        .update_thread_status(
-            &fixture.subagent.id,
-            pl_protocol::ThreadStatus::Idle,
-            None,
-            None,
-            updated_at,
-        )
-        .await
-        .unwrap();
+    persist_agent_state(
+        &fixture.store,
+        &fixture.subagent.id,
+        crate::AgentState::idle(),
+        updated_at,
+    )
+    .await
+    .unwrap();
     let store = fixture.store.clone();
     let executor_id = fixture.subagent.id.clone();
     let projection = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        store
-            .update_thread_status(
-                &executor_id,
-                pl_protocol::ThreadStatus::Closed,
-                None,
-                None,
-                updated_at + 1,
-            )
-            .await
+        persist_agent_state(
+            &store,
+            &executor_id,
+            crate::AgentState::Closed(crate::ClosedAgentState::new()),
+            updated_at + 1,
+        )
+        .await
     });
 
     fixture
@@ -1769,20 +1783,8 @@ async fn delivery_review_prompt_uses_relative_locator_without_absolute_workspace
         .store
         .create_work_completion(
             &fixture.work_unit_id,
-            WorkCompletionKind::Delivery,
-            Some(&AgentDelivery {
-                worktree: AgentWorktreeDelivery {
-                    path: std::fs::canonicalize(&fixture.worktree)
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string(),
-                    branch: fixture.branch.clone(),
-                },
-                base_commit: fixture.base_commit.clone(),
-                head_commit: source_head,
-                changed_files: vec!["src/prompt.rs".to_string()],
-                verification_summary: "focused checks passed".to_string(),
-            }),
+            WorkCompletionContent::delivery(source_head, vec!["src/prompt.rs".to_string()])
+                .expect("test delivery has a head commit"),
             "focused checks passed",
         )
         .await
@@ -1997,7 +1999,7 @@ async fn begin_integrated_review_for_fixture(
         .unwrap()
         .into_iter()
         .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
-        .flat_map(|completion| completion.changed_files)
+        .flat_map(|completion| completion.changed_files().to_vec())
         .filter(|path| !path.starts_with("design/"))
         .collect::<Vec<_>>();
     changed_files.sort();
@@ -2074,7 +2076,7 @@ impl DeliveryFixture {
             })
             .await
             .unwrap();
-        let running = WorkUnitState::running(work_unit.state.clone().into_progress());
+        let running = WorkUnitState::running_for_test(0);
         let work_unit = store
             .update_work_unit(&work_unit.id, running, Some("agent-1".to_string()))
             .await
@@ -2184,8 +2186,7 @@ impl DeliveryFixture {
             .store
             .create_work_completion(
                 &self.work_unit_id,
-                WorkCompletionKind::NoDelivery,
-                None,
+                WorkCompletionContent::no_delivery(),
                 "nothing to deliver",
             )
             .await
@@ -2417,8 +2418,7 @@ async fn approve_delivery(
     let completion = store
         .create_work_completion(
             &work_unit.id,
-            WorkCompletionKind::Delivery,
-            Some(&delivery),
+            delivery_content(&delivery),
             &delivery.verification_summary,
         )
         .await?;
@@ -2457,62 +2457,86 @@ async fn approve_delivery(
     store
         .settle_executor_turn_finished(
             executor_thread_id,
-            &executor_outcome(crate::TurnOutcomeKind::Completed, None),
+            &executor_outcome(crate::TurnOutcome::completed(crate::TurnCompletion::Normal)),
         )
         .await?;
     persist_closed_executor_thread(store, root_thread_id, executor_thread_id).await?;
     Ok(delivery)
 }
 
-fn executor_outcome(kind: crate::TurnOutcomeKind, reason: Option<&str>) -> crate::AgentTurnOutcome {
+fn executor_outcome(outcome: crate::TurnOutcome) -> crate::AgentTurnOutcome {
     crate::AgentTurnOutcome {
-        turn_id: crate::TurnId::new(format!("turn-{kind:?}")).expect("turn id"),
+        turn_id: crate::TurnId::new("turn-outcome").expect("turn id"),
         thread_id: crate::ThreadId::new("executor-thread").expect("thread id"),
-        kind,
-        reason: reason.map(str::to_string),
-        failure: None,
-        budget_limit: None,
-        rollover_compacted: false,
-        rollover_compaction_error: None,
+        outcome,
         usage: Default::default(),
+        started_at: None,
         finished_at: 1,
     }
 }
 
 fn wall_clock_outcome(turn_id: &str) -> crate::AgentTurnOutcome {
-    budget_outcome(turn_id, crate::BudgetLimitKind::WallClock, true, None)
+    budget_outcome(
+        turn_id,
+        crate::BudgetLimitKind::WallClock,
+        crate::TurnRolloverOutcome::Succeeded,
+    )
 }
 
 fn budget_outcome(
     turn_id: &str,
     kind: crate::BudgetLimitKind,
-    rollover_compacted: bool,
-    rollover_compaction_error: Option<&str>,
+    rollover: crate::TurnRolloverOutcome,
 ) -> crate::AgentTurnOutcome {
     crate::AgentTurnOutcome {
         turn_id: crate::TurnId::new(turn_id).expect("turn id"),
         thread_id: crate::ThreadId::new("executor-thread").expect("thread id"),
-        kind: crate::TurnOutcomeKind::BudgetLimited,
-        reason: Some(if kind == crate::BudgetLimitKind::ToolCall {
-            "tool budget reached".to_string()
-        } else {
-            "active wall-clock budget reached".to_string()
-        }),
-        failure: None,
-        budget_limit: Some(crate::BudgetLimitSnapshot {
-            kind,
-            usage: crate::BudgetUsage {
-                model_steps: 3,
-                tool_calls: 5,
-                wait_calls: 1,
-                elapsed_ms: 1_800_000,
+        outcome: crate::TurnOutcome::budget_limited(
+            crate::BudgetLimitSnapshot {
+                kind,
+                usage: crate::BudgetUsage {
+                    model_steps: 3,
+                    tool_calls: 5,
+                    wait_calls: 1,
+                    elapsed_ms: 1_800_000,
+                },
             },
-        }),
-        rollover_compacted,
-        rollover_compaction_error: rollover_compaction_error.map(str::to_string),
+            rollover,
+        ),
         usage: Default::default(),
+        started_at: None,
         finished_at: 1,
     }
+}
+
+fn cancel_test_interaction(interaction: &mut InteractionRequest, cancelled_at: i64) {
+    let decision = interaction
+        .decide(InteractionCommand::Cancel(crate::CancelInteraction {
+            interaction_id: interaction.interaction_id.clone(),
+            expected_revision: interaction.revision,
+            operation_id: format!("cancel:{}", interaction.interaction_id),
+            cancelled_at,
+            reason: "cancelled by test".to_string(),
+        }))
+        .unwrap();
+    interaction.apply(decision, cancelled_at);
+}
+
+async fn persist_agent_state(
+    store: &StudioStore,
+    thread_id: &str,
+    state: crate::AgentState,
+    updated_at: i64,
+) -> anyhow::Result<()> {
+    let row = crate::studio::entity::thread::Entity::find_by_id(thread_id)
+        .one(store.database())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("missing Thread {thread_id}"))?;
+    let mut active = row.into_active_model();
+    active.state_json = Set(serde_json::to_string(&state)?);
+    active.updated_at = Set(updated_at);
+    active.update(store.database()).await?;
+    Ok(())
 }
 
 async fn persist_closed_executor_thread(
@@ -2529,15 +2553,13 @@ async fn persist_closed_executor_thread(
             title: executor_thread_id.to_string(),
         })
         .await?;
-    store
-        .update_thread_status(
-            executor_thread_id,
-            pl_protocol::ThreadStatus::Closed,
-            None,
-            None,
-            crate::studio::ids::unix_seconds(),
-        )
-        .await?;
+    persist_agent_state(
+        store,
+        executor_thread_id,
+        crate::AgentState::Closed(crate::ClosedAgentState::new()),
+        crate::studio::ids::unix_seconds(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -2865,7 +2887,7 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
         })
         .await
         .unwrap();
-    let running = WorkUnitState::running(unit.state.clone().into_progress());
+    let running = WorkUnitState::running_for_test(0);
     store
         .update_work_unit(&unit.id, running, Some("blocked-owned".to_string()))
         .await
@@ -2987,7 +3009,7 @@ async fn create_running_recovery_worktree(
         })
         .await
         .unwrap();
-    let running = WorkUnitState::running(unit.state.clone().into_progress());
+    let running = WorkUnitState::running_for_test(0);
     store
         .update_work_unit(&unit.id, running, Some(agent_id.to_string()))
         .await

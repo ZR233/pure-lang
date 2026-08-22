@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use pl_protocol::{
-    InteractionRequest, RuntimeCostAmount, ThreadItem, ThreadItemContent, ThreadItemStatus,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
-    ThreadSnapshot,
+    InteractionRequest, RuntimeCostAmount, ThreadContextCompactionItem, ThreadItem,
+    ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot,
+    ThreadRuntimeUsage, ThreadSnapshot,
 };
 use pl_trace::AgentEvent;
 
@@ -21,7 +21,6 @@ pub(crate) struct ObservedTurnEvent {
 
 #[derive(Debug, Clone)]
 pub(crate) enum TurnObservation {
-    DirectoryChanged,
     RuntimeDelta(pl_protocol::AgentRuntimeDelta),
     TodoList(pl_protocol::TodoListSnapshot),
     InteractionChanged(Box<InteractionRequest>),
@@ -35,9 +34,6 @@ pub(crate) enum TurnObservation {
 
 pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObservation> {
     match event {
-        AgentEvent::AgentStateChanged { .. } | AgentEvent::SubAgentActivity { .. } => {
-            Some(TurnObservation::DirectoryChanged)
-        }
         AgentEvent::AgentRuntimeUpdated { delta } => {
             Some(TurnObservation::RuntimeDelta(delta.clone()))
         }
@@ -122,28 +118,24 @@ pub(crate) fn project_observation(
         } => (
             compacted_at,
             Some(ThreadNotification::ItemCompleted {
-                item: Box::new(ThreadItem {
-                    id: format!("{turn_id}:context-compaction:{compacted_at}"),
-                    thread_id: thread_id.to_string(),
-                    turn_id: turn_id.to_string(),
+                item: Box::new(ThreadItem::new(
+                    format!("{turn_id}:context-compaction:{compacted_at}"),
+                    thread_id.to_string(),
+                    turn_id.to_string(),
                     // ordinal 由 ThreadEventBus 首次应用时分配（到达序）。
-                    ordinal: 0,
-                    revision: 0,
-                    status: ThreadItemStatus::Completed,
-                    created_at: compacted_at,
-                    updated_at: compacted_at,
-                    completed_at: Some(compacted_at),
-                    error: None,
-                    content: ThreadItemContent::ContextCompaction {
+                    0,
+                    0,
+                    compacted_at,
+                    compacted_at,
+                    ThreadItemState::ContextCompaction(ThreadContextCompactionItem::new(
                         before_tokens,
                         after_tokens,
                         compacted_at,
-                    },
-                    usage: None,
-                }),
+                    )),
+                )),
             }),
         ),
-        TurnObservation::DirectoryChanged | TurnObservation::Diagnostic => (unix_timestamp(), None),
+        TurnObservation::Diagnostic => (unix_timestamp(), None),
         TurnObservation::InteractionChanged(_) => unreachable!("handled before projection"),
     };
     let notifications = notification

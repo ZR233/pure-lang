@@ -26,7 +26,6 @@ pub(in crate::studio::store::task) fn review_round_record(
             .context("completion revision must be positive")?,
         reviewed_head: model.reviewed_head,
         requested_by_call_id: model.requested_by_call_id,
-        reviewer_thread_id: model.reviewer_thread_id,
         state,
         design_references: serde_json::from_str(&model.design_references_json)?,
         findings: serde_json::from_str(&model.findings_json)?,
@@ -45,12 +44,15 @@ pub(in crate::studio::store::task) fn review_round_state(
     model: &entities::review_round::Model,
 ) -> Result<ReviewRoundState> {
     let state = decode_review_round_state(&model.state_json)?;
-    if state.verdict().as_str() != model.state_kind {
+    if state.kind().as_str() != model.state_kind {
         bail!(
             "stored ReviewRound state discriminator mismatch: JSON is {}, generated column is {}",
-            state.verdict().as_str(),
+            state.kind().as_str(),
             model.state_kind
         );
+    }
+    if state.reviewer_thread_id() != model.reviewer_thread_id.as_deref() {
+        bail!("stored ReviewRound reviewer association disagrees with canonical state");
     }
     Ok(state)
 }
@@ -71,6 +73,10 @@ where
         .col_expr(
             entities::review_round::Column::StateJson,
             Expr::value(serde_json::to_string(&state)?),
+        )
+        .col_expr(
+            entities::review_round::Column::ReviewerThreadId,
+            Expr::value(state.reviewer_thread_id().map(str::to_string)),
         )
         .col_expr(
             entities::review_round::Column::Revision,

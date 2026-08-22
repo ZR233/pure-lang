@@ -107,14 +107,22 @@ abstract final class StudioDriverState {
         'newThreadMode': _newThreadMode.name,
         'newThreadComposer': {
           'draft': _newThreadComposer.draft,
-          'phase': _newThreadComposer.phase.name,
+          'phase': switch (_newThreadComposer) {
+            IdleComposerThreadState() => 'idle',
+            SubmittingComposerThreadState() => 'submitting',
+            PendingStartComposerThreadState() => 'pendingStart',
+            FailedComposerThreadState() => 'failed',
+          },
           'submissionRevision': _newThreadComposer.submissionRevision,
           'error': _newThreadComposer.error,
         },
       },
       'shutdownPhases': <String>[
         for (final progress in _shutdownProgress)
-          '${progress.phase.name}:${progress.pendingCommits}',
+          '${progress.phase.name}:${switch (progress) {
+            FlushingPersistenceProgress(:final pendingCommits) => pendingCommits,
+            StoppingSubscriptionsProgress() || CancellingTurnsProgress() || SuspendingTasksProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
+          }}',
       ],
       'project': _project == null
           ? null
@@ -126,7 +134,7 @@ abstract final class StudioDriverState {
               'projectId': workspace.thread.projectId,
               'rootThreadId': workspace.rootThread.id,
               'threadMode': workspace.thread.mode.name,
-              'threadStatus': workspace.thread.status,
+              'threadStatus': workspace.thread.status.name,
               'isBusy': workspace.isBusy,
               'isTaskPaused': workspace.isTaskPaused,
               'composer': {
@@ -198,7 +206,7 @@ abstract final class StudioDriverState {
             for (final turn in target.turns)
               {
                 'turnId': turn.turnId,
-                'status': turn.status,
+                'state': turn.state.name,
                 'itemCount': turn.itemCount,
                 'inputCount': turn.inputCount,
                 'toolCount': turn.toolCount,
@@ -257,7 +265,7 @@ abstract final class StudioDriverState {
           'budgetLimit': unit.budgetLimit == null
               ? null
               : {
-                  'kind': unit.budgetLimit!.kind,
+                  'kind': unit.budgetLimit!.kind.name,
                   'usage': {
                     'modelSteps': unit.budgetLimit!.usage.modelSteps,
                     'toolCalls': unit.budgetLimit!.usage.toolCalls,
@@ -304,7 +312,7 @@ abstract final class StudioDriverState {
           'expectedPreviousHead': merge.expectedPreviousHead,
           'deliveryHead': merge.deliveryHead,
           'resultingHead': merge.resultingHead,
-          'method': merge.method,
+          'method': merge.method.name,
           'cleanupStatus': merge.cleanupStatus,
           'cleanupDetail': merge.cleanupDetail,
           'updatedAt': merge.updatedAt.toUtc().toIso8601String(),
@@ -315,7 +323,7 @@ abstract final class StudioDriverState {
         {
           'id': review.id,
           'round': review.round,
-          'scope': review.scope,
+          'scope': review.scope.name,
           'workUnitId': review.workUnitId,
           'completionId': review.completionId,
           'completionRevision': review.completionRevision,

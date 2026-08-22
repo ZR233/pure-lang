@@ -1,16 +1,25 @@
 use pl_protocol::{
-    AgentMessageChannel, ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField,
-    ThreadItemStatus, ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot,
-    ThreadToolCall, Turn, TurnPhase, TurnState,
+    ApprovedThreadTool, AwaitingApprovalThreadTool, BudgetLimitedTurnState, CancelledThreadAgent,
+    CancelledThreadTool, CancelledTurnState, CompletedThreadInference, CompletedTurnState,
+    DeniedThreadAgent, DeniedThreadTool, FailedThreadAgent, FailedThreadInference,
+    FailedThreadTool, FailedTurnState, QueuedThreadAgent, RunningThreadAgent,
+    RunningThreadInference, RunningThreadTool, RunningTurnState, StartedThreadTool,
+    StreamingThreadTool, SucceededThreadAgent, SucceededThreadTool, ThreadAgentIdentity,
+    ThreadAgentItem, ThreadAgentState, ThreadAttachment, ThreadContentLifecycle,
+    ThreadInferenceItem, ThreadInferenceState, ThreadItem, ThreadItemDelta, ThreadItemDeltaState,
+    ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadPlanItem,
+    ThreadSnapshot, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem, ThreadToolFailure,
+    ThreadToolFailureKind, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput, ThreadToolState,
+    ThreadTurnItem, Turn, TurnCancellationCause, TurnCompletion, TurnOutcome, TurnPhase, TurnState,
 };
 use pl_trace::{
-    TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartKind,
-    TracePartStatus, TraceTextChannel,
+    TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartState,
+    TraceTextChannel, TraceToolFailureKind, TraceToolState,
 };
 
 use crate::agent_runtime::{
     AgentRuntimeEvent, AgentRuntimeEventKind, DurableMailboxEnvelope, MailboxDeliveryState,
-    MailboxPresentation, TurnOutcomeKind,
+    MailboxPresentation,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -24,15 +33,15 @@ pub(crate) fn project_trace_events(
     current: &ThreadSnapshot,
     traces: &[TraceEvent],
 ) -> ThreadProjectionBatch {
-    let mut projector = Projector::new(thread_id, current.revision);
-    let mut active_turn_id = current.active_turn.as_ref().map(|turn| turn.id.clone());
+    let mut projector = Projector::new(thread_id, current);
+    let mut active_turn = current.active_turn.clone();
     for trace in traces {
         match &trace.kind {
             TraceEventKind::TracePartStarted { item } => {
                 if let Some(phase) = phase_for_item(item) {
-                    projector.turn_updated(&item.turn_id, phase, trace.timestamp);
+                    projector.turn_updated(item.turn_id(), phase, trace.timestamp);
                 }
-                if let Some(item) = thread_item(thread_id, item, None) {
+                if let Some(item) = thread_item(thread_id, item) {
                     projector.push(
                         trace.timestamp,
                         ThreadNotification::ItemStarted {
@@ -47,7 +56,7 @@ pub(crate) fn project_trace_events(
                 }
             }
             TraceEventKind::TracePartCompleted { item } => {
-                if let Some(item) = thread_item(thread_id, item, None) {
+                if let Some(item) = thread_item(thread_id, item) {
                     projector.push(
                         trace.timestamp,
                         ThreadNotification::ItemCompleted {
@@ -56,8 +65,8 @@ pub(crate) fn project_trace_events(
                     );
                 }
             }
-            TraceEventKind::TracePartFailed { item, error } => {
-                if let Some(item) = thread_item(thread_id, item, Some(error)) {
+            TraceEventKind::TracePartFailed { item } => {
+                if let Some(item) = thread_item(thread_id, item) {
                     projector.push(
                         trace.timestamp,
                         ThreadNotification::ItemCompleted {
@@ -71,12 +80,12 @@ pub(crate) fn project_trace_events(
                 interaction.scope.thread_id = thread_id.to_string();
                 if let Some(turn) = interaction_completion_turn(
                     thread_id,
-                    active_turn_id.as_deref(),
+                    active_turn.as_ref(),
                     &interaction,
                     trace.timestamp,
                 ) {
                     projector.push(trace.timestamp, ThreadNotification::TurnCompleted { turn });
-                    active_turn_id = None;
+                    active_turn = None;
                 }
                 projector.push(
                     trace.timestamp,
@@ -85,9 +94,8 @@ pub(crate) fn project_trace_events(
                     },
                 );
             }
-            TraceEventKind::PlanLifecycleChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => {}
+            TraceEventKind::SkillActivated { .. } | TraceEventKind::EnabledToolsRecorded { .. } => {
+            }
         }
     }
     projector.finish()
@@ -95,28 +103,22 @@ pub(crate) fn project_trace_events(
 
 pub(crate) fn project_runtime_event(
     event: &AgentRuntimeEvent,
-    through_revision: u64,
+    current: &ThreadSnapshot,
 ) -> ThreadProjectionBatch {
     let Some(thread_id) = runtime_event_thread_id(event) else {
         return ThreadProjectionBatch {
-            through_revision,
+            through_revision: current.revision,
             ..ThreadProjectionBatch::default()
         };
     };
-    let mut projector = Projector::new(thread_id, through_revision);
+    let mut projector = Projector::new(thread_id, current);
     match &event.kind {
         AgentRuntimeEventKind::TurnQueued { input, .. } => {
             if !matches!(input.delivery_state, MailboxDeliveryState::Claimed { .. }) {
                 projector.push(
                     event.created_at,
                     ThreadNotification::TurnStarted {
-                        turn: turn(
-                            input.turn_id.as_str(),
-                            thread_id,
-                            TurnState::Queued,
-                            None,
-                            event.created_at,
-                        ),
+                        turn: Turn::queued(input.turn_id.as_str(), thread_id, event.created_at),
                     },
                 );
             }
@@ -135,13 +137,13 @@ pub(crate) fn project_runtime_event(
             projector.push(
                 event.created_at,
                 ThreadNotification::TurnUpdated {
-                    turn: turn(
+                    turn: projected_turn(
                         turn_id.as_str(),
                         thread_id,
-                        TurnState::InProgress {
-                            phase: TurnPhase::Preparing,
-                        },
-                        Some(event.created_at),
+                        TurnState::Running(RunningTurnState::new(
+                            event.created_at,
+                            TurnPhase::Preparing,
+                        )),
                         event.created_at,
                     ),
                 },
@@ -151,13 +153,17 @@ pub(crate) fn project_runtime_event(
                     projector.push(
                         event.created_at,
                         ThreadNotification::TurnCompleted {
-                            turn: turn(
+                            turn: projected_turn(
                                 input.turn_id.as_str(),
                                 thread_id,
-                                TurnState::Interrupted {
-                                    reason: format!("coalescedIntoTurn:{turn_id}"),
-                                },
-                                None,
+                                TurnState::Cancelled(CancelledTurnState::new(
+                                    None,
+                                    event.created_at,
+                                    event.created_at,
+                                    TurnCancellationCause::Coalesced {
+                                        target_turn_id: turn_id.to_string(),
+                                    },
+                                )),
                                 event.created_at,
                             ),
                         },
@@ -173,31 +179,38 @@ pub(crate) fn project_runtime_event(
                 TurnPhase::Persisting,
                 event.created_at,
             );
-            let state = match outcome.kind {
-                TurnOutcomeKind::Completed => TurnState::Completed,
-                TurnOutcomeKind::Cancelled | TurnOutcomeKind::BudgetLimited => {
-                    TurnState::Interrupted {
-                        reason: outcome
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "turn interrupted".to_string()),
-                    }
+            let state = match &outcome.outcome {
+                TurnOutcome::Completed(result) => TurnState::Completed(CompletedTurnState::new(
+                    outcome.started_at,
+                    outcome.finished_at,
+                    result.completion(),
+                )),
+                TurnOutcome::Cancelled(result) => TurnState::Cancelled(CancelledTurnState::new(
+                    outcome.started_at,
+                    outcome.finished_at,
+                    outcome.finished_at,
+                    result.cause().clone(),
+                )),
+                TurnOutcome::Failed(result) => TurnState::Failed(FailedTurnState::new(
+                    outcome.started_at,
+                    outcome.finished_at,
+                    result.failure().clone(),
+                )),
+                TurnOutcome::BudgetLimited(result) => {
+                    TurnState::BudgetLimited(BudgetLimitedTurnState::new(
+                        outcome.started_at,
+                        outcome.finished_at,
+                        *result.limit(),
+                        result.rollover().clone(),
+                    ))
                 }
-                TurnOutcomeKind::Failed => TurnState::Failed {
-                    reason: outcome
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| "turn failed".to_string()),
-                },
             };
-            let mut completed_turn = turn(
+            let completed_turn = projected_turn(
                 outcome.turn_id.as_str(),
                 thread_id,
                 state,
-                None,
                 outcome.finished_at,
             );
-            completed_turn.failure = outcome.failure.clone();
             projector.push(
                 event.created_at,
                 ThreadNotification::TurnCompleted {
@@ -247,270 +260,362 @@ fn project_user_input(
     projector.push(
         emitted_at,
         ThreadNotification::ItemCompleted {
-            item: Box::new(ThreadItem {
-                id: item_id,
-                thread_id: projector.thread_id.to_string(),
-                turn_id: turn_id.to_string(),
-                ordinal: 0,
-                revision: 0,
-                status: ThreadItemStatus::Completed,
-                created_at: input.queued_at,
-                updated_at: input.queued_at,
-                completed_at: Some(input.queued_at),
-                error: None,
-                content: ThreadItemContent::UserMessage {
-                    text: input.payload.message.clone(),
-                    attachments: Vec::new(),
-                },
-                usage: None,
-            }),
+            item: Box::new(ThreadItem::completed_user_message(
+                item_id,
+                projector.thread_id.to_string(),
+                turn_id.to_string(),
+                input.payload.message.clone(),
+                Vec::new(),
+                input.queued_at,
+            )),
         },
     );
 }
 
-fn turn(
-    id: &str,
-    thread_id: &str,
-    state: TurnState,
-    started_at: Option<i64>,
-    updated_at: i64,
-) -> Turn {
-    let completed_at = matches!(
-        state,
-        TurnState::Completed | TurnState::Failed { .. } | TurnState::Interrupted { .. }
-    )
-    .then_some(updated_at);
+fn projected_turn(id: &str, thread_id: &str, state: TurnState, updated_at: i64) -> Turn {
     Turn {
         id: id.to_string(),
         thread_id: thread_id.to_string(),
+        revision: 0,
         state,
-        failure: None,
-        started_at,
         updated_at,
-        completed_at,
     }
 }
 
 pub(super) fn interaction_completion_turn(
     thread_id: &str,
-    active_turn_id: Option<&str>,
+    active_turn: Option<&Turn>,
     interaction: &pl_protocol::InteractionRequest,
     emitted_at: i64,
 ) -> Option<Turn> {
-    (interaction.status == pl_protocol::InteractionStatus::Pending
-        && active_turn_id == Some(interaction.scope.turn_id.as_str()))
-    .then(|| {
-        turn(
+    let active_turn = active_turn.filter(|turn| {
+        interaction.status() == pl_protocol::InteractionStatus::Pending
+            && turn.id == interaction.scope.turn_id
+    })?;
+    Some({
+        projected_turn(
             &interaction.scope.turn_id,
             thread_id,
-            TurnState::Completed,
-            None,
+            TurnState::Completed(CompletedTurnState::new(
+                active_turn.started_at(),
+                emitted_at,
+                TurnCompletion::InteractionRequested,
+            )),
             emitted_at,
         )
     })
 }
 
 fn phase_for_item(item: &TracePart) -> Option<TurnPhase> {
-    match item.kind {
-        TracePartKind::Text => Some(match item.text_channel {
-            Some(TraceTextChannel::Commentary | TraceTextChannel::Final) => TurnPhase::Responding,
-            Some(TraceTextChannel::User) | None => TurnPhase::Thinking,
+    match item.state() {
+        TracePartState::Text(text) => Some(match text.channel() {
+            TraceTextChannel::Commentary | TraceTextChannel::Final => TurnPhase::Responding,
+            TraceTextChannel::User => TurnPhase::Thinking,
         }),
-        TracePartKind::Thinking | TracePartKind::Inference => Some(TurnPhase::Thinking),
-        TracePartKind::Tool | TracePartKind::Agent => Some(TurnPhase::RunningTool),
-        TracePartKind::Plan => Some(TurnPhase::Planning),
-        TracePartKind::Turn => None,
+        TracePartState::Thinking(_) | TracePartState::Inference(_) => Some(TurnPhase::Thinking),
+        TracePartState::Tool(_) | TracePartState::Agent(_) => Some(TurnPhase::RunningTool),
+        TracePartState::Plan(_) => Some(TurnPhase::Planning),
+        TracePartState::Turn(_) => None,
     }
 }
 
-fn thread_item(thread_id: &str, item: &TracePart, failure: Option<&str>) -> Option<ThreadItem> {
-    let content = match item.kind {
-        TracePartKind::Text => match item.text_channel.unwrap_or(TraceTextChannel::Final) {
+fn thread_item(thread_id: &str, item: &TracePart) -> Option<ThreadItem> {
+    let state = match item.state() {
+        TracePartState::Text(text) => match text.channel() {
             // User inputs are projected exactly once from the durable mailbox event.
             // Trace keeps the model-visible prompt for diagnostics, but is not a second
             // timeline source and must not reveal hidden control inputs.
             TraceTextChannel::User => return None,
-            TraceTextChannel::Commentary => ThreadItemContent::AgentMessage {
-                channel: AgentMessageChannel::Commentary,
-                text: item.content.clone(),
-            },
-            TraceTextChannel::Final => ThreadItemContent::AgentMessage {
-                channel: AgentMessageChannel::Final,
-                text: item.content.clone(),
-            },
-        },
-        TracePartKind::Thinking => ThreadItemContent::Reasoning {
-            summary: item
-                .thinking_chunks
-                .iter()
-                .map(|chunk| chunk.content.clone())
-                .collect(),
-            content: item
-                .reasoning_content_chunks
-                .iter()
-                .map(|chunk| chunk.content.clone())
-                .collect(),
-        },
-        TracePartKind::Tool => ThreadItemContent::ToolCall {
-            tool: item.tool.as_ref().map_or_else(
-                || empty_tool(&item.item_id, "tool"),
-                |tool| ThreadToolCall {
-                    tool_call_id: tool.tool_call_id.clone(),
-                    call_id: tool.call_id.clone().unwrap_or_default(),
-                    provider_item_id: tool.provider_item_id.clone(),
-                    name: tool.name.clone(),
-                    arguments: tool.arguments.clone(),
-                    result: tool.result.clone(),
-                    output_artifacts: tool.output_artifacts.clone(),
-                    exit_code: tool.exit_code,
-                    timed_out: tool.timed_out,
-                    working_directory: tool.working_directory.clone(),
-                    denial_reason: tool.denial_reason.clone(),
-                },
-            ),
-        },
-        TracePartKind::Agent => ThreadItemContent::ToolCall {
-            tool: ThreadToolCall {
-                arguments: item
-                    .agent
-                    .as_ref()
-                    .and_then(|agent| serde_json::to_string(agent).ok())
-                    .unwrap_or_default(),
-                result: item.agent.as_ref().and_then(|agent| agent.summary.clone()),
-                ..empty_tool(&item.item_id, "agent")
-            },
-        },
-        TracePartKind::Plan => ThreadItemContent::Plan {
-            content: item.content.clone(),
-        },
-        TracePartKind::Turn => {
-            failure?;
-            ThreadItemContent::AgentMessage {
-                channel: AgentMessageChannel::Final,
-                text: String::new(),
+            TraceTextChannel::Commentary | TraceTextChannel::Final => {
+                ThreadItemState::Text(ThreadTextItem::new(
+                    match text.channel() {
+                        TraceTextChannel::Commentary => ThreadTextChannel::Commentary,
+                        TraceTextChannel::Final => ThreadTextChannel::Final,
+                        TraceTextChannel::User => unreachable!("user trace returned above"),
+                    },
+                    text.content().to_string(),
+                    text.attachments().iter().map(thread_attachment).collect(),
+                    text_lifecycle(text.state(), item.updated_at()),
+                ))
             }
+        },
+        TracePartState::Thinking(thinking) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+            thinking
+                .summary()
+                .iter()
+                .map(|chunk| chunk.content.clone())
+                .collect(),
+            thinking
+                .content()
+                .iter()
+                .map(|chunk| chunk.content.clone())
+                .collect(),
+            thinking_lifecycle(thinking.state(), item.updated_at()),
+        )),
+        TracePartState::Tool(tool) => {
+            ThreadItemState::Tool(thread_tool_item(tool, item.updated_at()))
         }
-        TracePartKind::Inference => return None,
+        TracePartState::Agent(agent) => {
+            ThreadItemState::Agent(thread_agent_item(agent, item.updated_at()))
+        }
+        TracePartState::Plan(plan) => ThreadItemState::Plan(ThreadPlanItem::new(
+            plan.content().to_string(),
+            plan_lifecycle(plan.state(), item.updated_at()),
+        )),
+        TracePartState::Turn(_) => {
+            item.failure()?;
+            let TracePartState::Turn(turn) = item.state() else {
+                unreachable!("matched turn state")
+            };
+            ThreadItemState::Turn(ThreadTurnItem::new(turn.state().clone()))
+        }
+        TracePartState::Inference(inference) => {
+            ThreadItemState::Inference(thread_inference_item(inference, item.updated_at()))
+        }
     };
-    Some(ThreadItem {
-        id: item.item_id.clone(),
-        thread_id: thread_id.to_string(),
-        turn_id: item.turn_id.clone(),
+    Some(ThreadItem::new(
+        item.item_id().to_string(),
+        thread_id.to_string(),
+        item.turn_id().to_string(),
         // ordinal 由 ThreadEventBus 首次应用时分配（到达序）；started_sequence 仅是
         // trace 事件自身的去重/批内排序键，不再兼任 timeline 顺序。
-        ordinal: 0,
-        revision: item.revision,
-        status: if failure.is_some() && item.status != TracePartStatus::BudgetLimited {
-            ThreadItemStatus::Failed
-        } else {
-            item_status(item.status)
-        },
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-        completed_at: is_terminal(item.status).then_some(item.updated_at),
-        error: failure.map(str::to_string),
-        content,
-        usage: item.usage.clone(),
-    })
+        0,
+        item.revision(),
+        item.created_at(),
+        item.updated_at(),
+        state,
+    ))
 }
 
-fn empty_tool(item_id: &str, name: &str) -> ThreadToolCall {
-    ThreadToolCall {
-        tool_call_id: item_id.to_string(),
-        call_id: String::new(),
-        provider_item_id: None,
-        name: name.to_string(),
-        arguments: String::new(),
-        result: None,
-        output_artifacts: Vec::new(),
-        exit_code: None,
-        timed_out: false,
-        working_directory: None,
-        denial_reason: None,
+fn thread_tool_item(tool: &pl_trace::TraceToolPart, updated_at: i64) -> ThreadToolItem {
+    let invocation = tool.invocation();
+    let state =
+        match tool.state() {
+            TraceToolState::Started(_) => ThreadToolState::Started(StartedThreadTool),
+            TraceToolState::Streaming(_) => ThreadToolState::Streaming(StreamingThreadTool),
+            TraceToolState::AwaitingApproval(_) => {
+                ThreadToolState::AwaitingApproval(AwaitingApprovalThreadTool)
+            }
+            TraceToolState::Approved(_) => ThreadToolState::Approved(ApprovedThreadTool),
+            TraceToolState::Running(_) => {
+                ThreadToolState::Running(RunningThreadTool::new(String::new()))
+            }
+            TraceToolState::Succeeded(value) => ThreadToolState::Succeeded(
+                SucceededThreadTool::new(updated_at, thread_tool_output(value.output())),
+            ),
+            TraceToolState::Failed(value) => ThreadToolState::Failed(FailedThreadTool::new(
+                updated_at,
+                ThreadToolFailure::new(
+                    match value.failure().kind() {
+                        TraceToolFailureKind::Execution => ThreadToolFailureKind::Execution,
+                        TraceToolFailureKind::TimedOut => ThreadToolFailureKind::TimedOut,
+                        TraceToolFailureKind::BudgetLimited => ThreadToolFailureKind::BudgetLimited,
+                    },
+                    value.failure().message().to_string(),
+                ),
+                value.output().map(thread_tool_output),
+            )),
+            TraceToolState::Denied(value) => ThreadToolState::Denied(DeniedThreadTool::new(
+                updated_at,
+                value.reason().to_string(),
+            )),
+            TraceToolState::Cancelled(value) => ThreadToolState::Cancelled(
+                CancelledThreadTool::new(updated_at, format!("{:?}", value.cause())),
+            ),
+        };
+    ThreadToolItem::new(
+        ThreadToolInvocation::new(
+            invocation.tool_call_id().to_string(),
+            invocation.name().to_string(),
+            invocation.arguments().to_string(),
+        )
+        .with_provider_identity(
+            invocation.call_id().map(str::to_string),
+            invocation.provider_item_id().map(str::to_string),
+        )
+        .with_working_directory(invocation.working_directory().map(str::to_string)),
+        state,
+    )
+}
+
+fn thread_tool_output(output: &pl_trace::TraceToolOutput) -> ThreadToolOutput {
+    ThreadToolOutput::new(
+        output.result().to_string(),
+        output.output_artifacts().to_vec(),
+        output.exit_code(),
+    )
+}
+
+fn thread_attachment(value: &pl_trace::TraceAttachment) -> ThreadAttachment {
+    ThreadAttachment {
+        id: value.id.clone(),
+        media_type: value.media_type.clone(),
+        filename: value.filename.clone(),
+        width: value.width,
+        height: value.height,
+        byte_size: value.byte_size,
+        data_url: value.data_url.clone(),
     }
+}
+
+fn text_lifecycle(state: &pl_trace::TraceTextState, updated_at: i64) -> ThreadContentLifecycle {
+    match state {
+        pl_trace::TraceTextState::Streaming(_) => ThreadContentLifecycle::streaming(),
+        pl_trace::TraceTextState::Completed(_) => ThreadContentLifecycle::completed(updated_at),
+        pl_trace::TraceTextState::Failed(value) => {
+            ThreadContentLifecycle::failed(updated_at, value.error().to_string())
+        }
+        pl_trace::TraceTextState::Cancelled(value) => {
+            ThreadContentLifecycle::cancelled(updated_at, value.reason().to_string())
+        }
+    }
+}
+
+fn thinking_lifecycle(
+    state: &pl_trace::TraceThinkingState,
+    updated_at: i64,
+) -> ThreadContentLifecycle {
+    match state {
+        pl_trace::TraceThinkingState::Streaming(_) => ThreadContentLifecycle::streaming(),
+        pl_trace::TraceThinkingState::Completed(_) => ThreadContentLifecycle::completed(updated_at),
+        pl_trace::TraceThinkingState::Failed(value) => {
+            ThreadContentLifecycle::failed(updated_at, value.error().to_string())
+        }
+        pl_trace::TraceThinkingState::Cancelled(value) => {
+            ThreadContentLifecycle::cancelled(updated_at, value.reason().to_string())
+        }
+    }
+}
+
+fn plan_lifecycle(state: &pl_trace::TracePlanState, updated_at: i64) -> ThreadContentLifecycle {
+    match state {
+        pl_trace::TracePlanState::Started(_) | pl_trace::TracePlanState::Streaming(_) => {
+            ThreadContentLifecycle::streaming()
+        }
+        pl_trace::TracePlanState::Completed(_) => ThreadContentLifecycle::completed(updated_at),
+        pl_trace::TracePlanState::Failed(value) => {
+            ThreadContentLifecycle::failed(updated_at, value.error().to_string())
+        }
+        pl_trace::TracePlanState::Cancelled(value) => {
+            ThreadContentLifecycle::cancelled(updated_at, value.reason().to_string())
+        }
+    }
+}
+
+fn thread_agent_item(agent: &pl_trace::TraceAgentPart, updated_at: i64) -> ThreadAgentItem {
+    let identity = agent.identity();
+    let state = match agent.state() {
+        pl_trace::TraceAgentState::Queued(_) => ThreadAgentState::Queued(QueuedThreadAgent),
+        pl_trace::TraceAgentState::Running(_) => ThreadAgentState::Running(RunningThreadAgent),
+        pl_trace::TraceAgentState::Succeeded(value) => ThreadAgentState::Succeeded(
+            SucceededThreadAgent::new(updated_at, value.summary().to_string()),
+        ),
+        pl_trace::TraceAgentState::Denied(value) => ThreadAgentState::Denied(
+            DeniedThreadAgent::new(updated_at, value.reason().to_string()),
+        ),
+        pl_trace::TraceAgentState::Cancelled(value) => ThreadAgentState::Cancelled(
+            CancelledThreadAgent::new(updated_at, value.reason().to_string()),
+        ),
+        pl_trace::TraceAgentState::Failed(value) => ThreadAgentState::Failed(
+            FailedThreadAgent::new(updated_at, value.error().to_string()),
+        ),
+    };
+    ThreadAgentItem::new(
+        ThreadAgentIdentity::new(
+            identity.id().to_string(),
+            identity.path().to_string(),
+            identity.role().to_string(),
+            identity.task().to_string(),
+            identity.depth(),
+        )
+        .with_parent_path(identity.parent_path().map(str::to_string)),
+        state,
+    )
+}
+
+fn thread_inference_item(
+    inference: &pl_trace::TraceInferencePart,
+    updated_at: i64,
+) -> ThreadInferenceItem {
+    let state = match inference.state() {
+        pl_trace::TraceInferenceState::Running(_) => {
+            ThreadInferenceState::Running(RunningThreadInference)
+        }
+        pl_trace::TraceInferenceState::Completed(value) => ThreadInferenceState::Completed(
+            CompletedThreadInference::new(updated_at, value.usage().clone()),
+        ),
+        pl_trace::TraceInferenceState::Failed(value) => ThreadInferenceState::Failed(
+            FailedThreadInference::new(updated_at, value.error().to_string()),
+        ),
+        pl_trace::TraceInferenceState::Cancelled(value) => ThreadInferenceState::Cancelled(
+            pl_protocol::CancelledThreadInference::new(updated_at, value.reason().to_string()),
+        ),
+    };
+    ThreadInferenceItem::new(
+        inference.inference_id().to_string(),
+        inference.model().to_string(),
+        state,
+    )
 }
 
 fn item_delta(event: &TracePartDeltaEvent) -> Option<ThreadItemDelta> {
-    if matches!(event.kind, TracePartKind::Turn | TracePartKind::Inference) {
-        return None;
-    }
-    let (field, delta, chunk_index) = match &event.delta {
-        TraceDelta::Text { delta, .. } => (ThreadItemDeltaField::Text, delta.clone(), None),
-        TraceDelta::Thinking { chunk_index, delta } => (
-            ThreadItemDeltaField::ReasoningSummary,
-            delta.clone(),
-            Some(*chunk_index),
-        ),
-        TraceDelta::ReasoningContent { chunk_index, delta } => (
-            ThreadItemDeltaField::ReasoningContent,
-            delta.clone(),
-            Some(*chunk_index),
-        ),
-        TraceDelta::ToolArguments { delta } => {
-            (ThreadItemDeltaField::ToolArguments, delta.clone(), None)
+    let delta = match &event.delta {
+        TraceDelta::Text { delta, .. } => ThreadItemDeltaState::Text {
+            delta: delta.clone(),
+        },
+        TraceDelta::Thinking { chunk_index, delta } => ThreadItemDeltaState::ThinkingSummary {
+            chunk_index: *chunk_index,
+            delta: delta.clone(),
+        },
+        TraceDelta::ReasoningContent { chunk_index, delta } => {
+            ThreadItemDeltaState::ThinkingContent {
+                chunk_index: *chunk_index,
+                delta: delta.clone(),
+            }
         }
-        TraceDelta::ToolResult { delta } => (ThreadItemDeltaField::ToolResult, delta.clone(), None),
-        TraceDelta::Plan { delta } => (ThreadItemDeltaField::PlanContent, delta.clone(), None),
+        TraceDelta::ToolArguments { delta } => ThreadItemDeltaState::ToolArguments {
+            delta: delta.clone(),
+        },
+        TraceDelta::ToolResult { delta } => ThreadItemDeltaState::ToolResult {
+            delta: delta.clone(),
+        },
+        TraceDelta::Plan { delta } => ThreadItemDeltaState::Plan {
+            delta: delta.clone(),
+        },
     };
     Some(ThreadItemDelta {
         item_id: event.item_id.clone(),
         revision: event.revision,
-        field,
         delta,
-        chunk_index,
     })
-}
-
-fn item_status(status: TracePartStatus) -> ThreadItemStatus {
-    match status {
-        TracePartStatus::Started => ThreadItemStatus::Started,
-        TracePartStatus::Streaming => ThreadItemStatus::Streaming,
-        TracePartStatus::AwaitingApproval => ThreadItemStatus::AwaitingApproval,
-        TracePartStatus::Approved => ThreadItemStatus::Approved,
-        TracePartStatus::Denied => ThreadItemStatus::Denied,
-        TracePartStatus::Running => ThreadItemStatus::Running,
-        TracePartStatus::Completed => ThreadItemStatus::Completed,
-        TracePartStatus::Failed => ThreadItemStatus::Failed,
-        TracePartStatus::Interrupted => ThreadItemStatus::Interrupted,
-        TracePartStatus::BudgetLimited => ThreadItemStatus::BudgetLimited,
-    }
-}
-
-fn is_terminal(status: TracePartStatus) -> bool {
-    matches!(
-        status,
-        TracePartStatus::Completed
-            | TracePartStatus::Failed
-            | TracePartStatus::Interrupted
-            | TracePartStatus::BudgetLimited
-            | TracePartStatus::Denied
-    )
 }
 
 struct Projector<'a> {
     thread_id: &'a str,
     revision: u64,
+    active_turn_started_at: Option<i64>,
     notifications: Vec<ThreadNotificationEnvelope>,
 }
 
 impl<'a> Projector<'a> {
-    fn new(thread_id: &'a str, revision: u64) -> Self {
+    fn new(thread_id: &'a str, current: &ThreadSnapshot) -> Self {
         Self {
             thread_id,
-            revision,
+            revision: current.revision,
+            active_turn_started_at: current.active_turn.as_ref().and_then(Turn::started_at),
             notifications: Vec::new(),
         }
     }
 
     fn turn_updated(&mut self, turn_id: &str, phase: TurnPhase, emitted_at: i64) {
+        let started_at = *self.active_turn_started_at.get_or_insert(emitted_at);
         self.push(
             emitted_at,
             ThreadNotification::TurnUpdated {
-                turn: turn(
+                turn: projected_turn(
                     turn_id,
                     self.thread_id,
-                    TurnState::InProgress { phase },
-                    None,
+                    TurnState::Running(RunningTurnState::new(started_at, phase)),
                     emitted_at,
                 ),
             },
@@ -538,8 +643,8 @@ impl<'a> Projector<'a> {
 #[cfg(test)]
 mod tests {
     use pl_protocol::{
-        InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
-        InteractionResolution, InteractionScope, InteractionStatus, THREAD_SCHEMA_VERSION, Thread,
+        InteractionChangedEvent, InteractionCommand, InteractionRequest, InteractionScope,
+        ResolveUserInput, RunningTurnState, THREAD_SCHEMA_VERSION, Thread, ThreadItemState,
         ThreadSnapshot,
     };
 
@@ -552,13 +657,13 @@ mod tests {
             sequence: 1,
             timestamp: 7,
             kind: TraceEventKind::TracePartCompleted {
-                item: TracePart::text(
+                item: TracePart::completed_text(
                     "turn-1",
                     "item-1",
                     1,
                     TraceTextChannel::Final,
                     "done",
-                    TracePartStatus::Completed,
+                    Vec::new(),
                     7,
                 ),
             },
@@ -568,7 +673,7 @@ mod tests {
         assert!(matches!(
             &batch.notifications[0].notification,
             ThreadNotification::ItemCompleted { item }
-                if matches!(item.content, ThreadItemContent::AgentMessage { .. })
+                if matches!(item.state(), ThreadItemState::Text(_))
         ));
     }
 
@@ -579,13 +684,13 @@ mod tests {
             sequence: 1,
             timestamp: 7,
             kind: TraceEventKind::TracePartCompleted {
-                item: TracePart::text(
+                item: TracePart::completed_text(
                     "turn-1",
                     "internal-user-trace",
                     1,
                     TraceTextChannel::User,
                     "hidden control input",
-                    TracePartStatus::Completed,
+                    Vec::new(),
                     7,
                 ),
             },
@@ -605,27 +710,20 @@ mod tests {
             sequence: 3,
             timestamp: 7,
             kind: TraceEventKind::TracePartFailed {
-                item: TracePart {
-                    turn_id: "turn-1".to_string(),
-                    item_id: "turn-1-turn".to_string(),
-                    started_sequence: 3,
-                    revision: 1,
-                    kind: TracePartKind::Turn,
-                    status: TracePartStatus::Failed,
-                    created_at: 6,
-                    updated_at: 7,
-                    source: pl_trace::TracePartSource::Model,
-                    text_channel: None,
-                    content: String::new(),
-                    attachments: Vec::new(),
-                    thinking_chunks: Vec::new(),
-                    reasoning_content_chunks: Vec::new(),
-                    tool: None,
-                    agent: None,
-                    inference: None,
-                    usage: None,
-                },
-                error: "provider rejected tool schema".to_string(),
+                item: TracePart::turn(
+                    "turn-1".to_string(),
+                    "turn-1-turn".to_string(),
+                    3,
+                    7,
+                    TurnState::Failed(FailedTurnState::new(
+                        Some(6),
+                        7,
+                        pl_protocol::TurnFailure::permanent(
+                            pl_protocol::TurnFailureCategory::Provider,
+                            "provider rejected tool schema",
+                        ),
+                    )),
+                ),
             },
         };
 
@@ -635,61 +733,50 @@ mod tests {
         assert!(matches!(
             &batch.notifications[0].notification,
             ThreadNotification::ItemCompleted { item }
-                if item.status == ThreadItemStatus::Failed
-                    && item.error.as_deref() == Some("provider rejected tool schema")
-                    && matches!(
-                        item.content,
-                        ThreadItemContent::AgentMessage {
-                            channel: AgentMessageChannel::Final,
-                            ref text,
-                        } if text.is_empty()
-                    )
+                if item.failure() == Some("provider rejected tool schema")
+                    && matches!(item.state(), ThreadItemState::Turn(_))
         ));
     }
 
     #[test]
     fn resolved_interaction_trace_does_not_update_unrelated_active_turn() {
+        let mut interaction = InteractionRequest::user_input(
+            "ask-1",
+            InteractionScope {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-origin".to_string(),
+                item_id: None,
+                tool_id: None,
+                agent_path: None,
+            },
+            Vec::new(),
+            1,
+        );
+        let decision = interaction
+            .decide(InteractionCommand::ResolveUserInput(ResolveUserInput {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id: "resolve-1".to_string(),
+                resolved_at: 7,
+                answers: Default::default(),
+            }))
+            .unwrap();
+        interaction.apply(decision, 7);
         let trace = TraceEvent {
             session_id: "thread-1".to_string(),
             sequence: 1,
             timestamp: 7,
             kind: TraceEventKind::InteractionChanged {
-                event: InteractionChangedEvent {
-                    interaction: InteractionRequest {
-                        interaction_id: "ask-1".to_string(),
-                        kind: InteractionKind::UserInput,
-                        status: InteractionStatus::Resolved,
-                        scope: InteractionScope {
-                            thread_id: "thread-1".to_string(),
-                            turn_id: "turn-origin".to_string(),
-                            item_id: None,
-                            tool_id: None,
-                            agent_path: None,
-                        },
-                        payload: InteractionPayload::UserInput {
-                            questions: Vec::new(),
-                        },
-                        created_at: 1,
-                        updated_at: 7,
-                        resolved_at: Some(7),
-                        resolution: Some(InteractionResolution::UserInput {
-                            answers: Default::default(),
-                        }),
-                    },
-                },
+                event: InteractionChangedEvent { interaction },
             },
         };
         let mut current = snapshot();
         current.active_turn = Some(Turn {
             id: "turn-unrelated".to_string(),
             thread_id: "thread-1".to_string(),
-            state: TurnState::InProgress {
-                phase: TurnPhase::Thinking,
-            },
-            failure: None,
-            started_at: Some(1),
+            revision: 0,
+            state: TurnState::Running(RunningTurnState::new(1, TurnPhase::Thinking)),
             updated_at: 1,
-            completed_at: None,
         });
 
         let projected = project_trace_events("thread-1", &current, &[trace]);

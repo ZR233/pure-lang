@@ -5,14 +5,14 @@ use sea_orm::{
 };
 
 use super::task_run_record;
-use super::work_unit::{update_work_unit_state, work_unit_record, work_unit_state};
+use super::work_unit::{apply_work_unit_command, work_unit_record, work_unit_state};
 use crate::agent::worktree::git_compatible_path;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AllocateExecutor, BlockedRecovery, ExecutorAllocation, TaskCommand, TaskRunStateKind,
-    TaskSpawnFailure, WorkUnit, WorkUnitState, WorkUnitStatus,
+    TaskSpawnFailure, WorkUnit, WorkUnitCommand, WorkUnitState, WorkUnitStateKind,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -201,7 +201,7 @@ impl StudioStore {
             .await?
             .context("executor work unit not found while recording worktree base")?;
         let state = work_unit_state(&model)?;
-        if state.status() != WorkUnitStatus::Pending {
+        if state.kind() != WorkUnitStateKind::Pending {
             bail!("executor worktree base can only be recorded for a pending WorkUnit");
         }
         if model.base_commit == actual_base_commit {
@@ -257,40 +257,13 @@ impl StudioStore {
             .one(&tx)
             .await?
             .context("executor work unit not found")?;
-        let mut progress = work_unit_state(&work_unit)?.into_progress();
-        let next_state = match &transition {
-            ExecutorAllocationTransition::Activate => {
-                progress.execution_error = None;
-                progress.spawn_failure = None;
-                WorkUnitState::running(progress)
-            }
-            ExecutorAllocationTransition::Fail(failure) => {
-                let failure = failure.as_ref();
-                if let Some(existing) = progress.spawn_failure.as_ref() {
-                    if existing == failure {
-                        tx.commit().await?;
-                        return Ok(());
-                    }
-                    bail!("executor WorkUnit already records a different spawn failure");
-                }
-                if !matches!(
-                    work_unit_state(&work_unit)?.status(),
-                    WorkUnitStatus::Pending
-                        | WorkUnitStatus::Failed
-                        | WorkUnitStatus::NeedsAttention
-                ) {
-                    bail!("executor spawn failure cannot overwrite an active WorkUnit");
-                }
-                progress.execution_error = Some(failure.message.clone());
-                progress.spawn_failure = Some(failure.clone());
-                if failure.needs_attention() {
-                    WorkUnitState::needs_attention(progress)
-                } else {
-                    WorkUnitState::failed(progress)
-                }
-            }
+        let command = match &transition {
+            ExecutorAllocationTransition::Activate => WorkUnitCommand::Activate,
+            ExecutorAllocationTransition::Fail(failure) => WorkUnitCommand::FailSpawn {
+                failure: Box::new(failure.as_ref().clone()),
+            },
         };
-        update_work_unit_state(&tx, work_unit, next_state).await?;
+        apply_work_unit_command(&tx, work_unit, command).await?;
         if let ExecutorAllocationTransition::Fail(failure) = &transition
             && failure.needs_attention()
         {
@@ -344,15 +317,7 @@ fn stored_scope_matches(
 
 fn is_active_work_unit(status: &str) -> bool {
     matches!(
-        WorkUnitStatus::from_str(status),
-        Some(
-            WorkUnitStatus::Pending
-                | WorkUnitStatus::Running
-                | WorkUnitStatus::AwaitingCompletion
-                | WorkUnitStatus::ReadyForReview
-                | WorkUnitStatus::Reviewing
-                | WorkUnitStatus::ChangesRequested
-                | WorkUnitStatus::Approved
-        )
+        status,
+        "pending" | "running" | "waitingReview" | "reviewPassed" | "changesRequired" | "paused"
     )
 }

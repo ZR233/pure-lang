@@ -98,7 +98,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map_err(anyhow_error)?
             .ok_or_else(|| turn_error("selected Studio project not found"))?;
         let config = self.config_runtime.read()?.config;
-        let skill_catalog = self.skills.read(&thread_record.project_id).await.catalog;
+        let skills = self.skills.read(&thread_record.project_id).await;
+        let skill_catalog = skills.catalog_or_empty();
         let mode = thread_record.mode;
         let is_root = context.snapshot.identity.parent_id.is_none();
         // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
@@ -200,6 +201,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             self.store
                 .mark_executor_turn_started(
                     context.snapshot.identity.id.as_str(),
+                    context.turn_id.as_str(),
                     context.input.budget_action,
                 )
                 .await

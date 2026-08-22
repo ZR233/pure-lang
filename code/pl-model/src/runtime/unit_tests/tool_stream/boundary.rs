@@ -117,12 +117,11 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item } => {
-                Some((item.item_id.as_str(), item.kind, item.content.as_str()))
+                Some((item.item_id(), item.kind(), trace_part_text(item)))
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -131,23 +130,38 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
     let tool_seen = response.trace_events.iter().any(|event| match &event.kind {
         TraceEventKind::TracePartStarted { item }
         | TraceEventKind::TracePartCompleted { item }
-        | TraceEventKind::TracePartFailed { item, .. } => {
-            item.item_id == "turn-1-call_1" && item.kind == TracePartKind::Tool
+        | TraceEventKind::TracePartFailed { item } => {
+            item.item_id() == "turn-1-call_1" && item.kind() == TracePartKind::Tool
         }
         TraceEventKind::TracePartDelta { event } => {
-            event.item_id == "turn-1-call_1" && event.kind == TracePartKind::Tool
+            event.item_id == "turn-1-call_1" && event.kind() == TracePartKind::Tool
         }
-        TraceEventKind::PlanLifecycleChanged { .. }
-        | TraceEventKind::InteractionChanged { .. }
+        TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::SkillActivated { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => false,
     });
 
-    assert!(completed.contains(&("turn-1-inf-0-reasoning-1", TracePartKind::Thinking, "")));
-    assert!(completed.contains(&("turn-1-inf-0-text-final-1", TracePartKind::Text, "prelude")));
+    assert!(completed.contains(&(
+        "turn-1-inf-0-reasoning-1",
+        TracePartKind::Thinking,
+        "before".to_string(),
+    )));
+    assert!(completed.contains(&(
+        "turn-1-inf-0-text-final-1",
+        TracePartKind::Text,
+        "prelude".to_string(),
+    )));
     assert!(tool_seen);
-    assert!(completed.contains(&("turn-1-inf-0-reasoning-2", TracePartKind::Thinking, "")));
-    assert!(completed.contains(&("turn-1-inf-0-text-final-2", TracePartKind::Text, "done")));
+    assert!(completed.contains(&(
+        "turn-1-inf-0-reasoning-2",
+        TracePartKind::Thinking,
+        "after".to_string(),
+    )));
+    assert!(completed.contains(&(
+        "turn-1-inf-0-text-final-2",
+        TracePartKind::Text,
+        "done".to_string(),
+    )));
 }
 
 #[test]
@@ -202,18 +216,17 @@ fn tagged_stream_flushes_visible_text_before_tool_call() {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item } => {
-                Some((item.kind, item.item_id.as_str(), trace_part_text(item)))
+                Some((item.kind(), item.item_id(), trace_part_text(item)))
             }
             TraceEventKind::TracePartStarted { item } => {
-                Some((item.kind, item.item_id.as_str(), trace_part_text(item)))
+                Some((item.kind(), item.item_id(), trace_part_text(item)))
             }
             TraceEventKind::TracePartDelta { event } => Some((
-                event.kind,
+                event.kind(),
                 event.item_id.as_str(),
                 trace_delta_text(&event.delta),
             )),
             TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -296,15 +309,13 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         .iter()
         .filter_map(|event| match event {
             AgentEvent::TracePartStarted { item } => {
-                Some((item.item_id.as_str(), item.kind, item.content.as_str()))
+                Some((item.item_id(), item.kind(), trace_part_text(item)))
             }
             AgentEvent::TracePartDelta { .. }
             | AgentEvent::TracePartCompleted { .. }
             | AgentEvent::TracePartFailed { .. }
             | AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
-            | AgentEvent::AgentStateChanged { .. }
-            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
@@ -313,28 +324,34 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
             | AgentEvent::Error { .. } => None,
         })
         .collect::<Vec<_>>();
-    assert!(started.contains(&("turn-1-inf-0-reasoning-1", TracePartKind::Thinking, "")));
-    assert!(started.contains(&("turn-1-inf-0-text-final-1", TracePartKind::Text, "")));
-    assert!(started.contains(&("turn-1-fc_1", TracePartKind::Tool, "")));
+    assert!(started.contains(&(
+        "turn-1-inf-0-reasoning-1",
+        TracePartKind::Thinking,
+        String::new(),
+    )));
+    assert!(started.contains(&(
+        "turn-1-inf-0-text-final-1",
+        TracePartKind::Text,
+        String::new(),
+    )));
+    assert!(started.contains(&("turn-1-fc_1", TracePartKind::Tool, String::new(),)));
 
     let mut live = std::collections::HashMap::new();
     for event in &live_events {
         match event {
             AgentEvent::TracePartStarted { item } | AgentEvent::TracePartCompleted { item } => {
-                live.insert(item.item_id.clone(), trace_part_text(item));
+                live.insert(item.item_id().to_string(), trace_part_text(item));
             }
             AgentEvent::TracePartDelta { event } => {
                 live.entry(event.item_id.clone())
                     .or_insert_with(String::new)
                     .push_str(&trace_delta_text(&event.delta));
             }
-            AgentEvent::TracePartFailed { item, .. } => {
-                live.insert(item.item_id.clone(), trace_part_text(item));
+            AgentEvent::TracePartFailed { item } => {
+                live.insert(item.item_id().to_string(), trace_part_text(item));
             }
             AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
-            | AgentEvent::AgentStateChanged { .. }
-            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
@@ -348,29 +365,26 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartStarted { item }
                 if matches!(
-                    item.kind,
+                    item.kind(),
                     TracePartKind::Text | TracePartKind::Thinking | TracePartKind::Plan
-                ) && item.status == pl_trace::TracePartStatus::Completed =>
+                ) =>
             {
-                Some((item.item_id.clone(), trace_part_text(item)))
+                Some((item.item_id().to_string(), trace_part_text(item)))
             }
             TraceEventKind::TracePartStarted { item }
-                if item.kind == TracePartKind::Tool
-                    && item.item_id == "turn-1-fc_1"
+                if item.kind() == TracePartKind::Tool
+                    && item.item_id() == "turn-1-fc_1"
                     && item
-                        .tool
-                        .as_ref()
-                        .is_some_and(|tool| !tool.arguments.is_empty()) =>
+                        .tool()
+                        .is_some_and(|tool| !tool.invocation().arguments().is_empty()) =>
             {
-                Some((item.item_id.clone(), trace_part_text(item)))
+                Some((item.item_id().to_string(), trace_part_text(item)))
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,

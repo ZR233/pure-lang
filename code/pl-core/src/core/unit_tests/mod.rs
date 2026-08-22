@@ -1,10 +1,14 @@
+use super::tool_dispatch::ToolExecutionOutcome;
 use super::*;
 use crate::ContextCompactionTrigger;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
 use crate::turn::PermissionMode;
 use futures::FutureExt;
 use pl_model::{ModelInfo, OpenAiCompactionMode, ProviderEndpoint, ToolCall};
-use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
+use pl_protocol::{
+    InteractionContent, InteractionResolution, ToolApprovalResolution,
+    ToolApprovalResolutionPayload,
+};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -53,22 +57,13 @@ fn terminal_tool_event_count(events: &[TraceEvent]) -> usize {
         .iter()
         .filter(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item } => {
-                item.kind == pl_trace::TracePartKind::Tool
-                    && item.status == TracePartStatus::Completed
+                item.kind() == pl_trace::TracePartKind::Tool && item.is_terminal()
             }
-            TraceEventKind::TracePartFailed { item, .. } => {
-                item.kind == pl_trace::TracePartKind::Tool
-                    && matches!(
-                        item.status,
-                        TracePartStatus::Denied
-                            | TracePartStatus::Failed
-                            | TracePartStatus::Interrupted
-                            | TracePartStatus::BudgetLimited
-                    )
+            TraceEventKind::TracePartFailed { item } => {
+                item.kind() == pl_trace::TracePartKind::Tool && item.is_terminal()
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
@@ -76,19 +71,47 @@ fn terminal_tool_event_count(events: &[TraceEvent]) -> usize {
         .count()
 }
 
-fn tool_statuses(events: &[TraceEvent], item_id: &str) -> Vec<TracePartStatus> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestToolPhase {
+    Started,
+    Streaming,
+    AwaitingApproval,
+    Approved,
+    Running,
+    Succeeded,
+    Failed,
+    Denied,
+    Cancelled,
+}
+
+impl From<&pl_trace::TraceToolState> for TestToolPhase {
+    fn from(state: &pl_trace::TraceToolState) -> Self {
+        match state {
+            pl_trace::TraceToolState::Started(_) => Self::Started,
+            pl_trace::TraceToolState::Streaming(_) => Self::Streaming,
+            pl_trace::TraceToolState::AwaitingApproval(_) => Self::AwaitingApproval,
+            pl_trace::TraceToolState::Approved(_) => Self::Approved,
+            pl_trace::TraceToolState::Running(_) => Self::Running,
+            pl_trace::TraceToolState::Succeeded(_) => Self::Succeeded,
+            pl_trace::TraceToolState::Failed(_) => Self::Failed,
+            pl_trace::TraceToolState::Denied(_) => Self::Denied,
+            pl_trace::TraceToolState::Cancelled(_) => Self::Cancelled,
+        }
+    }
+}
+
+fn tool_statuses(events: &[TraceEvent], item_id: &str) -> Vec<TestToolPhase> {
     events
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. }
-                if item.kind == TracePartKind::Tool && item.item_id == item_id =>
+            | TraceEventKind::TracePartFailed { item }
+                if item.kind() == TracePartKind::Tool && item.item_id() == item_id =>
             {
-                Some(item.status)
+                item.tool().map(|tool| TestToolPhase::from(tool.state()))
             }
             TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. }
@@ -104,7 +127,7 @@ fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> 
         .iter()
         .filter_map(|event| match event {
             AgentEvent::TracePartDelta { event }
-                if event.kind == TracePartKind::Tool && event.item_id == item_id =>
+                if event.kind() == TracePartKind::Tool && event.item_id == item_id =>
             {
                 match &event.delta {
                     pl_trace::TraceDelta::ToolResult { delta } => Some(delta.clone()),
@@ -120,10 +143,8 @@ fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> 
             | AgentEvent::TracePartCompleted { .. }
             | AgentEvent::TracePartFailed { .. }
             | AgentEvent::InteractionChanged { .. }
-            | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
-            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
@@ -140,20 +161,25 @@ fn runtime_progress_texts(
     while let Ok(event) = event_rx.try_recv() {
         match event {
             AgentEvent::TracePartCompleted { item }
-                if item.source == TracePartSource::Runtime
-                    && item.text_channel == Some(TraceTextChannel::Commentary) =>
+                if item.source() == TracePartSource::Runtime
+                    && item
+                        .text()
+                        .is_some_and(|text| text.channel() == TraceTextChannel::Commentary) =>
             {
-                progress_texts.push(item.content)
+                progress_texts.push(
+                    item.text()
+                        .expect("runtime commentary text")
+                        .content()
+                        .to_string(),
+                )
             }
             AgentEvent::TracePartStarted { .. }
             | AgentEvent::TracePartDelta { .. }
             | AgentEvent::TracePartCompleted { .. }
             | AgentEvent::TracePartFailed { .. }
             | AgentEvent::InteractionChanged { .. }
-            | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
-            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
@@ -310,11 +336,10 @@ fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
     events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartStarted { item } => Some(item.kind),
+            TraceEventKind::TracePartStarted { item } => Some(item.kind()),
             TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -351,7 +376,6 @@ fn enabled_tools_event(events: &[TraceEvent]) -> &pl_trace::EnabledToolsEvent {
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. } => None,
         })
@@ -454,8 +478,6 @@ impl Tool for DeltaEchoTool {
                 item_id: input.tool_id.clone(),
                 started_sequence: 0,
                 revision: input.revision_base.saturating_add(1),
-                kind: TracePartKind::Tool,
-                status: TracePartStatus::Running,
                 created_at: now,
                 updated_at: now,
                 delta: pl_trace::TraceDelta::ToolResult {

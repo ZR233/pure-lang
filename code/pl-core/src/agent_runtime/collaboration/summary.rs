@@ -3,9 +3,7 @@
 use serde_json::{Value, json};
 
 use super::super::state::unix_timestamp;
-use super::super::{
-    AgentActivityState, AgentDirectoryWaitMessage, AgentLifecycleState, AgentSnapshot,
-};
+use super::super::{AgentDirectoryWaitMessage, AgentSnapshot, AgentState};
 use super::support::agent_path;
 
 pub(super) fn compact_agent(snapshot: &AgentSnapshot, all: &[AgentSnapshot]) -> Value {
@@ -13,8 +11,7 @@ pub(super) fn compact_agent(snapshot: &AgentSnapshot, all: &[AgentSnapshot]) -> 
         "identity": snapshot.identity.id,
         "path": agent_path(&snapshot.identity.id, all),
         "role": snapshot.identity.role,
-        "lifecycle": snapshot.lifecycle,
-        "activity": snapshot.activity,
+        "state": snapshot.state,
         "lastTurnOutcome": snapshot.last_turn,
         "progress": snapshot.progress,
         "updatedAt": snapshot.updated_at,
@@ -39,8 +36,7 @@ pub(super) fn compact_wait_message(
         "role": message.identity.role,
         "message": progress,
         "state": {
-            "lifecycle": message.lifecycle,
-            "activity": message.activity,
+            "agent": message.state,
             "lastTurnOutcome": message.last_turn_outcome,
         },
     })
@@ -57,19 +53,15 @@ pub(super) fn summary_age_seconds(snapshot: &AgentSnapshot) -> i64 {
         .max(0)
 }
 
-pub(super) fn session_read_requires_age_gate(
-    lifecycle: AgentLifecycleState,
-    activity: AgentActivityState,
-) -> bool {
-    lifecycle == AgentLifecycleState::Active && activity != AgentActivityState::Idle
+pub(super) fn session_read_requires_age_gate(state: &AgentState) -> bool {
+    state.is_operational() && !state.is_idle()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::agent_runtime::{
-        ActiveKind, AgentActivityState, AgentDirectoryWaitMessage, AgentIdentity,
-        AgentLifecycleState, AgentProgressCheckpoint, AgentProgressReport, AgentProgressStage,
-        AgentTurnOutcome, ThreadId, TurnId, TurnOutcomeKind,
+        AgentCommand, AgentDirectoryWaitMessage, AgentIdentity, AgentProgressCheckpoint,
+        AgentProgressReport, AgentProgressStage, AgentState, ThreadId, TurnId,
     };
     use crate::model_config::AgentRoleId;
 
@@ -85,8 +77,7 @@ mod tests {
                 role: AgentRoleId::new("executor").unwrap(),
                 depth: 0,
             },
-            lifecycle: AgentLifecycleState::Active,
-            activity: AgentActivityState::Active(ActiveKind::Running),
+            state: AgentState::idle(),
             message: Some(AgentProgressCheckpoint {
                 report: AgentProgressReport {
                     stage: AgentProgressStage::Verifying,
@@ -112,55 +103,30 @@ mod tests {
 
         let terminal = AgentDirectoryWaitMessage {
             identity: message.identity,
-            lifecycle: AgentLifecycleState::Closed,
-            activity: AgentActivityState::Idle,
+            state: AgentState::idle(),
             message: None,
-            last_turn_outcome: Some(AgentTurnOutcome {
-                turn_id: TurnId::new("turn-failed").unwrap(),
-                thread_id: ThreadId::new("executor").unwrap(),
-                kind: TurnOutcomeKind::Failed,
-                reason: Some("provider unavailable".to_string()),
-                failure: None,
-                budget_limit: None,
-                rollover_compacted: false,
-                rollover_compaction_error: None,
-                usage: pl_model::TokenUsage::default(),
-                finished_at: 124,
-            }),
+            last_turn_outcome: None,
         };
         let terminal_output = compact_wait_message(&terminal, &[]);
         assert!(terminal_output["message"].is_null());
-        assert_eq!(
-            terminal_output["state"]["lastTurnOutcome"]["turnId"],
-            "turn-failed"
-        );
-        assert_eq!(
-            terminal_output["state"]["lastTurnOutcome"]["kind"],
-            "failed"
-        );
-        assert_eq!(
-            terminal_output["state"]["lastTurnOutcome"]["reason"],
-            "provider unavailable"
-        );
+        assert_eq!(terminal_output["state"]["agent"]["kind"], "idle");
+        assert!(terminal_output["state"]["lastTurnOutcome"].is_null());
     }
 
     #[test]
     fn read_session_age_gate_only_applies_while_agent_has_active_work() {
-        assert!(session_read_requires_age_gate(
-            AgentLifecycleState::Active,
-            AgentActivityState::Active(ActiveKind::Running),
-        ));
-        assert!(session_read_requires_age_gate(
-            AgentLifecycleState::Active,
-            AgentActivityState::Active(ActiveKind::WaitingTool),
-        ));
-        assert!(!session_read_requires_age_gate(
-            AgentLifecycleState::Active,
-            AgentActivityState::Idle,
-        ));
-        assert!(!session_read_requires_age_gate(
-            AgentLifecycleState::Closed,
-            AgentActivityState::Idle,
-        ));
+        let turn_id = TurnId::new("turn-running").unwrap();
+        let queued = AgentState::idle()
+            .decide(AgentCommand::Queue {
+                turn_id: turn_id.clone(),
+            })
+            .unwrap()
+            .next_state;
+        let running = queued
+            .decide(AgentCommand::Start { turn_id })
+            .unwrap()
+            .next_state;
+        assert!(session_read_requires_age_gate(&running));
+        assert!(!session_read_requires_age_gate(&AgentState::idle()));
     }
 }

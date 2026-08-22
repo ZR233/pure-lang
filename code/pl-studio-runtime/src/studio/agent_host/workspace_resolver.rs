@@ -136,8 +136,7 @@ impl AgentWorkspaceResolver {
                 let root =
                     validate_child_workspace(&completion.worktree_path, &completion.branch, &run)?;
                 let expected_head = completion
-                    .head_commit
-                    .as_deref()
+                    .head_commit()
                     .unwrap_or(completion.base_commit.as_str());
                 ensure!(
                     round.reviewed_head == expected_head,
@@ -245,8 +244,7 @@ mod tests {
     use crate::studio::agent_host::resources::StudioAgentResources;
     use crate::studio::records::{ThreadKind, ThreadVisibility};
     use crate::studio::task_coordinator::{
-        AgentDelivery, AgentWorktreeDelivery, CreateWorkUnit, TaskCoordinator, TaskRunStateKind,
-        WorkCompletionKind, WorkUnitState,
+        CreateWorkUnit, TaskCoordinator, TaskRunStateKind, WorkCompletionContent, WorkUnitState,
     };
 
     #[tokio::test]
@@ -280,17 +278,8 @@ mod tests {
             .store
             .create_work_completion(
                 &fixture.work_unit_id,
-                WorkCompletionKind::Delivery,
-                Some(&AgentDelivery {
-                    worktree: AgentWorktreeDelivery {
-                        path: canonical_text(&fixture.worktree),
-                        branch: fixture.branch.clone(),
-                    },
-                    base_commit: git_output(&fixture.repository, &["rev-parse", "HEAD"]),
-                    head_commit: head,
-                    changed_files: vec!["sentinel.txt".to_string()],
-                    verification_summary: "focused checks passed".to_string(),
-                }),
+                WorkCompletionContent::delivery(head, vec!["sentinel.txt".to_string()])
+                    .expect("test delivery has a head commit"),
                 "focused checks passed",
             )
             .await
@@ -499,7 +488,6 @@ mod tests {
         design_run: TaskRun,
         repository: PathBuf,
         worktree: PathBuf,
-        branch: String,
         work_unit_id: String,
         executor_agent_id: String,
     }
@@ -558,7 +546,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let running = WorkUnitState::running(work_unit.state.clone().into_progress());
+            let running = WorkUnitState::running_for_test(0);
             let work_unit = store
                 .update_work_unit(&work_unit.id, running, Some(executor_agent_id.clone()))
                 .await
@@ -576,7 +564,6 @@ mod tests {
                 design_run,
                 repository,
                 worktree,
-                branch,
                 work_unit_id: work_unit.id.clone(),
                 executor_agent_id,
             }
@@ -630,7 +617,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let running = WorkUnitState::running(work_unit.state.clone().into_progress());
+            let running = WorkUnitState::running_for_test(0);
             let work_unit = self
                 .store
                 .update_work_unit(&work_unit.id, running, Some(agent_id.to_string()))

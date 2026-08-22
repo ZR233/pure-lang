@@ -303,7 +303,10 @@ async fn injected_backend_keeps_the_exec_result_contract() {
         .unwrap();
     let result = command_json(&output);
 
-    assert_eq!(result.status, "completed");
+    assert!(matches!(
+        result.state.final_result(),
+        Some(CommandProcessFinalResult::Succeeded { .. })
+    ));
     assert_eq!(result.output_file, "hosted/output.log");
     assert_eq!(
         result.output_artifacts,
@@ -618,7 +621,10 @@ async fn long_command_returns_process_id_then_can_be_polled() {
         .unwrap();
     let running_result = command_json(&running);
 
-    assert_eq!(running_result.status, "running", "{running_result:?}");
+    assert!(
+        matches!(&running_result.state, CommandProcessLifecycle::Running(_)),
+        "{running_result:?}"
+    );
     let process_id = running_result.process_id.unwrap();
 
     let mut result = None;
@@ -640,13 +646,22 @@ async fn long_command_returns_process_id_then_can_be_polled() {
             .await
             .unwrap();
         result = Some(command_json(&completed));
-        if result.as_ref().unwrap().status == "completed" {
+        if matches!(
+            result.as_ref().unwrap().state.final_result(),
+            Some(CommandProcessFinalResult::Succeeded { .. })
+        ) {
             break;
         }
     }
     let result = result.unwrap();
 
-    assert_eq!(result.status, "completed", "{result:?}");
+    assert!(
+        matches!(
+            result.state.final_result(),
+            Some(CommandProcessFinalResult::Succeeded { .. })
+        ),
+        "{result:?}"
+    );
     assert!(result.stdout.contains("done"));
 }
 
@@ -669,7 +684,10 @@ async fn write_stdin_sends_input_to_running_process() {
         .await
         .unwrap();
     let running_result = command_json(&running);
-    assert_eq!(running_result.status, "running", "{running_result:?}");
+    assert!(
+        matches!(&running_result.state, CommandProcessLifecycle::Running(_)),
+        "{running_result:?}"
+    );
     let process_id = running_result.process_id.unwrap();
 
     let mut result = None;
@@ -693,13 +711,22 @@ async fn write_stdin_sends_input_to_running_process() {
             .unwrap();
         result = Some(command_json(&completed));
         stdout.push_str(&result.as_ref().unwrap().stdout);
-        if result.as_ref().unwrap().status == "completed" {
+        if matches!(
+            result.as_ref().unwrap().state.final_result(),
+            Some(CommandProcessFinalResult::Succeeded { .. })
+        ) {
             break;
         }
     }
     let result = result.unwrap();
 
-    assert_eq!(result.status, "completed", "{result:?}");
+    assert!(
+        matches!(
+            result.state.final_result(),
+            Some(CommandProcessFinalResult::Succeeded { .. })
+        ),
+        "{result:?}"
+    );
     assert!(stdout.contains("got:hello"), "{stdout}");
 }
 
@@ -723,9 +750,12 @@ async fn timeout_terminates_background_process() {
         .await
         .unwrap();
     let mut result = command_json(&output);
-    let mut timed_out = output.timed_out || result.timed_out;
+    let mut timed_out = output.timed_out || result.state.is_timed_out();
     for attempt in 0..8 {
-        if result.status == "timedOut" {
+        if matches!(
+            result.state.final_result(),
+            Some(CommandProcessFinalResult::TimedOut)
+        ) {
             break;
         }
         let Some(process_id) = result.process_id.clone() else {
@@ -750,7 +780,13 @@ async fn timeout_terminates_background_process() {
         result = command_json(&polled);
     }
 
-    assert_eq!(result.status, "timedOut", "{result:?}");
+    assert!(
+        matches!(
+            result.state.final_result(),
+            Some(CommandProcessFinalResult::TimedOut)
+        ),
+        "{result:?}"
+    );
     assert!(timed_out);
     assert_eq!(result.process_id, None);
 }

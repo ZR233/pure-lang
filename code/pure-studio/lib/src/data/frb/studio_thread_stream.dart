@@ -45,7 +45,7 @@ sealed class ThreadStreamFrame {
           revision: envelope.revision.toInt(),
           update: ThreadInteractionUpdate(
             interaction: _interactionFromFrb(interaction),
-            pending: interaction.status == frb.BridgeInteractionStatus.pending,
+            pending: _interactionIsPending(interaction),
           ),
         ),
         threadRuntimeUpdated: (runtime) => ThreadNotificationFrame(
@@ -139,14 +139,12 @@ class ThreadItemDeltaView {
   const ThreadItemDeltaView({
     required this.itemId,
     required this.revision,
-    required this.field,
-    required this.delta,
+    required this.state,
   });
 
   final String itemId;
   final int revision;
-  final String field;
-  final String delta;
+  final ThreadItemDeltaStateView state;
 }
 
 class ThreadHistoryPage {
@@ -163,10 +161,7 @@ ThreadWorkspace _threadWorkspaceFromFrb(frb.BridgeThreadSnapshot value) {
     items: value.items.map(_threadItemFromFrb).toList()
       ..sort(_compareThreadItems),
     interactions: value.interactions
-        .where(
-          (interaction) =>
-              interaction.status == frb.BridgeInteractionStatus.pending,
-        )
+        .where(_interactionIsPending)
         .map(_interactionFromFrb)
         .toList(),
     runtime: value.runtime == null
@@ -194,132 +189,118 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
     rootThreadId: value.rootThreadId,
     agentPath: value.agentPath,
     role: value.role,
-    status: value.status.name,
+    status: switch (value.status) {
+      frb.BridgeThreadStatus.idle => ThreadStatusView.idle,
+      frb.BridgeThreadStatus.queued => ThreadStatusView.queued,
+      frb.BridgeThreadStatus.running => ThreadStatusView.running,
+      frb.BridgeThreadStatus.waitingTool => ThreadStatusView.waitingTool,
+      frb.BridgeThreadStatus.waitingInteraction =>
+        ThreadStatusView.waitingInteraction,
+      frb.BridgeThreadStatus.cancelling => ThreadStatusView.cancelling,
+      frb.BridgeThreadStatus.closing => ThreadStatusView.closing,
+      frb.BridgeThreadStatus.closed => ThreadStatusView.closed,
+      frb.BridgeThreadStatus.faulted => ThreadStatusView.faulted,
+    },
     archived: value.archived,
   );
 }
 
 ThreadItemView _threadItemFromFrb(
-  frb.BridgeThreadItem value, {
+  frb_item.BridgeThreadItem value, {
   ThreadContextDisposition contextDisposition = ThreadContextDisposition.active,
 }) {
-  final base = (
+  return ThreadItemView(
     id: value.id,
     threadId: value.threadId,
     turnId: value.turnId,
     ordinal: value.ordinal.toInt(),
     revision: value.revision.toInt(),
-    status: value.status.name,
     createdAt: _dateFromUnix(value.createdAt),
     updatedAt: _dateFromUnix(value.updatedAt),
-    completedAt: value.completedAt == null
-        ? null
-        : _dateFromUnix(value.completedAt!),
-    error: value.error,
-  );
-  return value.content.when(
-    userMessage: (text, attachments) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.userMessage,
-      text: text,
-      attachments: attachments.map(_attachmentFromFrb).toList(),
-      contextDisposition: contextDisposition,
-    ),
-    agentMessage: (channel, text) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.agentMessage,
-      text: text,
-      channel: switch (channel) {
-        frb.BridgeAgentMessageChannel.commentary =>
-          AgentMessageChannel.commentary,
-        frb.BridgeAgentMessageChannel.final_ => AgentMessageChannel.finalAnswer,
-      },
-      contextDisposition: contextDisposition,
-    ),
-    reasoning: (summary, content) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.reasoning,
-      reasoningSummary: summary,
-      reasoningContent: content,
-      contextDisposition: contextDisposition,
-    ),
-    plan: (content) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.plan,
-      text: content,
-      contextDisposition: contextDisposition,
-    ),
-    toolCall: (tool) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.toolCall,
-      tool: _toolFromFrb(tool),
-      contextDisposition: contextDisposition,
-    ),
-    file: (path, mediaType) => ThreadItemView(
-      id: base.id,
-      threadId: base.threadId,
-      turnId: base.turnId,
-      ordinal: base.ordinal,
-      revision: base.revision,
-      status: base.status,
-      createdAt: base.createdAt,
-      updatedAt: base.updatedAt,
-      completedAt: base.completedAt,
-      error: base.error,
-      kind: ThreadItemKind.file,
-      filePath: path,
-      mediaType: mediaType,
-      contextDisposition: contextDisposition,
-    ),
+    state: _threadItemStateFromFrb(value.state),
+    contextDisposition: contextDisposition,
   );
 }
 
-ThreadAttachmentView _attachmentFromFrb(frb.BridgeThreadAttachment value) {
+ThreadItemStateView _threadItemStateFromFrb(
+  frb_item.BridgeThreadItemState value,
+) {
+  return value.when(
+    text: (channel, text, attachments, lifecycle) => ThreadTextItemStateView(
+      channel: switch (channel) {
+        frb_item.BridgeThreadTextChannel.user => ThreadTextChannel.user,
+        frb_item.BridgeThreadTextChannel.commentary =>
+          ThreadTextChannel.commentary,
+        frb_item.BridgeThreadTextChannel.final_ =>
+          ThreadTextChannel.finalAnswer,
+      },
+      text: text,
+      attachments: attachments.map(_attachmentFromFrb).toList(),
+      lifecycle: _contentLifecycleFromFrb(lifecycle),
+    ),
+    thinking: (summary, content, lifecycle) => ThreadThinkingItemStateView(
+      summary: summary,
+      content: content,
+      lifecycle: _contentLifecycleFromFrb(lifecycle),
+    ),
+    tool: (invocation, state) => ThreadToolItemStateView(
+      invocation: ThreadToolInvocationView(
+        toolCallId: invocation.toolCallId,
+        callId: invocation.callId,
+        providerItemId: invocation.providerItemId,
+        name: invocation.name,
+        arguments: invocation.arguments,
+        workingDirectory: invocation.workingDirectory,
+      ),
+      lifecycle: _toolLifecycleFromFrb(state),
+    ),
+    agent: (identity, state) => ThreadAgentItemStateView(
+      identity: ThreadAgentIdentityView(
+        id: identity.id,
+        path: identity.path,
+        parentPath: identity.parentPath,
+        role: identity.role,
+        task: identity.task,
+        depth: identity.depth,
+      ),
+      lifecycle: _agentLifecycleFromFrb(state),
+    ),
+    turn: (state) => ThreadTurnItemStateView(_turnStateFromFrb(state)),
+    inference: (inferenceId, model, state) => ThreadInferenceItemStateView(
+      inferenceId: inferenceId,
+      model: model,
+      lifecycle: _inferenceLifecycleFromFrb(state),
+    ),
+    plan: (content, lifecycle) => ThreadPlanItemStateView(
+      content: content,
+      lifecycle: _contentLifecycleFromFrb(lifecycle),
+    ),
+    file: (path, mediaType, completedAt) =>
+        ThreadFileItemStateView(path, mediaType, _dateFromUnix(completedAt)),
+    contextCompaction: (beforeTokens, afterTokens, compactedAt) =>
+        ThreadContextCompactionItemStateView(
+          beforeTokens.toInt(),
+          afterTokens.toInt(),
+          _dateFromUnix(compactedAt),
+        ),
+  );
+}
+
+ThreadContentLifecycleView _contentLifecycleFromFrb(
+  frb_item.BridgeThreadContentLifecycle value,
+) {
+  return value.when(
+    streaming: () => const StreamingThreadContentView(),
+    completed: (completedAt) =>
+        CompletedThreadContentView(_dateFromUnix(completedAt)),
+    failed: (failedAt, error) =>
+        FailedThreadContentView(_dateFromUnix(failedAt), error),
+    cancelled: (cancelledAt, reason) =>
+        CancelledThreadContentView(_dateFromUnix(cancelledAt), reason),
+  );
+}
+
+ThreadAttachmentView _attachmentFromFrb(frb_item.BridgeThreadAttachment value) {
   return ThreadAttachmentView(
     id: value.id,
     mediaType: value.mediaType,
@@ -331,37 +312,103 @@ ThreadAttachmentView _attachmentFromFrb(frb.BridgeThreadAttachment value) {
   );
 }
 
-TimelineToolPart _toolFromFrb(frb.BridgeThreadToolCall value) {
-  return TimelineToolPart(
-    toolCallId: value.toolCallId,
-    callId: value.callId,
-    providerItemId: value.providerItemId,
-    name: value.name,
-    arguments: value.arguments,
+ThreadToolLifecycleView _toolLifecycleFromFrb(
+  frb_item.BridgeThreadToolState value,
+) {
+  return value.when(
+    started: () => const StartedThreadToolView(),
+    streaming: () => const StreamingThreadToolView(),
+    awaitingApproval: () => const AwaitingApprovalThreadToolView(),
+    approved: () => const ApprovedThreadToolView(),
+    running: (streamedOutput) => RunningThreadToolView(streamedOutput),
+    succeeded: (completedAt, output) => SucceededThreadToolView(
+      _dateFromUnix(completedAt),
+      _toolOutputFromFrb(output),
+    ),
+    failed: (failedAt, failure, output) => FailedThreadToolView(
+      _dateFromUnix(failedAt),
+      ThreadToolFailureView(
+        kind: switch (failure.kind) {
+          frb_item.BridgeThreadToolFailureKind.execution =>
+            ThreadToolFailureKindView.execution,
+          frb_item.BridgeThreadToolFailureKind.timedOut =>
+            ThreadToolFailureKindView.timedOut,
+          frb_item.BridgeThreadToolFailureKind.budgetLimited =>
+            ThreadToolFailureKindView.budgetLimited,
+        },
+        message: failure.message,
+      ),
+      output == null ? null : _toolOutputFromFrb(output),
+    ),
+    denied: (deniedAt, reason) =>
+        DeniedThreadToolView(_dateFromUnix(deniedAt), reason),
+    cancelled: (cancelledAt, reason) =>
+        CancelledThreadToolView(_dateFromUnix(cancelledAt), reason),
+  );
+}
+
+ThreadToolOutputView _toolOutputFromFrb(frb_item.BridgeThreadToolOutput value) {
+  return ThreadToolOutputView(
     result: value.result,
     outputArtifacts: value.outputArtifactsJson
         .map(JsonLeafDecoder.decode)
         .toList(),
     exitCode: value.exitCode,
-    timedOut: value.timedOut,
-    workingDirectory: value.workingDirectory,
-    denialReason: value.denialReason,
   );
 }
 
-ThreadItemDeltaView _threadItemDeltaFromFrb(frb.BridgeThreadItemDelta value) {
+ThreadAgentLifecycleView _agentLifecycleFromFrb(
+  frb_item.BridgeThreadAgentState value,
+) {
+  return value.when(
+    queued: () => const QueuedThreadAgentView(),
+    running: () => const RunningThreadAgentView(),
+    succeeded: (completedAt, summary) =>
+        SucceededThreadAgentView(_dateFromUnix(completedAt), summary),
+    denied: (deniedAt, reason) =>
+        DeniedThreadAgentView(_dateFromUnix(deniedAt), reason),
+    cancelled: (cancelledAt, reason) =>
+        CancelledThreadAgentView(_dateFromUnix(cancelledAt), reason),
+    failed: (failedAt, error) =>
+        FailedThreadAgentView(_dateFromUnix(failedAt), error),
+  );
+}
+
+ThreadInferenceLifecycleView _inferenceLifecycleFromFrb(
+  frb_item.BridgeThreadInferenceState value,
+) {
+  return value.when(
+    running: () => const RunningThreadInferenceView(),
+    completed: (completedAt, usage) => CompletedThreadInferenceView(
+      _dateFromUnix(completedAt),
+      ThreadInferenceUsageView(
+        promptTokens: usage.promptTokens.toInt(),
+        completionTokens: usage.completionTokens.toInt(),
+        cachedPromptTokens: usage.cachedPromptTokens.toInt(),
+        totalTokens: usage.totalTokens.toInt(),
+      ),
+    ),
+    failed: (failedAt, error) =>
+        FailedThreadInferenceView(_dateFromUnix(failedAt), error),
+    cancelled: (cancelledAt, reason) =>
+        CancelledThreadInferenceView(_dateFromUnix(cancelledAt), reason),
+  );
+}
+
+ThreadItemDeltaView _threadItemDeltaFromFrb(
+  frb_item.BridgeThreadItemDelta value,
+) {
   return ThreadItemDeltaView(
     itemId: value.itemId,
     revision: value.revision.toInt(),
-    field: switch (value.field) {
-      frb.BridgeThreadItemDeltaField.text => 'text',
-      frb.BridgeThreadItemDeltaField.reasoningSummary => 'reasoning.summary',
-      frb.BridgeThreadItemDeltaField.reasoningContent => 'reasoning.content',
-      frb.BridgeThreadItemDeltaField.planContent => 'planContent',
-      frb.BridgeThreadItemDeltaField.toolArguments => 'tool.arguments',
-      frb.BridgeThreadItemDeltaField.toolResult => 'tool.result',
-    },
-    delta: value.delta,
+    state: value.delta.when(
+      text: ThreadTextDeltaView.new,
+      thinkingSummary: ThreadThinkingSummaryDeltaView.new,
+      thinkingContent: ThreadThinkingContentDeltaView.new,
+      plan: ThreadPlanDeltaView.new,
+      toolArguments: ThreadToolArgumentsDeltaView.new,
+      toolResult: ThreadToolResultDeltaView.new,
+    ),
   );
 }
 
@@ -369,32 +416,91 @@ StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
   return StudioTurnView(
     turnId: value.id,
     threadId: value.threadId,
-    state: value.state.when(
-      queued: () => const StudioTurnState.queued(),
-      inProgress: (phase) => StudioTurnState.inProgress(switch (phase) {
+    revision: value.revision.toInt(),
+    state: _turnStateFromFrb(value.state),
+    updatedAt: _dateFromUnix(value.updatedAt),
+  );
+}
+
+StudioTurnState _turnStateFromFrb(frb.BridgeTurnState value) {
+  return value.when(
+    queued: (queuedAt) => QueuedStudioTurnState(queuedAt: queuedAt),
+    running: (startedAt, phase) => RunningStudioTurnState(
+      startedAt: startedAt,
+      activity: switch (phase) {
         frb.BridgeTurnPhase.preparing => StudioTurnActivity.preparing,
         frb.BridgeTurnPhase.thinking => StudioTurnActivity.thinking,
         frb.BridgeTurnPhase.responding => StudioTurnActivity.responding,
         frb.BridgeTurnPhase.planning => StudioTurnActivity.planning,
         frb.BridgeTurnPhase.runningTool => StudioTurnActivity.runningTool,
         frb.BridgeTurnPhase.persisting => StudioTurnActivity.persisting,
-      }),
-      completed: () => const StudioTurnState.completed(),
-      failed: StudioTurnState.failed,
-      interrupted: StudioTurnState.cancelled,
+      },
     ),
-    failure: value.failure == null
-        ? null
-        : StudioTurnFailureView(
-            category: value.failure!.category,
-            providerKind: value.failure!.providerKind,
-            code: value.failure!.code,
-            httpStatus: value.failure!.httpStatus,
-            message: value.failure!.message,
-            retryable: value.failure!.retryable,
-            retryAfterMs: value.failure!.retryAfterMs?.toInt(),
+    completed: (startedAt, completedAt, completion) => CompletedStudioTurnState(
+      startedAt: startedAt,
+      completedAt: completedAt,
+      completion: switch (completion) {
+        frb.BridgeTurnCompletion.normal => StudioTurnCompletion.normal,
+        frb.BridgeTurnCompletion.interactionRequested =>
+          StudioTurnCompletion.interactionRequested,
+      },
+    ),
+    cancelled: (startedAt, requestedAt, completedAt, cause) =>
+        CancelledStudioTurnState(
+          startedAt: startedAt,
+          requestedAt: requestedAt,
+          completedAt: completedAt,
+          cause: _turnCancellationCauseFromFrb(cause),
+        ),
+    failed: (startedAt, completedAt, failure) => FailedStudioTurnState(
+      startedAt: startedAt,
+      completedAt: completedAt,
+      failure: _turnFailureFromFrb(failure),
+    ),
+    budgetLimited: (startedAt, completedAt, limit, rollover) =>
+        BudgetLimitedStudioTurnState(
+          startedAt: startedAt,
+          completedAt: completedAt,
+          limit: StudioTurnBudgetLimit(
+            kind: StudioTurnBudgetLimitKind.values.byName(limit.kind.name),
+            usage: StudioTurnBudgetUsage(
+              modelSteps: limit.usage.modelSteps,
+              toolCalls: limit.usage.toolCalls,
+              waitCalls: limit.usage.waitCalls,
+              elapsedMs: limit.usage.elapsedMs.toInt(),
+            ),
           ),
-    updatedAt: _dateFromUnix(value.updatedAt),
+          rollover: rollover.when(
+            notAttempted: () => const RolloverNotAttempted(),
+            succeeded: () => const RolloverSucceeded(),
+            failed: (error) => RolloverFailed(error: error),
+          ),
+        ),
+  );
+}
+
+StudioTurnCancellationCause _turnCancellationCauseFromFrb(
+  frb.BridgeTurnCancellationCause value,
+) {
+  return value.when(
+    userRequested: () => const UserRequestedTurnCancellation(),
+    runtimeShutdown: () => const RuntimeShutdownTurnCancellation(),
+    agentClosed: () => const AgentClosedTurnCancellation(),
+    recovery: () => const RecoveryTurnCancellation(),
+    coalesced: (targetTurnId) =>
+        CoalescedTurnCancellation(targetTurnId: targetTurnId),
+  );
+}
+
+StudioTurnFailureView _turnFailureFromFrb(frb.BridgeTurnFailureDto value) {
+  return StudioTurnFailureView(
+    category: value.category,
+    providerKind: value.providerKind,
+    code: value.code,
+    httpStatus: value.httpStatus,
+    message: value.message,
+    retryable: value.retryable,
+    retryAfterMs: value.retryAfterMs?.toInt(),
   );
 }
 
@@ -458,50 +564,81 @@ TimelineTodoListUpdate? _todoFromFrb(frb.BridgeTodoListSnapshot? value) {
 }
 
 PendingInteraction _interactionFromFrb(frb.BridgeInteractionRequest value) {
-  final kind = switch (value.kind) {
-    frb.BridgeInteractionKind.userInput => InteractionKind.userInput,
-    frb.BridgeInteractionKind.toolApproval => InteractionKind.toolApproval,
-    frb.BridgeInteractionKind.planConfirmation =>
-      InteractionKind.planConfirmation,
-  };
-  final payload = value.payload.when<InteractionPayload>(
-    userInput: (questions) => UserInputInteractionPayload(
-      questions: [
-        for (final question in questions)
-          UserQuestionView(
-            id: question.id,
-            header: question.header,
-            question: question.question,
-            isOther: question.isOther,
-            isSecret: question.isSecret,
-            options: [
-              for (final option in question.options ?? const [])
-                UserQuestionOptionView(
-                  label: option.label,
-                  description: option.description,
-                ),
-            ],
-          ),
-      ],
+  final mapped = value.content.when(
+    userInput: (questions, state) => (
+      kind: InteractionKind.userInput,
+      payload: UserInputInteractionPayload(
+        questions: [
+          for (final question in questions)
+            UserQuestionView(
+              id: question.id,
+              header: question.header,
+              question: question.question,
+              isOther: question.isOther,
+              isSecret: question.isSecret,
+              options: [
+                for (final option in question.options ?? const [])
+                  UserQuestionOptionView(
+                    label: option.label,
+                    description: option.description,
+                  ),
+              ],
+            ),
+        ],
+      ) as InteractionPayload,
     ),
-    toolApproval: (name, argumentsJson, workingDirectory, parentAgentId) =>
-        ToolApprovalInteractionPayload(
-          toolName: name,
-          arguments: JsonLeafDecoder.decode(argumentsJson),
-          workingDirectory: workingDirectory ?? '',
-          parentAgentId: parentAgentId,
+    toolApproval:
+        (name, argumentsJson, workingDirectory, parentAgentId, state) => (
+          kind: InteractionKind.toolApproval,
+          payload: ToolApprovalInteractionPayload(
+            toolName: name,
+            arguments: JsonLeafDecoder.decode(argumentsJson),
+            workingDirectory: workingDirectory ?? '',
+            parentAgentId: parentAgentId,
+          ) as InteractionPayload,
         ),
-    planConfirmation: (planId, content) =>
-        PlanConfirmationInteractionPayload(planId: planId, content: content),
+    planConfirmation: (planId, content, state) => (
+      kind: InteractionKind.planConfirmation,
+      payload: PlanConfirmationInteractionPayload(
+        planId: planId,
+        content: content,
+      ) as InteractionPayload,
+    ),
   );
   return PendingInteraction(
     id: value.interactionId,
     threadId: value.scope.threadId,
     turnId: value.scope.turnId,
-    kind: kind,
-    title: _interactionTitle(kind, payload),
-    body: _interactionBody(kind, payload),
-    payload: payload,
+    kind: mapped.kind,
+    title: _interactionTitle(mapped.kind, mapped.payload),
+    body: _interactionBody(mapped.kind, mapped.payload),
+    payload: mapped.payload,
+  );
+}
+
+bool _interactionIsPending(frb.BridgeInteractionRequest value) {
+  return value.content.when(
+    userInput: (questions, state) => state.when(
+      pending: (operationId) => true,
+      resolved: (operationId, resolvedAt, answers) => false,
+      cancelled: (operationId, cancelledAt, reason) => false,
+      expired: (operationId, expiredAt) => false,
+    ),
+    toolApproval:
+        (name, argumentsJson, workingDirectory, parentAgentId, state) =>
+            state.when(
+              pending: (operationId) => true,
+              resolved: (operationId, resolvedAt, decision, reason) => false,
+              cancelled: (operationId, cancelledAt, reason) => false,
+              expired: (operationId, expiredAt) => false,
+            ),
+    planConfirmation: (planId, content, state) => state.when(
+      pending: (operationId) => true,
+      resolved: (operationId, resolvedAt, decision, resolvedContent, reason) =>
+          false,
+      cancelled: (operationId, cancelledAt, reason) => false,
+      expired: (operationId, expiredAt) => false,
+    ),
   );
 }
 

@@ -1,11 +1,18 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+mod state;
+
+pub use state::{
+    FailedProviderUsage, MissingCredentialProviderUsage, ProviderUsageState, ReadyProviderUsage,
+    UnsupportedProviderUsage,
+};
+
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::join_all;
 use pl_model::ProviderEndpoint;
-use pl_protocol::PureError;
+use pl_protocol::{PureError, StateError};
 use reqwest::header::{ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
@@ -376,56 +383,165 @@ pub fn zhipu_limit_by_window(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageRecord {
-    pub provider_id: String,
-    pub updated_at: i64,
-    pub state: ProviderUsageState,
+    provider_id: String,
+    revision: u64,
+    updated_at: i64,
+    last_operation_id: String,
+    state: ProviderUsageState,
+}
+
+impl ProviderUsageRecord {
+    pub fn new(provider_id: impl Into<String>) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            revision: 0,
+            updated_at: 0,
+            last_operation_id: String::new(),
+            state: ProviderUsageState::unsupported(),
+        }
+    }
+
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
+
+    pub fn state(&self) -> &ProviderUsageState {
+        &self.state
+    }
+
+    pub fn decide(
+        &self,
+        command: ProviderUsageCommand,
+    ) -> Result<ProviderUsageTransitionDecision, ProviderUsageTransitionError> {
+        let ProviderUsageCommand::Observe {
+            expected_revision,
+            operation_id,
+            observed_at,
+            state,
+        } = command;
+        if expected_revision != self.revision {
+            return Err(ProviderUsageTransitionError::StaleRevision {
+                provider_id: self.provider_id.clone(),
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+        if operation_id == self.last_operation_id {
+            if observed_at == self.updated_at && state == self.state {
+                return Ok(ProviderUsageTransitionDecision {
+                    next_state: self.clone(),
+                    changed: false,
+                });
+            }
+            return Err(ProviderUsageTransitionError::OperationConflict {
+                provider_id: self.provider_id.clone(),
+                operation_id,
+            });
+        }
+        Ok(ProviderUsageTransitionDecision {
+            next_state: Self {
+                provider_id: self.provider_id.clone(),
+                revision: self.revision.saturating_add(1),
+                updated_at: observed_at,
+                last_operation_id: operation_id,
+                state,
+            },
+            changed: true,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderUsageCommand {
+    Observe {
+        expected_revision: u64,
+        operation_id: String,
+        observed_at: i64,
+        state: ProviderUsageState,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderUsageTransitionDecision {
+    pub next_state: ProviderUsageRecord,
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProviderUsageTransitionError {
+    #[error("provider usage {provider_id} revision is stale: expected {expected}, actual {actual}")]
+    StaleRevision {
+        provider_id: String,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("provider usage {provider_id} operation {operation_id} conflicts with prior payload")]
+    OperationConflict {
+        provider_id: String,
+        operation_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum ProviderUsageState {
-    Unsupported,
-    MissingCredential,
-    Ready(ProviderUsageData),
-    Failed(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum ProviderUsageData {
     DeepSeekBalance(DeepSeekBalanceUsage),
     ZhipuCodingPlan(ZhipuCodingPlanUsage),
 }
 
-pub async fn provider_usage_records(config: &StudioConfig) -> Vec<ProviderUsageRecord> {
+pub async fn provider_usage_records(
+    config: &StudioConfig,
+    previous: &[ProviderUsageRecord],
+    operation_id: &str,
+) -> Result<Vec<ProviderUsageRecord>, ProviderUsageTransitionError> {
+    let previous = previous
+        .iter()
+        .map(|record| (record.provider_id.clone(), record.clone()))
+        .collect::<BTreeMap<_, _>>();
     let futures = config
         .models
         .providers
         .iter()
         .map(|(provider_id, provider)| {
-            provider_usage_record(provider_id.to_string(), provider.clone())
+            let record = previous
+                .get(provider_id.as_str())
+                .cloned()
+                .unwrap_or_else(|| ProviderUsageRecord::new(provider_id.to_string()));
+            provider_usage_record(record, provider.clone(), operation_id.to_string())
         });
-    join_all(futures).await
+    join_all(futures).await.into_iter().collect()
 }
 
 async fn provider_usage_record(
-    provider_id: String,
+    record: ProviderUsageRecord,
     provider: ProviderConfig,
-) -> ProviderUsageRecord {
-    let updated_at = unix_seconds();
+    operation_id: String,
+) -> Result<ProviderUsageRecord, ProviderUsageTransitionError> {
+    let observed_at = unix_seconds();
     let state = match provider_template_kind(&provider)
         .as_ref()
         .map(|kind| kind.key())
     {
         Some("deepseek") => provider_usage_data(provider, query_deepseek).await,
         Some("zhipu-coding-plan") => provider_usage_data(provider, query_zhipu).await,
-        Some(_) | None => ProviderUsageState::Unsupported,
+        Some(_) | None => ProviderUsageState::unsupported(),
     };
-    ProviderUsageRecord {
-        provider_id,
-        updated_at,
-        state,
-    }
+    record
+        .decide(ProviderUsageCommand::Observe {
+            expected_revision: record.revision(),
+            operation_id,
+            observed_at,
+            state,
+        })
+        .map(|decision| decision.next_state)
 }
 
 type ProviderUsageQueryFuture = BoxFuture<'static, crate::Result<ProviderUsageData>>;
@@ -439,15 +555,25 @@ async fn provider_usage_data(
         .as_ref()
         .is_none_or(|token| token.trim().is_empty())
     {
-        return ProviderUsageState::MissingCredential;
+        return ProviderUsageState::missing_credential("provider API key is not configured");
     }
     let info = match provider.to_endpoint() {
         Ok(info) => info,
-        Err(error) => return ProviderUsageState::Failed(error.to_string()),
+        Err(error) => {
+            return ProviderUsageState::failed(StateError {
+                code: "providerUsageConfigurationFailed".to_string(),
+                message: error.to_string(),
+                retryable: false,
+            });
+        }
     };
     match query(info).await {
-        Ok(data) => ProviderUsageState::Ready(data),
-        Err(error) => ProviderUsageState::Failed(error.to_string()),
+        Ok(data) => ProviderUsageState::ready(data),
+        Err(error) => ProviderUsageState::failed(StateError {
+            code: "providerUsageQueryFailed".to_string(),
+            message: error.to_string(),
+            retryable: true,
+        }),
     }
 }
 
@@ -467,4 +593,143 @@ fn query_zhipu(info: pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture {
             .map(ProviderUsageData::ZhipuCodingPlan)
     }
     .boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    fn ready_state() -> ProviderUsageState {
+        ProviderUsageState::ready(ProviderUsageData::DeepSeekBalance(DeepSeekBalanceUsage {
+            is_available: true,
+            balances: vec![DeepSeekBalanceInfo {
+                currency: "CNY".to_string(),
+                total_balance: "12.50".to_string(),
+                granted_balance: "2.50".to_string(),
+                topped_up_balance: "10.00".to_string(),
+            }],
+        }))
+    }
+
+    fn observe(
+        record: &ProviderUsageRecord,
+        operation_id: &str,
+        observed_at: i64,
+        state: ProviderUsageState,
+    ) -> ProviderUsageCommand {
+        ProviderUsageCommand::Observe {
+            expected_revision: record.revision(),
+            operation_id: operation_id.to_string(),
+            observed_at,
+            state,
+        }
+    }
+
+    #[test]
+    fn provider_usage_state_round_trips_as_adjacent_union() {
+        let states = [
+            ProviderUsageState::unsupported(),
+            ProviderUsageState::missing_credential("missing key"),
+            ready_state(),
+            ProviderUsageState::failed(StateError {
+                code: "providerUsageQueryFailed".to_string(),
+                message: "network unavailable".to_string(),
+                retryable: true,
+            }),
+        ];
+
+        for state in states {
+            let json = serde_json::to_string(&state).expect("serialize provider usage state");
+            let restored = serde_json::from_str(&json).expect("deserialize provider usage state");
+            assert_eq!(state, restored);
+        }
+    }
+
+    #[test]
+    fn provider_usage_state_rejects_flattened_legacy_json() {
+        let legacy = serde_json::json!({
+            "status": "ready",
+            "usageKind": "deepSeekBalance",
+            "message": "ok",
+            "balance": {"isAvailable": true, "balances": []}
+        });
+
+        assert!(serde_json::from_value::<ProviderUsageState>(legacy).is_err());
+    }
+
+    #[test]
+    fn duplicate_operation_is_noop_only_for_identical_payload() {
+        let initial = ProviderUsageRecord::new("deepseek");
+        let first = initial
+            .decide(observe(&initial, "usage:1", 10, ready_state()))
+            .expect("first observation");
+        assert!(first.changed);
+        assert_eq!(first.next_state.revision(), 1);
+
+        let duplicate = first
+            .next_state
+            .decide(observe(&first.next_state, "usage:1", 10, ready_state()))
+            .expect("identical duplicate");
+        assert!(!duplicate.changed);
+        assert_eq!(duplicate.next_state, first.next_state);
+
+        let conflict = first.next_state.decide(observe(
+            &first.next_state,
+            "usage:1",
+            11,
+            ProviderUsageState::unsupported(),
+        ));
+        assert_eq!(
+            conflict,
+            Err(ProviderUsageTransitionError::OperationConflict {
+                provider_id: "deepseek".to_string(),
+                operation_id: "usage:1".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn stale_revision_is_rejected_and_failed_state_can_recover() {
+        let initial = ProviderUsageRecord::new("deepseek");
+        let failed = initial
+            .decide(observe(
+                &initial,
+                "usage:1",
+                10,
+                ProviderUsageState::failed(StateError {
+                    code: "providerUsageQueryFailed".to_string(),
+                    message: "timeout".to_string(),
+                    retryable: true,
+                }),
+            ))
+            .expect("failure observation")
+            .next_state;
+
+        let stale = failed.decide(ProviderUsageCommand::Observe {
+            expected_revision: 0,
+            operation_id: "usage:2".to_string(),
+            observed_at: 11,
+            state: ready_state(),
+        });
+        assert_eq!(
+            stale,
+            Err(ProviderUsageTransitionError::StaleRevision {
+                provider_id: "deepseek".to_string(),
+                expected: 0,
+                actual: 1,
+            })
+        );
+
+        let recovered = failed
+            .decide(observe(&failed, "usage:2", 11, ready_state()))
+            .expect("new observation recovers provider usage");
+        assert!(recovered.changed);
+        assert_eq!(recovered.next_state.revision(), 2);
+        assert!(matches!(
+            recovered.next_state.state(),
+            ProviderUsageState::Ready(_)
+        ));
+    }
 }

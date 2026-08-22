@@ -18,7 +18,10 @@ pub mod thread {
         pub role: String,
         #[sea_orm(unique)]
         pub agent_path: String,
-        pub status: String,
+        /// Canonical serialized [`pl_core::AgentState`].
+        pub state_json: String,
+        /// SQLite generated discriminator derived from `state_json`.
+        pub state_kind: String,
         /// Thread realtime notification revision exposed to subscribers.
         pub revision: i64,
         /// ThreadActor compare-and-swap revision. `None` means the durable Thread exists but its
@@ -63,13 +66,10 @@ pub mod thread_input {
         pub content: String,
         pub metadata_json: String,
         pub presentation: String,
-        pub state: String,
-        pub claimed_turn_id: Option<String>,
-        pub checkpoint_seq: Option<i64>,
+        pub state_json: String,
+        pub state_kind: String,
         pub queue_ordinal: i64,
         pub queued_at: i64,
-        pub claimed_at: Option<i64>,
-        pub consumed_at: Option<i64>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -134,19 +134,12 @@ pub mod turn {
         pub thread_id: String,
         pub ordinal: i64,
         pub revision: i64,
-        pub status: String,
-        pub phase: Option<String>,
-        pub reason: Option<String>,
+        pub state_json: String,
+        pub state_kind: String,
         pub model_json: Option<String>,
         pub usage_json: String,
-        pub failure_json: Option<String>,
-        pub budget_limit_json: Option<String>,
-        pub rollover_compacted: i32,
-        pub rollover_compaction_error: Option<String>,
         pub metadata_json: Option<String>,
-        pub started_at: Option<i64>,
         pub updated_at: i64,
-        pub completed_at: Option<i64>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -175,12 +168,12 @@ pub mod item {
         pub turn_id: String,
         pub ordinal: i64,
         pub revision: i64,
-        pub item_kind: String,
-        pub status: String,
-        pub payload_json: String,
+        /// Category-specific canonical [`pl_protocol::ThreadItemState`].
+        pub state_json: String,
+        /// SQLite generated discriminator derived from `state_json`.
+        pub state_kind: String,
         pub created_at: i64,
         pub updated_at: i64,
-        pub completed_at: Option<i64>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

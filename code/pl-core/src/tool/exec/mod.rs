@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use pl_protocol::PureError;
-use pl_trace::{AgentEvent, TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
+use pl_trace::{AgentEvent, TracePartDeltaEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -90,11 +90,9 @@ struct WriteStdinInput {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandJsonOutput {
-    status: String,
+    state: CommandProcessLifecycle,
     #[serde(skip_serializing_if = "Option::is_none")]
     process_id: Option<String>,
-    exit_code: Option<i32>,
-    timed_out: bool,
     stdout: String,
     stderr: String,
     output_file: String,
@@ -152,17 +150,13 @@ impl CommandOutputObserver for ToolResultOutputObserver {
             delta = format!("[stderr] {delta}");
         }
         let now = unix_seconds();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id: self.item_id.clone(),
-            started_sequence: 0,
-            revision: self.revision_base.saturating_add(revision),
-            kind: TracePartKind::Tool,
-            status: TracePartStatus::Running,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::ToolResult { delta },
-        };
+        let event = TracePartDeltaEvent::running_tool_result(
+            self.turn_id.clone(),
+            self.item_id.clone(),
+            self.revision_base.saturating_add(revision),
+            now,
+            delta,
+        );
         if let Some(event_tx) = self.event_tx.upgrade() {
             let _ = event_tx.send(AgentEvent::TracePartDelta { event });
         }
@@ -353,11 +347,11 @@ fn tool_output_from_snapshot(
     revision_base: u64,
 ) -> Result<ToolOutput, PureError> {
     let capture_file = snapshot.capture_file.clone();
+    let exit_code = snapshot.state.exit_code();
+    let timed_out = snapshot.state.is_timed_out();
     let output = CommandJsonOutput {
-        status: snapshot.status,
+        state: snapshot.state,
         process_id: snapshot.process_id,
-        exit_code: snapshot.exit_code,
-        timed_out: snapshot.timed_out,
         stdout: snapshot.stdout.content.clone(),
         stderr: snapshot.stderr.content.clone(),
         output_file: snapshot.output_file.display().to_string(),
@@ -384,8 +378,8 @@ fn tool_output_from_snapshot(
             stderr: snapshot.stderr,
         },
         output_file: capture_file,
-        exit_code: snapshot.exit_code,
-        timed_out: snapshot.timed_out,
+        exit_code,
+        timed_out,
         runtime_events,
     })
 }

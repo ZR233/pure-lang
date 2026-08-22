@@ -105,10 +105,17 @@ pub struct StudioMcpServerSettings {
     pub id: String,
     pub transport: String,
     pub endpoint: String,
-    pub enabled: bool,
-    pub status: String,
+    pub configuration: StudioMcpServerConfiguration,
     pub source_kind: String,
     pub mutation_policy: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioMcpServerConfiguration {
+    Enabled,
+    Disabled,
+    MissingCredential,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

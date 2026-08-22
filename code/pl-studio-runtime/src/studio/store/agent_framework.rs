@@ -1,6 +1,11 @@
-use anyhow::Result;
-use pl_core::canonical_content_hash;
-use pl_protocol::{ThreadItem, ThreadItemContent, ThreadItemStatus};
+use anyhow::{Context, Result};
+use pl_core::{
+    AgentCommand, AgentRecoveryTarget, AgentState, MailboxCommand, MailboxDeliveryState, TurnId,
+    canonical_content_hash,
+};
+use pl_protocol::{
+    ThreadContentLifecycle, ThreadItem, Turn, TurnCancellationCause, TurnCommand, TurnState,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QueryOrder, TransactionTrait,
@@ -30,12 +35,50 @@ pub(in crate::studio) struct ThreadRuntimeSeed {
     pub event_sequence: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::studio) enum UnregisteredThreadFault {
+    Faulted,
+    RuntimeOwned,
+}
+
 impl StudioStore {
+    /// 在 actor 首次注册前把已创建的 child Thread 收敛为 canonical Faulted 状态。
+    /// 已由 runtime 持有 revision 的 Thread 留给 core spawn compensation 处理。
+    pub(in crate::studio) async fn fault_unregistered_child_thread(
+        &self,
+        thread_id: &str,
+        error: &str,
+    ) -> Result<UnregisteredThreadFault> {
+        let row = thread::Entity::find_by_id(thread_id)
+            .one(&self.db)
+            .await?
+            .with_context(|| format!("spawn compensation Thread not found: {thread_id}"))?;
+        if row.runtime_revision.is_some() {
+            return Ok(UnregisteredThreadFault::RuntimeOwned);
+        }
+        let state: AgentState = serde_json::from_str(&row.state_json)?;
+        let state = state
+            .decide(AgentCommand::Fault {
+                error: pl_protocol::StateError {
+                    code: "agentRegistrationFailed".to_string(),
+                    message: error.to_string(),
+                    retryable: false,
+                },
+                turn_id: None,
+            })?
+            .next_state;
+        let mut active = row.into_active_model();
+        active.state_json = Set(serde_json::to_string(&state)?);
+        active.updated_at = Set(unix_seconds());
+        active.update(&self.db).await?;
+        Ok(UnregisteredThreadFault::Faulted)
+    }
+
     /// 只读判断 durable Thread 是否仍有活动 Turn 或未消费输入。
     pub(in crate::studio) async fn thread_has_active_work(&self, thread_id: &str) -> Result<bool> {
         let active_turn = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id))
-            .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+            .filter(turn::Column::StateKind.is_in(["queued", "running"]))
             .one(&self.db)
             .await?;
         if active_turn.is_some() {
@@ -43,7 +86,7 @@ impl StudioStore {
         }
         Ok(thread_input::Entity::find()
             .filter(thread_input::Column::ThreadId.eq(thread_id))
-            .filter(thread_input::Column::State.ne("consumed"))
+            .filter(thread_input::Column::StateKind.ne("consumed"))
             .one(&self.db)
             .await?
             .is_some())
@@ -86,39 +129,77 @@ impl StudioStore {
 
                 let inputs = thread_input::Entity::find()
                     .filter(thread_input::Column::ThreadId.eq(&thread_row.id))
-                    .filter(thread_input::Column::State.ne("consumed"))
+                    .filter(thread_input::Column::StateKind.ne("consumed"))
                     .all(&tx)
                     .await?;
                 for input in inputs {
+                    let mut state: MailboxDeliveryState = serde_json::from_str(&input.state_json)?;
+                    if state.is_pending() {
+                        state = state
+                            .decide(MailboxCommand::Claim {
+                                turn_id: TurnId::new(input.turn_id.clone())?,
+                            })?
+                            .next_state;
+                    }
+                    let turn_id = state
+                        .turn_id()
+                        .cloned()
+                        .context("claimed mailbox is missing its Turn identity")?;
+                    let checkpoint_seq = state.checkpoint_seq().unwrap_or_default();
+                    let state = state
+                        .decide(MailboxCommand::Consume {
+                            turn_id,
+                            checkpoint_seq,
+                        })?
+                        .next_state;
                     let mut active = input.into_active_model();
-                    active.state = Set("consumed".to_string());
-                    active.consumed_at = Set(Some(now));
+                    active.state_json = Set(serde_json::to_string(&state)?);
                     active.update(&tx).await?;
                 }
 
                 let active_turns = turn::Entity::find()
                     .filter(turn::Column::ThreadId.eq(&thread_row.id))
-                    .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+                    .filter(turn::Column::StateKind.is_in(["queued", "running"]))
                     .all(&tx)
                     .await?;
                 for turn in active_turns {
+                    let state: TurnState = serde_json::from_str(&turn.state_json)?;
+                    let aggregate = Turn {
+                        id: turn.id.clone(),
+                        thread_id: turn.thread_id.clone(),
+                        revision: u64::try_from(turn.revision)?,
+                        state,
+                        updated_at: turn.updated_at,
+                    };
+                    let mut aggregate = aggregate;
+                    let decision = aggregate.decide(TurnCommand::Cancel {
+                        turn_id: aggregate.id.clone(),
+                        expected_revision: aggregate.revision,
+                        cause: TurnCancellationCause::Recovery,
+                        completed_at: now,
+                    })?;
+                    aggregate.apply(decision, now);
                     let mut active = turn.into_active_model();
-                    active.status = Set("interrupted".to_string());
-                    active.phase = Set(None);
-                    active.reason = Set(Some("recovery context reset".to_string()));
-                    active.failure_json = Set(None);
-                    active.budget_limit_json = Set(None);
-                    active.rollover_compacted = Set(0);
-                    active.rollover_compaction_error = Set(None);
-                    active.updated_at = Set(now);
-                    active.completed_at = Set(Some(now));
+                    active.revision = Set(i64::try_from(aggregate.revision)?);
+                    active.state_json = Set(serde_json::to_string(&aggregate.state)?);
+                    active.updated_at = Set(aggregate.updated_at);
                     active.update(&tx).await?;
                 }
 
                 let is_root = thread_row.id == root_thread_id;
+                let state: AgentState = serde_json::from_str(&thread_row.state_json)?;
+                let state = state
+                    .decide(AgentCommand::Recover {
+                        target: if is_root {
+                            AgentRecoveryTarget::Idle
+                        } else {
+                            AgentRecoveryTarget::Closed
+                        },
+                    })?
+                    .next_state;
                 let mut active = thread_row.into_active_model();
                 active.runtime_revision = Set(None);
-                active.status = Set(if is_root { "idle" } else { "closed" }.to_string());
+                active.state_json = Set(serde_json::to_string(&state)?);
                 active.last_context_tokens = Set(None);
                 active.updated_at = Set(now);
                 active.update(&tx).await?;
@@ -170,13 +251,12 @@ impl StudioStore {
             let thread_id = thread.id;
             let history = item::Entity::find()
                 .filter(item::Column::ThreadId.eq(thread_id.clone()))
-                .filter(item::Column::ItemKind.eq("plan"))
-                .filter(item::Column::Status.eq("completed"))
+                .filter(item::Column::StateKind.eq("plan"))
                 .order_by_desc(item::Column::Ordinal)
                 .all(&self.db)
                 .await?;
             let plan = history.into_iter().find_map(|item| {
-                let item: ThreadItem = match serde_json::from_str(&item.payload_json) {
+                let item = match ThreadItem::try_from(item) {
                     Ok(item) => item,
                     Err(error) => {
                         tracing::warn!(
@@ -187,12 +267,13 @@ impl StudioStore {
                         return None;
                     }
                 };
-                let ThreadItemContent::Plan { content } = item.content else {
-                    return None;
-                };
-                if item.status != ThreadItemStatus::Completed || content.trim().is_empty() {
+                let plan = item.plan()?;
+                if !matches!(plan.lifecycle(), ThreadContentLifecycle::Completed(_))
+                    || plan.content().trim().is_empty()
+                {
                     return None;
                 }
+                let content = plan.content().to_string();
                 Some(RecoverablePlan {
                     turn_id: item.turn_id,
                     item_id: item.id,
@@ -209,25 +290,5 @@ impl StudioStore {
             });
         }
         Ok(plans)
-    }
-
-    /// 查询 turn 的产品元数据；queue 行转为 running/terminal 时仍会保留该值。
-    pub(in crate::studio) async fn agent_turn_metadata(
-        &self,
-        agent_id: &str,
-        turn_id: &str,
-    ) -> Result<Option<serde_json::Value>> {
-        turn::Entity::find_by_id(turn_id.to_string())
-            .filter(turn::Column::ThreadId.eq(agent_id))
-            .one(&self.db)
-            .await?
-            .map(|turn| {
-                turn.metadata_json
-                    .map(|metadata| serde_json::from_str(&metadata))
-                    .transpose()
-                    .map_err(Into::into)
-            })
-            .transpose()
-            .map(Option::flatten)
     }
 }

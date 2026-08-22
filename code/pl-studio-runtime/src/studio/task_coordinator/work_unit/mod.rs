@@ -1,267 +1,15 @@
-//! WorkUnit aggregate with a single lifecycle state.
+//! WorkUnit aggregate and its command-driven lifecycle state machine.
+
+mod state;
 
 use std::ops::Deref;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    ExecutorContinuationState, TaskSpawnFailure, TaskWorktreeDisposition, ThreadExecutionStatus,
-    WorkUnitStatus,
-};
+pub(crate) use state::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WorkUnitProgress {
-    pub(crate) worktree_disposition: TaskWorktreeDisposition,
-    pub(crate) execution_summary: Option<String>,
-    pub(crate) execution_error: Option<String>,
-    #[serde(default)]
-    pub(crate) spawn_failure: Option<TaskSpawnFailure>,
-    pub(crate) budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
-    pub(crate) budget_slice_count: u32,
-    pub(crate) continuation_state: ExecutorContinuationState,
-    pub(crate) continuation_source_turn_id: Option<String>,
-    pub(crate) continuation_revision: u64,
-}
-
-impl WorkUnitProgress {
-    pub(crate) fn pending() -> Self {
-        Self {
-            worktree_disposition: TaskWorktreeDisposition::Protect,
-            execution_summary: None,
-            execution_error: None,
-            spawn_failure: None,
-            budget_limit: None,
-            budget_slice_count: 1,
-            continuation_state: ExecutorContinuationState::None,
-            continuation_source_turn_id: None,
-            continuation_revision: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum RunningExecution {
-    Running,
-    BudgetLimited,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum AwaitingExecution {
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RunningWorkUnitState {
-    pub(crate) execution: RunningExecution,
-    pub(crate) progress: WorkUnitProgress,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AwaitingWorkUnitState {
-    pub(crate) execution: AwaitingExecution,
-    pub(crate) progress: WorkUnitProgress,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub(crate) enum WorkUnitState {
-    Pending(WorkUnitProgress),
-    Running(RunningWorkUnitState),
-    AwaitingCompletion(AwaitingWorkUnitState),
-    ReadyForReview(WorkUnitProgress),
-    Reviewing(WorkUnitProgress),
-    ChangesRequested(WorkUnitProgress),
-    Approved(WorkUnitProgress),
-    Merged(WorkUnitProgress),
-    NoDelivery(WorkUnitProgress),
-    NeedsAttention(WorkUnitProgress),
-    Failed(WorkUnitProgress),
-    Cancelled(WorkUnitProgress),
-}
-
-impl WorkUnitState {
-    pub(crate) fn pending() -> Self {
-        Self::Pending(WorkUnitProgress::pending())
-    }
-
-    pub(crate) fn running(progress: WorkUnitProgress) -> Self {
-        Self::Running(RunningWorkUnitState {
-            execution: RunningExecution::Running,
-            progress,
-        })
-    }
-
-    pub(crate) fn budget_limited(progress: WorkUnitProgress) -> Self {
-        Self::Running(RunningWorkUnitState {
-            execution: RunningExecution::BudgetLimited,
-            progress,
-        })
-    }
-
-    pub(crate) fn awaiting_completed(progress: WorkUnitProgress) -> Self {
-        Self::AwaitingCompletion(AwaitingWorkUnitState {
-            execution: AwaitingExecution::Completed,
-            progress,
-        })
-    }
-
-    pub(crate) fn awaiting_failed(progress: WorkUnitProgress) -> Self {
-        Self::AwaitingCompletion(AwaitingWorkUnitState {
-            execution: AwaitingExecution::Failed,
-            progress,
-        })
-    }
-
-    pub(crate) fn awaiting_cancelled(progress: WorkUnitProgress) -> Self {
-        Self::AwaitingCompletion(AwaitingWorkUnitState {
-            execution: AwaitingExecution::Cancelled,
-            progress,
-        })
-    }
-
-    pub(crate) fn ready_for_review(progress: WorkUnitProgress) -> Self {
-        Self::ReadyForReview(progress)
-    }
-
-    pub(crate) fn reviewing(progress: WorkUnitProgress) -> Self {
-        Self::Reviewing(progress)
-    }
-
-    pub(crate) fn changes_requested(progress: WorkUnitProgress) -> Self {
-        Self::ChangesRequested(progress)
-    }
-
-    pub(crate) fn approved(progress: WorkUnitProgress) -> Self {
-        Self::Approved(progress)
-    }
-
-    pub(crate) fn merged(progress: WorkUnitProgress) -> Self {
-        Self::Merged(progress)
-    }
-
-    pub(crate) fn no_delivery(progress: WorkUnitProgress) -> Self {
-        Self::NoDelivery(progress)
-    }
-
-    pub(crate) fn needs_attention(progress: WorkUnitProgress) -> Self {
-        Self::NeedsAttention(progress)
-    }
-
-    pub(crate) fn failed(progress: WorkUnitProgress) -> Self {
-        Self::Failed(progress)
-    }
-
-    pub(crate) fn cancelled(progress: WorkUnitProgress) -> Self {
-        Self::Cancelled(progress)
-    }
-
-    pub(crate) const fn status(&self) -> WorkUnitStatus {
-        match self {
-            Self::Pending(_) => WorkUnitStatus::Pending,
-            Self::Running(_) => WorkUnitStatus::Running,
-            Self::AwaitingCompletion(_) => WorkUnitStatus::AwaitingCompletion,
-            Self::ReadyForReview(_) => WorkUnitStatus::ReadyForReview,
-            Self::Reviewing(_) => WorkUnitStatus::Reviewing,
-            Self::ChangesRequested(_) => WorkUnitStatus::ChangesRequested,
-            Self::Approved(_) => WorkUnitStatus::Approved,
-            Self::Merged(_) => WorkUnitStatus::Merged,
-            Self::NoDelivery(_) => WorkUnitStatus::NoDelivery,
-            Self::NeedsAttention(_) => WorkUnitStatus::NeedsAttention,
-            Self::Failed(_) => WorkUnitStatus::Failed,
-            Self::Cancelled(_) => WorkUnitStatus::Cancelled,
-        }
-    }
-
-    pub(crate) const fn execution_status(&self) -> ThreadExecutionStatus {
-        match self {
-            Self::Pending(_) => ThreadExecutionStatus::Queued,
-            Self::Running(state) => match state.execution {
-                RunningExecution::Running => ThreadExecutionStatus::Running,
-                RunningExecution::BudgetLimited => ThreadExecutionStatus::BudgetLimited,
-            },
-            Self::AwaitingCompletion(state) => match state.execution {
-                AwaitingExecution::Completed => ThreadExecutionStatus::Completed,
-                AwaitingExecution::Failed => ThreadExecutionStatus::Failed,
-                AwaitingExecution::Cancelled => ThreadExecutionStatus::Cancelled,
-            },
-            Self::ReadyForReview(_)
-            | Self::Reviewing(_)
-            | Self::ChangesRequested(_)
-            | Self::Approved(_)
-            | Self::Merged(_)
-            | Self::NoDelivery(_) => ThreadExecutionStatus::Completed,
-            Self::NeedsAttention(_) => ThreadExecutionStatus::BudgetLimited,
-            Self::Failed(_) => ThreadExecutionStatus::Failed,
-            Self::Cancelled(_) => ThreadExecutionStatus::Cancelled,
-        }
-    }
-
-    pub(crate) fn progress(&self) -> &WorkUnitProgress {
-        match self {
-            Self::Pending(progress)
-            | Self::ReadyForReview(progress)
-            | Self::Reviewing(progress)
-            | Self::ChangesRequested(progress)
-            | Self::Approved(progress)
-            | Self::Merged(progress)
-            | Self::NoDelivery(progress)
-            | Self::NeedsAttention(progress)
-            | Self::Failed(progress)
-            | Self::Cancelled(progress) => progress,
-            Self::Running(state) => &state.progress,
-            Self::AwaitingCompletion(state) => &state.progress,
-        }
-    }
-
-    pub(crate) fn into_progress(self) -> WorkUnitProgress {
-        match self {
-            Self::Pending(progress)
-            | Self::ReadyForReview(progress)
-            | Self::Reviewing(progress)
-            | Self::ChangesRequested(progress)
-            | Self::Approved(progress)
-            | Self::Merged(progress)
-            | Self::NoDelivery(progress)
-            | Self::NeedsAttention(progress)
-            | Self::Failed(progress)
-            | Self::Cancelled(progress) => progress,
-            Self::Running(state) => state.progress,
-            Self::AwaitingCompletion(state) => state.progress,
-        }
-    }
-
-    /// 替换状态 payload，同时保留当前 lifecycle variant 与 execution variant。
-    pub(crate) fn with_progress(self, progress: WorkUnitProgress) -> Self {
-        match self {
-            Self::Pending(_) => Self::Pending(progress),
-            Self::Running(mut state) => {
-                state.progress = progress;
-                Self::Running(state)
-            }
-            Self::AwaitingCompletion(mut state) => {
-                state.progress = progress;
-                Self::AwaitingCompletion(state)
-            }
-            Self::ReadyForReview(_) => Self::ReadyForReview(progress),
-            Self::Reviewing(_) => Self::Reviewing(progress),
-            Self::ChangesRequested(_) => Self::ChangesRequested(progress),
-            Self::Approved(_) => Self::Approved(progress),
-            Self::Merged(_) => Self::Merged(progress),
-            Self::NoDelivery(_) => Self::NoDelivery(progress),
-            Self::NeedsAttention(_) => Self::NeedsAttention(progress),
-            Self::Failed(_) => Self::Failed(progress),
-            Self::Cancelled(_) => Self::Cancelled(progress),
-        }
-    }
-}
+use super::{TaskSpawnFailure, TaskWorktreeDisposition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -297,52 +45,81 @@ impl Deref for WorkUnit {
 }
 
 impl WorkUnit {
-    pub(crate) const fn status(&self) -> WorkUnitStatus {
-        self.state.status()
+    pub(crate) const fn kind(&self) -> WorkUnitStateKind {
+        self.state.kind()
     }
 
-    pub(crate) const fn execution_status(&self) -> ThreadExecutionStatus {
-        self.state.execution_status()
-    }
-
-    pub(crate) fn progress(&self) -> &WorkUnitProgress {
-        self.state.progress()
+    pub(crate) fn decide(
+        &self,
+        expected_revision: u64,
+        command: WorkUnitCommand,
+    ) -> std::result::Result<WorkUnitTransitionDecision, WorkUnitTransitionError> {
+        if expected_revision != self.revision {
+            return Err(WorkUnitTransitionError::StaleRevision {
+                work_unit_id: self.id.clone(),
+                expected: expected_revision,
+                actual: self.revision,
+                command: Box::new(command),
+            });
+        }
+        self.state.decide(&self.id, command)
     }
 
     pub(crate) fn worktree_disposition(&self) -> TaskWorktreeDisposition {
-        self.progress().worktree_disposition
-    }
-
-    pub(crate) fn execution_summary(&self) -> Option<&str> {
-        self.progress().execution_summary.as_deref()
+        self.state.worktree_disposition()
     }
 
     pub(crate) fn execution_error(&self) -> Option<&str> {
-        self.progress().execution_error.as_deref()
+        self.state.execution_error()
     }
 
     pub(crate) fn spawn_failure(&self) -> Option<&TaskSpawnFailure> {
-        self.progress().spawn_failure.as_ref()
+        self.state.spawn_failure()
     }
 
     pub(crate) fn budget_limit(&self) -> Option<&pl_protocol::BudgetLimitSnapshot> {
-        self.progress().budget_limit.as_ref()
+        self.state.budget_limit()
     }
 
     pub(crate) fn budget_slice_count(&self) -> u32 {
-        self.progress().budget_slice_count
+        match &self.state {
+            WorkUnitState::ChangesRequired(value) => value.slice_count(),
+            _ => self
+                .state
+                .continuation()
+                .map_or(1, ExecutorContinuationState::slice_count),
+        }
     }
 
-    pub(crate) fn continuation_state(&self) -> ExecutorContinuationState {
-        self.progress().continuation_state
+    pub(crate) fn continuation_state(&self) -> ExecutorContinuationStateKind {
+        self.state.continuation().map_or(
+            ExecutorContinuationStateKind::Idle,
+            ExecutorContinuationState::kind,
+        )
     }
 
     pub(crate) fn continuation_source_turn_id(&self) -> Option<&str> {
-        self.progress().continuation_source_turn_id.as_deref()
+        self.state
+            .continuation()
+            .and_then(ExecutorContinuationState::source_turn_id)
     }
 
     pub(crate) fn continuation_revision(&self) -> u64 {
-        self.progress().continuation_revision
+        match &self.state {
+            WorkUnitState::ChangesRequired(value) => value.continuation_revision(),
+            _ => self
+                .state
+                .continuation()
+                .map_or(0, ExecutorContinuationState::revision),
+        }
+    }
+
+    pub(crate) fn waiting_review_phase(&self) -> Option<&WaitingReviewPhase> {
+        self.state.waiting_review_phase()
+    }
+
+    pub(crate) fn completion_outcome(&self) -> Option<&WorkUnitCompletionOutcome> {
+        self.state.completion_outcome()
     }
 }
 
@@ -353,32 +130,225 @@ pub(crate) fn decode_work_unit_state(value: &str) -> Result<WorkUnitState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pl_protocol::{BudgetLimitKind, BudgetLimitSnapshot, BudgetUsage};
+
+    fn work_unit(state: WorkUnitState, revision: u64) -> WorkUnit {
+        WorkUnit {
+            context: WorkUnitContext {
+                id: "work-1".to_string(),
+                task_run_id: "task-1".to_string(),
+                title: "work".to_string(),
+                scope_hints: Vec::new(),
+                base_commit: "base".to_string(),
+                worktree_path: "path".to_string(),
+                branch: "branch".to_string(),
+                attempt: 1,
+                executor_thread_id: None,
+                requested_by_call_id: "call-1".to_string(),
+            },
+            state,
+            revision,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn next(state: &WorkUnitState, command: WorkUnitCommand) -> WorkUnitState {
+        state.decide("work-1", command).unwrap().next_state()
+    }
+
+    fn budget_limit() -> BudgetLimitSnapshot {
+        BudgetLimitSnapshot {
+            kind: BudgetLimitKind::ModelStep,
+            usage: BudgetUsage {
+                model_steps: 10,
+                ..BudgetUsage::default()
+            },
+        }
+    }
 
     #[test]
     fn states_round_trip_as_a_single_tagged_enum() {
+        let pending = WorkUnitState::pending();
+        let running = next(&pending, WorkUnitCommand::Activate);
+        let waiting_review = next(
+            &running,
+            WorkUnitCommand::SubmitCompletion {
+                completion_id: "completion-1".to_string(),
+                completion_revision: 1,
+                verification_summary: "verified".to_string(),
+            },
+        );
+        let reviewing = next(
+            &waiting_review,
+            WorkUnitCommand::BeginReview {
+                review_round_id: "review-1".to_string(),
+            },
+        );
+        let review_passed = next(
+            &reviewing,
+            WorkUnitCommand::PassReview {
+                review_round_id: "review-1".to_string(),
+                outcome: ReviewPassedOutcome::Delivery,
+            },
+        );
+        let changes_required = next(
+            &reviewing,
+            WorkUnitCommand::RequireChanges {
+                review_round_id: "review-1".to_string(),
+            },
+        );
+        let paused = next(
+            &running,
+            WorkUnitCommand::PauseOperational {
+                operation_id: "pause-1".to_string(),
+                detail: "operator attention".to_string(),
+            },
+        );
+        let completed = next(
+            &review_passed,
+            WorkUnitCommand::CompleteMerge {
+                merge_record_id: "merge-1".to_string(),
+            },
+        );
+        let failed = next(
+            &running,
+            WorkUnitCommand::FailExecution {
+                operation_id: "failure-1".to_string(),
+                detail: "failed".to_string(),
+                disposition: TaskWorktreeDisposition::Protect,
+            },
+        );
+        let cancelled = next(
+            &running,
+            WorkUnitCommand::Cancel {
+                operation_id: "cancel-1".to_string(),
+                reason: "cancelled".to_string(),
+                disposition: TaskWorktreeDisposition::CleanupRequested,
+            },
+        );
         let states = [
-            WorkUnitState::pending(),
-            WorkUnitState::running(WorkUnitProgress::pending()),
-            WorkUnitState::budget_limited(WorkUnitProgress::pending()),
-            WorkUnitState::awaiting_completed(WorkUnitProgress::pending()),
-            WorkUnitState::awaiting_failed(WorkUnitProgress::pending()),
-            WorkUnitState::awaiting_cancelled(WorkUnitProgress::pending()),
-            WorkUnitState::ready_for_review(WorkUnitProgress::pending()),
-            WorkUnitState::reviewing(WorkUnitProgress::pending()),
-            WorkUnitState::changes_requested(WorkUnitProgress::pending()),
-            WorkUnitState::approved(WorkUnitProgress::pending()),
-            WorkUnitState::merged(WorkUnitProgress::pending()),
-            WorkUnitState::no_delivery(WorkUnitProgress::pending()),
-            WorkUnitState::needs_attention(WorkUnitProgress::pending()),
-            WorkUnitState::failed(WorkUnitProgress::pending()),
-            WorkUnitState::cancelled(WorkUnitProgress::pending()),
+            pending,
+            running,
+            waiting_review,
+            review_passed,
+            changes_required,
+            paused,
+            completed,
+            failed,
+            cancelled,
         ];
 
         for state in states {
             let value = serde_json::to_value(&state).unwrap();
-            assert_eq!(value["kind"], state.status().as_str());
+            assert_eq!(value["kind"], state.kind().as_str());
             let decoded: WorkUnitState = serde_json::from_value(value).unwrap();
             assert_eq!(decoded, state);
+        }
+    }
+
+    #[test]
+    fn terminal_state_rejects_non_idempotent_commands() {
+        let pending = work_unit(WorkUnitState::pending(), 0);
+        let cancel = WorkUnitCommand::Cancel {
+            operation_id: "cancel-1".to_string(),
+            reason: "stop".to_string(),
+            disposition: TaskWorktreeDisposition::CleanupRequested,
+        };
+        let cancelled = pending.decide(0, cancel.clone()).unwrap().next_state();
+        let replay = cancelled.decide("work-1", cancel).unwrap();
+        assert!(!replay.changed());
+        assert_eq!(replay.next_state(), cancelled);
+        assert!(
+            cancelled
+                .decide("work-1", WorkUnitCommand::Activate)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn aggregate_rejects_stale_revision() {
+        let work_unit = work_unit(WorkUnitState::pending(), 3);
+        assert!(matches!(
+            work_unit.decide(2, WorkUnitCommand::Activate),
+            Err(WorkUnitTransitionError::StaleRevision {
+                expected: 2,
+                actual: 3,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn budget_commands_require_the_active_source_turn() {
+        let running = next(&WorkUnitState::pending(), WorkUnitCommand::Activate);
+        let active = next(
+            &running,
+            WorkUnitCommand::StartTurn {
+                turn_id: "turn-1".to_string(),
+                reset_budget: false,
+            },
+        );
+        let command = WorkUnitCommand::ContinueAfterBudget {
+            source_turn_id: "turn-2".to_string(),
+            next_slice: 2,
+            limit: budget_limit(),
+        };
+        assert!(matches!(
+            active.decide("work-1", command),
+            Err(WorkUnitTransitionError::CorrelationMismatch { .. })
+        ));
+
+        let pending_start = next(
+            &active,
+            WorkUnitCommand::ContinueAfterBudget {
+                source_turn_id: "turn-1".to_string(),
+                next_slice: 2,
+                limit: budget_limit(),
+            },
+        );
+        assert!(matches!(
+            pending_start.decide(
+                "work-1",
+                WorkUnitCommand::PauseForBudget {
+                    source_turn_id: "turn-2".to_string(),
+                    limit: budget_limit(),
+                    detail: "continuation failed".to_string(),
+                },
+            ),
+            Err(WorkUnitTransitionError::CorrelationMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn operational_pause_replays_only_for_the_same_operation() {
+        let command = WorkUnitCommand::PauseOperational {
+            operation_id: "pause-1".to_string(),
+            detail: "attention".to_string(),
+        };
+        let paused = next(&WorkUnitState::pending(), command.clone());
+        let replay = paused.decide("work-1", command).unwrap();
+        assert!(!replay.changed());
+        assert!(matches!(
+            paused.decide(
+                "work-1",
+                WorkUnitCommand::PauseOperational {
+                    operation_id: "pause-2".to_string(),
+                    detail: "attention".to_string(),
+                },
+            ),
+            Err(WorkUnitTransitionError::IllegalTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_or_incomplete_state_json_is_rejected() {
+        for legacy in [
+            r#"{"status":"running"}"#,
+            r#"{"kind":"running"}"#,
+            r#"{"kind":"cancelled","data":{"operationId":"cancel-1","reason":"stop"}}"#,
+        ] {
+            assert!(decode_work_unit_state(legacy).is_err(), "accepted {legacy}");
         }
     }
 }

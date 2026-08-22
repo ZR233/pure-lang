@@ -44,14 +44,14 @@ pub(super) fn spawn_lifecycle_task<B>(
         let wait_result = match outcome {
             LifecycleOutcome::Exited(result) => result,
             LifecycleOutcome::TimedOut => {
-                apply_transition(&entry, CommandProcessTransition::TimedOut).await;
+                apply_transition(&entry, CommandProcessTransition::TimeOut).await;
                 close_stdin(&entry).await;
                 backend.terminate(&entry.process_id, child.id()).await;
                 let _ = child.start_kill();
                 child.wait().await
             }
             LifecycleOutcome::Interrupted => {
-                apply_transition(&entry, CommandProcessTransition::Interrupted).await;
+                apply_transition(&entry, CommandProcessTransition::Cancel).await;
                 close_stdin(&entry).await;
                 backend.terminate(&entry.process_id, child.id()).await;
                 let _ = child.start_kill();
@@ -73,11 +73,13 @@ pub(super) fn spawn_lifecycle_task<B>(
                 .await;
             }
             Err(error) => {
-                {
-                    let mut state = entry.state.lock().await;
-                    state.record_error(format!("failed to wait for process: {error}"));
-                }
-                apply_transition(&entry, CommandProcessTransition::ProcessWaitFailed).await;
+                apply_transition(
+                    &entry,
+                    CommandProcessTransition::ProcessWaitFailed {
+                        error: format!("failed to wait for process: {error}"),
+                    },
+                )
+                .await;
             }
         }
     });

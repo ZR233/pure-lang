@@ -6,7 +6,8 @@ use crate::api::studio::types::{
     StartTurnResponse, SteerTurnResponse,
 };
 use pl_protocol::{
-    InteractionResolution, PlanConfirmationResolution, ToolApprovalResolution, UserInputAnswer,
+    InteractionResolution, PlanConfirmationResolution, PlanConfirmationResolutionPayload,
+    ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputAnswer, UserInputResolution,
 };
 use std::collections::HashMap;
 // ── Prompt / Interaction ──
@@ -105,22 +106,22 @@ fn interaction_resolution(
                     )));
                 }
             }
-            InteractionResolution::UserInput { answers: mapped }
+            InteractionResolution::UserInput(UserInputResolution { answers: mapped })
         }
         BridgeInteractionResolution::ToolApproval { decision, reason } => {
-            InteractionResolution::ToolApproval {
+            InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                 decision: match decision {
                     BridgeToolApprovalResolution::Approved => ToolApprovalResolution::Approved,
                     BridgeToolApprovalResolution::Denied => ToolApprovalResolution::Denied,
                 },
                 reason,
-            }
+            })
         }
         BridgeInteractionResolution::PlanConfirmation {
             decision,
             content,
             reason,
-        } => InteractionResolution::PlanConfirmation {
+        } => InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
             decision: match decision {
                 BridgePlanConfirmationResolution::ImplementFreshContext => {
                     PlanConfirmationResolution::ImplementFreshContext
@@ -132,6 +133,6 @@ fn interaction_resolution(
             },
             content,
             reason,
-        },
+        }),
     })
 }

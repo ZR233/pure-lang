@@ -22,7 +22,13 @@ mod state;
 mod stream_io;
 
 use lifecycle::{spawn_lifecycle_task, wait_for_process_activity};
-use snapshot::{message_for_state, status_for_state, truncate_text};
+use snapshot::{message_for_state, truncate_text};
+use state::CommandProcessTransition;
+pub use state::{
+    CommandProcessFailure, CommandProcessFinalResult, CommandProcessLifecycle,
+    CommandTerminationReason, DrainingCommandProcess, FinalCommandProcess, RunningCommandProcess,
+    TerminatingCommandProcess,
+};
 use stream_io::{prepare_output_file, read_stderr, read_stdout};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
@@ -81,8 +87,7 @@ impl std::fmt::Debug for CommandProcessEntry {
 
 #[derive(Debug)]
 struct CommandProcessState {
-    phase: CommandProcessPhase,
-    exit_code: Option<i32>,
+    lifecycle: CommandProcessLifecycle,
     stdout_open: bool,
     stderr_open: bool,
     stdout: HeadTailBuffer,
@@ -90,24 +95,6 @@ struct CommandProcessState {
     pending_stdout: HeadTailBuffer,
     pending_stderr: HeadTailBuffer,
     output_revision: u64,
-    error: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandProcessPhase {
-    Running,
-    Terminating(CommandTerminationReason),
-    Draining(CommandProcessResult),
-    Final(CommandProcessResult),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandProcessTransition {
-    TimedOut,
-    Interrupted,
-    ProcessExited { exit_code: Option<i32> },
-    ProcessWaitFailed,
-    StreamClosed(StreamKind),
 }
 
 pub struct CommandStartRequest {
@@ -151,10 +138,8 @@ pub struct CommandWriteRequest {
 
 #[derive(Debug, Clone)]
 pub struct CommandOutputSnapshot {
-    pub status: String,
+    pub state: CommandProcessLifecycle,
     pub process_id: Option<String>,
-    pub exit_code: Option<i32>,
-    pub timed_out: bool,
     pub stdout: TruncatedOutput,
     pub stderr: TruncatedOutput,
     pub output_file: PathBuf,
@@ -422,8 +407,7 @@ impl CommandProcessEntry {
         max_output_chars: usize,
     ) -> (CommandOutputSnapshot, CommandOutputSizes) {
         let mut state = self.state.lock().await;
-        let status = status_for_state(&state);
-        let process_id = (status == "running").then(|| self.process_id.clone());
+        let process_id = (!state.lifecycle.is_final()).then(|| self.process_id.clone());
         let message = message_for_state(
             &state,
             process_id.as_deref(),
@@ -437,10 +421,8 @@ impl CommandProcessEntry {
         let stderr = truncate_text(&state.pending_stderr.take_display_text(), max_output_chars);
         (
             CommandOutputSnapshot {
-                status: status.to_string(),
+                state: state.lifecycle.clone(),
                 process_id,
-                exit_code: state.exit_code,
-                timed_out: state.timed_out(),
                 stdout,
                 stderr,
                 output_file: self.output_target.model_file().to_path_buf(),
@@ -451,29 +433,6 @@ impl CommandProcessEntry {
             },
             sizes,
         )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandTerminationReason {
-    TimedOut,
-    Interrupted,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandProcessResult {
-    Completed,
-    Failed,
-    TimedOut,
-    Interrupted,
-}
-
-impl From<CommandTerminationReason> for CommandProcessResult {
-    fn from(reason: CommandTerminationReason) -> Self {
-        match reason {
-            CommandTerminationReason::TimedOut => Self::TimedOut,
-            CommandTerminationReason::Interrupted => Self::Interrupted,
-        }
     }
 }
 

@@ -208,10 +208,7 @@ class FrbStudioApi implements StudioApi {
         ),
       ),
     );
-    return ThreadDirectoryPage(
-      threads: page.threads.map(_threadFromFrb).toList(),
-      nextCursor: page.nextCursor,
-    );
+    return _threadDirectoryPageFromFrb(page);
   }
 
   @override
@@ -409,24 +406,25 @@ class FrbStudioApi implements StudioApi {
     return frb
         .subscribeShutdownProgress()
         .map(
-          (event) => StudioShutdownProgress(
-            phase: switch (event.phase) {
-              frb.BridgeShutdownPhase.stoppingSubscriptions =>
-                StudioShutdownPhase.stoppingSubscriptions,
-              frb.BridgeShutdownPhase.cancellingTurns =>
-                StudioShutdownPhase.cancellingTurns,
-              frb.BridgeShutdownPhase.flushingPersistence =>
-                StudioShutdownPhase.flushingPersistence,
-              frb.BridgeShutdownPhase.suspendingTasks =>
-                StudioShutdownPhase.suspendingTasks,
-              frb.BridgeShutdownPhase.stoppingMcp =>
-                StudioShutdownPhase.stoppingMcp,
-              frb.BridgeShutdownPhase.stoppingLsp =>
-                StudioShutdownPhase.stoppingLsp,
-              frb.BridgeShutdownPhase.stopped => StudioShutdownPhase.stopped,
-            },
-            pendingCommits: event.pendingCommits.toInt(),
-          ),
+          (event) => switch (event) {
+            frb.BridgeShutdownProgress_StoppingSubscriptions() =>
+              const StoppingSubscriptionsProgress(),
+            frb.BridgeShutdownProgress_CancellingTurns() =>
+              const CancellingTurnsProgress(),
+            frb.BridgeShutdownProgress_FlushingPersistence(
+              :final pendingCommits,
+            ) =>
+              FlushingPersistenceProgress(
+                pendingCommits: pendingCommits.toInt(),
+              ),
+            frb.BridgeShutdownProgress_SuspendingTasks() =>
+              const SuspendingTasksProgress(),
+            frb.BridgeShutdownProgress_StoppingMcp() =>
+              const StoppingMcpProgress(),
+            frb.BridgeShutdownProgress_StoppingLsp() =>
+              const StoppingLspProgress(),
+            frb.BridgeShutdownProgress_Stopped() => const StoppedProgress(),
+          },
         )
         .handleError((Object error) => throw _studioFailure(error));
   }

@@ -3,13 +3,18 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::Result;
-use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateError, StateOperation};
+use pl_protocol::{
+    ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
+};
 use tokio::sync::{Mutex, RwLock, broadcast::error::RecvError};
 
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind, effective_mcp_servers};
 use crate::mcp::{McpAvailabilityKind, McpAvailabilitySnapshot};
 use crate::studio::ids::unix_seconds;
-use crate::{StudioMcpHealth, StudioMcpServer, StudioMcpStateSnapshot};
+use crate::{
+    McpAvailable, McpChecking, McpDisabled, McpMissingCredential, McpUnavailable, StudioMcpHealth,
+    StudioMcpServer, StudioMcpServerState, StudioMcpStateData, StudioMcpStateSnapshot,
+};
 
 use super::StudioRuntime;
 
@@ -34,10 +39,7 @@ impl McpStateRuntime {
         Self {
             command_lock: Arc::new(Mutex::new(())),
             state: Arc::new(RwLock::new(StudioMcpStateSnapshot {
-                meta: ObservedStateMeta::uninitialized(unix_seconds()),
-                desired_config_fingerprint: String::new(),
-                applied_config_fingerprint: String::new(),
-                health: empty_health(),
+                state: ObservedResource::uninitialized(unix_seconds()),
             })),
             desired_effective_fingerprint: Arc::new(RwLock::new(None)),
             applied_effective_fingerprint: Arc::new(RwLock::new(None)),
@@ -116,19 +118,14 @@ impl StudioRuntime {
             .await
             .as_ref()
             == Some(&effective_fingerprint);
-        if effective_unchanged && matches!(previous.meta.phase, ObservedStatePhase::Ready) {
+        if effective_unchanged && previous.state.kind() == ObservedResourceKind::Ready {
             return Ok(None);
         }
         let desired_public_fingerprint = self
             .desired_mcp_fingerprint(&previous, &effective_fingerprint, public_fingerprint)
             .await;
-        self.publish_mcp_running(
-            previous,
-            desired_public_fingerprint.clone(),
-            StateOperation::Reconcile,
-            !effective_unchanged,
-        )
-        .await;
+        self.publish_mcp_running(previous, StateOperation::Reconcile)
+            .await?;
         Ok(Some(McpReconcilePlan {
             _command_guard: command_guard,
             servers,
@@ -156,8 +153,7 @@ impl StudioRuntime {
                 Ok(())
             }
             Err(error) => {
-                self.publish_mcp_failed(StateOperation::Reconcile, &error)
-                    .await;
+                self.publish_mcp_failed(&error).await?;
                 Err(error.into())
             }
         }
@@ -179,13 +175,8 @@ impl StudioRuntime {
         let desired_public_fingerprint = self
             .desired_mcp_fingerprint(&previous, &effective_fingerprint, public_fingerprint)
             .await;
-        self.publish_mcp_running(
-            previous,
-            desired_public_fingerprint.clone(),
-            StateOperation::Reset,
-            true,
-        )
-        .await;
+        self.publish_mcp_running(previous, StateOperation::Reset)
+            .await?;
         match self.external_runtimes.mcp.reset(scope, servers).await {
             Ok(()) => {
                 *self
@@ -198,7 +189,7 @@ impl StudioRuntime {
                 Ok(())
             }
             Err(error) => {
-                self.publish_mcp_failed(StateOperation::Reset, &error).await;
+                self.publish_mcp_failed(&error).await?;
                 Err(error.into())
             }
         }
@@ -240,19 +231,19 @@ impl StudioRuntime {
         Ok(self.external_runtimes.mcp_state.read().await)
     }
 
-    pub(super) async fn publish_mcp_stopped(&self) {
+    pub(super) async fn publish_mcp_stopped(&self) -> Result<()> {
         let previous = self.external_runtimes.mcp_state.read().await;
         let snapshot = StudioMcpStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Stopped,
-                updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
-                stale: previous.meta.stale,
-            },
-            ..previous
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Stop {
+                    expected_revision: previous.state.revision(),
+                    stopped_at: unix_seconds(),
+                })?
+                .next_state,
         };
         self.publish_mcp(snapshot).await;
+        Ok(())
     }
 
     async fn desired_mcp_fingerprint(
@@ -268,15 +259,22 @@ impl StudioRuntime {
             .write()
             .await;
         if desired_effective.as_deref() == Some(effective_fingerprint) {
-            return previous.desired_config_fingerprint.clone();
+            return previous
+                .state
+                .value()
+                .map(|data| data.desired_config_fingerprint.clone())
+                .unwrap_or_default();
         }
         *desired_effective = Some(effective_fingerprint.to_string());
-        if public_fingerprint == previous.applied_config_fingerprint
-            && !previous.applied_config_fingerprint.is_empty()
-        {
+        let applied_fingerprint = previous
+            .state
+            .value()
+            .map(|data| data.applied_config_fingerprint.as_str())
+            .unwrap_or_default();
+        if public_fingerprint == applied_fingerprint && !applied_fingerprint.is_empty() {
             format!(
                 "{public_fingerprint}:g{}",
-                previous.meta.revision.saturating_add(1)
+                previous.state.revision().saturating_add(1)
             )
         } else {
             public_fingerprint
@@ -286,26 +284,26 @@ impl StudioRuntime {
     async fn publish_mcp_running(
         &self,
         previous: StudioMcpStateSnapshot,
-        desired_config_fingerprint: String,
         operation: StateOperation,
-        desired_differs_from_applied: bool,
-    ) {
-        let revision = previous.meta.revision.saturating_add(1);
+    ) -> Result<()> {
+        let revision = previous.state.revision();
         let snapshot = StudioMcpStateSnapshot {
-            meta: ObservedStateMeta {
-                revision,
-                phase: ObservedStatePhase::Running {
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Begin {
+                    expected_revision: revision,
                     operation,
-                    operation_id: format!("mcp-{}-{revision}", operation_name(operation)),
-                },
-                updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
-                stale: desired_differs_from_applied,
-            },
-            desired_config_fingerprint,
-            ..previous
+                    operation_id: format!(
+                        "mcp-{}-{}",
+                        operation_name(operation),
+                        revision.saturating_add(1)
+                    ),
+                    started_at: unix_seconds(),
+                })?
+                .next_state,
         };
         self.publish_mcp(snapshot).await;
+        Ok(())
     }
 
     async fn publish_mcp_ready(&self, applied_config_fingerprint: String) -> Result<()> {
@@ -314,83 +312,84 @@ impl StudioRuntime {
         let last_checked_at = health
             .mcp_servers
             .iter()
-            .filter_map(|server| server.last_checked_at)
+            .filter_map(mcp_server_checked_at)
             .max();
         let snapshot = StudioMcpStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Ready,
-                updated_at: unix_seconds(),
-                last_checked_at,
-                stale: false,
-            },
-            desired_config_fingerprint: applied_config_fingerprint.clone(),
-            applied_config_fingerprint,
-            health,
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Succeed {
+                    expected_revision: previous.state.revision(),
+                    updated_at: unix_seconds(),
+                    last_checked_at,
+                    value: StudioMcpStateData {
+                        desired_config_fingerprint: applied_config_fingerprint.clone(),
+                        applied_config_fingerprint,
+                        health,
+                    },
+                })?
+                .next_state,
         };
         self.publish_mcp(snapshot).await;
         Ok(())
     }
 
-    async fn publish_mcp_failed(&self, operation: StateOperation, error: &impl std::fmt::Display) {
+    async fn publish_mcp_failed(&self, error: &impl std::fmt::Display) -> Result<()> {
         let previous = self.external_runtimes.mcp_state.read().await;
-        let health = self
-            .collect_mcp_health()
-            .await
-            .unwrap_or_else(|_| previous.health.clone());
-        let last_checked_at = health
-            .mcp_servers
-            .iter()
-            .filter_map(|server| server.last_checked_at)
-            .max()
-            .or(previous.meta.last_checked_at);
         let snapshot = StudioMcpStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Failed {
-                    operation,
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Fail {
+                    expected_revision: previous.state.revision(),
+                    failed_at: unix_seconds(),
                     error: StateError {
                         code: "mcpOperationFailed".to_string(),
                         message: error.to_string(),
                         retryable: true,
                     },
-                },
-                updated_at: unix_seconds(),
-                last_checked_at,
-                stale: true,
-            },
-            health,
-            ..previous
+                })?
+                .next_state,
         };
         self.publish_mcp(snapshot).await;
+        Ok(())
     }
 
     async fn refresh_mcp_health_snapshot(&self) -> Result<()> {
         let previous = self.external_runtimes.mcp_state.read().await;
-        if matches!(
-            previous.meta.phase,
-            ObservedStatePhase::Running { .. } | ObservedStatePhase::Stopped
-        ) {
+        let Some(mut data) = previous.state.value().cloned() else {
             return Ok(());
-        }
+        };
         let health = self.collect_mcp_health().await?;
-        if previous.health == health {
+        if data.health == health {
             return Ok(());
         }
-        let snapshot = StudioMcpStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Ready,
-                updated_at: unix_seconds(),
-                last_checked_at: health
-                    .mcp_servers
-                    .iter()
-                    .filter_map(|server| server.last_checked_at)
-                    .max(),
-                stale: previous.meta.stale,
+        let last_checked_at = health
+            .mcp_servers
+            .iter()
+            .filter_map(mcp_server_checked_at)
+            .max()
+            .or(previous.state.last_checked_at());
+        data.health = health;
+        let command = match previous.state.kind() {
+            ObservedResourceKind::Ready => ObservedResourceCommand::Observe {
+                expected_revision: previous.state.revision(),
+                observed_at: unix_seconds(),
+                last_checked_at,
+                value: data,
             },
-            health,
-            ..previous
+            ObservedResourceKind::Stale => ObservedResourceCommand::MarkStale {
+                expected_revision: previous.state.revision(),
+                stale_at: unix_seconds(),
+                value: data,
+            },
+            ObservedResourceKind::Uninitialized
+            | ObservedResourceKind::Loading
+            | ObservedResourceKind::Refreshing
+            | ObservedResourceKind::Degraded
+            | ObservedResourceKind::Failed
+            | ObservedResourceKind::Stopped => return Ok(()),
+        };
+        let snapshot = StudioMcpStateSnapshot {
+            state: previous.state.decide(command)?.next_state,
         };
         self.publish_mcp(snapshot).await;
         Ok(())
@@ -439,24 +438,89 @@ fn studio_mcp_server(
     snapshot: Option<&McpAvailabilitySnapshot>,
 ) -> StudioMcpServer {
     let endpoint = server.config.endpoint_summary();
+    let state = mcp_server_state(
+        server.status_kind,
+        server.status_message.as_deref(),
+        snapshot,
+    );
     StudioMcpServer {
         id: server.id,
-        enabled: server.status_kind == McpServerStatusKind::Enabled,
         transport: server.config.transport.as_str().to_string(),
         endpoint,
         source_kind: server.source_kind.as_str().to_string(),
-        status_kind: server.status_kind.as_str().to_string(),
         mutation_policy: server.mutation_policy.as_str().to_string(),
-        availability_kind: snapshot
-            .map(|snapshot| snapshot.availability_kind.as_str().to_string())
-            .unwrap_or_else(|| fallback_availability_kind(server.status_kind).to_string()),
-        availability_message: snapshot
-            .and_then(|snapshot| snapshot.availability_message.clone())
-            .or_else(|| fallback_availability_message(server.status_kind)),
-        last_checked_at: snapshot.and_then(|snapshot| snapshot.last_checked_at),
-        tool_count: snapshot
-            .and_then(|snapshot| snapshot.tool_count)
-            .map(|count| count as u64),
+        state,
+    }
+}
+
+fn mcp_server_state(
+    status: McpServerStatusKind,
+    status_message: Option<&str>,
+    snapshot: Option<&McpAvailabilitySnapshot>,
+) -> StudioMcpServerState {
+    match status {
+        McpServerStatusKind::Disabled => StudioMcpServerState::Disabled(McpDisabled::new(
+            status_message.unwrap_or("MCP server is disabled in configuration"),
+        )),
+        McpServerStatusKind::MissingCredential => {
+            StudioMcpServerState::MissingCredential(McpMissingCredential::new(
+                status_message.unwrap_or("MCP server credential is not configured"),
+            ))
+        }
+        McpServerStatusKind::Enabled => match snapshot {
+            Some(snapshot) => match snapshot.availability_kind {
+                McpAvailabilityKind::Checking => StudioMcpServerState::Checking(McpChecking::new(
+                    snapshot
+                        .availability_message
+                        .as_deref()
+                        .unwrap_or("MCP health check is running"),
+                )),
+                McpAvailabilityKind::Available => {
+                    StudioMcpServerState::Available(McpAvailable::new(
+                        snapshot.last_checked_at.unwrap_or_else(unix_seconds),
+                        snapshot.tool_count.unwrap_or_default() as u64,
+                    ))
+                }
+                McpAvailabilityKind::Unavailable => {
+                    StudioMcpServerState::Unavailable(McpUnavailable::new(
+                        snapshot.last_checked_at.unwrap_or_else(unix_seconds),
+                        StateError {
+                            code: "mcpServerUnavailable".to_string(),
+                            message: snapshot
+                                .availability_message
+                                .clone()
+                                .unwrap_or_else(|| "MCP server is unavailable".to_string()),
+                            retryable: true,
+                        },
+                    ))
+                }
+                McpAvailabilityKind::Disabled => StudioMcpServerState::Disabled(McpDisabled::new(
+                    snapshot
+                        .availability_message
+                        .as_deref()
+                        .unwrap_or("MCP server is disabled in configuration"),
+                )),
+                McpAvailabilityKind::MissingCredential => {
+                    StudioMcpServerState::MissingCredential(McpMissingCredential::new(
+                        snapshot
+                            .availability_message
+                            .as_deref()
+                            .unwrap_or("MCP server credential is not configured"),
+                    ))
+                }
+            },
+            None => StudioMcpServerState::Checking(McpChecking::new("MCP health check is running")),
+        },
+    }
+}
+
+fn mcp_server_checked_at(server: &StudioMcpServer) -> Option<i64> {
+    match &server.state {
+        StudioMcpServerState::Available(state) => Some(state.checked_at()),
+        StudioMcpServerState::Unavailable(state) => Some(state.checked_at()),
+        StudioMcpServerState::Disabled(_)
+        | StudioMcpServerState::MissingCredential(_)
+        | StudioMcpServerState::Checking(_) => None,
     }
 }
 
@@ -505,31 +569,6 @@ fn public_mcp_fingerprint(servers: &BTreeMap<String, EffectiveMcpServerConfig>) 
         server.tool_effect.hash(&mut hasher);
     }
     format!("{:x}", hasher.finish())
-}
-
-fn empty_health() -> StudioMcpHealth {
-    StudioMcpHealth {
-        mcp_servers: Vec::new(),
-        active_mcp_servers: Vec::new(),
-    }
-}
-
-fn fallback_availability_kind(status: McpServerStatusKind) -> &'static str {
-    match status {
-        McpServerStatusKind::Enabled => McpAvailabilityKind::Checking.as_str(),
-        McpServerStatusKind::Disabled => McpAvailabilityKind::Disabled.as_str(),
-        McpServerStatusKind::MissingCredential => McpAvailabilityKind::MissingCredential.as_str(),
-    }
-}
-
-fn fallback_availability_message(status: McpServerStatusKind) -> Option<String> {
-    match status {
-        McpServerStatusKind::Enabled => Some("MCP health check is running".to_string()),
-        McpServerStatusKind::Disabled => {
-            Some("MCP server is disabled in configuration".to_string())
-        }
-        McpServerStatusKind::MissingCredential => None,
-    }
 }
 
 fn operation_name(operation: StateOperation) -> &'static str {

@@ -2,9 +2,10 @@ use anyhow::Result;
 use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 
 use super::runtime::{
-    bridge_agent_directory_entry, bridge_mcp_health, bridge_recovery_issue, bridge_task_runtime,
+    bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_project_directory,
+    bridge_provider_usage_state, bridge_recovery_state, bridge_settings_state, bridge_skills_state,
+    bridge_task_directory, bridge_update_state,
 };
-use super::settings::{bridge_settings, provider_usage_dto};
 use super::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
 
@@ -17,108 +18,50 @@ pub(crate) fn bridge_product_event(
         created_at: event.created_at,
         payload: match event.kind {
             StudioProductEventKind::ProjectDirectoryChanged(state) => {
-                BridgeProductEventPayload::ProjectDirectoryChanged(BridgeProjectDirectoryState {
-                    meta: state.meta.into(),
-                    projects: state.projects.into_iter().map(Into::into).collect(),
-                })
+                BridgeProductEventPayload::ProjectDirectoryChanged(bridge_project_directory(
+                    state.state,
+                ))
             }
             StudioProductEventKind::ThreadDirectoryChanged(state) => {
                 BridgeProductEventPayload::ThreadDirectoryChanged(BridgeThreadDirectoryDelta {
-                    meta: state.meta.into(),
+                    revision: state.revision,
+                    updated_at: state.updated_at,
                     upserted: state.upserted.into_iter().map(bridge_thread).collect(),
                     removed: state.removed,
                 })
             }
             StudioProductEventKind::TaskDirectoryChanged(state) => {
-                BridgeProductEventPayload::TaskDirectoryChanged(BridgeTaskDirectoryState {
-                    meta: state.meta.into(),
-                    tasks: state
-                        .tasks
-                        .into_iter()
-                        .map(|entry| BridgeTaskDirectoryEntry {
-                            root_thread_id: entry.root_thread_id,
-                            task: bridge_task_runtime(entry.task),
-                        })
-                        .collect(),
-                })
+                BridgeProductEventPayload::TaskDirectoryChanged(bridge_task_directory(state.state))
             }
             StudioProductEventKind::AgentDirectoryChanged(state) => {
-                BridgeProductEventPayload::AgentDirectoryChanged(BridgeAgentDirectoryState {
-                    meta: state.meta.into(),
-                    agents: state
-                        .agents
-                        .into_iter()
-                        .map(bridge_agent_directory_entry)
-                        .collect(),
-                })
-            }
-            StudioProductEventKind::SettingsStateChanged(state) => {
-                BridgeProductEventPayload::SettingsStateChanged(Box::new(
-                    BridgeSettingsStateSnapshot {
-                        meta: state.meta.into(),
-                        settings: bridge_settings(state.settings),
-                    },
+                BridgeProductEventPayload::AgentDirectoryChanged(bridge_agent_directory(
+                    state.state,
                 ))
             }
+            StudioProductEventKind::SettingsStateChanged(state) => {
+                BridgeProductEventPayload::SettingsStateChanged(Box::new(bridge_settings_state(
+                    state.state,
+                )))
+            }
             StudioProductEventKind::RecoveryStateChanged(state) => {
-                BridgeProductEventPayload::RecoveryStateChanged(BridgeRecoveryStateSnapshot {
-                    meta: state.meta.into(),
-                    issues: state
-                        .issues
-                        .into_iter()
-                        .map(bridge_recovery_issue)
-                        .collect(),
-                })
+                BridgeProductEventPayload::RecoveryStateChanged(bridge_recovery_state(state.state))
             }
             StudioProductEventKind::McpStateChanged(state) => {
-                BridgeProductEventPayload::McpStateChanged(BridgeMcpStateSnapshot {
-                    meta: state.meta.into(),
-                    desired_config_fingerprint: state.desired_config_fingerprint,
-                    applied_config_fingerprint: state.applied_config_fingerprint,
-                    health: bridge_mcp_health(state.health),
-                })
+                BridgeProductEventPayload::McpStateChanged(bridge_mcp_state(state.state))
             }
             StudioProductEventKind::LspStateChanged(state) => {
-                BridgeProductEventPayload::LspStateChanged(BridgeLspStateSnapshot {
-                    meta: state.meta.into(),
-                    health: state.health.into(),
-                })
+                BridgeProductEventPayload::LspStateChanged(bridge_lsp_state(state.state))
             }
             StudioProductEventKind::SkillsStateChanged(state) => {
-                BridgeProductEventPayload::SkillsStateChanged(BridgeSkillsStateSnapshot {
-                    meta: state.meta.into(),
-                    project_id: state.project_id,
-                    config_fingerprint: state.config_fingerprint,
-                    catalog_revision: state.catalog_revision,
-                    skills: state
-                        .catalog
-                        .skills
-                        .iter()
-                        .map(|skill| SkillSummaryDto {
-                            name: skill.name.clone(),
-                        })
-                        .collect(),
-                    warnings: state.catalog.warnings.clone(),
-                })
+                BridgeProductEventPayload::SkillsStateChanged(bridge_skills_state(state))
             }
             StudioProductEventKind::ProviderUsageStateChanged(state) => {
-                BridgeProductEventPayload::ProviderUsageStateChanged(
-                    BridgeProviderUsageStateSnapshot {
-                        meta: state.meta.into(),
-                        config_fingerprint: state.config_fingerprint,
-                        usages: state.usages.into_iter().map(provider_usage_dto).collect(),
-                    },
-                )
+                BridgeProductEventPayload::ProviderUsageStateChanged(bridge_provider_usage_state(
+                    state.state,
+                ))
             }
             StudioProductEventKind::UpdaterStateChanged(state) => {
-                BridgeProductEventPayload::UpdaterStateChanged(BridgeUpdaterStateSnapshot {
-                    meta: state.meta.into(),
-                    update: state.update.map(|update| BridgeVerifiedUpdateSummary {
-                        version: update.version,
-                        published_at: update.published_at,
-                        notes_url: update.notes_url,
-                    }),
-                })
+                BridgeProductEventPayload::UpdaterStateChanged(bridge_update_state(state))
             }
         },
     })

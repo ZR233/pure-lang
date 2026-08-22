@@ -14,7 +14,7 @@ use super::{
 use crate::studio::ids::new_id;
 use crate::studio::runtime_state::StudioRecoveryIssue;
 use crate::studio::store::StudioStore;
-use crate::{AgentLifecycleState, AgentRuntimeHandle};
+use crate::{AgentRuntimeHandle, AgentState};
 
 mod recovery;
 use recovery::resolve_worktree_recovery_groups;
@@ -97,7 +97,7 @@ impl TaskCoordinator {
         for snapshot in snapshots {
             if snapshot.identity.id == root {
                 if snapshot.identity.id.as_str() != source_agent_id
-                    && let Some(turn_id) = snapshot.active_turn_id
+                    && let Some(turn_id) = snapshot.active_turn_id().cloned()
                 {
                     runtime
                         .cancel_turn(snapshot.identity.id, turn_id)
@@ -106,8 +106,8 @@ impl TaskCoordinator {
                 }
             } else if snapshot.identity.parent_id.as_ref() == Some(&root)
                 && !matches!(
-                    snapshot.lifecycle,
-                    AgentLifecycleState::Closing | AgentLifecycleState::Closed
+                    snapshot.state,
+                    AgentState::Closing(_) | AgentState::Closed(_)
                 )
             {
                 runtime

@@ -1,7 +1,10 @@
 use super::*;
 use crate::{StudioProductEventKind, StudioRecoveryIssueCategory, StudioRecoveryIssueScope};
 use pl_core::canonical_content_hash;
-use pl_protocol::{AgentWorkingState, ThreadItem, ThreadItemContent, ThreadItemStatus};
+use pl_protocol::{
+    AgentWorkingState, ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel,
+    ThreadTextItem,
+};
 use pretty_assertions::assert_eq;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
@@ -33,7 +36,7 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.state.kind(), StudioRuntimeStateKind::Ready);
     let recovery_issues = runtime.recovery_issues();
     assert_eq!(recovery_issues.len(), 1);
     let issue = &recovery_issues[0];
@@ -65,7 +68,7 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
     .expect("RemoveProject recovery cleanup must not re-enter the lifecycle lock")
     .unwrap();
 
-    assert_eq!(cleaned.status, StudioRuntimeStatus::Ready);
+    assert_eq!(cleaned.state.kind(), StudioRuntimeStateKind::Ready);
     assert!(runtime.recovery_issues().is_empty());
     assert_eq!(
         runtime.list_projects().await.unwrap(),
@@ -111,7 +114,7 @@ async fn start_runtime_registers_persisted_child_thread_identity() {
 
     let snapshot = runtime.start_runtime().await.unwrap();
 
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.state.kind(), StudioRuntimeStateKind::Ready);
     // 惰性驻留：持久化 child 在显式激活后按需注册，身份链保持不变。
     runtime.ensure_thread_agent(&child.id).await.unwrap();
     let framework = runtime.agent_framework().await.unwrap();
@@ -160,7 +163,7 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.state.kind(), StudioRuntimeStateKind::Ready);
     let recovery_issues = runtime.recovery_issues();
     assert_eq!(recovery_issues.len(), 1);
     let issue = &recovery_issues[0];
@@ -184,7 +187,7 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         .await
         .unwrap();
 
-    assert_eq!(cleaned.status, StudioRuntimeStatus::Ready);
+    assert_eq!(cleaned.state.kind(), StudioRuntimeStateKind::Ready);
     assert!(runtime.recovery_issues().is_empty());
     let reset_thread = thread::Entity::find_by_id(&broken.id)
         .one(store.database())
@@ -192,7 +195,7 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         .unwrap()
         .unwrap();
     assert_eq!(reset_thread.runtime_revision, None);
-    assert_eq!(reset_thread.status, "idle");
+    assert_eq!(reset_thread.state_kind, "idle");
     let reset_state = thread_session_state::Entity::find_by_id(&broken.id)
         .one(store.database())
         .await
@@ -214,8 +217,10 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
             .flat_map(|turn| &turn.items)
             .any(|item| {
                 matches!(
-                    &item.content,
-                    ThreadItemContent::UserMessage { text, .. } if text == "preserve this history"
+                    item.state(),
+                    ThreadItemState::Text(text)
+                        if text.channel() == ThreadTextChannel::User
+                            && text.text() == "preserve this history"
                 )
             })
     );
@@ -231,7 +236,10 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
     )
     .unwrap();
     let restarted_snapshot = restarted.initialize_runtime().await.unwrap();
-    assert_eq!(restarted_snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(
+        restarted_snapshot.state.kind(),
+        StudioRuntimeStateKind::Ready
+    );
     assert!(restarted.recovery_issues().is_empty());
     let _ = tokio::fs::remove_dir_all(root).await;
 }
@@ -268,58 +276,52 @@ async fn persist_registered_session_state(
 
 async fn persist_completed_user_message(store: &StudioStore, thread_id: &str) {
     let turn_id = format!("turn-history-{thread_id}");
+    let turn_state = pl_protocol::TurnState::Completed(pl_protocol::CompletedTurnState::new(
+        Some(1),
+        1,
+        pl_protocol::TurnCompletion::Normal,
+    ));
     turn::ActiveModel {
         id: Set(turn_id.clone()),
         thread_id: Set(thread_id.to_string()),
         ordinal: Set(1),
         revision: Set(1),
-        status: Set("completed".to_string()),
-        phase: Set(None),
-        reason: Set(None),
+        state_json: Set(serde_json::to_string(&turn_state).unwrap()),
         model_json: Set(None),
         usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
-        failure_json: Set(None),
-        budget_limit_json: Set(None),
-        rollover_compacted: Set(0),
-        rollover_compaction_error: Set(None),
         metadata_json: Set(None),
-        started_at: Set(Some(1)),
         updated_at: Set(1),
-        completed_at: Set(Some(1)),
+        ..Default::default()
     }
     .insert(store.database())
     .await
     .unwrap();
     let item_id = format!("item-history-{thread_id}");
-    let value = ThreadItem {
-        id: item_id.clone(),
-        thread_id: thread_id.to_string(),
-        turn_id: turn_id.clone(),
-        ordinal: 1,
-        revision: 1,
-        status: ThreadItemStatus::Completed,
-        created_at: 1,
-        updated_at: 1,
-        completed_at: Some(1),
-        error: None,
-        content: ThreadItemContent::UserMessage {
-            text: "preserve this history".to_string(),
-            attachments: Vec::new(),
-        },
-        usage: None,
-    };
+    let value = ThreadItem::new(
+        item_id.clone(),
+        thread_id.to_string(),
+        turn_id.clone(),
+        1,
+        1,
+        1,
+        1,
+        ThreadItemState::Text(ThreadTextItem::new(
+            ThreadTextChannel::User,
+            "preserve this history".to_string(),
+            Vec::new(),
+            ThreadContentLifecycle::completed(1),
+        )),
+    );
     item::ActiveModel {
         id: Set(item_id),
         thread_id: Set(thread_id.to_string()),
         turn_id: Set(turn_id),
         ordinal: Set(1),
         revision: Set(1),
-        item_kind: Set("userMessage".to_string()),
-        status: Set("completed".to_string()),
-        payload_json: Set(serde_json::to_string(&value).unwrap()),
+        state_json: Set(serde_json::to_string(value.state()).unwrap()),
         created_at: Set(1),
         updated_at: Set(1),
-        completed_at: Set(Some(1)),
+        ..Default::default()
     }
     .insert(store.database())
     .await
@@ -460,8 +462,8 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
             .is_none()
     );
     assert_ne!(
-        busy_runtime.runtime_snapshot().await.unwrap().status,
-        StudioRuntimeStatus::Stopped
+        busy_runtime.runtime_snapshot().await.unwrap().state.kind(),
+        StudioRuntimeStateKind::Stopped
     );
 
     let idle_home = std::env::temp_dir().join(format!("pure-update-idle-{unique}"));
@@ -477,7 +479,7 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
         .await
         .unwrap()
         .expect("idle runtime should stop for update");
-    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
+    assert_eq!(stopped.state.kind(), StudioRuntimeStateKind::Stopped);
 
     let _ = tokio::fs::remove_dir_all(busy_home).await;
     let _ = tokio::fs::remove_dir_all(idle_home).await;
@@ -542,7 +544,7 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
 
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.state.kind(), StudioRuntimeStateKind::Ready);
     let ask = store
         .read_interaction("ask-recovered")
         .await
@@ -558,16 +560,16 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(ask.status, InteractionStatus::Pending);
-    assert_eq!(approval.status, InteractionStatus::Cancelled);
-    assert_eq!(plan.status, InteractionStatus::Pending);
+    assert_eq!(ask.status(), InteractionStatus::Pending);
+    assert_eq!(approval.status(), InteractionStatus::Cancelled);
+    assert_eq!(plan.status(), InteractionStatus::Pending);
     let canonical = runtime.thread_snapshot(&session.id).await.unwrap();
     assert_eq!(canonical.interactions.len(), 2);
     assert!(canonical.interactions.iter().all(|interaction| {
         matches!(
-            interaction.kind,
+            interaction.kind(),
             InteractionKind::UserInput | InteractionKind::PlanConfirmation
-        ) && interaction.status == InteractionStatus::Pending
+        ) && interaction.status() == InteractionStatus::Pending
     }));
     let _ = tokio::fs::remove_dir_all(home).await;
 }
@@ -615,14 +617,14 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         )
         .await
         .unwrap();
-    let resolution = crate::InteractionResolution::UserInput {
+    let resolution = crate::InteractionResolution::UserInput(crate::UserInputResolution {
         answers: std::collections::HashMap::from([(
             "architecture".to_string(),
             crate::UserInputAnswer {
                 answers: vec!["typed canonical route".to_string()],
             },
         )]),
-    };
+    });
 
     runtime
         .resolve_interaction(interaction.interaction_id.clone(), resolution.clone())
@@ -639,7 +641,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "SELECT mail_id, content, metadata_json, presentation
-             FROM thread_inputs WHERE thread_id = ? AND state = 'active'",
+             FROM thread_inputs WHERE thread_id = ? AND state_kind = 'claimed'",
             [owner.to_string().into()],
         ))
         .await
@@ -662,7 +664,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     assert_eq!(message["interactionId"], interaction.interaction_id);
     assert_eq!(message["originTurnId"], interaction.scope.turn_id);
     assert_eq!(
-        message["resolution"]["answers"]["architecture"]["answers"][0],
+        message["resolution"]["data"]["answers"]["architecture"]["answers"][0],
         "typed canonical route"
     );
     let persisted_interaction = store
@@ -670,8 +672,8 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         .await
         .unwrap()
         .expect("resolved interaction should remain persisted");
-    assert_eq!(persisted_interaction.status, InteractionStatus::Resolved);
-    assert_eq!(persisted_interaction.resolution, Some(resolution.clone()));
+    assert_eq!(persisted_interaction.status(), InteractionStatus::Resolved);
+    assert_eq!(persisted_interaction.resolution(), Some(resolution.clone()));
     assert!(
         runtime
             .thread_snapshot(&session.id)
@@ -680,8 +682,8 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
             .items
             .iter()
             .all(|item| !matches!(
-                &item.content,
-                pl_protocol::ThreadItemContent::UserMessage { .. }
+                item.state(),
+                ThreadItemState::Text(text) if text.channel() == ThreadTextChannel::User
             ))
     );
 
@@ -783,7 +785,7 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
             if let pl_protocol::ThreadSubscriptionUpdate::Notification { notification } = update
                 && let pl_protocol::ThreadNotification::InteractionChanged { interaction } =
                     notification.notification
-                && interaction.status == InteractionStatus::Pending
+                && interaction.status() == InteractionStatus::Pending
             {
                 break *interaction;
             }
@@ -792,14 +794,14 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
     .await
     .unwrap();
     assert_eq!(interaction.scope.turn_id, submitted.turn_id);
-    let resolution = crate::InteractionResolution::UserInput {
+    let resolution = crate::InteractionResolution::UserInput(crate::UserInputResolution {
         answers: std::collections::HashMap::from([(
             "architecture".to_string(),
             crate::UserInputAnswer {
                 answers: vec!["typed canonical route".to_string()],
             },
         )]),
-    };
+    });
 
     runtime
         .resolve_interaction(interaction.interaction_id.clone(), resolution)
@@ -816,14 +818,13 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(stored_interaction.status, InteractionStatus::Resolved);
+    assert_eq!(stored_interaction.status(), InteractionStatus::Resolved);
     let origin = turn::Entity::find_by_id(&submitted.turn_id)
         .one(store.database())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(origin.status, "completed");
-    assert_eq!(origin.budget_limit_json, None);
+    assert_eq!(origin.state_kind, "completed");
     let turns = turn::Entity::find()
         .filter(turn::Column::ThreadId.eq(&thread.id))
         .all(store.database())
@@ -834,9 +835,11 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
     let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
     assert!(snapshot.items.iter().any(|item| {
         matches!(
-            &item.content,
-            ThreadItemContent::AgentMessage { text, .. }
-                if text.contains("新的 Turn") && text.contains("typed canonical route")
+            item.state(),
+            ThreadItemState::Text(text)
+                if text.channel() != ThreadTextChannel::User
+                    && text.text().contains("新的 Turn")
+                    && text.text().contains("typed canonical route")
         )
     }));
     let owner = crate::studio::agent_host::root_agent_id(&thread.id);
@@ -844,7 +847,7 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT state, presentation FROM thread_inputs
+            "SELECT state_kind, presentation FROM thread_inputs
              WHERE thread_id = ? AND mail_id = ?",
             [
                 owner.to_string().into(),
@@ -857,7 +860,10 @@ async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "state_kind").unwrap(),
+        "consumed"
+    );
     assert_eq!(
         input.try_get::<String>("", "presentation").unwrap(),
         "hidden"
@@ -932,7 +938,7 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
             if let pl_protocol::ThreadSubscriptionUpdate::Notification { notification } = update
                 && let pl_protocol::ThreadNotification::InteractionChanged { interaction } =
                     notification.notification
-                && interaction.status == InteractionStatus::Pending
+                && interaction.status() == InteractionStatus::Pending
             {
                 break *interaction;
             }
@@ -977,16 +983,14 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(origin.status, "completed");
-    assert_eq!(origin.failure_json, None);
-    assert_eq!(origin.budget_limit_json, None);
+    assert_eq!(origin.state_kind, "completed");
     assert_eq!(
         store
             .read_interaction(&interaction.interaction_id)
             .await
             .unwrap()
             .unwrap()
-            .status,
+            .status(),
         InteractionStatus::Pending
     );
 
@@ -1197,7 +1201,7 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
                 .await
                 .unwrap()
                 .into_iter()
-                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
             {
                 break interaction;
             }
@@ -1211,15 +1215,17 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
     let response = runtime
         .resolve_interaction(
             confirmation.interaction_id.clone(),
-            crate::InteractionResolution::PlanConfirmation {
-                decision: crate::PlanConfirmationResolution::ImplementFreshContext,
-                content: None,
-                reason: None,
-            },
+            crate::InteractionResolution::PlanConfirmation(
+                crate::PlanConfirmationResolutionPayload {
+                    decision: crate::PlanConfirmationResolution::ImplementFreshContext,
+                    content: None,
+                    reason: None,
+                },
+            ),
         )
         .await
         .unwrap();
-    assert_eq!(response.interaction.status, InteractionStatus::Resolved);
+    assert_eq!(response.interaction.status(), InteractionStatus::Resolved);
 
     assert_eq!(
         tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
@@ -1267,7 +1273,7 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         .iter()
         .find(|turn| turn.id != submitted.turn_id)
         .expect("implementation should use a fresh planner Turn");
-    assert_eq!(fresh_turn.status, "completed");
+    assert_eq!(fresh_turn.state_kind, "completed");
 
     let durable_run = store
         .read_active_task_run_for_root_thread(&thread.id)
@@ -1283,7 +1289,7 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT turn_id, state, presentation, metadata_json FROM thread_inputs
+            "SELECT turn_id, state_kind, presentation, metadata_json FROM thread_inputs
              WHERE thread_id = ? AND mail_id = ?",
             [owner.to_string().into(), mail_id.clone().into()],
         ))
@@ -1294,7 +1300,10 @@ async fn plan_implementation_continues_in_a_fresh_task_planner_turn() {
         input.try_get::<String>("", "turn_id").unwrap(),
         fresh_turn.id
     );
-    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "state_kind").unwrap(),
+        "consumed"
+    );
     assert_eq!(
         input.try_get::<String>("", "presentation").unwrap(),
         "hidden"
@@ -1373,7 +1382,7 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
                 .await
                 .unwrap()
                 .into_iter()
-                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
             {
                 break interaction;
             }
@@ -1383,20 +1392,21 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
     .await
     .unwrap();
     assert!(matches!(
-        &confirmation.payload,
-        InteractionPayload::PlanConfirmation { content, .. } if content == original_plan
+        &confirmation.content,
+        crate::InteractionContent::PlanConfirmation(value) if value.content() == original_plan
     ));
 
-    let resolution = crate::InteractionResolution::PlanConfirmation {
-        decision: crate::PlanConfirmationResolution::ContinuePlanning,
-        content: Some("涉及的提示词都用中文".to_string()),
-        reason: Some("continue planning".to_string()),
-    };
+    let resolution =
+        crate::InteractionResolution::PlanConfirmation(crate::PlanConfirmationResolutionPayload {
+            decision: crate::PlanConfirmationResolution::ContinuePlanning,
+            content: Some("涉及的提示词都用中文".to_string()),
+            reason: Some("continue planning".to_string()),
+        });
     let response = runtime
         .resolve_interaction(confirmation.interaction_id.clone(), resolution.clone())
         .await
         .unwrap();
-    assert_eq!(response.interaction.status, InteractionStatus::Resolved);
+    assert_eq!(response.interaction.status(), InteractionStatus::Resolved);
 
     assert_eq!(
         tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
@@ -1412,8 +1422,8 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(persisted.status, InteractionStatus::Resolved);
-    assert_eq!(persisted.resolution, Some(resolution.clone()));
+    assert_eq!(persisted.status(), InteractionStatus::Resolved);
+    assert_eq!(persisted.resolution(), Some(resolution.clone()));
     let revised_confirmation = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
         loop {
             if let Some(interaction) = store
@@ -1421,7 +1431,7 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
                 .await
                 .unwrap()
                 .into_iter()
-                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
             {
                 break interaction;
             }
@@ -1435,8 +1445,8 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
         confirmation.interaction_id
     );
     assert!(matches!(
-        revised_confirmation.payload,
-        InteractionPayload::PlanConfirmation { content, .. } if content == revised_plan
+        revised_confirmation.content,
+        crate::InteractionContent::PlanConfirmation(value) if value.content() == revised_plan
     ));
 
     let turns = turn::Entity::find()
@@ -1445,9 +1455,7 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
         .await
         .unwrap();
     assert_eq!(turns.len(), 2);
-    assert!(turns.iter().all(|turn| turn.status == "completed"));
-    assert!(turns.iter().all(|turn| turn.failure_json.is_none()));
-    assert!(turns.iter().all(|turn| turn.budget_limit_json.is_none()));
+    assert!(turns.iter().all(|turn| turn.state_kind == "completed"));
     assert!(turns.iter().any(|turn| turn.id == submitted.turn_id));
 
     let owner = crate::studio::agent_host::root_agent_id(&thread.id);
@@ -1457,14 +1465,17 @@ async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT state, content, metadata_json, presentation FROM thread_inputs
+            "SELECT state_kind, content, metadata_json, presentation FROM thread_inputs
              WHERE thread_id = ? AND mail_id = ?",
             [owner.to_string().into(), mail_id.clone().into()],
         ))
         .await
         .unwrap()
         .expect("plan adjustment should be stored as a durable input");
-    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "state_kind").unwrap(),
+        "consumed"
+    );
     assert_eq!(
         input.try_get::<String>("", "presentation").unwrap(),
         "hidden"
@@ -1570,11 +1581,11 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
     let recovered = restarted.thread_snapshot(&thread.id).await.unwrap();
     assert!(recovered.interactions.iter().any(|candidate| {
         candidate.interaction_id == interaction.interaction_id
-            && candidate.status == InteractionStatus::Pending
+            && candidate.status() == InteractionStatus::Pending
     }));
-    let resolution = crate::InteractionResolution::UserInput {
+    let resolution = crate::InteractionResolution::UserInput(crate::UserInputResolution {
         answers: Default::default(),
-    };
+    });
     restarted
         .resolve_interaction(interaction.interaction_id.clone(), resolution.clone())
         .await
@@ -1596,7 +1607,7 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count, MAX(state) AS state FROM thread_inputs
+            "SELECT COUNT(*) AS count, MAX(state_kind) AS state_kind FROM thread_inputs
              WHERE thread_id = ? AND mail_id = ?",
             [
                 owner.to_string().into(),
@@ -1610,14 +1621,14 @@ async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
         .unwrap()
         .unwrap();
     assert_eq!(row.try_get::<i64>("", "count").unwrap(), 1);
-    assert_eq!(row.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(row.try_get::<String>("", "state_kind").unwrap(), "consumed");
     assert_eq!(
         store
             .read_interaction(&interaction.interaction_id)
             .await
             .unwrap()
             .unwrap()
-            .status,
+            .status(),
         InteractionStatus::Resolved
     );
 
@@ -1661,14 +1672,12 @@ async fn start_runtime_returns_while_mcp_discovery_is_pending() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.state.kind(), StudioRuntimeStateKind::Ready);
     let running = runtime.read_mcp_state().await.unwrap();
     assert!(matches!(
-        running.meta.phase,
-        pl_protocol::ObservedStatePhase::Running {
-            operation: pl_protocol::StateOperation::Reconcile,
-            ..
-        }
+        running.state,
+        pl_protocol::ObservedResource::Loading(ref state)
+            if state.operation() == pl_protocol::StateOperation::Reconcile
     ));
 
     release.send(()).unwrap();
@@ -1676,7 +1685,7 @@ async fn start_runtime_returns_while_mcp_discovery_is_pending() {
         loop {
             let event = events.recv().await.unwrap();
             if let StudioProductEventKind::McpStateChanged(state) = event.kind
-                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
+                && state.state.kind() == pl_protocol::ObservedResourceKind::Ready
             {
                 break state;
             }
@@ -1686,6 +1695,9 @@ async fn start_runtime_returns_while_mcp_discovery_is_pending() {
     .unwrap();
     assert!(
         ready
+            .state
+            .value()
+            .unwrap()
             .health
             .mcp_servers
             .iter()
@@ -1722,20 +1734,27 @@ async fn failed_mcp_startup_is_projected_to_its_server_without_blocking_runtime(
 
     let startup = runtime.start_runtime().await.unwrap();
 
-    assert_eq!(startup.status, StudioRuntimeStatus::Ready);
+    assert_eq!(startup.state.kind(), StudioRuntimeStateKind::Ready);
     let state = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
         loop {
             let event = events.recv().await.unwrap();
             if let StudioProductEventKind::McpStateChanged(state) = event.kind
-                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
-                && state.health.mcp_servers.iter().any(|server| {
-                    server.id == "unavailable-startup"
-                        && server.availability_kind == "unavailable"
-                        && server
-                            .availability_message
-                            .as_deref()
-                            .is_some_and(|message| message.contains(&missing_command))
-                })
+                && state.state.kind() == pl_protocol::ObservedResourceKind::Ready
+                && state
+                    .state
+                    .value()
+                    .unwrap()
+                    .health
+                    .mcp_servers
+                    .iter()
+                    .any(|server| {
+                        server.id == "unavailable-startup"
+                            && matches!(
+                                &server.state,
+                                crate::StudioMcpServerState::Unavailable(state)
+                                    if state.error().message.contains(&missing_command)
+                            )
+                    })
             {
                 break state;
             }
@@ -1744,20 +1763,24 @@ async fn failed_mcp_startup_is_projected_to_its_server_without_blocking_runtime(
     .await
     .unwrap();
     let server = state
+        .state
+        .value()
+        .unwrap()
         .health
         .mcp_servers
         .iter()
         .find(|server| server.id == "unavailable-startup")
         .unwrap();
-    assert_eq!(server.availability_kind, "unavailable");
-    assert!(
-        server
-            .availability_message
-            .as_deref()
-            .is_some_and(|message| message.contains(&missing_command))
-    );
+    assert!(matches!(
+        &server.state,
+        crate::StudioMcpServerState::Unavailable(state)
+            if state.error().message.contains(&missing_command)
+    ));
     assert!(
         !state
+            .state
+            .value()
+            .unwrap()
             .health
             .active_mcp_servers
             .contains(&"unavailable-startup".to_string())
@@ -1787,7 +1810,7 @@ async fn start_runtime_emits_mcp_health_snapshot() {
         loop {
             let event = events.recv().await.unwrap();
             if let StudioProductEventKind::McpStateChanged(state) = event.kind
-                && matches!(state.meta.phase, pl_protocol::ObservedStatePhase::Ready)
+                && state.state.kind() == pl_protocol::ObservedResourceKind::Ready
             {
                 break state;
             }
@@ -1795,10 +1818,14 @@ async fn start_runtime_emits_mcp_health_snapshot() {
     })
     .await
     .unwrap();
-    let health = state.health;
+    let health = &state.state.value().unwrap().health;
     assert!(health.active_mcp_servers.is_empty());
     assert!(health.mcp_servers.iter().any(|server| {
-        server.source_kind == "builtIn" && server.availability_kind == "missingCredential"
+        server.source_kind == "builtIn"
+            && matches!(
+                server.state,
+                crate::StudioMcpServerState::MissingCredential(_)
+            )
     }));
 
     runtime.shutdown().await;
@@ -1827,12 +1854,12 @@ async fn unchanged_mcp_reconcile_is_noop_and_shutdown_snapshot_remains_readable(
 
     runtime.shutdown_runtime().await.unwrap();
     let stopped = runtime.read_mcp_state().await.unwrap();
-    assert_eq!(stopped.meta.revision, ready.meta.revision + 1);
-    assert!(matches!(
-        stopped.meta.phase,
-        pl_protocol::ObservedStatePhase::Stopped
-    ));
-    assert_eq!(stopped.health, ready.health);
+    assert_eq!(stopped.state.revision(), ready.state.revision() + 1);
+    assert_eq!(
+        stopped.state.kind(),
+        pl_protocol::ObservedResourceKind::Stopped
+    );
+    assert_eq!(stopped.state.value(), None);
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 
@@ -1891,12 +1918,12 @@ async fn external_state_reads_are_stable_and_lsp_stopped_snapshot_remains_readab
 
     runtime.shutdown_runtime().await.unwrap();
     let stopped = runtime.read_lsp_state().await;
-    assert_eq!(stopped.meta.revision, lsp.meta.revision + 1);
-    assert!(matches!(
-        stopped.meta.phase,
-        pl_protocol::ObservedStatePhase::Stopped
-    ));
-    assert_eq!(stopped.health, lsp.health);
+    assert_eq!(stopped.state.revision(), lsp.state.revision() + 1);
+    assert_eq!(
+        stopped.state.kind(),
+        pl_protocol::ObservedResourceKind::Stopped
+    );
+    assert_eq!(stopped.state.value(), None);
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 

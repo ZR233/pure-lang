@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use pl_core::{AgentModelConfig, McpServerConfig, McpServerTransport, ProviderConfig};
-use pl_protocol::{ThreadItemContent, ThreadItemStatus, TurnBillingRecord};
+use pl_protocol::{ThreadItemState, ThreadTextChannel, ThreadToolState, TurnBillingRecord};
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;
@@ -121,29 +121,33 @@ async fn run_tool_failure_fixture(root: &Path) -> Result<()> {
         .iter()
         .find(|item| {
             matches!(
-                &item.content,
-                ThreadItemContent::ToolCall { tool } if tool.name == "read_file"
+                item.state(),
+                ThreadItemState::Tool(tool) if tool.invocation().name() == "read_file"
             )
         })
         .context("failed read_file call missing from Thread timeline")?;
-    let ThreadItemContent::ToolCall { tool } = &failed_tool.content else {
+    let ThreadItemState::Tool(tool) = failed_tool.state() else {
         unreachable!("matched tool call above")
     };
     let diagnostic = format!(
         "{} {}",
-        failed_tool.error.as_deref().unwrap_or_default(),
-        tool.result.as_deref().unwrap_or_default()
+        failed_tool.failure().unwrap_or_default(),
+        tool.terminal_output().map_or("", |output| output.result())
     )
     .to_ascii_lowercase();
     assert!(
-        failed_tool.status == ThreadItemStatus::Failed
+        matches!(tool.state(), ThreadToolState::Failed(_))
             || diagnostic.contains("missing-cache-file")
             || diagnostic.contains("not found")
     );
-    assert!(snapshot.items.iter().any(|item| matches!(
-        &item.content,
-        ThreadItemContent::AgentMessage { text, .. } if text == "tool failure observed"
-    )));
+    assert!(snapshot.items.iter().any(|item| {
+        matches!(
+            item.state(),
+            ThreadItemState::Text(text)
+                if text.channel() != ThreadTextChannel::User
+                    && text.text() == "tool failure observed"
+        )
+    }));
 
     runtime.shutdown_runtime().await?;
     mcp_server.stop();
@@ -189,7 +193,7 @@ async fn run_interrupted_fixture(root: &Path) -> Result<()> {
         .one(store.database())
         .await?
         .context("interrupted Turn row missing")?;
-    assert_eq!(row.status, "interrupted");
+    assert_eq!(row.state_kind, "cancelled");
     assert!(row.model_json.is_none());
     let usage: pl_model::TokenUsage = serde_json::from_str(&row.usage_json)?;
     assert_eq!(usage, pl_model::TokenUsage::default());
@@ -274,7 +278,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
         public
             .items
             .iter()
-            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+            .all(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
     );
     let runtime_usage = public
         .runtime
@@ -323,7 +327,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
         restored
             .items
             .iter()
-            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+            .all(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
     );
     let restored_thread = thread::Entity::find_by_id(thread.id.clone())
         .one(reopened_store.database())
@@ -476,7 +480,7 @@ pub(super) async fn wait_for_turn(store: &StudioStore, turn_id: &str) -> Result<
             if let Some(row) = turn::Entity::find_by_id(turn_id)
                 .one(store.database())
                 .await?
-                && !matches!(row.status.as_str(), "queued" | "inProgress")
+                && !matches!(row.state_kind.as_str(), "queued" | "running")
             {
                 return Ok::<(), sea_orm::DbErr>(());
             }

@@ -218,18 +218,21 @@ impl TaskCoordinator {
         scope: TaskMergeScope,
         runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<MergeRecord> {
-        if matches!(
-            scope.merge.cleanup.status.as_str(),
-            "discarded" | "alreadyAbsent"
-        ) {
+        if scope.merge.cleanup.is_complete() {
             return Ok(scope.merge);
         }
-        self.store
+        let attempt = self
+            .store
             .record_merge_cleanup_attempting(&scope.merge.id)
             .await?;
+        let operation_id = attempt
+            .cleanup
+            .operation_id()
+            .context("merge cleanup attempt has no operation id")?
+            .to_string();
         let cleanup = cleanup_accepted_delivery(&scope, runtime).await;
         self.store
-            .record_merge_cleanup(&scope.merge.id, cleanup)
+            .record_merge_cleanup(&scope.merge.id, &operation_id, cleanup)
             .await
     }
 }

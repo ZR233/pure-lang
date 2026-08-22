@@ -17,19 +17,29 @@ identity、live Item overlay 和当前 prompt generation/context baseline。它�
 19.6）。它不缓存完整历史，也不拥有 Task/worktree；context baseline 只用于生成模型输入差量，
 不能成为 runtime 事实源。
 
-Agent activity 不再是调用方可独立写入的状态轴。公开形状固定为：
+Agent lifecycle、activity 与 active Turn 不再是三个可独立写入的状态轴。唯一公开状态固定为：
 
 ```text
-Idle | Queued | Active(Running | WaitingTool | WaitingInteraction) | Cancelling
+Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling
+| Closing | Closed | Faulted
 ```
 
-ThreadActor 在每次 commit 前从 lifecycle、RunningTurn.kind/cancelling 与 pending triggering input
-派生 activity，优先级为：active cancellation → Cancelling，active Turn → Active(kind)，无 active
-Turn 且存在 triggering input → Queued，其余 → Idle；非 Active lifecycle 不保留活动投影。调用方
-不能直接修改 snapshot.activity。trace/tool/interaction 只更新 RunningTurn.kind，并在同一次内存
-commit 中提交 `TurnActivityChanged` runtime event 与新 snapshot。这样 durable snapshot、directory
-watch 和产品投影共享一个内存提交点，重启恢复只从 active Turn 与 pending input 重建，不
-维护第二份 activity truth。
+`AgentState` 的每个 variant 承载独立 state struct；Running、WaitingTool、WaitingInteraction 与
+Cancelling 必须携带 active Turn identity，WaitingInteraction 还携带 Interaction identity，Faulted
+携带 typed error 和可选诊断 Turn。ThreadActor 只接受 `AgentCommand`，由状态机返回 next state 与
+effects；trace/tool/interaction、mailbox 和 close saga 不得直接写 snapshot 字段。pending triggering
+input 通过显式 Queue/Start command 把 Idle 推进到 Queued/Running，不能再由调用方临时派生 activity。
+同一次内存 commit 原子提交 state、runtime event 与 snapshot，directory watch 和产品投影读取同一
+状态事实源。
+
+Studio `AgentDirectoryChanged` 直接携带上述九态相邻标签 union；目录条目不再并列传输
+`status/lifecycle/activity/activeTurnId/error/reason`。Flutter 以 sealed `StudioAgentState` 穷尽消费，
+展示标签和 fault message 只能作为只读派生值。Faulted 的 `StateError` 保留 code、message、retryable
+及可选诊断 Turn，不能在 Bridge 层退化成字符串。
+
+Thread 的公开状态只从 canonical Agent/Turn 状态穷尽投影为 Idle、Queued、Running、WaitingTool、
+WaitingInteraction、Cancelling、Closing、Closed、Faulted；它不是另一个可写 lifecycle。没有实际
+生产来源的 Completed Thread 状态被删除。
 
 所有改变 canonical session 的 Thread transition 都由 runtime 根据提交前后 session 自动派生
 `Append | Replace | None`，调用方不能在 transcript 已变化时省略 context mutation。child 注册若
@@ -71,7 +81,7 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 
 ## 17.3 取消与恢复
 
-RunningTurn 包含 turnId、进程内 identity、当前 ActiveKind、CancellationToken、abort handle、done、
+RunningTurn 包含 turnId、进程内 identity、canonical Turn running state、CancellationToken、abort handle、done、
 steer sender 与单一 budget-refresh signal。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
 abort；Turn 终态的 Immediate flush 完成后才能广播 turnCompleted。

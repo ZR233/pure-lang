@@ -83,7 +83,38 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
     assert!(!work_unit_columns.contains(&"status".to_string()));
     assert!(!work_unit_columns.contains(&"execution_status".to_string()));
     assert!(!work_unit_columns.contains(&"owned_paths_json".to_string()));
+    let work_completion_columns = table_columns(store.database(), "work_completions").await;
+    for column in [
+        "content_json",
+        "content_kind",
+        "state_json",
+        "state_kind",
+        "state_revision",
+    ] {
+        assert!(
+            work_completion_columns.contains(&column.to_string()),
+            "missing work_completions.{column}"
+        );
+    }
+    for column in ["kind", "status", "head_commit", "changed_files_json"] {
+        assert!(
+            !work_completion_columns.contains(&column.to_string()),
+            "obsolete work_completions.{column} still exists"
+        );
+    }
     let item_columns = table_columns(store.database(), "items").await;
+    for column in ["state_json", "state_kind"] {
+        assert!(
+            item_columns.contains(&column.to_string()),
+            "missing items.{column}"
+        );
+    }
+    for column in ["item_kind", "status", "payload_json", "completed_at"] {
+        assert!(
+            !item_columns.contains(&column.to_string()),
+            "obsolete items.{column} still exists"
+        );
+    }
     assert!(!item_columns.contains(&"provider_private_payload".to_string()));
     let review_round_columns = table_columns(store.database(), "review_rounds").await;
     assert!(review_round_columns.contains(&"file_reviews_json".to_string()));
@@ -114,24 +145,42 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
         "source_role",
         "work_unit_id",
         "review_round_id",
-        "disposition",
-        "failure_json",
-        "resolved_at",
+        "state_json",
+        "state_kind",
+        "revision",
     ] {
         assert!(
             task_failure_columns.contains(&column.to_string()),
             "missing task_failures.{column}"
         );
     }
+    for column in ["disposition", "failure_json", "resolved_at"] {
+        assert!(
+            !task_failure_columns.contains(&column.to_string()),
+            "obsolete task_failures.{column} still exists"
+        );
+    }
     let turn_columns = table_columns(store.database(), "turns").await;
-    for column in [
-        "budget_limit_json",
-        "rollover_compacted",
-        "rollover_compaction_error",
-    ] {
+    for column in ["state_json", "state_kind"] {
         assert!(
             turn_columns.contains(&column.to_string()),
             "missing turns.{column}"
+        );
+    }
+    for column in [
+        "status",
+        "phase",
+        "reason",
+        "failure_json",
+        "budget_limit_json",
+        "rollover_compacted",
+        "rollover_compaction_error",
+        "started_at",
+        "completed_at",
+    ] {
+        assert!(
+            !turn_columns.contains(&column.to_string()),
+            "obsolete turns.{column} still exists"
         );
     }
     let segment_columns = table_columns(store.database(), "thread_context_segments").await;
@@ -160,12 +209,19 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
         "delivery_head",
         "method",
         "summary",
-        "cleanup_status",
-        "cleanup_detail",
+        "cleanup_state_json",
+        "cleanup_state_kind",
+        "revision",
     ] {
         assert!(
             merge_columns.contains(&column.to_string()),
             "missing merge_records.{column}"
+        );
+    }
+    for column in ["cleanup_status", "cleanup_detail"] {
+        assert!(
+            !merge_columns.contains(&column.to_string()),
+            "obsolete merge_records.{column} still exists"
         );
     }
     for legacy_column in [
@@ -183,8 +239,8 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
 }
 
 #[tokio::test]
-async fn schema_v9_database_is_rebuilt_to_v11_without_migration() {
-    let root = unique_test_root("schema-v7-rebuild");
+async fn schema_v10_database_is_rebuilt_to_v11_without_migration() {
+    let root = unique_test_root("schema-v10-rebuild");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
     store
@@ -192,13 +248,13 @@ async fn schema_v9_database_is_rebuilt_to_v11_without_migration() {
         .execute_unprepared(
             "INSERT INTO projects \
              (id, name, path, created_at, updated_at, last_opened_at, closed) \
-             VALUES ('project-v7', 'Project', 'C:/project', 1, 1, 1, 0);",
+             VALUES ('project-v10', 'Project', 'C:/project', 1, 1, 1, 0);",
         )
         .await
         .unwrap();
     drop(store);
     // 旧库只有版本号低于 v11；Studio schema 单版本精确重建，不再迁移。
-    create_database(&database_path, "PRAGMA user_version = 9;").await;
+    create_database(&database_path, "PRAGMA user_version = 10;").await;
 
     let rebuilt = StudioStore::open(&database_path).await.unwrap();
 
@@ -206,7 +262,7 @@ async fn schema_v9_database_is_rebuilt_to_v11_without_migration() {
         schema_version(rebuilt.database()).await,
         STUDIO_DATABASE_SCHEMA_VERSION
     );
-    // 重建丢弃旧数据，而不是把 v9 行迁移进 v11。
+    // 重建丢弃旧数据，而不是把 v10 行迁移进 v11。
     assert!(rebuilt.list_projects().await.unwrap().is_empty());
 
     drop(rebuilt);

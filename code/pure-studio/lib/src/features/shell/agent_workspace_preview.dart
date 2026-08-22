@@ -95,7 +95,7 @@ StudioState _agentWorkspacePreviewState({
     rootThreadId: root.id,
     agentPath: 'preview-reviewer',
     role: 'reviewer',
-    status: 'running',
+    status: ThreadStatusView.running,
   );
   final selected = selectChild ? child : root;
   final item = ThreadItemView(
@@ -104,15 +104,16 @@ StudioState _agentWorkspacePreviewState({
     turnId: '${selected.id}-turn',
     ordinal: 0,
     revision: 0,
-    status: 'completed',
     createdAt: timestamp,
     updatedAt: timestamp,
-    completedAt: timestamp,
-    kind: ThreadItemKind.agentMessage,
-    channel: AgentMessageChannel.finalAnswer,
-    text: selectChild
-        ? 'Reviewer is checking the workspace boundary.'
-        : 'Planner owns this root workspace and its editable composer.',
+    state: ThreadTextItemStateView(
+      channel: ThreadTextChannel.finalAnswer,
+      text: selectChild
+          ? 'Reviewer is checking the workspace boundary.'
+          : 'Planner owns this root workspace and its editable composer.',
+      attachments: const [],
+      lifecycle: CompletedThreadContentView(timestamp),
+    ),
   );
   final runtime = ThreadRuntimeView(
     model: selectChild ? 'reviewer/model' : 'planner/model',
@@ -126,54 +127,95 @@ StudioState _agentWorkspacePreviewState({
     agentCount: 1,
   );
   return StudioState(
-    projectDirectory: const ProjectDirectoryState(values: [project]),
+    projectDirectory: ProjectDirectoryState.fromState(
+      state: ReadyObservedResource(
+        revision: 1,
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+        lastCheckedAt: null,
+        value: const [project],
+      ),
+    ),
     threadDirectory: ThreadDirectoryWindow(threads: [root, child]),
-    taskDirectory: const TaskDirectoryState(),
-    agentDirectory: const AgentDirectoryState(),
-    settingsState: const SettingsStateSnapshot(
-      providers: [
-        ProviderSettingsView(
-          id: 'preview-provider',
-          name: 'Preview Provider',
-          baseUrl: '',
-          defaultModel: 'planner/model',
-          models: [
-            ProviderModelView(
-              slug: 'planner/model',
-              displayName: 'Planner Model',
-              reasoningEfforts: ['high'],
-              wireProtocol: 'responses',
-              supportedConnectionModes: ['web_socket', 'http'],
-              defaultConnectionMode: 'web_socket',
-              connectionMode: 'web_socket',
+    taskDirectory: TaskDirectoryState.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+    agentDirectory: AgentDirectoryState.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+    settingsState: SettingsStateSnapshot.fromState(
+      state: ReadyObservedResource(
+        revision: 1,
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+        lastCheckedAt: null,
+        value: const SettingsStateData(
+          providers: [
+            ProviderSettingsView(
+              id: 'preview-provider',
+              name: 'Preview Provider',
+              baseUrl: '',
+              defaultModel: 'planner/model',
+              models: [
+                ProviderModelView(
+                  slug: 'planner/model',
+                  displayName: 'Planner Model',
+                  reasoningEfforts: ['high'],
+                  wireProtocol: 'responses',
+                  supportedConnectionModes: ['web_socket', 'http'],
+                  defaultConnectionMode: 'web_socket',
+                  connectionMode: 'web_socket',
+                ),
+              ],
+              status: 'ready',
+              usageLabel: '',
             ),
           ],
-          status: 'ready',
-          usageLabel: '',
+          roles: [
+            RoleSettingsView(
+              key: 'planner',
+              providerId: 'preview-provider',
+              model: 'planner/model',
+              effort: 'high',
+            ),
+            RoleSettingsView(
+              key: 'executor',
+              providerId: 'preview-provider',
+              model: 'planner/model',
+              effort: 'high',
+            ),
+          ],
+          permissionMode: PermissionMode.requestApproval,
         ),
-      ],
-      roles: [
-        RoleSettingsView(
-          key: 'planner',
-          providerId: 'preview-provider',
-          model: 'planner/model',
-          effort: 'high',
-        ),
-        RoleSettingsView(
-          key: 'executor',
-          providerId: 'preview-provider',
-          model: 'planner/model',
-          effort: 'high',
-        ),
-      ],
-      permissionMode: PermissionMode.requestApproval,
+      ),
     ),
-    recoveryState: const RecoveryStateSnapshot(),
-    mcpState: const McpStateSnapshot(),
-    lspState: const LspStateSnapshot(),
+    recoveryState: RecoveryStateSnapshot.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+    mcpState: McpStateSnapshot.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+    lspState: LspStateSnapshot.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
     skillsByProject: const {},
-    providerUsageState: const ProviderUsageStateSnapshot(),
-    updaterState: const UpdaterStateSnapshot(),
+    providerUsageState: ProviderUsageStateSnapshot.fromState(
+      state: UninitializedObservedResource(
+        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+      ),
+    ),
+    updaterState: UpdaterStateSnapshot.idle(
+      revision: 0,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    ),
     workspacesByThread: childLoading
         ? const {}
         : {
@@ -188,8 +230,10 @@ StudioState _agentWorkspacePreviewState({
                   : StudioTurnView(
                       turnId: '${selected.id}-turn',
                       threadId: selected.id,
-                      state: const StudioTurnState.inProgress(
-                        StudioTurnActivity.responding,
+                      revision: 1,
+                      state: RunningStudioTurnState(
+                        startedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
+                        activity: StudioTurnActivity.responding,
                       ),
                       updatedAt: timestamp,
                     ),

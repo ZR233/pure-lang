@@ -1,7 +1,7 @@
 use crate::api::studio::bridge_runtime::active_bridge;
-use crate::api::studio::convert::settings::provider_usage_dto;
+use crate::api::studio::convert::runtime::{bridge_provider_usage_state, bridge_skills_state};
 use crate::api::studio::types::{
-    BridgeError, BridgeProviderUsageStateSnapshot, BridgeSkillsStateSnapshot, SkillSummaryDto,
+    BridgeError, BridgeProviderUsageStateSnapshot, BridgeSkillsStateSnapshot,
 };
 // ── Provider usage ──
 
@@ -31,19 +31,7 @@ pub async fn read_skills_state(
 fn owned_skills_state(
     state: pl_studio_runtime::StudioSkillsStateSnapshot,
 ) -> BridgeSkillsStateSnapshot {
-    BridgeSkillsStateSnapshot {
-        meta: state.meta.into(),
-        project_id: state.project_id,
-        config_fingerprint: state.config_fingerprint,
-        catalog_revision: state.catalog_revision,
-        skills: state
-            .catalog
-            .skills
-            .into_iter()
-            .map(|skill| SkillSummaryDto { name: skill.name })
-            .collect(),
-        warnings: state.catalog.warnings,
-    }
+    bridge_skills_state(state)
 }
 
 pub async fn discover_skills(project_id: String) -> Result<BridgeSkillsStateSnapshot, BridgeError> {
@@ -56,27 +44,9 @@ pub async fn discover_skills(project_id: String) -> Result<BridgeSkillsStateSnap
 fn provider_usage_state(
     state: pl_studio_runtime::ProviderUsageStateSnapshot,
 ) -> BridgeProviderUsageStateSnapshot {
-    BridgeProviderUsageStateSnapshot {
-        meta: state.meta.into(),
-        config_fingerprint: state.config_fingerprint,
-        usages: state.usages.into_iter().map(provider_usage_dto).collect(),
-    }
+    bridge_provider_usage_state(state.state)
 }
 
 fn skills_state(state: pl_studio_runtime::SkillsStateSnapshot) -> BridgeSkillsStateSnapshot {
-    BridgeSkillsStateSnapshot {
-        meta: state.meta.into(),
-        project_id: state.project_id,
-        config_fingerprint: state.config_fingerprint,
-        catalog_revision: state.catalog_revision,
-        skills: state
-            .catalog
-            .skills
-            .iter()
-            .map(|skill| SkillSummaryDto {
-                name: skill.name.clone(),
-            })
-            .collect(),
-        warnings: state.catalog.warnings.clone(),
-    }
+    bridge_skills_state(state.into())
 }

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::runtime::BridgeObservedStateMeta;
 use super::{
     BridgeAgentDirectoryState, BridgeLspStateSnapshot, BridgeMcpStateSnapshot,
     BridgeProjectDirectoryState, BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot,
@@ -44,30 +43,23 @@ pub enum BridgeProductEventPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeThreadDirectoryDelta {
-    pub meta: BridgeObservedStateMeta,
+    pub revision: u64,
+    pub updated_at: i64,
     pub upserted: Vec<BridgeThread>,
     pub removed: Vec<String>,
 }
 
-/// 关机阶段枚举（与 Rust `StudioShutdownPhase` 一一对应）。
+/// 一次关机进度的精确阶段状态；只有持久化刷新阶段携带 pending commit 数。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum BridgeShutdownPhase {
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeShutdownProgress {
     StoppingSubscriptions,
     CancellingTurns,
-    FlushingPersistence,
+    FlushingPersistence { pending_commits: u64 },
     SuspendingTasks,
     StoppingMcp,
     StoppingLsp,
     Stopped,
-}
-
-/// 一次关机进度的进度事件；`flushingPersistence` 完成事件携带 `pendingCommits: 0`。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeShutdownProgress {
-    pub phase: BridgeShutdownPhase,
-    pub pending_commits: u64,
 }
 
 impl BridgeProductEventEnvelope {

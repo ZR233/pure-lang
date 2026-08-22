@@ -1,7 +1,5 @@
-import 'turn_models.dart';
 import 'thread_directory_models.dart';
-
-enum ComposerSubmissionPhase { idle, submitting, pendingStart }
+import 'turn_models.dart';
 
 class SubmitPromptReceipt {
   const SubmitPromptReceipt({
@@ -34,90 +32,82 @@ class ArchiveThreadResult {
   final StudioThread? nextRoot;
 }
 
-class ComposerThreadState {
-  const ComposerThreadState._({
-    required this.draft,
-    required this.phase,
-    required this.submissionRevision,
-    this.acceptedTurnId,
-  }) : error = null;
+sealed class ComposerThreadState {
+  const ComposerThreadState();
 
-  const ComposerThreadState.idle({
-    this.draft = '',
-    this.submissionRevision = 0,
-    this.acceptedTurnId,
-  }) : phase = ComposerSubmissionPhase.idle,
-       error = null;
+  const factory ComposerThreadState.idle({
+    String draft,
+    int submissionRevision,
+  }) = IdleComposerThreadState;
 
-  const ComposerThreadState.failure({
-    required this.error,
-    this.draft = '',
-    this.submissionRevision = 0,
-  }) : phase = ComposerSubmissionPhase.idle,
-       acceptedTurnId = null;
+  const factory ComposerThreadState.failure({
+    required String error,
+    String draft,
+    int submissionRevision,
+  }) = FailedComposerThreadState;
 
-  final String draft;
-  final ComposerSubmissionPhase phase;
-  final int submissionRevision;
-  final String? acceptedTurnId;
-  final String? error;
+  String get draft => switch (this) {
+    IdleComposerThreadState(:final draft) ||
+    SubmittingComposerThreadState(:final draft) ||
+    FailedComposerThreadState(:final draft) => draft,
+    PendingStartComposerThreadState() => '',
+  };
 
-  bool get isSubmissionPending => phase != ComposerSubmissionPhase.idle;
+  int get submissionRevision => switch (this) {
+    IdleComposerThreadState(:final submissionRevision) ||
+    SubmittingComposerThreadState(:final submissionRevision) ||
+    PendingStartComposerThreadState(:final submissionRevision) ||
+    FailedComposerThreadState(:final submissionRevision) => submissionRevision,
+  };
+
+  String? get error => switch (this) {
+    FailedComposerThreadState(:final error) => error,
+    IdleComposerThreadState() ||
+    SubmittingComposerThreadState() ||
+    PendingStartComposerThreadState() => null,
+  };
+
+  bool get isSubmissionPending =>
+      this is SubmittingComposerThreadState ||
+      this is PendingStartComposerThreadState;
 
   ComposerThreadState updateDraft(String value) {
-    if (isSubmissionPending) {
-      return this;
-    }
-    return ComposerThreadState.idle(
+    if (isSubmissionPending) return this;
+    return IdleComposerThreadState(
       draft: value,
       submissionRevision: submissionRevision,
-      acceptedTurnId: acceptedTurnId,
     );
   }
 
   ComposerThreadState beginSubmission() {
-    if (isSubmissionPending || draft.trim().isEmpty) {
-      return this;
-    }
+    if (isSubmissionPending || draft.trim().isEmpty) return this;
     return _startSubmission();
   }
 
   ComposerThreadState beginCommandSubmission() {
-    if (isSubmissionPending) {
-      return this;
-    }
+    if (isSubmissionPending) return this;
     return _startSubmission();
   }
 
-  ComposerThreadState _startSubmission() {
-    return ComposerThreadState._(
-      draft: draft,
-      phase: ComposerSubmissionPhase.submitting,
-      submissionRevision: submissionRevision + 1,
-      acceptedTurnId: acceptedTurnId,
-    );
-  }
+  ComposerThreadState _startSubmission() => SubmittingComposerThreadState(
+    draft: draft,
+    submissionRevision: submissionRevision + 1,
+  );
 
   ComposerThreadState accept(
     SubmitPromptReceipt receipt, {
     required int submissionRevision,
   }) {
-    if (!_matchesSubmittingRevision(submissionRevision)) {
-      return this;
-    }
-    return ComposerThreadState._(
-      draft: '',
-      phase: ComposerSubmissionPhase.pendingStart,
+    if (!_matchesSubmittingRevision(submissionRevision)) return this;
+    return PendingStartComposerThreadState(
       submissionRevision: this.submissionRevision,
       acceptedTurnId: receipt.turnId,
     );
   }
 
   ComposerThreadState fail(Object error, {required int submissionRevision}) {
-    if (!_matchesSubmittingRevision(submissionRevision)) {
-      return this;
-    }
-    return ComposerThreadState.failure(
+    if (!_matchesSubmittingRevision(submissionRevision)) return this;
+    return FailedComposerThreadState(
       draft: draft,
       error: error.toString(),
       submissionRevision: this.submissionRevision,
@@ -125,13 +115,17 @@ class ComposerThreadState {
   }
 
   ComposerThreadState observeTurn(StudioTurnView? turn) {
-    if (turn == null || turn.turnId != acceptedTurnId) {
-      return this;
-    }
+    final acceptedTurnId = switch (this) {
+      PendingStartComposerThreadState(:final acceptedTurnId) => acceptedTurnId,
+      IdleComposerThreadState() ||
+      SubmittingComposerThreadState() ||
+      FailedComposerThreadState() => null,
+    };
+    if (turn == null || turn.turnId != acceptedTurnId) return this;
     if (turn.state.status == StudioTurnStatus.failed) {
       final message = turn.failure?.message.trim();
       final reason = turn.state.reason?.trim();
-      return ComposerThreadState.failure(
+      return FailedComposerThreadState(
         draft: draft,
         error: message?.isNotEmpty == true
             ? message!
@@ -141,22 +135,56 @@ class ComposerThreadState {
         submissionRevision: submissionRevision,
       );
     }
-    if (turn.state.isTerminal) {
-      return ComposerThreadState.idle(
-        draft: draft,
-        submissionRevision: submissionRevision,
-      );
-    }
-    if (phase != ComposerSubmissionPhase.pendingStart) {
-      return this;
-    }
-    return ComposerThreadState.idle(
-      submissionRevision: submissionRevision,
-      acceptedTurnId: acceptedTurnId,
-    );
+    return IdleComposerThreadState(submissionRevision: submissionRevision);
   }
 
   bool _matchesSubmittingRevision(int revision) =>
-      phase == ComposerSubmissionPhase.submitting &&
-      submissionRevision == revision;
+      this is SubmittingComposerThreadState && submissionRevision == revision;
+}
+
+final class IdleComposerThreadState extends ComposerThreadState {
+  const IdleComposerThreadState({this.draft = '', this.submissionRevision = 0});
+
+  @override
+  final String draft;
+  @override
+  final int submissionRevision;
+}
+
+final class SubmittingComposerThreadState extends ComposerThreadState {
+  const SubmittingComposerThreadState({
+    required this.draft,
+    required this.submissionRevision,
+  });
+
+  @override
+  final String draft;
+  @override
+  final int submissionRevision;
+}
+
+final class PendingStartComposerThreadState extends ComposerThreadState {
+  const PendingStartComposerThreadState({
+    required this.submissionRevision,
+    required this.acceptedTurnId,
+  });
+
+  @override
+  final int submissionRevision;
+  final String acceptedTurnId;
+}
+
+final class FailedComposerThreadState extends ComposerThreadState {
+  const FailedComposerThreadState({
+    required this.error,
+    this.draft = '',
+    this.submissionRevision = 0,
+  });
+
+  @override
+  final String error;
+  @override
+  final String draft;
+  @override
+  final int submissionRevision;
 }

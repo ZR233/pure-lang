@@ -1,8 +1,8 @@
 //! 正文与 reasoning 流的 trace part 投影。
 
 use pl_trace::{
-    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartKind,
-    TracePartSource, TracePartStatus, TraceTextChannel, TraceThinkingChunk,
+    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartAction, TracePartCompletion,
+    TracePartKind, TraceTextChannel,
 };
 
 use super::TraceProjection;
@@ -18,26 +18,13 @@ impl TraceProjection {
         let item_id = self.active_text_item_id(item_id, text_channel);
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
-            let item = TracePart {
-                turn_id: self.turn_id.clone(),
-                item_id: item_id.clone(),
-                started_sequence: self.sequence,
-                revision: 0,
-                kind: TracePartKind::Text,
-                status: TracePartStatus::Streaming,
-                created_at: now,
-                updated_at: now,
-                source: TracePartSource::Model,
-                text_channel: Some(text_channel),
-                content: String::new(),
-                attachments: Vec::new(),
-                thinking_chunks: Vec::new(),
-                reasoning_content_chunks: Vec::new(),
-                tool: None,
-                agent: None,
-                inference: None,
-                usage: None,
-            };
+            let item = TracePart::streaming_text(
+                self.turn_id.clone(),
+                item_id.clone(),
+                self.sequence,
+                text_channel,
+                now,
+            );
             self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
             events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id.clone(), item);
@@ -54,30 +41,21 @@ impl TraceProjection {
         let now = unix_seconds();
         let mut events = self.start_text(item_id, text_channel);
         let item_id = self.active_text_item_id(item_id, text_channel);
-        if let Some(item) = self.started.get_mut(&item_id) {
-            item.revision += 1;
-            item.status = TracePartStatus::Streaming;
-            item.updated_at = now;
-            item.content.push_str(&delta);
+        let trace_delta = TraceDelta::Text {
+            channel: text_channel,
+            delta,
+        };
+        let Some(item) = self.started.get_mut(&item_id) else {
+            return events;
+        };
+        if let Err(error) =
+            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
+        {
+            tracing::error!(%error, "failed to append text trace delta");
+            return events;
         }
-        let revision = self
-            .started
-            .get(&item_id)
-            .map(|item| item.revision)
-            .unwrap_or_default();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id,
-            started_sequence: self.sequence,
-            revision,
-            kind: TracePartKind::Text,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::Text {
-                text_channel,
-                delta,
-            },
+        let Ok(event) = item.delta_event(trace_delta) else {
+            return events;
         };
         self.record(
             TraceEventKind::TracePartDelta {
@@ -102,8 +80,9 @@ impl TraceProjection {
         self.complete_item_by_resolved_id(
             &item_id,
             TracePartKind::Text,
-            Some(text_channel),
-            authoritative_text,
+            TracePartCompletion::Text {
+                authoritative_content: authoritative_text,
+            },
         )
     }
 
@@ -112,26 +91,12 @@ impl TraceProjection {
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
-            let item = TracePart {
-                turn_id: self.turn_id.clone(),
-                item_id: item_id.clone(),
-                started_sequence: self.sequence,
-                revision: 0,
-                kind: TracePartKind::Thinking,
-                status: TracePartStatus::Streaming,
-                created_at: now,
-                updated_at: now,
-                source: TracePartSource::Model,
-                text_channel: None,
-                content: String::new(),
-                attachments: Vec::new(),
-                thinking_chunks: Vec::new(),
-                reasoning_content_chunks: Vec::new(),
-                tool: None,
-                agent: None,
-                inference: None,
-                usage: None,
-            };
+            let item = TracePart::streaming_thinking(
+                self.turn_id.clone(),
+                item_id.clone(),
+                self.sequence,
+                now,
+            );
             self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
             events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id, item);
@@ -148,38 +113,18 @@ impl TraceProjection {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        if let Some(item) = self.started.get_mut(&item_id) {
-            item.revision += 1;
-            item.status = TracePartStatus::Streaming;
-            item.updated_at = now;
-            match item
-                .thinking_chunks
-                .iter_mut()
-                .find(|chunk| chunk.chunk_index == chunk_index)
-            {
-                Some(chunk) => chunk.content.push_str(&delta),
-                None => item.thinking_chunks.push(TraceThinkingChunk {
-                    chunk_index,
-                    content: delta.clone(),
-                }),
-            }
-            item.thinking_chunks.sort_by_key(|chunk| chunk.chunk_index);
+        let trace_delta = TraceDelta::Thinking { chunk_index, delta };
+        let Some(item) = self.started.get_mut(&item_id) else {
+            return events;
+        };
+        if let Err(error) =
+            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
+        {
+            tracing::error!(%error, "failed to append thinking trace delta");
+            return events;
         }
-        let revision = self
-            .started
-            .get(&item_id)
-            .map(|item| item.revision)
-            .unwrap_or_default();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id,
-            started_sequence: self.sequence,
-            revision,
-            kind: TracePartKind::Thinking,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::Thinking { chunk_index, delta },
+        let Ok(event) = item.delta_event(trace_delta) else {
+            return events;
         };
         self.record(
             TraceEventKind::TracePartDelta {
@@ -200,39 +145,18 @@ impl TraceProjection {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        if let Some(item) = self.started.get_mut(&item_id) {
-            item.revision += 1;
-            item.status = TracePartStatus::Streaming;
-            item.updated_at = now;
-            match item
-                .reasoning_content_chunks
-                .iter_mut()
-                .find(|chunk| chunk.chunk_index == chunk_index)
-            {
-                Some(chunk) => chunk.content.push_str(&delta),
-                None => item.reasoning_content_chunks.push(TraceThinkingChunk {
-                    chunk_index,
-                    content: delta.clone(),
-                }),
-            }
-            item.reasoning_content_chunks
-                .sort_by_key(|chunk| chunk.chunk_index);
+        let trace_delta = TraceDelta::ReasoningContent { chunk_index, delta };
+        let Some(item) = self.started.get_mut(&item_id) else {
+            return events;
+        };
+        if let Err(error) =
+            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
+        {
+            tracing::error!(%error, "failed to append reasoning content trace delta");
+            return events;
         }
-        let revision = self
-            .started
-            .get(&item_id)
-            .map(|item| item.revision)
-            .unwrap_or_default();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id,
-            started_sequence: self.sequence,
-            revision,
-            kind: TracePartKind::Thinking,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::ReasoningContent { chunk_index, delta },
+        let Ok(event) = item.delta_event(trace_delta) else {
+            return events;
         };
         self.record(
             TraceEventKind::TracePartDelta {
@@ -250,18 +174,10 @@ impl TraceProjection {
         authoritative_summary: Option<Vec<String>>,
     ) -> Vec<AgentEvent> {
         let mut events = Vec::new();
-        if let Some(summary) = authoritative_summary {
-            for (index, text) in summary.into_iter().enumerate() {
+        if let Some(summary) = authoritative_summary.as_ref() {
+            for (index, _text) in summary.iter().enumerate() {
                 let chunk_index = index as u32;
                 events.extend(self.start_thinking(item_id, chunk_index));
-                let resolved_id = self.active_thinking_item_id(item_id, chunk_index);
-                if let Some(item) = self.started.get_mut(&resolved_id) {
-                    item.thinking_chunks = vec![TraceThinkingChunk {
-                        chunk_index,
-                        content: text,
-                    }];
-                    item.updated_at = unix_seconds();
-                }
             }
         }
         let prefix = thinking_provider_key_prefix(item_id);
@@ -275,11 +191,18 @@ impl TraceProjection {
         item_ids.sort();
         for key in item_ids {
             if let Some(item_id) = self.active_thinking_items.remove(&key) {
+                let authoritative_summary = authoritative_summary.as_ref().and_then(|summary| {
+                    key.strip_prefix(&prefix)
+                        .and_then(|index| index.parse::<usize>().ok())
+                        .and_then(|index| summary.get(index))
+                        .map(|text| vec![text.clone()])
+                });
                 events.extend(self.complete_item_by_resolved_id(
                     &item_id,
                     TracePartKind::Thinking,
-                    None,
-                    None,
+                    TracePartCompletion::Thinking {
+                        authoritative_summary,
+                    },
                 ));
             }
         }

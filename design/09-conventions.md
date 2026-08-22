@@ -55,6 +55,26 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 
 `pl-core` 可以重导出常用 `pl-protocol` 类型，方便核心层用户使用；raw `pl-trace` 类型只作为内部运行事件边界，不应作为 Studio wire 或前端事实源。
 
+### 9.5.1 生命周期状态机
+
+具有时间顺序、非法转换、终态或恢复语义的领域对象统一使用单一状态机聚合：身份和跨状态上下文
+位于 aggregate，唯一可写状态是带 payload 的 enum。每个状态 variant 承载字段私有的独立 struct，
+并按 `state/mod.rs + state/<variant>.rs` 组织；只适用于某个状态的时间、失败、进度和结果不得提升为
+aggregate 上的平行 `Option`、布尔值或第二个 status enum。
+
+状态变化只接受语义明确的 command，并返回包含 next state、durable effects 和 external effects 的
+decision。状态模块是纯领域代码，不执行 IO、等待、加锁或外部回调；adapter 在事务和 lifecycle
+边界解释 effects。禁止通用 `set_state`、`can_transition_to`、`from_parts` 兼容构造、`dyn State` 和
+泛型 typestate。终态不可继续迁移；恢复必须是从指定可恢复状态出发的显式 command。重复 operation、
+mail 或 revision 只有完全命中幂等身份时才是 no-op，其他同态命令和过期 revision 必须返回 typed
+transition error。
+
+公共协议的生命周期统一使用
+`#[serde(tag = "kind", content = "data", rename_all = "camelCase")]` tagged enum；Dart 使用
+sealed union 并穷尽匹配。SQLite 对需要查询的生命周期保存完整 `state_json`，`state_kind` 只能是从
+JSON discriminator 生成的 stored column。普通分类、配置、能力、scope、transport、severity、解析
+游标和没有迁移规则的一次性结果继续使用普通 enum，不为形式统一强行引入状态机。
+
 ## 9.6 文档口径
 
 - 项目名：Pure-Lang。

@@ -1,20 +1,22 @@
 use crate::api::studio::types::{
-    BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,
-    BridgeProviderModelSettingsDto, BridgeProviderSettingsDto, BridgeRoleSettingsDto,
-    BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStudioSettingsDto,
-    BridgeWebSearchSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput,
-    ProviderSettingsInput, ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration,
+    BridgeMcpServerSettingsDto, BridgeProviderModelSettingsDto, BridgeProviderSettingsDto,
+    BridgeProviderUsageData, BridgeProviderUsageState, BridgeRoleSettingsDto,
+    BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStateError,
+    BridgeStudioSettingsDto, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
+    DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto,
+    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use pl_studio_runtime::{ProviderUsageData, ProviderUsageState, ZhipuQuotaWindow};
 
 pub(crate) fn bridge_settings_snapshot(
     snapshot: pl_protocol::studio::StudioSettingsSnapshot,
 ) -> BridgeSettingsStateSnapshot {
-    BridgeSettingsStateSnapshot {
-        meta: pl_protocol::ObservedStateMeta::ready(snapshot.revision, snapshot.updated_at).into(),
-        settings: bridge_settings(snapshot.settings),
-    }
+    super::runtime::bridge_settings_state(pl_protocol::ObservedResource::ready(
+        snapshot.revision,
+        snapshot.updated_at,
+        snapshot.settings,
+    ))
 }
 
 pub(crate) fn bridge_settings(
@@ -86,8 +88,17 @@ pub(crate) fn bridge_settings(
                 id: server.id,
                 transport: server.transport,
                 endpoint: server.endpoint,
-                enabled: server.enabled,
-                status: server.status,
+                configuration: match server.configuration {
+                    pl_protocol::studio::StudioMcpServerConfiguration::Enabled => {
+                        BridgeMcpServerConfiguration::Enabled
+                    }
+                    pl_protocol::studio::StudioMcpServerConfiguration::Disabled => {
+                        BridgeMcpServerConfiguration::Disabled
+                    }
+                    pl_protocol::studio::StudioMcpServerConfiguration::MissingCredential => {
+                        BridgeMcpServerConfiguration::MissingCredential
+                    }
+                },
                 source_kind: server.source_kind,
                 mutation_policy: server.mutation_policy,
             })
@@ -212,94 +223,74 @@ pub(crate) fn provider_settings_request(
 pub(crate) fn provider_usage_dto(
     record: pl_studio_runtime::ProviderUsageRecord,
 ) -> ProviderUsageDto {
-    match record.state {
-        ProviderUsageState::Unsupported => ProviderUsageDto {
-            provider_id: record.provider_id,
-            updated_at: record.updated_at,
-            status: "unsupported".to_string(),
-            usage_kind: "unsupported".to_string(),
-            message: None,
-            balance: None,
-            coding_plan: None,
+    let state = match record.state() {
+        ProviderUsageState::Unsupported(_) => BridgeProviderUsageState::Unsupported,
+        ProviderUsageState::MissingCredential(state) => {
+            BridgeProviderUsageState::MissingCredential {
+                message: state.message().to_string(),
+            }
+        }
+        ProviderUsageState::Failed(state) => BridgeProviderUsageState::Failed {
+            error: BridgeStateError {
+                code: state.error().code.clone(),
+                message: state.error().message.clone(),
+                retryable: state.error().retryable,
+            },
         },
-        ProviderUsageState::MissingCredential => ProviderUsageDto {
-            provider_id: record.provider_id,
-            updated_at: record.updated_at,
-            status: "missingCredential".to_string(),
-            usage_kind: "unknown".to_string(),
-            message: Some("provider API key is not configured".to_string()),
-            balance: None,
-            coding_plan: None,
-        },
-        ProviderUsageState::Failed(message) => ProviderUsageDto {
-            provider_id: record.provider_id,
-            updated_at: record.updated_at,
-            status: "error".to_string(),
-            usage_kind: String::new(),
-            message: Some(message),
-            balance: None,
-            coding_plan: None,
-        },
-        ProviderUsageState::Ready(ProviderUsageData::DeepSeekBalance(balance)) => {
-            ProviderUsageDto {
-                provider_id: record.provider_id,
-                updated_at: record.updated_at,
-                status: "ready".to_string(),
-                usage_kind: "deepseekBalance".to_string(),
-                message: None,
-                balance: Some(DeepSeekBalanceDto {
+        ProviderUsageState::Ready(state) => match state.data() {
+            ProviderUsageData::DeepSeekBalance(balance) => BridgeProviderUsageState::Ready {
+                data: BridgeProviderUsageData::DeepSeekBalance(DeepSeekBalanceDto {
                     is_available: balance.is_available,
                     balances: balance
                         .balances
-                        .into_iter()
+                        .iter()
                         .map(|item| DeepSeekBalanceInfoDto {
-                            currency: item.currency,
-                            total_balance: item.total_balance,
-                            granted_balance: item.granted_balance,
-                            topped_up_balance: item.topped_up_balance,
+                            currency: item.currency.clone(),
+                            total_balance: item.total_balance.clone(),
+                            granted_balance: item.granted_balance.clone(),
+                            topped_up_balance: item.topped_up_balance.clone(),
                         })
                         .collect(),
                 }),
-                coding_plan: None,
-            }
-        }
-        ProviderUsageState::Ready(ProviderUsageData::ZhipuCodingPlan(usage)) => ProviderUsageDto {
-            provider_id: record.provider_id,
-            updated_at: record.updated_at,
-            status: "ready".to_string(),
-            usage_kind: "zhipuCodingPlan".to_string(),
-            message: None,
-            balance: None,
-            coding_plan: Some(ZhipuCodingPlanUsageDto {
-                level: usage.level,
-                limits: usage
-                    .limits
-                    .into_iter()
-                    .map(|limit| {
-                        let (window, label) = zhipu_window_labels(&limit.window);
-                        ZhipuQuotaLimitDto {
-                            window: window.to_string(),
-                            label: label.to_string(),
-                            percentage: limit.percentage,
-                            current_value: limit.current_value,
-                            total: limit.total,
-                            remaining: limit.remaining,
-                            next_reset_at: limit.next_reset_at,
-                            usage_details: limit
-                                .usage_details
-                                .into_iter()
-                                .map(|detail| ZhipuToolUsageDetailDto {
-                                    name: detail.name,
-                                    current_value: detail.current_value,
-                                    total: detail.total,
-                                    percentage: detail.percentage,
-                                })
-                                .collect(),
-                        }
-                    })
-                    .collect(),
-            }),
+            },
+            ProviderUsageData::ZhipuCodingPlan(usage) => BridgeProviderUsageState::Ready {
+                data: BridgeProviderUsageData::ZhipuCodingPlan(ZhipuCodingPlanUsageDto {
+                    level: usage.level.clone(),
+                    limits: usage
+                        .limits
+                        .iter()
+                        .map(|limit| {
+                            let (window, label) = zhipu_window_labels(&limit.window);
+                            ZhipuQuotaLimitDto {
+                                window: window.to_string(),
+                                label: label.to_string(),
+                                percentage: limit.percentage,
+                                current_value: limit.current_value,
+                                total: limit.total,
+                                remaining: limit.remaining,
+                                next_reset_at: limit.next_reset_at,
+                                usage_details: limit
+                                    .usage_details
+                                    .iter()
+                                    .map(|detail| ZhipuToolUsageDetailDto {
+                                        name: detail.name.clone(),
+                                        current_value: detail.current_value,
+                                        total: detail.total,
+                                        percentage: detail.percentage,
+                                    })
+                                    .collect(),
+                            }
+                        })
+                        .collect(),
+                }),
+            },
         },
+    };
+    ProviderUsageDto {
+        provider_id: record.provider_id().to_string(),
+        revision: record.revision(),
+        updated_at: record.updated_at(),
+        state,
     }
 }
 

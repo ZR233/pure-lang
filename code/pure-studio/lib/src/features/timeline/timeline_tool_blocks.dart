@@ -679,7 +679,7 @@ class _ToolGroupItemRow extends StatelessWidget {
     if (result == null || result.trim().isEmpty) {
       return null;
     }
-    if (item.part.status == 'completed') {
+    if (item.part.status == 'succeeded') {
       return null;
     }
     if (item.name == 'task_complete') {
@@ -708,9 +708,10 @@ class _ToolGroupItemRow extends StatelessWidget {
 String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
   final label = _toolDisplayName(context, item);
   return switch (item.status) {
-    'completed' => context.l10n.timelineToolCompleted(label),
+    'succeeded' => context.l10n.timelineToolCompleted(label),
     'failed' => context.l10n.timelineToolFailed(label),
     'denied' => context.l10n.timelineToolDenied(label),
+    'cancelled' => context.l10n.timelineToolCancelled(label),
     'awaitingApproval' => context.l10n.timelineToolAwaitingApproval(label),
     'running' ||
     'streaming' ||

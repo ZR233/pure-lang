@@ -13,7 +13,7 @@ part of 'studio_update_controller.dart';
 final studioUpdateControllerProvider = StudioUpdateControllerProvider._();
 
 final class StudioUpdateControllerProvider
-    extends $NotifierProvider<StudioUpdateController, StudioUpdateState> {
+    extends $NotifierProvider<StudioUpdateController, UpdaterStateSnapshot> {
   StudioUpdateControllerProvider._()
     : super(
         from: null,
@@ -33,28 +33,29 @@ final class StudioUpdateControllerProvider
   StudioUpdateController create() => StudioUpdateController();
 
   /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(StudioUpdateState value) {
+  Override overrideWithValue(UpdaterStateSnapshot value) {
     return $ProviderOverride(
       origin: this,
-      providerOverride: $SyncValueProvider<StudioUpdateState>(value),
+      providerOverride: $SyncValueProvider<UpdaterStateSnapshot>(value),
     );
   }
 }
 
 String _$studioUpdateControllerHash() =>
-    r'6ed73b2cf548b39d5907d5328b1b27345cca4aea';
+    r'9d340da71568f5d71ec4a9ffe80e152e47d14c30';
 
-abstract class _$StudioUpdateController extends $Notifier<StudioUpdateState> {
-  StudioUpdateState build();
+abstract class _$StudioUpdateController
+    extends $Notifier<UpdaterStateSnapshot> {
+  UpdaterStateSnapshot build();
   @$mustCallSuper
   @override
   WhenComplete runBuild() {
-    final ref = this.ref as $Ref<StudioUpdateState, StudioUpdateState>;
+    final ref = this.ref as $Ref<UpdaterStateSnapshot, UpdaterStateSnapshot>;
     final element =
         ref.element
             as $ClassProviderElement<
-              AnyNotifier<StudioUpdateState, StudioUpdateState>,
-              StudioUpdateState,
+              AnyNotifier<UpdaterStateSnapshot, UpdaterStateSnapshot>,
+              UpdaterStateSnapshot,
               Object?,
               Object?
             >;

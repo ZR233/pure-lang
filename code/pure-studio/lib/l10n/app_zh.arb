@@ -234,6 +234,7 @@
   "timelineToolCompleted": "{name} 已完成",
   "timelineToolFailed": "{name} 失败",
   "timelineToolDenied": "{name} 被拒绝",
+  "timelineToolCancelled": "{name} 已取消",
   "timelineToolAwaitingApproval": "{name} 等待授权",
   "timelineToolRunning": "{name} 运行中",
   "timelineToolExitCode": "退出码 {code}",

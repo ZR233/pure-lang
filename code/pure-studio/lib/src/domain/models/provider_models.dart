@@ -368,21 +368,58 @@ ProviderSettingsView providerWithCatalogMetadata(
 class ProviderUsageView {
   const ProviderUsageView({
     required this.providerId,
+    this.revision = 0,
     required this.updatedAt,
-    required this.status,
-    required this.usageKind,
-    this.message,
-    this.balance,
-    this.codingPlan,
+    required this.state,
   });
 
   final String providerId;
+  final int revision;
   final int updatedAt;
-  final String status;
-  final String usageKind;
-  final String? message;
-  final DeepSeekBalanceUsageView? balance;
-  final ZhipuCodingPlanUsageView? codingPlan;
+  final ProviderUsageStateView state;
+}
+
+sealed class ProviderUsageStateView {
+  const ProviderUsageStateView();
+}
+
+final class UnsupportedProviderUsageView extends ProviderUsageStateView {
+  const UnsupportedProviderUsageView();
+}
+
+final class MissingCredentialProviderUsageView extends ProviderUsageStateView {
+  const MissingCredentialProviderUsageView({required this.message});
+  final String message;
+}
+
+final class ReadyProviderUsageView extends ProviderUsageStateView {
+  const ReadyProviderUsageView({required this.data});
+  final ProviderUsageDataView data;
+}
+
+final class FailedProviderUsageView extends ProviderUsageStateView {
+  const FailedProviderUsageView({
+    required this.code,
+    required this.message,
+    required this.retryable,
+  });
+  final String code;
+  final String message;
+  final bool retryable;
+}
+
+sealed class ProviderUsageDataView {
+  const ProviderUsageDataView();
+}
+
+final class DeepSeekBalanceProviderUsageView extends ProviderUsageDataView {
+  const DeepSeekBalanceProviderUsageView({required this.balance});
+  final DeepSeekBalanceUsageView balance;
+}
+
+final class ZhipuCodingPlanProviderUsageView extends ProviderUsageDataView {
+  const ZhipuCodingPlanProviderUsageView({required this.codingPlan});
+  final ZhipuCodingPlanUsageView codingPlan;
 }
 
 class DeepSeekBalanceUsageView {

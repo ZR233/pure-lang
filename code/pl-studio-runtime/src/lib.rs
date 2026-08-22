@@ -37,8 +37,10 @@ pub use first_run::{
 };
 pub use protocol::*;
 pub use provider_usage::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ProviderUsageData, ProviderUsageRecord,
-    ProviderUsageState, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, FailedProviderUsage, MissingCredentialProviderUsage,
+    ProviderUsageCommand, ProviderUsageData, ProviderUsageRecord, ProviderUsageState,
+    ProviderUsageTransitionDecision, ProviderUsageTransitionError, ReadyProviderUsage,
+    UnsupportedProviderUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
     ZhipuToolUsageDetail, provider_usage_records, zhipu_limit_by_window,
 };
 pub use studio::*;

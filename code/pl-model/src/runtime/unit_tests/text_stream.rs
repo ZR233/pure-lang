@@ -35,7 +35,7 @@ fn stream_accumulator_returns_content_and_reasoning_content() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Thinking
+            if item.kind() == TracePartKind::Thinking
                 && trace_part_text(item) == "先比较整数位。"
     )));
     assert!(matches!(
@@ -116,14 +116,14 @@ fn stream_accumulator_streams_commentary_without_content() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
-                && item.content == "检查配置。"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                && trace_part_text(item) == "检查配置。"
     )));
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
-        && item.content == "完成。"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+        && trace_part_text(item) == "完成。"
     )));
 }
 
@@ -166,14 +166,14 @@ fn stream_accumulator_projects_tagged_raw_reasoning_without_visible_text() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Thinking
+            if item.kind() == TracePartKind::Thinking
                 && trace_part_text(item)
                     == "<commentary>正在分析日志。</commentary><final>完成。</final>"
     )));
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Text || item.kind == TracePartKind::Plan
+            if item.kind() == TracePartKind::Text || item.kind() == TracePartKind::Plan
     )));
 }
 
@@ -207,18 +207,17 @@ fn stream_accumulator_splits_repeated_tagged_commentary_and_final_blocks() {
         .trace_events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Text => {
+            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Text => {
                 Some((
-                    item.item_id.as_str(),
-                    item.text_channel,
-                    item.content.as_str(),
+                    item.item_id(),
+                    trace_text_channel(item),
+                    trace_part_text(item),
                 ))
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -233,22 +232,22 @@ fn stream_accumulator_splits_repeated_tagged_commentary_and_final_blocks() {
             (
                 "inf-1-text-commentary-1",
                 Some(pl_trace::TraceTextChannel::Commentary),
-                "A",
+                "A".to_string(),
             ),
             (
                 "inf-1-text-final-1",
                 Some(pl_trace::TraceTextChannel::Final),
-                "B",
+                "B".to_string(),
             ),
             (
                 "inf-1-text-commentary-2",
                 Some(pl_trace::TraceTextChannel::Commentary),
-                "C",
+                "C".to_string(),
             ),
             (
                 "inf-1-text-final-2",
                 Some(pl_trace::TraceTextChannel::Final),
-                "D",
+                "D".to_string(),
             ),
         ]
     );
@@ -287,13 +286,13 @@ fn stream_accumulator_projects_untagged_reasoning_without_visible_text() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Thinking
+            if item.kind() == TracePartKind::Thinking
                 && trace_part_text(item) == "先比较整数位。"
     )));
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Text || item.kind == TracePartKind::Plan
+            if item.kind() == TracePartKind::Text || item.kind() == TracePartKind::Plan
     )));
 }
 
@@ -322,8 +321,8 @@ fn stream_accumulator_treats_untagged_display_text_as_final() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
-                && item.content == "plain text"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                && trace_part_text(item) == "plain text"
     )));
 }
 
@@ -362,8 +361,8 @@ fn stream_accumulator_uses_authoritative_completed_text_for_response_content() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
-                && item.content == "final text"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                && trace_part_text(item) == "final text"
     )));
 }
 
@@ -398,14 +397,14 @@ fn stream_accumulator_creates_part_for_authoritative_completion_without_delta() 
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartStarted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
-                && item.content.is_empty()
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                && trace_part_text(item).is_empty()
     )));
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
-                && item.content == "已完成检查"
+            if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                && trace_part_text(item) == "已完成检查"
     )));
 }
 
@@ -449,14 +448,13 @@ fn stream_accumulator_does_not_extract_proposed_plan_item() {
         .trace_events
         .iter()
         .find_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
+            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Plan => {
                 Some(item)
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,

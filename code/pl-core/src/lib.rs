@@ -85,7 +85,7 @@ pub use pl_model::{
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
-    ImageSource, InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
+    ImageSource, InteractionChangedEvent, InteractionContent, InteractionKind, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, McpAvailabilityDescriptor,
     McpHealthSnapshot, McpServerDescriptor, Message, MessageContent, MessageRole, ModelContextItem,
     OutputStream, PermissionLevel, PinnedContextSection, PipelineStage, PlanConfirmationResolution,
@@ -110,8 +110,8 @@ pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
     InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalRequest, ToolCompletion,
-    ToolCompletionCallback, ToolCompletionFuture, ToolEffect, ToolExecutionMode, TurnAbortReason,
-    TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus, UserInputMode,
+    ToolCompletionCallback, ToolCompletionFuture, ToolEffect, ToolExecutionMode, TurnBudget,
+    TurnOptions, TurnRequest, TurnResult, UserInputMode,
 };
 pub use web_search::{
     ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchPath,

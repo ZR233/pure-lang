@@ -1,4 +1,6 @@
-use pl_trace::{AgentEvent, TracePart, TracePartKind, TraceTextChannel};
+use pl_trace::{
+    AgentEvent, TracePart, TracePartKind, TraceTextChannel, TraceTextState, TraceToolState,
+};
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::*;
@@ -68,7 +70,7 @@ fn reasoning_summary_sections_get_distinct_part_ids() {
     let completed = completed
         .into_iter()
         .filter_map(completed_thinking_item)
-        .map(|item| (item.item_id.clone(), trace_part_text(&item)))
+        .map(|item| (item.item_id().to_string(), trace_part_text(&item)))
         .collect::<Vec<_>>();
 
     assert_eq!(first_delta, "inference-1-reasoning-1");
@@ -111,7 +113,9 @@ fn raw_reasoning_starts_the_part_and_later_summary_updates_the_same_part() {
     assert_eq!(trace_part_text(&completed), "summary done");
     assert_eq!(
         completed
-            .reasoning_content_chunks
+            .thinking()
+            .expect("thinking part")
+            .content()
             .iter()
             .map(|chunk| chunk.content.as_str())
             .collect::<String>(),
@@ -130,10 +134,18 @@ fn raw_only_reasoning_is_preserved_in_the_authoritative_part() {
         .find_map(completed_thinking_item)
         .expect("completed reasoning part");
 
-    assert!(completed.thinking_chunks.is_empty());
+    assert!(
+        completed
+            .thinking()
+            .expect("thinking part")
+            .summary()
+            .is_empty()
+    );
     assert_eq!(
         completed
-            .reasoning_content_chunks
+            .thinking()
+            .expect("thinking part")
+            .content()
             .iter()
             .map(|chunk| chunk.content.as_str())
             .collect::<String>(),
@@ -213,8 +225,8 @@ fn completed_text_uses_authoritative_text_and_revision() {
         .find_map(completed_text_item)
         .expect("completed text item");
 
-    assert_eq!(completed.content, "final text");
-    assert_eq!(completed.revision, 1);
+    assert_eq!(completed.text().expect("text part").content(), "final text");
+    assert_eq!(completed.revision(), 2);
 }
 
 #[test]
@@ -232,14 +244,15 @@ fn failed_sampling_attempt_invalidates_completed_and_streaming_parts() {
         .fail_attempt("connection lost")
         .into_iter()
         .filter_map(|event| match event {
-            AgentEvent::TracePartFailed { item, error } => Some((item.item_id, item.status, error)),
+            AgentEvent::TracePartFailed { item } => Some((
+                item.item_id().to_string(),
+                item.failure().map(str::to_string),
+            )),
             AgentEvent::TracePartStarted { .. }
             | AgentEvent::TracePartDelta { .. }
             | AgentEvent::TracePartCompleted { .. }
             | AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
-            | AgentEvent::AgentStateChanged { .. }
-            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
@@ -251,18 +264,10 @@ fn failed_sampling_attempt_invalidates_completed_and_streaming_parts() {
 
     assert_eq!(
         failed,
-        vec![
-            (
-                "inference-1-text-final-1".to_string(),
-                TracePartStatus::Failed,
-                "connection lost".to_string(),
-            ),
-            (
-                "inference-1-reasoning-1".to_string(),
-                TracePartStatus::Failed,
-                "connection lost".to_string(),
-            ),
-        ]
+        vec![(
+            "inference-1-reasoning-1".to_string(),
+            Some("connection lost".to_string()),
+        )]
     );
 }
 
@@ -292,11 +297,14 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         .find_map(started_tool_item)
         .expect("updated tool snapshot");
 
-    assert_eq!(updated.item_id, "turn-1-provider-tool-1");
-    assert_eq!(updated.status, TracePartStatus::Streaming);
-    assert_eq!(updated.revision, 1);
-    let tool = updated.tool.expect("tool metadata");
-    assert_eq!(tool.arguments, "{\"cmd\":\"echo hi\"}");
+    assert_eq!(updated.item_id(), "turn-1-provider-tool-1");
+    assert!(matches!(
+        updated.tool().map(|tool| tool.state()),
+        Some(TraceToolState::Streaming(_))
+    ));
+    assert_eq!(updated.revision(), 1);
+    let tool = updated.tool().expect("tool metadata");
+    assert_eq!(tool.invocation().arguments(), "{\"cmd\":\"echo hi\"}");
 }
 
 #[test]
@@ -344,23 +352,24 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
 
     assert_eq!(first_delta, "turn-1-call-1");
     assert_eq!(second_delta, "turn-1-call-1");
-    assert_eq!(updated.item_id, "turn-1-call-1");
-    assert_eq!(updated.revision, 2);
-    let tool = updated.tool.expect("tool metadata");
-    assert_eq!(tool.provider_item_id.as_deref(), Some("provider-tool-1"));
-    assert_eq!(tool.call_id.as_deref(), Some("call-1"));
+    assert_eq!(updated.item_id(), "turn-1-call-1");
+    assert_eq!(updated.revision(), 1);
+    let tool = updated.tool().expect("tool metadata");
+    assert_eq!(
+        tool.invocation().provider_item_id(),
+        Some("provider-tool-1")
+    );
+    assert_eq!(tool.invocation().call_id(), Some("call-1"));
 }
 
 fn started_sequence(event: AgentEvent) -> Option<u64> {
     match event {
-        AgentEvent::TracePartStarted { item } => Some(item.started_sequence),
+        AgentEvent::TracePartStarted { item } => Some(item.started_sequence()),
         AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -372,7 +381,7 @@ fn started_sequence(event: AgentEvent) -> Option<u64> {
 
 fn delta_item_id(event: AgentEvent) -> Option<String> {
     match event {
-        AgentEvent::TracePartDelta { event } if event.kind == TracePartKind::Thinking => {
+        AgentEvent::TracePartDelta { event } if event.kind() == TracePartKind::Thinking => {
             Some(event.item_id)
         }
         AgentEvent::TracePartStarted { .. }
@@ -380,8 +389,6 @@ fn delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -394,7 +401,7 @@ fn delta_item_id(event: AgentEvent) -> Option<String> {
 
 fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
     match event {
-        AgentEvent::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
+        AgentEvent::TracePartDelta { event } if event.kind() == TracePartKind::Tool => {
             Some(event.item_id)
         }
         AgentEvent::TracePartStarted { .. }
@@ -402,8 +409,6 @@ fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -416,16 +421,14 @@ fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
 
 fn completed_item_id(event: AgentEvent) -> Option<String> {
     match event {
-        AgentEvent::TracePartCompleted { item } if item.kind == TracePartKind::Thinking => {
-            Some(item.item_id)
+        AgentEvent::TracePartCompleted { item } if item.kind() == TracePartKind::Thinking => {
+            Some(item.item_id().to_string())
         }
         AgentEvent::TracePartStarted { .. }
         | AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -439,8 +442,11 @@ fn completed_item_id(event: AgentEvent) -> Option<String> {
 fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
     match event {
         AgentEvent::TracePartCompleted { item }
-            if item.kind == TracePartKind::Text
-                && item.text_channel == Some(TraceTextChannel::Final) =>
+            if matches!(
+                item.text(),
+                Some(text) if text.channel() == TraceTextChannel::Final
+                    && matches!(text.state(), TraceTextState::Completed(_))
+            ) =>
         {
             Some(item)
         }
@@ -449,8 +455,6 @@ fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -463,7 +467,7 @@ fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
 
 fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
     match event {
-        AgentEvent::TracePartCompleted { item } if item.kind == TracePartKind::Thinking => {
+        AgentEvent::TracePartCompleted { item } if item.kind() == TracePartKind::Thinking => {
             Some(item)
         }
         AgentEvent::TracePartStarted { .. }
@@ -471,8 +475,6 @@ fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
@@ -484,7 +486,9 @@ fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
 }
 
 fn trace_part_text(item: &TracePart) -> String {
-    item.thinking_chunks
+    item.thinking()
+        .expect("thinking part")
+        .summary()
         .iter()
         .map(|chunk| chunk.content.as_str())
         .collect::<Vec<_>>()
@@ -493,14 +497,12 @@ fn trace_part_text(item: &TracePart) -> String {
 
 fn started_tool_item(event: AgentEvent) -> Option<TracePart> {
     match event {
-        AgentEvent::TracePartStarted { item } if item.kind == TracePartKind::Tool => Some(item),
+        AgentEvent::TracePartStarted { item } if item.kind() == TracePartKind::Tool => Some(item),
         AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }

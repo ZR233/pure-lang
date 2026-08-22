@@ -1,5 +1,5 @@
 use crate::api::studio::bridge_runtime::active_bridge;
-use crate::api::studio::convert::runtime::bridge_mcp_health;
+use crate::api::studio::convert::runtime::{bridge_lsp_state, bridge_mcp_state};
 use crate::api::studio::types::{
     BridgeError, BridgeLspStateSnapshot, BridgeMcpStateSnapshot, LspScopeInput, McpResetInput,
 };
@@ -7,12 +7,7 @@ use crate::api::studio::types::{
 pub async fn read_mcp_state() -> Result<BridgeMcpStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
     let state = bridge.studio.read_mcp_state().await?;
-    Ok(BridgeMcpStateSnapshot {
-        meta: state.meta.into(),
-        desired_config_fingerprint: state.desired_config_fingerprint,
-        applied_config_fingerprint: state.applied_config_fingerprint,
-        health: bridge_mcp_health(state.health),
-    })
+    Ok(bridge_mcp_state(state.state))
 }
 
 pub async fn reset_mcp(input: McpResetInput) -> Result<BridgeMcpStateSnapshot, BridgeError> {
@@ -30,10 +25,7 @@ pub async fn reset_mcp(input: McpResetInput) -> Result<BridgeMcpStateSnapshot, B
 pub async fn read_lsp_state() -> Result<BridgeLspStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
     let state = bridge.studio.read_lsp_state().await;
-    Ok(BridgeLspStateSnapshot {
-        meta: state.meta.into(),
-        health: state.health.into(),
-    })
+    Ok(bridge_lsp_state(state.state))
 }
 
 pub async fn probe_lsp_server(project_id: String) -> Result<BridgeLspStateSnapshot, BridgeError> {

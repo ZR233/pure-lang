@@ -1,7 +1,11 @@
 //! Thread item 到 store 行投影的核心类型与 durable 投递身份落库。
 
-use pl_core::{MailboxDeliveryState, ThreadActorState, ThreadCommit, TurnId};
-use pl_protocol::{PureError, ThreadItem, ThreadNotification, Turn};
+use pl_core::{AgentState, ThreadActorState, ThreadCommit};
+use pl_protocol::{
+    BudgetLimitedTurnState, CancelledTurnState, CompletedTurnState, FailedTurnState, PureError,
+    QueuedTurnState, RunningTurnState, ThreadItem, ThreadNotification, Turn, TurnOutcome,
+    TurnPhase, TurnState,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
@@ -10,26 +14,14 @@ use crate::studio::StudioStore;
 use crate::studio::entity::{interaction, item, turn};
 
 use super::billing::authoritative_turn_usage;
-use super::labels::{
-    activity_phase, interaction_kind_label, interaction_status_label, item_kind_label,
-    item_status_label, outcome_columns, turn_state_columns,
-};
 use super::{i64_from_u64, store_error};
 
 struct TurnProjection<'a> {
     id: &'a str,
     thread_id: &'a str,
-    status: &'a str,
-    phase: Option<&'a str>,
-    reason: Option<&'a str>,
+    state: TurnState,
     usage: Option<&'a pl_model::TokenUsage>,
-    failure: Option<&'a pl_protocol::TurnFailure>,
-    budget_limit: Option<&'a pl_protocol::BudgetLimitSnapshot>,
-    rollover_compacted: Option<bool>,
-    rollover_compaction_error: Option<&'a str>,
     metadata: Option<&'a serde_json::Value>,
-    started_at: Option<i64>,
-    completed_at: Option<i64>,
     updated_at: i64,
     revision: u64,
 }
@@ -55,49 +47,45 @@ async fn persist_turn_projection(
         None => next_turn_ordinal(tx, projection.thread_id).await?,
     };
     let usage = authoritative_turn_usage(existing.as_ref(), projection.usage)?;
+    let state = preserve_running_started_at(existing.as_ref(), projection.state)?;
     let active = turn::ActiveModel {
         id: Set(projection.id.to_string()),
         thread_id: Set(projection.thread_id.to_string()),
         ordinal: Set(ordinal),
         revision: Set(i64_from_u64(projection.revision)?),
-        status: Set(projection.status.to_string()),
-        phase: Set(projection.phase.map(str::to_string)),
-        reason: Set(projection.reason.map(str::to_string)),
+        state_json: Set(serde_json::to_string(&state)?),
         model_json: Set(existing.as_ref().and_then(|row| row.model_json.clone())),
         usage_json: Set(serde_json::to_string(&usage)?),
-        failure_json: Set(projection.failure.map(serde_json::to_string).transpose()?),
-        budget_limit_json: Set(match (projection.budget_limit, existing.as_ref()) {
-            (Some(limit), _) => Some(serde_json::to_string(limit)?),
-            (None, Some(row)) => row.budget_limit_json.clone(),
-            (None, None) => None,
-        }),
-        rollover_compacted: Set(projection.rollover_compacted.map_or_else(
-            || existing.as_ref().map_or(0, |row| row.rollover_compacted),
-            |compacted| if compacted { 1 } else { 0 },
-        )),
-        rollover_compaction_error: Set(
-            match (projection.rollover_compaction_error, existing.as_ref()) {
-                (Some(error), _) => Some(error.to_string()),
-                (None, Some(row)) => row.rollover_compaction_error.clone(),
-                (None, None) => None,
-            },
-        ),
         metadata_json: Set(match (existing.as_ref(), projection.metadata) {
             (Some(row), None) => row.metadata_json.clone(),
             (_, metadata) => metadata.map(serde_json::to_string).transpose()?,
         }),
-        started_at: Set(existing
-            .as_ref()
-            .and_then(|row| row.started_at)
-            .or(projection.started_at)),
         updated_at: Set(projection.updated_at),
-        completed_at: Set(projection.completed_at),
+        ..Default::default()
     };
     match existing {
         Some(_) => active.update(tx).await.map_err(store_error)?,
         None => active.insert(tx).await.map_err(store_error)?,
     };
     Ok(())
+}
+
+fn preserve_running_started_at(
+    existing: Option<&turn::Model>,
+    state: TurnState,
+) -> Result<TurnState, PureError> {
+    let TurnState::Running(next) = state else {
+        return Ok(state);
+    };
+    let started_at = existing
+        .map(|row| serde_json::from_str::<TurnState>(&row.state_json))
+        .transpose()?
+        .and_then(|state| state.started_at())
+        .unwrap_or_else(|| next.started_at());
+    Ok(TurnState::Running(RunningTurnState::new(
+        started_at,
+        next.phase(),
+    )))
 }
 
 pub(super) async fn persist_thread_notifications(
@@ -131,23 +119,14 @@ async fn persist_turn(
     value: &Turn,
     revision: u64,
 ) -> Result<(), PureError> {
-    let (status, phase, reason) = turn_state_columns(&value.state);
     persist_turn_projection(
         tx,
         TurnProjection {
             id: &value.id,
             thread_id: &value.thread_id,
-            status,
-            phase,
-            reason,
+            state: value.state.clone(),
             usage: None,
-            failure: value.failure.as_ref(),
-            budget_limit: None,
-            rollover_compacted: None,
-            rollover_compaction_error: None,
             metadata: None,
-            started_at: value.started_at,
-            completed_at: value.completed_at,
             updated_at: value.updated_at,
             revision,
         },
@@ -179,14 +158,12 @@ async fn persist_item(
         turn_id: Set(value.turn_id.clone()),
         ordinal: Set(i64_from_u64(value.ordinal)?),
         revision: Set(i64_from_u64(value.revision)?),
-        item_kind: Set(item_kind_label(&value.content).to_string()),
-        status: Set(item_status_label(value.status).to_string()),
-        payload_json: Set(serde_json::to_string(value)?),
+        state_json: Set(serde_json::to_string(value.state())?),
         created_at: Set(existing
             .as_ref()
             .map_or(value.created_at, |row| row.created_at)),
         updated_at: Set(value.updated_at),
-        completed_at: Set(value.completed_at),
+        ..Default::default()
     };
     match existing {
         Some(_) => active.update(tx).await.map_err(store_error)?,
@@ -210,19 +187,13 @@ async fn persist_interaction(
         item_id: Set(value.scope.item_id.clone()),
         tool_id: Set(value.scope.tool_id.clone()),
         agent_path: Set(value.scope.agent_path.clone()),
-        kind: Set(interaction_kind_label(value.kind.clone()).to_string()),
-        status: Set(interaction_status_label(value.status.clone()).to_string()),
-        payload_json: Set(serde_json::to_string(&value.payload)?),
-        resolution_json: Set(value
-            .resolution
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?),
+        revision: Set(i64_from_u64(value.revision)?),
+        state_json: Set(serde_json::to_string(&value.content)?),
         created_at: Set(existing
             .as_ref()
             .map_or(value.created_at, |row| row.created_at)),
         updated_at: Set(value.updated_at),
-        resolved_at: Set(value.resolved_at),
+        ..Default::default()
     };
     match existing {
         Some(_) => active.update(tx).await.map_err(store_error)?,
@@ -238,9 +209,14 @@ pub(super) async fn latest_turn(
 ) -> Result<Option<turn::Model>, PureError> {
     let query = turn::Entity::find().filter(turn::Column::ThreadId.eq(thread_id));
     let query = if active {
-        query.filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+        query.filter(turn::Column::StateKind.is_in(["queued", "running"]))
     } else {
-        query.filter(turn::Column::Status.is_in(["completed", "failed", "interrupted"]))
+        query.filter(turn::Column::StateKind.is_in([
+            "completed",
+            "cancelled",
+            "failed",
+            "budgetLimited",
+        ]))
     };
     query
         .order_by_desc(turn::Column::Ordinal)
@@ -262,20 +238,6 @@ async fn next_turn_ordinal(
         .map_or(0, |row| row.ordinal.saturating_add(1)))
 }
 
-pub(super) fn delivery_identity(state: &MailboxDeliveryState) -> Option<(TurnId, u64)> {
-    match state {
-        MailboxDeliveryState::Claimed {
-            turn_id,
-            checkpoint_seq,
-        }
-        | MailboxDeliveryState::Consumed {
-            turn_id,
-            checkpoint_seq,
-        } => Some((turn_id.clone(), *checkpoint_seq)),
-        MailboxDeliveryState::Pending => None,
-    }
-}
-
 pub(super) async fn persist_state_turns(
     tx: &sea_orm::DatabaseTransaction,
     state: &ThreadActorState,
@@ -287,40 +249,51 @@ pub(super) async fn persist_state_turns(
             TurnProjection {
                 id: input.turn_id.as_str(),
                 thread_id,
-                status: "queued",
-                phase: None,
-                reason: None,
+                state: TurnState::Queued(QueuedTurnState::new(input.queued_at)),
                 usage: None,
-                failure: None,
-                budget_limit: None,
-                rollover_compacted: None,
-                rollover_compaction_error: None,
                 metadata: Some(&input.payload.metadata),
-                started_at: None,
-                completed_at: None,
                 updated_at: input.queued_at,
                 revision: state.session.thread_revision,
             },
         )
         .await?;
     }
-    if let Some(turn_id) = state.snapshot.active_turn_id.as_ref() {
+    if let Some(turn_id) = state.snapshot.active_turn_id() {
+        let turn_state = match &state.snapshot.state {
+            AgentState::Queued(_) => {
+                TurnState::Queued(QueuedTurnState::new(state.snapshot.updated_at))
+            }
+            AgentState::Running(_) => TurnState::Running(RunningTurnState::new(
+                state.snapshot.updated_at,
+                TurnPhase::Responding,
+            )),
+            AgentState::WaitingTool(_) => TurnState::Running(RunningTurnState::new(
+                state.snapshot.updated_at,
+                TurnPhase::RunningTool,
+            )),
+            AgentState::WaitingInteraction(_) => TurnState::Running(RunningTurnState::new(
+                state.snapshot.updated_at,
+                TurnPhase::Responding,
+            )),
+            AgentState::Cancelling(_) => TurnState::Running(RunningTurnState::new(
+                state.snapshot.updated_at,
+                TurnPhase::Persisting,
+            )),
+            AgentState::Faulted(_)
+            | AgentState::Idle(_)
+            | AgentState::Closing(_)
+            | AgentState::Closed(_) => {
+                return Err(store_error("Agent state exposes an invalid active Turn"));
+            }
+        };
         persist_turn_projection(
             tx,
             TurnProjection {
                 id: turn_id.as_str(),
                 thread_id,
-                status: "inProgress",
-                phase: Some(activity_phase(state.snapshot.activity)),
-                reason: None,
+                state: turn_state,
                 usage: None,
-                failure: None,
-                budget_limit: None,
-                rollover_compacted: None,
-                rollover_compaction_error: None,
                 metadata: None,
-                started_at: Some(state.snapshot.updated_at),
-                completed_at: None,
                 updated_at: state.snapshot.updated_at,
                 revision: state.session.thread_revision,
             },
@@ -328,23 +301,40 @@ pub(super) async fn persist_state_turns(
         .await?;
     }
     if let Some(outcome) = &state.snapshot.last_turn {
-        let (status, reason) = outcome_columns(outcome);
+        let turn_state = match &outcome.outcome {
+            TurnOutcome::Completed(value) => TurnState::Completed(CompletedTurnState::new(
+                outcome.started_at,
+                outcome.finished_at,
+                value.completion(),
+            )),
+            TurnOutcome::Cancelled(value) => TurnState::Cancelled(CancelledTurnState::new(
+                outcome.started_at,
+                outcome.finished_at,
+                outcome.finished_at,
+                value.cause().clone(),
+            )),
+            TurnOutcome::Failed(value) => TurnState::Failed(FailedTurnState::new(
+                outcome.started_at,
+                outcome.finished_at,
+                value.failure().clone(),
+            )),
+            TurnOutcome::BudgetLimited(value) => {
+                TurnState::BudgetLimited(BudgetLimitedTurnState::new(
+                    outcome.started_at,
+                    outcome.finished_at,
+                    *value.limit(),
+                    value.rollover().clone(),
+                ))
+            }
+        };
         persist_turn_projection(
             tx,
             TurnProjection {
                 id: outcome.turn_id.as_str(),
                 thread_id,
-                status,
-                phase: None,
-                reason,
+                state: turn_state,
                 usage: Some(&outcome.usage),
-                failure: outcome.failure.as_ref(),
-                budget_limit: outcome.budget_limit.as_ref(),
-                rollover_compacted: Some(outcome.rollover_compacted),
-                rollover_compaction_error: outcome.rollover_compaction_error.as_deref(),
                 metadata: None,
-                started_at: None,
-                completed_at: Some(outcome.finished_at),
                 updated_at: outcome.finished_at,
                 revision: state.session.thread_revision,
             },

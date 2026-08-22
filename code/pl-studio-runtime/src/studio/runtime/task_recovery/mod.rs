@@ -165,7 +165,10 @@ impl StudioRuntime {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{ConversationRecoveryMode, ThreadToolCall};
+    use pl_protocol::{
+        ConversationRecoveryMode, SucceededThreadTool, ThreadToolInvocation, ThreadToolItem,
+        ThreadToolOutput, ThreadToolState,
+    };
 
     use super::facts::tool_summary;
     use super::preview::ensure_recoverable_phase;
@@ -191,7 +194,7 @@ mod tests {
                 .iter()
                 .map(|turn_id| StudioTaskRecoveryTurn {
                     turn_id: (*turn_id).to_string(),
-                    status: "failed".to_string(),
+                    state: pl_protocol::studio::StudioTaskRecoveryTurnState::Failed,
                     updated_at: 1,
                     item_count: 1,
                     input_count: 1,
@@ -233,19 +236,18 @@ mod tests {
 
     #[test]
     fn tool_summary_reports_side_effect_outcome_without_arguments() {
-        let tool = ThreadToolCall {
-            tool_call_id: "call-1".to_string(),
-            call_id: String::new(),
-            provider_item_id: None,
-            name: "shell_command".to_string(),
-            arguments: r#"{"command":"secret"}"#.to_string(),
-            result: None,
-            output_artifacts: Vec::new(),
-            exit_code: Some(1),
-            timed_out: false,
-            working_directory: Some("workspace".to_string()),
-            denial_reason: None,
-        };
+        let tool = ThreadToolItem::new(
+            ThreadToolInvocation::new(
+                "call-1".to_string(),
+                "shell_command".to_string(),
+                r#"{"command":"secret"}"#.to_string(),
+            )
+            .with_working_directory(Some("workspace".to_string())),
+            ThreadToolState::Succeeded(SucceededThreadTool::new(
+                1,
+                ThreadToolOutput::new(String::new(), Vec::new(), Some(1)),
+            )),
+        );
 
         assert_eq!(tool_summary(&tool), "shell_command (exit 1)");
     }

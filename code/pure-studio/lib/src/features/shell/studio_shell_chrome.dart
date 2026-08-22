@@ -280,15 +280,13 @@ Color _statusColor(HeaderView state, StudioThread thread) {
   return StudioColors.sage;
 }
 
-bool _isRunningAgentStatus(String status) =>
-    const {'queued', 'running', 'waiting'}.contains(status);
+bool _isRunningAgentStatus(ThreadStatusView status) => status.isActive;
 
-bool _isFaultedAgentStatus(String status) =>
-    const {'faulted', 'failed', 'errored', 'error'}.contains(status);
+bool _isFaultedAgentStatus(ThreadStatusView status) =>
+    status == ThreadStatusView.faulted;
 
 String _agentShortStatus(StudioThread thread) {
-  final status = thread.status.trim();
-  return status.isEmpty ? 'idle' : status;
+  return thread.status.name;
 }
 
 String _agentDisplayName(BuildContext context, StudioThread thread) {

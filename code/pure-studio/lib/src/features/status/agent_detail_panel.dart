@@ -19,9 +19,7 @@ class AgentDetailPanel extends StatelessWidget {
     if (agents.isEmpty) {
       return _AgentDetailEmpty();
     }
-    final runningCount = agents
-        .where((agent) => _isAgentActive(agent.status))
-        .length;
+    final runningCount = agents.where((agent) => agent.state.isActive).length;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,12 +114,11 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
   @override
   Widget build(BuildContext context) {
     final agent = widget.agent;
-    final style = _statusStyle(context, agent.status);
+    final style = _statusStyle(context, agent.state);
     final indent = (agent.depth.clamp(0, 6)) * 22.0;
     final hasDetails =
         (agent.summary?.isNotEmpty ?? false) ||
-        (agent.error?.isNotEmpty ?? false) ||
-        (agent.reason?.isNotEmpty ?? false);
+        (agent.error?.isNotEmpty ?? false);
     return Padding(
       padding: EdgeInsets.only(left: indent),
       child: _AgentTreeConnector(
@@ -142,7 +139,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(StudioRadii.sm),
         side: BorderSide(
-          color: _isAgentActive(agent.status)
+          color: agent.state.isActive
               ? style.color.withValues(alpha: 0.34)
               : context.colors.outlineVariant.withValues(alpha: 0.5),
         ),
@@ -175,7 +172,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
   ) {
     return Row(
       children: [
-        _AgentStatusDot(style: style, active: _isAgentActive(agent.status)),
+        _AgentStatusDot(style: style, active: agent.state.isActive),
         const SizedBox(width: 9),
         Expanded(
           child: Column(
@@ -245,11 +242,6 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
           _DetailLine(
             label: context.l10n.agentDetailSummaryLabel,
             value: agent.summary!,
-          ),
-        if (agent.reason?.isNotEmpty ?? false)
-          _DetailLine(
-            label: context.l10n.agentDetailReasonLabel,
-            value: agent.reason!,
           ),
         if (agent.error?.isNotEmpty ?? false)
           _DetailLine(
@@ -426,60 +418,51 @@ class _DetailLine extends StatelessWidget {
   }
 }
 
-bool _isAgentActive(String status) {
-  return const {'queued', 'running', 'waiting'}.contains(status);
-}
-
-_AgentStatusStyle _statusStyle(BuildContext context, String status) {
+_AgentStatusStyle _statusStyle(BuildContext context, StudioAgentState state) {
   final l10n = context.l10n;
-  return switch (status) {
-    'running' => _AgentStatusStyle(
+  return switch (state) {
+    RunningStudioAgent() => _AgentStatusStyle(
       icon: Icons.play_arrow_rounded,
       color: StudioColors.clayDeep,
       backgroundColor: StudioColors.claySoft,
       label: l10n.agentDetailStatusRunning,
     ),
-    'queued' => _AgentStatusStyle(
+    QueuedStudioAgent() => _AgentStatusStyle(
       icon: Icons.schedule_rounded,
       color: StudioColors.clayDeep,
       backgroundColor: StudioColors.claySoft,
       label: l10n.agentDetailStatusQueued,
     ),
-    'waiting' => _AgentStatusStyle(
+    WaitingToolStudioAgent() ||
+    WaitingInteractionStudioAgent() => _AgentStatusStyle(
       icon: Icons.hourglass_top_rounded,
       color: StudioColors.ochre,
       backgroundColor: StudioColors.ochre.withValues(alpha: 0.16),
       label: l10n.agentDetailStatusWaiting,
     ),
-    'completed' => _AgentStatusStyle(
+    IdleStudioAgent() => _AgentStatusStyle(
       icon: Icons.check_rounded,
       color: StudioColors.sage,
       backgroundColor: StudioColors.sageSoft,
       label: l10n.agentDetailStatusCompleted,
     ),
-    'errored' => _AgentStatusStyle(
+    FaultedStudioAgent() => _AgentStatusStyle(
       icon: Icons.error_outline_rounded,
       color: StudioColors.rose,
       backgroundColor: StudioColors.rose.withValues(alpha: 0.14),
       label: l10n.agentDetailStatusErrored,
     ),
-    'interrupted' => _AgentStatusStyle(
+    CancellingStudioAgent() => _AgentStatusStyle(
       icon: Icons.do_not_disturb_on_outlined,
       color: StudioColors.rose,
       backgroundColor: StudioColors.rose.withValues(alpha: 0.14),
       label: l10n.agentDetailStatusInterrupted,
     ),
-    'shutdown' => _AgentStatusStyle(
+    ClosingStudioAgent() || ClosedStudioAgent() => _AgentStatusStyle(
       icon: Icons.power_settings_new_rounded,
       color: context.studioInkSoft,
       backgroundColor: context.studioPaper3,
       label: l10n.agentDetailStatusShutdown,
-    ),
-    _ => _AgentStatusStyle(
-      icon: Icons.help_outline_rounded,
-      color: context.studioInkSoft,
-      backgroundColor: context.studioPaper3,
-      label: l10n.agentDetailStatusNotFound,
     ),
   };
 }

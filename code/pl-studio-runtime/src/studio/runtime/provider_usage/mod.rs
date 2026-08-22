@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::Result;
-use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateOperation};
+use pl_protocol::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
@@ -11,12 +11,17 @@ use crate::config::StudioConfig;
 use crate::studio::ids::unix_seconds;
 use crate::{ProviderUsageRecord, ProviderUsageState, StudioStore};
 
-const CACHE_KEY: &str = "observed:providerUsage:v1";
+const CACHE_KEY: &str = "observed:providerUsage:v2";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageStateSnapshot {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<ProviderUsageStateData>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsageStateData {
     pub config_fingerprint: String,
     pub usages: Vec<ProviderUsageRecord>,
 }
@@ -55,49 +60,56 @@ impl ProviderUsageRuntime {
     pub async fn check(&self, config: &StudioConfig) -> Result<ProviderUsageStateSnapshot> {
         let _command = self.command_lock.lock().await;
         let previous = self.read().await;
+        let revision = previous.state.revision();
+        let operation_id = format!("provider-usage-check-{}", revision.saturating_add(1));
         let running = ProviderUsageStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Running {
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Begin {
+                    expected_revision: revision,
                     operation: StateOperation::Check,
-                    operation_id: format!("provider-usage-check-{}", previous.meta.revision + 1),
-                },
-                updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
-                stale: previous.meta.stale,
-            },
-            ..previous
+                    operation_id: operation_id.clone(),
+                    started_at: unix_seconds(),
+                })
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                .next_state,
         };
         self.publish(running.clone()).await;
-        let usages = crate::provider_usage_records(config).await;
+        let prior_usages = previous
+            .state
+            .value()
+            .map(|data| data.usages.as_slice())
+            .unwrap_or_default();
+        let usages = crate::provider_usage_records(config, prior_usages, &operation_id).await?;
         let checked_at = unix_seconds();
         let failures = usages
             .iter()
-            .filter_map(|usage| match &usage.state {
-                ProviderUsageState::Failed(message) => {
-                    Some(format!("{}: {message}", usage.provider_id))
-                }
-                _ => None,
+            .filter_map(|usage| match usage.state() {
+                ProviderUsageState::Failed(state) => Some(format!(
+                    "{}: {}",
+                    usage.provider_id(),
+                    state.error().message
+                )),
+                ProviderUsageState::Unsupported(_)
+                | ProviderUsageState::MissingCredential(_)
+                | ProviderUsageState::Ready(_) => None,
             })
             .collect::<Vec<_>>();
         if !failures.is_empty() {
             let failed = ProviderUsageStateSnapshot {
-                meta: ObservedStateMeta {
-                    revision: running.meta.revision.saturating_add(1),
-                    phase: ObservedStatePhase::Failed {
-                        operation: StateOperation::Check,
-                        error: pl_protocol::StateError {
+                state: running
+                    .state
+                    .decide(ObservedResourceCommand::Fail {
+                        expected_revision: running.state.revision(),
+                        failed_at: checked_at,
+                        error: StateError {
                             code: "providerUsageCheckFailed".to_string(),
                             message: failures.join("; "),
                             retryable: true,
                         },
-                    },
-                    updated_at: checked_at,
-                    last_checked_at: Some(checked_at),
-                    stale: true,
-                },
-                config_fingerprint: running.config_fingerprint,
-                usages: running.usages,
+                    })
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                    .next_state,
             };
             self.store
                 .save_setting(CACHE_KEY, &serde_json::to_string(&failed)?)
@@ -106,15 +118,19 @@ impl ProviderUsageRuntime {
             anyhow::bail!("provider usage check failed: {}", failures.join("; "));
         }
         let next = ProviderUsageStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: running.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Ready,
-                updated_at: checked_at,
-                last_checked_at: Some(checked_at),
-                stale: false,
-            },
-            config_fingerprint: config_fingerprint(config)?,
-            usages,
+            state: running
+                .state
+                .decide(ObservedResourceCommand::Succeed {
+                    expected_revision: running.state.revision(),
+                    updated_at: checked_at,
+                    last_checked_at: Some(checked_at),
+                    value: ProviderUsageStateData {
+                        config_fingerprint: config_fingerprint(config)?,
+                        usages,
+                    },
+                })
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                .next_state,
         };
         if let Err(error) = self
             .store
@@ -122,22 +138,19 @@ impl ProviderUsageRuntime {
             .await
         {
             let failed = ProviderUsageStateSnapshot {
-                meta: ObservedStateMeta {
-                    revision: running.meta.revision.saturating_add(1),
-                    phase: ObservedStatePhase::Failed {
-                        operation: StateOperation::Check,
-                        error: pl_protocol::StateError {
+                state: running
+                    .state
+                    .decide(ObservedResourceCommand::Fail {
+                        expected_revision: running.state.revision(),
+                        failed_at: checked_at,
+                        error: StateError {
                             code: "providerUsageCacheFailed".to_string(),
                             message: error.to_string(),
                             retryable: true,
                         },
-                    },
-                    updated_at: checked_at,
-                    last_checked_at: Some(checked_at),
-                    stale: true,
-                },
-                config_fingerprint: running.config_fingerprint,
-                usages: running.usages,
+                    })
+                    .map_err(|transition| anyhow::anyhow!(transition.to_string()))?
+                    .next_state,
             };
             self.publish(failed).await;
             return Err(error);
@@ -148,6 +161,7 @@ impl ProviderUsageRuntime {
 
     /// Provider desired config 改变时保留 payload，并 authoritative 删除已移除 provider。
     pub async fn apply_config(&self, config: &StudioConfig) -> Result<ProviderUsageStateSnapshot> {
+        let _command = self.command_lock.lock().await;
         let fingerprint = config_fingerprint(config)?;
         let provider_ids = config
             .models
@@ -156,19 +170,31 @@ impl ProviderUsageRuntime {
             .map(ToString::to_string)
             .collect::<std::collections::BTreeSet<_>>();
         let previous = self.read().await;
-        let mut next = previous.clone();
-        next.usages
-            .retain(|usage| provider_ids.contains(&usage.provider_id));
-        if next.config_fingerprint != fingerprint || next.usages != previous.usages {
-            next.meta.revision = next.meta.revision.saturating_add(1);
-            next.meta.updated_at = unix_seconds();
-            next.meta.stale = next.config_fingerprint != fingerprint;
+        let Some(mut data) = previous.state.value().cloned() else {
+            return Ok(previous);
+        };
+        let previous_data = data.clone();
+        data.usages
+            .retain(|usage| provider_ids.contains(usage.provider_id()));
+        if data.config_fingerprint != fingerprint || data != previous_data {
+            let next = ProviderUsageStateSnapshot {
+                state: previous
+                    .state
+                    .decide(ObservedResourceCommand::MarkStale {
+                        expected_revision: previous.state.revision(),
+                        stale_at: unix_seconds(),
+                        value: data,
+                    })
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                    .next_state,
+            };
             self.store
                 .save_setting(CACHE_KEY, &serde_json::to_string(&next)?)
                 .await?;
             self.publish(next.clone()).await;
+            return Ok(next);
         }
-        Ok(next)
+        Ok(previous)
     }
 
     async fn publish(&self, snapshot: ProviderUsageStateSnapshot) {
@@ -179,9 +205,7 @@ impl ProviderUsageRuntime {
 
 fn empty_state() -> ProviderUsageStateSnapshot {
     ProviderUsageStateSnapshot {
-        meta: ObservedStateMeta::uninitialized(unix_seconds()),
-        config_fingerprint: String::new(),
-        usages: Vec::new(),
+        state: ObservedResource::uninitialized(unix_seconds()),
     }
 }
 

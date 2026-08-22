@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use pl_core::{AgentModelConfig, McpServerConfig, McpServerTransport, ProviderConfig};
 use pl_model::{ProviderConnectionMode, TokenUsage};
-use pl_protocol::{InferenceOrchestrationMetrics, ThreadItemContent, TurnBillingRecord};
+use pl_protocol::{InferenceOrchestrationMetrics, ThreadItemState, TurnBillingRecord};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -98,7 +98,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
         public
             .items
             .iter()
-            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+            .all(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
     );
     let runtime_usage = &public
         .runtime
@@ -139,7 +139,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
         restored
             .items
             .iter()
-            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+            .all(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
     );
     let restored_thread = thread::Entity::find_by_id(thread.id.clone())
         .one(reopened_store.database())

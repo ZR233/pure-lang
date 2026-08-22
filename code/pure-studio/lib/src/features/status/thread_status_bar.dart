@@ -46,7 +46,7 @@ class ThreadStatusBar extends ConsumerWidget {
                   )
                   ?.servers ??
               const <LspServerStateView>[])
-        if (server.activityKind != 'idle') server,
+        if (_lspActiveActivity(server) != null) server,
     ];
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -106,16 +106,15 @@ class ThreadStatusBar extends ConsumerWidget {
                     _StatusReadout(
                       icon: Icons.account_tree_outlined,
                       label: context.roleLabel(thread.role),
-                      tooltip: thread.status.isEmpty
-                          ? thread.title
-                          : '${thread.title} · ${thread.status}',
+                      tooltip: '${thread.title} · ${thread.status.name}',
                       maxWidth: 96,
                     ),
                     if (thread.isRoot)
                       SessionModeSelector(
                         mode: thread.mode,
                         enabled:
-                            !runtime.hasActiveTask && thread.status == 'idle',
+                            !runtime.hasActiveTask &&
+                            thread.status == ThreadStatusView.idle,
                         onSelected: (mode) => ref
                             .read(studioControllerProvider.notifier)
                             .setThreadMode(mode),
@@ -201,8 +200,9 @@ class _LspActivityReadout extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final first = activeServers.first;
-    final firstLabel = _lspActivityLabel(context, first.activityKind);
-    final percentage = first.activityPercentage;
+    final firstActivity = _lspActiveActivity(first)!;
+    final firstLabel = _lspActivityLabel(context, firstActivity);
+    final percentage = _lspActivityPercentage(firstActivity);
     final label = activeServers.length == 1
         ? (percentage == null
               ? firstLabel
@@ -227,24 +227,51 @@ class _LspActivityReadout extends StatelessWidget {
   }
 }
 
-String _lspActivityLabel(BuildContext context, String activityKind) {
-  return switch (activityKind) {
-    'indexing' => context.l10n.statusLspIndexing,
-    'busy' => context.l10n.statusLspBusy,
-    final kind => kind,
+LspActivity? _lspActiveActivity(LspServerStateView server) {
+  return switch (server.state) {
+    LspAvailableState(activity: final activity)
+        when activity is! LspIdleActivity =>
+      activity,
+    LspAvailableState() ||
+    LspCheckingState() ||
+    LspUnavailableState() ||
+    LspDisabledState() => null,
   };
 }
+
+String _lspActivityLabel(BuildContext context, LspActivity activity) {
+  return switch (activity) {
+    LspIndexingActivity() => context.l10n.statusLspIndexing,
+    LspBusyActivity() => context.l10n.statusLspBusy,
+    LspIdleActivity() => 'idle',
+  };
+}
+
+int? _lspActivityPercentage(LspActivity activity) => switch (activity) {
+  LspBusyActivity(:final percentage) ||
+  LspIndexingActivity(:final percentage) => percentage,
+  LspIdleActivity() => null,
+};
 
 String _lspServerActivitySummary(
   BuildContext context,
   LspServerStateView server,
 ) {
+  final activity = _lspActiveActivity(server);
+  if (activity == null) return '';
   return [
-    _lspActivityLabel(context, server.activityKind),
-    if (server.activityPercentage case final percentage?)
+    _lspActivityLabel(context, activity),
+    if (_lspActivityPercentage(activity) case final percentage?)
       context.l10n.statusLspActivityPercentage(percentage),
-    if (server.activityTitle case final title? when title.isNotEmpty) title,
-    if (server.activityMessage case final message? when message.isNotEmpty)
+    if (activity
+        case LspBusyActivity(title: final title?) ||
+            LspIndexingActivity(title: final title?)
+        when title.isNotEmpty)
+      title,
+    if (activity
+        case LspBusyActivity(message: final message?) ||
+            LspIndexingActivity(message: final message?)
+        when message.isNotEmpty)
       message,
   ].join(' · ');
 }

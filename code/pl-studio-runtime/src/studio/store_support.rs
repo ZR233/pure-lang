@@ -1,6 +1,6 @@
 use anyhow::Result;
-use sea_orm::sea_query::{Expr, ExprTrait, Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
+use sea_orm::sea_query::{Index, IndexCreateStatement, IndexOrder};
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
@@ -10,21 +10,17 @@ pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 11;
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_task_run_table(db).await?;
     create_work_unit_table(db).await?;
+    create_work_completion_table(db).await?;
     create_review_round_table(db).await?;
+    create_task_failure_table(db).await?;
+    create_merge_record_table(db).await?;
+    create_thread_lifecycle_tables(db).await?;
     db.get_schema_builder()
         .register(entity::app_setting::Entity)
         .register(entity::project::Entity)
         .register(entity::attachment::Entity)
-        .register(entity::interaction::Entity)
-        .register(entity::task_failure::Entity)
-        .register(entity::work_completion::Entity)
-        .register(entity::merge_record::Entity)
         .register(entity::project_lease::Entity)
-        .register(entity::thread::Entity)
-        .register(entity::thread_input::Entity)
         .register(entity::thread_submission::Entity)
-        .register(entity::turn::Entity)
-        .register(entity::item::Entity)
         .register(entity::thread_context_segment::Entity)
         .register(entity::thread_session_state::Entity)
         .apply(db)
@@ -32,6 +28,232 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
     create_state_indexes(db).await?;
     create_task_relation_guards(db).await?;
     set_schema_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    Ok(())
+}
+
+async fn create_task_failure_table(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        r#"
+        CREATE TABLE IF NOT EXISTS task_failures (
+            id TEXT PRIMARY KEY NOT NULL,
+            task_run_id TEXT NOT NULL,
+            source_thread_id TEXT NOT NULL,
+            source_turn_id TEXT NOT NULL,
+            source_agent_id TEXT NOT NULL,
+            source_role TEXT NOT NULL,
+            work_unit_id TEXT,
+            review_round_id TEXT,
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN ('openRecoverable', 'openFatal', 'resolved')
+            ),
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE SET NULL,
+            FOREIGN KEY (review_round_id) REFERENCES review_rounds(id) ON DELETE SET NULL
+        )
+        "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn create_work_completion_table(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        r#"
+        CREATE TABLE IF NOT EXISTS work_completions (
+            id TEXT PRIMARY KEY NOT NULL,
+            task_run_id TEXT NOT NULL,
+            work_unit_id TEXT NOT NULL,
+            executor_agent_id TEXT NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision > 0),
+            content_json TEXT NOT NULL CHECK (json_valid(content_json)),
+            content_kind TEXT GENERATED ALWAYS AS (
+                json_extract(content_json, '$.kind')
+            ) STORED NOT NULL CHECK (content_kind IN ('delivery', 'noDelivery')),
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN ('readyForReview', 'changesRequired', 'approved')
+            ),
+            state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
+            base_commit TEXT NOT NULL,
+            verification_summary TEXT NOT NULL,
+            worktree_path TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn create_merge_record_table(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        r#"
+        CREATE TABLE IF NOT EXISTS merge_records (
+            id TEXT PRIMARY KEY NOT NULL,
+            task_run_id TEXT NOT NULL,
+            work_unit_id TEXT NOT NULL,
+            completion_id TEXT NOT NULL,
+            completion_revision INTEGER NOT NULL,
+            executor_agent_id TEXT NOT NULL,
+            expected_previous_head TEXT NOT NULL,
+            resulting_head TEXT NOT NULL,
+            delivery_head TEXT NOT NULL,
+            method TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            cleanup_state_json TEXT NOT NULL CHECK (json_valid(cleanup_state_json)),
+            cleanup_state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(cleanup_state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                cleanup_state_kind IN (
+                    'pending', 'deferred', 'attempting', 'discarded',
+                    'alreadyAbsent', 'failed'
+                )
+            ),
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE,
+            FOREIGN KEY (completion_id) REFERENCES work_completions(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        r#"
+        CREATE TABLE IF NOT EXISTS threads (
+            id TEXT PRIMARY KEY NOT NULL,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            root_thread_id TEXT NOT NULL,
+            parent_thread_id TEXT,
+            role TEXT NOT NULL,
+            agent_path TEXT NOT NULL UNIQUE,
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN (
+                    'idle', 'queued', 'running', 'waitingTool',
+                    'waitingInteraction', 'cancelling', 'closing', 'closed',
+                    'faulted'
+                )
+            ),
+            revision INTEGER NOT NULL,
+            runtime_revision INTEGER,
+            event_sequence INTEGER NOT NULL,
+            metadata_json TEXT NOT NULL,
+            usage_json TEXT NOT NULL,
+            last_context_tokens INTEGER,
+            trace_sequence INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            archived INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS thread_inputs (
+            id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL,
+            mail_id TEXT NOT NULL UNIQUE,
+            turn_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            presentation TEXT NOT NULL,
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (state_kind IN ('pending', 'claimed', 'consumed')),
+            queue_ordinal INTEGER NOT NULL,
+            queued_at INTEGER NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS turns (
+            id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN (
+                    'queued', 'running', 'completed', 'cancelled', 'failed',
+                    'budgetLimited'
+                )
+            ),
+            model_json TEXT,
+            usage_json TEXT NOT NULL,
+            metadata_json TEXT,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS items (
+            id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN (
+                    'text', 'thinking', 'tool', 'agent', 'turn', 'inference',
+                    'plan', 'file', 'contextCompaction'
+                )
+            ),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS interactions (
+            id TEXT PRIMARY KEY NOT NULL,
+            thread_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            item_id TEXT,
+            tool_id TEXT,
+            agent_path TEXT,
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+            interaction_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.kind')
+            ) STORED NOT NULL CHECK (
+                interaction_kind IN ('userInput', 'toolApproval', 'planConfirmation')
+            ),
+            state_kind TEXT GENERATED ALWAYS AS (
+                json_extract(state_json, '$.data.state.kind')
+            ) STORED NOT NULL CHECK (
+                state_kind IN ('pending', 'resolved', 'cancelled', 'expired')
+            ),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .await?;
     Ok(())
 }
 
@@ -85,9 +307,8 @@ async fn create_work_unit_table(db: &DatabaseConnection) -> Result<()> {
                 json_extract(state_json, '$.kind')
             ) STORED NOT NULL CHECK (
                 state_kind IN (
-                    'pending', 'running', 'awaitingCompletion', 'readyForReview',
-                    'reviewing', 'changesRequested', 'approved', 'merged',
-                    'noDelivery', 'needsAttention', 'failed', 'cancelled'
+                    'pending', 'running', 'waitingReview', 'reviewPassed',
+                    'changesRequired', 'paused', 'completed', 'failed', 'cancelled'
                 )
             ),
             revision INTEGER NOT NULL CHECK (revision >= 0),
@@ -119,7 +340,10 @@ async fn create_review_round_table(db: &DatabaseConnection) -> Result<()> {
             state_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.kind')
             ) STORED NOT NULL CHECK (
-                state_kind IN ('pending', 'pass', 'changesRequired', 'blocked', 'failed')
+                state_kind IN (
+                    'pendingDispatch', 'dispatched', 'running', 'passed',
+                    'changesRequired', 'blocked', 'failed', 'cancelled'
+                )
             ),
             revision INTEGER NOT NULL CHECK (revision >= 0),
             design_references_json TEXT NOT NULL,
@@ -178,10 +402,10 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .unique()
             .to_owned(),
         Index::create()
-            .name("idx_interactions_thread_status_updated")
+            .name("idx_interactions_thread_state_updated")
             .table(entity::interaction::Entity)
             .col(entity::interaction::Column::ThreadId)
-            .col(entity::interaction::Column::Status)
+            .col(entity::interaction::Column::StateKind)
             .col((entity::interaction::Column::UpdatedAt, IndexOrder::Desc))
             .to_owned(),
         Index::create()
@@ -266,7 +490,7 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .name("idx_thread_inputs_queue")
             .table(entity::thread_input::Entity)
             .col(entity::thread_input::Column::ThreadId)
-            .col(entity::thread_input::Column::State)
+            .col(entity::thread_input::Column::StateKind)
             .col(entity::thread_input::Column::QueueOrdinal)
             .unique()
             .to_owned(),
@@ -298,6 +522,13 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::item::Column::Ordinal)
             .to_owned(),
         Index::create()
+            .name("idx_items_thread_state_kind_ordinal")
+            .table(entity::item::Entity)
+            .col(entity::item::Column::ThreadId)
+            .col(entity::item::Column::StateKind)
+            .col((entity::item::Column::Ordinal, IndexOrder::Desc))
+            .to_owned(),
+        Index::create()
             .name("idx_thread_context_segments_thread_ordinal")
             .table(entity::thread_context_segment::Entity)
             .col(entity::thread_context_segment::Column::ThreadId)
@@ -312,7 +543,7 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .unique()
             .to_owned(),
         Index::create()
-            .name("idx_work_units_run_status")
+            .name("idx_work_units_run_state_kind")
             .table(entity::work_unit::Entity)
             .col(entity::work_unit::Column::TaskRunId)
             .col(entity::work_unit::Column::StateKind)
@@ -340,28 +571,18 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
     )
     .await?;
 
-    execute_index(
-        db,
-        Index::create()
-            .name("idx_review_rounds_active_delivery")
-            .table(entity::review_round::Entity)
-            .col(entity::review_round::Column::WorkUnitId)
-            .and_where(Expr::col(entity::review_round::Column::Scope).eq("delivery"))
-            .and_where(Expr::col(entity::review_round::Column::StateKind).eq("pending"))
-            .unique()
-            .to_owned(),
-    )
-    .await?;
-    execute_index(
-        db,
-        Index::create()
-            .name("idx_review_rounds_active_integrated")
-            .table(entity::review_round::Entity)
-            .col(entity::review_round::Column::TaskRunId)
-            .and_where(Expr::col(entity::review_round::Column::Scope).eq("integrated"))
-            .and_where(Expr::col(entity::review_round::Column::StateKind).eq("pending"))
-            .unique()
-            .to_owned(),
+    db.execute_unprepared(
+        r#"
+        CREATE UNIQUE INDEX idx_review_rounds_active_delivery
+        ON review_rounds(work_unit_id)
+        WHERE scope = 'delivery'
+            AND state_kind IN ('pendingDispatch', 'dispatched', 'running');
+
+        CREATE UNIQUE INDEX idx_review_rounds_active_integrated
+        ON review_rounds(task_run_id)
+        WHERE scope = 'integrated'
+            AND state_kind IN ('pendingDispatch', 'dispatched', 'running');
+        "#,
     )
     .await?;
     Ok(())

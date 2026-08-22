@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::{StudioShutdownPhase, StudioShutdownProgress};
+use crate::StudioShutdownProgress;
 
 /// 关机进度通道 owner；随 `StudioRuntime` clone 共享。
 #[derive(Clone)]
@@ -31,10 +31,7 @@ impl ShutdownProgressBus {
         self.tx.subscribe()
     }
 
-    pub fn emit(&self, phase: StudioShutdownPhase, pending_commits: u64) {
-        let _ = self.tx.send(StudioShutdownProgress {
-            phase,
-            pending_commits,
-        });
+    pub fn emit(&self, progress: StudioShutdownProgress) {
+        let _ = self.tx.send(progress);
     }
 }

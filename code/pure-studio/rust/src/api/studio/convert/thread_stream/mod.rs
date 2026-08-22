@@ -4,12 +4,14 @@ pub(crate) use interaction::interaction as bridge_interaction;
 
 use anyhow::Result;
 use pl_protocol::{
-    AgentMessageChannel, McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor,
-    PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAttachment, ThreadItem,
-    ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus, ThreadMode,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
-    ThreadSnapshot, ThreadStatus, ThreadSubscriptionUpdate, ThreadToolCall, TodoItem,
-    TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn, TurnPhase, TurnState,
+    BudgetLimitKind, BudgetLimitSnapshot, McpAvailabilityDescriptor, McpHealthSnapshot,
+    McpServerDescriptor, PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAgentState,
+    ThreadAttachment, ThreadContentLifecycle, ThreadInferenceState, ThreadItem, ThreadItemDelta,
+    ThreadItemDeltaState, ThreadItemState, ThreadMode, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
+    ThreadStatus, ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind,
+    ThreadToolOutput, ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot,
+    Turn, TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
 };
 
 use crate::api::studio::types::*;
@@ -38,39 +40,43 @@ fn thread_notification(
 ) -> Result<Option<BridgeThreadNotificationEnvelope>> {
     let notification = match envelope.notification {
         ThreadNotification::TurnStarted { turn: value } => BridgeThreadNotification::TurnStarted {
-            turn: bridge_turn(value),
+            turn: Box::new(bridge_turn(value)),
         },
         ThreadNotification::TurnUpdated { turn: value } => BridgeThreadNotification::TurnUpdated {
-            turn: bridge_turn(value),
+            turn: Box::new(bridge_turn(value)),
         },
         ThreadNotification::TurnCompleted { turn: value } => {
             BridgeThreadNotification::TurnCompleted {
-                turn: bridge_turn(value),
+                turn: Box::new(bridge_turn(value)),
             }
         }
         ThreadNotification::ItemStarted { item: value } => {
             let Some(item) = bridge_thread_item(*value)? else {
                 return Ok(None);
             };
-            BridgeThreadNotification::ItemStarted { item }
+            BridgeThreadNotification::ItemStarted {
+                item: Box::new(item),
+            }
         }
         ThreadNotification::ItemDelta { delta } => BridgeThreadNotification::ItemDelta {
-            delta: item_delta(delta),
+            delta: Box::new(item_delta(delta)),
         },
         ThreadNotification::ItemCompleted { item: value } => {
             let Some(item) = bridge_thread_item(*value)? else {
                 return Ok(None);
             };
-            BridgeThreadNotification::ItemCompleted { item }
+            BridgeThreadNotification::ItemCompleted {
+                item: Box::new(item),
+            }
         }
         ThreadNotification::InteractionChanged { interaction: value } => {
             BridgeThreadNotification::InteractionChanged {
-                interaction: interaction::interaction(*value)?,
+                interaction: Box::new(interaction::interaction(*value)?),
             }
         }
         ThreadNotification::ThreadRuntimeUpdated { runtime: value } => {
             BridgeThreadNotification::ThreadRuntimeUpdated {
-                runtime: runtime_snapshot(*value),
+                runtime: Box::new(runtime_snapshot(*value)),
             }
         }
         ThreadNotification::Lagged { dropped } => BridgeThreadNotification::Lagged { dropped },
@@ -153,11 +159,14 @@ pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
         agent_path: value.agent_path,
         status: match value.status {
             ThreadStatus::Idle => BridgeThreadStatus::Idle,
+            ThreadStatus::Queued => BridgeThreadStatus::Queued,
             ThreadStatus::Running => BridgeThreadStatus::Running,
-            ThreadStatus::Waiting => BridgeThreadStatus::Waiting,
-            ThreadStatus::Completed => BridgeThreadStatus::Completed,
-            ThreadStatus::Failed => BridgeThreadStatus::Failed,
+            ThreadStatus::WaitingTool => BridgeThreadStatus::WaitingTool,
+            ThreadStatus::WaitingInteraction => BridgeThreadStatus::WaitingInteraction,
+            ThreadStatus::Cancelling => BridgeThreadStatus::Cancelling,
+            ThreadStatus::Closing => BridgeThreadStatus::Closing,
             ThreadStatus::Closed => BridgeThreadStatus::Closed,
+            ThreadStatus::Faulted => BridgeThreadStatus::Faulted,
         },
         created_at: value.created_at,
         updated_at: value.updated_at,
@@ -169,19 +178,86 @@ pub(crate) fn bridge_turn(value: Turn) -> BridgeTurn {
     BridgeTurn {
         id: value.id,
         thread_id: value.thread_id,
-        state: match value.state {
-            TurnState::Queued => BridgeTurnState::Queued,
-            TurnState::InProgress { phase } => BridgeTurnState::InProgress {
-                phase: turn_phase(phase),
-            },
-            TurnState::Completed => BridgeTurnState::Completed,
-            TurnState::Failed { reason } => BridgeTurnState::Failed { reason },
-            TurnState::Interrupted { reason } => BridgeTurnState::Interrupted { reason },
-        },
-        failure: value.failure.map(bridge_turn_failure),
-        started_at: value.started_at,
+        revision: value.revision,
+        state: bridge_turn_state(&value.state),
         updated_at: value.updated_at,
-        completed_at: value.completed_at,
+    }
+}
+
+fn bridge_turn_state(value: &TurnState) -> BridgeTurnState {
+    match value {
+        TurnState::Queued(state) => BridgeTurnState::Queued {
+            queued_at: state.queued_at(),
+        },
+        TurnState::Running(state) => BridgeTurnState::Running {
+            started_at: state.started_at(),
+            phase: turn_phase(state.phase()),
+        },
+        TurnState::Completed(state) => BridgeTurnState::Completed {
+            started_at: state.started_at(),
+            completed_at: state.completed_at(),
+            completion: match state.completion() {
+                TurnCompletion::Normal => BridgeTurnCompletion::Normal,
+                TurnCompletion::InteractionRequested => BridgeTurnCompletion::InteractionRequested,
+            },
+        },
+        TurnState::Cancelled(state) => BridgeTurnState::Cancelled {
+            started_at: state.started_at(),
+            requested_at: state.requested_at(),
+            completed_at: state.completed_at(),
+            cause: turn_cancellation_cause(state.cause().clone()),
+        },
+        TurnState::Failed(state) => BridgeTurnState::Failed {
+            started_at: state.started_at(),
+            completed_at: state.completed_at(),
+            failure: bridge_turn_failure(state.failure().clone()),
+        },
+        TurnState::BudgetLimited(state) => BridgeTurnState::BudgetLimited {
+            started_at: state.started_at(),
+            completed_at: state.completed_at(),
+            limit: turn_budget_limit(*state.limit()),
+            rollover: turn_rollover(state.rollover().clone()),
+        },
+    }
+}
+
+fn turn_cancellation_cause(value: TurnCancellationCause) -> BridgeTurnCancellationCause {
+    match value {
+        TurnCancellationCause::UserRequested => BridgeTurnCancellationCause::UserRequested,
+        TurnCancellationCause::RuntimeShutdown => BridgeTurnCancellationCause::RuntimeShutdown,
+        TurnCancellationCause::AgentClosed => BridgeTurnCancellationCause::AgentClosed,
+        TurnCancellationCause::Recovery => BridgeTurnCancellationCause::Recovery,
+        TurnCancellationCause::Coalesced { target_turn_id } => {
+            BridgeTurnCancellationCause::Coalesced { target_turn_id }
+        }
+    }
+}
+
+fn turn_rollover(value: TurnRolloverOutcome) -> BridgeTurnRolloverOutcome {
+    match value {
+        TurnRolloverOutcome::NotAttempted => BridgeTurnRolloverOutcome::NotAttempted,
+        TurnRolloverOutcome::Succeeded => BridgeTurnRolloverOutcome::Succeeded,
+        TurnRolloverOutcome::Failed { error } => BridgeTurnRolloverOutcome::Failed { error },
+    }
+}
+
+fn turn_budget_limit(value: BudgetLimitSnapshot) -> BridgeTurnBudgetLimit {
+    BridgeTurnBudgetLimit {
+        kind: match value.kind {
+            BudgetLimitKind::ModelStep => BridgeTurnBudgetLimitKind::ModelStep,
+            BudgetLimitKind::ToolCall => BridgeTurnBudgetLimitKind::ToolCall,
+            BudgetLimitKind::Wait => BridgeTurnBudgetLimitKind::Wait,
+            BudgetLimitKind::WallClock => BridgeTurnBudgetLimitKind::WallClock,
+            BudgetLimitKind::AgentCount => BridgeTurnBudgetLimitKind::AgentCount,
+            BudgetLimitKind::AgentDepth => BridgeTurnBudgetLimitKind::AgentDepth,
+            BudgetLimitKind::Finalization => BridgeTurnBudgetLimitKind::Finalization,
+        },
+        usage: BridgeTurnBudgetUsage {
+            model_steps: value.usage.model_steps,
+            tool_calls: value.usage.tool_calls,
+            wait_calls: value.usage.wait_calls,
+            elapsed_ms: value.usage.elapsed_ms,
+        },
     }
 }
 
@@ -211,122 +287,221 @@ fn turn_phase(value: TurnPhase) -> BridgeTurnPhase {
 }
 
 pub(crate) fn bridge_thread_item(value: ThreadItem) -> Result<Option<BridgeThreadItem>> {
-    let Some(content) = item_content(value.content)? else {
+    if matches!(value.state(), ThreadItemState::ContextCompaction(_)) {
         return Ok(None);
-    };
+    }
+    let state = item_state(value.state())?;
     Ok(Some(BridgeThreadItem {
         id: value.id,
         thread_id: value.thread_id,
         turn_id: value.turn_id,
         ordinal: value.ordinal,
         revision: value.revision,
-        status: item_status(value.status),
         created_at: value.created_at,
         updated_at: value.updated_at,
-        completed_at: value.completed_at,
-        error: value.error,
-        content,
-        usage: value.usage.map(token_usage),
+        state,
     }))
 }
 
-fn item_content(value: ThreadItemContent) -> Result<Option<BridgeThreadItemContent>> {
+fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
     Ok(match value {
-        ThreadItemContent::UserMessage { text, attachments } => {
-            Some(BridgeThreadItemContent::UserMessage {
-                text,
-                attachments: attachments.into_iter().map(attachment).collect(),
-            })
-        }
-        ThreadItemContent::AgentMessage { channel, text } => {
-            Some(BridgeThreadItemContent::AgentMessage {
-                channel: match channel {
-                    AgentMessageChannel::Commentary => BridgeAgentMessageChannel::Commentary,
-                    AgentMessageChannel::Final => BridgeAgentMessageChannel::Final,
+        ThreadItemState::Text(value) => BridgeThreadItemState::Text {
+            channel: match value.channel() {
+                ThreadTextChannel::User => BridgeThreadTextChannel::User,
+                ThreadTextChannel::Commentary => BridgeThreadTextChannel::Commentary,
+                ThreadTextChannel::Final => BridgeThreadTextChannel::Final,
+            },
+            text: value.text().to_string(),
+            attachments: value.attachments().iter().map(attachment).collect(),
+            lifecycle: content_lifecycle(value.lifecycle()),
+        },
+        ThreadItemState::Thinking(value) => BridgeThreadItemState::Thinking {
+            summary: value.summary().to_vec(),
+            content: value.content().to_vec(),
+            lifecycle: content_lifecycle(value.lifecycle()),
+        },
+        ThreadItemState::Tool(value) => BridgeThreadItemState::Tool {
+            invocation: BridgeThreadToolInvocation {
+                tool_call_id: value.invocation().tool_call_id().to_string(),
+                call_id: value.invocation().call_id().map(str::to_string),
+                provider_item_id: value.invocation().provider_item_id().map(str::to_string),
+                name: value.invocation().name().to_string(),
+                arguments: value.invocation().arguments().to_string(),
+                working_directory: value.invocation().working_directory().map(str::to_string),
+            },
+            state: tool_state(value.state())?,
+        },
+        ThreadItemState::Agent(value) => {
+            let identity = value.identity();
+            BridgeThreadItemState::Agent {
+                identity: BridgeThreadAgentIdentity {
+                    id: identity.id().to_string(),
+                    path: identity.path().to_string(),
+                    parent_path: identity.parent_path().map(str::to_string),
+                    role: identity.role().to_string(),
+                    task: identity.task().to_string(),
+                    depth: identity.depth(),
                 },
-                text,
-            })
+                state: match value.state() {
+                    ThreadAgentState::Queued(_) => BridgeThreadAgentState::Queued,
+                    ThreadAgentState::Running(_) => BridgeThreadAgentState::Running,
+                    ThreadAgentState::Succeeded(state) => BridgeThreadAgentState::Succeeded {
+                        completed_at: state.completed_at(),
+                        summary: state.summary().to_string(),
+                    },
+                    ThreadAgentState::Denied(state) => BridgeThreadAgentState::Denied {
+                        denied_at: state.denied_at(),
+                        reason: state.reason().to_string(),
+                    },
+                    ThreadAgentState::Cancelled(state) => BridgeThreadAgentState::Cancelled {
+                        cancelled_at: state.cancelled_at(),
+                        reason: state.reason().to_string(),
+                    },
+                    ThreadAgentState::Failed(state) => BridgeThreadAgentState::Failed {
+                        failed_at: state.failed_at(),
+                        error: state.error().to_string(),
+                    },
+                },
+            }
         }
-        ThreadItemContent::Reasoning { summary, content } => {
-            Some(BridgeThreadItemContent::Reasoning { summary, content })
-        }
-        ThreadItemContent::Plan { content } => Some(BridgeThreadItemContent::Plan { content }),
-        ThreadItemContent::ToolCall { tool } => Some(BridgeThreadItemContent::ToolCall {
-            tool: tool_call(tool)?,
-        }),
-        ThreadItemContent::File { path, media_type } => {
-            Some(BridgeThreadItemContent::File { path, media_type })
-        }
-        ThreadItemContent::ContextCompaction { .. } => None,
+        ThreadItemState::Turn(value) => BridgeThreadItemState::Turn {
+            state: bridge_turn_state(value.state()),
+        },
+        ThreadItemState::Inference(value) => BridgeThreadItemState::Inference {
+            inference_id: value.inference_id().to_string(),
+            model: value.model().to_string(),
+            state: match value.state() {
+                ThreadInferenceState::Running(_) => BridgeThreadInferenceState::Running,
+                ThreadInferenceState::Completed(state) => BridgeThreadInferenceState::Completed {
+                    completed_at: state.completed_at(),
+                    usage: token_usage(state.usage().clone()),
+                },
+                ThreadInferenceState::Failed(state) => BridgeThreadInferenceState::Failed {
+                    failed_at: state.failed_at(),
+                    error: state.error().to_string(),
+                },
+                ThreadInferenceState::Cancelled(state) => BridgeThreadInferenceState::Cancelled {
+                    cancelled_at: state.cancelled_at(),
+                    reason: state.reason().to_string(),
+                },
+            },
+        },
+        ThreadItemState::Plan(value) => BridgeThreadItemState::Plan {
+            content: value.content().to_string(),
+            lifecycle: content_lifecycle(value.lifecycle()),
+        },
+        ThreadItemState::File(value) => BridgeThreadItemState::File {
+            path: value.path().to_string(),
+            media_type: value.media_type().map(str::to_string),
+            completed_at: value.completed_at(),
+        },
+        ThreadItemState::ContextCompaction(value) => BridgeThreadItemState::ContextCompaction {
+            before_tokens: value.before_tokens(),
+            after_tokens: value.after_tokens(),
+            compacted_at: value.compacted_at(),
+        },
     })
 }
 
-fn attachment(value: ThreadAttachment) -> BridgeThreadAttachment {
+fn content_lifecycle(value: &ThreadContentLifecycle) -> BridgeThreadContentLifecycle {
+    match value {
+        ThreadContentLifecycle::Streaming(_) => BridgeThreadContentLifecycle::Streaming,
+        ThreadContentLifecycle::Completed(state) => BridgeThreadContentLifecycle::Completed {
+            completed_at: state.completed_at(),
+        },
+        ThreadContentLifecycle::Failed(state) => BridgeThreadContentLifecycle::Failed {
+            failed_at: state.failed_at(),
+            error: state.error().to_string(),
+        },
+        ThreadContentLifecycle::Cancelled(state) => BridgeThreadContentLifecycle::Cancelled {
+            cancelled_at: state.cancelled_at(),
+            reason: state.reason().to_string(),
+        },
+    }
+}
+
+fn attachment(value: &ThreadAttachment) -> BridgeThreadAttachment {
     BridgeThreadAttachment {
-        id: value.id,
-        media_type: value.media_type,
-        filename: value.filename,
+        id: value.id.clone(),
+        media_type: value.media_type.clone(),
+        filename: value.filename.clone(),
         width: value.width,
         height: value.height,
         byte_size: value.byte_size,
-        data_url: value.data_url,
+        data_url: value.data_url.clone(),
     }
 }
 
-fn tool_call(value: ThreadToolCall) -> Result<BridgeThreadToolCall> {
-    Ok(BridgeThreadToolCall {
-        tool_call_id: value.tool_call_id,
-        // durable 线程的 call_id 必填；空串表示没有 canonical 调用 id。
-        call_id: if value.call_id.is_empty() {
-            None
-        } else {
-            Some(value.call_id)
+fn tool_state(value: &ThreadToolState) -> Result<BridgeThreadToolState> {
+    Ok(match value {
+        ThreadToolState::Started(_) => BridgeThreadToolState::Started,
+        ThreadToolState::Streaming(_) => BridgeThreadToolState::Streaming,
+        ThreadToolState::AwaitingApproval(_) => BridgeThreadToolState::AwaitingApproval,
+        ThreadToolState::Approved(_) => BridgeThreadToolState::Approved,
+        ThreadToolState::Running(state) => BridgeThreadToolState::Running {
+            streamed_output: state.streamed_output().to_string(),
         },
-        provider_item_id: value.provider_item_id,
-        name: value.name,
-        arguments: value.arguments,
-        result: value.result,
-        output_artifacts_json: value
-            .output_artifacts
-            .into_iter()
-            .map(|artifact| serde_json::to_string(&artifact).map_err(Into::into))
-            .collect::<Result<Vec<_>>>()?,
-        exit_code: value.exit_code,
-        timed_out: value.timed_out,
-        working_directory: value.working_directory,
-        denial_reason: value.denial_reason,
+        ThreadToolState::Succeeded(state) => BridgeThreadToolState::Succeeded {
+            completed_at: state.completed_at(),
+            output: tool_output(state.output())?,
+        },
+        ThreadToolState::Failed(state) => BridgeThreadToolState::Failed {
+            failed_at: state.failed_at(),
+            failure: BridgeThreadToolFailure {
+                kind: match state.failure().kind() {
+                    ThreadToolFailureKind::Execution => BridgeThreadToolFailureKind::Execution,
+                    ThreadToolFailureKind::TimedOut => BridgeThreadToolFailureKind::TimedOut,
+                    ThreadToolFailureKind::BudgetLimited => {
+                        BridgeThreadToolFailureKind::BudgetLimited
+                    }
+                },
+                message: state.failure().message().to_string(),
+            },
+            output: state.output().map(tool_output).transpose()?,
+        },
+        ThreadToolState::Denied(state) => BridgeThreadToolState::Denied {
+            denied_at: state.denied_at(),
+            reason: state.reason().to_string(),
+        },
+        ThreadToolState::Cancelled(state) => BridgeThreadToolState::Cancelled {
+            cancelled_at: state.cancelled_at(),
+            reason: state.reason().to_string(),
+        },
     })
 }
 
-fn item_status(value: ThreadItemStatus) -> BridgeThreadItemStatus {
-    match value {
-        ThreadItemStatus::Started => BridgeThreadItemStatus::Started,
-        ThreadItemStatus::Streaming => BridgeThreadItemStatus::Streaming,
-        ThreadItemStatus::AwaitingApproval => BridgeThreadItemStatus::AwaitingApproval,
-        ThreadItemStatus::Approved => BridgeThreadItemStatus::Approved,
-        ThreadItemStatus::Denied => BridgeThreadItemStatus::Denied,
-        ThreadItemStatus::Running => BridgeThreadItemStatus::Running,
-        ThreadItemStatus::Completed => BridgeThreadItemStatus::Completed,
-        ThreadItemStatus::Failed => BridgeThreadItemStatus::Failed,
-        ThreadItemStatus::Interrupted => BridgeThreadItemStatus::Interrupted,
-        ThreadItemStatus::BudgetLimited => BridgeThreadItemStatus::BudgetLimited,
-    }
+fn tool_output(value: &ThreadToolOutput) -> Result<BridgeThreadToolOutput> {
+    Ok(BridgeThreadToolOutput {
+        result: value.result().to_string(),
+        output_artifacts_json: value
+            .output_artifacts()
+            .iter()
+            .map(|artifact| serde_json::to_string(artifact).map_err(Into::into))
+            .collect::<Result<Vec<_>>>()?,
+        exit_code: value.exit_code(),
+    })
 }
 
 fn item_delta(value: ThreadItemDelta) -> BridgeThreadItemDelta {
     BridgeThreadItemDelta {
         item_id: value.item_id,
         revision: value.revision,
-        field: match value.field {
-            ThreadItemDeltaField::Text => BridgeThreadItemDeltaField::Text,
-            ThreadItemDeltaField::ReasoningSummary => BridgeThreadItemDeltaField::ReasoningSummary,
-            ThreadItemDeltaField::ReasoningContent => BridgeThreadItemDeltaField::ReasoningContent,
-            ThreadItemDeltaField::PlanContent => BridgeThreadItemDeltaField::PlanContent,
-            ThreadItemDeltaField::ToolArguments => BridgeThreadItemDeltaField::ToolArguments,
-            ThreadItemDeltaField::ToolResult => BridgeThreadItemDeltaField::ToolResult,
+        delta: match value.delta {
+            ThreadItemDeltaState::Text { delta } => BridgeThreadItemDeltaState::Text { delta },
+            ThreadItemDeltaState::ThinkingSummary { chunk_index, delta } => {
+                BridgeThreadItemDeltaState::ThinkingSummary { chunk_index, delta }
+            }
+            ThreadItemDeltaState::ThinkingContent { chunk_index, delta } => {
+                BridgeThreadItemDeltaState::ThinkingContent { chunk_index, delta }
+            }
+            ThreadItemDeltaState::Plan { delta } => BridgeThreadItemDeltaState::Plan { delta },
+            ThreadItemDeltaState::ToolArguments { delta } => {
+                BridgeThreadItemDeltaState::ToolArguments { delta }
+            }
+            ThreadItemDeltaState::ToolResult { delta } => {
+                BridgeThreadItemDeltaState::ToolResult { delta }
+            }
         },
-        delta: value.delta,
-        chunk_index: value.chunk_index,
     }
 }
 
@@ -495,15 +670,15 @@ fn mcp_server(value: McpServerDescriptor) -> BridgeThreadMcpServerDescriptor {
 
 #[cfg(test)]
 mod tests {
+    use pl_protocol::{ThreadContextCompactionItem, ThreadTextItem};
+
     use super::*;
 
     #[test]
     fn internal_context_items_never_cross_the_bridge_boundary() {
-        let context_compaction = item(ThreadItemContent::ContextCompaction {
-            before_tokens: 100,
-            after_tokens: 25,
-            compacted_at: 1,
-        });
+        let context_compaction = item(ThreadItemState::ContextCompaction(
+            ThreadContextCompactionItem::new(100, 25, 1),
+        ));
 
         assert!(
             bridge_thread_item(context_compaction.clone())
@@ -526,10 +701,12 @@ mod tests {
         let mut snapshot = ThreadSnapshot::empty("thread-1");
         snapshot.items = vec![
             context_compaction,
-            item(ThreadItemContent::UserMessage {
-                text: "visible".to_string(),
-                attachments: Vec::new(),
-            }),
+            item(ThreadItemState::Text(ThreadTextItem::new(
+                ThreadTextChannel::User,
+                "visible".to_string(),
+                Vec::new(),
+                ThreadContentLifecycle::completed(1),
+            ))),
         ];
         let bridged = bridge_thread_snapshot(snapshot).unwrap();
         assert_eq!(bridged.items.len(), 1);
@@ -562,39 +739,33 @@ mod tests {
     }
 
     fn window_item(ordinal: u64, turn_id: String) -> ThreadItem {
-        ThreadItem {
-            id: format!("item-{ordinal}"),
-            thread_id: "thread-1".to_string(),
+        ThreadItem::new(
+            format!("item-{ordinal}"),
+            "thread-1".to_string(),
             turn_id,
             ordinal,
-            revision: 1,
-            status: ThreadItemStatus::Completed,
-            created_at: 1,
-            updated_at: 1,
-            completed_at: Some(1),
-            error: None,
-            content: ThreadItemContent::UserMessage {
-                text: format!("message {ordinal}"),
-                attachments: Vec::new(),
-            },
-            usage: None,
-        }
+            1,
+            1,
+            1,
+            ThreadItemState::Text(ThreadTextItem::new(
+                ThreadTextChannel::User,
+                format!("message {ordinal}"),
+                Vec::new(),
+                ThreadContentLifecycle::completed(1),
+            )),
+        )
     }
 
-    fn item(content: ThreadItemContent) -> ThreadItem {
-        ThreadItem {
-            id: "item-1".to_string(),
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            ordinal: 1,
-            revision: 1,
-            status: ThreadItemStatus::Completed,
-            created_at: 1,
-            updated_at: 1,
-            completed_at: Some(1),
-            error: None,
-            content,
-            usage: None,
-        }
+    fn item(state: ThreadItemState) -> ThreadItem {
+        ThreadItem::new(
+            "item-1".to_string(),
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            1,
+            1,
+            1,
+            1,
+            state,
+        )
     }
 }

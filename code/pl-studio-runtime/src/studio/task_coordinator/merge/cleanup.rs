@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::{AgentLifecycleState, AgentRuntimeHandle, ThreadId, WorktreeHandle, WorktreeManager};
+use crate::{AgentRuntimeHandle, AgentState, ThreadId, WorktreeHandle, WorktreeManager};
 
 use super::git::{checked_git, run_git};
-use crate::studio::task_coordinator::{MergeCleanupEvidence, TaskCoordinator, TaskMergeScope};
+use crate::studio::task_coordinator::{MergeCleanupResult, TaskCoordinator, TaskMergeScope};
 
 impl TaskCoordinator {
     pub(in crate::studio::task_coordinator) async fn validate_accepted_cleanup_replay(
@@ -19,9 +19,9 @@ impl TaskCoordinator {
 pub(crate) async fn cleanup_accepted_delivery(
     scope: &TaskMergeScope,
     runtime: Option<&AgentRuntimeHandle>,
-) -> MergeCleanupEvidence {
+) -> MergeCleanupResult {
     match validate_cleanup_identity(scope).await {
-        Ok(CleanupPresence::AlreadyAbsent) => return cleanup_success("alreadyAbsent"),
+        Ok(CleanupPresence::AlreadyAbsent) => return MergeCleanupResult::AlreadyAbsent,
         Ok(CleanupPresence::Present) => {}
         Err(error) => return cleanup_failure(error.to_string()),
     }
@@ -37,12 +37,12 @@ pub(crate) async fn cleanup_accepted_delivery(
         if listed.iter().any(|snapshot| {
             snapshot.identity.id == agent_id
                 && !matches!(
-                    snapshot.lifecycle,
-                    AgentLifecycleState::Closing | AgentLifecycleState::Closed
+                    snapshot.state,
+                    AgentState::Closing(_) | AgentState::Closed(_)
                 )
         }) {
             let cleanup = match runtime.close(agent_id).await {
-                Ok(_) => cleanup_success("discarded"),
+                Ok(_) => MergeCleanupResult::Discarded,
                 Err(error) => cleanup_failure(error.to_string()),
             };
             return verify_cleanup_result(scope, cleanup).await;
@@ -55,11 +55,11 @@ pub(crate) async fn cleanup_accepted_delivery(
         branch: scope.work_unit.branch.clone(),
     };
     let cleanup = match manager.discard(&handle).await {
-        Ok(()) => cleanup_success("discarded"),
+        Ok(()) => MergeCleanupResult::Discarded,
         Err(error)
             if cleanup_is_already_absent(&scope.work_unit.worktree_path, &error.to_string()) =>
         {
-            cleanup_success("alreadyAbsent")
+            MergeCleanupResult::AlreadyAbsent
         }
         Err(error) => cleanup_failure(error.to_string()),
     };
@@ -109,9 +109,9 @@ async fn validate_cleanup_identity(scope: &TaskMergeScope) -> anyhow::Result<Cle
 
 async fn verify_cleanup_result(
     scope: &TaskMergeScope,
-    cleanup: MergeCleanupEvidence,
-) -> MergeCleanupEvidence {
-    if cleanup.status == "failed" {
+    cleanup: MergeCleanupResult,
+) -> MergeCleanupResult {
+    if matches!(cleanup, MergeCleanupResult::Failed { .. }) {
         return cleanup;
     }
     match validate_cleanup_identity(scope).await {
@@ -130,16 +130,6 @@ fn cleanup_is_already_absent(path: &str, error: &str) -> bool {
             || error.contains("branch") && error.contains("not found"))
 }
 
-fn cleanup_success(status: &str) -> MergeCleanupEvidence {
-    MergeCleanupEvidence {
-        status: status.to_string(),
-        detail: None,
-    }
-}
-
-fn cleanup_failure(detail: String) -> MergeCleanupEvidence {
-    MergeCleanupEvidence {
-        status: "failed".to_string(),
-        detail: Some(detail),
-    }
+fn cleanup_failure(detail: String) -> MergeCleanupResult {
+    MergeCleanupResult::Failed { detail }
 }

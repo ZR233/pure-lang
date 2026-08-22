@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, TodoListSnapshot, TokenUsageSnapshot,
+    InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, ThreadItem, ThreadItemDelta,
+    TodoListSnapshot, Turn,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 3;
+pub const THREAD_SCHEMA_VERSION: u32 = 4;
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,11 +58,14 @@ pub enum ThreadMode {
 #[serde(rename_all = "camelCase")]
 pub enum ThreadStatus {
     Idle,
+    Queued,
     Running,
-    Waiting,
-    Completed,
-    Failed,
+    WaitingTool,
+    WaitingInteraction,
+    Cancelling,
+    Closing,
     Closed,
+    Faulted,
 }
 
 /// Timeline 记录是否仍属于后续模型的有效上下文。
@@ -71,199 +75,6 @@ pub enum ThreadContextDisposition {
     #[default]
     Active,
     RolledBack,
-}
-
-/// Thread 中一次由明确输入启动的执行。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Turn {
-    pub id: String,
-    pub thread_id: String,
-    pub state: TurnState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<crate::TurnFailure>,
-    pub started_at: Option<i64>,
-    pub updated_at: i64,
-    pub completed_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "status"
-)]
-pub enum TurnState {
-    Queued,
-    InProgress { phase: TurnPhase },
-    Completed,
-    Failed { reason: String },
-    Interrupted { reason: String },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TurnPhase {
-    Preparing,
-    Thinking,
-    Responding,
-    Planning,
-    RunningTool,
-    Persisting,
-}
-
-/// Timeline 的唯一持久条目。`ordinal` 在首次插入时固定。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadItem {
-    pub id: String,
-    pub thread_id: String,
-    pub turn_id: String,
-    pub ordinal: u64,
-    #[serde(default)]
-    pub revision: u64,
-    pub status: ThreadItemStatus,
-    pub created_at: i64,
-    pub updated_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    pub content: ThreadItemContent,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TokenUsageSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
-pub enum ThreadItemContent {
-    UserMessage {
-        #[serde(default, skip_serializing_if = "String::is_empty")]
-        text: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        attachments: Vec<ThreadAttachment>,
-    },
-    AgentMessage {
-        channel: AgentMessageChannel,
-        #[serde(default, skip_serializing_if = "String::is_empty")]
-        text: String,
-    },
-    Reasoning {
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        summary: Vec<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        content: Vec<String>,
-    },
-    Plan {
-        #[serde(default, skip_serializing_if = "String::is_empty")]
-        content: String,
-    },
-    ToolCall {
-        tool: ThreadToolCall,
-    },
-    File {
-        path: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        media_type: Option<String>,
-    },
-    /// 无正文的内部压缩审计记录；Bridge 不得向 Flutter 暴露。
-    ContextCompaction {
-        before_tokens: u64,
-        after_tokens: u64,
-        compacted_at: i64,
-    },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentMessageChannel {
-    Commentary,
-    Final,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum ThreadItemStatus {
-    Started,
-    Streaming,
-    AwaitingApproval,
-    Approved,
-    Denied,
-    Running,
-    Completed,
-    Failed,
-    Interrupted,
-    BudgetLimited,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadAttachment {
-    pub id: String,
-    pub media_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filename: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub width: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    pub byte_size: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadToolCall {
-    pub tool_call_id: String,
-    pub call_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_item_id: Option<String>,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub arguments: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub output_artifacts: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i32>,
-    #[serde(default)]
-    pub timed_out: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub working_directory: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub denial_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadItemDelta {
-    pub item_id: String,
-    pub revision: u64,
-    pub field: ThreadItemDeltaField,
-    pub delta: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chunk_index: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum ThreadItemDeltaField {
-    Text,
-    #[serde(rename = "reasoning.summary")]
-    ReasoningSummary,
-    #[serde(rename = "reasoning.content")]
-    ReasoningContent,
-    PlanContent,
-    #[serde(rename = "tool.arguments")]
-    ToolArguments,
-    #[serde(rename = "tool.result")]
-    ToolResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -443,36 +254,6 @@ pub struct ThreadTurnHistory {
 }
 
 crate::impl_labeled_enum!(
-    TurnPhase,
-    "TurnPhase",
-    [
-        TurnPhase::Preparing => "preparing",
-        TurnPhase::Thinking => "thinking",
-        TurnPhase::Responding => "responding",
-        TurnPhase::Planning => "planning",
-        TurnPhase::RunningTool => "runningTool",
-        TurnPhase::Persisting => "persisting",
-    ]
-);
-
-crate::impl_labeled_enum!(
-    ThreadItemStatus,
-    "ThreadItemStatus",
-    [
-        ThreadItemStatus::Started => "started",
-        ThreadItemStatus::Streaming => "streaming",
-        ThreadItemStatus::AwaitingApproval => "awaitingApproval",
-        ThreadItemStatus::Approved => "approved",
-        ThreadItemStatus::Denied => "denied",
-        ThreadItemStatus::Running => "running",
-        ThreadItemStatus::Completed => "completed",
-        ThreadItemStatus::Failed => "failed",
-        ThreadItemStatus::Interrupted => "interrupted",
-        ThreadItemStatus::BudgetLimited => "budgetLimited",
-    ]
-);
-
-crate::impl_labeled_enum!(
     ThreadMode,
     "ThreadMode",
     [
@@ -486,10 +267,13 @@ crate::impl_labeled_enum!(
     "ThreadStatus",
     [
         ThreadStatus::Idle => "idle",
+        ThreadStatus::Queued => "queued",
         ThreadStatus::Running => "running",
-        ThreadStatus::Waiting => "waiting",
-        ThreadStatus::Completed => "completed",
-        ThreadStatus::Failed => "failed",
+        ThreadStatus::WaitingTool => "waitingTool",
+        ThreadStatus::WaitingInteraction => "waitingInteraction",
+        ThreadStatus::Cancelling => "cancelling",
+        ThreadStatus::Closing => "closing",
         ThreadStatus::Closed => "closed",
+        ThreadStatus::Faulted => "faulted",
     ]
 );

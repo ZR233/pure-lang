@@ -1,17 +1,18 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 
-use super::super::work_unit::{update_work_unit_state, work_unit_state};
+use super::super::work_completion::work_completion_record;
+use super::super::work_unit::{apply_work_unit_command, work_unit_state};
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    MergeCleanupEvidence, MergeMethod, MergeRecord, RecordTaskMerge, ReviewVerdict, TaskCommand,
-    TaskRunStateKind, TaskWorktreeDisposition, ThreadExecutionStatus, WorkCompletionKind,
-    WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
+    MergeCleanupState, MergeMethod, MergeRecord, RecordTaskMerge, ReviewRoundStateKind,
+    TaskCommand, TaskRunStateKind, WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand,
+    WorkUnitStateKind,
 };
 
 impl StudioStore {
@@ -52,26 +53,29 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("executor canonical Thread not found")?;
-            if executor.role != "executor" || executor.status != "closed" {
+            let executor_state: pl_core::AgentState = serde_json::from_str(&executor.state_json)?;
+            if executor.role != "executor"
+                || !matches!(executor_state, pl_core::AgentState::Closed(_))
+            {
                 bail!("executor must remain canonically closed during merge accounting");
             }
             let work_unit_state = work_unit_state(&work_unit)?;
+            let completion_record = work_completion_record(completion.clone())?;
             if work_unit.task_run_id != run.id
                 || work_unit.executor_thread_id.as_deref() != Some(input.executor_agent_id.as_str())
-                || work_unit_state.status() != WorkUnitStatus::Approved
-                || work_unit_state.execution_status() != ThreadExecutionStatus::Completed
+                || work_unit_state.kind() != WorkUnitStateKind::ReviewPassed
                 || completion.task_run_id != run.id
                 || completion.work_unit_id != work_unit.id
                 || completion.executor_agent_id != input.executor_agent_id
                 || completion.revision != i32::try_from(input.completion_revision)?
-                || completion.kind != WorkCompletionKind::Delivery.as_str()
-                || completion.status != WorkCompletionStatus::Approved.as_str()
+                || completion_record.kind() != WorkCompletionKind::Delivery
+                || completion_record.status() != WorkCompletionStatus::Approved
             {
                 bail!("approved Completion changed before merge accounting");
             }
-            let delivery_head = completion
-                .head_commit
-                .clone()
+            let delivery_head = completion_record
+                .head_commit()
+                .map(str::to_string)
                 .context("approved delivery Completion has no head commit")?;
             if let Some(existing) = entities::merge_record::Entity::find()
                 .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
@@ -116,22 +120,29 @@ impl StudioStore {
                 delivery_head: Set(delivery_head),
                 method: Set(input.method.as_str().to_string()),
                 summary: Set(input.summary),
-                cleanup_status: Set("pending".to_string()),
-                cleanup_detail: Set(None),
+                cleanup_state_json: Set(serde_json::to_string(&MergeCleanupState::pending())?),
+                cleanup_state_kind: NotSet,
+                revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
             .insert(&tx)
             .await?;
 
-            let mut progress = work_unit_state.into_progress();
-            progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-            update_work_unit_state(&tx, work_unit, WorkUnitState::merged(progress)).await?;
+            apply_work_unit_command(
+                &tx,
+                work_unit,
+                WorkUnitCommand::CompleteMerge {
+                    merge_record_id: merge.id.clone(),
+                },
+            )
+            .await?;
 
             let remaining_approved = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
                 .filter(
-                    entities::work_unit::Column::StateKind.eq(WorkUnitStatus::Approved.as_str()),
+                    entities::work_unit::Column::StateKind
+                        .eq(WorkUnitStateKind::ReviewPassed.as_str()),
                 )
                 .one(&tx)
                 .await?
@@ -140,7 +151,7 @@ impl StudioStore {
                 .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
                 .filter(
                     entities::review_round::Column::StateKind
-                        .eq(ReviewVerdict::ChangesRequired.as_str()),
+                        .eq(ReviewRoundStateKind::ChangesRequired.as_str()),
                 )
                 .one(&tx)
                 .await?
@@ -190,6 +201,15 @@ impl StudioStore {
 }
 
 pub(crate) fn merge_record(model: entities::merge_record::Model) -> Result<MergeRecord> {
+    let cleanup: MergeCleanupState = serde_json::from_str(&model.cleanup_state_json)
+        .context("invalid stored merge cleanup state JSON")?;
+    if cleanup.kind().as_str() != model.cleanup_state_kind {
+        bail!(
+            "stored merge cleanup discriminator mismatch: JSON is {}, generated column is {}",
+            cleanup.kind().as_str(),
+            model.cleanup_state_kind
+        );
+    }
     Ok(MergeRecord {
         id: model.id,
         task_run_id: model.task_run_id,
@@ -203,10 +223,8 @@ pub(crate) fn merge_record(model: entities::merge_record::Model) -> Result<Merge
         method: MergeMethod::from_str(&model.method)
             .with_context(|| format!("invalid merge method: {}", model.method))?,
         summary: model.summary,
-        cleanup: MergeCleanupEvidence {
-            status: model.cleanup_status,
-            detail: model.cleanup_detail,
-        },
+        cleanup,
+        revision: u64::try_from(model.revision).context("merge revision is negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

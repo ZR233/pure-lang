@@ -275,7 +275,7 @@ $Res call({
 });
 
 
-
+$BridgeProjectDirectoryStateCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -295,7 +295,16 @@ as BridgeProjectDirectoryState,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeProjectDirectoryStateCopyWith<$Res> get field0 {
 
+  return $BridgeProjectDirectoryStateCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -407,7 +416,7 @@ $Res call({
 });
 
 
-
+$BridgeTaskDirectoryStateCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -427,7 +436,16 @@ as BridgeTaskDirectoryState,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeTaskDirectoryStateCopyWith<$Res> get field0 {
 
+  return $BridgeTaskDirectoryStateCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -473,7 +491,7 @@ $Res call({
 });
 
 
-
+$BridgeAgentDirectoryStateCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -493,7 +511,16 @@ as BridgeAgentDirectoryState,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeAgentDirectoryStateCopyWith<$Res> get field0 {
 
+  return $BridgeAgentDirectoryStateCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -539,7 +566,7 @@ $Res call({
 });
 
 
-
+$BridgeSettingsStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -559,7 +586,16 @@ as BridgeSettingsStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeSettingsStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeSettingsStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -605,7 +641,7 @@ $Res call({
 });
 
 
-
+$BridgeRecoveryStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -625,7 +661,16 @@ as BridgeRecoveryStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeRecoveryStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeRecoveryStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -671,7 +716,7 @@ $Res call({
 });
 
 
-
+$BridgeMcpStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -691,7 +736,16 @@ as BridgeMcpStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeMcpStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeMcpStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -737,7 +791,7 @@ $Res call({
 });
 
 
-
+$BridgeLspStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -757,7 +811,16 @@ as BridgeLspStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeLspStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeLspStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -869,7 +932,7 @@ $Res call({
 });
 
 
-
+$BridgeProviderUsageStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -889,7 +952,16 @@ as BridgeProviderUsageStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeProviderUsageStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeProviderUsageStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -935,7 +1007,7 @@ $Res call({
 });
 
 
-
+$BridgeUpdaterStateSnapshotCopyWith<$Res> get field0;
 
 }
 /// @nodoc
@@ -955,7 +1027,16 @@ as BridgeUpdaterStateSnapshot,
   ));
 }
 
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeUpdaterStateSnapshotCopyWith<$Res> get field0 {
 
+  return $BridgeUpdaterStateSnapshotCopyWith<$Res>(_self.field0, (value) {
+    return _then(_self.copyWith(field0: value));
+  });
+}
 }
 
 /// @nodoc
@@ -1023,5 +1104,453 @@ as BigInt,
 
 
 }
+
+/// @nodoc
+mixin _$BridgeShutdownProgress {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeShutdownProgressCopyWith<$Res>  {
+$BridgeShutdownProgressCopyWith(BridgeShutdownProgress _, $Res Function(BridgeShutdownProgress) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeShutdownProgress].
+extension BridgeShutdownProgressPatterns on BridgeShutdownProgress {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult Function( BridgeShutdownProgress_SuspendingTasks value)?  suspendingTasks,TResult Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult Function( BridgeShutdownProgress_Stopped value)?  stopped,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
+return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
+return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
+return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
+return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
+return stoppingLsp(_that);case BridgeShutdownProgress_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)  stoppingSubscriptions,required TResult Function( BridgeShutdownProgress_CancellingTurns value)  cancellingTurns,required TResult Function( BridgeShutdownProgress_FlushingPersistence value)  flushingPersistence,required TResult Function( BridgeShutdownProgress_SuspendingTasks value)  suspendingTasks,required TResult Function( BridgeShutdownProgress_StoppingMcp value)  stoppingMcp,required TResult Function( BridgeShutdownProgress_StoppingLsp value)  stoppingLsp,required TResult Function( BridgeShutdownProgress_Stopped value)  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions():
+return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns():
+return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence():
+return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks():
+return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp():
+return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp():
+return stoppingLsp(_that);case BridgeShutdownProgress_Stopped():
+return stopped(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult? Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult? Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult? Function( BridgeShutdownProgress_SuspendingTasks value)?  suspendingTasks,TResult? Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult? Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult? Function( BridgeShutdownProgress_Stopped value)?  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
+return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
+return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
+return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
+return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
+return stoppingLsp(_that);case BridgeShutdownProgress_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  stoppingSubscriptions,TResult Function()?  cancellingTurns,TResult Function( BigInt pendingCommits)?  flushingPersistence,TResult Function()?  suspendingTasks,TResult Function()?  stoppingMcp,TResult Function()?  stoppingLsp,TResult Function()?  stopped,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
+return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
+return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
+return suspendingTasks();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return stoppingMcp();case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
+return stoppingLsp();case BridgeShutdownProgress_Stopped() when stopped != null:
+return stopped();case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  stoppingSubscriptions,required TResult Function()  cancellingTurns,required TResult Function( BigInt pendingCommits)  flushingPersistence,required TResult Function()  suspendingTasks,required TResult Function()  stoppingMcp,required TResult Function()  stoppingLsp,required TResult Function()  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions():
+return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns():
+return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence():
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks():
+return suspendingTasks();case BridgeShutdownProgress_StoppingMcp():
+return stoppingMcp();case BridgeShutdownProgress_StoppingLsp():
+return stoppingLsp();case BridgeShutdownProgress_Stopped():
+return stopped();}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  stoppingSubscriptions,TResult? Function()?  cancellingTurns,TResult? Function( BigInt pendingCommits)?  flushingPersistence,TResult? Function()?  suspendingTasks,TResult? Function()?  stoppingMcp,TResult? Function()?  stoppingLsp,TResult? Function()?  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
+return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
+return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
+return suspendingTasks();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return stoppingMcp();case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
+return stoppingLsp();case BridgeShutdownProgress_Stopped() when stopped != null:
+return stopped();case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_StoppingSubscriptions extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_StoppingSubscriptions(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingSubscriptions);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.stoppingSubscriptions()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_CancellingTurns extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_CancellingTurns(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_CancellingTurns);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.cancellingTurns()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_FlushingPersistence extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_FlushingPersistence({required this.pendingCommits}): super._();
+
+
+ final  BigInt pendingCommits;
+
+/// Create a copy of BridgeShutdownProgress
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeShutdownProgress_FlushingPersistenceCopyWith<BridgeShutdownProgress_FlushingPersistence> get copyWith => _$BridgeShutdownProgress_FlushingPersistenceCopyWithImpl<BridgeShutdownProgress_FlushingPersistence>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_FlushingPersistence&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits);
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.flushingPersistence(pendingCommits: $pendingCommits)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeShutdownProgress_FlushingPersistenceCopyWith<$Res> implements $BridgeShutdownProgressCopyWith<$Res> {
+  factory $BridgeShutdownProgress_FlushingPersistenceCopyWith(BridgeShutdownProgress_FlushingPersistence value, $Res Function(BridgeShutdownProgress_FlushingPersistence) _then) = _$BridgeShutdownProgress_FlushingPersistenceCopyWithImpl;
+@useResult
+$Res call({
+ BigInt pendingCommits
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeShutdownProgress_FlushingPersistenceCopyWithImpl<$Res>
+    implements $BridgeShutdownProgress_FlushingPersistenceCopyWith<$Res> {
+  _$BridgeShutdownProgress_FlushingPersistenceCopyWithImpl(this._self, this._then);
+
+  final BridgeShutdownProgress_FlushingPersistence _self;
+  final $Res Function(BridgeShutdownProgress_FlushingPersistence) _then;
+
+/// Create a copy of BridgeShutdownProgress
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,}) {
+  return _then(BridgeShutdownProgress_FlushingPersistence(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_SuspendingTasks extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_SuspendingTasks(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_SuspendingTasks);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.suspendingTasks()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_StoppingMcp extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_StoppingMcp(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingMcp);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.stoppingMcp()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_StoppingLsp extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_StoppingLsp(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingLsp);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.stoppingLsp()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeShutdownProgress_Stopped extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_Stopped(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_Stopped);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeShutdownProgress.stopped()';
+}
+
+
+}
+
+
+
 
 // dart format on

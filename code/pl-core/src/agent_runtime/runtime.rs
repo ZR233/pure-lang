@@ -3,12 +3,11 @@ use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
 use super::host::{AgentCommitObserver, CommitDurability, ThreadRepository};
-use super::state::{AgentRuntimeError, derive_activity, unix_timestamp};
+use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentTurnOutcome,
+    AgentCommand, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentState, AgentTurnOutcome,
     MailboxDeliveryState, RestoredAgentRuntime, ThreadCommitOutcome, ThreadId, TurnId,
-    TurnOutcomeKind,
 };
 use crate::thread_event::{project_runtime_event, runtime_event_thread_id};
 use crate::{ThreadEventBus, ThreadEventBusHandle, ThreadEventOptions};
@@ -138,32 +137,38 @@ where
 {
     let mut recovered = Vec::with_capacity(restored.len());
     for mut agent in restored {
-        let interrupted_turn_id = agent.state.snapshot.active_turn_id.clone();
+        let interrupted_turn_id = agent.state.snapshot.active_turn_id().cloned();
         let mut pending_inputs = VecDeque::new();
         while let Some(mut input) = agent.state.pending_inputs.pop_front() {
             if input.mail_id.trim().is_empty() {
                 input.mail_id = format!("mail:{}", input.turn_id);
             }
             match input.delivery_state {
-                MailboxDeliveryState::Pending => pending_inputs.push_back(input),
-                MailboxDeliveryState::Claimed { .. } => {
-                    input.delivery_state = MailboxDeliveryState::Pending;
-                    if interrupted_turn_id.as_ref() == Some(&input.turn_id) {
-                        input.turn_id = TurnId::generate();
-                    }
+                MailboxDeliveryState::Pending(_) => pending_inputs.push_back(input),
+                MailboxDeliveryState::Claimed(_) => {
+                    let requeued_turn_id = if interrupted_turn_id.as_ref() == Some(&input.turn_id) {
+                        TurnId::generate()
+                    } else {
+                        input.turn_id.clone()
+                    };
+                    input
+                        .requeue(requeued_turn_id)
+                        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
                     pending_inputs.push_back(input);
                 }
-                MailboxDeliveryState::Consumed { .. } => {}
+                MailboxDeliveryState::Consumed(_) => {}
             }
         }
         agent.state.pending_inputs = pending_inputs;
         agent.state.refresh_mailbox_snapshot();
         let had_active_input = agent.state.active_input.is_some();
-        let interrupted = agent.state.snapshot.active_turn_id.is_some()
-            || had_active_input
+        let interrupted = had_active_input
             || matches!(
-                agent.state.snapshot.activity,
-                AgentActivityState::Active(_) | AgentActivityState::Cancelling
+                agent.state.snapshot.state,
+                AgentState::Running(_)
+                    | AgentState::WaitingTool(_)
+                    | AgentState::WaitingInteraction(_)
+                    | AgentState::Cancelling(_)
             );
         if !interrupted {
             recovered.push(agent);
@@ -173,33 +178,31 @@ where
         let turn_id = agent
             .state
             .snapshot
-            .active_turn_id
-            .clone()
+            .active_turn_id()
+            .cloned()
             .unwrap_or_else(TurnId::generate);
         let thread_id = agent.state.snapshot.identity.id.clone();
         let outcome = AgentTurnOutcome {
             turn_id,
             thread_id,
-            kind: TurnOutcomeKind::Cancelled,
-            reason: Some("runtime_restarted".to_string()),
-            failure: None,
-            budget_limit: None,
-            rollover_compacted: false,
-            rollover_compaction_error: None,
+            outcome: pl_protocol::TurnOutcome::cancelled(
+                pl_protocol::TurnCancellationCause::Recovery,
+            ),
             usage: pl_model::TokenUsage::default(),
+            started_at: None,
             finished_at: unix_timestamp(),
         };
         let expected_revision = agent.state.snapshot.revision;
         agent.state.snapshot.revision = expected_revision.saturating_add(1);
         agent.state.snapshot.event_sequence = agent.state.snapshot.event_sequence.saturating_add(1);
-        agent.state.snapshot.active_turn_id = None;
         agent.state.snapshot.last_turn = Some(outcome.clone());
         agent.state.refresh_mailbox_snapshot();
-        agent.state.snapshot.activity = derive_activity(
-            agent.state.snapshot.lifecycle,
-            None,
-            agent.state.has_triggering_input(),
-        );
+        let next_turn_id = agent.state.triggering_turn_id();
+        agent
+            .state
+            .snapshot
+            .transition(AgentCommand::Settle { next_turn_id })
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         agent.state.snapshot.updated_at = unix_timestamp();
         let event = AgentRuntimeEvent {
             agent_id: agent.state.snapshot.identity.id.clone(),
@@ -211,15 +214,18 @@ where
             },
         };
         let thread_id = runtime_event_thread_id(&event)
-            .expect("recovery cancellation always belongs to a thread")
+            .ok_or_else(|| {
+                AgentRuntimeError::ThreadEvents(
+                    "recovery cancellation is missing its canonical thread".to_string(),
+                )
+            })?
             .to_string();
         let thread_key = ThreadId::new(thread_id.clone())
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        let sequence = thread_events
+        let current_thread = thread_events
             .snapshot(&thread_id)
-            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
-            .revision;
-        let projected = project_runtime_event(&event, sequence);
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        let projected = project_runtime_event(&event, &current_thread);
         let projected_thread = thread_events
             .project(&thread_id, &projected.notifications)
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;

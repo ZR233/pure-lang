@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, bail};
+use pl_core::MailboxDeliveryState;
 use pl_protocol::{AgentWorkingState, ConversationRecoveryState};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
@@ -22,18 +23,22 @@ impl StudioStore {
         let selected = turn_ids.iter().collect::<BTreeSet<_>>();
         let rows = thread_input::Entity::find()
             .filter(thread_input::Column::ThreadId.eq(thread_id.to_string()))
-            .filter(thread_input::Column::State.eq("consumed"))
+            .filter(thread_input::Column::StateKind.eq("consumed"))
             .order_by_asc(thread_input::Column::QueueOrdinal)
             .all(&self.db)
             .await?;
         let mut inputs = BTreeMap::<String, ConversationTurnInputs>::new();
         for row in rows {
-            let turn_id = row.claimed_turn_id.as_ref().unwrap_or(&row.turn_id);
-            if !selected.contains(turn_id) {
+            let state: MailboxDeliveryState = serde_json::from_str(&row.state_json)?;
+            let turn_id = state
+                .turn_id()
+                .map(ToString::to_string)
+                .ok_or_else(|| anyhow::anyhow!("consumed mailbox has no Turn identity"))?;
+            if !selected.contains(&turn_id) {
                 continue;
             }
             let entry = inputs
-                .entry(turn_id.clone())
+                .entry(turn_id)
                 .or_insert_with(|| ConversationTurnInputs {
                     messages: Vec::new(),
                     hashes: Vec::new(),

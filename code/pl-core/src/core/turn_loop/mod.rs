@@ -1,6 +1,6 @@
 use pl_model::CompletionRequest;
+use pl_protocol::TurnCompletion;
 use pl_protocol::{ErrorSeverity, Result};
-use pl_trace::TracePartStatus;
 use std::sync::Arc;
 
 mod attachments;
@@ -93,7 +93,7 @@ pub(super) async fn run_turn_with_trace(
     let working_set = TurnWorkingSetHandle::from_session(session)?;
     let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
     record_enabled_tools(recorder, &turn_id, &tool_schemas);
-    let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
+    let turn_item = recorder.running_turn_item(&turn_id);
     recorder.start_item(turn_item.clone());
     let mut progress = ProgressEmitter::new(turn_id.clone(), ProgressVerbosity::from_env());
     progress.milestone(recorder, "已接收请求，正在准备上下文。");
@@ -119,7 +119,7 @@ pub(super) async fn run_turn_with_trace(
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
     let mut terminal_checkpointed = false;
-    let mut ended_for_interaction = false;
+    let mut completion = TurnCompletion::Normal;
     checkpoint::persist_pending_mail(&options, session).await?;
     let mut turn_context =
         TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
@@ -364,8 +364,13 @@ pub(super) async fn run_turn_with_trace(
         } else {
             response.model.clone()
         };
-        if let Some(inference) = &mut inference_item.inference {
-            inference.model = actual_model.clone();
+        if let Err(error) = inference_item.apply(inference_item.command(
+            unix_seconds(),
+            pl_trace::TracePartAction::UpdateInferenceModel {
+                model: actual_model.clone(),
+            },
+        )) {
+            tracing::error!(%error, "failed to update inference model trace");
         }
         let usage_snapshot = token_usage_snapshot(&response.usage);
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
@@ -566,7 +571,6 @@ pub(super) async fn run_turn_with_trace(
                         pl_protocol::TurnFailureCategory::Tool,
                         "fatal tool runtime failure",
                     ),
-                    crate::turn::TurnAbortReason::ToolError,
                 ));
             }
             Err(ToolExecutionError::RespondToModel(error)) => {
@@ -592,7 +596,6 @@ pub(super) async fn run_turn_with_trace(
                         pl_protocol::TurnFailureCategory::Validation,
                         "tool execution failed and can be corrected",
                     ),
-                    crate::turn::TurnAbortReason::ToolError,
                 ));
             }
         };
@@ -689,7 +692,11 @@ pub(super) async fn run_turn_with_trace(
                 iteration = iteration.saturating_add(1);
                 continue;
             }
-            ended_for_interaction = requested_interaction;
+            completion = if requested_interaction {
+                TurnCompletion::InteractionRequested
+            } else {
+                TurnCompletion::Normal
+            };
             terminal_checkpointed = true;
             break;
         }
@@ -743,8 +750,7 @@ pub(super) async fn run_turn_with_trace(
             last_context_tokens,
             context_compactions,
             session_message_count,
-            ended_for_interaction,
-            inference_count,
+            completion,
         },
     ))
 }

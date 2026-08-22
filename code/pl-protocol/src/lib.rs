@@ -11,6 +11,8 @@ mod permission;
 mod provider_catalog;
 pub mod studio;
 mod thread;
+mod thread_item;
+mod turn;
 mod turn_failure;
 
 pub use billing::{
@@ -19,17 +21,12 @@ pub use billing::{
 };
 pub use error::{PureError, Result};
 pub use event::{
-    AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetLimitSnapshot, BudgetUsage,
-    ErrorSeverity, OutputStream, PipelineStage, PlanLifecycleEvent, PlanLifecycleState,
-    RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, SubAgentActivityKind, TodoItem,
-    TodoListSnapshot, TodoStatus, TokenUsageSnapshot, UserInputAnswer, UserInputRequest,
+    AgentRuntimeDelta, BudgetLimitKind, BudgetLimitSnapshot, BudgetUsage, ErrorSeverity,
+    OutputStream, PipelineStage, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
+    TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, UserInputAnswer, UserInputRequest,
     UserInputResponse, UserQuestion, UserQuestionOption,
 };
-pub use interaction::{
-    InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, PlanConfirmationResolution,
-    ToolApprovalResolution,
-};
+pub use interaction::*;
 pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
@@ -44,7 +41,12 @@ pub use model_context::{
     PromptPrefixChangedReason, ResponsesContextItem, ResponsesContextItemKind, SessionNote,
     ThreadPromptMetadata, ThreadPromptSnapshot, ToolResultReceipt,
 };
-pub use observed_state::{ObservedStateMeta, ObservedStatePhase, StateError, StateOperation};
+pub use observed_state::{
+    DegradedResource, FailedResource, LoadingResource, ObservedResource, ObservedResourceCommand,
+    ObservedResourceKind, ObservedResourceTransitionDecision, ObservedResourceTransitionError,
+    ReadyResource, RefreshingResource, StaleResource, StateError, StateOperation, StoppedResource,
+    UninitializedResource,
+};
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
@@ -54,12 +56,17 @@ pub use provider_catalog::{
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
 pub use thread::{
-    AgentMessageChannel, THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadContextDisposition,
-    ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus,
-    ThreadMode, ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot,
-    ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest,
-    ThreadSubscriptionUpdate, ThreadToolCall, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase,
-    TurnState,
+    THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadMode, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
+    ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
+    ThreadTurnPage,
+};
+pub use thread_item::*;
+pub use turn::{
+    BudgetLimitedTurnOutcome, BudgetLimitedTurnState, CancelledTurnOutcome, CancelledTurnState,
+    CompletedTurnOutcome, CompletedTurnState, FailedTurnOutcome, FailedTurnState, QueuedTurnState,
+    RunningTurnState, Turn, TurnCancellationCause, TurnCommand, TurnCompletion, TurnOutcome,
+    TurnPhase, TurnRolloverOutcome, TurnState, TurnTransitionDecision, TurnTransitionError,
 };
 pub use turn_failure::{
     ProviderFailure, ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory,

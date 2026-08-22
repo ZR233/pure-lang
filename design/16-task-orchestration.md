@@ -88,6 +88,19 @@ flowchart LR
 会重新进入“尚未创建主任务”的规划流程，因此可能再次要求调用 `plan_exit`。这不是原任务从审查退回
 规划，而是原任务已经结束，新的模型执行正在走下一次任务的入口。
 
+WorkUnit 状态收敛为 Pending、Running、WaitingReview、ReviewPassed、ChangesRequired、Paused、
+Completed、Failed、Cancelled。每个 variant 使用独立 state struct；worktree disposition、execution
+summary/error、budget、typed continuation、来源 Turn 与 continuation revision 只存在于适用状态。
+旧 AwaitingCompletion/ReadyForReview/Reviewing/Approved/Merged/NoDelivery/NeedsAttention 语义分别由
+WaitingReview、ReviewPassed、Completed、Paused 的 typed payload 表达，不再形成平行 execution status。
+
+ReviewRound 状态为 PendingDispatch、Dispatched、Running、Passed、ChangesRequired、Blocked、Failed、
+Cancelled，不再使用外层状态、reviewer status 和 verdict 三轴组合。Executor continuation 状态为
+Idle、Compacting、PendingStart、PlannerWakePending、NeedsAttention；WorkCompletion 生命周期为
+ReadyForReview、ChangesRequired、Approved，其内容是强类型 Delivery/NoDelivery union。TaskFailure
+使用 OpenRecoverable、OpenFatal、Resolved；Merge cleanup 使用 Pending、Deferred、Attempting、
+Discarded、AlreadyAbsent、Failed。所有变化分别由领域 command/decision 驱动。
+
 ### 16.3.3 完整主状态转换图
 
 实线表示正常业务路径，虚线表示可从任意非终态触发的旁路。图中的“任意非终态”只是为了减少重复
@@ -507,7 +520,7 @@ requestedByCallId、worktree 实际 base/path/branch、确认计划、完整蓝�
 `studio.task_executor_handoff` pinned section 随 fresh child session 持久化。运行时对规范化蓝图
 计算稳定内容指纹；同一 provider call 或新重试只有完整指纹一致时才复用既有 WorkUnit。taskName、
 scope 相同但步骤、验收或验证不同是稳定冲突，不能复用或重新分配。后续 Turn 从 durable WorkUnit
-与该 section 交叉校验；缺失、损坏、旧版 handoff 或 owner/resource 不一致时进入 NeedsAttention，
+与该 section 交叉校验；缺失、损坏或 owner/resource 不一致时进入 Paused 的 operational payload，
 不迁移或兼容旧版。只有原 WorkUnit 已 terminal，或 TaskRun 已明确进入 Reworking，才允许创建
 新的 attempt。
 
@@ -522,7 +535,12 @@ base commit，CAS 写回 WorkUnit，再持久化 child Thread、注册并激活 
 结构化 failure 保存在 WorkUnit。相同 provider call id 重放直接返回原有 `spawned` 或 `failed`，
 不重复创建资源；新的 call id 创建新的 attempt。无副作用或补偿成功的失败只把 WorkUnit 标为
 Failed 并保持 Task phase，以便重试；资源可能已创建且 cleanup/fault compensation 失败时 WorkUnit
-进入 NeedsAttention、TaskRun 进入 Blocked，必须先走资源恢复。
+进入 Failed、TaskRun 进入 Blocked，必须先走资源恢复。
+
+spawn failure 的 code、phase、worktree cause、逐资源 compensation 与 nextAction 在 Rust protocol、
+FRB 和 Dart 中均为穷尽 enum；不存在字符串 fallback。Task projection 中 `MergeMethod`、
+`ReviewScope`、budget limit kind 也保持强类型。会话恢复 preview 仅列出 Completed、Cancelled、Failed、
+BudgetLimited 四种 terminal Turn，并用 typed state 传输，不接受历史 `status` 字符串。
 
 executor 使用全新上下文，初始消息由 runtime 固定生成，只要求读取 pinned handoff 并按顺序开始；
 不得复制一份可能漂移的自由文本 assignment。executor 可调整不改变目标与验收语义的低层实现；
@@ -561,17 +579,15 @@ JSON 字符串，也兼容不能稳定生成根 `oneOf` 参数的 provider，并
 delivery 的 `headCommit` 与 `changedFiles` 是 executor 声明的 opaque 审计事实；TaskService 只校验
 字段组合、路径格式、owner、revision 与状态转换，不验证 commit 存在、HEAD 推进、ancestor、clean
 或真实 diff。worktree 内变更不受 scopeHints 限制。成功事务创建不可变
-WorkCompletion 并将 WorkUnit 置为 ReadyForReview。普通文本
-结束、工具错误或预算中止不会伪造交付，WorkUnit 保持 AwaitingCompletion，可由 planner 向同一
-Thread 发送明确 follow-up。follow-up 或 changes-requested rework 开启新的 executor Turn 时，
-WorkUnit 与 Thread execution 必须在同一事务中恢复为 `Running/Running`，清除旧 execution error
-并推进 continuation revision；重复的 TurnStarted 对已处于 `Running/Running` 的组合保持幂等。
-不得持久化 `AwaitingCompletion/Running` 或 `ChangesRequested/Running` 这类重启校验无法接受的
-中间组合。
+WorkCompletion 并以该 Completion identity 将 WorkUnit 置为 `WaitingReview::Ready`。普通文本
+结束、工具错误不会伪造交付，WorkUnit 进入 `WaitingReview::AwaitingReport`，并在 payload 中直接
+承载 typed executor outcome；planner 可向同一 Thread 发送明确 follow-up。follow-up 或
+ChangesRequired rework 开启新的 executor Turn 时，WorkUnit 必须在同一事务中恢复为 Running，清除
+旧 execution error 并推进 continuation revision；相同 source Turn 的重复 TurnStarted 保持幂等。
+状态 enum 不允许表达“等待 completion 但 executor 仍 running”之类中间组合。
 
-executor Turn 被取消后可能形成 `AwaitingCompletion/Cancelled` 的 durable 组合。planner 首次关闭
-该 executor 时必须在同一事务中归一为 `Cancelled/Cancelled` 并请求清理；后续重复关闭返回同一
-discard disposition，不再次推进 revision。ReadyForReview、Reviewing 或 ChangesRequested 的
+executor Turn 被取消后进入带 typed cancel cause 的 Cancelled，并请求清理；后续重复关闭返回同一
+discard disposition，不再次推进 revision。`WaitingReview::Ready/Reviewing` 与 ChangesRequired 的
 completion review 仍禁止关闭。
 
 executor 的单个 Turn 保持 30 分钟 wall-clock 上限。前三个 `WallClock` budget terminal 不把
@@ -580,7 +596,7 @@ executor 或 WorkUnit 标记为失败：runtime 通过唯一 compaction controll
 硬超时约束；取消、超时或错误不得阻止当前 Turn 提交 terminal。成功后以
 `workUnitId + sourceTurnId` 生成确定性 hidden continuation input，在同一 worktree 开启下一切片。
 一个自动 tranche 最多四个切片；第四次 wall-clock 耗尽、非 wall-clock budget 或 rollover 失败
-进入 NeedsAttention，保留 executor/worktree，并形成稳定 Planner wake。pending continuation 与
+进入 Paused 的 budget payload，保留 executor/worktree，并形成稳定 Planner wake。pending continuation 与
 Planner wake 在重启时分别按幂等键对账已有 active/terminal Turn 和 queued/claimed/active/consumed
 mail，禁止重复增加切片或启动 Turn。rollover replacement transcript 必须先与 TurnFinished 在
 repository 提交链上持久化成功，再允许 hidden continuation 入队；提交失败时 actor 不推进内存
@@ -589,25 +605,25 @@ session，也不启动下一 Turn。
 planner 用统一的 `send_message`（parent→direct-child）向子代理下发调度或恢复消息；不增加 Task
 专用恢复工具。每次成功接受的消息都刷新 child budget。活动 Turn 不被中断，但 wall-clock 和
 本 tranche 的 model/tool/wait 计数从消息接受时重新开始；idle child 开启 fresh Turn。对应 WorkUnit
-的 budget tranche 重置为第一片，清除上一 tranche 的 budget/error/source。预算型 NeedsAttention
-可由该消息恢复为同一 executor/Thread/WorkUnit/worktree 的 `Running/Running`；handoff、ownership
-或其他非预算 NeedsAttention 继续拒绝恢复。自动 `PendingStart` continuation 不刷新 tranche。
+的 budget tranche 重置为第一片，清除上一 tranche 的 budget/error/source。预算型 Paused
+可由该消息恢复为同一 executor/Thread/WorkUnit/worktree 的 Running；handoff、ownership
+等 operational Paused 继续拒绝恢复。自动 `PendingStart` continuation 不刷新 tranche。
 
 UserInput 的 fresh-turn 边界不扩大上述预算续轮范围。普通 Planner、reviewer、Simple 或 child
 `budgetLimited` 仍是 terminal 事实，不自动合成 continuation；只有这里定义的 executor
 `WallClockRollover` 可以按 WorkUnit tranche 状态机续轮。
 
-WorkUnit 在 ReadyForReview 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
+WorkUnit 在 `WaitingReview::Ready` 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
 事务固定最新 Completion revision，reviewer canonical workspace 直接绑定同一 worktree，不接受
 模型提供路径。Reviewer 必须在 `review_exit.fileReviews` 中为冻结清单的每个规范仓库相对路径提交
 `reviewed: true`；服务端精确拒绝缺失、false、重复、额外、绝对或非规范路径。该标记声明 Reviewer
 已经结合 prompt 中完整 diff 审查该文件，不要求每个文件都有独立 `read_file` trace。findings 使
-WorkUnit 进入 ChangesRequested；
+WorkUnit 进入 ChangesRequired；
 planner 把具体 finding 发回原 executor Thread，新的 completion revision 重新审查。pass 后
-WorkUnit 进入 Approved 或 NoDelivery。executor 在普通结束或失败时若没有形成新的
+WorkUnit 进入 `ReviewPassed::Delivery` 或 `ReviewPassed::NoDelivery`。executor 在普通结束或失败时若没有形成新的
 Completion，WorkUnit 保留可 follow-up 的 durable terminal execution 状态，并生成一次 Planner
 wake；review changes-requested 后的 rework failure 也走同一路径，不能静默停在
-`AwaitingCompletion/failed`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
+`WaitingReview::AwaitingReport`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
 
 Reviewer 在产品语义上仍是只读角色，不得通过 shell 修改 workspace、Git 或其他现场。审查前可以
 使用 `list_files`，或通过 `exec` 运行 `rg` / `rg --files` 定位设计和代码；定位之后仍必须用
@@ -640,14 +656,14 @@ TaskRun 置为 Failed、固定 terminal failure、收束未完成 WorkUnit/Revie
 
 ## 16.6 Planner 自主 Git、合并记账与综合审查
 
-Approved 且 executor 已关闭的 delivery 由 `task_status` 投影为 `MergeCandidate`，包含 executor、
+`ReviewPassed::Delivery` 且 executor 已关闭的 delivery 由 `task_status` 投影为 `MergeCandidate`，包含 executor、
 completion revision、相对 worktree locator、branch、base/head commit 与前一条 MergeRecord 声明。
 TaskService 不执行 merge，也不提供专用 conflict 文件工具。Planner 在 Task 主 workspace 使用普通
 exec/file/Git，自行选择 merge、cherry-pick、squash、rebase 或 manual，并自行解决或 abort 冲突。
 冲突期间 Task phase 仍是 Merging，不创建独立 conflict state 或持久化 conflict tool session。
 
 Planner 完成自选整合后调用 `task_record_merge`，提交 executor、completion revision、
-previous/resulting HEAD、typed method 与 summary。该工具是纯记账入口，只重读并验证 caller、Approved
+previous/resulting HEAD、typed method 与 summary。该工具是纯记账入口，只重读并验证 caller、ReviewPassed
 completion、已关闭 executor、Task phase、owner、幂等性，以及连续 MergeRecord 的
 `expectedPreviousHead == 前一条 resultingHead`。所有 commit 字段均为 opaque audit value；工具不解析
 commit、不读取主 workspace、不验证 current HEAD、ancestor、clean、diff 或 Git operation，也不运行
@@ -657,7 +673,7 @@ delivery reviewer 的 prompt 必须直接包含完整实施蓝图、验收条件
 按验收 ID 逐项核对，并继续满足完整 changed-files 覆盖门禁。reviewer 与 executor 消费同一份
 持久化契约，不从 planner transcript 重述或猜测目标。
 
-所有 WorkUnit 均有 MergeRecord 或 NoDelivery 后，TaskService 计算统一、
+所有 WorkUnit 均为 `Completed::Merged` 或 `Completed::NoDelivery` 后，TaskService 计算统一、
 transport-neutral 的综合审查门禁：`Required`、`SatisfiedByReview { reviewRoundId, reviewedHead }`、
 `NotRequiredNoDelivery` 或
 `NotRequiredSingleExecutorEquivalent { workUnitId, completionRevision, mergeRecordId }`。同一结果用于
@@ -727,7 +743,7 @@ WorkUnit resource identity。Apply 重读全部 durable 事实；任何 identity
 
 对话恢复不回退 TaskRun、WorkUnit、attempt、budget slice、continuation、Completion、Review 或
 Merge。executor 仍由 planner 通过既有 follow-up 恢复；executor 新 `TurnStarted` 后，WorkUnit 与
-Thread execution 在同一事务恢复为 `Running/Running`。root resume input 使用稳定 mail ID
+WorkUnit 在同一事务恢复为 Running。root resume input 使用稳定 mail ID
 `task-recovery:{runId}:{recoveryRevision}`，重复 recoveryId 和 mail materialization 必须幂等。
 
 恢复是可重试 saga：先提交 Thread transcript/working state/recovery marker，再在满足门禁时清除
@@ -765,7 +781,7 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 `task_complete` 要求：
 
 - 设计阶段已经 finalize；
-- 全部 WorkUnit 为 Merged 或 NoDelivery；
+- 全部 WorkUnit 为 `Completed::Merged` 或 `Completed::NoDelivery`；
 - 综合审查门禁为 `SatisfiedByReview`、`NotRequiredNoDelivery` 或
   `NotRequiredSingleExecutorEquivalent`；`Required` 以 `reviewRequired` 拒绝并说明无法复用 delivery
   review 的稳定原因；
@@ -822,7 +838,7 @@ WorkUnit 的状态机与 follow-up 处理，不得在 harness、工具 schema、
 第四次直接判定恢复循环；stale preview 的重新生成不计数。
 
 预算恢复验收只允许 debug scripted fixture 注入短 wall-clock 与短 compaction timeout；生产默认
-仍固定为 30 分钟和 120 秒。fixture 必须先观察 budget `NeedsAttention`，让当前 Planner Turn 结束
+仍固定为 30 分钟和 120 秒。fixture 必须先观察 WorkUnit 的 budget Paused，让当前 Planner Turn 结束
 并由稳定 wake 开启 fresh Turn，再向原 executor 执行 `send_message`。Driver 必须记录恢复后的
 `budgetSliceCount == 1`，并证明 WorkUnit、agent、worktree 与 branch identity 均未变化；同一隔离
 Studio 数据目录重启后还必须验证 wake、恢复消息和 continuation 没有重复物化。

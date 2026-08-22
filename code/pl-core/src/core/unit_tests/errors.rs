@@ -131,34 +131,39 @@ fn failed_turn_result_preserves_error_message() {
         ),
     );
 
-    assert_eq!(result.status, TurnResultStatus::Errored);
-    assert_eq!(
-        result.abort_reason,
-        Some(crate::turn::TurnAbortReason::ProviderError),
-    );
     assert_eq!(result.content, "partial summary");
-    assert_eq!(result.error.as_deref(), Some("provider rejected request"));
     assert_eq!(
-        result.failure.as_ref().map(|failure| failure.category),
+        result
+            .outcome
+            .failure()
+            .map(|failure| failure.message.as_str()),
+        Some("provider rejected request")
+    );
+    assert_eq!(
+        result.outcome.failure().map(|failure| failure.category),
         Some(pl_protocol::TurnFailureCategory::Provider)
     );
     assert!(matches!(
         event_rx.try_recv().unwrap(),
         AgentEvent::TracePartStarted { item }
-            if item.item_id == "turn-1-assistant"
-                && item.text_channel == Some(TraceTextChannel::Final)
-                && item.content == "partial summary"
+            if item.item_id() == "turn-1-assistant"
+                && item.text().is_some_and(|text| {
+                    text.channel() == TraceTextChannel::Final
+                        && text.content() == "partial summary"
+                })
     ));
     assert!(matches!(
         event_rx.try_recv().unwrap(),
-        AgentEvent::TracePartCompleted { item, .. }
-            if item.item_id == "turn-1-assistant"
-                && item.text_channel == Some(TraceTextChannel::Final)
-                && item.content == "partial summary"
+        AgentEvent::TracePartCompleted { item }
+            if item.item_id() == "turn-1-assistant"
+                && item.text().is_some_and(|text| {
+                    text.channel() == TraceTextChannel::Final
+                        && text.content() == "partial summary"
+                })
     ));
     assert!(matches!(
         event_rx.try_recv().unwrap(),
-        AgentEvent::TracePartFailed { item, .. } if item.item_id == "turn-1-turn"
+        AgentEvent::TracePartFailed { item } if item.item_id() == "turn-1-turn"
     ));
     assert!(matches!(
         event_rx.try_recv().unwrap(),

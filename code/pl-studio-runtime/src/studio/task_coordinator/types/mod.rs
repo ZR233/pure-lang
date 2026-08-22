@@ -1,88 +1,13 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use super::TaskFailureDisposition;
+use super::work_completion::WorkCompletionRecord;
 use super::{TaskRun, TaskRunStateKind, WorkUnit};
 
 mod merge;
 pub(crate) use merge::*;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum TaskFailureDisposition {
-    Recoverable,
-    Fatal,
-}
-
-impl TaskFailureDisposition {
-    pub(crate) fn for_turn_failure(failure: &pl_protocol::TurnFailure) -> Self {
-        use pl_protocol::{ProviderFailureKind, TurnFailureCategory};
-
-        match failure.category {
-            TurnFailureCategory::ProviderCapacity | TurnFailureCategory::Validation => {
-                Self::Recoverable
-            }
-            TurnFailureCategory::Provider
-                if failure.retry.is_retryable()
-                    || matches!(
-                        failure.provider_kind,
-                        Some(ProviderFailureKind::Capacity | ProviderFailureKind::Transport)
-                    ) =>
-            {
-                Self::Recoverable
-            }
-            TurnFailureCategory::Provider
-            | TurnFailureCategory::Tool
-            | TurnFailureCategory::Internal => Self::Fatal,
-        }
-    }
-
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Recoverable => "recoverable",
-            Self::Fatal => "fatal",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "recoverable" => Some(Self::Recoverable),
-            "fatal" => Some(Self::Fatal),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TaskFailureRecord {
-    pub(crate) id: String,
-    pub(crate) task_run_id: String,
-    pub(crate) source_thread_id: String,
-    pub(crate) source_turn_id: String,
-    pub(crate) source_agent_id: String,
-    pub(crate) source_role: String,
-    pub(crate) work_unit_id: Option<String>,
-    pub(crate) review_round_id: Option<String>,
-    pub(crate) disposition: TaskFailureDisposition,
-    pub(crate) failure: pl_protocol::TurnFailure,
-    pub(crate) resolved_at: Option<i64>,
-    pub(crate) created_at: i64,
-    pub(crate) updated_at: i64,
-}
-
-pub(crate) struct RecordTaskAgentFailure {
-    pub(crate) root_thread_id: String,
-    pub(crate) source_thread_id: String,
-    pub(crate) source_turn_id: String,
-    pub(crate) source_agent_id: String,
-    pub(crate) source_role: String,
-    pub(crate) failure: pl_protocol::TurnFailure,
-}
-
-pub(crate) struct TaskFailureSettlement {
-    pub(crate) run: TaskRun,
-    pub(crate) terminalized: bool,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,15 +19,6 @@ pub(crate) enum TaskStopOrigin {
 }
 
 impl TaskStopOrigin {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::UserRequest => "userRequest",
-            Self::PlannerDecision => "plannerDecision",
-            Self::RuntimeFailure => "runtimeFailure",
-            Self::ApplicationShutdown => "applicationShutdown",
-        }
-    }
-
     pub(crate) fn stops_root_turn(self) -> bool {
         !matches!(self, Self::PlannerDecision)
     }
@@ -193,99 +109,10 @@ pub(crate) struct CreateTaskRun {
     pub(crate) workspace_root: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum WorkUnitStatus {
-    Pending,
-    Running,
-    AwaitingCompletion,
-    ReadyForReview,
-    Reviewing,
-    ChangesRequested,
-    Approved,
-    Merged,
-    NoDelivery,
-    NeedsAttention,
-    Failed,
-    Cancelled,
-}
-
-impl WorkUnitStatus {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::AwaitingCompletion => "awaitingCompletion",
-            Self::ReadyForReview => "readyForReview",
-            Self::Reviewing => "reviewing",
-            Self::ChangesRequested => "changesRequested",
-            Self::Approved => "approved",
-            Self::Merged => "merged",
-            Self::NoDelivery => "noDelivery",
-            Self::NeedsAttention => "needsAttention",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "pending" => Some(Self::Pending),
-            "running" => Some(Self::Running),
-            "awaitingCompletion" => Some(Self::AwaitingCompletion),
-            "readyForReview" => Some(Self::ReadyForReview),
-            "reviewing" => Some(Self::Reviewing),
-            "changesRequested" => Some(Self::ChangesRequested),
-            "approved" => Some(Self::Approved),
-            "merged" => Some(Self::Merged),
-            "noDelivery" => Some(Self::NoDelivery),
-            "needsAttention" => Some(Self::NeedsAttention),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum ThreadExecutionStatus {
-    Queued,
-    Running,
-    Completed,
-    BudgetLimited,
-    Failed,
-    Cancelled,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExecutorCloseDisposition {
     PreserveForMerge,
     Discard,
-}
-
-impl ThreadExecutionStatus {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::BudgetLimited => "budgetLimited",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum ExecutorContinuationState {
-    #[default]
-    None,
-    Compacting,
-    PendingStart,
-    PlannerWakePending,
-    NeedsAttention,
 }
 
 pub(crate) const MAX_EXECUTOR_BUDGET_SLICES: u32 = 4;
@@ -352,18 +179,6 @@ pub(crate) enum ReviewVerdict {
     Failed,
 }
 
-impl ReviewVerdict {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Pass => "pass",
-            Self::ChangesRequired => "changesRequired",
-            Self::Blocked => "blocked",
-            Self::Failed => "failed",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentWorktreeDelivery {
@@ -395,77 +210,6 @@ impl TaskWorktreeDisposition {
             Self::CleanupRequested => "cleanupRequested",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum WorkCompletionKind {
-    Delivery,
-    NoDelivery,
-}
-
-impl WorkCompletionKind {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Delivery => "delivery",
-            Self::NoDelivery => "noDelivery",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "delivery" => Some(Self::Delivery),
-            "noDelivery" => Some(Self::NoDelivery),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum WorkCompletionStatus {
-    ReadyForReview,
-    ChangesRequired,
-    Approved,
-}
-
-impl WorkCompletionStatus {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadyForReview => "readyForReview",
-            Self::ChangesRequired => "changesRequired",
-            Self::Approved => "approved",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "readyForReview" => Some(Self::ReadyForReview),
-            "changesRequired" => Some(Self::ChangesRequired),
-            "approved" => Some(Self::Approved),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WorkCompletionRecord {
-    pub(crate) id: String,
-    pub(crate) task_run_id: String,
-    pub(crate) work_unit_id: String,
-    pub(crate) executor_agent_id: String,
-    pub(crate) revision: u32,
-    pub(crate) kind: WorkCompletionKind,
-    pub(crate) status: WorkCompletionStatus,
-    pub(crate) base_commit: String,
-    pub(crate) head_commit: Option<String>,
-    pub(crate) changed_files: Vec<String>,
-    pub(crate) verification_summary: String,
-    pub(crate) worktree_path: String,
-    pub(crate) branch: String,
-    pub(crate) created_at: i64,
-    pub(crate) updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

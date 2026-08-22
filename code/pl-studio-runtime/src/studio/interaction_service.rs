@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
-    InteractionKind, InteractionRequest, InteractionResolution, InteractionStatus,
-    PlanConfirmationResolution, ToolApprovalResolution,
+    CancelInteraction, InteractionCommand, InteractionKind, InteractionRequest,
+    InteractionResolution, InteractionStatus, PlanConfirmationResolution,
+    PlanConfirmationResolutionPayload, ReopenRecoveredInteraction, ResolvePlanConfirmation,
+    ResolveToolApproval, ResolveUserInput, ToolApprovalResolution, ToolApprovalResolutionPayload,
+    UserInputResolution,
 };
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -23,7 +26,7 @@ impl InteractionCancelScope {
     fn includes(self, interaction: &InteractionRequest) -> bool {
         match self {
             Self::All => true,
-            Self::ToolApprovalOnly => interaction.kind == InteractionKind::ToolApproval,
+            Self::ToolApprovalOnly => interaction.kind() == InteractionKind::ToolApproval,
         }
     }
 }
@@ -75,15 +78,20 @@ impl InteractionService {
         emitter: InteractionEmitter,
     ) -> Result<InteractionRequest> {
         anyhow::ensure!(
-            interaction.kind == InteractionKind::UserInput
-                && interaction.status == InteractionStatus::Cancelled,
+            interaction.kind() == InteractionKind::UserInput
+                && interaction.status() == InteractionStatus::Cancelled,
             "only a cancelled user input can be recovered"
         );
         let now = unix_seconds();
-        interaction.status = InteractionStatus::Pending;
-        interaction.updated_at = now;
-        interaction.resolved_at = None;
-        interaction.resolution = None;
+        let decision = interaction.decide(InteractionCommand::ReopenRecovered(
+            ReopenRecoveredInteraction {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id: format!("recovery:{}", interaction.interaction_id),
+                reopened_at: now,
+            },
+        ))?;
+        interaction.apply(decision, now);
         self.persist_and_emit(interaction.clone(), emitter).await?;
         Ok(interaction)
     }
@@ -99,20 +107,16 @@ impl InteractionService {
             .read_interaction(interaction_id)
             .await?
             .context("interaction not found")?;
-        if interaction.status != InteractionStatus::Pending {
+        if interaction.status() != InteractionStatus::Pending {
             return Ok(interaction);
         }
-        if !resolution_matches_kind(&interaction.kind, &resolution) {
-            anyhow::bail!("interaction resolution kind mismatch");
-        }
         let now = unix_seconds();
-        interaction.status = InteractionStatus::Resolved;
-        interaction.updated_at = now;
-        interaction.resolved_at = Some(now);
-        interaction.resolution = Some(resolution);
+        let command = resolve_command(&interaction, resolution, now)?;
+        let decision = interaction.decide(command)?;
+        interaction.apply(decision, now);
         self.persist_and_emit(interaction.clone(), emitter).await?;
         if let Some(waiter) = self.waiters.lock().await.remove(interaction_id)
-            && let Some(resolution) = interaction.resolution.clone()
+            && let Some(resolution) = interaction.resolution()
         {
             let _ = waiter.sender.send(resolution);
         }
@@ -156,12 +160,15 @@ impl InteractionService {
             if !scope.includes(&interaction) {
                 continue;
             }
-            let resolution = cancelled_resolution(&interaction.kind, reason);
             let now = unix_seconds();
-            interaction.status = InteractionStatus::Cancelled;
-            interaction.updated_at = now;
-            interaction.resolved_at = Some(now);
-            interaction.resolution = Some(resolution.clone());
+            let decision = interaction.decide(InteractionCommand::Cancel(CancelInteraction {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id: format!("cancel:{}", interaction.interaction_id),
+                reason: reason.to_string(),
+                cancelled_at: now,
+            }))?;
+            interaction.apply(decision, now);
             self.persist_and_emit(interaction.clone(), emitter.clone())
                 .await?;
             if let Some(waiter) = self
@@ -170,7 +177,9 @@ impl InteractionService {
                 .await
                 .remove(&interaction.interaction_id)
             {
-                let _ = waiter.sender.send(resolution);
+                let _ = waiter
+                    .sender
+                    .send(cancelled_resolution(interaction.kind(), reason));
             }
         }
         Ok(())
@@ -195,7 +204,7 @@ impl InteractionService {
             .insert(interaction_id.clone(), InteractionWaiter { sender })
         {
             let _ = waiter.sender.send(cancelled_resolution(
-                &request.kind,
+                request.kind(),
                 "interaction replaced by a newer request",
             ));
         }
@@ -206,11 +215,11 @@ impl InteractionService {
                 error_bytes = error.to_string().len(),
                 "failed to persist Studio interaction"
             );
-            return cancelled_resolution(&request.kind, "interaction persistence failed");
+            return cancelled_resolution(request.kind(), "interaction persistence failed");
         }
         receiver
             .await
-            .unwrap_or_else(|_| cancelled_resolution(&request.kind, "interaction channel closed"))
+            .unwrap_or_else(|_| cancelled_resolution(request.kind(), "interaction channel closed"))
     }
 
     async fn persist_and_emit(
@@ -222,36 +231,79 @@ impl InteractionService {
     }
 }
 
-pub fn resolution_matches_kind(kind: &InteractionKind, resolution: &InteractionResolution) -> bool {
+pub fn resolution_matches_kind(kind: InteractionKind, resolution: &InteractionResolution) -> bool {
     match (kind, resolution) {
-        (InteractionKind::UserInput, InteractionResolution::UserInput { .. })
-        | (InteractionKind::ToolApproval, InteractionResolution::ToolApproval { .. })
-        | (InteractionKind::PlanConfirmation, InteractionResolution::PlanConfirmation { .. }) => {
-            true
-        }
-        (InteractionKind::UserInput, InteractionResolution::ToolApproval { .. })
-        | (InteractionKind::UserInput, InteractionResolution::PlanConfirmation { .. })
-        | (InteractionKind::ToolApproval, InteractionResolution::UserInput { .. })
-        | (InteractionKind::ToolApproval, InteractionResolution::PlanConfirmation { .. })
-        | (InteractionKind::PlanConfirmation, InteractionResolution::UserInput { .. })
-        | (InteractionKind::PlanConfirmation, InteractionResolution::ToolApproval { .. }) => false,
+        (InteractionKind::UserInput, InteractionResolution::UserInput(_))
+        | (InteractionKind::ToolApproval, InteractionResolution::ToolApproval(_))
+        | (InteractionKind::PlanConfirmation, InteractionResolution::PlanConfirmation(_)) => true,
+        (InteractionKind::UserInput, InteractionResolution::ToolApproval(_))
+        | (InteractionKind::UserInput, InteractionResolution::PlanConfirmation(_))
+        | (InteractionKind::ToolApproval, InteractionResolution::UserInput(_))
+        | (InteractionKind::ToolApproval, InteractionResolution::PlanConfirmation(_))
+        | (InteractionKind::PlanConfirmation, InteractionResolution::UserInput(_))
+        | (InteractionKind::PlanConfirmation, InteractionResolution::ToolApproval(_)) => false,
     }
 }
 
-fn cancelled_resolution(kind: &InteractionKind, reason: &str) -> InteractionResolution {
+fn cancelled_resolution(kind: InteractionKind, reason: &str) -> InteractionResolution {
     match kind {
-        InteractionKind::UserInput => InteractionResolution::UserInput {
+        InteractionKind::UserInput => InteractionResolution::UserInput(UserInputResolution {
             answers: Default::default(),
-        },
-        InteractionKind::ToolApproval => InteractionResolution::ToolApproval {
-            decision: ToolApprovalResolution::Denied,
-            reason: Some(reason.to_string()),
-        },
-        InteractionKind::PlanConfirmation => InteractionResolution::PlanConfirmation {
-            decision: PlanConfirmationResolution::Dismiss,
-            content: None,
-            reason: Some(reason.to_string()),
-        },
+        }),
+        InteractionKind::ToolApproval => {
+            InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
+                decision: ToolApprovalResolution::Denied,
+                reason: Some(reason.to_string()),
+            })
+        }
+        InteractionKind::PlanConfirmation => {
+            InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
+                decision: PlanConfirmationResolution::Dismiss,
+                content: None,
+                reason: Some(reason.to_string()),
+            })
+        }
+    }
+}
+
+fn resolve_command(
+    interaction: &InteractionRequest,
+    resolution: InteractionResolution,
+    resolved_at: i64,
+) -> Result<InteractionCommand> {
+    let operation_id = format!("resolve:{}", interaction.interaction_id);
+    match (interaction.kind(), resolution) {
+        (InteractionKind::UserInput, InteractionResolution::UserInput(value)) => {
+            Ok(InteractionCommand::ResolveUserInput(ResolveUserInput {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id,
+                resolved_at,
+                answers: value.answers,
+            }))
+        }
+        (InteractionKind::ToolApproval, InteractionResolution::ToolApproval(value)) => Ok(
+            InteractionCommand::ResolveToolApproval(ResolveToolApproval {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id,
+                resolved_at,
+                decision: value.decision,
+                reason: value.reason,
+            }),
+        ),
+        (InteractionKind::PlanConfirmation, InteractionResolution::PlanConfirmation(value)) => Ok(
+            InteractionCommand::ResolvePlanConfirmation(ResolvePlanConfirmation {
+                interaction_id: interaction.interaction_id.clone(),
+                expected_revision: interaction.revision,
+                operation_id,
+                resolved_at,
+                decision: value.decision,
+                content: value.content,
+                reason: value.reason,
+            }),
+        ),
+        (_, _) => anyhow::bail!("interaction resolution kind mismatch"),
     }
 }
 
@@ -260,7 +312,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::{InteractionPayload, InteractionScope, ToolApprovalResolution, UserInputAnswer};
+    use crate::{
+        InteractionScope, ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputAnswer,
+        UserInputResolution,
+    };
     use pretty_assertions::assert_eq;
     use tokio::sync::Mutex;
 
@@ -321,50 +376,38 @@ mod tests {
     }
 
     fn user_input_interaction(id: &str) -> InteractionRequest {
-        InteractionRequest {
-            interaction_id: id.to_string(),
-            kind: InteractionKind::UserInput,
-            status: InteractionStatus::Pending,
-            scope: InteractionScope {
+        InteractionRequest::user_input(
+            id,
+            InteractionScope {
                 thread_id: String::new(),
                 turn_id: "turn-1".to_string(),
                 item_id: Some("tool-1".to_string()),
                 tool_id: Some("tool-1".to_string()),
                 agent_path: Some("/root/child".to_string()),
             },
-            payload: InteractionPayload::UserInput {
-                questions: Vec::new(),
-            },
-            created_at: 1,
-            updated_at: 1,
-            resolved_at: None,
-            resolution: None,
-        }
+            Vec::new(),
+            1,
+        )
     }
 
     fn tool_approval_interaction(session_id: &str, id: &str) -> InteractionRequest {
-        InteractionRequest {
-            interaction_id: id.to_string(),
-            kind: InteractionKind::ToolApproval,
-            status: InteractionStatus::Pending,
-            scope: InteractionScope {
+        InteractionRequest::tool_approval(
+            id,
+            InteractionScope {
                 thread_id: session_id.to_string(),
                 turn_id: "turn-1".to_string(),
                 item_id: Some(id.to_string()),
                 tool_id: Some(id.to_string()),
                 agent_path: None,
             },
-            payload: InteractionPayload::ToolApproval {
+            pl_protocol::ToolApprovalRequest {
                 name: "exec".to_string(),
                 arguments: serde_json::json!({"command": "echo hi"}),
                 working_directory: None,
                 parent_agent_id: None,
             },
-            created_at: 1,
-            updated_at: 1,
-            resolved_at: None,
-            resolution: None,
-        }
+            1,
+        )
     }
 
     #[tokio::test]
@@ -381,14 +424,14 @@ mod tests {
         assert_eq!(pending[0].scope.agent_path.as_deref(), Some("/root/child"));
         assert_eq!(wait_event_count(&events, 1).await, 1);
 
-        let resolution = InteractionResolution::UserInput {
+        let resolution = InteractionResolution::UserInput(UserInputResolution {
             answers: HashMap::from([(
                 "mode".to_string(),
                 UserInputAnswer {
                     answers: vec!["Fast".to_string()],
                 },
             )]),
-        };
+        });
         let resolved = runtime
             .resolve(
                 "ask-1",
@@ -398,7 +441,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resolved.status, InteractionStatus::Resolved);
+        assert_eq!(resolved.status(), InteractionStatus::Resolved);
         assert_eq!(waiter.await.unwrap(), resolution);
         assert!(
             store
@@ -430,15 +473,15 @@ mod tests {
         let resolution = waiter.await.unwrap();
         assert_eq!(
             resolution,
-            InteractionResolution::ToolApproval {
+            InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                 decision: ToolApprovalResolution::Denied,
                 reason: Some("interrupted by test".to_string()),
-            }
+            })
         );
 
         let stored = store.read_interaction("call-1").await.unwrap().unwrap();
-        assert_eq!(stored.status, InteractionStatus::Cancelled);
-        assert_eq!(stored.resolution, Some(resolution));
+        assert_eq!(stored.status(), InteractionStatus::Cancelled);
+        assert_eq!(stored.resolution(), None);
         assert!(
             store
                 .list_pending_interactions(&session_id)
@@ -456,13 +499,19 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut user_input = user_input_interaction("ask-1");
         user_input.scope.thread_id = session_id.clone();
-        let mut plan = user_input_interaction("plan-1");
-        plan.kind = InteractionKind::PlanConfirmation;
-        plan.scope.thread_id = session_id.clone();
-        plan.payload = InteractionPayload::PlanConfirmation {
-            plan_id: "turn-1-plan".to_string(),
-            content: "1. Inspect\n2. Implement".to_string(),
-        };
+        let plan = InteractionRequest::plan_confirmation(
+            "plan-1",
+            InteractionScope {
+                thread_id: session_id.clone(),
+                turn_id: "turn-1".to_string(),
+                item_id: Some("plan-1".to_string()),
+                tool_id: Some("plan-1".to_string()),
+                agent_path: Some("/root/child".to_string()),
+            },
+            "turn-1-plan",
+            "1. Inspect\n2. Implement",
+            1,
+        );
         let approval = tool_approval_interaction(&session_id, "approval-1");
 
         runtime
@@ -491,16 +540,10 @@ mod tests {
         let stored_approval = store.read_interaction("approval-1").await.unwrap().unwrap();
         let pending = store.list_pending_interactions(&session_id).await.unwrap();
 
-        assert_eq!(ask.status, InteractionStatus::Pending);
-        assert_eq!(stored_plan.status, InteractionStatus::Pending);
-        assert_eq!(stored_approval.status, InteractionStatus::Cancelled);
-        assert_eq!(
-            stored_approval.resolution,
-            Some(InteractionResolution::ToolApproval {
-                decision: ToolApprovalResolution::Denied,
-                reason: Some("application restarted".to_string()),
-            })
-        );
+        assert_eq!(ask.status(), InteractionStatus::Pending);
+        assert_eq!(stored_plan.status(), InteractionStatus::Pending);
+        assert_eq!(stored_approval.status(), InteractionStatus::Cancelled);
+        assert_eq!(stored_approval.resolution(), None);
         assert_eq!(pending, vec![stored_plan, ask]);
     }
 }

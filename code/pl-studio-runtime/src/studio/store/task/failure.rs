@@ -1,19 +1,21 @@
 use anyhow::{Context, Result};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    SqliteTransactionMode, TransactionOptions, TransactionTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    QueryOrder, SqliteTransactionMode, TransactionOptions, TransactionTrait, sea_query::Expr,
 };
 
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    RecordTaskAgentFailure, ReviewRoundState, ReviewVerdict, TaskCommand, TaskFailureDisposition,
-    TaskFailureRecord, TaskFailureSettlement, WorkUnitState, WorkUnitStatus,
+    RecordTaskAgentFailure, ReviewRoundCommand, ReviewRoundStateKind, TaskCommand,
+    TaskFailureCommand, TaskFailureDisposition, TaskFailureRecord, TaskFailureSettlement,
+    TaskFailureState, TaskFailureStateKind, TaskWorktreeDisposition, WorkUnitCommand,
+    WorkUnitStateKind,
 };
 
-use super::review::update_review_round_state;
-use super::work_unit::{update_work_unit_state, work_unit_state};
+use super::review::{review_round_state, update_review_round_state};
+use super::work_unit::{apply_work_unit_command, work_unit_record};
 
 impl StudioStore {
     pub(crate) async fn record_task_agent_failure(
@@ -75,7 +77,8 @@ impl StudioStore {
                 .order_by_desc(entities::review_round::Column::Round)
                 .one(&tx)
                 .await?;
-            let disposition = TaskFailureDisposition::for_turn_failure(&input.failure);
+            let state = TaskFailureState::open(input.failure.clone());
+            let disposition = state.disposition();
             let now = unix_seconds();
             let failure_model = entities::task_failure::ActiveModel {
                 id: Set(new_id("task-failure")),
@@ -86,9 +89,9 @@ impl StudioStore {
                 source_role: Set(input.source_role),
                 work_unit_id: Set(work_unit.as_ref().map(|unit| unit.id.clone())),
                 review_round_id: Set(review_round.as_ref().map(|round| round.id.clone())),
-                disposition: Set(disposition.as_str().to_string()),
-                failure_json: Set(serde_json::to_string(&input.failure)?),
-                resolved_at: Set(None),
+                state_json: Set(serde_json::to_string(&state)?),
+                state_kind: NotSet,
+                revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -158,17 +161,43 @@ impl StudioStore {
         for model in entities::task_failure::Entity::find()
             .filter(entities::task_failure::Column::SourceThreadId.eq(source_thread_id.to_string()))
             .filter(
-                entities::task_failure::Column::Disposition
-                    .eq(TaskFailureDisposition::Recoverable.as_str()),
+                entities::task_failure::Column::StateKind
+                    .eq(TaskFailureStateKind::OpenRecoverable.as_str()),
             )
-            .filter(entities::task_failure::Column::ResolvedAt.is_null())
             .all(&self.db)
             .await?
         {
-            let mut active: entities::task_failure::ActiveModel = model.into();
-            active.resolved_at = Set(Some(now));
-            active.updated_at = Set(now);
-            active.update(&self.db).await?;
+            let record = task_failure_record(model.clone())?;
+            let decision = record.decide(
+                record.revision,
+                TaskFailureCommand::Resolve {
+                    operation_id: format!(
+                        "resolve-task-failure:{}:{}",
+                        source_thread_id, record.source_turn_id
+                    ),
+                    resolved_at: now,
+                },
+            )?;
+            if !decision.changed() {
+                continue;
+            }
+            let result = entities::task_failure::Entity::update_many()
+                .col_expr(
+                    entities::task_failure::Column::StateJson,
+                    Expr::value(serde_json::to_string(&decision.next_state())?),
+                )
+                .col_expr(
+                    entities::task_failure::Column::Revision,
+                    Expr::value(model.revision.saturating_add(1)),
+                )
+                .col_expr(entities::task_failure::Column::UpdatedAt, Expr::value(now))
+                .filter(entities::task_failure::Column::Id.eq(model.id))
+                .filter(entities::task_failure::Column::Revision.eq(model.revision))
+                .exec(&self.db)
+                .await?;
+            if result.rows_affected != 1 {
+                anyhow::bail!("Task failure resolution lost its revision CAS");
+            }
         }
         Ok(())
     }
@@ -184,28 +213,57 @@ async fn settle_task_children(
         .all(tx)
         .await?
     {
-        let state = work_unit_state(&unit)?;
-        let status = state.status();
-        if matches!(status, WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery) {
+        let record = work_unit_record(unit.clone())?;
+        if record.kind() == WorkUnitStateKind::Completed {
             continue;
         }
-        let mut progress = state.into_progress();
-        progress.execution_error = Some(message.to_string());
-        update_work_unit_state(tx, unit, WorkUnitState::failed(progress)).await?;
+        apply_work_unit_command(
+            tx,
+            unit,
+            WorkUnitCommand::FailExecution {
+                operation_id: format!("task-failure:{task_run_id}"),
+                detail: message.to_string(),
+                disposition: TaskWorktreeDisposition::Protect,
+            },
+        )
+        .await?;
     }
     for round in entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id))
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in([
+            ReviewRoundStateKind::PendingDispatch.as_str(),
+            ReviewRoundStateKind::Dispatched.as_str(),
+            ReviewRoundStateKind::Running.as_str(),
+        ]))
         .all(tx)
         .await?
     {
-        let state = ReviewRoundState::failed(message.to_string(), message.to_string());
+        let current = review_round_state(&round)?;
+        let state = current
+            .decide(
+                &round.id,
+                ReviewRoundCommand::Fail {
+                    reviewer_thread_id: current.reviewer_thread_id().map(str::to_string),
+                    error: message.to_string(),
+                    summary: message.to_string(),
+                },
+            )?
+            .next_state();
         update_review_round_state(tx, round, state).await?;
     }
     Ok(())
 }
 
 fn task_failure_record(model: entities::task_failure::Model) -> Result<TaskFailureRecord> {
+    let state: TaskFailureState =
+        serde_json::from_str(&model.state_json).context("invalid stored TaskFailure state JSON")?;
+    if state.kind().as_str() != model.state_kind {
+        anyhow::bail!(
+            "stored TaskFailure state discriminator mismatch: JSON is {}, generated column is {}",
+            state.kind().as_str(),
+            model.state_kind
+        );
+    }
     Ok(TaskFailureRecord {
         id: model.id,
         task_run_id: model.task_run_id,
@@ -215,10 +273,8 @@ fn task_failure_record(model: entities::task_failure::Model) -> Result<TaskFailu
         source_role: model.source_role,
         work_unit_id: model.work_unit_id,
         review_round_id: model.review_round_id,
-        disposition: TaskFailureDisposition::from_str(&model.disposition)
-            .with_context(|| format!("invalid task failure disposition: {}", model.disposition))?,
-        failure: serde_json::from_str(&model.failure_json)?,
-        resolved_at: model.resolved_at,
+        state,
+        revision: u64::try_from(model.revision).context("TaskFailure revision is negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

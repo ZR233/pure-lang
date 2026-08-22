@@ -108,7 +108,10 @@ URL。清单与签名下载最多跟随五次重定向，重定向目标仅允�
 
 ## 4. 更新状态机与安装
 
-`pl-studio-runtime` 的 updater owner 保存带 `ObservedStateMeta` 的 last-known snapshot：
+`pl-studio-runtime` 的 updater owner 保存 canonical `UpdaterState`：Disabled、Idle、Checking、
+UpToDate、Available、Downloading、Verifying、InstallerLaunched、CheckFailed、InstallFailed。
+每个 variant 由独立 state struct 承载合法 payload；update、下载进度和 typed error 不再作为平行
+optional 字段存在：
 
 - `readUpdateState()` 只读 owner cache，不访问网络。
 - `checkStudioUpdate()` 使用编译时当前版本并返回 `UpToDate | Available`，Flutter 不传
@@ -121,10 +124,10 @@ URL。清单与签名下载最多跟随五次重定向，重定向目标仅允�
 turn/task；若 runtime 已变忙则保留验证缓存并返回 `runtimeBusy`。空闲时安全关闭 runtime，
 再使用 Inno Setup 的 silent/close/restart 参数启动安装器。
 
-检查结果持久化到现有 `app_settings` 键 `observed:studioUpdate:v1`。页面打开只显示 last-known/stale，
+检查结果持久化到现有 `app_settings` 键 `observed:studioUpdate:v1`。页面打开只显示 canonical last-known state，
 不自动检查。FRB 只公开 typed DTO 和事件：`readUpdateState()`、`checkStudioUpdate()`、
-`installStudioUpdate(expectedRevision, version, eventSink)`，以及 `Started`、`Progress`、`Verifying`、
-`InstallerLaunched`、`Failed`。Dart 不接收或解析 raw manifest JSON。
+`installStudioUpdate(expectedRevision, version, eventSink)`；安装事件直接携带完整 canonical updater
+state。Dart 不接收或解析 raw manifest JSON，也不维护第二套 install phase。
 
 更新失败不得启动任何二进制。未签名、错误签名、内容篡改、超限、长度不符、URL 越界或
 清单降级均属于终止错误；应用保留当前版本并允许用户重试检查或下载。

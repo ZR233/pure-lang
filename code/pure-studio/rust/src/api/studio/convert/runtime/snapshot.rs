@@ -5,21 +5,51 @@ use pl_studio_runtime::*;
 
 pub(crate) fn runtime_snapshot(snapshot: StudioRuntimeSnapshot) -> RuntimeSnapshot {
     RuntimeSnapshot {
-        status: match snapshot.status {
-            pl_studio_runtime::StudioRuntimeStatus::Uninitialized => {
-                BridgeRuntimeStatus::Uninitialized
+        revision: snapshot.revision,
+        state: match snapshot.state {
+            StudioRuntimeLifecycleState::Uninitialized(state) => {
+                BridgeRuntimeState::Uninitialized(BridgeRuntimeTimestamp {
+                    at: state.created_at(),
+                })
             }
-            pl_studio_runtime::StudioRuntimeStatus::Initializing => {
-                BridgeRuntimeStatus::Initializing
+            StudioRuntimeLifecycleState::Initializing(state) => {
+                BridgeRuntimeState::Initializing(BridgeRuntimeTimestamp {
+                    at: state.started_at(),
+                })
             }
-            pl_studio_runtime::StudioRuntimeStatus::Ready => BridgeRuntimeStatus::Ready,
-            pl_studio_runtime::StudioRuntimeStatus::ShuttingDown => {
-                BridgeRuntimeStatus::ShuttingDown
+            StudioRuntimeLifecycleState::Ready(state) => {
+                BridgeRuntimeState::Ready(BridgeRuntimeTimestamp {
+                    at: state.ready_at(),
+                })
             }
-            pl_studio_runtime::StudioRuntimeStatus::Stopped => BridgeRuntimeStatus::Stopped,
-            pl_studio_runtime::StudioRuntimeStatus::Failed => BridgeRuntimeStatus::Failed,
+            StudioRuntimeLifecycleState::ShuttingDown(state) => {
+                BridgeRuntimeState::ShuttingDown(BridgeRuntimeTimestamp {
+                    at: state.started_at(),
+                })
+            }
+            StudioRuntimeLifecycleState::Stopped(state) => {
+                BridgeRuntimeState::Stopped(BridgeRuntimeTimestamp {
+                    at: state.stopped_at(),
+                })
+            }
+            StudioRuntimeLifecycleState::Failed(state) => {
+                BridgeRuntimeState::Failed(BridgeFailedRuntimeState {
+                    failed_at: state.failed_at(),
+                    error: BridgeStateError {
+                        code: state.error().code.clone(),
+                        message: state.error().message.clone(),
+                        retryable: state.error().retryable,
+                    },
+                })
+            }
         },
-        updated_at: snapshot.updated_at,
-        error: snapshot.error,
+        active_turns: snapshot
+            .active_turns
+            .into_iter()
+            .map(|turn| BridgeActiveTurn {
+                thread_id: turn.thread_id,
+                turn_id: turn.turn_id,
+            })
+            .collect(),
     }
 }

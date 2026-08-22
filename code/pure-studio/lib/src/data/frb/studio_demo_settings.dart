@@ -44,16 +44,15 @@ ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
     return ProviderUsageView(
       providerId: provider.id,
       updatedAt: now,
-      status: 'missingCredential',
-      usageKind: 'unknown',
-      message: 'provider API key is not configured',
+      state: const MissingCredentialProviderUsageView(
+        message: 'provider API key is not configured',
+      ),
     );
   }
   return ProviderUsageView(
     providerId: provider.id,
     updatedAt: now,
-    status: 'unsupported',
-    usageKind: 'unsupported',
+    state: const UnsupportedProviderUsageView(),
   );
 }
 

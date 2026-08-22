@@ -1,8 +1,8 @@
 //! 工具调用与 web search 流的 trace part 投影。
 
 use pl_trace::{
-    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartKind,
-    TracePartSource, TracePartStatus, TraceToolPart,
+    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartAction, TracePartCompletion,
+    TraceToolInvocation, TraceToolOutput, TraceToolState,
 };
 
 use crate::WebSearchAction;
@@ -19,40 +19,22 @@ impl TraceProjection {
         if self.started.contains_key(&item_id) {
             return Vec::new();
         }
-        let item = TracePart {
-            turn_id: self.turn_id.clone(),
-            item_id: item_id.clone(),
-            started_sequence: self.sequence,
-            revision: 0,
-            kind: TracePartKind::Tool,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            source: TracePartSource::Model,
-            text_channel: None,
-            content: String::new(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            reasoning_content_chunks: Vec::new(),
-            tool: Some(TraceToolPart {
-                tool_call_id: item_id.clone(),
-                call_id: snapshot.call_id.clone(),
-                provider_item_id: (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
-                name: snapshot.name.clone(),
-                arguments: snapshot.arguments.clone(),
-                result: None,
-                exit_code: None,
-                timed_out: false,
-                output_artifacts: Vec::new(),
-                audit_metadata: Vec::new(),
-                output_metrics: None,
-                working_directory: None,
-                denial_reason: None,
-            }),
-            agent: None,
-            inference: None,
-            usage: None,
-        };
+        let invocation = TraceToolInvocation::new(
+            item_id.clone(),
+            snapshot.name.clone(),
+            snapshot.arguments.clone(),
+        )
+        .with_provider_identity(
+            snapshot.call_id.clone(),
+            (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+        );
+        let item = TracePart::streaming_tool(
+            self.turn_id.clone(),
+            item_id.clone(),
+            self.sequence,
+            now,
+            invocation,
+        );
         self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
         self.started.insert(item_id, item.clone());
         vec![AgentEvent::TracePartStarted { item }]
@@ -67,49 +49,40 @@ impl TraceProjection {
         let item_id =
             self.resolve_tool_item_id(vec![provider_item_id.to_string()], provider_item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
-            if item.status != TracePartStatus::Completed
-                && let Some(tool) = &mut item.tool
-            {
-                tool.arguments = web_search_arguments(&action);
-                item.updated_at = now;
+            if !item.is_terminal() {
+                let invocation = TraceToolInvocation::new(
+                    item_id.clone(),
+                    "web_search".to_string(),
+                    web_search_arguments(&action),
+                )
+                .with_provider_identity(
+                    None,
+                    (!provider_item_id.is_empty()).then(|| provider_item_id.to_string()),
+                );
+                if let Err(error) = item
+                    .apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+                {
+                    tracing::error!(%error, "failed to update web search trace invocation");
+                }
             }
             return Vec::new();
         }
-        let item = TracePart {
-            turn_id: self.turn_id.clone(),
-            item_id: item_id.clone(),
-            started_sequence: self.sequence,
-            revision: 0,
-            kind: TracePartKind::Tool,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            source: TracePartSource::Model,
-            text_channel: None,
-            content: String::new(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            reasoning_content_chunks: Vec::new(),
-            tool: Some(TraceToolPart {
-                tool_call_id: item_id.clone(),
-                call_id: None,
-                provider_item_id: (!provider_item_id.is_empty())
-                    .then(|| provider_item_id.to_string()),
-                name: "web_search".to_string(),
-                arguments: web_search_arguments(&action),
-                result: None,
-                exit_code: None,
-                timed_out: false,
-                output_metrics: None,
-                output_artifacts: Vec::new(),
-                audit_metadata: Vec::new(),
-                working_directory: None,
-                denial_reason: None,
-            }),
-            agent: None,
-            inference: None,
-            usage: None,
-        };
+        let invocation = TraceToolInvocation::new(
+            item_id.clone(),
+            "web_search".to_string(),
+            web_search_arguments(&action),
+        )
+        .with_provider_identity(
+            None,
+            (!provider_item_id.is_empty()).then(|| provider_item_id.to_string()),
+        );
+        let item = TracePart::streaming_tool(
+            self.turn_id.clone(),
+            item_id.clone(),
+            self.sequence,
+            now,
+            invocation,
+        );
         self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
         self.started.insert(item_id, item.clone());
         vec![AgentEvent::TracePartStarted { item }]
@@ -133,25 +106,35 @@ impl TraceProjection {
             "action": action,
             "results": results,
         })];
-        let changed = item
-            .tool
-            .as_ref()
-            .is_none_or(|tool| tool.arguments != arguments || tool.output_artifacts != artifacts);
-        if item.status == TracePartStatus::Completed && !changed {
+        if item.is_terminal() {
             return events;
         }
-        item.revision += 1;
-        item.status = TracePartStatus::Completed;
-        item.updated_at = unix_seconds();
-        if let Some(tool) = &mut item.tool {
-            tool.name = "web_search".to_string();
-            tool.arguments = arguments;
-            tool.output_artifacts = artifacts;
+        let invocation =
+            TraceToolInvocation::new(item_id.clone(), "web_search".to_string(), arguments)
+                .with_provider_identity(
+                    None,
+                    (!provider_item_id.is_empty()).then(|| provider_item_id.to_string()),
+                );
+        let now = unix_seconds();
+        if let Err(error) =
+            item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+        {
+            tracing::error!(%error, "failed to finalize web search invocation");
+            return events;
+        }
+        let output =
+            TraceToolOutput::new(String::new()).with_details(None, artifacts, Vec::new(), None);
+        if let Err(error) = item.apply(item.command(
+            now,
+            TracePartAction::Complete(TracePartCompletion::Tool { output }),
+        )) {
+            tracing::error!(%error, "failed to complete web search trace");
+            return events;
         }
         let item = item.clone();
         self.record(
             TraceEventKind::TracePartCompleted { item: item.clone() },
-            item.updated_at,
+            item.updated_at(),
         );
         events.push(AgentEvent::TracePartCompleted { item });
         events
@@ -165,32 +148,27 @@ impl TraceProjection {
         let now = unix_seconds();
         let item_id = self.active_tool_item_id(snapshot);
         let mut events = self.start_tool(snapshot);
-        if let Some(item) = self.started.get_mut(&item_id) {
-            item.revision += 1;
-            item.status = TracePartStatus::Streaming;
-            item.updated_at = now;
-            if let Some(tool) = &mut item.tool {
-                tool.name = snapshot.name.clone();
-                tool.arguments = snapshot.arguments.clone();
-                tool.call_id = snapshot.call_id.clone();
-                tool.provider_item_id = (!snapshot.id.is_empty()).then(|| snapshot.id.clone());
-            }
+        let Some(item) = self.started.get_mut(&item_id) else {
+            return events;
+        };
+        let invocation = TraceToolInvocation::new(
+            item_id.clone(),
+            snapshot.name.clone(),
+            snapshot.arguments.clone(),
+        )
+        .with_provider_identity(
+            snapshot.call_id.clone(),
+            (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+        );
+        if let Err(error) =
+            item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+        {
+            tracing::error!(%error, "failed to update streamed tool invocation");
+            return events;
         }
-        let revision = self
-            .started
-            .get(&item_id)
-            .map(|item| item.revision)
-            .unwrap_or_default();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id,
-            started_sequence: self.sequence,
-            revision,
-            kind: TracePartKind::Tool,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::ToolArguments { delta },
+        let trace_delta = TraceDelta::ToolArguments { delta };
+        let Ok(event) = item.delta_event(trace_delta) else {
+            return events;
         };
         self.record(
             TraceEventKind::TracePartDelta {
@@ -205,56 +183,34 @@ impl TraceProjection {
     pub(crate) fn update_tool_trace(&mut self, call: &ToolCall) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let item_id = self.active_tool_call_item_id(call);
-        let turn_id = self.turn_id.clone();
-        let sequence = self.sequence;
         let mut inserted = false;
         let item = self.started.entry(item_id.clone()).or_insert_with(|| {
             inserted = true;
-            TracePart {
-                turn_id,
-                item_id: item_id.clone(),
-                started_sequence: sequence,
-                revision: 0,
-                kind: TracePartKind::Tool,
-                status: TracePartStatus::Started,
-                created_at: now,
-                updated_at: now,
-                source: TracePartSource::Model,
-                text_channel: None,
-                content: String::new(),
-                attachments: Vec::new(),
-                thinking_chunks: Vec::new(),
-                reasoning_content_chunks: Vec::new(),
-                tool: Some(TraceToolPart {
-                    tool_call_id: item_id.clone(),
-                    call_id: Some(call.call_id.clone()),
-                    provider_item_id: (!call.id.is_empty()).then(|| call.id.clone()),
-                    name: call.name.clone(),
-                    arguments: call.payload_text(),
-                    result: None,
-                    exit_code: None,
-                    timed_out: false,
-                    output_artifacts: Vec::new(),
-                    audit_metadata: Vec::new(),
-                    output_metrics: None,
-                    working_directory: None,
-                    denial_reason: None,
-                }),
-                agent: None,
-                inference: None,
-                usage: None,
-            }
+            let invocation =
+                TraceToolInvocation::new(item_id.clone(), call.name.clone(), call.payload_text())
+                    .with_provider_identity(
+                        Some(call.call_id.clone()),
+                        (!call.id.is_empty()).then(|| call.id.clone()),
+                    );
+            TracePart::started_tool(
+                self.turn_id.clone(),
+                item_id.clone(),
+                self.sequence,
+                now,
+                invocation,
+            )
         });
-        if inserted {
-            item.status = TracePartStatus::Started;
-        }
-        item.updated_at = now;
-        if let Some(tool) = &mut item.tool {
-            tool.tool_call_id = item_id.clone();
-            tool.call_id = Some(call.call_id.clone());
-            tool.provider_item_id = Some(call.id.clone());
-            tool.name = call.name.clone();
-            tool.arguments = call.payload_text();
+        if !inserted
+            && matches!(item.tool().map(|tool| tool.state()), Some(state) if !matches!(state, TraceToolState::Succeeded(_) | TraceToolState::Failed(_) | TraceToolState::Denied(_) | TraceToolState::Cancelled(_)))
+        {
+            let invocation =
+                TraceToolInvocation::new(item_id.clone(), call.name.clone(), call.payload_text())
+                    .with_provider_identity(Some(call.call_id.clone()), Some(call.id.clone()));
+            if let Err(error) =
+                item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+            {
+                tracing::error!(%error, "failed to update canonical tool trace");
+            }
         }
         let item = item.clone();
         self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);

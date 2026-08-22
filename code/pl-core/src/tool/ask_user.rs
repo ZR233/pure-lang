@@ -5,9 +5,8 @@ use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
 use futures::FutureExt;
 use pl_protocol::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionScope, InteractionStatus, PureError, UserInputRequest, UserInputResponse,
-    UserQuestion, UserQuestionOption,
+    InteractionRequest, InteractionResolution, InteractionScope, PureError, UserInputRequest,
+    UserInputResolution, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -129,19 +128,19 @@ impl Tool for AskUserTool {
                         Some(token) => {
                             tokio::select! {
                                 resolution = callback(interaction.clone()) => resolution,
-                                _ = token.cancelled() => InteractionResolution::UserInput {
+                                _ = token.cancelled() => InteractionResolution::UserInput(UserInputResolution {
                                     answers: Default::default(),
-                                },
+                                }),
                             }
                         }
                         None => callback(interaction.clone()).await,
                     };
                     let response = match resolution {
-                        InteractionResolution::UserInput { answers } => {
-                            UserInputResponse { answers }
+                        InteractionResolution::UserInput(value) => {
+                            UserInputResponse { answers: value.answers }
                         }
-                        InteractionResolution::ToolApproval { .. }
-                        | InteractionResolution::PlanConfirmation { .. } => {
+                        InteractionResolution::ToolApproval(_)
+                        | InteractionResolution::PlanConfirmation(_) => {
                             UserInputResponse::default()
                         }
                     };
@@ -222,11 +221,9 @@ fn user_input_interaction(
     context: &ToolContext,
 ) -> InteractionRequest {
     let now = unix_seconds();
-    InteractionRequest {
-        interaction_id: request.request_id.clone(),
-        kind: InteractionKind::UserInput,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    InteractionRequest::user_input(
+        request.request_id.clone(),
+        InteractionScope {
             thread_id: String::new(),
             turn_id: turn_id.to_string(),
             item_id: Some(request.tool_id.clone()),
@@ -236,14 +233,9 @@ fn user_input_interaction(
                 .as_ref()
                 .and_then(|subagent| subagent.agent_path.clone()),
         },
-        payload: InteractionPayload::UserInput {
-            questions: request.questions.clone(),
-        },
-        created_at: now,
-        updated_at: now,
-        resolved_at: None,
-        resolution: None,
-    }
+        request.questions.clone(),
+        now,
+    )
 }
 
 #[cfg(test)]
@@ -304,14 +296,14 @@ mod tests {
             let seen_interaction = seen_interaction_for_callback.clone();
             async move {
                 *seen_interaction.lock().unwrap() = Some(interaction);
-                InteractionResolution::UserInput {
+                InteractionResolution::UserInput(UserInputResolution {
                     answers: HashMap::from([(
                         "mode".to_string(),
                         UserInputAnswer {
                             answers: vec!["Fast".to_string()],
                         },
                     )]),
-                }
+                })
             }
             .boxed()
         });
@@ -336,8 +328,11 @@ mod tests {
         );
         let interaction = seen_interaction.lock().unwrap().clone().unwrap();
         assert_eq!(interaction.interaction_id, "session-1-call-1");
-        assert_eq!(interaction.kind, InteractionKind::UserInput);
-        assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(interaction.kind(), pl_protocol::InteractionKind::UserInput);
+        assert_eq!(
+            interaction.status(),
+            pl_protocol::InteractionStatus::Pending
+        );
         assert_eq!(
             interaction.scope,
             InteractionScope {
@@ -348,21 +343,22 @@ mod tests {
                 agent_path: None,
             }
         );
+        let pl_protocol::InteractionContent::UserInput(user_input) = interaction.content else {
+            panic!("interaction must be user input");
+        };
         assert_eq!(
-            interaction.payload,
-            InteractionPayload::UserInput {
-                questions: vec![UserQuestion {
-                    id: "mode".to_string(),
-                    header: "Mode".to_string(),
-                    question: "Which mode?".to_string(),
-                    is_other: false,
-                    is_secret: false,
-                    options: Some(vec![UserQuestionOption {
-                        label: "Fast".to_string(),
-                        description: "Use the fast path.".to_string(),
-                    }]),
-                }],
-            }
+            user_input.questions(),
+            &[UserQuestion {
+                id: "mode".to_string(),
+                header: "Mode".to_string(),
+                question: "Which mode?".to_string(),
+                is_other: false,
+                is_secret: false,
+                options: Some(vec![UserQuestionOption {
+                    label: "Fast".to_string(),
+                    description: "Use the fast path.".to_string(),
+                }]),
+            }]
         );
         assert!(output.runtime_events.is_empty());
     }
@@ -372,9 +368,9 @@ mod tests {
         let callback: crate::InteractionCallback = Arc::new(|_interaction| {
             async {
                 std::future::pending::<()>().await;
-                InteractionResolution::UserInput {
+                InteractionResolution::UserInput(UserInputResolution {
                     answers: Default::default(),
-                }
+                })
             }
             .boxed()
         });
@@ -422,7 +418,7 @@ mod tests {
             panic!("first runtime event must persist the interaction");
         };
         assert_eq!(interaction.interaction_id, "session-1-call-1");
-        assert_eq!(interaction.kind, InteractionKind::UserInput);
+        assert_eq!(interaction.kind(), pl_protocol::InteractionKind::UserInput);
         assert_eq!(
             output.runtime_events[1],
             crate::tool::ToolRuntimeEvent::EndTurn

@@ -76,7 +76,7 @@ fn stream_accumulator_projects_raw_reasoning_into_thinking_trace() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Thinking && trace_part_text(item) == "raw only"
+            if item.kind() == TracePartKind::Thinking && trace_part_text(item) == "raw only"
     )));
 }
 

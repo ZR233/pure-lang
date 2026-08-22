@@ -1,12 +1,12 @@
-use pl_trace::TracePartStatus;
+use super::ToolExecutionOutcome;
 
 pub(super) fn display_result_for_tool(
     tool_call: &pl_model::ToolCall,
     tool_name: &str,
     result: &str,
-    status: TracePartStatus,
+    outcome: ToolExecutionOutcome,
 ) -> String {
-    if tool_name == "request_user_input" && status == TracePartStatus::Completed {
+    if tool_name == "request_user_input" && outcome == ToolExecutionOutcome::Succeeded {
         return redact_user_input_display_result(&tool_call.arguments_for_tool(), result);
     }
     result.to_string()

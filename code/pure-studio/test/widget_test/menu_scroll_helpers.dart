@@ -30,7 +30,7 @@ List<ThreadItemView> _scrollItems(
   final now = DateTime.fromMillisecondsSinceEpoch(0);
   return [
     for (var index = startIndex; index < startIndex + count; index++)
-      ThreadItemView(
+      _threadItemFixture(
         id: '$threadId-item-$index',
         threadId: threadId,
         turnId: '$threadId-turn-$index',

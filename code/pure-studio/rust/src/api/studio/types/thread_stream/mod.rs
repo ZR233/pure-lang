@@ -4,6 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod item;
+
+pub use item::*;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgeThreadSubscriptionUpdate {
     Snapshot {
@@ -25,28 +29,28 @@ pub struct BridgeThreadNotificationEnvelope {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgeThreadNotification {
     TurnStarted {
-        turn: BridgeTurn,
+        turn: Box<BridgeTurn>,
     },
     TurnUpdated {
-        turn: BridgeTurn,
+        turn: Box<BridgeTurn>,
     },
     TurnCompleted {
-        turn: BridgeTurn,
+        turn: Box<BridgeTurn>,
     },
     ItemStarted {
-        item: BridgeThreadItem,
+        item: Box<BridgeThreadItem>,
     },
     ItemDelta {
-        delta: BridgeThreadItemDelta,
+        delta: Box<BridgeThreadItemDelta>,
     },
     ItemCompleted {
-        item: BridgeThreadItem,
+        item: Box<BridgeThreadItem>,
     },
     InteractionChanged {
-        interaction: BridgeInteractionRequest,
+        interaction: Box<BridgeInteractionRequest>,
     },
     ThreadRuntimeUpdated {
-        runtime: BridgeThreadRuntimeSnapshot,
+        runtime: Box<BridgeThreadRuntimeSnapshot>,
     },
     Lagged {
         dropped: u64,
@@ -101,22 +105,23 @@ pub enum BridgeThreadMode {
 #[serde(rename_all = "camelCase")]
 pub enum BridgeThreadStatus {
     Idle,
+    Queued,
     Running,
-    Waiting,
-    Completed,
-    Failed,
+    WaitingTool,
+    WaitingInteraction,
+    Cancelling,
+    Closing,
     Closed,
+    Faulted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeTurn {
     pub id: String,
     pub thread_id: String,
+    pub revision: u64,
     pub state: BridgeTurnState,
-    pub failure: Option<BridgeTurnFailureDto>,
-    pub started_at: Option<i64>,
     pub updated_at: i64,
-    pub completed_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,11 +137,35 @@ pub struct BridgeTurnFailureDto {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeTurnState {
-    Queued,
-    InProgress { phase: BridgeTurnPhase },
-    Completed,
-    Failed { reason: String },
-    Interrupted { reason: String },
+    Queued {
+        queued_at: i64,
+    },
+    Running {
+        started_at: i64,
+        phase: BridgeTurnPhase,
+    },
+    Completed {
+        started_at: Option<i64>,
+        completed_at: i64,
+        completion: BridgeTurnCompletion,
+    },
+    Cancelled {
+        started_at: Option<i64>,
+        requested_at: i64,
+        completed_at: i64,
+        cause: BridgeTurnCancellationCause,
+    },
+    Failed {
+        started_at: Option<i64>,
+        completed_at: i64,
+        failure: BridgeTurnFailureDto,
+    },
+    BudgetLimited {
+        started_at: Option<i64>,
+        completed_at: i64,
+        limit: BridgeTurnBudgetLimit,
+        rollover: BridgeTurnRolloverOutcome,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,111 +178,51 @@ pub enum BridgeTurnPhase {
     Persisting,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct BridgeThreadItem {
-    pub id: String,
-    pub thread_id: String,
-    pub turn_id: String,
-    pub ordinal: u64,
-    pub revision: u64,
-    pub status: BridgeThreadItemStatus,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub completed_at: Option<i64>,
-    pub error: Option<String>,
-    pub content: BridgeThreadItemContent,
-    pub usage: Option<BridgeTokenUsageSnapshot>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum BridgeThreadItemContent {
-    UserMessage {
-        text: String,
-        attachments: Vec<BridgeThreadAttachment>,
-    },
-    AgentMessage {
-        channel: BridgeAgentMessageChannel,
-        text: String,
-    },
-    Reasoning {
-        summary: Vec<String>,
-        content: Vec<String>,
-    },
-    Plan {
-        content: String,
-    },
-    ToolCall {
-        tool: BridgeThreadToolCall,
-    },
-    File {
-        path: String,
-        media_type: Option<String>,
-    },
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeAgentMessageChannel {
-    Commentary,
-    Final,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeThreadItemStatus {
-    Started,
-    Streaming,
-    AwaitingApproval,
-    Approved,
-    Denied,
-    Running,
-    Completed,
-    Failed,
-    Interrupted,
-    BudgetLimited,
+pub enum BridgeTurnCompletion {
+    Normal,
+    InteractionRequested,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeThreadAttachment {
-    pub id: String,
-    pub media_type: String,
-    pub filename: Option<String>,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    pub byte_size: u64,
-    pub data_url: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct BridgeThreadToolCall {
-    pub tool_call_id: String,
-    pub call_id: Option<String>,
-    pub provider_item_id: Option<String>,
-    pub name: String,
-    pub arguments: String,
-    pub result: Option<String>,
-    pub output_artifacts_json: Vec<String>,
-    pub exit_code: Option<i32>,
-    pub timed_out: bool,
-    pub working_directory: Option<String>,
-    pub denial_reason: Option<String>,
+pub enum BridgeTurnCancellationCause {
+    UserRequested,
+    RuntimeShutdown,
+    AgentClosed,
+    Recovery,
+    Coalesced { target_turn_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeThreadItemDelta {
-    pub item_id: String,
-    pub revision: u64,
-    pub field: BridgeThreadItemDeltaField,
-    pub delta: String,
-    pub chunk_index: Option<u32>,
+pub enum BridgeTurnRolloverOutcome {
+    NotAttempted,
+    Succeeded,
+    Failed { error: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurnBudgetLimit {
+    pub kind: BridgeTurnBudgetLimitKind,
+    pub usage: BridgeTurnBudgetUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeThreadItemDeltaField {
-    Text,
-    ReasoningSummary,
-    ReasoningContent,
-    PlanContent,
-    ToolArguments,
-    ToolResult,
+pub enum BridgeTurnBudgetLimitKind {
+    ModelStep,
+    ToolCall,
+    Wait,
+    WallClock,
+    AgentCount,
+    AgentDepth,
+    Finalization,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeTurnBudgetUsage {
+    pub model_steps: u32,
+    pub tool_calls: u32,
+    pub wait_calls: u32,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,29 +285,11 @@ pub enum BridgePromptPrefixChangedReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeInteractionRequest {
     pub interaction_id: String,
-    pub kind: BridgeInteractionKind,
-    pub status: BridgeInteractionStatus,
     pub scope: BridgeInteractionScope,
-    pub payload: BridgeInteractionPayload,
+    pub revision: u64,
+    pub content: BridgeInteractionContent,
     pub created_at: i64,
     pub updated_at: i64,
-    pub resolved_at: Option<i64>,
-    pub resolution: Option<BridgeInteractionResolution>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeInteractionKind {
-    UserInput,
-    ToolApproval,
-    PlanConfirmation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeInteractionStatus {
-    Pending,
-    Resolved,
-    Cancelled,
-    Expired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -351,19 +302,88 @@ pub struct BridgeInteractionScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BridgeInteractionPayload {
+pub enum BridgeInteractionContent {
     UserInput {
         questions: Vec<BridgeUserQuestion>,
+        state: BridgeUserInputInteractionState,
     },
     ToolApproval {
         name: String,
         arguments_json: String,
         working_directory: Option<String>,
         parent_agent_id: Option<String>,
+        state: BridgeToolApprovalInteractionState,
     },
     PlanConfirmation {
         plan_id: String,
         content: String,
+        state: BridgePlanConfirmationInteractionState,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeUserInputInteractionState {
+    Pending {
+        operation_id: String,
+    },
+    Resolved {
+        operation_id: String,
+        resolved_at: i64,
+        answers: Vec<BridgeUserInputAnswer>,
+    },
+    Cancelled {
+        operation_id: String,
+        cancelled_at: i64,
+        reason: String,
+    },
+    Expired {
+        operation_id: String,
+        expired_at: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeToolApprovalInteractionState {
+    Pending {
+        operation_id: String,
+    },
+    Resolved {
+        operation_id: String,
+        resolved_at: i64,
+        decision: BridgeToolApprovalResolution,
+        reason: Option<String>,
+    },
+    Cancelled {
+        operation_id: String,
+        cancelled_at: i64,
+        reason: String,
+    },
+    Expired {
+        operation_id: String,
+        expired_at: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgePlanConfirmationInteractionState {
+    Pending {
+        operation_id: String,
+    },
+    Resolved {
+        operation_id: String,
+        resolved_at: i64,
+        decision: BridgePlanConfirmationResolution,
+        content: Option<String>,
+        reason: Option<String>,
+    },
+    Cancelled {
+        operation_id: String,
+        cancelled_at: i64,
+        reason: String,
+    },
+    Expired {
+        operation_id: String,
+        expired_at: i64,
     },
 }
 

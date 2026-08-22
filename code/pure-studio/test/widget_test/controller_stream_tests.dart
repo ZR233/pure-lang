@@ -92,9 +92,9 @@ void registerControllerStreamTests() {
     () async {
       final staleTask = TaskRuntimeView(
         runId: 'task-stale',
-        state: TaskStateView.facts(
-          kind: TaskStateKind.implementing,
+        state: const ImplementingTaskStateView(
           generation: 1,
+          design: TaskFinalizedDesignView('test design'),
         ),
         revision: 0,
         workUnits: [],
@@ -112,7 +112,7 @@ void registerControllerStreamTests() {
       final api = _FakeStudioApi(initial);
       api.selectProjectStates['project-b'] = _twoProjectState(
         selectedProjectId: 'project-b',
-      ).copyWith(taskDirectory: const TaskDirectoryState());
+      ).copyWith(taskDirectory: TaskDirectoryState());
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
@@ -150,8 +150,9 @@ void registerControllerStreamTests() {
           revision: 1,
           activeTurn: _testTurn(
             threadId: 'session-1',
-            state: const StudioTurnState.inProgress(
-              StudioTurnActivity.thinking,
+            state: const RunningStudioTurnState(
+              startedAt: 1,
+              activity: StudioTurnActivity.thinking,
             ),
             turnId: api.submitTurnId,
           ),
@@ -179,62 +180,67 @@ void registerControllerStreamTests() {
     controller.updateComposer('session-1', 'hello');
     await controller.submitComposer('session-1');
     expect(
-      container.read(studioControllerProvider).requireValue.composer.phase,
-      ComposerSubmissionPhase.pendingStart,
+      container.read(studioControllerProvider).requireValue.composer,
+      isA<PendingStartComposerThreadState>(),
     );
 
     api.emitThreadFrame(
       _threadTurnFrame(
         threadId: 'session-1',
         workspaceRevision: 1,
-        state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.preparing,
+        ),
         turnId: api.submitTurnId,
       ),
     );
     await pumpEventQueue();
 
     expect(
-      container.read(studioControllerProvider).requireValue.composer.phase,
-      ComposerSubmissionPhase.idle,
+      container.read(studioControllerProvider).requireValue.composer,
+      isA<IdleComposerThreadState>(),
     );
   });
 
-  test(
-    'accepted Turn failure remains visible after TurnStarted cleared pending',
-    () async {
-      final initial = _emptyState();
-      final api = _FakeStudioApi(initial);
-      final container = ProviderContainer(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-      );
-      addTearDown(container.dispose);
-      final controller = container.read(studioControllerProvider.notifier);
+  test('TurnStarted clears composer correlation and later failure stays in timeline', () async {
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(studioControllerProvider.notifier);
 
-      await container.read(studioControllerProvider.future);
-      await pumpEventQueue();
-      controller.updateComposer('session-1', 'hello');
-      await controller.submitComposer('session-1');
-      api.emitThreadFrame(
-        _threadTurnFrame(
-          threadId: 'session-1',
-          workspaceRevision: 1,
-          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
-          turnId: api.submitTurnId,
+    await container.read(studioControllerProvider.future);
+    await pumpEventQueue();
+    controller.updateComposer('session-1', 'hello');
+    await controller.submitComposer('session-1');
+    api.emitThreadFrame(
+      _threadTurnFrame(
+        threadId: 'session-1',
+        workspaceRevision: 1,
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.preparing,
         ),
-      );
-      await pumpEventQueue();
-      expect(
-        container.read(studioControllerProvider).requireValue.composer.phase,
-        ComposerSubmissionPhase.idle,
-      );
+        turnId: api.submitTurnId,
+      ),
+    );
+    await pumpEventQueue();
+    expect(
+      container.read(studioControllerProvider).requireValue.composer,
+      isA<IdleComposerThreadState>(),
+    );
 
-      api.emitThreadFrame(
-        _threadTurnFrame(
-          threadId: 'session-1',
-          workspaceRevision: 2,
-          state: const StudioTurnState.failed('fallback reason'),
-          turnId: api.submitTurnId,
-          failure: const StudioTurnFailureView(
+    api.emitThreadFrame(
+      _threadTurnFrame(
+        threadId: 'session-1',
+        workspaceRevision: 2,
+        state: const FailedStudioTurnState(
+          startedAt: 1,
+          completedAt: 2,
+          failure: StudioTurnFailureView(
             category: 'provider',
             providerKind: 'openaiCompatible',
             code: 'invalid_request_error',
@@ -244,24 +250,28 @@ void registerControllerStreamTests() {
             retryAfterMs: null,
           ),
         ),
-      );
-      await pumpEventQueue();
+        turnId: api.submitTurnId,
+      ),
+    );
+    await pumpEventQueue();
 
-      final composer = container
-          .read(studioControllerProvider)
-          .requireValue
-          .composer;
-      expect(composer.phase, ComposerSubmissionPhase.idle);
-      expect(composer.error, 'Invalid schema for function skill_manage');
-    },
-  );
+    final composer = container
+        .read(studioControllerProvider)
+        .requireValue
+        .composer;
+    expect(composer, isA<IdleComposerThreadState>());
+    expect(composer.error, isNull);
+  });
 
   test('interrupt uses the exact active Turn identity', () async {
     final initial = _emptyState();
     final workspace = initial.selectedWorkspace!.copyWith(
       activeTurn: _testTurn(
         threadId: 'session-1',
-        state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.thinking,
+        ),
         turnId: 'turn-active',
       ),
     );
@@ -733,8 +743,8 @@ void registerControllerStreamTests() {
       expect(after.selectedThreadId, created.id);
       expect(after.threads.map((thread) => thread.id), contains(created.id));
       expect(
-        after.workspaceUiByThread[created.id]?.composer.phase,
-        ComposerSubmissionPhase.pendingStart,
+        after.workspaceUiByThread[created.id]?.composer,
+        isA<PendingStartComposerThreadState>(),
       );
       expect(api.threadSubscriptions.last, created.id);
     },

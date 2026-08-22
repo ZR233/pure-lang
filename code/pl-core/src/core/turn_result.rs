@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use pl_model::ModelCapabilities;
 use pl_protocol::{
     BudgetLimitKind, BudgetUsage, ErrorSeverity, ProviderFailureKind, PureError, RetryDisposition,
-    TurnFailure, TurnFailureCategory,
+    TurnCancellationCause, TurnFailure, TurnFailureCategory, TurnOutcome, TurnRolloverOutcome,
 };
-use pl_trace::{AgentEvent, TracePartStatus};
+use pl_trace::AgentEvent;
 
 use crate::trace::TraceRecorder;
-use crate::turn::{ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, TurnResultStatus};
+use crate::turn::{ToolExecutionMode, TurnOptions, TurnResult};
 
 pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
@@ -134,9 +134,9 @@ pub(super) fn interrupted_turn_result(
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TracePartStatus::Interrupted);
-    item.content = content.clone();
-    recorder.fail_item(item, reason.clone());
+    let outcome = TurnOutcome::cancelled(TurnCancellationCause::UserRequested);
+    let item = recorder.terminal_turn_item(turn_id, &outcome);
+    recorder.fail_item(item);
     recorder.broadcast(AgentEvent::TurnInterrupted { reason });
     recorder.broadcast(AgentEvent::Done);
 
@@ -148,15 +148,7 @@ pub(super) fn interrupted_turn_result(
         last_context_tokens: None,
         context_compactions: Vec::new(),
         session_message_count,
-        status: TurnResultStatus::Aborted,
-        ended_for_interaction: false,
-        abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
-        error: None,
-        failure: None,
-        budget_limit_kind: None,
-        budget_usage: None,
-        rollover_compacted: false,
-        rollover_compaction_error: None,
+        outcome,
         trace_events: recorder.drain(),
     }
 }
@@ -185,7 +177,6 @@ pub(super) fn failed_turn_result(
         error,
         severity,
         failure,
-        TurnAbortReason::ProviderError,
     )
 }
 
@@ -200,14 +191,14 @@ pub(super) fn failed_turn_result_with_abort_reason(
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
-    failure: TurnFailure,
-    abort_reason: TurnAbortReason,
+    mut failure: TurnFailure,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TracePartStatus::Failed);
-    item.content = content.clone();
-    recorder.fail_item(item, error.clone());
+    failure.message = error.clone();
+    let outcome = TurnOutcome::failed(failure);
+    let item = recorder.terminal_turn_item(turn_id, &outcome);
+    recorder.fail_item(item);
     recorder.broadcast(AgentEvent::Error {
         message: error.clone(),
         severity,
@@ -222,15 +213,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
         last_context_tokens: None,
         context_compactions: Vec::new(),
         session_message_count,
-        status: TurnResultStatus::Errored,
-        ended_for_interaction: false,
-        abort_reason: Some(abort_reason),
-        error: Some(error),
-        failure: Some(failure),
-        budget_limit_kind: None,
-        budget_usage: None,
-        rollover_compacted: false,
-        rollover_compaction_error: None,
+        outcome,
         trace_events: recorder.drain(),
     }
 }
@@ -250,9 +233,15 @@ pub(super) fn budget_limited_turn_result(
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TracePartStatus::BudgetLimited);
-    item.content = content.clone();
-    recorder.fail_item(item, reason.clone());
+    let outcome = TurnOutcome::budget_limited(
+        pl_protocol::BudgetLimitSnapshot {
+            kind: limit_kind,
+            usage: budget_usage,
+        },
+        TurnRolloverOutcome::NotAttempted,
+    );
+    let item = recorder.terminal_turn_item(turn_id, &outcome);
+    recorder.fail_item(item);
     recorder.broadcast(AgentEvent::TurnBudgetLimited {
         reason,
         limit_kind,
@@ -268,15 +257,7 @@ pub(super) fn budget_limited_turn_result(
         last_context_tokens: None,
         context_compactions: Vec::new(),
         session_message_count,
-        status: TurnResultStatus::Aborted,
-        ended_for_interaction: false,
-        abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
-        error: None,
-        failure: None,
-        budget_limit_kind: Some(limit_kind),
-        budget_usage: Some(budget_usage),
-        rollover_compacted: false,
-        rollover_compaction_error: None,
+        outcome,
         trace_events: recorder.drain(),
     }
 }

@@ -106,7 +106,8 @@ mod tests {
             created_at: 10,
             kind: StudioProductEventKind::ThreadDirectoryChanged(
                 pl_studio_runtime::StudioThreadDirectoryDelta {
-                    meta: pl_protocol::ObservedStateMeta::ready(3, 10),
+                    revision: 3,
+                    updated_at: 10,
                     upserted: Vec::new(),
                     removed: Vec::new(),
                 },
@@ -119,7 +120,8 @@ mod tests {
         assert_eq!(
             envelope.payload,
             BridgeProductEventPayload::ThreadDirectoryChanged(super::BridgeThreadDirectoryDelta {
-                meta: pl_protocol::ObservedStateMeta::ready(3, 10).into(),
+                revision: 3,
+                updated_at: 10,
                 upserted: Vec::new(),
                 removed: Vec::new(),
             })

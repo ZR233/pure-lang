@@ -1,9 +1,7 @@
 use crate::studio::{InteractionService, ProductEventBus, StudioStore};
-use crate::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionScope, InteractionStatus,
-};
+use crate::{InteractionKind, InteractionRequest, InteractionScope};
 use futures::FutureExt;
-use pl_core::{AgentLifecycleState, AgentRuntimeHandle, ThreadId};
+use pl_core::{AgentRuntimeHandle, ThreadId};
 use pl_protocol::ThreadNotification;
 use pl_trace::TracePart;
 use tokio::sync::watch;
@@ -43,9 +41,9 @@ impl StudioPlanConfirmationProjector {
         self.project_plan(
             agent_id,
             thread_id,
-            &plan.turn_id,
-            &plan.item_id,
-            &plan.content,
+            plan.turn_id(),
+            plan.item_id(),
+            plan.plan().map_or("", pl_trace::TracePlanPart::content),
         )
         .await
     }
@@ -80,26 +78,19 @@ impl StudioPlanConfirmationProjector {
             return Ok(false);
         }
         let now = crate::studio::ids::unix_seconds();
-        let interaction = InteractionRequest {
+        let interaction = InteractionRequest::plan_confirmation(
             interaction_id,
-            kind: InteractionKind::PlanConfirmation,
-            status: InteractionStatus::Pending,
-            scope: InteractionScope {
+            InteractionScope {
                 thread_id: thread_id.to_string(),
                 turn_id: turn_id.to_string(),
                 item_id: Some(plan_id.to_string()),
                 tool_id: None,
                 agent_path: Some(agent_id.to_string()),
             },
-            payload: InteractionPayload::PlanConfirmation {
-                plan_id: plan_id.to_string(),
-                content: content.to_string(),
-            },
-            created_at: now,
-            updated_at: now,
-            resolved_at: None,
-            resolution: None,
-        };
+            plan_id,
+            content,
+            now,
+        );
         let runtime = self.runtime.clone();
         let thread_id = thread_id.to_string();
         let agent_path = agent_id.to_string();
@@ -187,8 +178,8 @@ impl StudioPlanConfirmationProjector {
         let snapshot = runtime
             .snapshot(pl_core::ThreadId::new(agent_id.to_string())?)
             .await?;
-        if snapshot.lifecycle != AgentLifecycleState::Active
-            || snapshot.active_turn_id.is_some()
+        if !snapshot.state.is_idle()
+            || snapshot.active_turn_id().is_some()
             || snapshot.pending_inputs != 0
         {
             return Ok(());
@@ -198,7 +189,7 @@ impl StudioPlanConfirmationProjector {
             .list_pending_interactions(thread_id)
             .await?
             .iter()
-            .any(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+            .any(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
         {
             return Ok(());
         }
@@ -214,16 +205,7 @@ impl StudioPlanConfirmationProjector {
         {
             return Ok(());
         }
-        if let Some(thread) = self.store.read_thread(thread_id).await? {
-            self.store
-                .update_thread_status(
-                    thread_id,
-                    pl_protocol::ThreadStatus::Waiting,
-                    thread.summary,
-                    None,
-                    crate::studio::ids::unix_seconds(),
-                )
-                .await?;
+        if self.store.read_thread(thread_id).await?.is_some() {
             self.product_events
                 .emit_thread_delta_for(&[thread_id.to_string()])
                 .await?;
@@ -241,7 +223,11 @@ mod tests {
     use crate::studio::{
         ChildThreadSpec, InteractionService, ProductEventBus, StudioRuntime, StudioStore,
     };
-    use pl_protocol::{ThreadItem, ThreadItemContent, ThreadItemStatus, ThreadNotification};
+    use pl_protocol::{
+        InteractionCommand, InteractionContent, InteractionStatus, PlanConfirmationResolution,
+        ResolvePlanConfirmation, ThreadContentLifecycle, ThreadItem, ThreadItemState,
+        ThreadNotification, ThreadPlanItem,
+    };
 
     use super::*;
 
@@ -320,44 +306,42 @@ mod tests {
         .unwrap();
         let framework = studio.agent_framework().await.unwrap();
         let (handle, agent_id) = studio.ensure_thread_agent(&session.id).await.unwrap();
-        let plan_item = ThreadItem {
-            id: "plan-item".to_string(),
-            thread_id: session.id.clone(),
-            turn_id: "turn-plan".to_string(),
-            ordinal: 1,
-            revision: 1,
-            status: ThreadItemStatus::Completed,
-            created_at: 1,
-            updated_at: 2,
-            completed_at: Some(2),
-            error: None,
-            content: ThreadItemContent::Plan {
-                content: "# Plan\n\nImplement the fix.".to_string(),
-            },
-            usage: None,
-        };
+        let plan_item = ThreadItem::new(
+            "plan-item".to_string(),
+            session.id.clone(),
+            "turn-plan".to_string(),
+            1,
+            1,
+            1,
+            2,
+            ThreadItemState::Plan(ThreadPlanItem::new(
+                "# Plan\n\nImplement the fix.".to_string(),
+                ThreadContentLifecycle::completed(2),
+            )),
+        );
+        let turn_state = pl_protocol::TurnState::Completed(pl_protocol::CompletedTurnState::new(
+            Some(1),
+            2,
+            pl_protocol::TurnCompletion::Normal,
+        ));
         store
             .database()
             .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
                 "INSERT INTO turns
-                 (id, thread_id, ordinal, revision, status, phase, reason, model_json,
-                  usage_json, failure_json, budget_limit_json, rollover_compacted,
-                  rollover_compaction_error, metadata_json, started_at, updated_at, completed_at)
-                 VALUES (?, ?, 1, 1, ?, NULL, ?, NULL, ?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
+                 (id, thread_id, ordinal, revision, state_json, model_json,
+                  usage_json, metadata_json, updated_at)
+                 VALUES (?, ?, 1, 1, ?, NULL, ?, ?, ?)",
                 [
                     "turn-plan".to_string().into(),
                     session.id.clone().into(),
-                    "completed".to_string().into(),
-                    Option::<String>::None.into(),
+                    serde_json::to_string(&turn_state).unwrap().into(),
                     serde_json::to_string(&pl_model::TokenUsage::default())
                         .unwrap()
                         .into(),
                     serde_json::json!({"historyPolicy": "ephemeral"})
                         .to_string()
                         .into(),
-                    1_i64.into(),
-                    2_i64.into(),
                     2_i64.into(),
                 ],
             ))
@@ -376,15 +360,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            store
-                .agent_turn_metadata(agent_id.as_str(), "turn-plan")
-                .await
-                .unwrap()
-                .unwrap()["historyPolicy"],
-            "ephemeral"
-        );
-
         framework.host().attach_runtime(handle.clone()).await;
         framework.host().attach_runtime(handle).await;
 
@@ -393,19 +368,18 @@ mod tests {
             .await
             .unwrap()
             .expect("missing plan confirmation should be recovered");
-        assert_eq!(interaction.kind, InteractionKind::PlanConfirmation);
-        assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(interaction.kind(), InteractionKind::PlanConfirmation);
+        assert_eq!(interaction.status(), InteractionStatus::Pending);
         assert_eq!(
             interaction.scope.agent_path.as_deref(),
             Some(agent_id.as_str())
         );
-        assert_eq!(
-            interaction.payload,
-            InteractionPayload::PlanConfirmation {
-                plan_id: "plan-item".to_string(),
-                content: "# Plan\n\nImplement the fix.".to_string(),
-            }
-        );
+        assert!(matches!(
+            &interaction.content,
+            InteractionContent::PlanConfirmation(value)
+                if value.plan_id() == "plan-item"
+                    && value.content() == "# Plan\n\nImplement the fix."
+        ));
         assert_eq!(
             store.list_pending_interactions(&session.id).await.unwrap(),
             vec![interaction]
@@ -416,8 +390,7 @@ mod tests {
                 .items
                 .iter()
                 .filter(|item| {
-                    item.id == "plan-item"
-                        && matches!(&item.content, ThreadItemContent::Plan { .. })
+                    item.id == "plan-item" && matches!(item.state(), ThreadItemState::Plan(_))
                 })
                 .count(),
             1
@@ -439,7 +412,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .status,
-            pl_protocol::ThreadStatus::Waiting
+            pl_protocol::ThreadStatus::WaitingInteraction
         );
 
         studio.shutdown().await;
@@ -460,33 +433,34 @@ mod tests {
             content: "# Plan\n\nAlready resolved.".to_string(),
         };
         let interaction_id = format!("plan-confirmation-{}", plan.item_id);
-        store
-            .upsert_interaction(&InteractionRequest {
-                interaction_id: interaction_id.clone(),
-                kind: InteractionKind::PlanConfirmation,
-                status: InteractionStatus::Resolved,
-                scope: InteractionScope {
-                    thread_id: thread.id.clone(),
-                    turn_id: plan.turn_id.clone(),
-                    item_id: Some(plan.item_id.clone()),
-                    tool_id: None,
-                    agent_path: Some(thread.id.clone()),
-                },
-                payload: InteractionPayload::PlanConfirmation {
-                    plan_id: plan.item_id.clone(),
-                    content: plan.content.clone(),
-                },
-                created_at: 1,
-                updated_at: 2,
-                resolved_at: Some(2),
-                resolution: Some(crate::InteractionResolution::PlanConfirmation {
-                    decision: crate::PlanConfirmationResolution::Dismiss,
+        let mut interaction = InteractionRequest::plan_confirmation(
+            interaction_id.clone(),
+            InteractionScope {
+                thread_id: thread.id.clone(),
+                turn_id: plan.turn_id.clone(),
+                item_id: Some(plan.item_id.clone()),
+                tool_id: None,
+                agent_path: Some(thread.id.clone()),
+            },
+            plan.item_id.clone(),
+            plan.content.clone(),
+            1,
+        );
+        let decision = interaction
+            .decide(InteractionCommand::ResolvePlanConfirmation(
+                ResolvePlanConfirmation {
+                    interaction_id: interaction_id.clone(),
+                    expected_revision: interaction.revision,
+                    operation_id: "resolve-plan".to_string(),
+                    resolved_at: 2,
+                    decision: PlanConfirmationResolution::Dismiss,
                     content: None,
                     reason: None,
-                }),
-            })
-            .await
+                },
+            ))
             .unwrap();
+        interaction.apply(decision, 2);
+        store.upsert_interaction(&interaction).await.unwrap();
         let (_runtime_tx, runtime_rx) = watch::channel(None);
         let projector = StudioPlanConfirmationProjector::new(
             store.clone(),
@@ -508,7 +482,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(interaction.status, InteractionStatus::Resolved);
+        assert_eq!(interaction.status(), InteractionStatus::Resolved);
         assert!(
             store
                 .list_pending_interactions(&thread.id)

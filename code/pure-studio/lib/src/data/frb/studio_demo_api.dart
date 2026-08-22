@@ -73,23 +73,15 @@ class DemoStudioApi implements StudioApi {
       await Future<void>.delayed(shutdownPhaseDelay);
       if (phase == StudioShutdownPhase.flushingPersistence) {
         _emitShutdownProgress(
-          const StudioShutdownProgress(
-            phase: StudioShutdownPhase.flushingPersistence,
-            pendingCommits: 3,
-          ),
+          const FlushingPersistenceProgress(pendingCommits: 3),
         );
         await Future<void>.delayed(shutdownPhaseDelay);
         _emitShutdownProgress(
-          const StudioShutdownProgress(
-            phase: StudioShutdownPhase.flushingPersistence,
-            pendingCommits: 0,
-          ),
+          const FlushingPersistenceProgress(pendingCommits: 0),
         );
         continue;
       }
-      _emitShutdownProgress(
-        StudioShutdownProgress(phase: phase, pendingCommits: 0),
-      );
+      _emitShutdownProgress(_demoShutdownProgress(phase));
     }
     await _shutdownEvents.close();
   }
@@ -97,6 +89,20 @@ class DemoStudioApi implements StudioApi {
   void _emitShutdownProgress(StudioShutdownProgress progress) {
     _shutdownEvents.add(progress);
     StudioDriverState.publishShutdownProgress(progress);
+  }
+
+  StudioShutdownProgress _demoShutdownProgress(StudioShutdownPhase phase) {
+    return switch (phase) {
+      StudioShutdownPhase.stoppingSubscriptions =>
+        const StoppingSubscriptionsProgress(),
+      StudioShutdownPhase.cancellingTurns => const CancellingTurnsProgress(),
+      StudioShutdownPhase.flushingPersistence =>
+        const FlushingPersistenceProgress(pendingCommits: 0),
+      StudioShutdownPhase.suspendingTasks => const SuspendingTasksProgress(),
+      StudioShutdownPhase.stoppingMcp => const StoppingMcpProgress(),
+      StudioShutdownPhase.stoppingLsp => const StoppingLspProgress(),
+      StudioShutdownPhase.stopped => const StoppedProgress(),
+    };
   }
 
   @override
@@ -133,20 +139,33 @@ class DemoStudioApi implements StudioApi {
               '';
     if (_archivedProjectIds.contains(project.id)) {
       return StudioState(
-        projectDirectory: const ProjectDirectoryState(),
+        projectDirectory: ProjectDirectoryState.fromState(
+          state: _demoInitialResource(),
+        ),
         threadDirectory: const ThreadDirectoryWindow(),
-        taskDirectory: const TaskDirectoryState(),
-        agentDirectory: const AgentDirectoryState(),
+        taskDirectory: TaskDirectoryState.fromState(
+          state: _demoInitialResource(),
+        ),
+        agentDirectory: AgentDirectoryState.fromState(
+          state: _demoInitialResource(),
+        ),
         settingsState: _settingsSnapshot(
           providers: _providers ?? [defaultProvider],
           roles: _roles ?? const [],
         ),
-        recoveryState: const RecoveryStateSnapshot(),
-        mcpState: const McpStateSnapshot(),
-        lspState: const LspStateSnapshot(),
+        recoveryState: RecoveryStateSnapshot.fromState(
+          state: _demoInitialResource(),
+        ),
+        mcpState: McpStateSnapshot.fromState(state: _demoInitialResource()),
+        lspState: LspStateSnapshot.fromState(state: _demoInitialResource()),
         skillsByProject: const {},
-        providerUsageState: const ProviderUsageStateSnapshot(),
-        updaterState: const UpdaterStateSnapshot(),
+        providerUsageState: ProviderUsageStateSnapshot.fromState(
+          state: _demoInitialResource(),
+        ),
+        updaterState: UpdaterStateSnapshot.idle(
+          revision: 0,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        ),
         providerCatalog: _providerCatalog,
         selectedProjectId: null,
         selectedThreadId: null,
@@ -159,9 +178,8 @@ class DemoStudioApi implements StudioApi {
     final directory = _sortedDirectoryThreads();
     final firstPage = directory.take(directoryPageSize).toList();
     return StudioState(
-      projectDirectory: ProjectDirectoryState(
-        meta: _demoMeta(1),
-        values: [project],
+      projectDirectory: ProjectDirectoryState.fromState(
+        state: _demoReadyResource(1, [project]),
       ),
       threadDirectory: ThreadDirectoryWindow(
         threads: firstPage,
@@ -170,8 +188,12 @@ class DemoStudioApi implements StudioApi {
             : null,
         hasMore: directory.length > directoryPageSize,
       ),
-      taskDirectory: const TaskDirectoryState(),
-      agentDirectory: const AgentDirectoryState(),
+      taskDirectory: TaskDirectoryState.fromState(
+        state: _demoInitialResource(),
+      ),
+      agentDirectory: AgentDirectoryState.fromState(
+        state: _demoInitialResource(),
+      ),
       settingsState: _settingsSnapshot(
         providers: _providers ?? [defaultProvider],
         roles:
@@ -191,21 +213,30 @@ class DemoStudioApi implements StudioApi {
                 ),
             ],
       ),
-      recoveryState: const RecoveryStateSnapshot(),
-      mcpState: const McpStateSnapshot(),
-      lspState: const LspStateSnapshot(),
+      recoveryState: RecoveryStateSnapshot.fromState(
+        state: _demoInitialResource(),
+      ),
+      mcpState: McpStateSnapshot.fromState(state: _demoInitialResource()),
+      lspState: LspStateSnapshot.fromState(state: _demoInitialResource()),
       skillsByProject: {
         project.id: _demoSkillsState(project.id, _skillsRevision),
       },
-      providerUsageState: ProviderUsageStateSnapshot(
-        meta: _demoMeta(_providerUsageRevision),
-        configFingerprint: 'demo',
-        usages: [
-          for (final provider in _providers ?? [defaultProvider])
-            _demoProviderUsage(provider),
-        ],
+      providerUsageState: ProviderUsageStateSnapshot.fromState(
+        state: _demoReadyResource(
+          _providerUsageRevision,
+          ProviderUsageStateData(
+            configFingerprint: 'demo',
+            usages: [
+              for (final provider in _providers ?? [defaultProvider])
+                _demoProviderUsage(provider),
+            ],
+          ),
+        ),
       ),
-      updaterState: const UpdaterStateSnapshot(),
+      updaterState: UpdaterStateSnapshot.idle(
+        revision: 0,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      ),
       workspacesByThread: Map.unmodifiable(_workspaces),
       workspaceUiByThread: {
         for (final thread in threads)
@@ -223,16 +254,20 @@ class DemoStudioApi implements StudioApi {
     required List<ProviderSettingsView> providers,
     required List<RoleSettingsView> roles,
   }) {
-    return SettingsStateSnapshot(
-      meta: _demoMeta(_settingsRevision),
-      providers: providers,
-      defaultProviderId: providers.firstOrNull?.id,
-      roles: roles,
-      instructions: _instructions,
-      skills: _skills,
-      general: _general,
-      webSearch: _webSearch,
-      permissionMode: _permissionMode,
+    return SettingsStateSnapshot.fromState(
+      state: _demoReadyResource(
+        _settingsRevision,
+        SettingsStateData(
+          providers: providers,
+          defaultProviderId: providers.firstOrNull?.id,
+          roles: roles,
+          instructions: _instructions,
+          skills: _skills,
+          general: _general,
+          webSearch: _webSearch,
+          permissionMode: _permissionMode,
+        ),
+      ),
     );
   }
 
@@ -268,7 +303,7 @@ class DemoStudioApi implements StudioApi {
       rootThreadId: root.id,
       agentPath: 'root/reviewer',
       role: 'reviewer',
-      status: 'waiting',
+      status: ThreadStatusView.waitingInteraction,
     );
     final alternate = StudioThread(
       id: 'thread-alt',
@@ -426,12 +461,13 @@ class DemoStudioApi implements StudioApi {
           turnId: 'turn-demo',
           ordinal: 1,
           revision: 0,
-          status: 'completed',
           createdAt: agentCreatedAt,
           updatedAt: agentCreatedAt,
-          completedAt: agentCreatedAt,
-          kind: ThreadItemKind.reasoning,
-          reasoningSummary: const ['## 判断\n\nUI 只消费当前 Thread 的高频通知。'],
+          state: ThreadThinkingItemStateView(
+            summary: const ['## 判断\n\nUI 只消费当前 Thread 的高频通知。'],
+            content: const [],
+            lifecycle: CompletedThreadContentView(agentCreatedAt),
+          ),
         ),
         ThreadItemView(
           id: 'turn-demo:tool',
@@ -439,15 +475,21 @@ class DemoStudioApi implements StudioApi {
           turnId: 'turn-demo',
           ordinal: 2,
           revision: 0,
-          status: 'completed',
           createdAt: agentCreatedAt,
           updatedAt: agentCreatedAt,
-          completedAt: agentCreatedAt,
-          kind: ThreadItemKind.toolCall,
-          tool: const TimelineToolPart(
-            toolCallId: 'turn-demo:tool-call',
-            name: 'cargo test -p pl-studio-bridge',
-            result: '1 passed; bridge envelope uses typed payload.',
+          state: ThreadToolItemStateView(
+            invocation: const ThreadToolInvocationView(
+              toolCallId: 'turn-demo:tool-call',
+              name: 'cargo test -p pl-studio-bridge',
+              arguments: '',
+            ),
+            lifecycle: SucceededThreadToolView(
+              agentCreatedAt,
+              const ThreadToolOutputView(
+                result: '1 passed; bridge envelope uses typed payload.',
+                outputArtifacts: [],
+              ),
+            ),
           ),
         ),
         _messageItem(
@@ -711,7 +753,7 @@ class DemoStudioApi implements StudioApi {
     if (!thread.isRoot) {
       throw StateError('only a root Thread can change mode');
     }
-    if (thread.status != 'idle') {
+    if (thread.status != ThreadStatusView.idle) {
       throw StateError(
         'thread mode cannot change while the Thread is running or has pending input',
       );
@@ -755,7 +797,12 @@ class DemoStudioApi implements StudioApi {
         StudioBridgeEvent(
           payload: LspStateChangedPayload(
             percentage == null
-                ? LspStateSnapshot(meta: _demoMeta(_lspRevision))
+                ? LspStateSnapshot.fromState(
+                    state: _demoReadyResource(
+                      _lspRevision,
+                      const LspStateData(),
+                    ),
+                  )
                 : _demoLspState(percentage: percentage),
           ),
         ),
@@ -852,7 +899,11 @@ class DemoStudioApi implements StudioApi {
         StudioTurnView(
           turnId: turnId,
           threadId: threadId,
-          state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+          revision: 0,
+          state: RunningStudioTurnState(
+            startedAt: now.millisecondsSinceEpoch ~/ 1000,
+            activity: StudioTurnActivity.thinking,
+          ),
           updatedAt: now,
         ),
       ),
@@ -888,11 +939,13 @@ class DemoStudioApi implements StudioApi {
           turnId: turnId,
           ordinal: _nextOrdinal(threadId),
           revision: 0,
-          status: 'streaming',
           createdAt: startedAt,
           updatedAt: startedAt,
-          kind: ThreadItemKind.reasoning,
-          reasoningSummary: const ['## Inspecting the request'],
+          state: const ThreadThinkingItemStateView(
+            summary: ['## Inspecting the request'],
+            content: [],
+            lifecycle: StreamingThreadContentView(),
+          ),
         ),
       ),
     );
@@ -904,8 +957,10 @@ class DemoStudioApi implements StudioApi {
         ThreadItemDeltaView(
           itemId: reasoningId,
           revision: 1,
-          field: 'reasoning.summary',
-          delta: '\n\nChecking the live ThreadItem projection.',
+          state: const ThreadThinkingSummaryDeltaView(
+            0,
+            '\n\nChecking the live ThreadItem projection.',
+          ),
         ),
       ),
     );
@@ -914,14 +969,19 @@ class DemoStudioApi implements StudioApi {
     final liveReasoning = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == reasoningId,
     );
+    final reasoningState = liveReasoning.state as ThreadThinkingItemStateView;
+    final reasoningCompletedAt = DateTime.now();
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
         liveReasoning.copyWith(
           revision: 2,
-          status: 'completed',
-          updatedAt: DateTime.now(),
-          completedAt: DateTime.now(),
+          updatedAt: reasoningCompletedAt,
+          state: ThreadThinkingItemStateView(
+            summary: reasoningState.summary,
+            content: reasoningState.content,
+            lifecycle: CompletedThreadContentView(reasoningCompletedAt),
+          ),
         ),
       ),
     );
@@ -931,8 +991,10 @@ class DemoStudioApi implements StudioApi {
         StudioTurnView(
           turnId: turnId,
           threadId: threadId,
-          state: const StudioTurnState.inProgress(
-            StudioTurnActivity.runningTool,
+          revision: 1,
+          state: RunningStudioTurnState(
+            startedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            activity: StudioTurnActivity.runningTool,
           ),
           updatedAt: DateTime.now(),
         ),
@@ -948,16 +1010,17 @@ class DemoStudioApi implements StudioApi {
           turnId: turnId,
           ordinal: _nextOrdinal(threadId),
           revision: 0,
-          status: 'running',
           createdAt: startedAt,
           updatedAt: startedAt,
-          kind: ThreadItemKind.toolCall,
-          tool: TimelineToolPart(
-            toolCallId: '$turnId:tool-call',
-            name: 'exec',
-            arguments: jsonEncode({
-              'command': 'flutter test test/widget_test.dart',
-            }),
+          state: ThreadToolItemStateView(
+            invocation: ThreadToolInvocationView(
+              toolCallId: '$turnId:tool-call',
+              name: 'exec',
+              arguments: jsonEncode({
+                'command': 'flutter test test/widget_test.dart',
+              }),
+            ),
+            lifecycle: const RunningThreadToolView(''),
           ),
         ),
       ),
@@ -967,15 +1030,24 @@ class DemoStudioApi implements StudioApi {
     final runningTool = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == toolId,
     );
+    final runningToolState = runningTool.state as ThreadToolItemStateView;
+    final toolCompletedAt = DateTime.now();
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
         runningTool.copyWith(
           revision: 1,
-          status: 'completed',
-          updatedAt: DateTime.now(),
-          completedAt: DateTime.now(),
-          tool: runningTool.tool?.copyWith(result: 'All widget tests passed.'),
+          updatedAt: toolCompletedAt,
+          state: ThreadToolItemStateView(
+            invocation: runningToolState.invocation,
+            lifecycle: SucceededThreadToolView(
+              toolCompletedAt,
+              const ThreadToolOutputView(
+                result: 'All widget tests passed.',
+                outputArtifacts: [],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1002,7 +1074,12 @@ class DemoStudioApi implements StudioApi {
         StudioTurnView(
           turnId: turnId,
           threadId: threadId,
-          state: const StudioTurnState.completed(),
+          revision: 2,
+          state: CompletedStudioTurnState(
+            startedAt: null,
+            completedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            completion: StudioTurnCompletion.normal,
+          ),
           updatedAt: DateTime.now(),
         ),
       ),
@@ -1022,7 +1099,13 @@ class DemoStudioApi implements StudioApi {
         StudioTurnView(
           turnId: turnId,
           threadId: threadId,
-          state: const StudioTurnState.cancelled('Stopped in demo mode'),
+          revision: 2,
+          state: CancelledStudioTurnState(
+            startedAt: null,
+            requestedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            completedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            cause: const UserRequestedTurnCancellation(),
+          ),
           updatedAt: DateTime.now(),
         ),
       ),
@@ -1222,24 +1305,34 @@ class DemoStudioApi implements StudioApi {
   }
 
   McpStateSnapshot _demoMcpState() {
-    return McpStateSnapshot(meta: _demoMeta(_mcpRevision));
+    return McpStateSnapshot.fromState(
+      state: _demoReadyResource(_mcpRevision, const McpStateData()),
+    );
   }
 
   LspStateSnapshot _demoLspState({int percentage = 40}) {
-    return LspStateSnapshot(
-      meta: _demoMeta(_lspRevision),
-      activeServers: const ['rust-analyzer'],
-      servers: [
-        LspServerStateView(
-          id: 'rust-analyzer',
-          displayName: 'rust-analyzer',
-          availability: 'available',
-          activityKind: 'indexing',
-          activityTitle: 'Roots Scanned',
-          activityMessage: '${(408 * percentage / 100).round()}/408',
-          activityPercentage: percentage,
+    return LspStateSnapshot.fromState(
+      state: _demoReadyResource(
+        _lspRevision,
+        LspStateData(
+          activeServers: const ['rust-analyzer'],
+          servers: [
+            LspServerStateView(
+              id: 'rust-analyzer',
+              displayName: 'rust-analyzer',
+              state: LspAvailableState(
+                checkedAt: 0,
+                diagnosticCount: 0,
+                activity: LspIndexingActivity(
+                  title: 'Roots Scanned',
+                  message: '${(408 * percentage / 100).round()}/408',
+                  percentage: percentage,
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -1315,13 +1408,39 @@ ThreadItemView _messageItem({
     turnId: turnId,
     ordinal: ordinal,
     revision: 0,
-    status: 'completed',
     createdAt: createdAt,
     updatedAt: createdAt,
-    completedAt: createdAt,
-    kind: kind,
-    text: text,
-    channel: channel,
+    state: switch (kind) {
+      ThreadItemKind.userMessage => ThreadTextItemStateView(
+        channel: ThreadTextChannel.user,
+        text: text,
+        attachments: const [],
+        lifecycle: CompletedThreadContentView(createdAt),
+      ),
+      ThreadItemKind.agentMessage => ThreadTextItemStateView(
+        channel: channel == AgentMessageChannel.commentary
+            ? ThreadTextChannel.commentary
+            : ThreadTextChannel.finalAnswer,
+        text: text,
+        attachments: const [],
+        lifecycle: CompletedThreadContentView(createdAt),
+      ),
+      ThreadItemKind.plan => ThreadPlanItemStateView(
+        content: text,
+        lifecycle: CompletedThreadContentView(createdAt),
+      ),
+      ThreadItemKind.reasoning ||
+      ThreadItemKind.toolCall ||
+      ThreadItemKind.agent ||
+      ThreadItemKind.turn ||
+      ThreadItemKind.inference ||
+      ThreadItemKind.file ||
+      ThreadItemKind.contextCompaction => throw ArgumentError.value(
+        kind,
+        'kind',
+        'demo message helper only accepts text and plan items',
+      ),
+    },
   );
 }
 
@@ -1349,11 +1468,11 @@ ThreadWorkspace _demoAppendDelta(
   final items = [...workspace.items];
   final index = items.indexWhere((item) => item.id == delta.itemId);
   if (index >= 0) {
-    items[index] = items[index].appendDelta(
-      field: delta.field,
-      delta: delta.delta,
+    final nextItem = items[index].appendDelta(
+      delta: delta.state,
       nextRevision: delta.revision,
     );
+    if (nextItem != null) items[index] = nextItem;
   }
   return workspace.copyWith(revision: revision, items: items);
 }
@@ -1424,7 +1543,12 @@ class DriverDemoStudioApi extends DemoStudioApi {
       StudioTurnView(
         turnId: 'driver-origin-turn',
         threadId: threadId,
-        state: const StudioTurnState.completed(),
+        revision: 1,
+        state: CompletedStudioTurnState(
+          startedAt: null,
+          completedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          completion: StudioTurnCompletion.normal,
+        ),
         updatedAt: DateTime.now(),
       ),
     );
@@ -1508,14 +1632,17 @@ class DriverDemoStudioApi extends DemoStudioApi {
   }
 }
 
-ObservedStateMeta _demoMeta(int revision) {
-  return ObservedStateMeta(
+ObservedResource<T> _demoReadyResource<T>(int revision, T value) {
+  return ReadyObservedResource(
     revision: revision,
-    phase: ObservedStatePhase.ready,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(revision * 1000),
-    stale: false,
+    updatedAt: revision,
+    lastCheckedAt: null,
+    value: value,
   );
 }
+
+ObservedResource<T> _demoInitialResource<T>() =>
+    UninitializedObservedResource(updatedAt: 0);
 
 SkillsStateSnapshot _demoSkillsState(
   String projectId,
@@ -1526,12 +1653,16 @@ SkillsStateSnapshot _demoSkillsState(
     'studio-settings',
   ],
 }) {
-  return SkillsStateSnapshot(
-    meta: _demoMeta(revision),
+  return SkillsStateSnapshot.fromState(
     projectId: projectId,
-    configFingerprint: 'demo',
-    catalogRevision: revision,
-    skills: skills,
-    warnings: const [],
+    state: _demoReadyResource(
+      revision,
+      SkillsStateData(
+        configFingerprint: 'demo',
+        catalogRevision: revision,
+        skills: skills,
+        warnings: const [],
+      ),
+    ),
   );
 }

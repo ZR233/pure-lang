@@ -6,45 +6,16 @@ use serde::{Deserialize, Serialize};
 use crate::AgentRoleId;
 use crate::agent_runtime::{ThreadId, TurnId};
 
+use super::AgentState;
 use super::{mailbox::*, snapshot::*};
 
-/// agent 资源仍可执行工作的生命周期状态。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentLifecycleState {
-    Active,
-    Closing,
-    Closed,
-    Faulted,
-}
-
-/// active Turn 内部可展示的活动种类。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum ActiveKind {
+/// runtime event 转换为 AgentCommand 时使用的瞬时活动更新。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum AgentActivityUpdate {
     Running,
     WaitingTool,
-    WaitingInteraction,
-}
-
-/// agent 当前执行活动；只能从 lifecycle、active Turn 与 triggering input 派生。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentActivityState {
-    Idle,
-    Queued,
-    Active(ActiveKind),
-    Cancelling,
-}
-
-/// 单轮执行结果，不用作 agent 生命周期。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum TurnOutcomeKind {
-    Completed,
-    Cancelled,
-    Failed,
-    BudgetLimited,
+    WaitingInteraction { interaction_id: String },
 }
 
 /// agent 最新进度阶段；`ReadyForReview` 仅由产品的 durable completion 路径提升。
@@ -57,29 +28,6 @@ pub enum AgentProgressStage {
     Blocked,
     ReadyForCompletion,
     ReadyForReview,
-}
-
-/// AgentLoop 用来派生活动投影的 active Turn 输入。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActiveTurnActivity {
-    pub(crate) kind: ActiveKind,
-    pub(crate) cancelling: bool,
-}
-
-pub(crate) fn derive_activity(
-    lifecycle: AgentLifecycleState,
-    active: Option<ActiveTurnActivity>,
-    has_triggering_input: bool,
-) -> AgentActivityState {
-    if lifecycle != AgentLifecycleState::Active {
-        return AgentActivityState::Idle;
-    }
-    match active {
-        Some(active) if active.cancelling => AgentActivityState::Cancelling,
-        Some(active) => AgentActivityState::Active(active.kind),
-        None if has_triggering_input => AgentActivityState::Queued,
-        None => AgentActivityState::Idle,
-    }
 }
 
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
@@ -99,7 +47,28 @@ impl ThreadActorState {
     pub(crate) fn triggering_input_position(&self) -> Option<usize> {
         self.pending_inputs
             .iter()
-            .position(|input| matches!(input.delivery_state, MailboxDeliveryState::Pending))
+            .position(|input| input.delivery_state.is_pending())
+    }
+
+    pub(crate) fn triggering_turn_id(&self) -> Option<TurnId> {
+        let first = self.triggering_input_position()?;
+        let input = &self.pending_inputs[first];
+        let Some(key) = input.queue_coalescing_key.as_deref() else {
+            return Some(input.turn_id.clone());
+        };
+        Some(
+            self.pending_inputs
+                .iter()
+                .skip(first)
+                .take_while(|candidate| {
+                    candidate.delivery_state.is_pending()
+                        && candidate.queue_coalescing_key.as_deref() == Some(key)
+                })
+                .last()
+                .expect("the triggering input starts its coalescing group")
+                .turn_id
+                .clone(),
+        )
     }
 
     pub(crate) fn refresh_mailbox_snapshot(&mut self) {
@@ -152,9 +121,7 @@ impl AgentRegistration {
         ThreadActorState {
             snapshot: AgentSnapshot {
                 identity: self.identity,
-                lifecycle: AgentLifecycleState::Active,
-                activity: AgentActivityState::Idle,
-                active_turn_id: None,
+                state: AgentState::idle(),
                 pending_inputs: 0,
                 progress: None,
                 last_turn: None,
@@ -174,54 +141,4 @@ pub(crate) fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn derives_activity_from_lifecycle_active_turn_and_triggering_input() {
-        let active_cases = [
-            None,
-            Some(ActiveTurnActivity {
-                kind: ActiveKind::Running,
-                cancelling: false,
-            }),
-            Some(ActiveTurnActivity {
-                kind: ActiveKind::WaitingTool,
-                cancelling: false,
-            }),
-            Some(ActiveTurnActivity {
-                kind: ActiveKind::WaitingInteraction,
-                cancelling: true,
-            }),
-        ];
-        for lifecycle in [
-            AgentLifecycleState::Active,
-            AgentLifecycleState::Closing,
-            AgentLifecycleState::Closed,
-            AgentLifecycleState::Faulted,
-        ] {
-            for active in active_cases {
-                for has_triggering_input in [false, true] {
-                    let expected = if lifecycle != AgentLifecycleState::Active {
-                        AgentActivityState::Idle
-                    } else {
-                        match active {
-                            Some(active) if active.cancelling => AgentActivityState::Cancelling,
-                            Some(active) => AgentActivityState::Active(active.kind),
-                            None if has_triggering_input => AgentActivityState::Queued,
-                            None => AgentActivityState::Idle,
-                        }
-                    };
-                    assert_eq!(
-                        derive_activity(lifecycle, active, has_triggering_input),
-                        expected,
-                        "lifecycle={lifecycle:?} active={active:?} pending={has_triggering_input}"
-                    );
-                }
-            }
-        }
-    }
 }

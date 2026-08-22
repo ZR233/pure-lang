@@ -8,7 +8,9 @@ use crate::studio::ids::unix_seconds;
 use anyhow::{Error, Result};
 use pl_core::config::SkillsConfig;
 use pl_core::skill::SkillCatalog;
-use pl_protocol::{ObservedStateMeta, ObservedStatePhase, StateOperation};
+use pl_protocol::{
+    ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
+};
 use tokio::sync::{Mutex, RwLock};
 
 /// Project skills catalog 的唯一内存 owner。
@@ -22,11 +24,24 @@ pub struct SkillCatalogRuntime {
 /// 某 Project 已发布且可被未来 Turn 冻结的 catalog。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillsStateSnapshot {
-    pub meta: ObservedStateMeta,
     pub project_id: String,
+    pub state: ObservedResource<SkillsStateData>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub catalog: Arc<SkillCatalog>,
+}
+
+impl SkillsStateSnapshot {
+    pub(in crate::studio) fn catalog_or_empty(&self) -> Arc<SkillCatalog> {
+        self.state
+            .value()
+            .map(|data| data.catalog.clone())
+            .unwrap_or_else(empty_catalog)
+    }
 }
 
 impl SkillCatalogRuntime {
@@ -58,22 +73,20 @@ impl SkillCatalogRuntime {
         let _command = self.command_lock.lock().await;
         let fingerprint = skills_fingerprint(config)?;
         let previous = self.read(project_id).await;
-        let operation_id = format!(
-            "skills-discover-{}",
-            previous.meta.revision.saturating_add(1)
-        );
+        let revision = previous.state.revision();
+        let operation_id = format!("skills-discover-{}", revision.saturating_add(1));
         let running = SkillsStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: previous.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Running {
+            project_id: project_id.to_string(),
+            state: previous
+                .state
+                .decide(ObservedResourceCommand::Begin {
+                    expected_revision: revision,
                     operation: StateOperation::Discover,
                     operation_id,
-                },
-                updated_at: unix_seconds(),
-                last_checked_at: previous.meta.last_checked_at,
-                stale: previous.meta.stale,
-            },
-            ..previous.clone()
+                    started_at: unix_seconds(),
+                })
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                .next_state,
         };
         self.publish(project_id, running.clone()).await;
 
@@ -89,38 +102,46 @@ impl SkillCatalogRuntime {
             Err(error) => {
                 let checked_at = unix_seconds();
                 let failed = SkillsStateSnapshot {
-                    meta: ObservedStateMeta {
-                        revision: running.meta.revision.saturating_add(1),
-                        phase: ObservedStatePhase::Failed {
-                            operation: StateOperation::Discover,
-                            error: pl_protocol::StateError {
+                    project_id: project_id.to_string(),
+                    state: running
+                        .state
+                        .decide(ObservedResourceCommand::Fail {
+                            expected_revision: running.state.revision(),
+                            failed_at: checked_at,
+                            error: StateError {
                                 code: "skillsDiscoveryFailed".to_string(),
                                 message: format!("{error:#}"),
                                 retryable: true,
                             },
-                        },
-                        updated_at: checked_at,
-                        last_checked_at: Some(checked_at),
-                        stale: true,
-                    },
-                    ..previous
+                        })
+                        .map_err(|transition| anyhow::anyhow!(transition.to_string()))?
+                        .next_state,
                 };
                 self.publish(project_id, failed).await;
                 return Err(error);
             }
         };
+        let checked_at = unix_seconds();
+        let catalog_revision = previous
+            .state
+            .value()
+            .map_or(1, |data| data.catalog_revision.saturating_add(1));
         let snapshot = SkillsStateSnapshot {
-            meta: ObservedStateMeta {
-                revision: running.meta.revision.saturating_add(1),
-                phase: ObservedStatePhase::Ready,
-                updated_at: unix_seconds(),
-                last_checked_at: Some(unix_seconds()),
-                stale: false,
-            },
             project_id: project_id.to_string(),
-            config_fingerprint: fingerprint,
-            catalog_revision: previous.catalog_revision.saturating_add(1),
-            catalog: Arc::new(catalog),
+            state: running
+                .state
+                .decide(ObservedResourceCommand::Succeed {
+                    expected_revision: running.state.revision(),
+                    updated_at: checked_at,
+                    last_checked_at: Some(checked_at),
+                    value: SkillsStateData {
+                        config_fingerprint: fingerprint,
+                        catalog_revision,
+                        catalog: Arc::new(catalog),
+                    },
+                })
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                .next_state,
         };
         self.publish(project_id, snapshot.clone()).await;
         Ok(snapshot)
@@ -128,13 +149,24 @@ impl SkillCatalogRuntime {
 
     /// Settings 变化只标记旧 payload stale，不执行扫描。
     pub async fn mark_all_stale(&self) {
+        let _command = self.command_lock.lock().await;
         let mut states = self.states.write().await;
         let mut changed = Vec::new();
         for state in states.values_mut() {
-            state.meta.revision = state.meta.revision.saturating_add(1);
-            state.meta.updated_at = unix_seconds();
-            state.meta.stale = true;
-            changed.push(state.clone());
+            if state.state.kind() == ObservedResourceKind::Ready {
+                let Some(value) = state.state.value().cloned() else {
+                    continue;
+                };
+                let decision = state.state.decide(ObservedResourceCommand::MarkStale {
+                    expected_revision: state.state.revision(),
+                    stale_at: unix_seconds(),
+                    value,
+                });
+                if let Ok(decision) = decision {
+                    state.state = decision.next_state;
+                    changed.push(state.clone());
+                }
+            }
         }
         drop(states);
         if let Some(events) = &self.events {
@@ -167,16 +199,17 @@ impl Default for SkillCatalogRuntime {
 
 fn empty_snapshot(project_id: &str) -> SkillsStateSnapshot {
     SkillsStateSnapshot {
-        meta: ObservedStateMeta::uninitialized(unix_seconds()),
         project_id: project_id.to_string(),
-        config_fingerprint: String::new(),
-        catalog_revision: 0,
-        catalog: Arc::new(SkillCatalog {
-            project_dir: PathBuf::new(),
-            skills: Vec::new(),
-            warnings: Vec::new(),
-        }),
+        state: ObservedResource::uninitialized(unix_seconds()),
     }
+}
+
+fn empty_catalog() -> Arc<SkillCatalog> {
+    Arc::new(SkillCatalog {
+        project_dir: PathBuf::new(),
+        skills: Vec::new(),
+        warnings: Vec::new(),
+    })
 }
 
 pub(super) fn skills_fingerprint(config: &SkillsConfig) -> Result<String> {
@@ -198,7 +231,7 @@ mod tests {
         let second = runtime.read("project").await;
 
         assert_eq!(first, second);
-        assert_eq!(first.catalog_revision, 0);
+        assert_eq!(first.state.kind(), ObservedResourceKind::Uninitialized);
     }
 
     #[tokio::test]
@@ -214,16 +247,8 @@ mod tests {
 
         assert!(result.is_err());
         let failed = runtime.read("project").await;
-        assert_eq!(failed.meta.revision, previous.meta.revision + 2);
-        assert!(failed.meta.stale);
-        assert!(matches!(
-            failed.meta.phase,
-            ObservedStatePhase::Failed {
-                operation: StateOperation::Discover,
-                ..
-            }
-        ));
-        assert_eq!(failed.catalog_revision, previous.catalog_revision);
-        assert_eq!(failed.catalog, previous.catalog);
+        assert_eq!(failed.state.revision(), previous.state.revision() + 2);
+        assert_eq!(failed.state.kind(), ObservedResourceKind::Failed);
+        assert_eq!(failed.state.value(), None);
     }
 }

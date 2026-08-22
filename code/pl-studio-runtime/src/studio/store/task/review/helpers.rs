@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::studio::entity as entities;
-use crate::studio::task_coordinator::{ReviewVerdict, TaskRunStateKind};
+use crate::studio::task_coordinator::{ReviewRoundStateKind, TaskRunStateKind};
 
 use super::super::task_run_record;
 
@@ -48,7 +48,7 @@ pub(super) async fn ensure_no_pending_review(
 ) -> Result<()> {
     if entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in(active_review_kinds()))
         .one(tx)
         .await?
         .is_some()
@@ -85,7 +85,7 @@ pub(super) async fn ensure_no_pending_delivery_review(
     if entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
         .filter(entities::review_round::Column::WorkUnitId.eq(Some(work_unit_id.to_string())))
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in(active_review_kinds()))
         .one(tx)
         .await?
         .is_some()
@@ -105,7 +105,7 @@ pub(super) async fn pending_review_by_call(
         .filter(
             entities::review_round::Column::RequestedByCallId.eq(requested_by_call_id.to_string()),
         )
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in(active_review_kinds()))
         .all(tx)
         .await?;
     match rounds.as_slice() {
@@ -123,7 +123,7 @@ pub(super) async fn pending_review_for_reviewer(
     let rounds = entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
         .filter(entities::review_round::Column::ReviewerThreadId.eq(reviewer_agent_id.to_string()))
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in(active_review_kinds()))
         .all(tx)
         .await?;
     match rounds.as_slice() {
@@ -131,6 +131,14 @@ pub(super) async fn pending_review_for_reviewer(
         [] => bail!("pending review not found for reviewer"),
         _ => bail!("reviewer owns multiple pending reviews"),
     }
+}
+
+fn active_review_kinds() -> [&'static str; 3] {
+    [
+        ReviewRoundStateKind::PendingDispatch.as_str(),
+        ReviewRoundStateKind::Dispatched.as_str(),
+        ReviewRoundStateKind::Running.as_str(),
+    ]
 }
 
 pub(super) async fn finish_transaction<T>(

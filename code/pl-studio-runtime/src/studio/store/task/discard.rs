@@ -1,15 +1,14 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 
-use super::work_unit::{update_work_unit_state, work_unit_state};
+use super::work_unit::{apply_work_unit_command, work_unit_record};
 
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, ExecutorContinuationState, TaskCommand, TaskRunStateKind,
-    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitState,
-    WorkUnitStatus,
+    ExecutorCloseDisposition, TaskCommand, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
+    TaskWorktreeDisposition, WaitingReviewPhase, WorkUnitCommand, WorkUnitStateKind,
 };
 
 struct ExecutorCloseScope {
@@ -62,10 +61,19 @@ impl StudioStore {
                 .all(&tx)
                 .await?;
             for work_unit in work_units {
-                let state = work_unit_state(&work_unit)?;
-                let mut progress = state.clone().into_progress();
-                progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-                update_work_unit_state(&tx, work_unit, state.with_progress(progress)).await?;
+                let record = work_unit_record(work_unit.clone())?;
+                if !record.kind().is_terminal() {
+                    apply_work_unit_command(
+                        &tx,
+                        work_unit,
+                        WorkUnitCommand::Cancel {
+                            operation_id: format!("recovery-cleanup:{task_run_id}"),
+                            reason: "recovery cleanup requested by user".to_string(),
+                            disposition: TaskWorktreeDisposition::CleanupRequested,
+                        },
+                    )
+                    .await?;
+                }
             }
             entities::project_lease::Entity::delete_many()
                 .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -92,21 +100,18 @@ impl StudioStore {
                 return Ok(plan.disposition);
             }
 
-            let state = work_unit_state(&work_unit)?;
-            let mut progress = state.clone().into_progress();
             if plan.cancel_active {
-                progress.execution_error = Some("executor discarded by planner".to_string());
-                progress.continuation_state = ExecutorContinuationState::None;
-                progress.continuation_source_turn_id = None;
-                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
+                apply_work_unit_command(
+                    &tx,
+                    work_unit,
+                    WorkUnitCommand::Cancel {
+                        operation_id: format!("executor-close:{agent_id}"),
+                        reason: "executor discarded by planner".to_string(),
+                        disposition: TaskWorktreeDisposition::CleanupRequested,
+                    },
+                )
+                .await?;
             }
-            progress.worktree_disposition = TaskWorktreeDisposition::CleanupRequested;
-            let next_state = if plan.cancel_active {
-                WorkUnitState::cancelled(progress)
-            } else {
-                state.with_progress(progress)
-            };
-            update_work_unit_state(&tx, work_unit, next_state).await?;
 
             Ok(plan.disposition)
         }
@@ -155,61 +160,23 @@ async fn load_executor_close_scope(
 }
 
 fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<ExecutorClosePlan> {
-    let state = work_unit_state(work_unit)?;
-    let work_status = state.status();
-    let execution_status = state.execution_status();
-    if work_status == WorkUnitStatus::Approved
-        && execution_status == ThreadExecutionStatus::Completed
-    {
+    let record = work_unit_record(work_unit.clone())?;
+    if record.kind() == WorkUnitStateKind::ReviewPassed {
         return Ok(ExecutorClosePlan {
             disposition: ExecutorCloseDisposition::PreserveForMerge,
             cancel_active: false,
         });
     }
-    if matches!(
-        work_status,
-        WorkUnitStatus::ReadyForReview
-            | WorkUnitStatus::Reviewing
-            | WorkUnitStatus::ChangesRequested
-    ) {
+    if record.kind() == WorkUnitStateKind::ChangesRequired
+        || matches!(
+            record.waiting_review_phase(),
+            Some(WaitingReviewPhase::Ready(_) | WaitingReviewPhase::Reviewing(_))
+        )
+    {
         bail!("executor cannot close while its completion review is active");
     }
 
-    let terminal_pair = matches!(
-        (work_status, execution_status),
-        (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
-            | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
-            | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)
-            | (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled)
-    );
-    let active_pair = matches!(
-        (work_status, execution_status),
-        (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
-            | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
-            | (
-                WorkUnitStatus::Running,
-                ThreadExecutionStatus::BudgetLimited
-            )
-            | (
-                WorkUnitStatus::NeedsAttention,
-                ThreadExecutionStatus::BudgetLimited
-            )
-            | (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Completed
-            )
-            | (
-                WorkUnitStatus::AwaitingCompletion,
-                ThreadExecutionStatus::Cancelled
-            )
-    );
-    if !active_pair && !terminal_pair {
-        bail!(
-            "executor close lifecycle state mismatch: workUnit={}, execution={}",
-            work_status.as_str(),
-            execution_status.as_str()
-        );
-    }
+    let active_pair = !record.kind().is_terminal();
     Ok(ExecutorClosePlan {
         disposition: ExecutorCloseDisposition::Discard,
         cancel_active: active_pair,

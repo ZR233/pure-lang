@@ -1,6 +1,12 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+fn commentary(item: &pl_trace::TracePart) -> &str {
+    let text = item.text().expect("runtime commentary part");
+    assert_eq!(text.channel(), TraceTextChannel::Commentary);
+    text.content()
+}
+
 #[test]
 fn progress_emitter_sends_runtime_commentary_by_verbosity() {
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
@@ -18,12 +24,11 @@ fn progress_emitter_sends_runtime_commentary_by_verbosity() {
     let AgentEvent::TracePartCompleted { item: first } = first else {
         panic!("expected completed progress part");
     };
-    assert_eq!(first.turn_id, "turn-1");
-    assert_eq!(first.item_id, "turn-1:progress:1");
-    assert_eq!(first.started_sequence, 1);
-    assert_eq!(first.source, TracePartSource::Runtime);
-    assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(first.content, "正在准备上下文。");
+    assert_eq!(first.turn_id(), "turn-1");
+    assert_eq!(first.item_id(), "turn-1:progress:1");
+    assert_eq!(first.started_sequence(), 1);
+    assert_eq!(first.source(), TracePartSource::Runtime);
+    assert_eq!(commentary(&first), "正在准备上下文。");
 }
 
 #[test]
@@ -45,10 +50,9 @@ fn progress_milestone_enters_the_durable_trace_channel() {
     let TraceEventKind::TracePartCompleted { item } = event.kind else {
         panic!("expected completed progress part");
     };
-    assert_eq!(item.turn_id, "turn-1");
-    assert_eq!(item.source, TracePartSource::Runtime);
-    assert_eq!(item.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(item.content, "正在准备上下文。");
+    assert_eq!(item.turn_id(), "turn-1");
+    assert_eq!(item.source(), TracePartSource::Runtime);
+    assert_eq!(commentary(&item), "正在准备上下文。");
 }
 
 #[test]
@@ -78,23 +82,23 @@ fn progress_emitter_sends_tool_detail_only_when_verbose() {
     let AgentEvent::TracePartCompleted { item: first } = verbose_rx.try_recv().unwrap() else {
         panic!("expected completed progress part");
     };
-    assert_eq!(first.source, TracePartSource::Runtime);
-    assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(first.content, "工具 `exec` 已完成。");
+    assert_eq!(first.source(), TracePartSource::Runtime);
+    assert_eq!(commentary(&first), "工具 `exec` 已完成。");
 
     let AgentEvent::TracePartCompleted { item: second } = verbose_rx.try_recv().unwrap() else {
         panic!("expected completed progress part");
     };
-    assert_eq!(second.source, TracePartSource::Runtime);
-    assert_eq!(second.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(second.content, "工具结果已写入上下文，准备继续调用模型。");
+    assert_eq!(second.source(), TracePartSource::Runtime);
+    assert_eq!(
+        commentary(&second),
+        "工具结果已写入上下文，准备继续调用模型。"
+    );
 
     let AgentEvent::TracePartCompleted { item: third } = verbose_rx.try_recv().unwrap() else {
         panic!("expected completed progress part");
     };
-    assert_eq!(third.source, TracePartSource::Runtime);
-    assert_eq!(third.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(third.content, "模型请求调用 2 个工具。");
+    assert_eq!(third.source(), TracePartSource::Runtime);
+    assert_eq!(commentary(&third), "模型请求调用 2 个工具。");
 }
 
 #[test]
@@ -121,8 +125,8 @@ fn progress_emitter_scopes_item_ids_without_changing_turn_id() {
     let AgentEvent::TracePartCompleted { item: second } = second else {
         panic!("expected completed progress part");
     };
-    assert_eq!(first.turn_id, "turn-1");
-    assert_eq!(first.item_id, "turn-1:progress:1");
-    assert_eq!(second.turn_id, "turn-1");
-    assert_eq!(second.item_id, "turn-1:tool-progress:1");
+    assert_eq!(first.turn_id(), "turn-1");
+    assert_eq!(first.item_id(), "turn-1:progress:1");
+    assert_eq!(second.turn_id(), "turn-1");
+    assert_eq!(second.item_id(), "turn-1:tool-progress:1");
 }

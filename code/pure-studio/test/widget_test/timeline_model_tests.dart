@@ -66,6 +66,7 @@ void registerTimelineModelTests() {
       turnId: 'turn-1',
       ordinal: 0,
       kind: ThreadItemKind.toolCall,
+      status: 'succeeded',
       channel: null,
       tool: const TimelineToolPart(toolCallId: 'call-1', name: 'read_file'),
     );
@@ -75,6 +76,7 @@ void registerTimelineModelTests() {
       turnId: 'turn-1',
       ordinal: 1,
       kind: ThreadItemKind.toolCall,
+      status: 'succeeded',
       channel: null,
       tool: const TimelineToolPart(toolCallId: 'call-2', name: 'rg'),
     );
@@ -96,6 +98,7 @@ void registerTimelineModelTests() {
         turnId: 'turn-1',
         ordinal: 0,
         kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
         channel: null,
         tool: const TimelineToolPart(toolCallId: 'call-1', name: 'rg'),
       ),
@@ -113,6 +116,7 @@ void registerTimelineModelTests() {
         turnId: 'turn-1',
         ordinal: 2,
         kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
         channel: null,
         tool: const TimelineToolPart(toolCallId: 'call-2', name: 'test'),
       ),
@@ -153,7 +157,7 @@ void registerTimelineModelTests() {
 
   test('file Items stay outside the transcript timeline', () {
     final rows = timelineRowsFromThreadItems([
-      ThreadItemView(
+      _threadItemFixture(
         id: 'file-1',
         threadId: 'thread-1',
         turnId: 'turn-1',

@@ -1,4 +1,4 @@
-use pl_protocol::{BudgetLimitKind, ThreadNotification};
+use pl_protocol::{ThreadNotification, TurnOutcome, TurnRolloverOutcome};
 use pl_trace::{AgentEvent, TraceEvent, TracePartKind};
 use tokio_util::sync::CancellationToken;
 
@@ -8,21 +8,22 @@ use crate::agent_runtime::*;
 use crate::thread_event::{ObservedTurnEvent, observation_from_agent_event};
 use crate::{
     AgentSession, ContextCompactionTrigger, ManualContextCompactionRequest, TraceRecorder,
-    TurnResult,
 };
 
-use super::outcome::enforce_finalization;
+use super::outcome::{TurnWorkerOutcome, enforce_finalization};
 
 pub(crate) struct TurnCompletion {
     pub(crate) turn_id: TurnId,
     pub(crate) identity: std::sync::Arc<()>,
     pub(crate) start_revision: u64,
-    /// worker 正常返回时携带更新后的 session；任务被 abort 时必须保留 actor 中的原 session。
-    pub(crate) session: Option<AgentSession>,
-    pub(crate) result: std::result::Result<TurnResult, String>,
-    pub(crate) finalized_with_tool: Option<String>,
-    pub(crate) cancelled: bool,
+    pub(crate) session: TurnSessionDisposition,
+    pub(crate) worker_outcome: TurnWorkerOutcome,
     pub(crate) next_trace_sequence: u64,
+}
+
+pub(crate) enum TurnSessionDisposition {
+    Preserve,
+    Replace(AgentSession),
 }
 
 pub(crate) async fn execute_turn<H>(
@@ -58,11 +59,7 @@ where
     let mailbox = context.mailbox.clone();
     let budget_refresh = context.budget_refresh.clone();
     let mut session = context.session.clone();
-    let (result, session_commit, finalized_with_tool) = match host
-        .turn_factory()
-        .prepare_turn(context)
-        .await
-    {
+    let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
         Ok(prepared) => {
             let prepared = prepared.with_runtime_context(
                 &turn_id,
@@ -160,7 +157,11 @@ where
                     .await
                     .map_err(|error| error.to_string());
                 if let Ok(turn_result) = &mut result
-                    && turn_result.budget_limit_kind == Some(BudgetLimitKind::WallClock)
+                    && matches!(
+                        &turn_result.outcome,
+                        TurnOutcome::BudgetLimited(outcome)
+                            if outcome.limit().kind == pl_protocol::BudgetLimitKind::WallClock
+                    )
                 {
                     let rollover = prepared
                         .engine
@@ -178,11 +179,17 @@ where
                         .await;
                     match rollover {
                         Ok(snapshot) => {
-                            turn_result.rollover_compacted = true;
+                            if let TurnOutcome::BudgetLimited(outcome) = &mut turn_result.outcome {
+                                outcome.replace_rollover(TurnRolloverOutcome::Succeeded);
+                            }
                             turn_result.context_compactions.extend(snapshot);
                         }
                         Err(error) => {
-                            turn_result.rollover_compaction_error = Some(error.to_string());
+                            if let TurnOutcome::BudgetLimited(outcome) = &mut turn_result.outcome {
+                                outcome.replace_rollover(TurnRolloverOutcome::Failed {
+                                    error: error.to_string(),
+                                });
+                            }
                         }
                     }
                     turn_result.trace_events.extend(recorder.drain());
@@ -191,14 +198,10 @@ where
                 let _ = event_task.await;
                 break 'execute result;
             };
-            let finalized_with_tool = enforce_finalization(&mut result, &policy);
-            (result, session_commit, finalized_with_tool)
+            enforce_finalization(&mut result, &policy);
+            (result, session_commit)
         }
-        Err(error) => (
-            Err(error.to_string()),
-            AgentSessionCommitPolicy::Persist,
-            None,
-        ),
+        Err(error) => (Err(error.to_string()), AgentSessionCommitPolicy::Persist),
     };
     let next_trace_sequence = result
         .as_ref()
@@ -211,39 +214,39 @@ where
         identity,
         start_revision,
         session: match session_commit {
-            AgentSessionCommitPolicy::Persist => Some(session),
-            AgentSessionCommitPolicy::DiscardTurn => None,
+            AgentSessionCommitPolicy::Persist => TurnSessionDisposition::Replace(session),
+            AgentSessionCommitPolicy::DiscardTurn => TurnSessionDisposition::Preserve,
         },
-        result,
-        finalized_with_tool,
-        cancelled: cancellation.is_cancelled(),
+        worker_outcome: result.into(),
         next_trace_sequence,
     }
 }
 
-fn activity_for_event(event: &AgentEvent) -> Option<ActiveKind> {
+fn activity_for_event(event: &AgentEvent) -> Option<AgentActivityUpdate> {
     match event {
-        AgentEvent::TracePartStarted { item } => match item.kind {
-            TracePartKind::Tool | TracePartKind::Agent => Some(ActiveKind::WaitingTool),
+        AgentEvent::TracePartStarted { item } => match item.kind() {
+            TracePartKind::Tool | TracePartKind::Agent => Some(AgentActivityUpdate::WaitingTool),
             TracePartKind::Text
             | TracePartKind::Thinking
             | TracePartKind::Turn
             | TracePartKind::Inference
-            | TracePartKind::Plan => Some(ActiveKind::Running),
+            | TracePartKind::Plan => Some(AgentActivityUpdate::Running),
         },
         AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }
-        | AgentEvent::TracePartFailed { .. } => Some(ActiveKind::Running),
-        AgentEvent::InteractionChanged { event } => match event.interaction.status {
-            pl_protocol::InteractionStatus::Pending => Some(ActiveKind::WaitingInteraction),
+        | AgentEvent::TracePartFailed { .. } => Some(AgentActivityUpdate::Running),
+        AgentEvent::InteractionChanged { event } => match event.interaction.status() {
+            pl_protocol::InteractionStatus::Pending => {
+                Some(AgentActivityUpdate::WaitingInteraction {
+                    interaction_id: event.interaction.interaction_id.clone(),
+                })
+            }
             pl_protocol::InteractionStatus::Resolved
             | pl_protocol::InteractionStatus::Cancelled
-            | pl_protocol::InteractionStatus::Expired => Some(ActiveKind::Running),
+            | pl_protocol::InteractionStatus::Expired => Some(AgentActivityUpdate::Running),
         },
-        AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::AgentRuntimeUpdated { .. }
+        AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::SkillActivated { .. }
-        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }

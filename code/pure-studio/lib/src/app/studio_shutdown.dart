@@ -124,9 +124,9 @@ String shutdownPhaseLabel(
     StudioShutdownPhase.stoppingLsp => l10n.shutdownPhaseStoppingLsp,
     StudioShutdownPhase.stopped => l10n.shutdownPhaseStopped,
   };
-  if (progress.phase == StudioShutdownPhase.flushingPersistence &&
-      progress.pendingCommits > 0) {
-    return '$label（${l10n.shutdownPendingCommits(progress.pendingCommits)}）';
+  if (progress case FlushingPersistenceProgress(:final pendingCommits)
+      when pendingCommits > 0) {
+    return '$label（${l10n.shutdownPendingCommits(pendingCommits)}）';
   }
   return label;
 }

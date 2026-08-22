@@ -43,7 +43,17 @@ void registerThreadStreamTests() {
       ThreadSnapshotFrame(
         workspace: base.selectedWorkspace!.copyWith(
           revision: 3,
-          items: [started.copyWith(revision: 2, text: 'authoritative')],
+          items: [
+            _threadItemFixture(
+              id: started.id,
+              threadId: started.threadId,
+              turnId: started.turnId,
+              ordinal: started.ordinal,
+              revision: 2,
+              status: 'streaming',
+              text: 'authoritative',
+            ),
+          ],
         ),
       ),
     );
@@ -57,7 +67,7 @@ void registerThreadStreamTests() {
   test('authoritative empty Thread directory clears prior entries', () async {
     final now = DateTime.fromMillisecondsSinceEpoch(1000);
     final initial = _emptyState().copyWith(
-      projectDirectory: const ProjectDirectoryState(
+      projectDirectory: ProjectDirectoryState(
         values: [
           StudioProject(id: 'project-1', name: 'one', path: 'one'),
           StudioProject(id: 'project-2', name: 'two', path: 'two'),
@@ -162,7 +172,10 @@ void registerThreadStreamTests() {
       _threadTurnFrame(
         threadId: 'session-1',
         workspaceRevision: 1,
-        state: const StudioTurnState.inProgress(StudioTurnActivity.responding),
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.responding,
+        ),
       ),
     );
     await pumpEventQueue();
@@ -173,14 +186,21 @@ void registerThreadStreamTests() {
           .selectedWorkspace!
           .activeTurn
           ?.state,
-      const StudioTurnState.inProgress(StudioTurnActivity.responding),
+      const RunningStudioTurnState(
+        startedAt: 1,
+        activity: StudioTurnActivity.responding,
+      ),
     );
 
     api.emitThreadFrame(
       _threadTurnFrame(
         threadId: 'session-1',
         workspaceRevision: 2,
-        state: const StudioTurnState.completed(),
+        state: const CompletedStudioTurnState(
+          startedAt: 1,
+          completedAt: 2,
+          completion: StudioTurnCompletion.normal,
+        ),
       ),
     );
     await pumpEventQueue();
@@ -224,7 +244,11 @@ void registerThreadStreamTests() {
       _threadItemFrame(
         threadId: 'session-1',
         workspaceRevision: 2,
-        item: started.copyWith(
+        item: _threadItemFixture(
+          id: started.id,
+          threadId: started.threadId,
+          turnId: started.turnId,
+          ordinal: started.ordinal,
           revision: 1,
           status: 'completed',
           text: 'authoritative final',

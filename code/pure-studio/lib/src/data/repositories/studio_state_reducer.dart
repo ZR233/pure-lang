@@ -307,7 +307,7 @@ StudioState applyProjectDirectory(
   StudioState current,
   ProjectDirectoryState next,
 ) {
-  if (!next.meta.isNewerThan(current.projectDirectory.meta)) return current;
+  if (next.revision <= current.projectDirectory.revision) return current;
   final projectIds = next.values.map((project) => project.id).toSet();
   final selectedProjectId = projectIds.contains(current.selectedProjectId)
       ? current.selectedProjectId
@@ -423,7 +423,7 @@ StudioState applyProviderUsageState(
 
 StudioState applySkillsState(StudioState current, SkillsStateSnapshot next) {
   final previous = current.skillsByProject[next.projectId];
-  if (previous != null && !next.meta.isNewerThan(previous.meta)) return current;
+  if (previous != null && next.revision <= previous.revision) return current;
   return current.copyWith(
     skillsByProject: {...current.skillsByProject, next.projectId: next},
   );
@@ -448,21 +448,17 @@ StudioState applyLspState(StudioState current, LspStateSnapshot next) {
 }
 
 StudioState applyUpdaterState(StudioState current, UpdaterStateSnapshot next) {
-  return _applyObservedSnapshot(
-    current,
-    current.updaterState,
-    next,
-    (snapshot) => current.copyWith(updaterState: snapshot),
-  );
+  if (next.revision <= current.updaterState.revision) return current;
+  return current.copyWith(updaterState: next);
 }
 
-StudioState _applyObservedSnapshot<T extends ObservedStateSnapshot>(
+StudioState _applyObservedSnapshot<T extends ObservedStateSnapshot<dynamic>>(
   StudioState current,
   T previous,
   T next,
   StudioState Function(T snapshot) replace,
 ) {
-  if (!next.meta.isNewerThan(previous.meta)) return current;
+  if (next.revision <= previous.revision) return current;
   return replace(next);
 }
 
@@ -566,16 +562,17 @@ ThreadWorkspace? _appendThreadItemDelta(
   final index = items.indexWhere((item) => item.id == delta.itemId);
   if (index < 0) return null;
   final item = items[index];
-  if (isTerminalTimelineStatus(item.status)) return null;
+  if (item.isTerminal) return null;
   if (delta.revision <= item.revision) {
     return workspace.copyWith(revision: workspaceRevision);
   }
   if (delta.revision != item.revision + 1) return null;
-  items[index] = item.appendDelta(
-    field: delta.field,
-    delta: delta.delta,
+  final nextItem = item.appendDelta(
+    delta: delta.state,
     nextRevision: delta.revision,
   );
+  if (nextItem == null) return null;
+  items[index] = nextItem;
   return workspace.copyWith(revision: workspaceRevision, items: items);
 }
 

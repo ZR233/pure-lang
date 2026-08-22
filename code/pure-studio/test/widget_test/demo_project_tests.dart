@@ -61,7 +61,10 @@ void registerDemoProjectTests() {
               rootThreadId: 'thread-main',
               task: TaskRuntimeView(
                 runId: 'task-run-active',
-                state: TaskStateView.facts(kind: TaskStateKind.implementing),
+                state: const ImplementingTaskStateView(
+                  generation: 0,
+                  design: TaskFinalizedDesignView('test design'),
+                ),
                 revision: 0,
                 workUnits: [],
                 completions: [],
@@ -164,15 +167,31 @@ void registerDemoProjectTests() {
     ];
     expect(states, hasLength(6));
     expect(
-      states.take(5).map((state) => state.servers.single.activityPercentage),
+      states.take(5).map((state) {
+        final serverState = state.servers.single.state;
+        return switch (serverState) {
+          LspAvailableState(activity: LspIndexingActivity(:final percentage)) =>
+            percentage,
+          LspCheckingState() ||
+          LspAvailableState() ||
+          LspUnavailableState() ||
+          LspDisabledState() => null,
+        };
+      }),
       [40, 55, 70, 85, 100],
     );
     expect(
-      states.take(5).map((state) => state.servers.single.activityKind),
-      everyElement('indexing'),
+      states.take(5).map((state) => state.servers.single.state),
+      everyElement(
+        isA<LspAvailableState>().having(
+          (state) => state.activity,
+          'activity',
+          isA<LspIndexingActivity>(),
+        ),
+      ),
     );
     expect(states[5].servers, isEmpty);
-    final revisions = states.map((state) => state.meta.revision).toList();
+    final revisions = states.map((state) => state.revision).toList();
     expect(revisions.toSet().length, revisions.length);
   });
 }

@@ -448,7 +448,7 @@ class _TaskRecoveryTurnCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                 ),
-                Chip(label: Text(turn.status)),
+                Chip(label: Text(turn.state.name)),
               ],
             ),
             Text(metadata, style: Theme.of(context).textTheme.bodySmall),

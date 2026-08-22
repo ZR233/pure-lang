@@ -71,14 +71,15 @@ fingerprint，过期结果不得覆盖新状态。workspace/server 删除时先�
 
 ## 状态模型
 
-`LspStateSnapshot` 包含公共 `ObservedStateMeta`、project memberships 和完整 server snapshots。
-server 记录稳定 id/display name、project id、definition fingerprint、availability、是否已启动、
-extensions/language ids、diagnostic count、activity、last error 与 checked time。availability 至少区分
-uninitialized、checking、available、missing command、missing server component（携带组件标签与
-修复说明）、unavailable、disabled 和 stopped。
+`LspStateSnapshot` 使用 `ObservedResource<StudioLspHealth>`：Loading/Failed 没有可用 payload，
+Refreshing/Degraded 明确保留 last-known health，Stale 表示 desired membership 已变化。每个 server
+记录稳定 id/display name 与 extensions/language ids，并以精确 `StudioLspServerState` 表达
+Checking、Available、Unavailable、Disabled。Missing command 与 missing server component 是
+Unavailable 内的 typed error code，不再形成平行 availability/message 字段。
 
-失败保留最后一次成功 payload 并标 stale；首次失败使用 authoritative empty。active LSP 只包括
-available server，unavailable/disabled/stopped 仍可在 UI 显示但不计入 active 数。
+只有 Available 承载 checked time、diagnostic count 与 `Idle | Busy | Indexing` activity union；
+title/message/percentage 只存在于 Busy/Indexing。Unavailable 承载 checked time 与 typed error，
+Checking/Disabled 只承载说明。active LSP 只包括 Available server，其余状态仍可展示但不计入 active。
 
 ## 工具能力
 
@@ -99,9 +100,9 @@ watched-files 通知。Windows verbatim path 在生成 URI 前转回普通 drive
 `readLspState`/`LspStateChanged`。页面刷新、Studio snapshot、Turn 创建和工具查询都不得隐式
 probe 或 repair。
 
-Flutter 的 LSP 设置页只投影产品级完整状态。页面进入和“刷新”调用 `readLspState`；Project
-probe、仅在 `missingServerComponent` 时可用的 repair，以及 workspace/server reset 分别调用
-对应 typed command。Widget 不从错误字符串推断 availability，也不把 shutdown 当作 reset。
+Flutter 的 LSP 设置页只投影产品级完整 sealed state。页面进入和“刷新”调用 `readLspState`；Project
+probe、仅在 Unavailable 的 `lspComponentMissing` typed code 时可用的 repair，以及 workspace/server
+reset 分别调用对应 typed command。Widget 不从错误字符串推断 availability，也不把 shutdown 当作 reset。
 
 server activity（idle/busy/indexing 及 title/message/percentage）随同一 snapshot 与
 `LspStateChanged` 事件流投影到 Flutter：设置页 LSP 行是权威展示，activity 非 idle 时显示

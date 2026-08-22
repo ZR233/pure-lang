@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use pl_protocol::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionScope, InteractionStatus, ToolApprovalResolution,
+    InteractionRequest, InteractionResolution, InteractionScope,
+    ToolApprovalRequest as InteractionToolApprovalRequest, ToolApprovalResolution,
+    ToolApprovalResolutionPayload,
 };
 
 use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
@@ -152,25 +153,26 @@ pub(super) async fn request_user_approval(
         Some(token) => {
             tokio::select! {
                 resolution = callback(interaction.clone()) => resolution,
-                _ = token.cancelled() => InteractionResolution::ToolApproval {
+                _ = token.cancelled() => InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                     decision: ToolApprovalResolution::Denied,
                     reason: Some(cancellation_reason()),
-                },
+                }),
             }
         }
         None => callback(interaction.clone()).await,
     };
     match resolution {
-        InteractionResolution::ToolApproval { decision, reason } => match decision {
+        InteractionResolution::ToolApproval(value) => match value.decision {
             ToolApprovalResolution::Approved => ToolApprovalDecision::Approved,
             ToolApprovalResolution::Denied => ToolApprovalDecision::Denied {
-                reason: reason.unwrap_or_else(|| "denied by user".to_string()),
+                reason: value.reason.unwrap_or_else(|| "denied by user".to_string()),
             },
         },
-        InteractionResolution::UserInput { .. }
-        | InteractionResolution::PlanConfirmation { .. } => ToolApprovalDecision::Denied {
-            reason: "interaction resolved with an incompatible payload".to_string(),
-        },
+        InteractionResolution::UserInput(_) | InteractionResolution::PlanConfirmation(_) => {
+            ToolApprovalDecision::Denied {
+                reason: "interaction resolved with an incompatible payload".to_string(),
+            }
+        }
     }
 }
 
@@ -180,28 +182,23 @@ pub(super) fn cancellation_reason() -> String {
 
 fn tool_approval_interaction(request: &ToolApprovalRequest, turn_id: &str) -> InteractionRequest {
     let now = unix_seconds();
-    InteractionRequest {
-        interaction_id: request.id.clone(),
-        kind: InteractionKind::ToolApproval,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
+    InteractionRequest::tool_approval(
+        request.id.clone(),
+        InteractionScope {
             thread_id: String::new(),
             turn_id: turn_id.to_string(),
             item_id: Some(request.id.clone()),
             tool_id: Some(request.id.clone()),
             agent_path: request.parent_agent_id.clone(),
         },
-        payload: InteractionPayload::ToolApproval {
+        InteractionToolApprovalRequest {
             name: request.name.clone(),
             arguments: request.arguments.clone(),
             working_directory: request.working_directory.clone(),
             parent_agent_id: request.parent_agent_id.clone(),
         },
-        created_at: now,
-        updated_at: now,
-        resolved_at: None,
-        resolution: None,
-    }
+        now,
+    )
 }
 
 #[cfg(test)]

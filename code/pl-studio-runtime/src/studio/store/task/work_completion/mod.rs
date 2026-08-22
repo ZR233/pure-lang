@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 
 use crate::studio::entity as entities;
@@ -9,14 +9,17 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, ExecutorContinuationRequest,
-    ExecutorContinuationState, MAX_EXECUTOR_BUDGET_SLICES, TaskRunStateKind, ThreadExecutionStatus,
-    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
+    ExecutorContinuationStateKind, ExecutorTerminalOutcome, MAX_EXECUTOR_BUDGET_SLICES,
+    TaskRunStateKind, TaskWorktreeDisposition, WorkCompletionContent, WorkCompletionKind,
+    WorkCompletionRecord, WorkCompletionState, WorkCompletionStatus, WorkUnitCommand,
+    WorkUnitStateKind,
 };
-use pl_core::{AgentTurnOutcome, MailboxBudgetAction, TurnOutcomeKind};
+use pl_core::{AgentTurnOutcome, MailboxBudgetAction};
 use pl_protocol::BudgetLimitKind;
+use pl_protocol::{TurnOutcome, TurnRolloverOutcome};
 
 use super::task_run_record;
-use super::work_unit::{update_work_unit_state, work_unit_record, work_unit_state};
+use super::work_unit::{apply_work_unit_command, work_unit_record, work_unit_state};
 
 impl StudioStore {
     pub(crate) async fn resolve_active_completion_scope(
@@ -66,8 +69,7 @@ impl StudioStore {
     pub(crate) async fn create_work_completion(
         &self,
         work_unit_id: &str,
-        kind: WorkCompletionKind,
-        delivery: Option<&AgentDelivery>,
+        content: WorkCompletionContent,
         verification_summary: &str,
     ) -> Result<WorkCompletionRecord> {
         let tx = self.db.begin().await?;
@@ -90,15 +92,7 @@ impl StudioStore {
                 bail!("task is not accepting executor completion");
             }
             let work_unit_state = work_unit_state(&work_unit)?;
-            if work_unit_state.execution_status() != ThreadExecutionStatus::Running {
-                bail!("executor Thread is not active");
-            }
-            if !matches!(
-                work_unit_state.status(),
-                WorkUnitStatus::Running
-                    | WorkUnitStatus::AwaitingCompletion
-                    | WorkUnitStatus::ChangesRequested
-            ) {
+            if work_unit_state.kind() != WorkUnitStateKind::Running {
                 bail!("work unit is not accepting a completion");
             }
             let latest = entities::work_completion::Entity::find()
@@ -107,19 +101,12 @@ impl StudioStore {
                 .one(&tx)
                 .await?;
             if latest.as_ref().is_some_and(|completion| {
-                completion.status == WorkCompletionStatus::ReadyForReview.as_str()
+                completion.state_kind == WorkCompletionStatus::ReadyForReview.as_str()
             }) {
                 bail!("work unit already has an active completion review");
             }
             let revision = latest.map_or(1, |completion| completion.revision + 1);
-            let (head_commit, changed_files) = match (kind, delivery) {
-                (WorkCompletionKind::Delivery, Some(delivery)) => (
-                    Some(delivery.head_commit.clone()),
-                    delivery.changed_files.clone(),
-                ),
-                (WorkCompletionKind::NoDelivery, None) => (None, Vec::new()),
-                _ => bail!("completion kind and delivery payload do not match"),
-            };
+            let state = WorkCompletionState::ready_for_review();
             let now = unix_seconds();
             let executor_thread_id = work_unit
                 .executor_thread_id
@@ -131,11 +118,12 @@ impl StudioStore {
                 work_unit_id: Set(work_unit.id.clone()),
                 executor_agent_id: Set(executor_thread_id),
                 revision: Set(revision),
-                kind: Set(kind.as_str().to_string()),
-                status: Set(WorkCompletionStatus::ReadyForReview.as_str().to_string()),
+                content_json: Set(serde_json::to_string(&content)?),
+                content_kind: NotSet,
+                state_json: Set(serde_json::to_string(&state)?),
+                state_kind: NotSet,
+                state_revision: Set(0),
                 base_commit: Set(work_unit.base_commit.clone()),
-                head_commit: Set(head_commit),
-                changed_files_json: Set(serde_json::to_string(&changed_files)?),
                 verification_summary: Set(verification_summary.to_string()),
                 worktree_path: Set(work_unit.worktree_path.clone()),
                 branch: Set(work_unit.branch.clone()),
@@ -144,11 +132,17 @@ impl StudioStore {
             }
             .insert(&tx)
             .await?;
-            let mut progress = work_unit_state.into_progress();
-            progress.execution_summary = Some(verification_summary.to_string());
-            progress.execution_error = None;
-            update_work_unit_state(&tx, work_unit, WorkUnitState::ready_for_review(progress))
-                .await?;
+            apply_work_unit_command(
+                &tx,
+                work_unit,
+                WorkUnitCommand::SubmitCompletion {
+                    completion_id: completion.id.clone(),
+                    completion_revision: u32::try_from(completion.revision)
+                        .context("completion revision is negative")?,
+                    verification_summary: verification_summary.to_string(),
+                },
+            )
+            .await?;
             work_completion_record(completion)
         }
         .await;
@@ -158,56 +152,21 @@ impl StudioStore {
     pub(crate) async fn mark_executor_turn_started(
         &self,
         agent_id: &str,
+        turn_id: &str,
         budget_action: MailboxBudgetAction,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
             let work_unit = executor_work_unit(&tx, agent_id).await?;
-            let state = work_unit_state(&work_unit)?;
-            let work_status = state.status();
-            let execution_status = state.execution_status();
-            let continuation_state = state.progress().continuation_state;
-            let budget_attention = work_status == WorkUnitStatus::NeedsAttention
-                && execution_status == ThreadExecutionStatus::BudgetLimited
-                && state.progress().budget_limit.is_some()
-                && continuation_state == ExecutorContinuationState::NeedsAttention;
-            let budget_refresh_expected =
-                budget_action == MailboxBudgetAction::Refresh && budget_attention;
-            if !matches!(
-                work_status,
-                WorkUnitStatus::Running
-                    | WorkUnitStatus::AwaitingCompletion
-                    | WorkUnitStatus::ChangesRequested
-            ) && !budget_refresh_expected
-            {
-                bail!(
-                    "executor cannot start a turn while work unit is {}",
-                    work_status.as_str()
-                );
-            }
-            let already_running = work_status == WorkUnitStatus::Running
-                && execution_status == ThreadExecutionStatus::Running
-                && continuation_state == ExecutorContinuationState::None;
-            let already_refreshed = already_running
-                && state.progress().budget_slice_count == 1
-                && state.progress().budget_limit.is_none()
-                && state.progress().execution_error.is_none()
-                && state.progress().continuation_source_turn_id.is_none();
-            if (budget_action == MailboxBudgetAction::Preserve && already_running)
-                || (budget_action == MailboxBudgetAction::Refresh && already_refreshed)
-            {
-                return Ok(());
-            }
-            let mut progress = state.into_progress();
-            progress.continuation_revision = progress.continuation_revision.saturating_add(1);
-            progress.execution_error = None;
-            progress.continuation_state = ExecutorContinuationState::None;
-            if budget_action == MailboxBudgetAction::Refresh {
-                progress.budget_limit = None;
-                progress.budget_slice_count = 1;
-                progress.continuation_source_turn_id = None;
-            }
-            update_work_unit_state(&tx, work_unit, WorkUnitState::running(progress)).await?;
+            apply_work_unit_command(
+                &tx,
+                work_unit,
+                WorkUnitCommand::StartTurn {
+                    turn_id: turn_id.to_string(),
+                    reset_budget: budget_action == MailboxBudgetAction::Refresh,
+                },
+            )
+            .await?;
             Ok(())
         }
         .await;
@@ -222,59 +181,44 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let work_unit = executor_work_unit(&tx, agent_id).await?;
-            let state = work_unit_state(&work_unit)?;
-            let work_status = state.status();
-            if matches!(
-                work_status,
-                WorkUnitStatus::ReadyForReview
-                    | WorkUnitStatus::Reviewing
-                    | WorkUnitStatus::Approved
-                    | WorkUnitStatus::Merged
-                    | WorkUnitStatus::NoDelivery
-                    | WorkUnitStatus::NeedsAttention
-                    | WorkUnitStatus::Failed
-                    | WorkUnitStatus::Cancelled
-            ) {
-                return Ok(None);
-            }
-            let continuation_state = state.progress().continuation_state;
-            if state.progress().continuation_source_turn_id.as_deref()
-                == Some(outcome.turn_id.as_str())
-            {
-                if outcome.kind == TurnOutcomeKind::BudgetLimited
-                    && continuation_state == ExecutorContinuationState::PendingStart
+            let record = work_unit_record(work_unit.clone())?;
+            if record.continuation_source_turn_id() == Some(outcome.turn_id.as_str()) {
+                if matches!(&outcome.outcome, TurnOutcome::BudgetLimited(_))
+                    && record.continuation_state() == ExecutorContinuationStateKind::PendingStart
                 {
                     return Ok(Some(ExecutorContinuationRequest {
                         agent_id: agent_id.to_string(),
                         work_unit_id: work_unit.id,
                         source_turn_id: outcome.turn_id.to_string(),
-                        slice_count: state.progress().budget_slice_count,
+                        slice_count: record.budget_slice_count(),
                     }));
                 }
                 return Ok(None);
             }
 
-            if outcome.kind == TurnOutcomeKind::BudgetLimited {
-                let budget_limit = outcome
-                    .budget_limit
-                    .context("budget-limited executor outcome has no budget snapshot")?;
-                let current_slice = state.progress().budget_slice_count;
+            if record.kind() != WorkUnitStateKind::Running {
+                return Ok(None);
+            }
+
+            if let TurnOutcome::BudgetLimited(budget) = &outcome.outcome {
+                let budget_limit = budget.limit();
+                let current_slice = record.budget_slice_count();
                 let can_continue = budget_limit.kind == BudgetLimitKind::WallClock
-                    && outcome.rollover_compacted
-                    && outcome.rollover_compaction_error.is_none()
+                    && matches!(budget.rollover(), TurnRolloverOutcome::Succeeded)
                     && current_slice < MAX_EXECUTOR_BUDGET_SLICES;
-                let mut progress = state.clone().into_progress();
-                progress.budget_limit = Some(budget_limit);
-                progress.continuation_source_turn_id = Some(outcome.turn_id.to_string());
-                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
                 if can_continue {
                     let next_slice = current_slice.saturating_add(1);
                     let work_unit_id = work_unit.id.clone();
-                    progress.budget_slice_count = next_slice;
-                    progress.continuation_state = ExecutorContinuationState::PendingStart;
-                    progress.execution_error = None;
-                    update_work_unit_state(&tx, work_unit, WorkUnitState::budget_limited(progress))
-                        .await?;
+                    apply_work_unit_command(
+                        &tx,
+                        work_unit,
+                        WorkUnitCommand::ContinueAfterBudget {
+                            source_turn_id: outcome.turn_id.to_string(),
+                            next_slice,
+                            limit: *budget_limit,
+                        },
+                    )
+                    .await?;
                     return Ok(Some(ExecutorContinuationRequest {
                         agent_id: agent_id.to_string(),
                         work_unit_id,
@@ -282,49 +226,53 @@ impl StudioStore {
                         slice_count: next_slice,
                     }));
                 }
-                progress.continuation_state = ExecutorContinuationState::NeedsAttention;
-                progress.execution_error =
-                    outcome.rollover_compaction_error.clone().or_else(|| {
-                        outcome.reason.clone().or_else(|| {
-                            Some(if budget_limit.kind == BudgetLimitKind::WallClock {
-                                format!(
-                                    "executor reached the {MAX_EXECUTOR_BUDGET_SLICES}-slice limit"
-                                )
-                            } else {
-                                format!(
-                                    "executor stopped at the {} budget limit",
-                                    budget_limit.kind.as_str()
-                                )
-                            })
-                        })
-                    });
-                update_work_unit_state(&tx, work_unit, WorkUnitState::needs_attention(progress))
-                    .await?;
+                let detail = match budget.rollover() {
+                    TurnRolloverOutcome::Failed { error } => error.clone(),
+                    TurnRolloverOutcome::NotAttempted | TurnRolloverOutcome::Succeeded => {
+                        if budget_limit.kind == BudgetLimitKind::WallClock {
+                            format!("executor reached the {MAX_EXECUTOR_BUDGET_SLICES}-slice limit")
+                        } else {
+                            format!(
+                                "executor stopped at the {} budget limit",
+                                budget_limit.kind.as_str()
+                            )
+                        }
+                    }
+                };
+                apply_work_unit_command(
+                    &tx,
+                    work_unit,
+                    WorkUnitCommand::PauseForBudget {
+                        source_turn_id: outcome.turn_id.to_string(),
+                        limit: *budget_limit,
+                        detail,
+                    },
+                )
+                .await?;
                 return Ok(None);
             }
-            let mut progress = state.into_progress();
-            progress.execution_error = outcome.reason.clone().or_else(|| {
-                (outcome.kind == TurnOutcomeKind::Completed).then(|| {
-                    "executor turn ended without a successful report_completion".to_string()
-                })
-            });
-            if matches!(
-                outcome.kind,
-                TurnOutcomeKind::Completed | TurnOutcomeKind::Failed
-            ) {
-                progress.continuation_state = ExecutorContinuationState::PlannerWakePending;
-                progress.continuation_source_turn_id = Some(outcome.turn_id.to_string());
-                progress.continuation_revision = progress.continuation_revision.saturating_add(1);
-            } else {
-                progress.continuation_state = ExecutorContinuationState::None;
-            }
-            let next_state = match outcome.kind {
-                TurnOutcomeKind::Completed => WorkUnitState::awaiting_completed(progress),
-                TurnOutcomeKind::Failed => WorkUnitState::awaiting_failed(progress),
-                TurnOutcomeKind::Cancelled => WorkUnitState::awaiting_cancelled(progress),
-                TurnOutcomeKind::BudgetLimited => unreachable!("handled above"),
+            let command = match &outcome.outcome {
+                TurnOutcome::Completed(_) => WorkUnitCommand::FinishTurn {
+                    outcome: ExecutorTerminalOutcome::Completed {
+                        source_turn_id: outcome.turn_id.to_string(),
+                        detail: "executor turn ended without a successful report_completion"
+                            .to_string(),
+                    },
+                },
+                TurnOutcome::Failed(value) => WorkUnitCommand::FinishTurn {
+                    outcome: ExecutorTerminalOutcome::Failed {
+                        source_turn_id: outcome.turn_id.to_string(),
+                        detail: value.failure().message.clone(),
+                    },
+                },
+                TurnOutcome::Cancelled(value) => WorkUnitCommand::Cancel {
+                    operation_id: outcome.turn_id.to_string(),
+                    reason: format!("executor turn cancelled: {:?}", value.cause()),
+                    disposition: TaskWorktreeDisposition::CleanupRequested,
+                },
+                TurnOutcome::BudgetLimited(_) => unreachable!("handled above"),
             };
-            update_work_unit_state(&tx, work_unit, next_state).await?;
+            apply_work_unit_command(&tx, work_unit, command).await?;
             Ok(None)
         }
         .await;
@@ -342,20 +290,28 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("executor continuation work unit not found")?;
-            let state = work_unit_state(&work_unit)?;
+            let record = work_unit_record(work_unit.clone())?;
             if work_unit.executor_thread_id.as_deref() != Some(continuation.agent_id.as_str())
-                || state.progress().continuation_source_turn_id.as_deref()
+                || record.continuation_source_turn_id()
                     != Some(continuation.source_turn_id.as_str())
-                || state.progress().continuation_state != ExecutorContinuationState::PendingStart
+                || record.continuation_state() != ExecutorContinuationStateKind::PendingStart
             {
                 return Ok(());
             }
-            let mut progress = state.into_progress();
-            progress.continuation_state = ExecutorContinuationState::NeedsAttention;
-            progress.continuation_revision = progress.continuation_revision.saturating_add(1);
-            progress.execution_error = Some(error.to_string());
-            update_work_unit_state(&tx, work_unit, WorkUnitState::needs_attention(progress))
-                .await?;
+            let limit = record
+                .budget_limit()
+                .cloned()
+                .context("pending executor continuation has no budget snapshot")?;
+            apply_work_unit_command(
+                &tx,
+                work_unit,
+                WorkUnitCommand::PauseForBudget {
+                    source_turn_id: continuation.source_turn_id.clone(),
+                    limit,
+                    detail: error.to_string(),
+                },
+            )
+            .await?;
             Ok(())
         }
         .await;
@@ -407,19 +363,27 @@ async fn executor_work_unit(
 pub(super) fn work_completion_record(
     model: entities::work_completion::Model,
 ) -> Result<WorkCompletionRecord> {
+    let content: WorkCompletionContent = serde_json::from_str(&model.content_json)
+        .context("invalid stored WorkCompletion content JSON")?;
+    if content.kind().as_str() != model.content_kind {
+        bail!("stored WorkCompletion content discriminator mismatch");
+    }
+    let state: WorkCompletionState = serde_json::from_str(&model.state_json)
+        .context("invalid stored WorkCompletion state JSON")?;
+    if state.status().as_str() != model.state_kind {
+        bail!("stored WorkCompletion state discriminator mismatch");
+    }
     Ok(WorkCompletionRecord {
         id: model.id,
         task_run_id: model.task_run_id,
         work_unit_id: model.work_unit_id,
         executor_agent_id: model.executor_agent_id,
         revision: u32::try_from(model.revision).context("completion revision must be positive")?,
-        kind: WorkCompletionKind::from_str(&model.kind)
-            .with_context(|| format!("invalid completion kind: {}", model.kind))?,
-        status: WorkCompletionStatus::from_str(&model.status)
-            .with_context(|| format!("invalid completion status: {}", model.status))?,
+        content,
+        state,
+        state_revision: u64::try_from(model.state_revision)
+            .context("WorkCompletion state revision is negative")?,
         base_commit: model.base_commit,
-        head_commit: model.head_commit,
-        changed_files: serde_json::from_str(&model.changed_files_json)?,
         verification_summary: model.verification_summary,
         worktree_path: model.worktree_path,
         branch: model.branch,
@@ -429,14 +393,14 @@ pub(super) fn work_completion_record(
 }
 
 pub(super) fn delivery_from_completion(completion: &WorkCompletionRecord) -> Result<AgentDelivery> {
-    if completion.kind != WorkCompletionKind::Delivery
-        || completion.status != WorkCompletionStatus::Approved
+    if completion.kind() != WorkCompletionKind::Delivery
+        || completion.status() != WorkCompletionStatus::Approved
     {
         bail!("merge requires an approved delivery completion");
     }
     let head_commit = completion
-        .head_commit
-        .clone()
+        .head_commit()
+        .map(str::to_string)
         .context("delivery completion has no head commit")?;
     Ok(AgentDelivery {
         worktree: AgentWorktreeDelivery {
@@ -445,7 +409,7 @@ pub(super) fn delivery_from_completion(completion: &WorkCompletionRecord) -> Res
         },
         base_commit: completion.base_commit.clone(),
         head_commit,
-        changed_files: completion.changed_files.clone(),
+        changed_files: completion.changed_files().to_vec(),
         verification_summary: completion.verification_summary.clone(),
     })
 }

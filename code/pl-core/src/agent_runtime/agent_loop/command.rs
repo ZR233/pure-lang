@@ -36,7 +36,7 @@ pub(crate) enum AgentLoopCommand {
     },
     SetActivity {
         turn_id: TurnId,
-        kind: ActiveKind,
+        activity: AgentActivityUpdate,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Checkpoint {

@@ -88,29 +88,29 @@ String providerUsageSummary(
   if (usage == null) {
     return context.l10n.settingsUsageNotLoaded;
   }
-  return switch (usage.status) {
-    'unsupported' => context.l10n.settingsUsageUnsupported,
-    'missingCredential' => context.l10n.settingsUsageMissingKey,
-    'failed' => context.l10n.settingsUsageFailed,
-    'ready' => _readyProviderUsageSummary(usage),
-    _ => context.l10n.settingsUsageUnavailable,
+  return switch (usage.state) {
+    UnsupportedProviderUsageView() => context.l10n.settingsUsageUnsupported,
+    MissingCredentialProviderUsageView() =>
+      context.l10n.settingsUsageMissingKey,
+    FailedProviderUsageView() => context.l10n.settingsUsageFailed,
+    ReadyProviderUsageView(:final data) => _readyProviderUsageSummary(data),
   };
 }
 
-String _readyProviderUsageSummary(ProviderUsageView usage) {
-  if (usage.usageKind == 'deepseekBalance' && usage.balance != null) {
+String _readyProviderUsageSummary(ProviderUsageDataView data) {
+  if (data case DeepSeekBalanceProviderUsageView(:final balance)) {
     final primary =
-        usage.balance!.balances
+        balance.balances
             .where((item) => item.currency.toUpperCase() == 'CNY')
             .firstOrNull ??
-        usage.balance!.balances.firstOrNull;
+        balance.balances.firstOrNull;
     return primary == null
         ? 'Usage unavailable'
         : '${primary.currency} ${primary.totalBalance}';
   }
-  if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
-    final fiveHour = findQuotaLimit(usage.codingPlan!.limits, 'fiveHour');
-    final weekly = findQuotaLimit(usage.codingPlan!.limits, 'weekly');
+  if (data case ZhipuCodingPlanProviderUsageView(:final codingPlan)) {
+    final fiveHour = findQuotaLimit(codingPlan.limits, 'fiveHour');
+    final weekly = findQuotaLimit(codingPlan.limits, 'weekly');
     if (fiveHour != null && weekly != null) {
       return '5h ${formatPercent(quotaRemainingPercent(fiveHour))} · 7d ${formatPercent(quotaRemainingPercent(weekly))}';
     }
@@ -123,14 +123,14 @@ String providerUsageMessage(
   ProviderSettingsView provider,
   ProviderUsageView usage,
 ) {
-  return switch (usage.status) {
-    'missingCredential' =>
-      usage.message ?? context.l10n.settingsUsageApiKeyMissing,
-    'failed' => usage.message ?? context.l10n.settingsUsageQueryFailed,
-    'unsupported' => context.l10n.settingsUsageUnsupportedForProvider(
-      provider.name,
-    ),
-    _ => context.l10n.settingsUsageUnavailable,
+  return switch (usage.state) {
+    MissingCredentialProviderUsageView(:final message) =>
+      message.isEmpty ? context.l10n.settingsUsageApiKeyMissing : message,
+    FailedProviderUsageView(:final message) =>
+      message.isEmpty ? context.l10n.settingsUsageQueryFailed : message,
+    UnsupportedProviderUsageView() =>
+      context.l10n.settingsUsageUnsupportedForProvider(provider.name),
+    ReadyProviderUsageView() => context.l10n.settingsUsageUnavailable,
   };
 }
 

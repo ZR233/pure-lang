@@ -6,11 +6,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    TaskCoordinator, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
-    ThreadExecutionStatus, WorkUnitStatus,
+    TaskCoordinator, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason, WaitingReviewPhase,
+    WorkUnitStateKind,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
-use crate::{AgentLifecycleState, AgentRuntimeHandle, StudioIntegratedReviewGate, ToolEffect};
+use crate::{AgentRuntimeHandle, AgentState, StudioIntegratedReviewGate, ToolEffect};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -216,12 +216,10 @@ impl TaskCoordinator {
             ));
         }
         let work_units = self.store.list_work_units(&run.id).await?;
-        if work_units.iter().any(|unit| {
-            !matches!(
-                unit.status(),
-                WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery
-            )
-        }) {
+        if work_units
+            .iter()
+            .any(|unit| unit.kind() != WorkUnitStateKind::Completed)
+        {
             return Ok(TaskCompleteOutcome::rejected(
                 "deliveriesIncomplete",
                 "all executor deliveries must be merged or recorded as no-delivery",
@@ -394,7 +392,12 @@ impl TaskCoordinator {
             .list_work_units(&run.id)
             .await?
             .into_iter()
-            .find(|work_unit| work_unit.status() == super::WorkUnitStatus::AwaitingCompletion);
+            .find(|work_unit| {
+                matches!(
+                    work_unit.waiting_review_phase(),
+                    Some(WaitingReviewPhase::AwaitingReport(_))
+                )
+            });
         let Some(work_unit) = work_unit else {
             return Ok(None);
         };
@@ -449,13 +452,13 @@ async fn interrupt_task_agents(
         })
         .filter(|snapshot| {
             !matches!(
-                snapshot.lifecycle,
-                AgentLifecycleState::Closing | AgentLifecycleState::Closed
+                snapshot.state,
+                AgentState::Closing(_) | AgentState::Closed(_)
             )
         })
         .collect::<Vec<_>>();
     for child in &children {
-        if let Some(turn_id) = child.active_turn_id.clone() {
+        if let Some(turn_id) = child.active_turn_id().cloned() {
             runtime
                 .cancel_turn(child.identity.id.clone(), turn_id)
                 .await
@@ -477,23 +480,13 @@ async fn wait_for_terminal_outcomes(
                 .list_work_units(task_run_id)
                 .await?
                 .into_iter()
-                .any(|unit| {
-                    matches!(
-                        unit.execution_status(),
-                        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-                    )
-                });
+                .any(|unit| unit.kind() == WorkUnitStateKind::Running);
             let active_reviewer = coordinator
                 .store
                 .list_review_rounds(task_run_id)
                 .await?
                 .into_iter()
-                .any(|round| {
-                    matches!(
-                        round.reviewer_status(),
-                        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-                    )
-                });
+                .any(|round| round.kind().is_active());
             let active = active_executor || active_reviewer;
             if !active {
                 return Ok::<(), anyhow::Error>(());
@@ -522,8 +515,8 @@ async fn close_task_children(runtime: &AgentRuntimeHandle, thread_id: &str) -> R
         .filter(|snapshot| snapshot.identity.parent_id.as_ref() == Some(&root))
         .filter(|snapshot| {
             !matches!(
-                snapshot.lifecycle,
-                AgentLifecycleState::Closing | AgentLifecycleState::Closed
+                snapshot.state,
+                AgentState::Closing(_) | AgentState::Closed(_)
             )
         })
         .map(|snapshot| snapshot.identity.id)

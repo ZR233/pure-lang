@@ -9,6 +9,7 @@ import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
 import '../types/thread_stream.dart';
+import '../types/updater.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 

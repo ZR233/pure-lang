@@ -1,99 +1,121 @@
 use pl_model::TokenUsage;
-use pl_trace::{TraceEvent, TraceEventKind};
+use pl_trace::TraceEventKind;
 
+use crate::TurnResult;
 use crate::agent_runtime::state::unix_timestamp;
 use crate::agent_runtime::*;
-use crate::{TurnResult, TurnResultStatus};
+
+#[derive(Debug)]
+pub(crate) enum TurnWorkerOutcome {
+    Returned(Box<TurnResult>),
+    Failed { error: String },
+}
+
+impl TurnWorkerOutcome {
+    pub(crate) fn returned(&self) -> Option<&TurnResult> {
+        match self {
+            Self::Returned(result) => Some(result),
+            Self::Failed { .. } => None,
+        }
+    }
+}
+
+impl From<std::result::Result<TurnResult, String>> for TurnWorkerOutcome {
+    fn from(result: std::result::Result<TurnResult, String>) -> Self {
+        match result {
+            Ok(result) => Self::Returned(Box::new(result)),
+            Err(error) => Self::Failed { error },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum TurnExecutionTerminal {
+    Returned(TurnResult),
+    CancelledAfterReturn {
+        cause: pl_protocol::TurnCancellationCause,
+        result: TurnResult,
+    },
+    CancelledBeforeReturn {
+        cause: pl_protocol::TurnCancellationCause,
+    },
+    WorkerFailed {
+        error: String,
+    },
+}
+
+impl From<TurnWorkerOutcome> for TurnExecutionTerminal {
+    fn from(outcome: TurnWorkerOutcome) -> Self {
+        match outcome {
+            TurnWorkerOutcome::Returned(result) => Self::Returned(*result),
+            TurnWorkerOutcome::Failed { error } => Self::WorkerFailed { error },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum RetainedTurnResult {
+    Present(Box<TurnResult>),
+    Absent,
+}
+
+impl RetainedTurnResult {
+    pub(crate) fn as_ref(&self) -> Option<&TurnResult> {
+        match self {
+            Self::Present(result) => Some(result),
+            Self::Absent => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TurnFinalization {
+    pub(crate) outcome: AgentTurnOutcome,
+    pub(crate) retained_result: RetainedTurnResult,
+}
 
 pub(crate) fn turn_outcome(
     turn_id: TurnId,
     thread_id: ThreadId,
-    result: std::result::Result<TurnResult, String>,
-    cancelled: bool,
-) -> (AgentTurnOutcome, Vec<TraceEvent>, Option<TurnResult>) {
-    let (kind, reason, failure, usage, traces, result) = match result {
-        Ok(result) if cancelled => (
-            TurnOutcomeKind::Cancelled,
-            Some("cancelled".to_string()),
-            None,
+    terminal: TurnExecutionTerminal,
+    started_at: Option<i64>,
+) -> TurnFinalization {
+    let (outcome, usage, retained_result) = match terminal {
+        TurnExecutionTerminal::CancelledAfterReturn { cause, result } => (
+            pl_protocol::TurnOutcome::cancelled(cause),
             result.usage.clone(),
-            result.trace_events.clone(),
-            Some(result),
+            RetainedTurnResult::Present(Box::new(result)),
         ),
-        Ok(result) => {
-            let kind = match result.status {
-                TurnResultStatus::Completed => TurnOutcomeKind::Completed,
-                TurnResultStatus::Aborted if result.budget_limit_kind.is_some() => {
-                    TurnOutcomeKind::BudgetLimited
-                }
-                TurnResultStatus::Aborted => TurnOutcomeKind::Cancelled,
-                TurnResultStatus::Errored => TurnOutcomeKind::Failed,
-            };
-            let reason = result.error.clone().or_else(|| {
-                result
-                    .abort_reason
-                    .map(|reason| reason.as_str().to_string())
-            });
-            (
-                kind,
-                reason,
-                result.failure.clone(),
-                result.usage.clone(),
-                result.trace_events.clone(),
-                Some(result),
-            )
-        }
-        Err(error) if cancelled => (
-            TurnOutcomeKind::Cancelled,
-            Some(error),
-            None,
+        TurnExecutionTerminal::Returned(result) => (
+            result.outcome.clone(),
+            result.usage.clone(),
+            RetainedTurnResult::Present(Box::new(result)),
+        ),
+        TurnExecutionTerminal::CancelledBeforeReturn { cause } => (
+            pl_protocol::TurnOutcome::cancelled(cause),
             TokenUsage::default(),
-            Vec::new(),
-            None,
+            RetainedTurnResult::Absent,
         ),
-        Err(error) => (
-            TurnOutcomeKind::Failed,
-            Some(error),
-            Some(pl_protocol::TurnFailure::permanent(
+        TurnExecutionTerminal::WorkerFailed { error } => (
+            pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
                 pl_protocol::TurnFailureCategory::Internal,
-                "agent runtime execution failed",
+                error,
             )),
             TokenUsage::default(),
-            Vec::new(),
-            None,
+            RetainedTurnResult::Absent,
         ),
     };
-    let budget_limit = (kind == TurnOutcomeKind::BudgetLimited)
-        .then(|| {
-            let result = result.as_ref()?;
-            Some(pl_protocol::BudgetLimitSnapshot {
-                kind: result.budget_limit_kind?,
-                usage: result.budget_usage?,
-            })
-        })
-        .flatten();
-    let rollover_compacted = result
-        .as_ref()
-        .is_some_and(|result| result.rollover_compacted);
-    let rollover_compaction_error = result
-        .as_ref()
-        .and_then(|result| result.rollover_compaction_error.clone());
-    (
-        AgentTurnOutcome {
+    TurnFinalization {
+        outcome: AgentTurnOutcome {
             turn_id,
             thread_id,
-            kind,
-            reason,
-            failure,
-            budget_limit,
-            rollover_compacted,
-            rollover_compaction_error,
+            outcome,
             usage,
+            started_at,
             finished_at: unix_timestamp(),
         },
-        traces,
-        result,
-    )
+        retained_result,
+    }
 }
 
 pub(crate) fn add_usage(total: &mut TokenUsage, delta: &TokenUsage) {
@@ -113,18 +135,18 @@ pub(crate) fn add_usage(total: &mut TokenUsage, delta: &TokenUsage) {
 pub(super) fn enforce_finalization(
     result: &mut std::result::Result<TurnResult, String>,
     policy: &AgentExecutionPolicy,
-) -> Option<String> {
+) {
     let Ok(result) = result else {
-        return None;
+        return;
     };
-    if result.status != TurnResultStatus::Completed {
-        return None;
+    if !result.outcome.is_completed() {
+        return;
     }
-    if result.ended_for_interaction {
-        return None;
+    if result.outcome.is_interaction_boundary() {
+        return;
     }
     let TurnFinalizationPolicy::RequiredTool { name } = &policy.finalization else {
-        return None;
+        return;
     };
     let latest_tool = result
         .trace_events
@@ -132,42 +154,46 @@ pub(super) fn enforce_finalization(
         .rev()
         .find_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
-                if item.tool.as_ref().is_some_and(|tool| tool.name == *name) =>
+                if item
+                    .tool()
+                    .is_some_and(|tool| tool.invocation().name() == name) =>
             {
                 Some(Ok(()))
             }
-            TraceEventKind::TracePartFailed { item, error }
-                if item.tool.as_ref().is_some_and(|tool| tool.name == *name) =>
+            TraceEventKind::TracePartFailed { item }
+                if item
+                    .tool()
+                    .is_some_and(|tool| tool.invocation().name() == name) =>
             {
-                Some(Err(error.clone()))
+                Some(Err(item
+                    .failure()
+                    .unwrap_or("finalization tool did not succeed")
+                    .to_string()))
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         });
     if matches!(latest_tool, Some(Ok(()))) {
-        return Some(name.clone());
+        return;
     }
     let message = latest_tool
         .and_then(Result::err)
         .unwrap_or_else(|| format!("turn must finalize with tool `{name}`"));
-    result.status = TurnResultStatus::Errored;
-    result.error = Some(message.clone());
-    result.failure = Some(pl_protocol::TurnFailure::permanent(
+    result.outcome = pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
         pl_protocol::TurnFailureCategory::Validation,
         message,
     ));
-    None
 }
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::TurnFailureCategory;
+    use pl_protocol::{TurnCompletion, TurnFailureCategory, TurnOutcome};
+    use pl_trace::TraceEvent;
 
     use super::*;
     use crate::TraceRecorder;
@@ -179,29 +205,22 @@ mod tests {
             ToolTraceOutcome::Completed,
         )]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
-        assert_eq!(finalized.as_deref(), Some("report_completion"));
-        assert_eq!(result.status, TurnResultStatus::Completed);
-        assert_eq!(result.error, None);
-        assert_eq!(result.failure, None);
+        assert!(matches!(result.outcome, TurnOutcome::Completed(_)));
     }
 
     #[test]
     fn required_tool_finalization_accepts_durable_interaction_boundary() {
         let mut completed = completed_result(Vec::new());
-        completed.ended_for_interaction = true;
+        completed.outcome = TurnOutcome::completed(TurnCompletion::InteractionRequested);
         let mut result = Ok(completed);
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("plan_exit"));
+        enforce_finalization(&mut result, &required_tool_policy("plan_exit"));
 
-        assert_eq!(finalized, None);
         let result = result.unwrap();
-        assert_eq!(result.status, TurnResultStatus::Completed);
-        assert_eq!(result.error, None);
-        assert_eq!(result.failure, None);
+        assert!(result.outcome.is_interaction_boundary());
     }
 
     #[test]
@@ -211,18 +230,18 @@ mod tests {
             ToolTraceOutcome::Failed("completion scope is not ready for review"),
         )]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
-        assert_eq!(finalized, None);
-        assert_eq!(result.status, TurnResultStatus::Errored);
         assert_eq!(
-            result.error.as_deref(),
+            result
+                .outcome
+                .failure()
+                .map(|failure| failure.message.as_str()),
             Some("completion scope is not ready for review")
         );
         assert_eq!(
-            result.failure.as_ref().map(|failure| failure.category),
+            result.outcome.failure().map(|failure| failure.category),
             Some(TurnFailureCategory::Validation)
         );
     }
@@ -240,12 +259,14 @@ mod tests {
             ),
         ]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
-        assert_eq!(finalized, None);
         assert_eq!(
-            result.unwrap().error.as_deref(),
+            result
+                .unwrap()
+                .outcome
+                .failure()
+                .map(|failure| failure.message.as_str()),
             Some("latest completion failure")
         );
     }
@@ -257,17 +278,18 @@ mod tests {
             ToolTraceOutcome::Failed("exec failed"),
         )]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
-        assert_eq!(finalized, None);
         assert_eq!(
-            result.error.as_deref(),
+            result
+                .outcome
+                .failure()
+                .map(|failure| failure.message.as_str()),
             Some("turn must finalize with tool `report_completion`")
         );
         assert_eq!(
-            result.failure.as_ref().map(|failure| failure.category),
+            result.outcome.failure().map(|failure| failure.category),
             Some(TurnFailureCategory::Validation)
         );
     }
@@ -282,11 +304,9 @@ mod tests {
             tool_event("report_completion", ToolTraceOutcome::Completed),
         ]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
-        assert_eq!(finalized.as_deref(), Some("report_completion"));
-        assert_eq!(result.unwrap().status, TurnResultStatus::Completed);
+        assert!(result.unwrap().is_completed());
     }
 
     #[test]
@@ -299,19 +319,23 @@ mod tests {
             ),
         ]));
 
-        let finalized =
-            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+        enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
-        assert_eq!(finalized, None);
         let result = result.unwrap();
-        assert_eq!(result.status, TurnResultStatus::Errored);
-        assert_eq!(result.error.as_deref(), Some("latest completion failure"));
         assert_eq!(
-            result.failure.as_ref().map(|failure| failure.category),
+            result
+                .outcome
+                .failure()
+                .map(|failure| failure.message.as_str()),
+            Some("latest completion failure")
+        );
+        assert_eq!(
+            result.outcome.failure().map(|failure| failure.category),
             Some(TurnFailureCategory::Validation)
         );
     }
 
+    #[derive(Clone, Copy)]
     enum ToolTraceOutcome {
         Completed,
         Failed(&'static str),
@@ -335,15 +359,7 @@ mod tests {
             last_context_tokens: None,
             context_compactions: Vec::new(),
             session_message_count: 0,
-            status: TurnResultStatus::Completed,
-            ended_for_interaction: false,
-            abort_reason: None,
-            error: None,
-            failure: None,
-            budget_limit_kind: None,
-            budget_usage: None,
-            rollover_compacted: false,
-            rollover_compaction_error: None,
+            outcome: TurnOutcome::completed(TurnCompletion::Normal),
             trace_events,
         }
     }
@@ -359,15 +375,30 @@ mod tests {
             None,
             None,
         );
-        match outcome {
+        let action = match outcome {
             ToolTraceOutcome::Completed => {
-                item.status = pl_trace::TracePartStatus::Completed;
-                recorder.complete_item(item);
+                pl_trace::TracePartAction::Complete(pl_trace::TracePartCompletion::Tool {
+                    output: pl_trace::TraceToolOutput::new(String::new()),
+                })
             }
-            ToolTraceOutcome::Failed(error) => {
-                item.status = pl_trace::TracePartStatus::Failed;
-                recorder.fail_item(item, error.to_string());
-            }
+            ToolTraceOutcome::Failed(error) => pl_trace::TracePartAction::FailTool {
+                failure: pl_trace::TraceToolFailure::new(
+                    pl_trace::TraceToolFailureKind::Execution,
+                    error.to_string(),
+                ),
+                output: None,
+            },
+        };
+        let command = pl_trace::TracePartCommand {
+            item_id: item.item_id().to_string(),
+            expected_revision: item.revision(),
+            updated_at: crate::time::unix_seconds(),
+            action,
+        };
+        item.apply(command).expect("valid tool terminal state");
+        match outcome {
+            ToolTraceOutcome::Completed => recorder.complete_item(item),
+            ToolTraceOutcome::Failed(_) => recorder.fail_item(item),
         }
         recorder.drain().pop().unwrap()
     }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{InteractionKind, InteractionPayload, InteractionScope, InteractionStatus};
+use crate::{InteractionKind, InteractionScope, InteractionStatus};
 use pl_model::{ModelInfo, ProviderEndpoint};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
-use crate::{ConfigStore, StudioMode, StudioRuntimeStatus};
+use crate::{ConfigStore, StudioMode, StudioRuntimeStateKind};
 
 const TEST_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -197,23 +197,58 @@ fn pending_interaction(
     kind: InteractionKind,
     payload: InteractionPayload,
 ) -> InteractionRequest {
-    InteractionRequest {
-        interaction_id: id.to_string(),
-        kind,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
-            thread_id: session_id.to_string(),
-            turn_id: "turn-recovered".to_string(),
-            item_id: Some(id.to_string()),
-            tool_id: Some(id.to_string()),
-            agent_path: None,
-        },
-        payload,
-        created_at: 1,
-        updated_at: 1,
-        resolved_at: None,
-        resolution: None,
+    let scope = InteractionScope {
+        thread_id: session_id.to_string(),
+        turn_id: "turn-recovered".to_string(),
+        item_id: Some(id.to_string()),
+        tool_id: Some(id.to_string()),
+        agent_path: None,
+    };
+    match (kind, payload) {
+        (InteractionKind::UserInput, InteractionPayload::UserInput { questions }) => {
+            InteractionRequest::user_input(id, scope, questions, 1)
+        }
+        (
+            InteractionKind::ToolApproval,
+            InteractionPayload::ToolApproval {
+                name,
+                arguments,
+                working_directory,
+                parent_agent_id,
+            },
+        ) => InteractionRequest::tool_approval(
+            id,
+            scope,
+            pl_protocol::ToolApprovalRequest {
+                name,
+                arguments,
+                working_directory,
+                parent_agent_id,
+            },
+            1,
+        ),
+        (
+            InteractionKind::PlanConfirmation,
+            InteractionPayload::PlanConfirmation { plan_id, content },
+        ) => InteractionRequest::plan_confirmation(id, scope, plan_id, content, 1),
+        (kind, _) => panic!("fixture payload does not match interaction kind {kind:?}"),
     }
+}
+
+enum InteractionPayload {
+    UserInput {
+        questions: Vec<crate::UserQuestion>,
+    },
+    ToolApproval {
+        name: String,
+        arguments: serde_json::Value,
+        working_directory: Option<String>,
+        parent_agent_id: Option<String>,
+    },
+    PlanConfirmation {
+        plan_id: String,
+        content: String,
+    },
 }
 
 fn responses_function_tool_sse(id: &str, name: &str, arguments: serde_json::Value) -> String {

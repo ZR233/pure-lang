@@ -9,11 +9,13 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     BeginIntegratedReview, ReviewFileCoverage, ReviewRoundRecord, ReviewRoundState, ReviewScope,
-    ReviewTarget, TaskCommand, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
+    ReviewTarget, TaskCommand, WaitingReviewPhase, WorkCompletionStatus, WorkUnitCommand,
+    WorkUnitState, WorkUnitStateKind,
 };
 
 use super::super::apply_task_command;
-use super::super::work_unit::{update_work_unit_state, work_unit_state};
+use super::super::work_completion::work_completion_record;
+use super::super::work_unit::{apply_work_unit_command, work_unit_record, work_unit_state};
 use super::helpers::{
     active_implementation_run, ensure_no_pending_delivery_review, ensure_no_pending_review,
     ensure_review_call_unused, finish_transaction,
@@ -39,7 +41,7 @@ impl StudioStore {
                 .all(&tx)
                 .await?;
             let work_unit = match units.as_slice() {
-                [unit] if unit.state_kind == WorkUnitStatus::ReadyForReview.as_str() => {
+                [unit] if unit.state_kind == WorkUnitStateKind::WaitingReview.as_str() => {
                     unit.clone()
                 }
                 [unit] => bail!(
@@ -55,12 +57,18 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("work unit has no completion")?;
+            let completion_record = work_completion_record(completion.clone())?;
+            let work_unit_record = work_unit_record(work_unit.clone())?;
             if completion.executor_agent_id != executor_agent_id
-                || completion.status != WorkCompletionStatus::ReadyForReview.as_str()
+                || completion_record.status() != WorkCompletionStatus::ReadyForReview
+                || !matches!(
+                    work_unit_record.waiting_review_phase(),
+                    Some(WaitingReviewPhase::Ready(_))
+                )
             {
                 bail!("latest completion is not ready for review");
             }
-            let changed_files = serde_json::from_str(&completion.changed_files_json)?;
+            let changed_files = completion_record.changed_files().to_vec();
             ensure_no_pending_delivery_review(&tx, &run.id, &work_unit.id).await?;
             let round = insert_review_round(
                 &tx,
@@ -70,9 +78,8 @@ impl StudioStore {
                         work_unit_id: &work_unit.id,
                         completion_id: &completion.id,
                         completion_revision: completion.revision,
-                        reviewed_head: completion
-                            .head_commit
-                            .as_deref()
+                        reviewed_head: completion_record
+                            .head_commit()
                             .unwrap_or(work_unit.base_commit.as_str()),
                     },
                     requested_by_call_id,
@@ -80,9 +87,14 @@ impl StudioStore {
                 },
             )
             .await?;
-            let state = work_unit_state(&work_unit)?;
-            let progress = state.into_progress();
-            update_work_unit_state(&tx, work_unit, WorkUnitState::reviewing(progress)).await?;
+            apply_work_unit_command(
+                &tx,
+                work_unit,
+                WorkUnitCommand::BeginReview {
+                    review_round_id: round.id.clone(),
+                },
+            )
+            .await?;
             Ok(round)
         }
         .await;
@@ -112,12 +124,13 @@ impl StudioStore {
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
                 .all(&tx)
                 .await?;
-            if work_units.iter().any(|unit| {
-                !matches!(
-                    WorkUnitStatus::from_str(&unit.state_kind),
-                    Some(WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery)
-                )
-            }) {
+            let every_work_unit_completed = work_units
+                .iter()
+                .map(work_unit_state)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .all(|state| matches!(state, WorkUnitState::Completed(_)));
+            if !every_work_unit_completed {
                 bail!("integrated review requires every work unit to be merged or noDelivery");
             }
             ensure_no_pending_review(&tx, &run.id).await?;
@@ -207,7 +220,7 @@ async fn insert_review_round(
             reviewed_head: Set(reviewed_head.to_string()),
             requested_by_call_id: Set(request.requested_by_call_id.to_string()),
             reviewer_thread_id: Set(None),
-            state_json: Set(serde_json::to_string(&ReviewRoundState::pending())?),
+            state_json: Set(serde_json::to_string(&ReviewRoundState::pending_dispatch())?),
             revision: Set(0),
             design_references_json: Set("[]".to_string()),
             findings_json: Set("[]".to_string()),

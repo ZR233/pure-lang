@@ -1,20 +1,23 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait, sea_query::Expr};
 
-use pl_core::TurnOutcomeKind;
+use pl_protocol::TurnOutcome;
 
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentReview, ReviewExitDiagnostics, ReviewFileCoverage, ReviewRoundRecord, ReviewRoundState,
-    ReviewScope, ReviewTarget, ReviewVerdict, TaskCommand, TaskRunState, TaskRunStateKind,
-    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus, WorkUnitState, WorkUnitStatus,
+    AgentReview, ReviewExitDiagnostics, ReviewFileCoverage, ReviewPassedOutcome,
+    ReviewRoundCommand, ReviewRoundRecord, ReviewRoundStateKind, ReviewScope, ReviewTarget,
+    ReviewVerdict, TaskCommand, TaskRunState, TaskRunStateKind, WaitingReviewPhase,
+    WorkCompletionCommand, WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand,
+    WorkUnitStateKind,
 };
 
 use super::super::apply_task_command;
 use super::super::task_run_record;
-use super::super::work_unit::{update_work_unit_state, work_unit_state};
+use super::super::work_completion::work_completion_record;
+use super::super::work_unit::{apply_work_unit_command, work_unit_record};
 use super::helpers::{active_nonterminal_run, finish_transaction, pending_review_for_reviewer};
 use super::record::{review_round_record, review_round_state, update_review_round_state};
 
@@ -30,8 +33,8 @@ impl StudioStore {
         let result = async {
             let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
-            if review_round_state(&round)?.reviewer_status() != ThreadExecutionStatus::Running
-                || round.reviewer_thread_id.as_deref() != Some(reviewer_agent_id)
+            if review_round_state(&round)?.kind() != ReviewRoundStateKind::Running
+                || review_round_state(&round)?.reviewer_thread_id() != Some(reviewer_agent_id)
             {
                 bail!("reviewer Thread does not match the pending review");
             }
@@ -74,16 +77,26 @@ impl StudioStore {
                     }
                 }
             }
-            let next_state = match review.verdict {
-                ReviewVerdict::Pass => ReviewRoundState::pass(review.summary.clone()),
-                ReviewVerdict::ChangesRequired => {
-                    ReviewRoundState::changes_required(review.summary.clone())
-                }
-                ReviewVerdict::Blocked => ReviewRoundState::blocked(review.summary.clone()),
+            let command = match review.verdict {
+                ReviewVerdict::Pass => ReviewRoundCommand::Pass {
+                    reviewer_thread_id: reviewer_agent_id.to_string(),
+                    summary: review.summary.clone(),
+                },
+                ReviewVerdict::ChangesRequired => ReviewRoundCommand::RequireChanges {
+                    reviewer_thread_id: reviewer_agent_id.to_string(),
+                    summary: review.summary.clone(),
+                },
+                ReviewVerdict::Blocked => ReviewRoundCommand::Block {
+                    reviewer_thread_id: reviewer_agent_id.to_string(),
+                    summary: review.summary.clone(),
+                },
                 ReviewVerdict::Pending | ReviewVerdict::Failed => {
                     bail!("reviewer cannot select pending or failed")
                 }
             };
+            let next_state = review_round_state(&round)?
+                .decide(&round.id, command)?
+                .next_state();
             let next_revision = round.revision.saturating_add(1);
             let updated_round = entities::review_round::Entity::update_many()
                 .col_expr(
@@ -134,7 +147,7 @@ impl StudioStore {
         let result = async {
             let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_for_reviewer(&tx, &run.id, reviewer_agent_id).await?;
-            if review_round_state(&round)?.reviewer_status() != ThreadExecutionStatus::Running {
+            if review_round_state(&round)?.kind() != ReviewRoundStateKind::Running {
                 bail!("reviewer Thread does not match the pending review");
             }
             let file_reviews_json =
@@ -172,8 +185,7 @@ impl StudioStore {
     pub(crate) async fn settle_reviewer_turn_finished(
         &self,
         reviewer_agent_id: &str,
-        outcome_kind: TurnOutcomeKind,
-        reason: Option<&str>,
+        outcome: &TurnOutcome,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
@@ -182,9 +194,11 @@ impl StudioStore {
                     entities::review_round::Column::ReviewerThreadId
                         .eq(reviewer_agent_id.to_string()),
                 )
-                .filter(
-                    entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()),
-                )
+                .filter(entities::review_round::Column::StateKind.is_in([
+                    ReviewRoundStateKind::PendingDispatch.as_str(),
+                    ReviewRoundStateKind::Dispatched.as_str(),
+                    ReviewRoundStateKind::Running.as_str(),
+                ]))
                 .all(&tx)
                 .await?;
             let round = match rounds.as_slice() {
@@ -192,19 +206,23 @@ impl StudioStore {
                 [round] => round.clone(),
                 _ => bail!("reviewer owns multiple pending review rounds"),
             };
-            let detail = reason
-                .map(str::to_string)
-                .unwrap_or_else(|| "reviewer ended without a successful review_exit".to_string());
-            let failed_state = match outcome_kind {
-                TurnOutcomeKind::Cancelled => {
-                    ReviewRoundState::cancelled(detail.clone(), detail.clone())
-                }
-                TurnOutcomeKind::Completed
-                | TurnOutcomeKind::Failed
-                | TurnOutcomeKind::BudgetLimited => {
-                    ReviewRoundState::failed(detail.clone(), detail.clone())
-                }
+            let detail = reviewer_outcome_detail(outcome);
+            let state = review_round_state(&round)?;
+            let command = match outcome {
+                TurnOutcome::Cancelled(_) => ReviewRoundCommand::Cancel {
+                    reviewer_thread_id: Some(reviewer_agent_id.to_string()),
+                    reason: detail.clone(),
+                    summary: detail.clone(),
+                },
+                TurnOutcome::Completed(_)
+                | TurnOutcome::Failed(_)
+                | TurnOutcome::BudgetLimited(_) => ReviewRoundCommand::Fail {
+                    reviewer_thread_id: Some(reviewer_agent_id.to_string()),
+                    error: detail.clone(),
+                    summary: detail.clone(),
+                },
             };
+            let failed_state = state.decide(&round.id, command)?.next_state();
             update_review_round_state(&tx, round.clone(), failed_state).await?;
 
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
@@ -217,13 +235,13 @@ impl StudioStore {
                         .one(&tx)
                         .await?
                         .context("delivery review work unit not found")?;
-                    if work_unit.state_kind == WorkUnitStatus::Reviewing.as_str() {
-                        let state = work_unit_state(&work_unit)?;
-                        let progress = state.into_progress();
-                        update_work_unit_state(
+                    if work_unit.state_kind == WorkUnitStateKind::WaitingReview.as_str() {
+                        apply_work_unit_command(
                             &tx,
                             work_unit,
-                            WorkUnitState::ready_for_review(progress),
+                            WorkUnitCommand::ReviewFailed {
+                                review_round_id: round.id.clone(),
+                            },
                         )
                         .await?;
                     }
@@ -249,6 +267,15 @@ impl StudioStore {
         }
         .await;
         finish_transaction(tx, result).await
+    }
+}
+
+fn reviewer_outcome_detail(outcome: &TurnOutcome) -> String {
+    match outcome {
+        TurnOutcome::Completed(_) => "reviewer ended without a successful review_exit".to_string(),
+        TurnOutcome::Cancelled(value) => format!("reviewer cancelled: {:?}", value.cause()),
+        TurnOutcome::Failed(value) => value.failure().message.clone(),
+        TurnOutcome::BudgetLimited(_) => "reviewer stopped at its budget limit".to_string(),
     }
 }
 
@@ -278,42 +305,68 @@ async fn complete_delivery_review(
         .one(tx)
         .await?
         .context("delivery review completion not found")?;
-    let reviewed_head = completion
-        .head_commit
-        .as_deref()
+    let completion_record = work_completion_record(completion.clone())?;
+    let reviewed_head = completion_record
+        .head_commit()
         .unwrap_or(work_unit.base_commit.as_str());
-    if work_unit.state_kind != WorkUnitStatus::Reviewing.as_str()
-        || completion.work_unit_id != work_unit.id
+    let work_unit_record = work_unit_record(work_unit.clone())?;
+    if !matches!(
+        work_unit_record.waiting_review_phase(),
+        Some(WaitingReviewPhase::Reviewing(_))
+    ) || completion.work_unit_id != work_unit.id
         || completion.revision != completion_revision
-        || completion.status != WorkCompletionStatus::ReadyForReview.as_str()
+        || completion_record.status() != WorkCompletionStatus::ReadyForReview
         || round.reviewed_head != reviewed_head
     {
         bail!("delivery review target changed after reviewer creation");
     }
-    let progress = work_unit_state(&work_unit)?.into_progress();
-    let (completion_status, next_work_unit_state) = match review.verdict {
+    let (completion_command, completion_status, work_unit_command) = match review.verdict {
         ReviewVerdict::Pass => {
-            let state = if WorkCompletionKind::from_str(&completion.kind)
-                == Some(WorkCompletionKind::NoDelivery)
-            {
-                WorkUnitState::no_delivery(progress)
+            let outcome = if completion_record.kind() == WorkCompletionKind::NoDelivery {
+                ReviewPassedOutcome::NoDelivery
             } else {
-                WorkUnitState::approved(progress)
+                ReviewPassedOutcome::Delivery
             };
-            (WorkCompletionStatus::Approved, state)
+            (
+                WorkCompletionCommand::Approve {
+                    review_round_id: round.id.clone(),
+                    decided_at: now,
+                },
+                WorkCompletionStatus::Approved,
+                WorkUnitCommand::PassReview {
+                    review_round_id: round.id.clone(),
+                    outcome,
+                },
+            )
         }
         ReviewVerdict::ChangesRequired | ReviewVerdict::Blocked => (
+            WorkCompletionCommand::RequireChanges {
+                review_round_id: round.id.clone(),
+                decided_at: now,
+            },
             WorkCompletionStatus::ChangesRequired,
-            WorkUnitState::changes_requested(progress),
+            WorkUnitCommand::RequireChanges {
+                review_round_id: round.id.clone(),
+            },
         ),
         ReviewVerdict::Pending | ReviewVerdict::Failed => {
             bail!("reviewer cannot select pending or failed")
         }
     };
+    let decision =
+        completion_record.decide(completion_record.state_revision, completion_command)?;
+    if !decision.changed() {
+        bail!("delivery review completion was already settled");
+    }
+    let next_completion_state = decision.next_state();
     let updated_completion = entities::work_completion::Entity::update_many()
         .col_expr(
-            entities::work_completion::Column::Status,
-            Expr::value(completion_status.as_str()),
+            entities::work_completion::Column::StateJson,
+            Expr::value(serde_json::to_string(&next_completion_state)?),
+        )
+        .col_expr(
+            entities::work_completion::Column::StateRevision,
+            Expr::value(i64::try_from(completion_record.state_revision + 1)?),
         )
         .col_expr(
             entities::work_completion::Column::UpdatedAt,
@@ -322,7 +375,11 @@ async fn complete_delivery_review(
         .filter(entities::work_completion::Column::Id.eq(completion.id.clone()))
         .filter(entities::work_completion::Column::Revision.eq(completion_revision))
         .filter(
-            entities::work_completion::Column::Status
+            entities::work_completion::Column::StateRevision
+                .eq(i64::try_from(completion_record.state_revision)?),
+        )
+        .filter(
+            entities::work_completion::Column::StateKind
                 .eq(WorkCompletionStatus::ReadyForReview.as_str()),
         )
         .exec(tx)
@@ -330,9 +387,9 @@ async fn complete_delivery_review(
     if updated_completion.rows_affected != 1 {
         bail!("delivery review completion is stale or was already settled");
     }
-    update_work_unit_state(tx, work_unit, next_work_unit_state).await?;
+    apply_work_unit_command(tx, work_unit, work_unit_command).await?;
     if completion_status == WorkCompletionStatus::Approved
-        && WorkCompletionKind::from_str(&completion.kind) == Some(WorkCompletionKind::Delivery)
+        && completion_record.kind() == WorkCompletionKind::Delivery
     {
         apply_task_command(
             tx,

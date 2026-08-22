@@ -5,13 +5,12 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
-import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/updater.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update_state`, `cancel_all_update_operations`, `runtime_error`, `update_operations`, `wait`
+// These functions are ignored because they are not marked as `pub`: `cancel_all_update_operations`, `runtime_error`, `update_operations`, `wait`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
@@ -33,5 +32,5 @@ Future<BridgeStudioUpdateOperation> installStudioUpdate({
 abstract class BridgeStudioUpdateOperation implements RustOpaqueInterface {
   Future<void> cancel();
 
-  Stream<BridgeStudioUpdateEventDto> progressStream();
+  Stream<BridgeUpdaterStateSnapshot> progressStream();
 }

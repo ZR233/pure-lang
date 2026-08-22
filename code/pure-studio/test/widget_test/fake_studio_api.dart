@@ -672,7 +672,7 @@ class _FakeStudioApi implements StudioApi {
   McpStateSnapshot _nextMcpState() {
     final current = _currentState.mcpState;
     final snapshot = McpStateSnapshot(
-      meta: _nextObservedMeta(current.meta),
+      revision: current.revision + 1,
       desiredConfigFingerprint: current.desiredConfigFingerprint,
       appliedConfigFingerprint: current.appliedConfigFingerprint,
       activeServers: current.activeServers,
@@ -685,21 +685,12 @@ class _FakeStudioApi implements StudioApi {
   LspStateSnapshot _nextLspState() {
     final current = _currentState.lspState;
     final snapshot = LspStateSnapshot(
-      meta: _nextObservedMeta(current.meta),
+      revision: current.revision + 1,
       activeServers: current.activeServers,
       servers: current.servers,
     );
     _currentState = _currentState.copyWith(lspState: snapshot);
     return snapshot;
-  }
-
-  ObservedStateMeta _nextObservedMeta(ObservedStateMeta current) {
-    return ObservedStateMeta(
-      revision: current.revision + 1,
-      phase: ObservedStatePhase.ready,
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-      stale: false,
-    );
   }
 
   @override
@@ -819,10 +810,13 @@ class _FakeStudioApi implements StudioApi {
         for (final server in command.servers)
           McpServerSettingsView(
             id: server.id,
-            enabled: server.enabled,
             transport: server.transport,
             endpoint: server.endpoint,
-            status: 'configured',
+            state: server.enabled
+                ? const McpCheckingState(message: 'MCP health check is pending')
+                : const McpDisabledState(
+                    message: 'MCP server is disabled in configuration',
+                  ),
           ),
       ],
     );
@@ -883,12 +877,7 @@ class _FakeStudioApi implements StudioApi {
     final blocked = blockedProviderUsageLoad;
     final usages = blocked == null ? providerUsages : await blocked.future;
     final snapshot = ProviderUsageStateSnapshot(
-      meta: ObservedStateMeta(
-        revision: _currentState.providerUsageState.meta.revision + 1,
-        phase: ObservedStatePhase.ready,
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-        stale: false,
-      ),
+      revision: _currentState.providerUsageState.revision + 1,
       usages: usages,
     );
     _currentState = _currentState.copyWith(providerUsageState: snapshot);
@@ -897,17 +886,12 @@ class _FakeStudioApi implements StudioApi {
 
   SkillsStateSnapshot _skillsState(String projectId, {int revision = 0}) {
     return SkillsStateSnapshot(
-      meta: ObservedStateMeta(
-        revision: revision,
-        phase: ObservedStatePhase.ready,
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-        stale: false,
-      ),
       projectId: projectId,
       configFingerprint: 'fake-skills',
       catalogRevision: revision,
       skills: discoveredSkills,
       warnings: const [],
+      revision: revision,
     );
   }
 }
@@ -926,12 +910,7 @@ SettingsStateSnapshot _settingsSnapshot(
   PermissionMode? permissionMode,
 }) {
   return SettingsStateSnapshot(
-    meta: ObservedStateMeta(
-      revision: revision,
-      phase: ObservedStatePhase.ready,
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-      stale: false,
-    ),
+    revision: revision,
     providers: providers ?? current.providers,
     defaultProviderId: identical(defaultProviderId, _fakeUnset)
         ? current.defaultProviderId
@@ -951,7 +930,7 @@ const _fakeUnset = Object();
 StudioState _asNewerProductState(StudioState current, StudioState next) {
   return next.copyWith(
     projectDirectory: ProjectDirectoryState(
-      meta: _nextMeta(current.projectDirectory.meta),
+      revision: current.projectDirectory.revision + 1,
       values: next.projects,
     ),
     threadDirectory: ThreadDirectoryWindow(
@@ -960,38 +939,99 @@ StudioState _asNewerProductState(StudioState current, StudioState next) {
       hasMore: next.threadDirectory.hasMore,
     ),
     taskDirectory: TaskDirectoryState(
-      meta: _nextMeta(current.taskDirectory.meta),
+      revision: current.taskDirectory.revision + 1,
       values: next.taskDirectory.values,
     ),
     agentDirectory: AgentDirectoryState(
-      meta: _nextMeta(current.agentDirectory.meta),
+      revision: current.agentDirectory.revision + 1,
       values: next.agentDirectory.values,
     ),
     recoveryState: RecoveryStateSnapshot(
-      meta: _nextMeta(current.recoveryState.meta),
+      revision: current.recoveryState.revision + 1,
       values: next.recoveryIssues,
     ),
     providerUsageState: ProviderUsageStateSnapshot(
-      meta: _nextMeta(current.providerUsageState.meta),
+      revision: current.providerUsageState.revision + 1,
       configFingerprint: next.providerUsageState.configFingerprint,
       usages: next.providerUsages,
     ),
-    updaterState: UpdaterStateSnapshot(
-      meta: _nextMeta(current.updaterState.meta),
-      version: next.updaterState.version,
-      publishedAt: next.updaterState.publishedAt,
-      notesUrl: next.updaterState.notesUrl,
-    ),
+    updaterState: _nextUpdaterState(next.updaterState),
   );
 }
 
-ObservedStateMeta _nextMeta(ObservedStateMeta current) {
-  return ObservedStateMeta(
-    revision: current.revision + 1,
-    phase: ObservedStatePhase.ready,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-    stale: false,
-  );
+UpdaterStateSnapshot _nextUpdaterState(UpdaterStateSnapshot state) {
+  final revision = state.revision + 1;
+  return switch (state) {
+    DisabledUpdaterStateSnapshot(:final updatedAt) =>
+      DisabledUpdaterStateSnapshot(revision: revision, updatedAt: updatedAt),
+    IdleUpdaterStateSnapshot(:final updatedAt) => IdleUpdaterStateSnapshot(
+      revision: revision,
+      updatedAt: updatedAt,
+    ),
+    CheckingUpdaterStateSnapshot(:final operationId, :final startedAt) =>
+      CheckingUpdaterStateSnapshot(
+        revision: revision,
+        operationId: operationId,
+        startedAt: startedAt,
+      ),
+    UpToDateUpdaterStateSnapshot(:final checkedAt) =>
+      UpToDateUpdaterStateSnapshot(revision: revision, checkedAt: checkedAt),
+    AvailableUpdaterStateSnapshot(:final checkedAt, :final update) =>
+      AvailableUpdaterStateSnapshot(
+        revision: revision,
+        checkedAt: checkedAt,
+        update: update,
+      ),
+    DownloadingUpdaterStateSnapshot(
+      :final updatedAt,
+      :final update,
+      :final downloaded,
+      :final total,
+    ) =>
+      DownloadingUpdaterStateSnapshot(
+        revision: revision,
+        updatedAt: updatedAt,
+        update: update,
+        downloaded: downloaded,
+        total: total,
+      ),
+    VerifyingUpdaterStateSnapshot(
+      :final updatedAt,
+      :final update,
+      :final downloaded,
+      :final total,
+    ) =>
+      VerifyingUpdaterStateSnapshot(
+        revision: revision,
+        updatedAt: updatedAt,
+        update: update,
+        downloaded: downloaded,
+        total: total,
+      ),
+    InstallerLaunchedUpdaterStateSnapshot(:final launchedAt, :final update) =>
+      InstallerLaunchedUpdaterStateSnapshot(
+        revision: revision,
+        launchedAt: launchedAt,
+        update: update,
+      ),
+    CheckFailedUpdaterStateSnapshot(:final failedAt, :final error) =>
+      CheckFailedUpdaterStateSnapshot(
+        revision: revision,
+        failedAt: failedAt,
+        error: error,
+      ),
+    InstallFailedUpdaterStateSnapshot(
+      :final failedAt,
+      :final update,
+      :final error,
+    ) =>
+      InstallFailedUpdaterStateSnapshot(
+        revision: revision,
+        failedAt: failedAt,
+        update: update,
+        error: error,
+      ),
+  };
 }
 
 Map<String, Object?> _providerSettingsCommandJson(
@@ -1080,18 +1120,20 @@ const _defaultProviderUsages = [
   ProviderUsageView(
     providerId: 'deepseek',
     updatedAt: 1,
-    status: 'ready',
-    usageKind: 'deepseekBalance',
-    balance: DeepSeekBalanceUsageView(
-      isAvailable: true,
-      balances: [
-        DeepSeekBalanceInfoView(
-          currency: 'CNY',
-          totalBalance: '88.00',
-          grantedBalance: '8.00',
-          toppedUpBalance: '80.00',
+    state: ReadyProviderUsageView(
+      data: DeepSeekBalanceProviderUsageView(
+        balance: DeepSeekBalanceUsageView(
+          isAvailable: true,
+          balances: [
+            DeepSeekBalanceInfoView(
+              currency: 'CNY',
+              totalBalance: '88.00',
+              grantedBalance: '8.00',
+              toppedUpBalance: '80.00',
+            ),
+          ],
         ),
-      ],
+      ),
     ),
   ),
 ];

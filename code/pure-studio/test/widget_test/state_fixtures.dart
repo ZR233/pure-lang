@@ -188,7 +188,9 @@ StudioState _twoProjectState({
       ? 'session-b'
       : 'session-a';
   return _emptyState().copyWith(
-    projectDirectory: ProjectDirectoryState(values: projects),
+    projectDirectory: ProjectDirectoryState.fromState(
+      state: _testReady(projects),
+    ),
     threadDirectory: ThreadDirectoryWindow(threads: threads),
     workspacesByThread: {
       for (final session in threads)
@@ -219,13 +221,12 @@ StudioTurnView _testTurn({
   required StudioTurnState state,
   String turnId = 'turn-1',
   int updatedAt = 1,
-  StudioTurnFailureView? failure,
 }) {
   return StudioTurnView(
     turnId: turnId,
     threadId: threadId,
+    revision: 0,
     state: state,
-    failure: failure,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedAt),
   );
 }
@@ -233,48 +234,52 @@ StudioTurnView _testTurn({
 StudioState _stateWithPlannerModels() {
   final state = _emptyState();
   return state.copyWith(
-    settingsState: SettingsStateSnapshot(
-      providers: const [
-        ProviderSettingsView(
-          id: 'deepseek',
-          name: 'DeepSeek',
-          baseUrl: 'https://api.deepseek.com',
-          defaultModel: 'deepseek-v4-flash',
-          models: [
-            ProviderModelView(
-              slug: 'deepseek-v4-flash',
-              displayName: 'DeepSeek V4 Flash',
-              reasoningEfforts: ['high', 'max'],
-              wireProtocol: 'responses',
-              supportedConnectionModes: ['http'],
-              defaultConnectionMode: 'http',
-              connectionMode: 'http',
-            ),
-            ProviderModelView(
-              slug: 'deepseek-reasoner',
-              displayName: 'DeepSeek Reasoner',
-              reasoningEfforts: ['high', 'max'],
+    settingsState: SettingsStateSnapshot.fromState(
+      state: _testReady(
+        const SettingsStateData(
+          providers: [
+            ProviderSettingsView(
+              id: 'deepseek',
+              name: 'DeepSeek',
+              baseUrl: 'https://api.deepseek.com',
+              defaultModel: 'deepseek-v4-flash',
+              models: [
+                ProviderModelView(
+                  slug: 'deepseek-v4-flash',
+                  displayName: 'DeepSeek V4 Flash',
+                  reasoningEfforts: ['high', 'max'],
+                  wireProtocol: 'responses',
+                  supportedConnectionModes: ['http'],
+                  defaultConnectionMode: 'http',
+                  connectionMode: 'http',
+                ),
+                ProviderModelView(
+                  slug: 'deepseek-reasoner',
+                  displayName: 'DeepSeek Reasoner',
+                  reasoningEfforts: ['high', 'max'],
+                ),
+              ],
+              status: 'ready',
+              usageLabel: '2 models',
+              promptCacheDialect: 'implicit_prefix',
             ),
           ],
-          status: 'ready',
-          usageLabel: '2 models',
-          promptCacheDialect: 'implicit_prefix',
+          roles: [
+            RoleSettingsView(
+              key: 'executor',
+              providerId: 'deepseek',
+              model: 'deepseek-v4-flash',
+              effort: 'high',
+            ),
+            RoleSettingsView(
+              key: 'planner',
+              providerId: 'deepseek',
+              model: 'deepseek-v4-flash',
+              effort: 'high',
+            ),
+          ],
         ),
-      ],
-      roles: const [
-        RoleSettingsView(
-          key: 'executor',
-          providerId: 'deepseek',
-          model: 'deepseek-v4-flash',
-          effort: 'high',
-        ),
-        RoleSettingsView(
-          key: 'planner',
-          providerId: 'deepseek',
-          model: 'deepseek-v4-flash',
-          effort: 'high',
-        ),
-      ],
+      ),
     ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
@@ -308,44 +313,67 @@ StudioState _studioStateFixture({
   String? selectedThreadId,
 }) {
   return StudioState(
-    projectDirectory: ProjectDirectoryState(values: projects),
+    projectDirectory: ProjectDirectoryState.fromState(
+      state: _testReady(projects),
+    ),
     threadDirectory: ThreadDirectoryWindow(threads: threads),
-    taskDirectory: TaskDirectoryState(
-      values: [
+    taskDirectory: TaskDirectoryState.fromState(
+      state: _testReady([
         for (final entry in tasksByRootThread.entries)
           TaskDirectoryEntryView(rootThreadId: entry.key, task: entry.value),
-      ],
+      ]),
     ),
-    agentDirectory: AgentDirectoryState(values: agents),
-    settingsState: SettingsStateSnapshot(
-      providers: providers,
-      defaultProviderId: defaultProviderId,
-      roles: roles,
-      mcpServers: mcpServers,
-      instructions: instructions,
-      skills: skills,
-      general: general,
-      webSearch: webSearch,
-      permissionMode: permissionMode,
-    ),
-    recoveryState: RecoveryStateSnapshot(values: recoveryIssues),
-    mcpState: const McpStateSnapshot(),
-    lspState: const LspStateSnapshot(
-      servers: [
-        LspServerStateView(
-          id: 'rust-analyzer',
-          displayName: 'rust-analyzer',
-          availability: 'available',
-          activityKind: 'indexing',
-          activityTitle: 'Roots Scanned',
-          activityMessage: '166/408',
-          activityPercentage: 40,
+    agentDirectory: AgentDirectoryState.fromState(state: _testReady(agents)),
+    settingsState: SettingsStateSnapshot.fromState(
+      state: _testReady(
+        SettingsStateData(
+          providers: providers,
+          defaultProviderId: defaultProviderId,
+          roles: roles,
+          mcpServers: mcpServers,
+          instructions: instructions,
+          skills: skills,
+          general: general,
+          webSearch: webSearch,
+          permissionMode: permissionMode,
         ),
-      ],
+      ),
+    ),
+    recoveryState: RecoveryStateSnapshot.fromState(
+      state: _testReady(recoveryIssues),
+    ),
+    mcpState: McpStateSnapshot.fromState(
+      state: _testReady(const McpStateData()),
+    ),
+    lspState: LspStateSnapshot.fromState(
+      state: _testReady(
+        const LspStateData(
+          servers: [
+            LspServerStateView(
+              id: 'rust-analyzer',
+              displayName: 'rust-analyzer',
+              state: LspAvailableState(
+                checkedAt: 0,
+                diagnosticCount: 0,
+                activity: LspIndexingActivity(
+                  title: 'Roots Scanned',
+                  message: '166/408',
+                  percentage: 40,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
     skillsByProject: skillsByProject,
-    providerUsageState: ProviderUsageStateSnapshot(usages: providerUsages),
-    updaterState: const UpdaterStateSnapshot(),
+    providerUsageState: ProviderUsageStateSnapshot.fromState(
+      state: _testReady(ProviderUsageStateData(usages: providerUsages)),
+    ),
+    updaterState: UpdaterStateSnapshot.idle(
+      revision: 0,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    ),
     workspacesByThread: workspacesByThread,
     workspaceUiByThread: workspaceUiByThread,
     providerCatalog: providerCatalog,
@@ -354,12 +382,12 @@ StudioState _studioStateFixture({
   );
 }
 
-ObservedStateMeta _testObservedMeta(int revision) {
-  return ObservedStateMeta(
+ObservedResource<T> _testReady<T>(T value, {int revision = 1}) {
+  return ReadyObservedResource(
     revision: revision,
-    phase: ObservedStatePhase.ready,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-    stale: false,
+    updatedAt: 0,
+    lastCheckedAt: null,
+    value: value,
   );
 }
 
@@ -375,19 +403,23 @@ StudioState _withSettingsFixture(
 }) {
   final current = state.settingsState;
   return state.copyWith(
-    settingsState: SettingsStateSnapshot(
-      meta: current.meta,
-      providers: providers ?? current.providers,
-      defaultProviderId: identical(defaultProviderId, _fixtureUnset)
-          ? current.defaultProviderId
-          : defaultProviderId as String?,
-      roles: roles ?? current.roles,
-      mcpServers: mcpServers ?? current.mcpServers,
-      instructions: current.instructions,
-      skills: skills ?? current.skills,
-      general: current.general,
-      webSearch: webSearch ?? current.webSearch,
-      permissionMode: permissionMode ?? current.permissionMode,
+    settingsState: SettingsStateSnapshot.fromState(
+      state: _testReady(
+        SettingsStateData(
+          providers: providers ?? current.providers,
+          defaultProviderId: identical(defaultProviderId, _fixtureUnset)
+              ? current.defaultProviderId
+              : defaultProviderId as String?,
+          roles: roles ?? current.roles,
+          mcpServers: mcpServers ?? current.mcpServers,
+          instructions: current.instructions,
+          skills: skills ?? current.skills,
+          general: current.general,
+          webSearch: webSearch ?? current.webSearch,
+          permissionMode: permissionMode ?? current.permissionMode,
+        ),
+        revision: current.revision,
+      ),
     ),
   );
 }
@@ -416,29 +448,138 @@ ThreadItemView _threadItemFixture({
   AgentMessageChannel? channel = AgentMessageChannel.finalAnswer,
   int revision = 0,
   String status = 'completed',
-  int createdAt = 1,
+  Object createdAt = 1,
+  DateTime? updatedAt,
+  DateTime? completedAt,
+  String? error,
   TimelineToolPart? tool,
   List<String> reasoningSummary = const [],
   List<String> reasoningContent = const [],
+  String? filePath,
+  String? mediaType,
+  ThreadContextDisposition contextDisposition = ThreadContextDisposition.active,
 }) {
-  final timestamp = _fixtureDate(createdAt);
+  final timestamp = createdAt is DateTime
+      ? createdAt
+      : _fixtureDate(createdAt as int);
+  final terminalAt = completedAt ?? timestamp;
   return ThreadItemView(
     id: id,
     threadId: threadId,
     turnId: turnId,
     ordinal: ordinal,
     revision: revision,
-    status: status,
     createdAt: timestamp,
-    updatedAt: timestamp,
-    completedAt: status == 'completed' ? timestamp : null,
-    kind: kind,
-    channel: channel,
-    text: text,
-    tool: tool,
-    reasoningSummary: reasoningSummary,
-    reasoningContent: reasoningContent,
+    updatedAt: updatedAt ?? timestamp,
+    state: switch (kind) {
+      ThreadItemKind.userMessage => ThreadTextItemStateView(
+        channel: ThreadTextChannel.user,
+        text: text,
+        attachments: const [],
+        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
+      ),
+      ThreadItemKind.agentMessage => ThreadTextItemStateView(
+        channel: channel == AgentMessageChannel.commentary
+            ? ThreadTextChannel.commentary
+            : ThreadTextChannel.finalAnswer,
+        text: text,
+        attachments: const [],
+        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
+      ),
+      ThreadItemKind.reasoning => ThreadThinkingItemStateView(
+        summary: reasoningSummary,
+        content: reasoningContent,
+        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
+      ),
+      ThreadItemKind.plan => ThreadPlanItemStateView(
+        content: text,
+        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
+      ),
+      ThreadItemKind.toolCall => _toolItemFixture(
+        tool ?? const TimelineToolPart(toolCallId: 'tool', name: 'tool'),
+        status,
+        terminalAt,
+        error,
+      ),
+      ThreadItemKind.file => ThreadFileItemStateView(
+        filePath ?? '',
+        mediaType,
+        terminalAt,
+      ),
+      ThreadItemKind.agent ||
+      ThreadItemKind.turn ||
+      ThreadItemKind.inference ||
+      ThreadItemKind.contextCompaction => throw ArgumentError.value(
+        kind,
+        'kind',
+        'fixture requires an explicit canonical state for this item kind',
+      ),
+    },
+    contextDisposition: contextDisposition,
   );
+}
+
+ThreadContentLifecycleView _contentLifecycleFixture(
+  String status,
+  DateTime terminalAt, {
+  String? error,
+}) {
+  return switch (status) {
+    'started' || 'streaming' || 'running' => const StreamingThreadContentView(),
+    'completed' || 'succeeded' => CompletedThreadContentView(terminalAt),
+    'failed' ||
+    'budgetLimited' => FailedThreadContentView(terminalAt, error ?? status),
+    'cancelled' ||
+    'interrupted' ||
+    'denied' => CancelledThreadContentView(terminalAt, error ?? status),
+    _ => throw ArgumentError.value(status, 'status', 'unknown fixture state'),
+  };
+}
+
+ThreadToolItemStateView _toolItemFixture(
+  TimelineToolPart tool,
+  String status,
+  DateTime terminalAt,
+  String? error,
+) {
+  final invocation = ThreadToolInvocationView(
+    toolCallId: tool.toolCallId,
+    callId: tool.callId,
+    providerItemId: tool.providerItemId,
+    name: tool.name,
+    arguments: tool.arguments,
+    workingDirectory: tool.workingDirectory,
+  );
+  final output = ThreadToolOutputView(
+    result: tool.result ?? '',
+    outputArtifacts: tool.outputArtifacts,
+    exitCode: tool.exitCode,
+  );
+  final lifecycle = switch (status) {
+    'started' => const StartedThreadToolView(),
+    'streaming' => const StreamingThreadToolView(),
+    'awaitingApproval' => const AwaitingApprovalThreadToolView(),
+    'approved' => const ApprovedThreadToolView(),
+    'running' => RunningThreadToolView(tool.result ?? ''),
+    'succeeded' => SucceededThreadToolView(terminalAt, output),
+    'failed' => FailedThreadToolView(
+      terminalAt,
+      ThreadToolFailureView(
+        kind: tool.timedOut
+            ? ThreadToolFailureKindView.timedOut
+            : ThreadToolFailureKindView.execution,
+        message: error ?? tool.result ?? status,
+      ),
+      output,
+    ),
+    'denied' => DeniedThreadToolView(
+      terminalAt,
+      tool.denialReason ?? error ?? 'denied',
+    ),
+    'cancelled' => CancelledThreadToolView(terminalAt, error ?? status),
+    _ => throw ArgumentError.value(status, 'status', 'unknown tool state'),
+  };
+  return ThreadToolItemStateView(invocation: invocation, lifecycle: lifecycle);
 }
 
 StudioState _withSelectedRuntime(StudioState state, ThreadRuntimeView runtime) {

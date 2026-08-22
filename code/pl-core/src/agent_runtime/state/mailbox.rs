@@ -3,25 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_runtime::{ThreadId, TurnId};
 
-/// mailbox envelope 与模型上下文 checkpoint 的持久投递状态。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "state"
-)]
-pub enum MailboxDeliveryState {
-    #[default]
-    Pending,
-    Claimed {
-        turn_id: TurnId,
-        checkpoint_seq: u64,
-    },
-    Consumed {
-        turn_id: TurnId,
-        checkpoint_seq: u64,
-    },
-}
+use super::{MailboxCommand, MailboxDeliveryState, MailboxTransitionError};
 
 /// 决定 mailbox 输入是否以及如何投影到用户可见 Timeline。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,18 +90,35 @@ pub struct DurableMailboxEnvelope {
 }
 
 impl DurableMailboxEnvelope {
-    pub(crate) fn claim(&mut self, turn_id: TurnId) {
-        self.delivery_state = MailboxDeliveryState::Claimed {
-            turn_id,
-            checkpoint_seq: 0,
-        };
+    pub(crate) fn claim(&mut self, turn_id: TurnId) -> Result<bool, MailboxTransitionError> {
+        let decision = self
+            .delivery_state
+            .clone()
+            .decide(MailboxCommand::Claim { turn_id })?;
+        self.delivery_state = decision.next_state;
+        Ok(decision.changed)
     }
 
-    pub(crate) fn consume(&mut self, checkpoint_seq: u64) {
-        self.delivery_state = MailboxDeliveryState::Consumed {
-            turn_id: self.turn_id.clone(),
-            checkpoint_seq,
-        };
+    pub(crate) fn consume(&mut self, checkpoint_seq: u64) -> Result<bool, MailboxTransitionError> {
+        let decision = self
+            .delivery_state
+            .clone()
+            .decide(MailboxCommand::Consume {
+                turn_id: self.turn_id.clone(),
+                checkpoint_seq,
+            })?;
+        self.delivery_state = decision.next_state;
+        Ok(decision.changed)
+    }
+
+    pub(crate) fn requeue(&mut self, turn_id: TurnId) -> Result<bool, MailboxTransitionError> {
+        let decision = self
+            .delivery_state
+            .clone()
+            .decide(MailboxCommand::Requeue)?;
+        self.delivery_state = decision.next_state;
+        self.turn_id = turn_id;
+        Ok(decision.changed)
     }
 }
 
@@ -368,7 +367,7 @@ mod tests {
             },
             queue_coalescing_key: None,
             budget_action: MailboxBudgetAction::Refresh,
-            delivery_state: MailboxDeliveryState::Pending,
+            delivery_state: MailboxDeliveryState::default(),
             queued_at: 7,
         };
         let envelope_json = serde_json::to_value(&envelope).unwrap();
@@ -415,7 +414,7 @@ mod tests {
             "message": "hello",
             "presentation": { "type": "hidden" },
             "metadata": { "kind": "test" },
-            "deliveryState": { "state": "pending" },
+            "deliveryState": { "kind": "pending", "data": null },
             "queuedAt": 7
         }))
         .unwrap();

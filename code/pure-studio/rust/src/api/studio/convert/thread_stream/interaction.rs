@@ -1,7 +1,8 @@
 use anyhow::Result;
 use pl_protocol::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionStatus, PlanConfirmationResolution, ToolApprovalResolution, UserQuestion,
+    CancelledInteractionState, ExpiredInteractionState, InteractionContent, InteractionRequest,
+    PlanConfirmationResolution, PlanConfirmationState, ToolApprovalResolution, ToolApprovalState,
+    UserInputState, UserQuestion,
 };
 
 use crate::api::studio::types::*;
@@ -9,17 +10,6 @@ use crate::api::studio::types::*;
 pub(crate) fn interaction(value: InteractionRequest) -> Result<BridgeInteractionRequest> {
     Ok(BridgeInteractionRequest {
         interaction_id: value.interaction_id,
-        kind: match value.kind {
-            InteractionKind::UserInput => BridgeInteractionKind::UserInput,
-            InteractionKind::ToolApproval => BridgeInteractionKind::ToolApproval,
-            InteractionKind::PlanConfirmation => BridgeInteractionKind::PlanConfirmation,
-        },
-        status: match value.status {
-            InteractionStatus::Pending => BridgeInteractionStatus::Pending,
-            InteractionStatus::Resolved => BridgeInteractionStatus::Resolved,
-            InteractionStatus::Cancelled => BridgeInteractionStatus::Cancelled,
-            InteractionStatus::Expired => BridgeInteractionStatus::Expired,
-        },
         scope: BridgeInteractionScope {
             thread_id: value.scope.thread_id,
             turn_id: value.scope.turn_id,
@@ -27,75 +17,154 @@ pub(crate) fn interaction(value: InteractionRequest) -> Result<BridgeInteraction
             tool_id: value.scope.tool_id,
             agent_path: value.scope.agent_path,
         },
-        payload: payload(value.payload)?,
+        revision: value.revision,
+        content: content(value.content)?,
         created_at: value.created_at,
         updated_at: value.updated_at,
-        resolved_at: value.resolved_at,
-        resolution: value.resolution.map(resolution),
     })
 }
 
-fn payload(value: InteractionPayload) -> Result<BridgeInteractionPayload> {
+fn content(value: InteractionContent) -> Result<BridgeInteractionContent> {
     Ok(match value {
-        InteractionPayload::UserInput { questions } => BridgeInteractionPayload::UserInput {
-            questions: questions.into_iter().map(question).collect(),
+        InteractionContent::UserInput(value) => BridgeInteractionContent::UserInput {
+            questions: value.questions().iter().cloned().map(question).collect(),
+            state: user_input_state(value.state()),
         },
-        InteractionPayload::ToolApproval {
-            name,
-            arguments,
-            working_directory,
-            parent_agent_id,
-        } => BridgeInteractionPayload::ToolApproval {
-            name,
-            arguments_json: serde_json::to_string(&arguments)?,
-            working_directory,
-            parent_agent_id,
-        },
-        InteractionPayload::PlanConfirmation { plan_id, content } => {
-            BridgeInteractionPayload::PlanConfirmation { plan_id, content }
-        }
-    })
-}
-
-fn resolution(value: InteractionResolution) -> BridgeInteractionResolution {
-    match value {
-        InteractionResolution::UserInput { answers } => {
-            let mut answers = answers
-                .into_iter()
-                .map(|(question_id, answer)| BridgeUserInputAnswer {
-                    question_id,
-                    answers: answer.answers,
-                })
-                .collect::<Vec<_>>();
-            answers.sort_by(|left, right| left.question_id.cmp(&right.question_id));
-            BridgeInteractionResolution::UserInput { answers }
-        }
-        InteractionResolution::ToolApproval { decision, reason } => {
-            BridgeInteractionResolution::ToolApproval {
-                decision: match decision {
-                    ToolApprovalResolution::Approved => BridgeToolApprovalResolution::Approved,
-                    ToolApprovalResolution::Denied => BridgeToolApprovalResolution::Denied,
-                },
-                reason,
+        InteractionContent::ToolApproval(value) => {
+            let request = value.request();
+            BridgeInteractionContent::ToolApproval {
+                name: request.name.clone(),
+                arguments_json: serde_json::to_string(&request.arguments)?,
+                working_directory: request.working_directory.clone(),
+                parent_agent_id: request.parent_agent_id.clone(),
+                state: tool_approval_state(value.state()),
             }
         }
-        InteractionResolution::PlanConfirmation {
-            decision,
-            content,
-            reason,
-        } => BridgeInteractionResolution::PlanConfirmation {
-            decision: match decision {
-                PlanConfirmationResolution::ImplementFreshContext => {
-                    BridgePlanConfirmationResolution::ImplementFreshContext
-                }
-                PlanConfirmationResolution::ContinuePlanning => {
-                    BridgePlanConfirmationResolution::ContinuePlanning
-                }
-                PlanConfirmationResolution::Dismiss => BridgePlanConfirmationResolution::Dismiss,
-            },
-            content,
-            reason,
+        InteractionContent::PlanConfirmation(value) => BridgeInteractionContent::PlanConfirmation {
+            plan_id: value.plan_id().to_owned(),
+            content: value.content().to_owned(),
+            state: plan_confirmation_state(value.state()),
         },
+    })
+}
+
+fn user_input_state(value: &UserInputState) -> BridgeUserInputInteractionState {
+    match value {
+        UserInputState::Pending(state) => BridgeUserInputInteractionState::Pending {
+            operation_id: state.operation_id().to_owned(),
+        },
+        UserInputState::Resolved(state) => BridgeUserInputInteractionState::Resolved {
+            operation_id: state.operation_id().to_owned(),
+            resolved_at: state.resolved_at(),
+            answers: sorted_answers(state.answers()),
+        },
+        UserInputState::Cancelled(state) => BridgeUserInputInteractionState::Cancelled {
+            operation_id: state.operation_id().to_owned(),
+            cancelled_at: state.cancelled_at(),
+            reason: state.reason().to_owned(),
+        },
+        UserInputState::Expired(state) => expired_user_input(state),
+    }
+}
+
+fn expired_user_input(state: &ExpiredInteractionState) -> BridgeUserInputInteractionState {
+    BridgeUserInputInteractionState::Expired {
+        operation_id: state.operation_id().to_owned(),
+        expired_at: state.expired_at(),
+    }
+}
+
+fn tool_approval_state(value: &ToolApprovalState) -> BridgeToolApprovalInteractionState {
+    match value {
+        ToolApprovalState::Pending(state) => BridgeToolApprovalInteractionState::Pending {
+            operation_id: state.operation_id().to_owned(),
+        },
+        ToolApprovalState::Resolved(state) => BridgeToolApprovalInteractionState::Resolved {
+            operation_id: state.operation_id().to_owned(),
+            resolved_at: state.resolved_at(),
+            decision: tool_approval_resolution(state.decision()),
+            reason: state.reason().map(str::to_owned),
+        },
+        ToolApprovalState::Cancelled(state) => cancelled_tool_approval(state),
+        ToolApprovalState::Expired(state) => BridgeToolApprovalInteractionState::Expired {
+            operation_id: state.operation_id().to_owned(),
+            expired_at: state.expired_at(),
+        },
+    }
+}
+
+fn cancelled_tool_approval(
+    state: &CancelledInteractionState,
+) -> BridgeToolApprovalInteractionState {
+    BridgeToolApprovalInteractionState::Cancelled {
+        operation_id: state.operation_id().to_owned(),
+        cancelled_at: state.cancelled_at(),
+        reason: state.reason().to_owned(),
+    }
+}
+
+fn plan_confirmation_state(
+    value: &PlanConfirmationState,
+) -> BridgePlanConfirmationInteractionState {
+    match value {
+        PlanConfirmationState::Pending(state) => BridgePlanConfirmationInteractionState::Pending {
+            operation_id: state.operation_id().to_owned(),
+        },
+        PlanConfirmationState::Resolved(state) => {
+            BridgePlanConfirmationInteractionState::Resolved {
+                operation_id: state.operation_id().to_owned(),
+                resolved_at: state.resolved_at(),
+                decision: plan_confirmation_resolution(state.decision()),
+                content: state.content().map(str::to_owned),
+                reason: state.reason().map(str::to_owned),
+            }
+        }
+        PlanConfirmationState::Cancelled(state) => {
+            BridgePlanConfirmationInteractionState::Cancelled {
+                operation_id: state.operation_id().to_owned(),
+                cancelled_at: state.cancelled_at(),
+                reason: state.reason().to_owned(),
+            }
+        }
+        PlanConfirmationState::Expired(state) => BridgePlanConfirmationInteractionState::Expired {
+            operation_id: state.operation_id().to_owned(),
+            expired_at: state.expired_at(),
+        },
+    }
+}
+
+fn sorted_answers(
+    value: &std::collections::HashMap<String, pl_protocol::UserInputAnswer>,
+) -> Vec<BridgeUserInputAnswer> {
+    let mut answers = value
+        .iter()
+        .map(|(question_id, answer)| BridgeUserInputAnswer {
+            question_id: question_id.clone(),
+            answers: answer.answers.clone(),
+        })
+        .collect::<Vec<_>>();
+    answers.sort_by(|left, right| left.question_id.cmp(&right.question_id));
+    answers
+}
+
+fn tool_approval_resolution(value: ToolApprovalResolution) -> BridgeToolApprovalResolution {
+    match value {
+        ToolApprovalResolution::Approved => BridgeToolApprovalResolution::Approved,
+        ToolApprovalResolution::Denied => BridgeToolApprovalResolution::Denied,
+    }
+}
+
+fn plan_confirmation_resolution(
+    value: PlanConfirmationResolution,
+) -> BridgePlanConfirmationResolution {
+    match value {
+        PlanConfirmationResolution::ImplementFreshContext => {
+            BridgePlanConfirmationResolution::ImplementFreshContext
+        }
+        PlanConfirmationResolution::ContinuePlanning => {
+            BridgePlanConfirmationResolution::ContinuePlanning
+        }
+        PlanConfirmationResolution::Dismiss => BridgePlanConfirmationResolution::Dismiss,
     }
 }
 

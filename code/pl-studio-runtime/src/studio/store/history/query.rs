@@ -1,8 +1,5 @@
-use anyhow::{Context, Result, bail};
-use pl_protocol::{
-    ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase,
-    TurnState,
-};
+use anyhow::{Context, Result};
+use pl_protocol::{ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use crate::studio::entity::{item, turn};
@@ -58,7 +55,7 @@ impl StudioStore {
                 .all(&self.db)
                 .await?
                 .into_iter()
-                .map(|item| serde_json::from_str::<ThreadItem>(&item.payload_json))
+                .map(ThreadItem::try_from)
                 .collect::<Result<Vec<_>, _>>()?;
             turns.push(ThreadTurnHistory {
                 turn: turn_record(model)?,
@@ -78,48 +75,7 @@ impl StudioStore {
 }
 
 fn turn_record(model: &turn::Model) -> Result<Turn> {
-    // 老数据兼容：schema v1 的 waitingInteraction phase Turn 在新设计下应为 completed。
-    let state = if model.status.as_str() == "inProgress"
-        && model.phase.as_deref() == Some("waitingInteraction")
-    {
-        TurnState::Completed
-    } else {
-        match model.status.as_str() {
-            "queued" => TurnState::Queued,
-            "inProgress" => TurnState::InProgress {
-                phase: match model.phase.as_deref().unwrap_or("preparing") {
-                    "preparing" => TurnPhase::Preparing,
-                    "thinking" => TurnPhase::Thinking,
-                    "responding" => TurnPhase::Responding,
-                    "planning" => TurnPhase::Planning,
-                    "runningTool" => TurnPhase::RunningTool,
-                    "persisting" => TurnPhase::Persisting,
-                    phase => bail!("unknown Turn phase {phase}"),
-                },
-            },
-            "completed" => TurnState::Completed,
-            "failed" => TurnState::Failed {
-                reason: model.reason.clone().unwrap_or_default(),
-            },
-            "interrupted" => TurnState::Interrupted {
-                reason: model.reason.clone().unwrap_or_default(),
-            },
-            status => bail!("unknown Turn status {status}"),
-        }
-    };
-    Ok(Turn {
-        id: model.id.clone(),
-        thread_id: model.thread_id.clone(),
-        state,
-        failure: model
-            .failure_json
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()?,
-        started_at: model.started_at,
-        updated_at: model.updated_at,
-        completed_at: model.completed_at,
-    })
+    Ok(model.clone().try_into()?)
 }
 
 #[cfg(test)]
@@ -129,24 +85,22 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Set};
 
     async fn seed_turn(store: &StudioStore, thread_id: &str, ordinal: i64) {
+        let state = pl_protocol::TurnState::Completed(pl_protocol::CompletedTurnState::new(
+            Some(ordinal),
+            ordinal,
+            pl_protocol::TurnCompletion::Normal,
+        ));
         turn::ActiveModel {
             id: Set(format!("turn-{ordinal}")),
             thread_id: Set(thread_id.to_string()),
             ordinal: Set(ordinal),
             revision: Set(1),
-            status: Set("completed".to_string()),
-            phase: Set(None),
-            reason: Set(None),
+            state_json: Set(serde_json::to_string(&state).unwrap()),
             model_json: Set(None),
             usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
-            failure_json: Set(None),
-            budget_limit_json: Set(None),
-            rollover_compacted: Set(0),
-            rollover_compaction_error: Set(None),
             metadata_json: Set(None),
-            started_at: Set(Some(ordinal)),
             updated_at: Set(ordinal),
-            completed_at: Set(Some(ordinal)),
+            ..Default::default()
         }
         .insert(&store.db)
         .await

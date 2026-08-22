@@ -50,11 +50,10 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
         .iter()
         .map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
-            | TraceEventKind::TracePartCompleted { item } => item.item_id.as_str(),
+            | TraceEventKind::TracePartCompleted { item } => item.item_id(),
             TraceEventKind::TracePartDelta { event } => event.item_id.as_str(),
-            TraceEventKind::TracePartFailed { item, .. } => item.item_id.as_str(),
-            TraceEventKind::PlanLifecycleChanged { .. }
-            | TraceEventKind::InteractionChanged { .. }
+            TraceEventKind::TracePartFailed { item } => item.item_id(),
+            TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => "",
         })
@@ -130,18 +129,17 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-                if item.kind == TracePartKind::Tool =>
+                if item.kind() == TracePartKind::Tool =>
             {
-                Some(item.item_id.as_str())
+                Some(item.item_id())
             }
-            TraceEventKind::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
+            TraceEventKind::TracePartDelta { event } if event.kind() == TracePartKind::Tool => {
                 Some(event.item_id.as_str())
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -213,18 +211,17 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-                if item.kind == TracePartKind::Tool =>
+                if item.kind() == TracePartKind::Tool =>
             {
-                Some(item.item_id.as_str())
+                Some(item.item_id())
             }
-            TraceEventKind::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
+            TraceEventKind::TracePartDelta { event } if event.kind() == TracePartKind::Tool => {
                 Some(event.item_id.as_str())
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -292,8 +289,8 @@ fn stream_trace_scope_rejects_similar_turn_prefix() {
     assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartStarted { item }
-            if item.kind == TracePartKind::Tool
-                && item.item_id == "turn-1-turn-10-call"
+            if item.kind() == TracePartKind::Tool
+                && item.item_id() == "turn-1-turn-10-call"
     )));
 }
 

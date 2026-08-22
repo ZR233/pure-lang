@@ -1475,6 +1475,12 @@ abstract class AppLocalizations {
   /// **'{name} denied'**
   String timelineToolDenied(String name);
 
+  /// No description provided for @timelineToolCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} cancelled'**
+  String timelineToolCancelled(String name);
+
   /// No description provided for @timelineToolAwaitingApproval.
   ///
   /// In en, this message translates to:

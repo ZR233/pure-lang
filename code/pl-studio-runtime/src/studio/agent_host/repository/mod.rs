@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use pl_core::{
-    AgentSubmissionPage, AgentSubmissionRecord, DurableMailboxEnvelope, MailboxDeliveryState,
-    RestoredAgentRuntime, ThreadActorState, ThreadCommit, ThreadCommitOutcome, ThreadId,
-    ThreadRepository,
+    AgentSubmissionPage, AgentSubmissionRecord, DurableMailboxEnvelope, MailboxCommand,
+    MailboxDeliveryState, RestoredAgentRuntime, ThreadActorState, ThreadCommit,
+    ThreadCommitOutcome, ThreadId, ThreadRepository, TurnId,
 };
 use pl_protocol::ThreadSnapshot;
 use sea_orm::{
@@ -18,7 +18,7 @@ use crate::studio::entity::{thread, thread_input, thread_submission};
 mod billing;
 mod context;
 mod conversion;
-mod labels;
+pub(super) mod labels;
 mod write_behind;
 
 use billing::persist_inference_billing;
@@ -26,10 +26,10 @@ use context::{
     SessionSnapshotAuditError, audit_session_snapshot, persist_session_snapshot,
     serialize_thread_metadata,
 };
-use labels::{presentation_label, thread_status_label};
+use labels::presentation_label;
 
 use input_metadata::serialize_input_metadata;
-use projection::{delivery_identity, persist_state_turns, persist_thread_notifications};
+use projection::{persist_state_turns, persist_thread_notifications};
 use write_behind::ThreadWriteBehindWriter;
 
 /// Studio 单库对 canonical Thread 状态的 write-behind repository。
@@ -265,7 +265,7 @@ pub(super) async fn apply_state_commit(
         .as_ref()
         .map(ToString::to_string));
     active.role = Set(commit.next_state.snapshot.identity.role.to_string());
-    active.status = Set(thread_status_label(&commit.next_state).to_string());
+    active.state_json = Set(serde_json::to_string(&commit.next_state.snapshot.state)?);
     active.revision = Set(i64_from_u64(commit.next_state.session.thread_revision)?);
     active.runtime_revision = Set(Some(i64_from_u64(commit.next_state.snapshot.revision)?));
     active.event_sequence = Set(i64_from_u64(commit.next_state.snapshot.event_sequence)?);
@@ -348,19 +348,39 @@ async fn persist_inputs(
     let mut live = BTreeSet::new();
     for input in &state.pending_inputs {
         live.insert(input.mail_id.clone());
-        upsert_input(tx, &thread_id, input, false, state.snapshot.updated_at).await?;
+        upsert_input(tx, &thread_id, input).await?;
     }
     if let Some(input) = &state.active_input {
         live.insert(input.mail_id.clone());
-        upsert_input(tx, &thread_id, input, true, state.snapshot.updated_at).await?;
+        upsert_input(tx, &thread_id, input).await?;
     }
     for row in existing {
-        if live.contains(&row.mail_id) || row.state == "consumed" {
+        if live.contains(&row.mail_id) || row.state_kind == "consumed" {
             continue;
         }
+        let mut delivery_state: MailboxDeliveryState = serde_json::from_str(&row.state_json)?;
+        if delivery_state.is_pending() {
+            delivery_state = delivery_state
+                .decide(MailboxCommand::Claim {
+                    turn_id: TurnId::new(row.turn_id.clone())?,
+                })
+                .map_err(store_error)?
+                .next_state;
+        }
+        let turn_id = delivery_state
+            .turn_id()
+            .cloned()
+            .ok_or_else(|| store_error("claimed mailbox is missing its Turn identity"))?;
+        let checkpoint_seq = delivery_state.checkpoint_seq().unwrap_or_default();
+        let delivery_state = delivery_state
+            .decide(MailboxCommand::Consume {
+                turn_id,
+                checkpoint_seq,
+            })
+            .map_err(store_error)?
+            .next_state;
         let mut active = row.into_active_model();
-        active.state = Set("consumed".to_string());
-        active.consumed_at = Set(Some(state.snapshot.updated_at));
+        active.state_json = Set(serde_json::to_string(&delivery_state)?);
         active.update(tx).await.map_err(store_error)?;
     }
     Ok(())
@@ -370,8 +390,6 @@ async fn upsert_input(
     tx: &sea_orm::DatabaseTransaction,
     thread_id: &str,
     input: &DurableMailboxEnvelope,
-    is_active: bool,
-    updated_at: i64,
 ) -> Result<(), PureError> {
     let existing = thread_input::Entity::find_by_id(input.mail_id.clone())
         .one(tx)
@@ -389,35 +407,6 @@ async fn upsert_input(
         Some(existing) => existing.queue_ordinal,
         None => next_input_ordinal(tx, thread_id).await?,
     };
-    let (delivery_state, claimed_turn_id, checkpoint_seq) = if is_active {
-        let (turn_id, sequence) =
-            delivery_identity(&input.delivery_state).unwrap_or_else(|| (input.turn_id.clone(), 0));
-        (
-            "active",
-            Some(turn_id.to_string()),
-            Some(i64_from_u64(sequence)?),
-        )
-    } else {
-        match &input.delivery_state {
-            MailboxDeliveryState::Pending => ("queued", None, None),
-            MailboxDeliveryState::Claimed {
-                turn_id,
-                checkpoint_seq,
-            } => (
-                "claimed",
-                Some(turn_id.to_string()),
-                Some(i64_from_u64(*checkpoint_seq)?),
-            ),
-            MailboxDeliveryState::Consumed {
-                turn_id,
-                checkpoint_seq,
-            } => (
-                "consumed",
-                Some(turn_id.to_string()),
-                Some(i64_from_u64(*checkpoint_seq)?),
-            ),
-        }
-    };
     let active = thread_input::ActiveModel {
         id: Set(input.mail_id.clone()),
         thread_id: Set(thread_id.to_string()),
@@ -426,15 +415,12 @@ async fn upsert_input(
         content: Set(input.payload.message.clone()),
         metadata_json: Set(serialize_input_metadata(input)?),
         presentation: Set(presentation_label(input.payload.presentation.clone()).to_string()),
-        state: Set(delivery_state.to_string()),
-        claimed_turn_id: Set(claimed_turn_id),
-        checkpoint_seq: Set(checkpoint_seq),
+        state_json: Set(serde_json::to_string(&input.delivery_state)?),
         queue_ordinal: Set(ordinal),
         queued_at: Set(existing
             .as_ref()
             .map_or(input.queued_at, |row| row.queued_at)),
-        claimed_at: Set((delivery_state != "queued").then_some(updated_at)),
-        consumed_at: Set((delivery_state == "consumed").then_some(updated_at)),
+        ..Default::default()
     };
     match existing {
         Some(_) => active.update(tx).await.map_err(store_error)?,
@@ -478,9 +464,9 @@ pub(super) mod test_support {
     use std::collections::VecDeque;
 
     use pl_core::{
-        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
-        CommitDurability, DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadContextState,
-        ThreadId, ThreadMutation,
+        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, CommitDurability,
+        DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadContextState, ThreadId,
+        ThreadMutation,
     };
 
     use super::StudioStore;
@@ -515,9 +501,7 @@ pub(super) mod test_support {
                     role: AgentRoleId::new("executor").expect("role"),
                     depth: 0,
                 },
-                lifecycle: AgentLifecycleState::Active,
-                activity: AgentActivityState::Idle,
-                active_turn_id: None,
+                state: AgentState::idle(),
                 pending_inputs: 0,
                 progress: None,
                 last_turn: None,

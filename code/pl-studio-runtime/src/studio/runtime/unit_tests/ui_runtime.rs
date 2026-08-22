@@ -1,10 +1,10 @@
 use super::*;
 use crate::studio::task_coordinator::{
-    CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource,
+    CreateTaskRun, CreateWorkUnit, ExecutorContinuationStateKind, TaskPlannerWakeSource,
     TaskRunStateKind, WorkUnitState,
 };
 use crate::{StudioProductEventKind, ThreadVisibility};
-use pl_protocol::ThreadItemContent;
+use pl_protocol::{ThreadItemState, ThreadTextChannel};
 use pretty_assertions::assert_eq;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};
 
@@ -515,7 +515,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
         })
         .await
         .unwrap();
-    let running = WorkUnitState::running(unit.state.clone().into_progress());
+    let running = WorkUnitState::running_for_test(0);
     let unit = store
         .update_work_unit(&unit.id, running, Some(executor_thread_id.clone()))
         .await
@@ -544,13 +544,12 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
             &pl_core::AgentTurnOutcome {
                 turn_id: pl_core::TurnId::new("turn-terminal").unwrap(),
                 thread_id: pl_core::ThreadId::new(executor_thread_id.clone()).unwrap(),
-                kind: pl_core::TurnOutcomeKind::Failed,
-                reason: Some("executor failed".to_string()),
-                failure: None,
-                budget_limit: None,
-                rollover_compacted: false,
-                rollover_compaction_error: None,
+                outcome: pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
+                    pl_protocol::TurnFailureCategory::Internal,
+                    "executor failed",
+                )),
                 usage: Default::default(),
+                started_at: None,
                 finished_at: 1,
             },
         )
@@ -576,7 +575,7 @@ async fn restart_thread_registration_materializes_a_missing_durable_planner_wake
             .unwrap()
             .unwrap()
             .continuation_state(),
-        ExecutorContinuationState::PlannerWakePending
+        ExecutorContinuationStateKind::PlannerWakePending
     );
     assert!(!store.task_planner_wake_was_delivered(&wake).await.unwrap());
 
@@ -878,7 +877,7 @@ async fn active_turn_and_pending_input_prevent_thread_mutation() {
         .snapshot(crate::studio::agent_host::root_agent_id(&thread.id))
         .await
         .unwrap();
-    assert!(snapshot.active_turn_id.is_some());
+    assert!(snapshot.active_turn_id().is_some());
     assert_eq!(snapshot.pending_inputs, 1);
 
     let pending_mode_error = runtime
@@ -1006,17 +1005,6 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .start_confirmed_task(&session.id, "resume canonical task", &workspace)
         .await
         .unwrap();
-    store
-        .update_thread_status(
-            &session.id,
-            pl_protocol::ThreadStatus::Idle,
-            None,
-            None,
-            crate::studio::ids::unix_seconds(),
-        )
-        .await
-        .unwrap();
-
     let resumed = runtime.resume_task(session.id.clone()).await.unwrap();
     assert_eq!(resumed.thread_id, session.id);
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
@@ -1030,7 +1018,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "SELECT mail_id, content, metadata_json, presentation
-             FROM thread_inputs WHERE thread_id = ? AND state = 'active'",
+             FROM thread_inputs WHERE thread_id = ? AND state_kind = 'claimed'",
             [owner.to_string().into()],
         ))
         .await
@@ -1063,7 +1051,10 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
             .unwrap()
             .items
             .iter()
-            .all(|item| !matches!(&item.content, ThreadItemContent::UserMessage { .. }))
+            .all(|item| !matches!(
+                item.state(),
+                ThreadItemState::Text(text) if text.channel() == ThreadTextChannel::User
+            ))
     );
     runtime
         .resume_task(session.id.clone())
@@ -1074,7 +1065,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "SELECT COUNT(*) AS count FROM thread_inputs
-             WHERE thread_id = ? AND state = 'active'",
+             WHERE thread_id = ?",
             [owner.to_string().into()],
         ))
         .await
@@ -1137,15 +1128,15 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
         .read_project_directory()
         .await
         .unwrap()
-        .meta
-        .revision;
+        .state
+        .revision();
     let before_thread_revision = runtime
         .product_events()
         .read_thread_directory()
         .await
         .unwrap()
-        .meta
-        .revision;
+        .state
+        .revision();
     let mut events = runtime.product_events().subscribe();
     runtime
         .cleanup_project(&project.id, &preview.expected_revision)
@@ -1162,6 +1153,7 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
         let thread_directory = loop {
             if let StudioProductEventKind::ThreadDirectoryChanged(state) =
                 events.recv().await.unwrap().kind
+                && state.removed.contains(&session.id)
             {
                 break state;
             }
@@ -1183,12 +1175,12 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     ));
     assert!(runtime.active_turns_for_test().await.is_empty());
     assert!(runtime.list_projects().await.unwrap().is_empty());
-    assert!(project_directory.projects.is_empty());
+    assert!(project_directory.state.value().unwrap().projects.is_empty());
     // 目录事件是增量 payload：清理项目时受影响 Thread 以 removal 形式发布。
     assert!(thread_directory.removed.contains(&session.id));
     assert!(thread_directory.upserted.is_empty());
-    assert!(project_directory.meta.revision > before_project_revision);
-    assert!(thread_directory.meta.revision > before_thread_revision);
+    assert!(project_directory.state.revision() > before_project_revision);
+    assert!(thread_directory.revision > before_thread_revision);
     assert!(
         store
             .list_pending_interactions(&session.id)
@@ -1259,10 +1251,7 @@ async fn ui_submit_retries_http_overload_and_completes_session() {
     assert_eq!(request_count, 2);
     assert!(snapshot.active_turn.is_none(), "{snapshot:#?}");
     assert!(snapshot.items.iter().any(|item| {
-        matches!(
-            &item.content,
-            ThreadItemContent::AgentMessage { text, .. } if text == "done"
-        )
+        matches!(item.state(), ThreadItemState::Text(text) if text.text() == "done")
     }));
     let _ = tokio::fs::remove_dir_all(home).await;
     let _ = tokio::fs::remove_dir_all(workspace).await;

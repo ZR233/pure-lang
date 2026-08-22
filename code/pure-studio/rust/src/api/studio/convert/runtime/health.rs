@@ -14,22 +14,9 @@ pub(crate) fn bridge_agent_directory_entry(
         parent_path: agent.parent_path,
         role: agent.role,
         task: agent.task,
-        status: agent.status,
         summary: agent.summary,
         depth: agent.depth,
-        error: agent.error,
-        reason: agent.reason,
-        lifecycle: agent.lifecycle,
-        activity: match agent.activity {
-            StudioAgentActivity::Idle => BridgeAgentActivity::Idle,
-            StudioAgentActivity::Queued => BridgeAgentActivity::Queued,
-            StudioAgentActivity::ActiveRunning => BridgeAgentActivity::ActiveRunning,
-            StudioAgentActivity::ActiveWaitingTool => BridgeAgentActivity::ActiveWaitingTool,
-            StudioAgentActivity::ActiveWaitingInteraction => {
-                BridgeAgentActivity::ActiveWaitingInteraction
-            }
-            StudioAgentActivity::Cancelling => BridgeAgentActivity::Cancelling,
-        },
+        state: bridge_agent_state(agent.state),
         progress: agent.progress.map(|progress| BridgeAgentProgressDto {
             stage: progress.stage,
             summary: progress.summary,
@@ -42,6 +29,40 @@ pub(crate) fn bridge_agent_directory_entry(
     }
 }
 
+fn bridge_agent_state(state: StudioAgentState) -> BridgeAgentState {
+    match state {
+        StudioAgentState::Idle(_) => BridgeAgentState::Idle(BridgeIdleAgent {}),
+        StudioAgentState::Queued(value) => BridgeAgentState::Queued(BridgeQueuedAgent {
+            turn_id: value.turn_id().to_string(),
+        }),
+        StudioAgentState::Running(value) => BridgeAgentState::Running(BridgeRunningAgent {
+            turn_id: value.turn_id().to_string(),
+        }),
+        StudioAgentState::WaitingTool(value) => {
+            BridgeAgentState::WaitingTool(BridgeWaitingToolAgent {
+                turn_id: value.turn_id().to_string(),
+            })
+        }
+        StudioAgentState::WaitingInteraction(value) => {
+            BridgeAgentState::WaitingInteraction(BridgeWaitingInteractionAgent {
+                turn_id: value.turn_id().to_string(),
+                interaction_id: value.interaction_id().to_string(),
+            })
+        }
+        StudioAgentState::Cancelling(value) => {
+            BridgeAgentState::Cancelling(BridgeCancellingAgent {
+                turn_id: value.turn_id().to_string(),
+            })
+        }
+        StudioAgentState::Closing(_) => BridgeAgentState::Closing(BridgeClosingAgent {}),
+        StudioAgentState::Closed(_) => BridgeAgentState::Closed(BridgeClosedAgent {}),
+        StudioAgentState::Faulted(value) => BridgeAgentState::Faulted(BridgeFaultedAgent {
+            error: bridge_state_error(value.error()),
+            diagnostic_turn_id: value.diagnostic_turn_id().map(ToOwned::to_owned),
+        }),
+    }
+}
+
 pub(crate) fn bridge_mcp_health(health: StudioMcpHealth) -> BridgeMcpHealthDto {
     BridgeMcpHealthDto {
         active_mcp_servers: health.active_mcp_servers,
@@ -50,16 +71,11 @@ pub(crate) fn bridge_mcp_health(health: StudioMcpHealth) -> BridgeMcpHealthDto {
             .into_iter()
             .map(|server| BridgeMcpServerDto {
                 id: server.id,
-                enabled: server.enabled,
                 transport: server.transport.to_string(),
                 endpoint: server.endpoint,
                 source_kind: server.source_kind,
-                status_kind: server.status_kind,
                 mutation_policy: server.mutation_policy,
-                availability_kind: server.availability_kind,
-                availability_message: server.availability_message,
-                last_checked_at: server.last_checked_at,
-                tool_count: server.tool_count,
+                state: bridge_mcp_server_state(server.state),
             })
             .collect(),
     }
@@ -77,55 +93,167 @@ impl From<StudioLspHealth> for BridgeLspHealthDto {
                     display_name: server.display_name,
                     extensions: server.extensions,
                     language_ids: server.language_ids,
-                    availability_kind: server.availability_kind,
-                    availability_message: server.availability_message,
-                    last_checked_at: server.last_checked_at,
-                    diagnostic_count: server.diagnostic_count,
-                    activity_kind: server.activity_kind,
-                    activity_title: server.activity_title,
-                    activity_message: server.activity_message,
-                    activity_percentage: server.activity_percentage,
-                    last_error: server.last_error,
-                    last_error_at: server.last_error_at,
+                    state: bridge_lsp_server_state(server.state),
                 })
                 .collect(),
         }
     }
 }
 
-impl From<pl_protocol::ObservedStateMeta> for BridgeObservedStateMeta {
-    fn from(meta: pl_protocol::ObservedStateMeta) -> Self {
-        Self {
-            revision: meta.revision,
-            phase: meta.phase.into(),
-            updated_at: meta.updated_at,
-            last_checked_at: meta.last_checked_at,
-            stale: meta.stale,
-        }
+fn bridge_mcp_server_state(state: StudioMcpServerState) -> BridgeMcpServerState {
+    match state {
+        StudioMcpServerState::Disabled(state) => BridgeMcpServerState::Disabled {
+            message: state.message().to_string(),
+        },
+        StudioMcpServerState::MissingCredential(state) => BridgeMcpServerState::MissingCredential {
+            message: state.message().to_string(),
+        },
+        StudioMcpServerState::Checking(state) => BridgeMcpServerState::Checking {
+            message: state.message().to_string(),
+        },
+        StudioMcpServerState::Available(state) => BridgeMcpServerState::Available {
+            checked_at: state.checked_at(),
+            tool_count: state.tool_count(),
+        },
+        StudioMcpServerState::Unavailable(state) => BridgeMcpServerState::Unavailable {
+            checked_at: state.checked_at(),
+            error: bridge_state_error(state.error()),
+        },
     }
 }
 
-impl From<pl_protocol::ObservedStatePhase> for BridgeObservedStatePhase {
-    fn from(phase: pl_protocol::ObservedStatePhase) -> Self {
-        match phase {
-            pl_protocol::ObservedStatePhase::Uninitialized => Self::Uninitialized,
-            pl_protocol::ObservedStatePhase::Ready => Self::Ready,
-            pl_protocol::ObservedStatePhase::Running {
-                operation,
-                operation_id,
-            } => Self::Running {
-                operation: operation.into(),
-                operation_id,
-            },
-            pl_protocol::ObservedStatePhase::Failed { operation, error } => Self::Failed {
-                operation: operation.into(),
-                error: BridgeStateError {
-                    code: error.code,
-                    message: error.message,
-                    retryable: error.retryable,
-                },
-            },
-            pl_protocol::ObservedStatePhase::Stopped => Self::Stopped,
+fn bridge_lsp_server_state(state: StudioLspServerState) -> BridgeLspServerState {
+    match state {
+        StudioLspServerState::Checking(state) => BridgeLspServerState::Checking {
+            message: state.message().to_string(),
+        },
+        StudioLspServerState::Available(state) => BridgeLspServerState::Available {
+            checked_at: state.checked_at(),
+            diagnostic_count: state.diagnostic_count(),
+            activity: bridge_lsp_activity(state.activity()),
+        },
+        StudioLspServerState::Unavailable(state) => BridgeLspServerState::Unavailable {
+            checked_at: state.checked_at(),
+            error: bridge_state_error(state.error()),
+        },
+        StudioLspServerState::Disabled(state) => BridgeLspServerState::Disabled {
+            message: state.message().to_string(),
+        },
+    }
+}
+
+fn bridge_lsp_activity(activity: &LspAvailableActivity) -> BridgeLspActivity {
+    match activity {
+        LspAvailableActivity::Idle(_) => BridgeLspActivity::Idle,
+        LspAvailableActivity::Busy(state) => BridgeLspActivity::Busy {
+            title: state.title().map(ToString::to_string),
+            message: state.message().map(ToString::to_string),
+            percentage: state.percentage(),
+        },
+        LspAvailableActivity::Indexing(state) => BridgeLspActivity::Indexing {
+            title: state.title().map(ToString::to_string),
+            message: state.message().map(ToString::to_string),
+            percentage: state.percentage(),
+        },
+    }
+}
+
+fn bridge_state_error(error: &pl_protocol::StateError) -> BridgeStateError {
+    BridgeStateError {
+        code: error.code.clone(),
+        message: error.message.clone(),
+        retryable: error.retryable,
+    }
+}
+
+pub(crate) fn bridge_uninitialized_resource(
+    state: &pl_protocol::UninitializedResource,
+) -> BridgeUninitializedResource {
+    BridgeUninitializedResource {
+        revision: state.revision(),
+        updated_at: state.updated_at(),
+    }
+}
+
+pub(crate) fn bridge_loading_resource(
+    state: &pl_protocol::LoadingResource,
+) -> BridgeLoadingResource {
+    BridgeLoadingResource {
+        revision: state.revision(),
+        operation: state.operation().into(),
+        operation_id: state.operation_id().to_string(),
+        started_at: state.started_at(),
+    }
+}
+
+pub(crate) fn bridge_ready_resource<T>(
+    state: &pl_protocol::ReadyResource<T>,
+) -> BridgeReadyResource {
+    BridgeReadyResource {
+        revision: state.revision(),
+        updated_at: state.updated_at(),
+        last_checked_at: state.last_checked_at(),
+    }
+}
+
+pub(crate) fn bridge_refreshing_resource<T>(
+    state: &pl_protocol::RefreshingResource<T>,
+) -> BridgeRefreshingResource {
+    BridgeRefreshingResource {
+        revision: state.revision(),
+        operation: state.operation().into(),
+        operation_id: state.operation_id().to_string(),
+        started_at: state.started_at(),
+        last_checked_at: state.last_checked_at(),
+    }
+}
+
+pub(crate) fn bridge_stale_resource<T>(
+    state: &pl_protocol::StaleResource<T>,
+) -> BridgeStaleResource {
+    BridgeStaleResource {
+        revision: state.revision(),
+        stale_at: state.stale_at(),
+        last_checked_at: state.last_checked_at(),
+    }
+}
+
+pub(crate) fn bridge_degraded_resource<T>(
+    state: &pl_protocol::DegradedResource<T>,
+) -> BridgeDegradedResource {
+    BridgeDegradedResource {
+        revision: state.revision(),
+        failed_at: state.failed_at(),
+        last_checked_at: state.last_checked_at(),
+        operation: state.operation().into(),
+        error: state.error().clone().into(),
+    }
+}
+
+pub(crate) fn bridge_failed_resource(state: &pl_protocol::FailedResource) -> BridgeFailedResource {
+    BridgeFailedResource {
+        revision: state.revision(),
+        failed_at: state.failed_at(),
+        operation: state.operation().into(),
+        error: state.error().clone().into(),
+    }
+}
+
+pub(crate) fn bridge_stopped_resource(
+    state: &pl_protocol::StoppedResource,
+) -> BridgeStoppedResource {
+    BridgeStoppedResource {
+        revision: state.revision(),
+        stopped_at: state.stopped_at(),
+    }
+}
+
+impl From<pl_protocol::StateError> for BridgeStateError {
+    fn from(error: pl_protocol::StateError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
         }
     }
 }

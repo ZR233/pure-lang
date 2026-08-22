@@ -1,8 +1,8 @@
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest, AgentLifecycleState,
+    AgentCommand, AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest,
     AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSubmitRequest,
-    AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState, TurnId,
+    AgentTurnSubmitPolicy, DurableMailboxEnvelope, TurnId,
 };
 use super::AgentLoop;
 
@@ -14,10 +14,10 @@ where
         &mut self,
         request: AgentSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
-        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+        if !self.state.snapshot.state.is_accepting_work() {
             return Err(AgentRuntimeError::NotActive(
                 self.state.snapshot.identity.id.clone(),
-                self.state.snapshot.lifecycle,
+                self.state.snapshot.state.clone(),
             ));
         }
         if self.state.snapshot.identity.id != request.thread_id {
@@ -39,7 +39,7 @@ where
         }
         let live_turn = self.active.as_ref().and_then(|active| {
             (request.turn_policy != AgentTurnSubmitPolicy::StartOrQueue
-                && !active.cancelling
+                && !active.is_cancelling()
                 && active.thread_id == request.thread_id)
                 .then(|| {
                     (
@@ -83,10 +83,19 @@ where
             queued_at: unix_timestamp(),
         };
         if live_turn.is_some() {
-            input.claim(turn_id.clone());
+            input
+                .claim(turn_id.clone())
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         }
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
+        if live_turn.is_none() && next.snapshot.state.is_idle() {
+            next.snapshot
+                .transition(AgentCommand::Queue {
+                    turn_id: turn_id.clone(),
+                })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        }
         self.commit_transition(super::persist::TransitionCommit::new(next), |snapshot| {
             AgentRuntimeEventKind::TurnQueued {
                 input: input.clone(),
@@ -113,13 +122,12 @@ where
         let mut next = self.state.clone();
         let mut released = false;
         for input in &mut next.pending_inputs {
-            if input.mail_id != mail_id
-                || !matches!(input.delivery_state, MailboxDeliveryState::Claimed { .. })
-            {
+            if input.mail_id != mail_id || !input.delivery_state.is_claimed() {
                 continue;
             }
-            input.delivery_state = MailboxDeliveryState::Pending;
-            input.turn_id = TurnId::generate();
+            input
+                .requeue(TurnId::generate())
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
             released = true;
             break;
         }
@@ -141,10 +149,10 @@ where
         root_agent_id: super::super::ThreadId,
         request: AgentCurrentSessionSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
-        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+        if !self.state.snapshot.state.is_accepting_work() {
             return Err(AgentRuntimeError::NotActive(
                 self.state.snapshot.identity.id.clone(),
-                self.state.snapshot.lifecycle,
+                self.state.snapshot.state.clone(),
             ));
         }
         debug_assert!(
@@ -167,18 +175,18 @@ where
         root_agent_id: super::super::ThreadId,
         request: AgentInteractionContinuationRequest,
     ) -> AgentRuntimeResult<()> {
-        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+        if !self.state.snapshot.state.is_accepting_work() {
             return Err(AgentRuntimeError::NotActive(
                 self.state.snapshot.identity.id.clone(),
-                self.state.snapshot.lifecycle,
+                self.state.snapshot.state.clone(),
             ));
         }
         debug_assert!(
             root_agent_id == self.state.snapshot.identity.id
                 || self.state.snapshot.identity.depth > 0
         );
-        if request.interaction.status != pl_protocol::InteractionStatus::Resolved
-            || request.interaction.resolution.is_none()
+        if request.interaction.status() != pl_protocol::InteractionStatus::Resolved
+            || request.interaction.resolution().is_none()
         {
             return Err(AgentRuntimeError::InvalidInput(
                 "interaction continuation requires a resolved interaction".to_string(),
@@ -227,9 +235,9 @@ where
             ));
         };
         validate_interaction_identity(canonical_interaction, &request.interaction)?;
-        match canonical_interaction.status {
+        match canonical_interaction.status() {
             pl_protocol::InteractionStatus::Resolved => {
-                if canonical_interaction.resolution == request.interaction.resolution {
+                if canonical_interaction.resolution() == request.interaction.resolution() {
                     return Ok(());
                 }
                 return Err(AgentRuntimeError::InvalidInput(
@@ -263,6 +271,41 @@ where
         let mut next = self.state.clone();
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
+        let waiting_interaction_id = match &next.snapshot.state {
+            super::super::AgentState::WaitingInteraction(waiting) => {
+                Some(waiting.interaction_id().to_string())
+            }
+            super::super::AgentState::Idle(_)
+            | super::super::AgentState::Queued(_)
+            | super::super::AgentState::Running(_)
+            | super::super::AgentState::WaitingTool(_)
+            | super::super::AgentState::Cancelling(_)
+            | super::super::AgentState::Closing(_)
+            | super::super::AgentState::Closed(_)
+            | super::super::AgentState::Faulted(_) => None,
+        };
+        if let Some(waiting_interaction_id) = waiting_interaction_id {
+            if waiting_interaction_id != request.interaction.interaction_id {
+                return Err(AgentRuntimeError::InvalidInput(format!(
+                    "agent is waiting for interaction {waiting_interaction_id}, not {}",
+                    request.interaction.interaction_id
+                )));
+            }
+            next.snapshot
+                .transition(AgentCommand::ContinueInteraction {
+                    interaction_id: waiting_interaction_id,
+                    turn_id: next
+                        .triggering_turn_id()
+                        .expect("continuation input must be pending"),
+                })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        } else if next.snapshot.state.is_idle() {
+            next.snapshot
+                .transition(AgentCommand::Queue {
+                    turn_id: turn_id.clone(),
+                })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        }
         let interaction = request.interaction;
         self.commit_transition(
             super::persist::TransitionCommit::new(next).with_thread_facts(vec![
@@ -291,11 +334,7 @@ fn validate_interaction_identity(
     canonical: &pl_protocol::InteractionRequest,
     resolved: &pl_protocol::InteractionRequest,
 ) -> AgentRuntimeResult<()> {
-    if canonical.kind == resolved.kind
-        && canonical.scope == resolved.scope
-        && canonical.payload == resolved.payload
-        && canonical.created_at == resolved.created_at
-    {
+    if canonical.same_request(resolved) {
         return Ok(());
     }
     Err(AgentRuntimeError::InvalidInput(

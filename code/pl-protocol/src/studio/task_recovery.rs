@@ -16,12 +16,21 @@ pub enum StudioTaskRecoveryTargetKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioTaskRecoveryTurn {
     pub turn_id: String,
-    pub status: String,
+    pub state: StudioTaskRecoveryTurnState,
     pub updated_at: i64,
     pub item_count: u64,
     pub input_count: u64,
     pub tool_count: u64,
     pub tool_summaries: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioTaskRecoveryTurnState {
+    Completed,
+    Cancelled,
+    Failed,
+    BudgetLimited,
 }
 
 /// One Planner or Executor recovery target.
@@ -87,6 +96,38 @@ pub struct StudioTaskRecoveryRequest {
     pub mode: crate::ConversationRecoveryMode,
     pub turn_ids: Vec<String>,
     pub preview: StudioTaskRecoveryPreview,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_turn_uses_typed_terminal_state_and_rejects_legacy_status() {
+        let turn = StudioTaskRecoveryTurn {
+            turn_id: "turn-1".to_string(),
+            state: StudioTaskRecoveryTurnState::BudgetLimited,
+            updated_at: 10,
+            item_count: 2,
+            input_count: 1,
+            tool_count: 1,
+            tool_summaries: vec!["shell".to_string()],
+        };
+        let json = serde_json::to_string(&turn).expect("serialize recovery Turn");
+        let restored = serde_json::from_str(&json).expect("deserialize recovery Turn");
+        assert_eq!(turn, restored);
+
+        let legacy = serde_json::json!({
+            "turnId": "turn-1",
+            "status": "interrupted",
+            "updatedAt": 10,
+            "itemCount": 2,
+            "inputCount": 1,
+            "toolCount": 1,
+            "toolSummaries": ["shell"]
+        });
+        assert!(serde_json::from_value::<StudioTaskRecoveryTurn>(legacy).is_err());
+    }
 }
 
 /// Durable result of applying a Task conversation recovery.

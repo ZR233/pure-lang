@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use pl_model::TokenUsage;
-use pl_protocol::{TurnBillingRecord, TurnFailure};
+use pl_protocol::{TurnBillingRecord, TurnOutcome};
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
@@ -9,6 +9,7 @@ use crate::{AgentRoleId, AgentSession};
 use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::lifecycle::*;
+use super::{AgentCommand, AgentState, AgentTransitionError};
 
 /// agent 在 runtime 内的稳定身份。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,17 +27,9 @@ pub struct AgentIdentity {
 pub struct AgentTurnOutcome {
     pub turn_id: TurnId,
     pub thread_id: ThreadId,
-    pub kind: TurnOutcomeKind,
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<TurnFailure>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
-    #[serde(default)]
-    pub rollover_compacted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rollover_compaction_error: Option<String>,
+    pub outcome: TurnOutcome,
     pub usage: TokenUsage,
+    pub started_at: Option<i64>,
     pub finished_at: i64,
 }
 
@@ -146,8 +139,7 @@ pub enum AgentDirectoryWaitReason {
 #[serde(rename_all = "camelCase")]
 pub struct AgentDirectoryWaitMessage {
     pub identity: AgentIdentity,
-    pub lifecycle: AgentLifecycleState,
-    pub activity: AgentActivityState,
+    pub state: AgentState,
     pub message: Option<AgentProgressCheckpoint>,
     pub last_turn_outcome: Option<AgentTurnOutcome>,
 }
@@ -165,9 +157,7 @@ pub struct AgentDirectoryWaitResult {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
     pub identity: AgentIdentity,
-    pub lifecycle: AgentLifecycleState,
-    pub activity: AgentActivityState,
-    pub active_turn_id: Option<TurnId>,
+    pub state: AgentState,
     pub pending_inputs: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<AgentProgressCheckpoint>,
@@ -175,6 +165,23 @@ pub struct AgentSnapshot {
     pub revision: u64,
     pub event_sequence: u64,
     pub updated_at: i64,
+}
+
+impl AgentSnapshot {
+    /// 通过 canonical state machine 应用 Agent command。
+    ///
+    /// # Errors
+    ///
+    /// 当前状态不接受命令或 Turn identity 不匹配时返回转换错误。
+    pub fn transition(&mut self, command: AgentCommand) -> Result<bool, AgentTransitionError> {
+        let decision = self.state.clone().decide(command)?;
+        self.state = decision.next_state;
+        Ok(decision.changed)
+    }
+
+    pub fn active_turn_id(&self) -> Option<&TurnId> {
+        self.state.turn_id()
+    }
 }
 
 /// runtime 持有的 canonical session 及其统计。

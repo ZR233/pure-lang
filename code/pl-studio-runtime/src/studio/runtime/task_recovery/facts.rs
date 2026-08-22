@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
-use pl_protocol::{ConversationRecoveryMode, ThreadToolCall};
+use pl_protocol::{
+    ConversationRecoveryMode, ThreadToolFailureKind, ThreadToolItem, ThreadToolState,
+};
 
 use crate::studio::task_coordinator::TaskRunStateKind;
 use crate::studio::{StudioTaskRecoveryPreview, StudioTaskRecoveryState};
@@ -40,17 +42,28 @@ pub(super) const fn task_kind_from_recovery_state(
         StudioTaskRecoveryState::Cancelled => TaskRunStateKind::Cancelled,
     }
 }
-pub(super) fn tool_summary(tool: &ThreadToolCall) -> String {
-    let outcome = if tool.timed_out {
-        Some("timed out".to_string())
-    } else if tool.denial_reason.is_some() {
-        Some("denied".to_string())
-    } else {
-        tool.exit_code.map(|code| format!("exit {code}"))
+pub(super) fn tool_summary(tool: &ThreadToolItem) -> String {
+    let outcome = match tool.state() {
+        ThreadToolState::Started(_) => Some("started".to_string()),
+        ThreadToolState::Streaming(_) => Some("streaming".to_string()),
+        ThreadToolState::AwaitingApproval(_) => Some("awaiting approval".to_string()),
+        ThreadToolState::Approved(_) => Some("approved".to_string()),
+        ThreadToolState::Running(_) => Some("running".to_string()),
+        ThreadToolState::Succeeded(state) => state
+            .output()
+            .exit_code()
+            .map(|code| format!("exit {code}")),
+        ThreadToolState::Failed(state) => Some(match state.failure().kind() {
+            ThreadToolFailureKind::Execution => "failed".to_string(),
+            ThreadToolFailureKind::TimedOut => "timed out".to_string(),
+            ThreadToolFailureKind::BudgetLimited => "budget limited".to_string(),
+        }),
+        ThreadToolState::Denied(_) => Some("denied".to_string()),
+        ThreadToolState::Cancelled(_) => Some("cancelled".to_string()),
     };
     match outcome {
-        Some(outcome) => format!("{} ({outcome})", tool.name),
-        None => tool.name.clone(),
+        Some(outcome) => format!("{} ({outcome})", tool.invocation().name()),
+        None => tool.invocation().name().to_string(),
     }
 }
 pub(super) async fn selected_input_hashes(

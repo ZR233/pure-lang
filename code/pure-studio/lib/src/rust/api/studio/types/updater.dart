@@ -7,26 +7,326 @@ import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+
+import 'runtime.dart';
 part 'updater.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+class BridgeAvailableUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 checkedAt;
+  final BridgeVerifiedUpdateSummary update;
+
+  const BridgeAvailableUpdaterState({
+    required this.revision,
+    required this.checkedAt,
+    required this.update,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ checkedAt.hashCode ^ update.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAvailableUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          checkedAt == other.checkedAt &&
+          update == other.update;
+}
+
+class BridgeCheckFailedUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 failedAt;
+  final BridgeStateError error;
+
+  const BridgeCheckFailedUpdaterState({
+    required this.revision,
+    required this.failedAt,
+    required this.error,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ failedAt.hashCode ^ error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCheckFailedUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          failedAt == other.failedAt &&
+          error == other.error;
+}
+
+class BridgeCheckingUpdaterState {
+  final BigInt revision;
+  final String operationId;
+  final PlatformInt64 startedAt;
+
+  const BridgeCheckingUpdaterState({
+    required this.revision,
+    required this.operationId,
+    required this.startedAt,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^ operationId.hashCode ^ startedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCheckingUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          operationId == other.operationId &&
+          startedAt == other.startedAt;
+}
+
+class BridgeDisabledUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+
+  const BridgeDisabledUpdaterState({
+    required this.revision,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeDisabledUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeDownloadingUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final BridgeVerifiedUpdateSummary update;
+  final BigInt downloaded;
+  final BigInt total;
+
+  const BridgeDownloadingUpdaterState({
+    required this.revision,
+    required this.updatedAt,
+    required this.update,
+    required this.downloaded,
+    required this.total,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^
+      updatedAt.hashCode ^
+      update.hashCode ^
+      downloaded.hashCode ^
+      total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeDownloadingUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          update == other.update &&
+          downloaded == other.downloaded &&
+          total == other.total;
+}
+
+class BridgeIdleUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+
+  const BridgeIdleUpdaterState({
+    required this.revision,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeIdleUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeInstallFailedUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 failedAt;
+  final BridgeVerifiedUpdateSummary update;
+  final BridgeStateError error;
+
+  const BridgeInstallFailedUpdaterState({
+    required this.revision,
+    required this.failedAt,
+    required this.update,
+    required this.error,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^ failedAt.hashCode ^ update.hashCode ^ error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeInstallFailedUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          failedAt == other.failedAt &&
+          update == other.update &&
+          error == other.error;
+}
+
+class BridgeInstallerLaunchedUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 launchedAt;
+  final BridgeVerifiedUpdateSummary update;
+
+  const BridgeInstallerLaunchedUpdaterState({
+    required this.revision,
+    required this.launchedAt,
+    required this.update,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ launchedAt.hashCode ^ update.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeInstallerLaunchedUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          launchedAt == other.launchedAt &&
+          update == other.update;
+}
+
+class BridgeUpToDateUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 checkedAt;
+
+  const BridgeUpToDateUpdaterState({
+    required this.revision,
+    required this.checkedAt,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ checkedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeUpToDateUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          checkedAt == other.checkedAt;
+}
 
 @freezed
-sealed class BridgeStudioUpdateEventDto with _$BridgeStudioUpdateEventDto {
-  const BridgeStudioUpdateEventDto._();
+sealed class BridgeUpdaterStateSnapshot with _$BridgeUpdaterStateSnapshot {
+  const BridgeUpdaterStateSnapshot._();
 
-  const factory BridgeStudioUpdateEventDto.started({required BigInt total}) =
-      BridgeStudioUpdateEventDto_Started;
-  const factory BridgeStudioUpdateEventDto.progress({
-    required BigInt downloaded,
-    required BigInt total,
-  }) = BridgeStudioUpdateEventDto_Progress;
-  const factory BridgeStudioUpdateEventDto.verifying() =
-      BridgeStudioUpdateEventDto_Verifying;
-  const factory BridgeStudioUpdateEventDto.installerLaunched() =
-      BridgeStudioUpdateEventDto_InstallerLaunched;
-  const factory BridgeStudioUpdateEventDto.failed({
-    required String code,
-    required String message,
-  }) = BridgeStudioUpdateEventDto_Failed;
+  const factory BridgeUpdaterStateSnapshot.disabled(
+    BridgeDisabledUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Disabled;
+  const factory BridgeUpdaterStateSnapshot.idle(BridgeIdleUpdaterState field0) =
+      BridgeUpdaterStateSnapshot_Idle;
+  const factory BridgeUpdaterStateSnapshot.checking(
+    BridgeCheckingUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Checking;
+  const factory BridgeUpdaterStateSnapshot.upToDate(
+    BridgeUpToDateUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_UpToDate;
+  const factory BridgeUpdaterStateSnapshot.available(
+    BridgeAvailableUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Available;
+  const factory BridgeUpdaterStateSnapshot.downloading(
+    BridgeDownloadingUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Downloading;
+  const factory BridgeUpdaterStateSnapshot.verifying(
+    BridgeVerifyingUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Verifying;
+  const factory BridgeUpdaterStateSnapshot.installerLaunched(
+    BridgeInstallerLaunchedUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_InstallerLaunched;
+  const factory BridgeUpdaterStateSnapshot.checkFailed(
+    BridgeCheckFailedUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_CheckFailed;
+  const factory BridgeUpdaterStateSnapshot.installFailed(
+    BridgeInstallFailedUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_InstallFailed;
+}
+
+class BridgeVerifiedUpdateSummary {
+  final String version;
+  final PlatformInt64 publishedAt;
+  final String notesUrl;
+
+  const BridgeVerifiedUpdateSummary({
+    required this.version,
+    required this.publishedAt,
+    required this.notesUrl,
+  });
+
+  @override
+  int get hashCode =>
+      version.hashCode ^ publishedAt.hashCode ^ notesUrl.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeVerifiedUpdateSummary &&
+          runtimeType == other.runtimeType &&
+          version == other.version &&
+          publishedAt == other.publishedAt &&
+          notesUrl == other.notesUrl;
+}
+
+class BridgeVerifyingUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final BridgeVerifiedUpdateSummary update;
+  final BigInt downloaded;
+  final BigInt total;
+
+  const BridgeVerifyingUpdaterState({
+    required this.revision,
+    required this.updatedAt,
+    required this.update,
+    required this.downloaded,
+    required this.total,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^
+      updatedAt.hashCode ^
+      update.hashCode ^
+      downloaded.hashCode ^
+      total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeVerifyingUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          update == other.update &&
+          downloaded == other.downloaded &&
+          total == other.total;
 }

@@ -4,13 +4,11 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
-use pl_core::{AgentActivityState, AgentLifecycleState, ConversationRecoveryTarget, ThreadId};
-use pl_protocol::{ConversationRecoveryMode, ThreadItemContent, TurnState};
+use pl_core::{ConversationRecoveryTarget, ThreadId};
+use pl_protocol::{ConversationRecoveryMode, ThreadItemState, TurnState};
 
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::task_coordinator::{
-    TaskRun, TaskRunStateKind, ThreadExecutionStatus, WorkUnit, WorkUnitStatus,
-};
+use crate::studio::task_coordinator::{TaskRun, TaskRunStateKind, WorkUnit, WorkUnitStateKind};
 use crate::studio::{
     StudioTaskRecoveryPreview, StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind,
     StudioTaskRecoveryTurn,
@@ -154,19 +152,21 @@ impl StudioRuntime {
                 let tool_summaries = history
                     .items
                     .iter()
-                    .filter_map(|item| match &item.content {
-                        ThreadItemContent::ToolCall { tool } => Some(tool_summary(tool)),
-                        ThreadItemContent::UserMessage { .. }
-                        | ThreadItemContent::AgentMessage { .. }
-                        | ThreadItemContent::Reasoning { .. }
-                        | ThreadItemContent::Plan { .. }
-                        | ThreadItemContent::File { .. }
-                        | ThreadItemContent::ContextCompaction { .. } => None,
+                    .filter_map(|item| match item.state() {
+                        ThreadItemState::Tool(tool) => Some(tool_summary(tool)),
+                        ThreadItemState::Text(_)
+                        | ThreadItemState::Thinking(_)
+                        | ThreadItemState::Agent(_)
+                        | ThreadItemState::Turn(_)
+                        | ThreadItemState::Inference(_)
+                        | ThreadItemState::Plan(_)
+                        | ThreadItemState::File(_)
+                        | ThreadItemState::ContextCompaction(_) => None,
                     })
                     .collect::<Vec<_>>();
                 Ok(StudioTaskRecoveryTurn {
                     turn_id: history.turn.id.clone(),
-                    status: turn_status(&history.turn.state).to_string(),
+                    state: turn_state(&history.turn.state)?,
                     updated_at: history.turn.updated_at,
                     item_count: u64::try_from(history.items.len())?,
                     input_count: u64::try_from(
@@ -296,9 +296,9 @@ pub(super) async fn ensure_task_tree_idle(
         if !belongs_to_root(&parents, &snapshot.identity.id, &root) {
             continue;
         }
-        if snapshot.lifecycle == AgentLifecycleState::Active
-            && (snapshot.activity != AgentActivityState::Idle
-                || snapshot.active_turn_id.is_some()
+        if snapshot.state.is_operational()
+            && (!snapshot.state.is_idle()
+                || snapshot.active_turn_id().is_some()
                 || snapshot.pending_inputs != 0)
         {
             bail!("Task recovery requires the complete Task agent tree to be paused");
@@ -339,39 +339,35 @@ pub(super) fn ensure_recoverable_phase(phase: TaskRunStateKind) -> Result<()> {
 fn eligible_executor(unit: &WorkUnit) -> bool {
     unit.executor_thread_id.is_some()
         && matches!(
-            unit.status(),
-            WorkUnitStatus::Running
-                | WorkUnitStatus::AwaitingCompletion
-                | WorkUnitStatus::ChangesRequested
-                | WorkUnitStatus::NeedsAttention
-        )
-        && matches!(
-            unit.execution_status(),
-            ThreadExecutionStatus::Running
-                | ThreadExecutionStatus::Completed
-                | ThreadExecutionStatus::BudgetLimited
-                | ThreadExecutionStatus::Failed
-                | ThreadExecutionStatus::Cancelled
+            unit.kind(),
+            WorkUnitStateKind::Running
+                | WorkUnitStateKind::WaitingReview
+                | WorkUnitStateKind::ChangesRequired
+                | WorkUnitStateKind::Paused
         )
 }
 fn terminal_turn(state: &TurnState) -> bool {
     matches!(
         state,
-        TurnState::Completed | TurnState::Failed { .. } | TurnState::Interrupted { .. }
+        TurnState::Completed(_)
+            | TurnState::Cancelled(_)
+            | TurnState::Failed(_)
+            | TurnState::BudgetLimited(_)
     )
 }
 fn failed_turn(state: &TurnState) -> bool {
-    matches!(
-        state,
-        TurnState::Failed { .. } | TurnState::Interrupted { .. }
-    )
+    matches!(state, TurnState::Failed(_) | TurnState::Cancelled(_))
 }
-fn turn_status(state: &TurnState) -> &'static str {
+fn turn_state(state: &TurnState) -> Result<pl_protocol::studio::StudioTaskRecoveryTurnState> {
     match state {
-        TurnState::Queued => "queued",
-        TurnState::InProgress { .. } => "inProgress",
-        TurnState::Completed => "completed",
-        TurnState::Failed { .. } => "failed",
-        TurnState::Interrupted { .. } => "interrupted",
+        TurnState::Completed(_) => Ok(pl_protocol::studio::StudioTaskRecoveryTurnState::Completed),
+        TurnState::Cancelled(_) => Ok(pl_protocol::studio::StudioTaskRecoveryTurnState::Cancelled),
+        TurnState::Failed(_) => Ok(pl_protocol::studio::StudioTaskRecoveryTurnState::Failed),
+        TurnState::BudgetLimited(_) => {
+            Ok(pl_protocol::studio::StudioTaskRecoveryTurnState::BudgetLimited)
+        }
+        TurnState::Queued(_) | TurnState::Running(_) => Err(anyhow::anyhow!(
+            "task recovery preview received a non-terminal Turn"
+        )),
     }
 }

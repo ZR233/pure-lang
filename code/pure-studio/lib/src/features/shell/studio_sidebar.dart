@@ -160,7 +160,7 @@ class _SidebarDirectoryListState extends ConsumerState<_SidebarDirectoryList> {
             recoveryIssue: state.threadRecoveryIssues[thread.id],
             canArchive:
                 (thread.id != state.selectedRootThreadId || !state.isBusy) &&
-                !const {'queued', 'running', 'waiting'}.contains(thread.status),
+                !thread.status.isActive,
           );
         }
         return _DirectoryLoadFooter(state: state);

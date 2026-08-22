@@ -4,18 +4,18 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorContinuationState, RestartAgentReconciliation, ReviewRoundState, ReviewScope,
-    ReviewTarget, ReviewVerdict, TaskCommand, TaskRunState, TaskRunStateKind,
-    TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
-    TaskWorktreeOwnerSnapshot, ThreadExecutionStatus, WorkCompletionStatus, WorkUnitState,
-    WorkUnitStatus,
+    ExecutorContinuationStateKind, MergeCleanupState, RestartAgentReconciliation,
+    ReviewRoundCommand, ReviewRoundStateKind, ReviewScope, ReviewTarget, TaskCommand, TaskRunState,
+    TaskRunStateKind, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeDisposition,
+    TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot, WaitingReviewPhase, WorkCompletionStatus,
+    WorkUnitCommand, WorkUnitCompletionOutcome, WorkUnitStateKind,
 };
 
 use super::{
     review::{review_round_state, update_review_round_state},
     task_run_record,
     work_completion::work_completion_record,
-    work_unit::{update_work_unit_state, work_unit_record, work_unit_state},
+    work_unit::{apply_work_unit_command, work_unit_record, work_unit_state},
 };
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
@@ -165,27 +165,34 @@ impl StudioStore {
                 ..RestartAgentReconciliation::default()
             };
             for work_unit in work_units {
-                let state = work_unit_state(&work_unit)?;
-                let status = state.status();
-                let execution_status = state.execution_status();
-                let transient_execution = is_transient_execution(execution_status);
-                let continuation_state = state.progress().continuation_state;
-                if status == WorkUnitStatus::Pending {
-                    let mut progress = state.into_progress();
-                    progress.execution_error = Some(RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string());
-                    update_work_unit_state(&tx, work_unit, WorkUnitState::cancelled(progress))
-                        .await?;
-                    summary.cancelled_work_units += 1;
-                } else if (status == WorkUnitStatus::Running
-                    && continuation_state != ExecutorContinuationState::PendingStart)
-                    || transient_execution
-                {
-                    let mut progress = state.into_progress();
-                    progress.execution_error = Some(RESTART_DIAGNOSTIC.to_string());
-                    update_work_unit_state(
+                let record = work_unit_record(work_unit.clone())?;
+                let transient_execution = matches!(
+                    record.kind(),
+                    WorkUnitStateKind::Pending | WorkUnitStateKind::Running
+                );
+                if record.kind() == WorkUnitStateKind::Pending {
+                    apply_work_unit_command(
                         &tx,
                         work_unit,
-                        WorkUnitState::awaiting_cancelled(progress),
+                        WorkUnitCommand::Cancel {
+                            operation_id: format!("restart-before-create:{}", record.id),
+                            reason: RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string(),
+                            disposition: TaskWorktreeDisposition::CleanupRequested,
+                        },
+                    )
+                    .await?;
+                    summary.cancelled_work_units += 1;
+                } else if record.kind() == WorkUnitStateKind::Running
+                    && record.continuation_state() != ExecutorContinuationStateKind::PendingStart
+                {
+                    apply_work_unit_command(
+                        &tx,
+                        work_unit,
+                        WorkUnitCommand::Cancel {
+                            operation_id: format!("restart-active:{}", record.id),
+                            reason: RESTART_DIAGNOSTIC.to_string(),
+                            disposition: TaskWorktreeDisposition::Protect,
+                        },
                     )
                     .await?;
                 }
@@ -216,19 +223,18 @@ async fn reconcile_pending_reviews_after_restart(
 ) -> Result<usize> {
     let rounds = entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-        .filter(entities::review_round::Column::StateKind.eq(ReviewVerdict::Pending.as_str()))
+        .filter(entities::review_round::Column::StateKind.is_in([
+            ReviewRoundStateKind::PendingDispatch.as_str(),
+            ReviewRoundStateKind::Dispatched.as_str(),
+            ReviewRoundStateKind::Running.as_str(),
+        ]))
         .all(tx)
         .await?;
     let mut cancelled_reviewers = 0;
     for round in rounds {
         validate_restart_reviewer(&round)?;
         let round_state = review_round_state(&round)?;
-        if round.reviewer_thread_id.is_some()
-            && matches!(
-                round_state.reviewer_status(),
-                ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-            )
-        {
+        if round_state.reviewer_thread_id().is_some() {
             cancelled_reviewers += 1;
         }
         match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
@@ -263,10 +269,16 @@ async fn reconcile_pending_reviews_after_restart(
                 .await?;
             }
         }
-        let state = ReviewRoundState::cancelled(
-            REVIEW_RESTART_DIAGNOSTIC.to_string(),
-            REVIEW_RESTART_DIAGNOSTIC.to_string(),
-        );
+        let state = round_state
+            .decide(
+                &round.id,
+                ReviewRoundCommand::Cancel {
+                    reviewer_thread_id: round_state.reviewer_thread_id().map(str::to_string),
+                    reason: REVIEW_RESTART_DIAGNOSTIC.to_string(),
+                    summary: REVIEW_RESTART_DIAGNOSTIC.to_string(),
+                },
+            )?
+            .next_state();
         update_review_round_state(tx, round, state).await?;
     }
     Ok(cancelled_reviewers)
@@ -276,10 +288,7 @@ fn validate_restart_reviewer(round: &entities::review_round::Model) -> Result<()
     let Some(_reviewer_thread_id) = round.reviewer_thread_id.as_deref() else {
         return Ok(());
     };
-    if !matches!(
-        review_round_state(round)?.reviewer_status(),
-        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-    ) {
+    if !review_round_state(round)?.kind().is_active() {
         bail!("pending review has an invalid reviewer Thread status");
     }
     Ok(())
@@ -309,25 +318,28 @@ async fn restore_delivery_review_after_restart(
         .one(tx)
         .await?
         .context("pending delivery review completion not found")?;
-    let reviewed_head = completion
-        .head_commit
-        .as_deref()
+    let completion_record = work_completion_record(completion.clone())?;
+    let reviewed_head = completion_record
+        .head_commit()
         .unwrap_or(work_unit.base_commit.as_str());
-    let state = work_unit_state(work_unit)?;
-    if state.status() != WorkUnitStatus::Reviewing
-        || completion.task_run_id != round.task_run_id
+    let record = work_unit_record(work_unit.clone())?;
+    if !matches!(
+        record.waiting_review_phase(),
+        Some(WaitingReviewPhase::Reviewing(_))
+    ) || completion.task_run_id != round.task_run_id
         || completion.work_unit_id != work_unit.id
         || completion.revision != completion_revision
-        || completion.status != WorkCompletionStatus::ReadyForReview.as_str()
+        || completion_record.status() != WorkCompletionStatus::ReadyForReview
         || round.reviewed_head != reviewed_head
     {
         bail!("pending delivery review target does not match its completion");
     }
-    let progress = state.into_progress();
-    update_work_unit_state(
+    apply_work_unit_command(
         tx,
         work_unit.clone(),
-        WorkUnitState::ready_for_review(progress),
+        WorkUnitCommand::ReviewFailed {
+            review_round_id: round.id.clone(),
+        },
     )
     .await?;
     Ok(())
@@ -337,7 +349,10 @@ fn merge_cleanup_state(
     work_unit: &crate::studio::task_coordinator::WorkUnit,
     merges: &[entities::merge_record::Model],
 ) -> Result<TaskWorktreeCleanupState> {
-    if work_unit.status() != WorkUnitStatus::Merged {
+    if !matches!(
+        work_unit.completion_outcome(),
+        Some(WorkUnitCompletionOutcome::Merged { .. })
+    ) {
         return Ok(TaskWorktreeCleanupState::NotMerged);
     }
     let mut matches = Vec::new();
@@ -351,13 +366,23 @@ fn merge_cleanup_state(
         [] => bail!("merged work unit has no accepted merge evidence"),
         _ => bail!("merged work unit has ambiguous accepted merge evidence"),
     };
-    match merge.cleanup_status.as_str() {
-        "discarded" | "alreadyAbsent" => Ok(TaskWorktreeCleanupState::Cleanup),
-        "pending" | "attempting" => Ok(TaskWorktreeCleanupState::Replay {
-            merge_id: merge.id.clone(),
-        }),
-        "failed" | "deferred" => Ok(TaskWorktreeCleanupState::Protect),
-        status => bail!("accepted merge has unknown cleanup status `{status}`"),
+    let cleanup: MergeCleanupState = serde_json::from_str(&merge.cleanup_state_json)
+        .context("invalid merge cleanup state during recovery")?;
+    if cleanup.kind().as_str() != merge.cleanup_state_kind {
+        bail!("merge cleanup discriminator mismatch during recovery");
+    }
+    match cleanup {
+        MergeCleanupState::Discarded(_) | MergeCleanupState::AlreadyAbsent(_) => {
+            Ok(TaskWorktreeCleanupState::Cleanup)
+        }
+        MergeCleanupState::Pending(_) | MergeCleanupState::Attempting(_) => {
+            Ok(TaskWorktreeCleanupState::Replay {
+                merge_id: merge.id.clone(),
+            })
+        }
+        MergeCleanupState::Failed(_) | MergeCleanupState::Deferred(_) => {
+            Ok(TaskWorktreeCleanupState::Protect)
+        }
     }
 }
 
@@ -372,11 +397,4 @@ fn validate_work_units(task_run_id: &str, work_units: &[entities::work_unit::Mod
         work_unit_state(unit)?;
     }
     Ok(())
-}
-
-fn is_transient_execution(status: ThreadExecutionStatus) -> bool {
-    matches!(
-        status,
-        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
-    )
 }

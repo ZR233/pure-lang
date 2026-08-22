@@ -1,6 +1,5 @@
 use super::super::host::{CommitDurability, initial_transcript_mutation};
-use super::super::state::derive_activity;
-use super::super::{AgentIdentity, AgentLifecycleState, ThreadActorState};
+use super::super::{AgentCommand, AgentIdentity, ThreadActorState};
 use super::*;
 
 enum SpawnCompensation {
@@ -91,10 +90,10 @@ where
     H: AgentRuntimeHost,
 {
     let parent = snapshot_for(actors, &request.parent_id).await?;
-    if parent.lifecycle != AgentLifecycleState::Active {
+    if !parent.state.is_accepting_work() {
         return Err(AgentRuntimeError::NotActive(
             request.parent_id,
-            parent.lifecycle,
+            parent.state,
         ));
     }
     let child_id = request.thread_id.clone();
@@ -116,7 +115,7 @@ where
     .into_durable_state();
     let child_thread_id = child_id.clone();
     let metadata = request.metadata.clone();
-    let initial_turn_id = request.initial_message.map(|message| {
+    let initial_turn_id = if let Some(message) = request.initial_message {
         let turn_id = request.initial_turn_id.unwrap_or_else(TurnId::generate);
         state.pending_inputs.push_back(DurableMailboxEnvelope {
             mail_id: format!("mail:{turn_id}"),
@@ -133,10 +132,16 @@ where
             queued_at: unix_timestamp(),
         });
         state.refresh_mailbox_snapshot();
-        state.snapshot.activity =
-            derive_activity(state.snapshot.lifecycle, None, state.has_triggering_input());
-        turn_id
-    });
+        state
+            .snapshot
+            .transition(AgentCommand::Queue {
+                turn_id: turn_id.clone(),
+            })
+            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+        Some(turn_id)
+    } else {
+        None
+    };
     let lease = host
         .lifecycle()
         .prepare_spawn(SpawnLifecycleRequest {
@@ -310,20 +315,31 @@ where
     let expected_revision = state.snapshot.revision;
     state.snapshot.revision = expected_revision.saturating_add(1);
     state.snapshot.event_sequence = state.snapshot.event_sequence.saturating_add(1);
-    state.snapshot.active_turn_id = None;
     match &compensation {
         SpawnCompensation::RolledBack => {
             state.pending_inputs.clear();
             state.active_input = None;
             state.refresh_mailbox_snapshot();
-            state.snapshot.lifecycle = AgentLifecycleState::Closed;
+            state
+                .snapshot
+                .transition(AgentCommand::BeginClose)
+                .and_then(|_| state.snapshot.transition(AgentCommand::Close))
+                .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
         }
-        SpawnCompensation::Faulted { .. } => {
-            state.snapshot.lifecycle = AgentLifecycleState::Faulted;
+        SpawnCompensation::Faulted { reason } => {
+            state
+                .snapshot
+                .transition(AgentCommand::Fault {
+                    error: pl_protocol::StateError {
+                        code: "agentSpawnCompensationFailed".to_string(),
+                        message: reason.clone(),
+                        retryable: false,
+                    },
+                    turn_id: None,
+                })
+                .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
         }
     }
-    state.snapshot.activity =
-        derive_activity(state.snapshot.lifecycle, None, state.has_triggering_input());
     state.snapshot.updated_at = unix_timestamp();
     let event = AgentRuntimeEvent {
         agent_id: state.snapshot.identity.id.clone(),

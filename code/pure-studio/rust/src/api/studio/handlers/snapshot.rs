@@ -2,11 +2,10 @@ use anyhow::Result;
 
 use crate::api::studio::bridge_runtime::BridgeRuntime;
 use crate::api::studio::convert::runtime::{
-    bridge_agent_directory_entry, bridge_mcp_health, bridge_recovery_issue, bridge_task_runtime,
-    runtime_snapshot,
+    bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_project_directory,
+    bridge_provider_usage_state, bridge_recovery_state, bridge_settings_state, bridge_skills_state,
+    bridge_task_directory, bridge_thread_directory_page, bridge_update_state, runtime_snapshot,
 };
-use crate::api::studio::convert::settings::{bridge_settings, provider_usage_dto};
-use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
 
 /// Converts the transport-neutral Studio state into the FRB wire representation.
@@ -17,107 +16,21 @@ pub(super) async fn read_studio_state_inner(
 
     Ok(BridgeStudioStateSnapshot {
         runtime: runtime_snapshot(state.runtime),
-        project_directory: BridgeProjectDirectoryState {
-            meta: state.project_directory.meta.into(),
-            projects: state
-                .project_directory
-                .projects
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        },
-        thread_directory: BridgeThreadDirectoryPage {
-            meta: state.thread_directory.meta.into(),
-            threads: state
-                .thread_directory
-                .threads
-                .into_iter()
-                .map(bridge_thread)
-                .collect(),
-            next_cursor: state.thread_directory.next_cursor,
-        },
-        task_directory: BridgeTaskDirectoryState {
-            meta: state.task_directory.meta.into(),
-            tasks: state
-                .task_directory
-                .tasks
-                .into_iter()
-                .map(|entry| BridgeTaskDirectoryEntry {
-                    root_thread_id: entry.root_thread_id,
-                    task: bridge_task_runtime(entry.task),
-                })
-                .collect(),
-        },
-        agent_directory: BridgeAgentDirectoryState {
-            meta: state.agent_directory.meta.into(),
-            agents: state
-                .agent_directory
-                .agents
-                .into_iter()
-                .map(bridge_agent_directory_entry)
-                .collect(),
-        },
-        settings: BridgeSettingsStateSnapshot {
-            meta: state.settings.meta.into(),
-            settings: bridge_settings(state.settings.settings),
-        },
-        recovery: BridgeRecoveryStateSnapshot {
-            meta: state.recovery.meta.into(),
-            issues: state
-                .recovery
-                .issues
-                .into_iter()
-                .map(bridge_recovery_issue)
-                .collect(),
-        },
-        mcp: BridgeMcpStateSnapshot {
-            meta: state.mcp.meta.into(),
-            desired_config_fingerprint: state.mcp.desired_config_fingerprint,
-            applied_config_fingerprint: state.mcp.applied_config_fingerprint,
-            health: bridge_mcp_health(state.mcp.health),
-        },
-        lsp: BridgeLspStateSnapshot {
-            meta: state.lsp.meta.into(),
-            health: state.lsp.health.into(),
-        },
+        project_directory: bridge_project_directory(state.project_directory.state),
+        thread_directory: bridge_thread_directory_page(state.thread_directory.state),
+        task_directory: bridge_task_directory(state.task_directory.state),
+        agent_directory: bridge_agent_directory(state.agent_directory.state),
+        settings: bridge_settings_state(state.settings.state),
+        recovery: bridge_recovery_state(state.recovery.state),
+        mcp: bridge_mcp_state(state.mcp.state),
+        lsp: bridge_lsp_state(state.lsp.state),
         skills_by_project: state
             .skills_by_project
             .into_iter()
-            .map(|skills| BridgeSkillsStateSnapshot {
-                meta: skills.meta.into(),
-                project_id: skills.project_id,
-                config_fingerprint: skills.config_fingerprint,
-                catalog_revision: skills.catalog_revision,
-                skills: skills
-                    .catalog
-                    .skills
-                    .into_iter()
-                    .map(|skill| SkillSummaryDto { name: skill.name })
-                    .collect(),
-                warnings: skills.catalog.warnings,
-            })
+            .map(bridge_skills_state)
             .collect(),
-        provider_usage: BridgeProviderUsageStateSnapshot {
-            meta: state.provider_usage.meta.into(),
-            config_fingerprint: state.provider_usage.config_fingerprint,
-            usages: state
-                .provider_usage
-                .usages
-                .into_iter()
-                .map(provider_usage_dto)
-                .collect(),
-        },
-        updater: BridgeUpdaterStateSnapshot {
-            meta: state.updater.meta.into(),
-            update: state
-                .updater
-                .update
-                .map(|update| BridgeVerifiedUpdateSummary {
-                    version: update.version,
-                    published_at: update.published_at,
-                    notes_url: update.notes_url,
-                }),
-        },
+        provider_usage: bridge_provider_usage_state(state.provider_usage.state),
+        updater: bridge_update_state(state.updater),
     })
 }
 

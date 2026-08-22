@@ -2,39 +2,24 @@ part of '../widget_test.dart';
 
 void registerSnapshotSettingsTests() {
   test('observed snapshots reject equal and older revisions uniformly', () {
-    const currentMeta = ObservedStateMeta(
-      revision: 2,
-      phase: ObservedStatePhase.ready,
-      updatedAt: null,
-      stale: false,
-    );
-    const olderMeta = ObservedStateMeta(
-      revision: 1,
-      phase: ObservedStatePhase.ready,
-      updatedAt: null,
-      stale: false,
-    );
     final current = _emptyState().copyWith(
-      settingsState: const SettingsStateSnapshot(
-        meta: currentMeta,
+      settingsState: SettingsStateSnapshot(
+        revision: 2,
         permissionMode: PermissionMode.fullAccess,
       ),
-      mcpState: const McpStateSnapshot(
-        meta: currentMeta,
-        activeServers: ['canonical'],
-      ),
+      mcpState: McpStateSnapshot(revision: 2, activeServers: ['canonical']),
     );
 
     final settings = applySettingsState(
       current,
-      const SettingsStateSnapshot(
-        meta: currentMeta,
+      SettingsStateSnapshot(
+        revision: 2,
         permissionMode: PermissionMode.requestApproval,
       ),
     );
     final mcp = applyMcpState(
       current,
-      const McpStateSnapshot(meta: olderMeta, activeServers: ['stale']),
+      McpStateSnapshot(revision: 1, activeServers: ['stale']),
     );
 
     expect(settings, same(current));
@@ -43,13 +28,8 @@ void registerSnapshotSettingsTests() {
 
   test('settings merge does not replace canonical Thread workspace', () {
     final current = _emptyState();
-    final next = const SettingsStateSnapshot(
-      meta: ObservedStateMeta(
-        revision: 1,
-        phase: ObservedStatePhase.ready,
-        updatedAt: null,
-        stale: false,
-      ),
+    final next = SettingsStateSnapshot(
+      revision: 2,
       providers: [
         ProviderSettingsView(
           id: 'provider-1',

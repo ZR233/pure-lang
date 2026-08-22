@@ -47,107 +47,10 @@ pub struct UserInputResponse {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum PlanLifecycleState {
-    PendingConfirmation,
-    Accepted,
-    Implementing,
-    Implemented,
-    ImplementationFailed,
-    ContinuedPlanning,
-    Dismissed,
-    Cancelled,
-}
-
-impl PlanLifecycleState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PendingConfirmation => "pendingConfirmation",
-            Self::Accepted => "accepted",
-            Self::Implementing => "implementing",
-            Self::Implemented => "implemented",
-            Self::ImplementationFailed => "implementationFailed",
-            Self::ContinuedPlanning => "continuedPlanning",
-            Self::Dismissed => "dismissed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanLifecycleEvent {
-    pub plan_id: String,
-    pub state: PlanLifecycleState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub enum ErrorSeverity {
     Transient,
     Recoverable,
     Fatal,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentStatus {
-    Queued,
-    Running,
-    Waiting,
-    Completed,
-    Errored,
-    Interrupted,
-    Shutdown,
-    NotFound,
-}
-
-impl AgentStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Completed => "completed",
-            Self::Errored => "errored",
-            Self::Interrupted => "interrupted",
-            Self::Shutdown => "shutdown",
-            Self::NotFound => "notFound",
-        }
-    }
-
-    pub fn is_final(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Errored | Self::Shutdown | Self::NotFound
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SubAgentActivityKind {
-    Spawned,
-    MessageQueued,
-    FollowupStarted,
-    WaitCompleted,
-    Closed,
-}
-
-impl SubAgentActivityKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Spawned => "spawned",
-            Self::MessageQueued => "messageQueued",
-            Self::FollowupStarted => "followupStarted",
-            Self::WaitCompleted => "waitCompleted",
-            Self::Closed => "closed",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

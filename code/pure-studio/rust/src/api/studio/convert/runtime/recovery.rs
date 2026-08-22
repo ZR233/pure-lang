@@ -199,7 +199,20 @@ fn bridge_task_recovery_target(target: StudioTaskRecoveryTarget) -> BridgeTaskRe
             .into_iter()
             .map(|turn| BridgeTaskRecoveryTurnDto {
                 turn_id: turn.turn_id,
-                status: turn.status,
+                state: match turn.state {
+                    pl_protocol::studio::StudioTaskRecoveryTurnState::Completed => {
+                        BridgeTaskRecoveryTurnState::Completed
+                    }
+                    pl_protocol::studio::StudioTaskRecoveryTurnState::Cancelled => {
+                        BridgeTaskRecoveryTurnState::Cancelled
+                    }
+                    pl_protocol::studio::StudioTaskRecoveryTurnState::Failed => {
+                        BridgeTaskRecoveryTurnState::Failed
+                    }
+                    pl_protocol::studio::StudioTaskRecoveryTurnState::BudgetLimited => {
+                        BridgeTaskRecoveryTurnState::BudgetLimited
+                    }
+                },
                 updated_at: turn.updated_at,
                 item_count: turn.item_count,
                 input_count: turn.input_count,
@@ -253,7 +266,20 @@ fn task_recovery_preview_from_bridge(
                     .into_iter()
                     .map(|turn| StudioTaskRecoveryTurn {
                         turn_id: turn.turn_id,
-                        status: turn.status,
+                        state: match turn.state {
+                            BridgeTaskRecoveryTurnState::Completed => {
+                                pl_protocol::studio::StudioTaskRecoveryTurnState::Completed
+                            }
+                            BridgeTaskRecoveryTurnState::Cancelled => {
+                                pl_protocol::studio::StudioTaskRecoveryTurnState::Cancelled
+                            }
+                            BridgeTaskRecoveryTurnState::Failed => {
+                                pl_protocol::studio::StudioTaskRecoveryTurnState::Failed
+                            }
+                            BridgeTaskRecoveryTurnState::BudgetLimited => {
+                                pl_protocol::studio::StudioTaskRecoveryTurnState::BudgetLimited
+                            }
+                        },
                         updated_at: turn.updated_at,
                         item_count: turn.item_count,
                         input_count: turn.input_count,

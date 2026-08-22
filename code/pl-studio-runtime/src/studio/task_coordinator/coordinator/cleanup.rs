@@ -397,7 +397,7 @@ fn recovery_cleanup_revision(
             let resource = &resources[resource_index];
             resource_index += 1;
             digest.update(unit.id.as_bytes());
-            digest.update(unit.status().as_str().as_bytes());
+            digest.update(unit.kind().as_str().as_bytes());
             digest.update(unit.worktree_disposition().as_str().as_bytes());
             digest.update(resource.path.as_bytes());
             digest.update(resource.branch.as_bytes());

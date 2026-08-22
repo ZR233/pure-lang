@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{InteractionKind, InteractionResolution, InteractionStatus, PlanLifecycleState};
+use crate::{InteractionKind, InteractionResolution, InteractionStatus};
 use anyhow::{Context, Result, bail};
 use futures::FutureExt;
 
@@ -114,10 +114,7 @@ impl StudioRuntime {
     }
 
     pub(super) async fn ensure_prompt_runtime_ready(&self) -> Result<()> {
-        if !matches!(
-            self.runtime_snapshot().await?.status,
-            crate::StudioRuntimeStatus::Ready
-        ) {
+        if !self.runtime_snapshot().await?.state.is_ready() {
             bail!("Studio runtime is not ready");
         }
         Ok(())
@@ -127,10 +124,7 @@ impl StudioRuntime {
     /// synthetic user message into the Planner timeline.
     pub async fn resume_task(&self, thread_id: String) -> Result<StudioSubmitPromptResponse> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        if !matches!(
-            self.runtime_snapshot().await?.status,
-            crate::StudioRuntimeStatus::Ready
-        ) {
+        if !self.runtime_snapshot().await?.state.is_ready() {
             bail!("Studio runtime is not ready");
         }
         let thread_record = self
@@ -154,9 +148,9 @@ impl StudioRuntime {
             .snapshot(agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        if snapshot.active_turn_id.is_some()
+        if snapshot.active_turn_id().is_some()
             || snapshot.pending_inputs > 0
-            || snapshot.activity != pl_core::AgentActivityState::Idle
+            || !snapshot.state.is_idle()
         {
             bail!("Task Planner is already active or has pending input");
         }
@@ -229,7 +223,7 @@ impl StudioRuntime {
             }
             Err(error) => return Err(anyhow::anyhow!(error)),
         };
-        let Some(turn_id) = snapshot.active_turn_id else {
+        let Some(turn_id) = snapshot.active_turn_id().cloned() else {
             return Ok(StudioStopPromptResponse {
                 thread_id,
                 stopped: false,
@@ -297,9 +291,9 @@ impl StudioRuntime {
         if snapshot.identity.role == desired {
             return Ok(());
         }
-        if snapshot.active_turn_id.is_some()
+        if snapshot.active_turn_id().is_some()
             || snapshot.pending_inputs > 0
-            || snapshot.activity != pl_core::AgentActivityState::Idle
+            || !snapshot.state.is_idle()
         {
             return Ok(());
         }
@@ -480,32 +474,32 @@ impl StudioRuntime {
             .await?
             .context("interaction not found")?;
         let thread_id = current.scope.thread_id.clone();
-        if !resolution_matches_kind(&current.kind, &resolution) {
+        if !resolution_matches_kind(current.kind(), &resolution) {
             bail!("interaction resolution kind does not match interaction");
         }
         let emitter = self.interaction_emitter(thread_id.clone());
 
-        if current.kind == InteractionKind::PlanConfirmation {
+        if current.kind() == InteractionKind::PlanConfirmation {
             return self
                 .resolve_plan_confirmation(interaction_id, current, resolution, emitter)
                 .await;
         }
 
-        if current.status != InteractionStatus::Pending {
+        if current.status() != InteractionStatus::Pending {
             return Ok(StudioResolveInteractionResponse {
                 thread_id,
                 interaction: current,
                 threads: Vec::new(),
             });
         }
-        let resolved = if current.kind == InteractionKind::UserInput {
+        let resolved = if current.kind() == InteractionKind::UserInput {
             let mail_id =
                 pl_core::AgentInteractionContinuationRequest::stable_mail_id(&interaction_id);
             let message = serde_json::to_string_pretty(&serde_json::json!({
                 "type": "studioInteractionResolution",
                 "interactionId": interaction_id.clone(),
                 "originTurnId": current.scope.turn_id.clone(),
-                "payload": current.payload.clone(),
+                "payload": current.content.clone(),
                 "resolution": resolution.clone(),
             }))?;
             self.submit_durable_interaction_continuation(
@@ -530,19 +524,6 @@ impl StudioRuntime {
             interaction: resolved,
             threads: Vec::new(),
         })
-    }
-
-    pub(super) async fn append_plan_lifecycle_event(
-        &self,
-        thread_id: &str,
-        plan_id: &str,
-        state: PlanLifecycleState,
-        turn_id: Option<String>,
-        reason: Option<String>,
-    ) -> Result<()> {
-        // Plan 内容由 ThreadItem 持久化；生命周期由 interaction 与 Task 产品表表达。
-        let _ = (thread_id, plan_id, state, turn_id, reason);
-        Ok(())
     }
 
     pub(super) async fn record_thread_facts(
@@ -615,7 +596,7 @@ impl StudioRuntime {
                 .map_err(|error| anyhow::anyhow!(error))?;
             let emitter = self.interaction_emitter(thread_id.clone());
             for interaction in self.store.list_pending_interactions(&thread_id).await? {
-                if interaction.kind == InteractionKind::ToolApproval
+                if interaction.kind() == InteractionKind::ToolApproval
                     || canonical
                         .interactions
                         .iter()

@@ -327,6 +327,12 @@
       "name": { "type": "String" }
     }
   },
+  "timelineToolCancelled": "{name} cancelled",
+  "@timelineToolCancelled": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
   "timelineToolAwaitingApproval": "{name} awaiting approval",
   "@timelineToolAwaitingApproval": {
     "placeholders": {

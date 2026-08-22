@@ -142,7 +142,14 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
   }
 
   for (final item in items) {
-    if (item.kind == ThreadItemKind.file) continue;
+    if (const {
+      ThreadItemKind.file,
+      ThreadItemKind.turn,
+      ThreadItemKind.inference,
+      ThreadItemKind.contextCompaction,
+    }.contains(item.kind)) {
+      continue;
+    }
     final part = _timelineEntryFromThreadItem(item);
     if (item.kind == ThreadItemKind.toolCall) {
       flushReasoning();
@@ -177,7 +184,11 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
           ThreadItemKind.plan => TimelineRowType.plan,
           ThreadItemKind.reasoning => TimelineRowType.reasoningSummary,
           ThreadItemKind.toolCall => TimelineRowType.toolGroup,
-          ThreadItemKind.file => TimelineRowType.finalAnswer,
+          ThreadItemKind.agent => TimelineRowType.agentActivity,
+          ThreadItemKind.turn ||
+          ThreadItemKind.inference ||
+          ThreadItemKind.file ||
+          ThreadItemKind.contextCompaction => TimelineRowType.finalAnswer,
         },
       ),
     );
@@ -208,7 +219,11 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
       ThreadItemKind.reasoning => TimelineEntryType.reasoning,
       ThreadItemKind.plan => TimelineEntryType.plan,
       ThreadItemKind.toolCall => TimelineEntryType.tool,
-      ThreadItemKind.file => TimelineEntryType.file,
+      ThreadItemKind.agent => TimelineEntryType.text,
+      ThreadItemKind.turn ||
+      ThreadItemKind.inference ||
+      ThreadItemKind.file ||
+      ThreadItemKind.contextCompaction => TimelineEntryType.file,
     },
     order: item.ordinal,
     sequence: item.ordinal,
@@ -269,10 +284,5 @@ bool _isActiveToolStatus(String status) {
 }
 
 bool _isIssueToolStatus(String status) {
-  return const {
-    'failed',
-    'denied',
-    'interrupted',
-    'budgetLimited',
-  }.contains(status);
+  return const {'failed', 'denied', 'cancelled'}.contains(status);
 }

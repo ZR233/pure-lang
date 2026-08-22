@@ -481,7 +481,7 @@ class StudioController extends _$StudioController {
     final shouldSelect =
         latest.selectedProjectId == projectId &&
         latest.selectedThreadId == null &&
-        active.phase == ComposerSubmissionPhase.submitting &&
+        active is SubmittingComposerThreadState &&
         active.submissionRevision == submissionRevision;
     var next = applyThreadDirectoryDelta(
       latest,
@@ -650,7 +650,7 @@ class StudioController extends _$StudioController {
         thread == null ||
         !thread.isRoot ||
         thread.mode == mode ||
-        thread.status != 'idle' ||
+        thread.status != ThreadStatusView.idle ||
         current.runtime.hasActiveTask) {
       return;
     }

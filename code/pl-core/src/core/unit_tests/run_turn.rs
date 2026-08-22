@@ -32,7 +32,7 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     let events = &result.trace_events;
     let started_kinds = trace_started_kinds(events);
     assert_eq!(started_kinds[0], TracePartKind::Text);
@@ -43,8 +43,10 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
         .iter()
         .find_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
-                if item.kind == TracePartKind::Text
-                    && item.text_channel == Some(TraceTextChannel::User) =>
+                if item.kind() == TracePartKind::Text
+                    && item
+                        .text()
+                        .is_some_and(|text| text.channel() == TraceTextChannel::User) =>
             {
                 Some(item)
             }
@@ -52,14 +54,16 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .expect("user trace part");
-    assert_eq!(user_item.started_sequence, 0);
-    assert_eq!(user_item.content, "Build the thing");
+    assert_eq!(user_item.started_sequence(), 0);
+    assert_eq!(
+        user_item.text().expect("user text part").content(),
+        "Build the thing",
+    );
 }
 
 #[tokio::test]
@@ -92,7 +96,7 @@ async fn run_turn_emits_runtime_progress_commentary() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     assert_eq!(
         runtime_progress_texts(&mut event_rx),
         vec![
@@ -137,7 +141,7 @@ async fn run_turn_persists_only_final_text_to_session_history() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     assert_eq!(result.content, "Done");
     let assistant_messages = session
         .messages()
@@ -197,27 +201,36 @@ async fn run_turn_exposes_context_compaction_snapshot() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     assert_eq!(result.context_compactions.len(), 1);
     let compaction = &result.context_compactions[0];
     assert_eq!(compaction.summary.as_deref(), Some("compressed memory"));
     assert_eq!(compaction.trigger.as_str(), "estimatedTokens");
     assert_eq!(compaction.provider_prompt_tokens, None);
     assert_eq!(compaction.auto_compact_limit, 1);
-    let usage = result
+    let usages = result
         .trace_events
         .iter()
-        .find_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item }
-                if item.item_id == "turn-compaction-turn" =>
-            {
-                item.usage.as_ref()
-            }
-            _ => None,
+        .filter_map(|event| match &event.kind {
+            TraceEventKind::TracePartCompleted { item } => match item.state() {
+                pl_trace::TracePartState::Inference(inference) => inference.state().usage(),
+                pl_trace::TracePartState::Text(_)
+                | pl_trace::TracePartState::Thinking(_)
+                | pl_trace::TracePartState::Tool(_)
+                | pl_trace::TracePartState::Agent(_)
+                | pl_trace::TracePartState::Turn(_)
+                | pl_trace::TracePartState::Plan(_) => None,
+            },
+            TraceEventKind::TracePartStarted { .. }
+            | TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
-        .expect("completed turn usage");
-    assert_eq!(usage.inference_count, 2);
-    assert_eq!(usage.total_tokens, 15);
+        .collect::<Vec<_>>();
+    assert_eq!(usages.len(), 1);
+    assert_eq!(result.usage.total_tokens, 15);
     assert!(
         compaction
             .replacement_tokens
@@ -369,27 +382,27 @@ async fn client_tool_search_call_records_tool_item_with_structured_summary() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     let tool_item = result
         .trace_events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Tool => {
+            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Tool => {
                 Some(item)
             }
             _ => None,
         })
         .find(|item| {
-            item.tool
-                .as_ref()
-                .is_some_and(|tool| tool.name == "tool_search")
+            item.tool()
+                .is_some_and(|tool| tool.invocation().name() == "tool_search")
         })
         .expect("tool_search tool trace part");
-    let tool = tool_item.tool.as_ref().unwrap();
-    assert_eq!(tool.call_id.as_deref(), Some("call_search_1"));
-    assert!(tool.arguments.contains("git status"));
-    let summary: serde_json::Value = serde_json::from_str(tool.result.as_deref().unwrap())
-        .expect("tool_search item result is structured JSON");
+    let tool = tool_item.tool().unwrap();
+    assert_eq!(tool.invocation().call_id(), Some("call_search_1"));
+    assert!(tool.invocation().arguments().contains("git status"));
+    let summary: serde_json::Value =
+        serde_json::from_str(tool.terminal_output().expect("tool search output").result())
+            .expect("tool_search item result is structured JSON");
     assert_eq!(summary["type"], "tool_search");
     assert_eq!(summary["query"], "git status");
     assert_eq!(summary["loadedToolCount"], 1);
@@ -547,7 +560,7 @@ async fn run_turn_http_sends_full_history_without_a_retry_path() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 1);
     assert!(bodies[0].get("previous_response_id").is_none());
@@ -729,24 +742,24 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     let probe_result = result
         .trace_events
         .iter()
         .find_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
                 if item
-                    .tool
-                    .as_ref()
-                    .is_some_and(|tool| tool.name == "parent_history_probe") =>
+                    .tool()
+                    .is_some_and(|tool| tool.invocation().name() == "parent_history_probe") =>
             {
-                item.tool.as_ref().and_then(|tool| tool.result.as_deref())
+                item.tool()
+                    .and_then(pl_trace::TraceToolPart::terminal_output)
+                    .map(|output| output.result().to_string())
             }
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::TracePartCompleted { .. }
             | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
@@ -794,7 +807,7 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     assert_eq!(result.content, "artifact checked");
     assert_eq!(bodies.lock().unwrap().len(), 2);
     let receipt = session
@@ -861,7 +874,7 @@ async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json:
         .unwrap();
     handle.await.unwrap();
 
-    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert!(result.is_completed());
     bodies.lock().unwrap()[0].clone()
 }
 

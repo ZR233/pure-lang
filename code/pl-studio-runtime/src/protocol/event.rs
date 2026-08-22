@@ -1,4 +1,4 @@
-use pl_protocol::{ObservedStateMeta, Thread};
+use pl_protocol::{ObservedResource, Thread};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -40,14 +40,24 @@ pub enum StudioProductEventKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioProjectDirectoryState {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioProjectDirectoryData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioProjectDirectoryData {
     pub projects: Vec<ProjectRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioThreadDirectoryState {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioThreadDirectoryData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioThreadDirectoryData {
     pub threads: Vec<Thread>,
 }
 
@@ -58,7 +68,8 @@ pub struct StudioThreadDirectoryState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioThreadDirectoryDelta {
-    pub meta: ObservedStateMeta,
+    pub revision: u64,
+    pub updated_at: i64,
     pub upserted: Vec<Thread>,
     pub removed: Vec<String>,
 }
@@ -67,7 +78,12 @@ pub struct StudioThreadDirectoryDelta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioThreadDirectoryPage {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioThreadDirectoryPageData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioThreadDirectoryPageData {
     pub threads: Vec<Thread>,
     /// `None` 表示没有更旧的页。
     pub next_cursor: Option<String>,
@@ -76,7 +92,12 @@ pub struct StudioThreadDirectoryPage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioTaskDirectoryState {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioTaskDirectoryData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskDirectoryData {
     pub tasks: Vec<StudioTaskDirectoryEntry>,
 }
 
@@ -90,28 +111,36 @@ pub struct StudioTaskDirectoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioAgentDirectoryState {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioAgentDirectoryData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentDirectoryData {
     pub agents: Vec<StudioAgentDirectoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSettingsStateSnapshot {
-    pub meta: ObservedStateMeta,
-    pub settings: pl_protocol::studio::StudioSettings,
+    pub state: ObservedResource<pl_protocol::studio::StudioSettings>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioRecoveryStateSnapshot {
-    pub meta: ObservedStateMeta,
-    pub issues: Vec<StudioRecoveryIssue>,
+    pub state: ObservedResource<Vec<StudioRecoveryIssue>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioMcpStateSnapshot {
-    pub meta: ObservedStateMeta,
+    pub state: ObservedResource<StudioMcpStateData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioMcpStateData {
     pub desired_config_fingerprint: String,
     pub applied_config_fingerprint: String,
     pub health: StudioMcpHealth,
@@ -120,55 +149,20 @@ pub struct StudioMcpStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioLspStateSnapshot {
-    pub meta: ObservedStateMeta,
-    pub health: StudioLspHealth,
-}
-
-/// Studio 关机的固定阶段序列。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum StudioShutdownPhase {
-    StoppingSubscriptions,
-    CancellingTurns,
-    FlushingPersistence,
-    SuspendingTasks,
-    StoppingMcp,
-    StoppingLsp,
-    Stopped,
-}
-
-impl StudioShutdownPhase {
-    /// 1-based 阶段序号；驱动验收按它断言顺序与完备性。
-    pub fn index(self) -> u8 {
-        match self {
-            Self::StoppingSubscriptions => 1,
-            Self::CancellingTurns => 2,
-            Self::FlushingPersistence => 3,
-            Self::SuspendingTasks => 4,
-            Self::StoppingMcp => 5,
-            Self::StoppingLsp => 6,
-            Self::Stopped => 7,
-        }
-    }
-}
-
-/// 一次关机进度的进度事件。
-///
-/// `FlushingPersistence` 除进入事件外还发布 pending=0 的完成事件；
-/// 并发 shutdown 共享同一次阶段序列。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioShutdownProgress {
-    pub phase: StudioShutdownPhase,
-    pub pending_commits: u64,
+    pub state: ObservedResource<StudioLspHealth>,
 }
 
 /// Transport-neutral published Skills state with an owned catalog payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSkillsStateSnapshot {
-    pub meta: ObservedStateMeta,
     pub project_id: String,
+    pub state: ObservedResource<StudioSkillsStateData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioSkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub catalog: pl_core::skill::SkillCatalog,
@@ -177,11 +171,12 @@ pub struct StudioSkillsStateSnapshot {
 impl From<SkillsStateSnapshot> for StudioSkillsStateSnapshot {
     fn from(value: SkillsStateSnapshot) -> Self {
         Self {
-            meta: value.meta,
             project_id: value.project_id,
-            config_fingerprint: value.config_fingerprint,
-            catalog_revision: value.catalog_revision,
-            catalog: value.catalog.as_ref().clone(),
+            state: value.state.map(|data| StudioSkillsStateData {
+                config_fingerprint: data.config_fingerprint,
+                catalog_revision: data.catalog_revision,
+                catalog: data.catalog.as_ref().clone(),
+            }),
         }
     }
 }
