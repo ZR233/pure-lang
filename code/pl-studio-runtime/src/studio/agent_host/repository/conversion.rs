@@ -7,11 +7,12 @@ use pl_protocol::{Thread as ThreadRecord, Turn, TurnState};
 use crate::PureError;
 use crate::studio::entity::{thread, thread_input, thread_submission, turn};
 
+use super::input_metadata::deserialize_input_metadata;
 use super::labels::{
     presentation_from_label, thread_mode_from_label, thread_status_from_label,
     turn_phase_from_label,
 };
-use super::{deserialize_input_metadata, store_error, u64_from_i64};
+use super::{store_error, u64_from_i64};
 
 impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
     type Error = PureError;

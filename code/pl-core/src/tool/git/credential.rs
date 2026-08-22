@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pl_protocol::PureError;
 use secrecy::{ExposeSecret, SecretString};
 
-use super::tool_error;
 use crate::tool::shell::shell_quote_word;
+use crate::tool::tool_error;
 
 pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
 
@@ -165,4 +165,63 @@ fn git_shell_command_with_askpass(git_command: &str) -> String {
         "askpass=$(mktemp) && cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n{}PL_GIT_ASKPASS\nchmod 700 \"$askpass\" && GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=\"$askpass\" {git_command}; status=$?; rm -f \"$askpass\"; exit $status",
         git_askpass_script()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn git_shell_command_without_credential_uses_safe_git_flags() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["fetch", "origin", "feature branch"],
+            credential: GitShellCredential::Disabled,
+        });
+
+        assert_eq!(
+            command,
+            "git -c core.hooksPath=/dev/null -c safe.directory=/workspace/repo -c credential.helper= fetch origin 'feature branch'"
+        );
+    }
+
+    #[test]
+    fn git_shell_command_with_credential_installs_askpass() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["push", "origin", "HEAD:mai-agent/test"],
+            credential: GitShellCredential::EnvToken,
+        });
+
+        assert!(command.contains("GIT_ASKPASS=\"$askpass\""));
+        assert!(command.contains("GIT_TERMINAL_PROMPT=0"));
+        assert!(command.contains("$PL_GIT_TOKEN"));
+        assert!(command.contains("x-access-token"));
+        assert!(command.contains("git -c core.hooksPath=/dev/null"));
+        assert!(command.contains("safe.directory=/workspace/repo"));
+        assert!(command.contains("push origin HEAD:mai-agent/test"));
+    }
+
+    #[test]
+    fn git_shell_credential_prelude_installs_pl_token_askpass() {
+        let prelude = git_shell_credential_prelude();
+
+        assert!(prelude.contains("GIT_ASKPASS"));
+        assert!(prelude.contains("GIT_TERMINAL_PROMPT"));
+        assert!(prelude.contains("$PL_GIT_TOKEN"));
+        assert!(prelude.contains("x-access-token"));
+        assert!(!prelude.contains("MAI_GITHUB_INSTALLATION_TOKEN"));
+    }
+
+    #[test]
+    fn git_shell_retry_function_defines_generic_retry_wrapper() {
+        let function = git_shell_retry_function();
+
+        assert!(function.contains("git_with_retry()"));
+        assert!(function.contains("credential.helper="));
+        assert!(function.contains("http.version=HTTP/1.1"));
+        assert!(function.contains("attempts"));
+    }
 }

@@ -1,5 +1,6 @@
-use pl_trace::{AgentEvent, TracePart, TracePartKind};
+use pl_trace::{AgentEvent, TracePart, TracePartKind, TraceTextChannel};
 
+use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::*;
 use crate::{ToolCall, ToolCallPayload};
 

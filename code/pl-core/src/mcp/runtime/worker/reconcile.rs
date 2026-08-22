@@ -7,10 +7,11 @@ use pl_protocol::{PureError, Result};
 
 use super::super::{McpGeneration, McpResetScope};
 use super::redaction::McpErrorRedactor;
-use super::{
-    RuntimeGeneration, RuntimeServer, assign_tool_descriptors, configured_startup_timeout,
-    configured_tool_timeout, filter_tool_definitions, server_descriptor, server_fingerprint,
+use super::server::{
+    RuntimeGeneration, RuntimeServer, assign_tool_descriptors, server_descriptor,
+    server_fingerprint,
 };
+use super::tools::{configured_startup_timeout, configured_tool_timeout, filter_tool_definitions};
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind};
 use crate::mcp::health::McpAvailabilityKind;
 use crate::mcp::{McpConnectRequest, McpConnector};

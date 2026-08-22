@@ -171,12 +171,14 @@ impl StudioStore {
                 && execution_status == ThreadExecutionStatus::BudgetLimited
                 && state.progress().budget_limit.is_some()
                 && continuation_state == ExecutorContinuationState::NeedsAttention;
+            let budget_refresh_expected =
+                budget_action == MailboxBudgetAction::Refresh && budget_attention;
             if !matches!(
                 work_status,
                 WorkUnitStatus::Running
                     | WorkUnitStatus::AwaitingCompletion
                     | WorkUnitStatus::ChangesRequested
-            ) && !(budget_action == MailboxBudgetAction::Refresh && budget_attention)
+            ) && !budget_refresh_expected
             {
                 bail!(
                     "executor cannot start a turn while work unit is {}",

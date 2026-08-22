@@ -2,7 +2,7 @@ use std::path::{Component, Path};
 
 use pl_protocol::PureError;
 
-use super::tool_error;
+use crate::tool::tool_error;
 
 /// git workspace 安全策略。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,4 +126,85 @@ fn is_pull_request_head_destination(destination: &str, number: &str) -> bool {
 fn has_windows_drive_prefix(path: &str) -> bool {
     let bytes = path.as_bytes();
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_policy_rejects_non_origin_remote() {
+        let policy = GitPolicy::default();
+
+        assert!(policy.validate_remote("origin").is_ok());
+        assert!(policy.validate_remote("upstream").is_err());
+        assert!(
+            policy
+                .validate_remote("https://example.com/repo.git")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn git_policy_rejects_unsafe_paths() {
+        let policy = GitPolicy::default();
+
+        assert!(policy.validate_path("src/lib.rs").is_ok());
+        assert!(policy.validate_path("../secret").is_err());
+        assert!(policy.validate_path("/etc/passwd").is_err());
+        assert!(policy.validate_path("C:/Windows").is_err());
+        assert!(policy.validate_path("bad\\path").is_err());
+        assert!(policy.validate_path("bad\u{7f}path").is_err());
+    }
+
+    #[test]
+    fn git_policy_rejects_unsafe_branch_names() {
+        let policy = GitPolicy::default();
+
+        assert!(policy.validate_branch("feature/safe-name").is_ok());
+        assert!(policy.validate_branch("").is_err());
+        assert!(policy.validate_branch("../escape").is_err());
+        assert!(policy.validate_branch("/absolute").is_err());
+        assert!(policy.validate_branch("bad\\branch").is_err());
+        assert!(policy.validate_branch("bad\nbranch").is_err());
+    }
+
+    #[test]
+    fn git_policy_allows_default_and_pr_fetch_refspecs_only() {
+        let policy = GitPolicy::default();
+
+        assert!(policy.validate_fetch_refspec(None).is_ok());
+        assert!(policy.validate_fetch_refspec(Some("main")).is_ok());
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("refs/heads/main"))
+                .is_ok()
+        );
+        assert!(policy.validate_fetch_refspec(Some("pull/42/head")).is_ok());
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("pull/42/head:pr/42"))
+                .is_ok()
+        );
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("refs/pull/42/head:refs/remotes/origin/pr/42"))
+                .is_ok()
+        );
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("pull/42/head:refs/pull/43/head"))
+                .is_err()
+        );
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("+refs/heads/main:refs/heads/main"))
+                .is_err()
+        );
+        assert!(
+            policy
+                .validate_fetch_refspec(Some("refs/tags/v1.0.0"))
+                .is_err()
+        );
+    }
 }
