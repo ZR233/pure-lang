@@ -14,7 +14,6 @@ import '../../shared/upward_popup_menu.dart';
 import '../status/session_selectors.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
-import 'task_recovery_dialog.dart';
 import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
@@ -45,10 +44,7 @@ class ComposerDock extends ConsumerWidget {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: interaction == null
-                ? workspace.isTaskPaused
-                      ? _TaskResumeDock(workspace: workspace)
-                      : workspace.composerMode ==
-                            AgentComposerMode.runtimeDriven
+                ? workspace.composerMode == AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
                       : _PromptComposer(workspace: workspace)
                 : _InteractionDock(
@@ -144,83 +140,6 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
             ),
           ),
           if (workspace.isBusy) _StopButton(threadId: workspace.threadId),
-        ],
-      ),
-    );
-  }
-}
-
-class _TaskResumeDock extends ConsumerWidget {
-  const _TaskResumeDock({required this.workspace});
-
-  final AgentWorkspaceView workspace;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final composer = workspace.composer;
-    final colors = Theme.of(context).colorScheme;
-    return StudioPanel(
-      key: StudioDriverKeys.taskPaused,
-      backgroundColor: context.studioPaper2,
-      borderColor: context.studioLine,
-      radius: StudioRadii.lg,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.pause_circle_outline,
-                size: 20,
-                color: context.studioInkSoft,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      context.l10n.taskResumeTitle,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      context.l10n.taskResumeBody,
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: context.studioInkSoft),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                key: StudioDriverKeys.taskResume,
-                onPressed: composer.isSubmissionPending
-                    ? null
-                    : () => unawaited(
-                        showTaskRecoveryDialog(context, workspace.threadId),
-                      ),
-                icon: composer.isSubmissionPending
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow),
-                label: Text(context.l10n.taskResumeAction),
-              ),
-            ],
-          ),
-          if (composer.error case final error?)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                error,
-                key: StudioDriverKeys.composerError,
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: colors.error),
-              ),
-            ),
         ],
       ),
     );

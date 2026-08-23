@@ -15,8 +15,6 @@ pub(crate) use handoff::{
     TaskExecutorImplementationStep, TaskExecutorScope, TaskExecutorVerificationContract,
     verification_result_map,
 };
-#[cfg(test)]
-pub(crate) use handoff::{TaskExecutorTarget, TaskExecutorVerificationCommand};
 pub(crate) use lifecycle::{
     StudioTaskSpawnPreparation, StudioTaskSpawnRequest, normalize_scope_hints,
 };

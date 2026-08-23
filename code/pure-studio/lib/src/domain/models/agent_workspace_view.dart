@@ -45,11 +45,4 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
   bool get isLoading => syncState == AgentWorkspaceSyncState.loading;
 
   bool get isBusy => turn?.state.isBusy ?? false;
-
-  bool get isTaskPaused =>
-      isRoot &&
-      runtime.hasActiveTask &&
-      !isBusy &&
-      (rootThread.status == ThreadStatusView.faulted ||
-          runtime.task!.hasRecoverableExecutorFailure);
 }

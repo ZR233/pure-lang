@@ -152,7 +152,6 @@ impl StudioRuntime {
                 .emit(crate::StudioShutdownProgress::SuspendingTasks(
                     Default::default(),
                 ));
-            self.task_coordinator.suspend();
             // 阶段 5：关闭 MCP。
             self.shutdown_progress
                 .emit(crate::StudioShutdownProgress::StoppingMcp(

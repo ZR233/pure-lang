@@ -8,10 +8,9 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentReview, ReviewExitDiagnostics, ReviewFileCoverage, ReviewPassedOutcome,
-    ReviewRoundCommand, ReviewRoundRecord, ReviewRoundStateKind, ReviewScope, ReviewTarget,
-    ReviewVerdict, TaskCommand, TaskRunState, TaskRunStateKind, WaitingReviewPhase,
-    WorkCompletionCommand, WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand,
-    WorkUnitStateKind,
+    ReviewRoundCommand, ReviewRoundRecord, ReviewRoundStateKind, ReviewScope, ReviewVerdict,
+    TaskCommand, TaskRun, TaskRunStateKind, WaitingReviewPhase, WorkCompletionCommand,
+    WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand, WorkUnitStateKind,
 };
 
 use super::super::apply_task_command;
@@ -22,6 +21,68 @@ use super::helpers::{active_nonterminal_run, finish_transaction, pending_review_
 use super::record::{review_round_record, review_round_state, update_review_round_state};
 
 impl StudioStore {
+    pub(crate) async fn cancel_integrated_review(
+        &self,
+        thread_id: &str,
+        review_round_id: &str,
+        reason: &str,
+        expected_revision: u64,
+        expected_generation: u64,
+    ) -> Result<TaskRun> {
+        let reason = reason.trim();
+        if reason.is_empty() {
+            bail!("cancelIntegratedReview requires a non-empty reason");
+        }
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = active_nonterminal_run(&tx, thread_id).await?;
+            let task = task_run_record(run.clone())?;
+            if task.revision != expected_revision || task.generation() != expected_generation {
+                bail!(
+                    "task version changed: expected revision {expected_revision}/generation {expected_generation}, actual {}/{}",
+                    task.revision,
+                    task.generation()
+                );
+            }
+            let target = task
+                .state
+                .review_target()
+                .context("cancelIntegratedReview requires reviewing state")?;
+            if target.review_round_id != review_round_id {
+                bail!("reviewRoundId does not match the frozen integrated review target");
+            }
+            let round = entities::review_round::Entity::find_by_id(review_round_id.to_string())
+                .one(&tx)
+                .await?
+                .context("integrated review round not found")?;
+            let state = review_round_state(&round)?;
+            if state.kind().is_active() {
+                let cancelled = state
+                    .decide(
+                        &round.id,
+                        ReviewRoundCommand::Cancel {
+                            reviewer_thread_id: state.reviewer_thread_id().map(str::to_string),
+                            reason: reason.to_string(),
+                            summary: reason.to_string(),
+                        },
+                    )?
+                    .next_state();
+                update_review_round_state(&tx, round, cancelled).await?;
+            }
+            let updated = apply_task_command(
+                &tx,
+                run,
+                TaskCommand::ReturnToWorking {
+                    summary: reason.to_string(),
+                },
+            )
+            .await?;
+            task_run_record(updated)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
     pub(crate) async fn complete_task_review(
         &self,
         thread_id: &str,
@@ -47,15 +108,10 @@ impl StudioStore {
                 }
                 ReviewScope::Integrated => {
                     let task = task_run_record(run.clone())?;
-                    let target_matches = matches!(
-                        &task.state,
-                        TaskRunState::Reviewing(state)
-                            if matches!(
-                                state.target(),
-                                ReviewTarget::Integration { reviewed_head }
-                                    if reviewed_head == &round.reviewed_head
-                            )
-                    );
+                    let target_matches = task.state.review_target().is_some_and(|target| {
+                        target.review_round_id == round.id
+                            && target.reviewed_head == round.reviewed_head
+                    });
                     if !target_matches {
                         bail!("integrated review no longer matches the durable Task target");
                     }
@@ -65,8 +121,8 @@ impl StudioStore {
                             apply_task_command(
                                 &tx,
                                 run.clone(),
-                                TaskCommand::BeginReworking {
-                                    status_message: review.summary.clone(),
+                                TaskCommand::ReturnToWorking {
+                                    summary: review.summary.clone(),
                                 },
                             )
                             .await?;
@@ -251,13 +307,18 @@ impl StudioStore {
                         .one(&tx)
                         .await?
                         .context("integrated review task run not found")?;
-                    if task_run_record(run.clone())?.kind() == TaskRunStateKind::Reviewing {
+                    let keep_reviewing = matches!(
+                        outcome,
+                        TurnOutcome::Cancelled(value)
+                            if value.cause() == &pl_protocol::TurnCancellationCause::UserRequested
+                    );
+                    if task_run_record(run.clone())?.kind() == TaskRunStateKind::Reviewing
+                        && !keep_reviewing
+                    {
                         apply_task_command(
                             &tx,
                             run,
-                            TaskCommand::BeginReworking {
-                                status_message: detail,
-                            },
+                            TaskCommand::ReturnToWorking { summary: detail },
                         )
                         .await?;
                     }
@@ -388,21 +449,10 @@ async fn complete_delivery_review(
         bail!("delivery review completion is stale or was already settled");
     }
     apply_work_unit_command(tx, work_unit, work_unit_command).await?;
-    if completion_status == WorkCompletionStatus::Approved
-        && completion_record.kind() == WorkCompletionKind::Delivery
-    {
-        apply_task_command(
-            tx,
-            run.clone(),
-            TaskCommand::BeginMerging {
-                status_message: Some(format!(
-                    "approved Completion {} is ready for planner Git integration",
-                    completion.id
-                )),
-            },
-        )
-        .await?;
-    }
+    let _ = completion_status;
+    super::super::compare_and_swap_task_run(tx, run, None)
+        .await?
+        .context("TaskRun delivery review settlement lost its revision CAS")?;
     Ok(())
 }
 

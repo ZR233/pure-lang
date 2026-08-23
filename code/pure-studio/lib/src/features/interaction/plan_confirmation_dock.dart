@@ -63,7 +63,7 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
             enabled: !_submitting,
             canSubmit: canSubmitAdjustment && !_submitting,
             onChanged: () => setState(() {}),
-            onSubmit: _resolveContinuePlanning,
+            onSubmit: _resolveRevisePlan,
           ),
           if (_error case final error?) ...[
             const SizedBox(height: 10),
@@ -71,7 +71,6 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
           ],
           const SizedBox(height: 12),
           _PlanDecisionActions(
-            onDismiss: _submitting ? null : _resolveDismiss,
             onImplement: _submitting ? null : _resolveImplement,
           ),
         ],
@@ -83,13 +82,13 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     unawaited(
       _resolve(
         const PlanConfirmationResolutionCommand(
-          decision: PlanConfirmationDecision.implementFreshContext,
+          decision: PlanConfirmationDecision.confirm,
         ),
       ),
     );
   }
 
-  void _resolveContinuePlanning() {
+  void _resolveRevisePlan() {
     final content = _adjustmentController.text.trim();
     if (content.isEmpty) {
       return;
@@ -97,20 +96,9 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     unawaited(
       _resolve(
         PlanConfirmationResolutionCommand(
-          decision: PlanConfirmationDecision.continuePlanning,
+          decision: PlanConfirmationDecision.revisePlan,
           content: content,
-          reason: 'continue planning',
-        ),
-      ),
-    );
-  }
-
-  void _resolveDismiss() {
-    unawaited(
-      _resolve(
-        const PlanConfirmationResolutionCommand(
-          decision: PlanConfirmationDecision.dismiss,
-          reason: 'dismissed',
+          reason: 'revise plan',
         ),
       ),
     );
@@ -175,18 +163,14 @@ class _PlanResolutionError extends StatelessWidget {
 }
 
 class _PlanDecisionActions extends StatelessWidget {
-  const _PlanDecisionActions({
-    required this.onDismiss,
-    required this.onImplement,
-  });
+  const _PlanDecisionActions({required this.onImplement});
 
-  final VoidCallback? onDismiss;
   final VoidCallback? onImplement;
 
   @override
   Widget build(BuildContext context) {
     final hint = Text(
-      context.l10n.interactionPlanImplementFooterHint(
+      context.l10n.interactionPlanConfirmFooterHint(
         context.compileModeLabel(StudioMode.task),
       ),
       maxLines: 2,
@@ -196,16 +180,10 @@ class _PlanDecisionActions extends StatelessWidget {
     );
     final actions = DockActions(
       children: [
-        TextButton.icon(
-          key: StudioDriverKeys.planDismiss,
-          icon: const Icon(Icons.close),
-          label: Text(context.l10n.interactionPlanIgnore),
-          onPressed: onDismiss,
-        ),
         FilledButton.icon(
-          key: StudioDriverKeys.planImplement,
+          key: StudioDriverKeys.planConfirm,
           icon: const Icon(Icons.play_arrow),
-          label: Text(context.l10n.interactionPlanImplement),
+          label: Text(context.l10n.interactionPlanConfirmAction),
           onPressed: onImplement,
         ),
       ],
@@ -280,7 +258,7 @@ class _PlanAdjustmentInput extends StatelessWidget {
           },
         );
         final submit = FilledButton.tonalIcon(
-          key: StudioDriverKeys.planContinue,
+          key: StudioDriverKeys.planRevise,
           icon: const Icon(Icons.send),
           label: Text(context.l10n.interactionPlanAdjustSubmit),
           onPressed: canSubmit ? onSubmit : null,

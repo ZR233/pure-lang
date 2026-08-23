@@ -166,6 +166,10 @@ void validateTaskCompletion(
   if (task == null || task['phase'] != 'completed') {
     throw StateError('Task snapshot is not completed');
   }
+  final outcome = task['outcome'] as Map<String, dynamic>?;
+  if (outcome == null || outcome['kind'] != 'succeeded') {
+    throw StateError('Task did not complete with a succeeded outcome');
+  }
   final workUnits = (task['workUnits'] as List<dynamic>? ?? const [])
       .cast<Map<String, dynamic>>();
   final completions = (task['completions'] as List<dynamic>? ?? const [])
@@ -293,13 +297,23 @@ void validateTaskCompletion(
 
 void validateFatalTaskFailure(Map<String, dynamic> snapshot) {
   final task = snapshot['task'] as Map<String, dynamic>?;
-  if (task == null || task['phase'] != 'failed') {
-    throw StateError('Task snapshot is not failed');
+  if (task == null || task['phase'] != 'completed') {
+    throw StateError('failed Task snapshot is not in the completed state');
   }
-  final failure = task['terminalFailure'] as Map<String, dynamic>?;
-  if (failure == null || failure['disposition'] != 'fatal') {
-    throw StateError('Task snapshot has no fatal terminal failure');
+  final outcome = task['outcome'] as Map<String, dynamic>?;
+  if (outcome == null ||
+      outcome['kind'] != 'failed' ||
+      outcome['failureKind'] != 'fatal') {
+    throw StateError('Task snapshot has no fatal failed outcome');
   }
+  final failures = (task['issues'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .where((issue) => issue['disposition'] == 'fatal')
+      .toList();
+  if (failures.length != 1) {
+    throw StateError('Task snapshot does not expose one fatal issue');
+  }
+  final failure = failures.single;
   if (failure['providerKind'] != 'authentication' ||
       failure['code'] != 'invalid_api_key' ||
       failure['httpStatus'] != 401 ||

@@ -92,11 +92,11 @@ void registerControllerStreamTests() {
     () async {
       final staleTask = TaskRuntimeView(
         runId: 'task-stale',
-        state: const ImplementingTaskStateView(
-          generation: 1,
-          design: TaskFinalizedDesignView('test design'),
+        state: const WorkingTaskStateView(
+          documentEditSummary: 'test documents updated',
         ),
         revision: 0,
+        generation: 1,
         workUnits: [],
         completions: [],
         merges: [],

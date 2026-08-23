@@ -38,16 +38,13 @@ extension StudioLocalizationsX on BuildContext {
 
   String taskPhaseLabel(TaskStateKind phase) {
     return switch (phase) {
-      TaskStateKind.designUpdating => l10n.statusTaskPhaseDesignUpdating,
-      TaskStateKind.implementing => l10n.statusTaskPhaseImplementing,
-      TaskStateKind.merging => l10n.statusTaskPhaseMerging,
+      TaskStateKind.planning => l10n.statusTaskPhasePlanning,
+      TaskStateKind.pendingConfirmation =>
+        l10n.statusTaskPhasePendingConfirmation,
+      TaskStateKind.editingDocuments => l10n.statusTaskPhaseEditingDocuments,
+      TaskStateKind.working => l10n.statusTaskPhaseWorking,
       TaskStateKind.reviewing => l10n.statusTaskPhaseReviewing,
-      TaskStateKind.reworking => l10n.statusTaskPhaseReworking,
-      TaskStateKind.stopping => l10n.statusTaskPhaseStopping,
-      TaskStateKind.blocked => l10n.statusTaskPhaseBlocked,
       TaskStateKind.completed => l10n.statusTaskPhaseCompleted,
-      TaskStateKind.failed => l10n.statusTaskPhaseFailed,
-      TaskStateKind.cancelled => l10n.statusTaskPhaseCancelled,
     };
   }
 

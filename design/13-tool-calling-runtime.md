@@ -77,9 +77,8 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 统一收尾完成后、结果进入本轮有序 tool record 之前，core 调用 `TurnOptions` 中可选的宿主
 `ToolCompletion` callback。callback 接收稳定的 tool identity、名称、终态与 canonical 结果；成功、
 失败、拒绝和取消都经过同一个入口，宿主不得按具体工具名另建旁路。callback 失败属于 fatal tool
-runtime failure，不能让模型在宿主观察未持久化时继续执行后续调用。Studio 用该通用边界在 Task
-`DesignUpdating` 期间重算并 CAS 保存工作区内容指纹，因此命令生成文件、动态工具和普通文件工具
-与 `apply_patch` 具有相同的所有权观察语义。
+runtime failure，不能让模型在宿主观察未持久化时继续执行后续调用。Task 状态转换不借助该 callback
+读取或推断工作区内容；文件变化和状态事实保持两个独立边界。
 
 路径类工具不要求模型提供绝对路径。运行时把相对路径按 typed `AgentWorkspace.root` 解析，
 规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query`
@@ -165,9 +164,10 @@ program 外层运行。
 每个 Turn 开始时，运行时把实际暴露给模型的工具名保留为内部诊断 trace。它只包含 Turn id、
 模式和工具名，不进入模型上下文，也不创建可见 Item；旧 `timeline_events` 表已删除。
 
-`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示
-“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认后 root Thread 保持 Task，由
-TaskService 通过显式 durable input 推进。`<proposed_plan>` 不再是协议入口。
+`task_transition` 是 Task 状态事实的唯一提交入口。Planning 阶段使用 `action=submitPlan`，同时携带
+完整计划摘要、`expectedRevision` 与 `expectedGeneration`；事务原子保存计划、切换到
+`PendingConfirmation` 并创建确认 Interaction。确认后 root Thread 保持 Task，由 TaskService 通过
+显式 durable input 推进。自然语言标签不是协议入口。
 
 `request_user_input` 在 Studio 中是 durable Turn 边界，Simple root、Task root 和可执行该工具的
 child 使用相同语义。工具返回 typed `ToolRuntimeEvent::InteractionRequested`，RunningTurn 把它
@@ -177,7 +177,7 @@ interaction callback 后立即结束，也不得依赖进程内 waiter 保存用
 使用 `AwaitResponse`，可在原 Turn 内等待 callback，不受 Studio 语义影响。
 
 pending Interaction 是一种成功的 Turn completion boundary，不是业务 finalization。若当前 role 配置了
-`RequiredTool`（例如 Task planner 的 `plan_exit`），RunningTurn 在该边界不得把缺少 required tool
+`RequiredTool`（例如 Planning 阶段的 `task_transition`），RunningTurn 在该边界不得把缺少 required tool
 改写为 validation failure；用户答复后的 fresh Turn 仍按原 role policy 继续，只有真正完成该阶段时
 才必须调用 required tool。
 
@@ -186,22 +186,21 @@ Studio 回答 UserInput 时，把 resolved Interaction 与一个 hidden durable 
 `StartOrQueue`：Thread idle 时开启 fresh Turn，有活动 Turn 时只排队，绝不 steer 当前 Turn；该输入
 没有 queue coalescing key，也不参与 Task Planner wake 合并。事务失败时 Interaction 与 input 都不
 落地；重复回答先按 canonical Interaction 状态、再按稳定 mail ID 幂等返回，不能创建第二个 input
-或 Turn。ToolApproval 保留原有等待和审批语义。PlanConfirmation 的 `ContinuePlanning` 保留
-Planner/Task phase 语义，但必须复用同一 durable continuation 边界：在一个 `ThreadCommit` 中
-提交 resolved PlanConfirmation 与包含调整要求的 hidden input，mail ID 同样固定为
-`interaction-resolution:{interactionId}`，idle 时开启 fresh Planner Turn，active 时只排队且绝不
-steer。新的 Planner Turn 必须重新完成 `plan_exit`；`ImplementFreshContext` 和 `Dismiss` 继续使用
-各自的实施启动与忽略语义，不因计划调整路径而改变。
+或 Turn。ToolApproval 保留原有等待和审批语义。PlanConfirmation 的 `Confirm` 与 `RevisePlan`
+必须复用同一 durable continuation 边界：在一个 `ThreadCommit` 中提交 resolved Interaction 与
+hidden input，mail ID 同样固定为 `interaction-resolution:{interactionId}`，idle 时开启 fresh
+Planner Turn，active 时只排队且绝不 steer。`Confirm` 原子推进到 `EditingDocuments`；
+`RevisePlan` 原子回到 `Planning`，新的 Planner Turn 必须重新调用 `task_transition.submitPlan`。
 
 pending Interaction 是成功的 Turn completion boundary，不是 Turn 内的等待 phase。当
 origin Turn 仍是 Thread 当前 active Turn 时，pending Interaction 与随后的 `EndTurn` 一起提交：
 原 Turn 落 `completed`，“等待用户”状态由 Thread 上挂的 pending Interaction 派生。Interaction
 resolution 通过稳定 mail ID 的 durable hidden input 在 fresh Turn 继续，绝不复活已 terminal 的
-origin Turn、覆盖无关 Turn 或伪造 active 状态。
+origin Turn、覆盖无关 Turn 或伪造 active 状态。PlanConfirmation 只接受 `Confirm` 与
+`RevisePlan`；确认进入 `EditingDocuments`，要求修改则回到 `Planning` 并在新 Turn 重新提交计划。
 
-Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查：只读取最新完整 plan Item，
-并在没有对应 interaction、没有活动 TaskRun、且 plan 未进入实施或终态时补建确认。重复 attach
-必须幂等，不能复活旧计划或制造多个 pending confirmation。
+Studio attach 只恢复持久化 TaskRun、Interaction、输入队列和模型执行事实，不从 plan Item 反向补建
+Task 或确认。新 TaskRun 必须在首个模型执行前落库；缺失记录属于协议错误，不能从对话文本猜测修复。
 
 后台 stdio 子进程（MCP server、`exec` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。容器 backend 必须同时终止宿主 transport 进程和容器内进程组，不能只杀 Docker CLI 后留下孤儿任务。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
@@ -427,15 +426,14 @@ Timeline Item。
 重建新会话和相关 fixture。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的 `task_spawn_executor` 在活动
-Task planner Turn 中保持可见，但首次派发只接受 `Implementing`，返工派发只接受 `Reworking`；
-其他 phase 返回包含 current/required phase 与下一步工具的 recoverable `task_phase_mismatch`，且不得
-分配任何 durable owner。Task 的 `task_spawn_executor` 使用
+Task planner Turn 中保持可见，但只在 `Working` 接受新工作单或替代尝试；其他状态拒绝且不得分配
+任何 durable owner。Task 的 `task_spawn_executor` 使用
 破坏性的结构化实施蓝图协议，包含目标、分组范围、带目标路径与验收引用的实施步骤、验收条件、
 依赖、证据，以及带 ID、预期结果和验收引用的命令/检查验证。runtime 在分配任何 WorkUnit、
-worktree、lease 或 child Thread 前校验完整性、唯一引用、规范仓库相对路径、未知字段和固定上下文
+worktree 或 child Thread 前校验完整性、唯一引用、规范仓库相对路径、未知字段和固定上下文
 预算。范围只用于拆分、审查和冲突提示，不限制 worktree 内合法修改；
-`task_request_delivery_review` 与 `task_request_integrated_review` 分别固定 completion
-revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 child Thread，
+`task_request_delivery_review` 固定 completion revision；`task_transition.beginIntegratedReview` 从
+完成声明和合并记录冻结整体目标。两条审查路径都创建只属于新 agent 的 child Thread，
 不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、
 Turn 启动与失败补偿。
 

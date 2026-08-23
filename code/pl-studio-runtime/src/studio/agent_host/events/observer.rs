@@ -5,7 +5,6 @@ use pl_core::{AgentCommitObserver, AgentCommittedEvent, AgentRuntimeHandle};
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 
-use super::super::StudioPlanConfirmationProjector;
 use super::super::resources::StudioAgentResources;
 use super::continuation::recover_executor_continuation;
 use super::planner_wake::materialize_pending_task_planner_wakes;
@@ -17,30 +16,22 @@ pub(in crate::studio) struct StudioAgentCommitObserver {
     sender: mpsc::UnboundedSender<AgentCommittedEvent>,
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
     store: StudioStore,
-    plan_confirmations: StudioPlanConfirmationProjector,
 }
 
 impl StudioAgentCommitObserver {
     pub(in crate::studio::agent_host) fn new(
         store: StudioStore,
-        interactions: InteractionService,
+        _interactions: InteractionService,
         coordinator: std::sync::Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: ProductEventBus,
     ) -> Self {
         let (runtime, runtime_receiver) = watch::channel(None);
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        let plan_confirmations = StudioPlanConfirmationProjector::new(
-            store.clone(),
-            interactions.clone(),
-            product_events.clone(),
-            runtime_receiver.clone(),
-        );
         let projector = StudioAgentEventProjector {
             store: store.clone(),
             resources,
             product_events,
-            plan_confirmations: plan_confirmations.clone(),
             coordinator: coordinator.clone(),
             runtime: runtime_receiver,
         };
@@ -59,7 +50,6 @@ impl StudioAgentCommitObserver {
             sender,
             runtime,
             store,
-            plan_confirmations,
         }
     }
 
@@ -93,12 +83,6 @@ impl StudioAgentCommitObserver {
             tracing::warn!(
                 error_bytes = error.to_string().len(),
                 "failed to recover pending Task Planner wakes"
-            );
-        }
-        if let Err(error) = self.plan_confirmations.recover_missing().await {
-            tracing::warn!(
-                error_bytes = error.to_string().len(),
-                "failed to recover pending plan confirmations"
             );
         }
     }

@@ -85,10 +85,6 @@ class _FakeStudioApi implements StudioApi {
   final List<({String threadId, String prompt})> submittedPrompts = [];
   Completer<SubmitPromptReceipt>? blockedPromptSubmit;
   Exception? submitPromptError;
-  int resumeTaskCount = 0;
-  final List<String> resumedTaskSessionIds = [];
-  Completer<SubmitPromptReceipt>? blockedTaskResume;
-  Exception? resumeTaskError;
   String? submitReceiptSessionId;
   String submitTurnId = 'turn-1';
   ({String threadId, String turnId})? interruptedTurn;

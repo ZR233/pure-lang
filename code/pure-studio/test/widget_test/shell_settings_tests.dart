@@ -704,11 +704,11 @@ void registerShellSettingsTests() {
               rootThreadId: 'session-1',
               task: TaskRuntimeView(
                 runId: 'task-run-1',
-                state: const ImplementingTaskStateView(
-                  generation: 0,
-                  design: TaskFinalizedDesignView('test design'),
+                state: const WorkingTaskStateView(
+                  documentEditSummary: 'test documents updated',
                 ),
                 revision: 0,
+                generation: 0,
                 workUnits: [],
                 completions: [],
                 merges: [],
@@ -730,7 +730,7 @@ void registerShellSettingsTests() {
     expect(
       find.descendant(
         of: find.byType(ThreadStatusBar),
-        matching: find.text('Implementing'),
+        matching: find.text('Working'),
       ),
       findsOneWidget,
     );
@@ -740,12 +740,14 @@ void registerShellSettingsTests() {
     );
     expect(
       find.byKey(
-        StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.implementing),
+        StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.working),
       ),
       findsOneWidget,
     );
     expect(
-      find.byKey(StudioDriverKeys.taskStatus('task-run-1', '')),
+      find.byKey(
+        StudioDriverKeys.taskStatus('task-run-1', 'test documents updated'),
+      ),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

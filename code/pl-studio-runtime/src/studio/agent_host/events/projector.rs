@@ -2,7 +2,7 @@ use pl_core::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
     AgentSnapshot, AgentState, MailboxBudgetAction, ThreadId,
 };
-use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
+use pl_trace::{TraceEvent, TraceEventKind};
 use tokio::sync::watch;
 
 use crate::config::StudioRole;
@@ -13,7 +13,7 @@ use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{ProductEventBus, StudioStore};
 
 use super::super::resources::StudioAgentResources;
-use super::super::{StudioPlanConfirmationProjector, wait_for_runtime};
+use super::super::wait_for_runtime;
 use super::continuation::submit_executor_continuation;
 use super::mapping::studio_agent_state;
 use super::planner_wake::materialize_pending_task_planner_wakes;
@@ -22,7 +22,6 @@ pub(super) struct StudioAgentEventProjector {
     pub(super) store: StudioStore,
     pub(super) resources: StudioAgentResources,
     pub(super) product_events: ProductEventBus,
-    pub(super) plan_confirmations: StudioPlanConfirmationProjector,
     pub(super) coordinator: std::sync::Arc<TaskCoordinator>,
     pub(super) runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
 }
@@ -127,9 +126,9 @@ impl StudioAgentEventProjector {
             } => {
                 if let Some(thread_id) = thread_id.as_deref() {
                     self.store
-                        .resolve_recoverable_task_failures(thread_id)
+                        .resolve_recoverable_task_issues(thread_id)
                         .await
-                        .at("resolveRecoverableTaskFailure")?;
+                        .at("resolveRecoverableTaskIssue")?;
                 }
                 let is_task_executor = snapshot.identity.role.as_str()
                     == StudioRole::Executor.key()
@@ -243,19 +242,12 @@ impl StudioAgentEventProjector {
 
     async fn project_traces(
         &self,
-        agent_id: &str,
-        thread_id: &str,
+        _agent_id: &str,
+        _thread_id: &str,
         traces: Vec<TraceEvent>,
     ) -> anyhow::Result<()> {
         for trace in traces {
             match trace.kind {
-                TraceEventKind::TracePartCompleted { item }
-                    if item.kind() == TracePartKind::Plan =>
-                {
-                    self.plan_confirmations
-                        .project(agent_id, thread_id, &item)
-                        .await?;
-                }
                 TraceEventKind::TracePartStarted { .. }
                 | TraceEventKind::TracePartDelta { .. }
                 | TraceEventKind::TracePartCompleted { .. }

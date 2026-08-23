@@ -225,12 +225,6 @@ impl StudioRuntime {
         Ok(turns)
     }
 
-    /// 测试用：返回派生的活动 turn 列表。
-    #[cfg(test)]
-    pub(in crate::studio) async fn active_turns_for_test(&self) -> Vec<StudioActiveTurn> {
-        self.derive_active_turns().await.unwrap_or_default()
-    }
-
     pub async fn thread_task_view(
         &self,
         thread_id: &str,

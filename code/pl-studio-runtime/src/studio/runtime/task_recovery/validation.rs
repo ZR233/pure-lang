@@ -14,7 +14,7 @@ impl StudioRuntime {
         &self,
         preview: &StudioTaskRecoveryPreview,
         target: &StudioTaskRecoveryTarget,
-        allow_cleared_stop: bool,
+        _allow_generation_change: bool,
     ) -> Result<()> {
         let run = self
             .store
@@ -24,18 +24,8 @@ impl StudioRuntime {
             || run.revision != preview.revision
             || run.generation() != preview.task_generation
             || recovery_state_from_task_kind(run.kind()) != preview.state
-            || (!allow_cleared_stop && run.is_stop_requested() != preview.stop_requested)
-            || (allow_cleared_stop && run.is_stop_requested() && !preview.stop_requested)
         {
             bail!("Task recovery facts changed after conversation recovery");
-        }
-        let lease = self
-            .store
-            .read_project_lease(&run.id)
-            .await?
-            .context("Task recovery project lease disappeared")?;
-        if lease.id != preview.project_lease_id || lease.project_id != run.project_id {
-            bail!("Task recovery project lease changed");
         }
         match target.kind {
             StudioTaskRecoveryTargetKind::Planner => {

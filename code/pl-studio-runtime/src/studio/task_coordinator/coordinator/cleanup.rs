@@ -150,7 +150,6 @@ impl TaskCoordinator {
             self.store
                 .authorize_recovery_cleanup(&cleanup.run.id)
                 .await?;
-            self.release_owned_process_lease(&cleanup.run.id);
         }
         for (workspace_root, durable) in durable_by_workspace {
             cleanup_task_worktree_resources(workspace_root, &durable).await?;

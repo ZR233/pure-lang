@@ -433,9 +433,8 @@ pub enum BridgeToolApprovalResolution {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgePlanConfirmationResolution {
-    ImplementFreshContext,
-    ContinuePlanning,
-    Dismiss,
+    Confirm,
+    RevisePlan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -5,10 +5,10 @@ use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     ExecutorContinuationStateKind, MergeCleanupState, RestartAgentReconciliation,
-    ReviewRoundCommand, ReviewRoundStateKind, ReviewScope, ReviewTarget, TaskCommand, TaskRunState,
-    TaskRunStateKind, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeDisposition,
-    TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot, WaitingReviewPhase, WorkCompletionStatus,
-    WorkUnitCommand, WorkUnitCompletionOutcome, WorkUnitStateKind,
+    ReviewRoundCommand, ReviewRoundStateKind, ReviewScope, TaskCommand, TaskWorktreeCleanupState,
+    TaskWorktreeCreationState, TaskWorktreeDisposition, TaskWorktreeOwnerResource,
+    TaskWorktreeOwnerSnapshot, WaitingReviewPhase, WorkCompletionStatus, WorkUnitCommand,
+    WorkUnitCompletionOutcome, WorkUnitStateKind,
 };
 
 use super::{
@@ -25,62 +25,6 @@ const REVIEW_RESTART_DIAGNOSTIC: &str =
     "reviewer interrupted by application restart before review_exit";
 
 impl StudioStore {
-    pub(crate) async fn clear_task_stop_for_recovery(
-        &self,
-        task_run_id: &str,
-        expected_generation: u64,
-        expected_phase: TaskRunStateKind,
-    ) -> Result<bool> {
-        if !matches!(
-            expected_phase,
-            TaskRunStateKind::DesignUpdating
-                | TaskRunStateKind::Implementing
-                | TaskRunStateKind::Reworking
-        ) {
-            bail!(
-                "Task recovery cannot clear StopRequested during phase {}",
-                expected_phase.as_str()
-            );
-        }
-        let tx = self.db.begin().await?;
-        let result = async {
-            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
-                .one(&tx)
-                .await?
-                .context("Task recovery run not found")?;
-            let record = task_run_record(run.clone())?;
-            if record.generation() != expected_generation
-                || record.kind() != expected_phase
-                || record.kind().is_terminal()
-            {
-                bail!("Task recovery facts changed before StopRequested could be cleared");
-            }
-            let lease = entities::project_lease::Entity::find()
-                .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
-                .one(&tx)
-                .await?
-                .context("Task recovery project lease not found")?;
-            if lease.project_id != run.project_id {
-                bail!("Task recovery project lease changed before StopRequested clear");
-            }
-            if !record.is_stop_requested() {
-                return Ok(false);
-            }
-            bail!("Task recovery cannot clear a stop after the run entered stopping")
-        }
-        .await;
-        match result {
-            Ok(cleared) => {
-                tx.commit().await?;
-                Ok(cleared)
-            }
-            Err(error) => {
-                tx.rollback().await?;
-                Err(error)
-            }
-        }
-    }
-
     pub(crate) async fn list_all_task_worktree_owners(
         &self,
     ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
@@ -243,15 +187,10 @@ async fn reconcile_pending_reviews_after_restart(
             }
             ReviewScope::Integrated => {
                 let record = task_run_record(run.clone())?;
-                let target_matches = matches!(
-                    &record.state,
-                    TaskRunState::Reviewing(state)
-                        if matches!(
-                            state.target(),
-                            ReviewTarget::Integration { reviewed_head }
-                                if reviewed_head == &round.reviewed_head
-                        )
-                );
+                let target_matches = record.state.review_target().is_some_and(|target| {
+                    target.review_round_id == round.id
+                        && target.reviewed_head == round.reviewed_head
+                });
                 if round.work_unit_id.is_some()
                     || round.completion_id.is_some()
                     || round.completion_revision.is_some()
@@ -262,8 +201,8 @@ async fn reconcile_pending_reviews_after_restart(
                 super::apply_task_command(
                     tx,
                     run.clone(),
-                    TaskCommand::BeginReworking {
-                        status_message: REVIEW_RESTART_DIAGNOSTIC.to_string(),
+                    TaskCommand::ReturnToWorking {
+                        summary: REVIEW_RESTART_DIAGNOSTIC.to_string(),
                     },
                 )
                 .await?;

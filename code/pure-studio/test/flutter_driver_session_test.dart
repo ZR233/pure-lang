@@ -58,7 +58,7 @@ void main() {
         'threadMode': 'task',
         'turn': {'id': 'turn-target'},
       },
-      'task': {'runId': 'task-run-target', 'phase': 'implementing'},
+      'task': {'runId': 'task-run-target', 'phase': 'working'},
     };
 
     expect(

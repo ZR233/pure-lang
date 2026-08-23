@@ -1,6 +1,5 @@
 mod events;
 mod lifecycle;
-mod plan_confirmation;
 mod policy;
 mod repository;
 mod resources;
@@ -22,7 +21,6 @@ pub(in crate::studio) use events::{
     materialize_pending_task_planner_wakes, materialize_task_planner_wake,
 };
 use lifecycle::StudioAgentLifecycle;
-use plan_confirmation::StudioPlanConfirmationProjector;
 pub(in crate::studio) use repository::StudioAgentRepository;
 pub(super) use resources::{StudioAgentResources, root_agent_id};
 use turn_factory::StudioAgentTurnFactory;

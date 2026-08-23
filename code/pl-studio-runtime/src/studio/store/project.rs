@@ -49,8 +49,8 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        // Studio schema 只保留 v8 一个事实：任何非 v8 库（含历史 v4–v7）都按
-        // 不兼容处理，走精确重建，不存在跨版本迁移链。
+        // Studio schema 只支持当前 v12：其他版本直接按不兼容数据库精确重建，
+        // 不保留 Task 状态或工具协议的跨版本迁移链。
         let existing_is_compatible = if database_exists {
             match inspect_database(&path).await {
                 Ok(()) => true,

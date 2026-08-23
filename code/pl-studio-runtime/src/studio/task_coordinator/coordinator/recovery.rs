@@ -69,3 +69,4 @@ fn canonical_path_key(path: &Path) -> String {
     let path = crate::agent::worktree::git_compatible_path(path.to_path_buf());
     workspace_key(&path.to_string_lossy())
 }
+use std::collections::HashMap;

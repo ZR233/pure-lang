@@ -4,22 +4,22 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本；任何非 v11 库都按不兼容处理并精确重建。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 11;
+/// 唯一支持的 Studio schema 版本；任何其他版本都按不兼容处理并精确重建。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 12;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_task_run_table(db).await?;
+    create_task_stop_event_table(db).await?;
     create_work_unit_table(db).await?;
     create_work_completion_table(db).await?;
     create_review_round_table(db).await?;
-    create_task_failure_table(db).await?;
+    create_task_issue_table(db).await?;
     create_merge_record_table(db).await?;
     create_thread_lifecycle_tables(db).await?;
     db.get_schema_builder()
         .register(entity::app_setting::Entity)
         .register(entity::project::Entity)
         .register(entity::attachment::Entity)
-        .register(entity::project_lease::Entity)
         .register(entity::thread_submission::Entity)
         .register(entity::thread_context_segment::Entity)
         .register(entity::thread_session_state::Entity)
@@ -31,10 +31,32 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
     Ok(())
 }
 
-async fn create_task_failure_table(db: &DatabaseConnection) -> Result<()> {
+async fn create_task_stop_event_table(db: &DatabaseConnection) -> Result<()> {
     db.execute_unprepared(
         r#"
-        CREATE TABLE IF NOT EXISTS task_failures (
+        CREATE TABLE IF NOT EXISTS task_stop_events (
+            id TEXT PRIMARY KEY NOT NULL,
+            task_run_id TEXT NOT NULL,
+            generation INTEGER NOT NULL CHECK (generation > 0),
+            origin TEXT NOT NULL CHECK (
+                origin IN ('userRequest', 'plannerDecision', 'runtimeFailure', 'applicationShutdown')
+            ),
+            reason TEXT NOT NULL,
+            source_turn_id TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+            UNIQUE(task_run_id, generation)
+        )
+        "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn create_task_issue_table(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        r#"
+        CREATE TABLE IF NOT EXISTS task_issues (
             id TEXT PRIMARY KEY NOT NULL,
             task_run_id TEXT NOT NULL,
             source_thread_id TEXT NOT NULL,
@@ -264,16 +286,16 @@ async fn create_task_run_table(db: &DatabaseConnection) -> Result<()> {
             id TEXT PRIMARY KEY NOT NULL,
             project_id TEXT NOT NULL,
             root_thread_id TEXT NOT NULL,
-            plan TEXT NOT NULL,
+            request TEXT NOT NULL,
+            plan_json TEXT CHECK (plan_json IS NULL OR json_valid(plan_json)),
             workspace_root TEXT NOT NULL,
             state_json TEXT NOT NULL CHECK (json_valid(state_json)),
             state_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.kind')
             ) STORED NOT NULL CHECK (
                 state_kind IN (
-                    'designUpdating', 'implementing', 'merging', 'reviewing',
-                    'reworking', 'stopping', 'blocked', 'completed', 'failed',
-                    'cancelled'
+                    'planning', 'pendingConfirmation', 'editingDocuments',
+                    'working', 'reviewing', 'completed'
                 )
             ),
             revision INTEGER NOT NULL CHECK (revision >= 0),
@@ -300,6 +322,7 @@ async fn create_work_unit_table(db: &DatabaseConnection) -> Result<()> {
             worktree_path TEXT NOT NULL,
             branch TEXT NOT NULL,
             attempt INTEGER NOT NULL,
+            supersedes_work_unit_id TEXT,
             executor_thread_id TEXT,
             requested_by_call_id TEXT NOT NULL,
             state_json TEXT NOT NULL CHECK (json_valid(state_json)),
@@ -314,7 +337,8 @@ async fn create_work_unit_table(db: &DatabaseConnection) -> Result<()> {
             revision INTEGER NOT NULL CHECK (revision >= 0),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE
+            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (supersedes_work_unit_id) REFERENCES work_units(id)
         )
         "#,
     )
@@ -396,12 +420,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::attachment::Column::ThreadId)
             .to_owned(),
         Index::create()
-            .name("idx_project_leases_project")
-            .table(entity::project_lease::Entity)
-            .col(entity::project_lease::Column::ProjectId)
-            .unique()
-            .to_owned(),
-        Index::create()
             .name("idx_interactions_thread_state_updated")
             .table(entity::interaction::Entity)
             .col(entity::interaction::Column::ThreadId)
@@ -444,17 +462,17 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .unique()
             .to_owned(),
         Index::create()
-            .name("idx_task_failures_run_created")
-            .table(entity::task_failure::Entity)
-            .col(entity::task_failure::Column::TaskRunId)
-            .col((entity::task_failure::Column::CreatedAt, IndexOrder::Desc))
-            .col((entity::task_failure::Column::Id, IndexOrder::Desc))
+            .name("idx_task_issues_run_created")
+            .table(entity::task_issue::Entity)
+            .col(entity::task_issue::Column::TaskRunId)
+            .col((entity::task_issue::Column::CreatedAt, IndexOrder::Desc))
+            .col((entity::task_issue::Column::Id, IndexOrder::Desc))
             .to_owned(),
         Index::create()
-            .name("idx_task_failures_run_turn")
-            .table(entity::task_failure::Entity)
-            .col(entity::task_failure::Column::TaskRunId)
-            .col(entity::task_failure::Column::SourceTurnId)
+            .name("idx_task_issues_run_turn")
+            .table(entity::task_issue::Entity)
+            .col(entity::task_issue::Column::TaskRunId)
+            .col(entity::task_issue::Column::SourceTurnId)
             .unique()
             .to_owned(),
         Index::create()
@@ -566,7 +584,7 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
         r#"
         CREATE UNIQUE INDEX idx_task_runs_one_open_per_root
         ON task_runs(root_thread_id)
-        WHERE state_kind NOT IN ('completed', 'failed', 'cancelled')
+        WHERE state_kind != 'completed'
         "#,
     )
     .await?;

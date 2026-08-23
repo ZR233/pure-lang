@@ -258,8 +258,8 @@ fn cancelled_resolution(kind: InteractionKind, reason: &str) -> InteractionResol
         }
         InteractionKind::PlanConfirmation => {
             InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
-                decision: PlanConfirmationResolution::Dismiss,
-                content: None,
+                decision: PlanConfirmationResolution::RevisePlan,
+                content: Some(reason.to_string()),
                 reason: Some(reason.to_string()),
             })
         }

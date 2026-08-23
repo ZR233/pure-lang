@@ -17,7 +17,7 @@
 单次 agent turn 终态绑定。
 
 Task executor 只能由 `task_spawn_executor` 创建。Task planner 必须先调用
-`task_finalize_design` 进入 `Implementing`。finalize 只记录摘要并推进 Task 状态，不读取或修改 Git；
+`task_transition.finishDocumentEditing` 进入 `Working`。该动作只记录摘要并推进 Task 状态，不读取或修改 Git；
 executor worktree 始终由资源适配层从创建时的 `HEAD` 建立。planner 若希望 executor 获得主
 workspace 的既有修改，必须自行提交；未提交修改不会被 worktree 隐式复制。
 `scopeHints` 是可选的仓库相对关注路径，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
@@ -63,7 +63,7 @@ Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。�
 
 每个 durable `WorkUnit` 的 `Failed`、`Cancelled` 状态都保存 typed
 `worktreeDisposition = protect | cleanupRequested`；其他非终态隐式保护，Completed
-表示已具备清理授权。新记录默认保护；v11 不导入旧记录或运行 backfill。应用重启取消
+表示已具备清理授权。新记录默认保护；当前 schema 不导入旧记录或运行 backfill。应用重启取消
 活跃 executor 必须进入 `Cancelled::protect`；用户停止、recovery cleanup 与 planner
 discard 才进入 `Cancelled::cleanupRequested`，不能把 Cancelled/Failed 枚举本身当成
 删除授权。
@@ -135,8 +135,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 
 ## 启用时机
 
-孤儿 GC 只在 Studio 启动恢复阶段运行，并以持久化 `TaskRun`、`WorkUnit`、
-`ReviewRound` 与 `ProjectLease` 为唯一所有权来源。普通 root Turn、后续 Turn、Thread
+孤儿 GC 只在 Studio 启动恢复阶段运行，并以持久化 `TaskRun`、`WorkUnit` 和
+`ReviewRound` 为唯一所有权来源。普通 root Turn、后续 Turn、Thread
 选择切换和 `enable_worktrees` 都不得扫描或删除其他 Thread 的 worktree。
 
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
@@ -155,9 +155,9 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   任意部分存在仍 block。`Running`、`AwaitingCompletion`、`ReadyForReview`、
   `Reviewing`、`ChangesRequested`、`Approved` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
-- 启动先读取完整 durable ownership snapshot。TaskRun、Merging 和 conversation recovery 只依据
+- 启动先读取完整 durable ownership snapshot。TaskRun、合并记录和 conversation recovery 只依据
   durable state、generation/revision 与 agent 状态恢复，不读取项目 Git，也不因 dirty、HEAD 或
-  operation 标记进入 Blocked。只有明确执行 worktree 对账或清理时，资源适配层才读取 registration、
+  operation 标记改变任务主状态。只有明确执行 worktree 对账或清理时，资源适配层才读取 registration、
   leaf path、Pure-owned branch 与待删除 branch HEAD；这些事实只决定资源能否安全清理，不反向充当
   Task 状态门禁。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction

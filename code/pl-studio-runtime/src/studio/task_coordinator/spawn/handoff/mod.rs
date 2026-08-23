@@ -15,7 +15,7 @@ pub(crate) use validation::verification_result_map;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::super::{TaskRun, WorkUnit};
+use super::super::{TaskRun, TaskRunStateKind, WorkUnit};
 
 pub(crate) const TASK_EXECUTOR_HANDOFF_SECTION_ID: &str = "studio.task_executor_handoff";
 const TASK_EXECUTOR_HANDOFF_VERSION: u32 = 4;
@@ -73,8 +73,10 @@ impl TaskExecutorHandoff {
         parent_thread_id: String,
         blueprint: TaskExecutorBlueprint,
     ) -> Result<Self> {
-        run.design()
-            .context("Task executor allocation requires a finalized design stage")?;
+        anyhow::ensure!(
+            run.kind() == TaskRunStateKind::Working,
+            "Task executor allocation requires working state"
+        );
         let blueprint_fingerprint = blueprint.fingerprint()?;
         Ok(Self {
             version: TASK_EXECUTOR_HANDOFF_VERSION,
@@ -92,7 +94,10 @@ impl TaskExecutorHandoff {
                 branch: work_unit.branch.clone(),
             },
             confirmed_plan: TaskExecutorConfirmedPlan {
-                content: run.plan.clone(),
+                content: run
+                    .plan_content()
+                    .context("Task executor allocation requires a frozen plan")?
+                    .to_string(),
             },
             blueprint,
             delivery: TaskExecutorDeliveryContract {

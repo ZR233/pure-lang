@@ -185,63 +185,6 @@ impl WorkUnitState {
     }
 
     #[cfg(test)]
-    pub(crate) fn running_for_test(continuation_revision: u64) -> Self {
-        Self::Running(RunningWorkUnit::allocated(continuation_revision, 1))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn awaiting_report_for_test(
-        outcome: ExecutorTerminalOutcome,
-        continuation_revision: u64,
-    ) -> Self {
-        let source_turn_id = outcome.source_turn_id().to_string();
-        Self::WaitingReview(WaitingReviewWorkUnit {
-            phase: WaitingReviewPhase::AwaitingReport(AwaitingReport {
-                outcome,
-                continuation: ExecutorContinuationState::planner_wake_pending(
-                    continuation_revision,
-                    source_turn_id,
-                    1,
-                ),
-            }),
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn ready_for_review_for_test() -> Self {
-        Self::WaitingReview(WaitingReviewWorkUnit {
-            phase: WaitingReviewPhase::Ready(ReadyForReview {
-                completion_id: "completion-test".to_string(),
-                completion_revision: 1,
-                verification_summary: "test verification".to_string(),
-            }),
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn reviewing_for_test() -> Self {
-        Self::WaitingReview(WaitingReviewWorkUnit {
-            phase: WaitingReviewPhase::Reviewing(ReviewInProgress {
-                completion_id: "completion-test".to_string(),
-                completion_revision: 1,
-                review_round_id: "review-test".to_string(),
-                verification_summary: "test verification".to_string(),
-            }),
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn changes_required_for_test(continuation_revision: u64) -> Self {
-        Self::ChangesRequired(ChangesRequiredWorkUnit {
-            completion_id: "completion-test".to_string(),
-            completion_revision: 1,
-            review_round_id: "review-test".to_string(),
-            continuation_revision,
-            slice_count: 1,
-        })
-    }
-
-    #[cfg(test)]
     pub(crate) fn failed_for_test(
         operation_id: impl Into<String>,
         detail: impl Into<String>,
@@ -253,15 +196,6 @@ impl WorkUnitState {
                 detail: detail.into(),
             },
             worktree_disposition,
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn completed_merged_for_test(merge_record_id: impl Into<String>) -> Self {
-        Self::Completed(CompletedWorkUnit {
-            outcome: WorkUnitCompletionOutcome::Merged {
-                merge_record_id: merge_record_id.into(),
-            },
         })
     }
 

@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String threadId;
@@ -156,39 +156,6 @@ sealed class BridgeAgentState with _$BridgeAgentState {
       BridgeAgentState_Faulted;
 }
 
-enum BridgeBlockedRecovery { retryMerge, resumeRework, manualOnly }
-
-class BridgeBlockedTaskState {
-  final BigInt generation;
-  final String message;
-  final BridgeDesignProgress design;
-  final BridgeBlockedRecovery recovery;
-
-  const BridgeBlockedTaskState({
-    required this.generation,
-    required this.message,
-    required this.design,
-    required this.recovery,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^
-      message.hashCode ^
-      design.hashCode ^
-      recovery.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeBlockedTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          message == other.message &&
-          design == other.design &&
-          recovery == other.recovery;
-}
-
 class BridgeBudgetLimitDto {
   final BridgeBudgetLimitKind kind;
   final BridgeBudgetUsageDto usage;
@@ -246,37 +213,6 @@ class BridgeBudgetUsageDto {
           toolCalls == other.toolCalls &&
           waitCalls == other.waitCalls &&
           elapsedMs == other.elapsedMs;
-}
-
-class BridgeCancelledTaskState {
-  final BigInt generation;
-  final String message;
-  final BridgeDesignProgress design;
-  final BridgeTaskStopRequest? request;
-
-  const BridgeCancelledTaskState({
-    required this.generation,
-    required this.message,
-    required this.design,
-    this.request,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^
-      message.hashCode ^
-      design.hashCode ^
-      request.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeCancelledTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          message == other.message &&
-          design == other.design &&
-          request == other.request;
 }
 
 class BridgeCancelledWorkUnit {
@@ -386,24 +322,19 @@ class BridgeClosingAgent {
 }
 
 class BridgeCompletedTaskState {
-  final BigInt generation;
-  final BridgeFinalizedDesign design;
+  final BridgeTaskOutcome outcome;
 
-  const BridgeCompletedTaskState({
-    required this.generation,
-    required this.design,
-  });
+  const BridgeCompletedTaskState({required this.outcome});
 
   @override
-  int get hashCode => generation.hashCode ^ design.hashCode;
+  int get hashCode => outcome.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeCompletedTaskState &&
           runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          design == other.design;
+          outcome == other.outcome;
 }
 
 class BridgeCompletedWorkUnit {
@@ -459,30 +390,20 @@ class BridgeDegradedResource {
           error == other.error;
 }
 
-@freezed
-sealed class BridgeDesignProgress with _$BridgeDesignProgress {
-  const BridgeDesignProgress._();
+class BridgeEditingDocumentsTaskState {
+  final BigInt planRevision;
 
-  const factory BridgeDesignProgress.updating(BridgeUpdatingDesign field0) =
-      BridgeDesignProgress_Updating;
-  const factory BridgeDesignProgress.finalized(BridgeFinalizedDesign field0) =
-      BridgeDesignProgress_Finalized;
-}
-
-class BridgeDesignUpdatingTaskState {
-  final BigInt generation;
-
-  const BridgeDesignUpdatingTaskState({required this.generation});
+  const BridgeEditingDocumentsTaskState({required this.planRevision});
 
   @override
-  int get hashCode => generation.hashCode;
+  int get hashCode => planRevision.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeDesignUpdatingTaskState &&
+      other is BridgeEditingDocumentsTaskState &&
           runtimeType == other.runtimeType &&
-          generation == other.generation;
+          planRevision == other.planRevision;
 }
 
 @freezed
@@ -582,37 +503,6 @@ class BridgeFailedRuntimeState {
           error == other.error;
 }
 
-class BridgeFailedTaskState {
-  final BigInt generation;
-  final String message;
-  final BridgeDesignProgress design;
-  final String? failureId;
-
-  const BridgeFailedTaskState({
-    required this.generation,
-    required this.message,
-    required this.design,
-    this.failureId,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^
-      message.hashCode ^
-      design.hashCode ^
-      failureId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeFailedTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          message == other.message &&
-          design == other.design &&
-          failureId == other.failureId;
-}
-
 class BridgeFailedWorkUnit {
   final BridgeWorkUnitFailure failure;
   final BridgeTaskWorktreeDisposition worktreeDisposition;
@@ -652,22 +542,6 @@ class BridgeFaultedAgent {
           diagnosticTurnId == other.diagnosticTurnId;
 }
 
-class BridgeFinalizedDesign {
-  final String summary;
-
-  const BridgeFinalizedDesign({required this.summary});
-
-  @override
-  int get hashCode => summary.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeFinalizedDesign &&
-          runtimeType == other.runtimeType &&
-          summary == other.summary;
-}
-
 class BridgeIdleAgent {
   const BridgeIdleAgent();
 
@@ -681,27 +555,6 @@ class BridgeIdleAgent {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeIdleAgent && runtimeType == other.runtimeType;
-}
-
-class BridgeImplementingTaskState {
-  final BigInt generation;
-  final BridgeFinalizedDesign design;
-
-  const BridgeImplementingTaskState({
-    required this.generation,
-    required this.design,
-  });
-
-  @override
-  int get hashCode => generation.hashCode ^ design.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeImplementingTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          design == other.design;
 }
 
 @freezed
@@ -723,6 +576,31 @@ sealed class BridgeIntegratedReviewGateDto
     required int completionRevision,
     required String mergeRecordId,
   }) = BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent;
+}
+
+class BridgeIntegratedReviewTarget {
+  final String reviewRoundId;
+  final String reviewedHead;
+  final List<String> changedFiles;
+
+  const BridgeIntegratedReviewTarget({
+    required this.reviewRoundId,
+    required this.reviewedHead,
+    required this.changedFiles,
+  });
+
+  @override
+  int get hashCode =>
+      reviewRoundId.hashCode ^ reviewedHead.hashCode ^ changedFiles.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeIntegratedReviewTarget &&
+          runtimeType == other.runtimeType &&
+          reviewRoundId == other.reviewRoundId &&
+          reviewedHead == other.reviewedHead &&
+          changedFiles == other.changedFiles;
 }
 
 class BridgeLoadingResource {
@@ -958,31 +836,6 @@ sealed class BridgeMergeCleanupState with _$BridgeMergeCleanupState {
 
 enum BridgeMergeMethod { merge, cherryPick, squash, rebase, manual }
 
-class BridgeMergingTaskState {
-  final BigInt generation;
-  final String? statusMessage;
-  final BridgeFinalizedDesign design;
-
-  const BridgeMergingTaskState({
-    required this.generation,
-    this.statusMessage,
-    required this.design,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^ statusMessage.hashCode ^ design.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeMergingTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          statusMessage == other.statusMessage &&
-          design == other.design;
-}
-
 class BridgePausedWorkUnit {
   final BridgeWorkUnitPauseReason reason;
   final BridgeExecutorContinuationState continuation;
@@ -1004,6 +857,22 @@ class BridgePausedWorkUnit {
           continuation == other.continuation;
 }
 
+class BridgePendingConfirmationTaskState {
+  final BigInt planRevision;
+
+  const BridgePendingConfirmationTaskState({required this.planRevision});
+
+  @override
+  int get hashCode => planRevision.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePendingConfirmationTaskState &&
+          runtimeType == other.runtimeType &&
+          planRevision == other.planRevision;
+}
+
 class BridgePendingWorkUnit {
   const BridgePendingWorkUnit();
 
@@ -1017,6 +886,22 @@ class BridgePendingWorkUnit {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgePendingWorkUnit && runtimeType == other.runtimeType;
+}
+
+class BridgePlanningTaskState {
+  final String request;
+
+  const BridgePlanningTaskState({required this.request});
+
+  @override
+  int get hashCode => request.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePlanningTaskState &&
+          runtimeType == other.runtimeType &&
+          request == other.request;
 }
 
 class BridgeQueuedAgent {
@@ -1291,59 +1176,19 @@ class BridgeReviewedCompletion {
 }
 
 class BridgeReviewingTaskState {
-  final BigInt generation;
-  final String? statusMessage;
-  final BridgeFinalizedDesign design;
-  final BridgeTaskReviewTarget target;
+  final BridgeIntegratedReviewTarget target;
 
-  const BridgeReviewingTaskState({
-    required this.generation,
-    this.statusMessage,
-    required this.design,
-    required this.target,
-  });
+  const BridgeReviewingTaskState({required this.target});
 
   @override
-  int get hashCode =>
-      generation.hashCode ^
-      statusMessage.hashCode ^
-      design.hashCode ^
-      target.hashCode;
+  int get hashCode => target.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeReviewingTaskState &&
           runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          statusMessage == other.statusMessage &&
-          design == other.design &&
           target == other.target;
-}
-
-class BridgeReworkingTaskState {
-  final BigInt generation;
-  final String statusMessage;
-  final BridgeFinalizedDesign design;
-
-  const BridgeReworkingTaskState({
-    required this.generation,
-    required this.statusMessage,
-    required this.design,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^ statusMessage.hashCode ^ design.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeReworkingTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          statusMessage == other.statusMessage &&
-          design == other.design;
 }
 
 class BridgeRunningAgent {
@@ -1510,37 +1355,6 @@ class BridgeStoppedResource {
           runtimeType == other.runtimeType &&
           revision == other.revision &&
           stoppedAt == other.stoppedAt;
-}
-
-class BridgeStoppingTaskState {
-  final BigInt generation;
-  final String statusMessage;
-  final BridgeDesignProgress design;
-  final BridgeTaskStopRequest request;
-
-  const BridgeStoppingTaskState({
-    required this.generation,
-    required this.statusMessage,
-    required this.design,
-    required this.request,
-  });
-
-  @override
-  int get hashCode =>
-      generation.hashCode ^
-      statusMessage.hashCode ^
-      design.hashCode ^
-      request.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStoppingTaskState &&
-          runtimeType == other.runtimeType &&
-          generation == other.generation &&
-          statusMessage == other.statusMessage &&
-          design == other.design &&
-          request == other.request;
 }
 
 class BridgeStudioRecoveryIssueDto {
@@ -1765,7 +1579,9 @@ class BridgeTaskFailureDetail {
           retryable == other.retryable;
 }
 
-class BridgeTaskFailureDto {
+enum BridgeTaskFailureKind { unableToProceed, fatal }
+
+class BridgeTaskIssueDto {
   final String id;
   final String sourceThreadId;
   final String sourceTurnId;
@@ -1773,10 +1589,10 @@ class BridgeTaskFailureDto {
   final String sourceRole;
   final String? workUnitId;
   final String? reviewRoundId;
-  final BridgeTaskFailureState state;
+  final BridgeTaskIssueState state;
   final PlatformInt64 createdAt;
 
-  const BridgeTaskFailureDto({
+  const BridgeTaskIssueDto({
     required this.id,
     required this.sourceThreadId,
     required this.sourceTurnId,
@@ -1803,7 +1619,7 @@ class BridgeTaskFailureDto {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeTaskFailureDto &&
+      other is BridgeTaskIssueDto &&
           runtimeType == other.runtimeType &&
           id == other.id &&
           sourceThreadId == other.sourceThreadId &&
@@ -1817,19 +1633,19 @@ class BridgeTaskFailureDto {
 }
 
 @freezed
-sealed class BridgeTaskFailureState with _$BridgeTaskFailureState {
-  const BridgeTaskFailureState._();
+sealed class BridgeTaskIssueState with _$BridgeTaskIssueState {
+  const BridgeTaskIssueState._();
 
-  const factory BridgeTaskFailureState.openRecoverable({
+  const factory BridgeTaskIssueState.openRecoverable({
     required BridgeTaskFailureDetail failure,
-  }) = BridgeTaskFailureState_OpenRecoverable;
-  const factory BridgeTaskFailureState.openFatal({
+  }) = BridgeTaskIssueState_OpenRecoverable;
+  const factory BridgeTaskIssueState.openFatal({
     required BridgeTaskFailureDetail failure,
-  }) = BridgeTaskFailureState_OpenFatal;
-  const factory BridgeTaskFailureState.resolved({
+  }) = BridgeTaskIssueState_OpenFatal;
+  const factory BridgeTaskIssueState.resolved({
     required BridgeTaskFailureDetail failure,
     required PlatformInt64 resolvedAt,
-  }) = BridgeTaskFailureState_Resolved;
+  }) = BridgeTaskIssueState_Resolved;
 }
 
 class BridgeTaskMergeDto {
@@ -1917,6 +1733,24 @@ class BridgeTaskNoDeliveryCompletion {
           runtimeType == other.runtimeType;
 }
 
+@freezed
+sealed class BridgeTaskOutcome with _$BridgeTaskOutcome {
+  const BridgeTaskOutcome._();
+
+  const factory BridgeTaskOutcome.succeeded({
+    required String summary,
+    required PlatformInt64 completedAt,
+    required BridgeTaskReviewGate reviewGate,
+  }) = BridgeTaskOutcome_Succeeded;
+  const factory BridgeTaskOutcome.failed({
+    required BridgeTaskFailureKind kind,
+    required String summary,
+    required String evidence,
+    required String cause,
+    required PlatformInt64 completedAt,
+  }) = BridgeTaskOutcome_Failed;
+}
+
 class BridgeTaskRecoveryPreviewDto {
   final String previewToken;
   final String rootThreadId;
@@ -1924,8 +1758,6 @@ class BridgeTaskRecoveryPreviewDto {
   final BigInt revision;
   final BigInt taskGeneration;
   final BridgeTaskRecoveryState state;
-  final bool stopRequested;
-  final String projectLeaseId;
   final String recommendedThreadId;
   final List<BridgeTaskRecoveryTargetDto> targets;
   final String completionRevisionFingerprint;
@@ -1939,8 +1771,6 @@ class BridgeTaskRecoveryPreviewDto {
     required this.revision,
     required this.taskGeneration,
     required this.state,
-    required this.stopRequested,
-    required this.projectLeaseId,
     required this.recommendedThreadId,
     required this.targets,
     required this.completionRevisionFingerprint,
@@ -1956,8 +1786,6 @@ class BridgeTaskRecoveryPreviewDto {
       revision.hashCode ^
       taskGeneration.hashCode ^
       state.hashCode ^
-      stopRequested.hashCode ^
-      projectLeaseId.hashCode ^
       recommendedThreadId.hashCode ^
       targets.hashCode ^
       completionRevisionFingerprint.hashCode ^
@@ -1975,8 +1803,6 @@ class BridgeTaskRecoveryPreviewDto {
           revision == other.revision &&
           taskGeneration == other.taskGeneration &&
           state == other.state &&
-          stopRequested == other.stopRequested &&
-          projectLeaseId == other.projectLeaseId &&
           recommendedThreadId == other.recommendedThreadId &&
           targets == other.targets &&
           completionRevisionFingerprint ==
@@ -2038,7 +1864,6 @@ class BridgeTaskRecoveryResultDto {
   final String afterTranscriptHash;
   final BigInt removedItemCount;
   final BigInt removedInputCount;
-  final bool stopCleared;
   final String resumeTurnId;
 
   const BridgeTaskRecoveryResultDto({
@@ -2055,7 +1880,6 @@ class BridgeTaskRecoveryResultDto {
     required this.afterTranscriptHash,
     required this.removedItemCount,
     required this.removedInputCount,
-    required this.stopCleared,
     required this.resumeTurnId,
   });
 
@@ -2074,7 +1898,6 @@ class BridgeTaskRecoveryResultDto {
       afterTranscriptHash.hashCode ^
       removedItemCount.hashCode ^
       removedInputCount.hashCode ^
-      stopCleared.hashCode ^
       resumeTurnId.hashCode;
 
   @override
@@ -2095,21 +1918,16 @@ class BridgeTaskRecoveryResultDto {
           afterTranscriptHash == other.afterTranscriptHash &&
           removedItemCount == other.removedItemCount &&
           removedInputCount == other.removedInputCount &&
-          stopCleared == other.stopCleared &&
           resumeTurnId == other.resumeTurnId;
 }
 
 enum BridgeTaskRecoveryState {
-  designUpdating,
-  implementing,
-  merging,
+  planning,
+  pendingConfirmation,
+  editingDocuments,
+  working,
   reviewing,
-  reworking,
-  stopping,
-  blocked,
   completed,
-  failed,
-  cancelled,
 }
 
 class BridgeTaskRecoveryTargetDto {
@@ -2337,6 +2155,20 @@ class BridgeTaskReviewFindingDto {
 }
 
 @freezed
+sealed class BridgeTaskReviewGate with _$BridgeTaskReviewGate {
+  const BridgeTaskReviewGate._();
+
+  const factory BridgeTaskReviewGate.notRequiredNoDelivery() =
+      BridgeTaskReviewGate_NotRequiredNoDelivery;
+  const factory BridgeTaskReviewGate.notRequiredSingleExecutor({
+    required String workUnitId,
+  }) = BridgeTaskReviewGate_NotRequiredSingleExecutor;
+  const factory BridgeTaskReviewGate.integratedReview({
+    required String reviewRoundId,
+  }) = BridgeTaskReviewGate_IntegratedReview;
+}
+
+@freezed
 sealed class BridgeTaskReviewState with _$BridgeTaskReviewState {
   const BridgeTaskReviewState._();
 
@@ -2372,28 +2204,13 @@ sealed class BridgeTaskReviewState with _$BridgeTaskReviewState {
   }) = BridgeTaskReviewState_Cancelled;
 }
 
-@freezed
-sealed class BridgeTaskReviewTarget with _$BridgeTaskReviewTarget {
-  const BridgeTaskReviewTarget._();
-
-  const factory BridgeTaskReviewTarget.delivery({
-    required String workUnitId,
-    required String completionId,
-    required int completionRevision,
-    required String reviewedHead,
-  }) = BridgeTaskReviewTarget_Delivery;
-  const factory BridgeTaskReviewTarget.integration({
-    required String reviewedHead,
-  }) = BridgeTaskReviewTarget_Integration;
-}
-
 class BridgeTaskRuntimeDto {
   final String runId;
   final BridgeTaskState state;
   final BigInt revision;
+  final BigInt generation;
   final BridgeIntegratedReviewGateDto integratedReviewGate;
-  final List<BridgeTaskFailureDto> failures;
-  final BridgeTaskFailureDto? terminalFailure;
+  final List<BridgeTaskIssueDto> issues;
   final List<BridgeTaskWorkUnitDto> workUnits;
   final List<BridgeTaskCompletionDto> completions;
   final List<BridgeTaskMergeDto> merges;
@@ -2403,9 +2220,9 @@ class BridgeTaskRuntimeDto {
     required this.runId,
     required this.state,
     required this.revision,
+    required this.generation,
     required this.integratedReviewGate,
-    required this.failures,
-    this.terminalFailure,
+    required this.issues,
     required this.workUnits,
     required this.completions,
     required this.merges,
@@ -2417,9 +2234,9 @@ class BridgeTaskRuntimeDto {
       runId.hashCode ^
       state.hashCode ^
       revision.hashCode ^
+      generation.hashCode ^
       integratedReviewGate.hashCode ^
-      failures.hashCode ^
-      terminalFailure.hashCode ^
+      issues.hashCode ^
       workUnits.hashCode ^
       completions.hashCode ^
       merges.hashCode ^
@@ -2433,9 +2250,9 @@ class BridgeTaskRuntimeDto {
           runId == other.runId &&
           state == other.state &&
           revision == other.revision &&
+          generation == other.generation &&
           integratedReviewGate == other.integratedReviewGate &&
-          failures == other.failures &&
-          terminalFailure == other.terminalFailure &&
+          issues == other.issues &&
           workUnits == other.workUnits &&
           completions == other.completions &&
           merges == other.merges &&
@@ -2588,59 +2405,20 @@ class BridgeTaskSpawnResource {
 sealed class BridgeTaskState with _$BridgeTaskState {
   const BridgeTaskState._();
 
-  const factory BridgeTaskState.designUpdating(
-    BridgeDesignUpdatingTaskState field0,
-  ) = BridgeTaskState_DesignUpdating;
-  const factory BridgeTaskState.implementing(
-    BridgeImplementingTaskState field0,
-  ) = BridgeTaskState_Implementing;
-  const factory BridgeTaskState.merging(BridgeMergingTaskState field0) =
-      BridgeTaskState_Merging;
+  const factory BridgeTaskState.planning(BridgePlanningTaskState field0) =
+      BridgeTaskState_Planning;
+  const factory BridgeTaskState.pendingConfirmation(
+    BridgePendingConfirmationTaskState field0,
+  ) = BridgeTaskState_PendingConfirmation;
+  const factory BridgeTaskState.editingDocuments(
+    BridgeEditingDocumentsTaskState field0,
+  ) = BridgeTaskState_EditingDocuments;
+  const factory BridgeTaskState.working(BridgeWorkingTaskState field0) =
+      BridgeTaskState_Working;
   const factory BridgeTaskState.reviewing(BridgeReviewingTaskState field0) =
       BridgeTaskState_Reviewing;
-  const factory BridgeTaskState.reworking(BridgeReworkingTaskState field0) =
-      BridgeTaskState_Reworking;
-  const factory BridgeTaskState.stopping(BridgeStoppingTaskState field0) =
-      BridgeTaskState_Stopping;
-  const factory BridgeTaskState.blocked(BridgeBlockedTaskState field0) =
-      BridgeTaskState_Blocked;
   const factory BridgeTaskState.completed(BridgeCompletedTaskState field0) =
       BridgeTaskState_Completed;
-  const factory BridgeTaskState.failed(BridgeFailedTaskState field0) =
-      BridgeTaskState_Failed;
-  const factory BridgeTaskState.cancelled(BridgeCancelledTaskState field0) =
-      BridgeTaskState_Cancelled;
-}
-
-enum BridgeTaskStopOrigin {
-  userRequest,
-  plannerDecision,
-  runtimeFailure,
-  applicationShutdown,
-}
-
-class BridgeTaskStopRequest {
-  final BridgeTaskStopOrigin origin;
-  final String reason;
-  final PlatformInt64 requestedAt;
-
-  const BridgeTaskStopRequest({
-    required this.origin,
-    required this.reason,
-    required this.requestedAt,
-  });
-
-  @override
-  int get hashCode => origin.hashCode ^ reason.hashCode ^ requestedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskStopRequest &&
-          runtimeType == other.runtimeType &&
-          origin == other.origin &&
-          reason == other.reason &&
-          requestedAt == other.requestedAt;
 }
 
 class BridgeTaskWorkUnitDto {
@@ -2650,6 +2428,8 @@ class BridgeTaskWorkUnitDto {
   final String worktreePath;
   final String branch;
   final String? agentId;
+  final int attempt;
+  final String? supersedesWorkUnitId;
   final int budgetSliceLimit;
   final BigInt executorProgressRevision;
   final String? blueprintFingerprint;
@@ -2665,6 +2445,8 @@ class BridgeTaskWorkUnitDto {
     required this.worktreePath,
     required this.branch,
     this.agentId,
+    required this.attempt,
+    this.supersedesWorkUnitId,
     required this.budgetSliceLimit,
     required this.executorProgressRevision,
     this.blueprintFingerprint,
@@ -2682,6 +2464,8 @@ class BridgeTaskWorkUnitDto {
       worktreePath.hashCode ^
       branch.hashCode ^
       agentId.hashCode ^
+      attempt.hashCode ^
+      supersedesWorkUnitId.hashCode ^
       budgetSliceLimit.hashCode ^
       executorProgressRevision.hashCode ^
       blueprintFingerprint.hashCode ^
@@ -2701,6 +2485,8 @@ class BridgeTaskWorkUnitDto {
           worktreePath == other.worktreePath &&
           branch == other.branch &&
           agentId == other.agentId &&
+          attempt == other.attempt &&
+          supersedesWorkUnitId == other.supersedesWorkUnitId &&
           budgetSliceLimit == other.budgetSliceLimit &&
           executorProgressRevision == other.executorProgressRevision &&
           blueprintFingerprint == other.blueprintFingerprint &&
@@ -2760,21 +2546,6 @@ class BridgeUninitializedResource {
           runtimeType == other.runtimeType &&
           revision == other.revision &&
           updatedAt == other.updatedAt;
-}
-
-class BridgeUpdatingDesign {
-  const BridgeUpdatingDesign();
-
-  static Future<BridgeUpdatingDesign> default_() => RustLib.instance.api
-      .crateApiStudioTypesRuntimeBridgeUpdatingDesignDefault();
-
-  @override
-  int get hashCode => 0;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeUpdatingDesign && runtimeType == other.runtimeType;
 }
 
 class BridgeWaitingInteractionAgent {
@@ -2888,6 +2659,22 @@ sealed class BridgeWorkUnitPauseReason with _$BridgeWorkUnitPauseReason {
     required String operationId,
     required String detail,
   }) = BridgeWorkUnitPauseReason_Operational;
+}
+
+class BridgeWorkingTaskState {
+  final String documentEditSummary;
+
+  const BridgeWorkingTaskState({required this.documentEditSummary});
+
+  @override
+  int get hashCode => documentEditSummary.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeWorkingTaskState &&
+          runtimeType == other.runtimeType &&
+          documentEditSummary == other.documentEditSummary;
 }
 
 class BridgeWorktreeFailureCause {

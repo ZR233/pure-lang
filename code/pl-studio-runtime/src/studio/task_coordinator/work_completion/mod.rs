@@ -131,7 +131,7 @@ impl TaskCoordinator {
                 metadata(),
             ));
             entries.push(ToolEntry::new(
-                self.task_finalize_design_tool(thread_id),
+                self.task_transition_tool(thread_id, runtime.clone()),
                 metadata(),
             ));
             entries.push(ToolEntry::new(
@@ -140,10 +140,6 @@ impl TaskCoordinator {
             ));
             entries.push(ToolEntry::new(
                 self.task_request_delivery_review_tool(thread_id, runtime.clone()),
-                metadata(),
-            ));
-            entries.push(ToolEntry::new(
-                self.task_request_integrated_review_tool(thread_id, runtime.clone()),
                 metadata(),
             ));
             entries.push(ToolEntry::new(
@@ -160,10 +156,6 @@ impl TaskCoordinator {
             ));
             entries.push(ToolEntry::new(
                 self.read_review_file_coverage_tool(thread_id),
-                metadata(),
-            ));
-            entries.push(ToolEntry::new(
-                self.task_complete_tool(thread_id),
                 metadata(),
             ));
             entries.push(ToolEntry::new(

@@ -5,5 +5,3 @@ mod scope;
 mod validation;
 
 pub(crate) use cleanup::cleanup_accepted_delivery;
-#[cfg(test)]
-pub(crate) use record::TaskRecordMergeInput;

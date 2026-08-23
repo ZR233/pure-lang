@@ -1069,23 +1069,29 @@ abstract class AppLocalizations {
   /// **'Needs attention'**
   String get statusTaskContinuationNeedsAttention;
 
-  /// No description provided for @statusTaskPhaseDesignUpdating.
+  /// No description provided for @statusTaskPhasePlanning.
   ///
   /// In en, this message translates to:
-  /// **'Updating design'**
-  String get statusTaskPhaseDesignUpdating;
+  /// **'Planning'**
+  String get statusTaskPhasePlanning;
 
-  /// No description provided for @statusTaskPhaseImplementing.
+  /// No description provided for @statusTaskPhasePendingConfirmation.
   ///
   /// In en, this message translates to:
-  /// **'Implementing'**
-  String get statusTaskPhaseImplementing;
+  /// **'Awaiting plan confirmation'**
+  String get statusTaskPhasePendingConfirmation;
 
-  /// No description provided for @statusTaskPhaseMerging.
+  /// No description provided for @statusTaskPhaseEditingDocuments.
   ///
   /// In en, this message translates to:
-  /// **'Merging'**
-  String get statusTaskPhaseMerging;
+  /// **'Editing documents'**
+  String get statusTaskPhaseEditingDocuments;
+
+  /// No description provided for @statusTaskPhaseWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get statusTaskPhaseWorking;
 
   /// No description provided for @statusTaskPhaseReviewing.
   ///
@@ -1093,41 +1099,11 @@ abstract class AppLocalizations {
   /// **'Reviewing'**
   String get statusTaskPhaseReviewing;
 
-  /// No description provided for @statusTaskPhaseReworking.
-  ///
-  /// In en, this message translates to:
-  /// **'Reworking'**
-  String get statusTaskPhaseReworking;
-
-  /// No description provided for @statusTaskPhaseStopping.
-  ///
-  /// In en, this message translates to:
-  /// **'Stopping'**
-  String get statusTaskPhaseStopping;
-
   /// No description provided for @statusTaskPhaseCompleted.
   ///
   /// In en, this message translates to:
   /// **'Task completed'**
   String get statusTaskPhaseCompleted;
-
-  /// No description provided for @statusTaskPhaseBlocked.
-  ///
-  /// In en, this message translates to:
-  /// **'Task blocked'**
-  String get statusTaskPhaseBlocked;
-
-  /// No description provided for @statusTaskPhaseFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Task failed'**
-  String get statusTaskPhaseFailed;
-
-  /// No description provided for @statusTaskPhaseCancelled.
-  ///
-  /// In en, this message translates to:
-  /// **'Task cancelled'**
-  String get statusTaskPhaseCancelled;
 
   /// No description provided for @statusTaskStatusPending.
   ///
@@ -1571,24 +1547,6 @@ abstract class AppLocalizations {
   /// **'Continue after answering'**
   String get interactionContinueAfterAnswer;
 
-  /// No description provided for @taskResumeTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Task paused after restart'**
-  String get taskResumeTitle;
-
-  /// No description provided for @taskResumeBody.
-  ///
-  /// In en, this message translates to:
-  /// **'Continue from canonical Task and agent state without adding a new prompt.'**
-  String get taskResumeBody;
-
-  /// No description provided for @taskResumeAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Continue task'**
-  String get taskResumeAction;
-
   /// No description provided for @taskRecoveryDialogTitle.
   ///
   /// In en, this message translates to:
@@ -1832,32 +1790,20 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanConfirmTitle.
   ///
   /// In en, this message translates to:
-  /// **'Implement this plan?'**
+  /// **'Confirm this plan?'**
   String get interactionPlanConfirmTitle;
 
   /// No description provided for @interactionPlanConfirmSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Implement it, or describe what should change.'**
+  /// **'Confirm it, or describe what should change.'**
   String get interactionPlanConfirmSubtitle;
 
-  /// No description provided for @interactionPlanEditingFooterHint.
+  /// No description provided for @interactionPlanConfirmFooterHint.
   ///
   /// In en, this message translates to:
-  /// **'Only your adjustment will be sent; the plan body is not returned.'**
-  String get interactionPlanEditingFooterHint;
-
-  /// No description provided for @interactionPlanImplementFooterHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Implementing switches back to {mode} mode and starts execution.'**
-  String interactionPlanImplementFooterHint(String mode);
-
-  /// No description provided for @interactionPlanIgnore.
-  ///
-  /// In en, this message translates to:
-  /// **'Ignore'**
-  String get interactionPlanIgnore;
+  /// **'Confirming starts the document-editing checkpoint in {mode} mode.'**
+  String interactionPlanConfirmFooterHint(String mode);
 
   /// No description provided for @interactionPlanAdjust.
   ///
@@ -1865,11 +1811,11 @@ abstract class AppLocalizations {
   /// **'Tell Pure how to adjust'**
   String get interactionPlanAdjust;
 
-  /// No description provided for @interactionPlanImplement.
+  /// No description provided for @interactionPlanConfirmAction.
   ///
   /// In en, this message translates to:
-  /// **'Implement this plan'**
-  String get interactionPlanImplement;
+  /// **'Confirm plan'**
+  String get interactionPlanConfirmAction;
 
   /// No description provided for @interactionPlanAdjustHint.
   ///
@@ -1882,24 +1828,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Submit adjustment'**
   String get interactionPlanAdjustSubmit;
-
-  /// No description provided for @interactionPlanEditingNotice.
-  ///
-  /// In en, this message translates to:
-  /// **'Continue planning: only your adjustment will be submitted.'**
-  String get interactionPlanEditingNotice;
-
-  /// No description provided for @interactionPlanViewNotice.
-  ///
-  /// In en, this message translates to:
-  /// **'Plan content is not edited here; review the full plan in the timeline.'**
-  String get interactionPlanViewNotice;
-
-  /// No description provided for @interactionPlanContinueReason.
-  ///
-  /// In en, this message translates to:
-  /// **'continue planning'**
-  String get interactionPlanContinueReason;
 
   /// No description provided for @settingsProvidersTitle.
   ///

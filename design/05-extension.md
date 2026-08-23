@@ -117,11 +117,10 @@ Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skil
 本次变化 agent 的最新 progress message；`list_agents` 才返回完整可见目录，wait 后不重复调用。
 Studio 的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
 
-通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册
-`task_spawn_executor { taskName, message, scopeHints? }`、
-`task_request_delivery_review { executorAgentId }` 与
-`task_request_integrated_review {}`，把强类型输入转换为内部 spawn intent 后调用同一个
-`AgentRuntimeHandle`。`scopeHints` 只是可选的仓库相对关注路径，不承担授权、并发锁或 completion
-门禁。Delivery reviewer 由 durable ReviewRound 绑定目标 executor completion，并直接使用同一
-worktree；Integrated reviewer 使用 TaskRun 主 workspace。Task 根的通用 `spawn_agent` 只公开
-explorer，避免模型通过自由 metadata 绕过 worktree 与审查授权。
+通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册接收完整结构化实施蓝图的
+`task_spawn_executor`、绑定精确 completion 的 `task_request_delivery_review`，以及六动作统一入口
+`task_transition`。综合审查通过 `task_transition.beginIntegratedReview` 冻结目标并创建 reviewer。
+`scopeHints` 只是可选的仓库相对关注路径，不承担授权、并发锁或 completion 门禁。Delivery reviewer
+由 durable ReviewRound 绑定目标 executor completion，并直接使用同一 worktree；Integrated reviewer
+使用 TaskRun 主 workspace。Task 根的通用 `spawn_agent` 只公开 explorer，避免模型通过自由 metadata
+绕过 worktree 与审查授权。

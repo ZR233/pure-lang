@@ -3,9 +3,7 @@ use pl_core::{
     AgentCommand, AgentRecoveryTarget, AgentState, MailboxCommand, MailboxDeliveryState, TurnId,
     canonical_content_hash,
 };
-use pl_protocol::{
-    ThreadContentLifecycle, ThreadItem, Turn, TurnCancellationCause, TurnCommand, TurnState,
-};
+use pl_protocol::{Turn, TurnCancellationCause, TurnCommand, TurnState};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QueryOrder, TransactionTrait,
@@ -13,21 +11,9 @@ use sea_orm::{
 
 use crate::studio::StudioStore;
 use crate::studio::entity::{
-    item, thread, thread_context_segment, thread_input, thread_session_state, turn,
+    thread, thread_context_segment, thread_input, thread_session_state, turn,
 };
 use crate::studio::ids::unix_seconds;
-
-pub(in crate::studio) struct RecoverablePlan {
-    pub turn_id: String,
-    pub item_id: String,
-    pub content: String,
-}
-
-pub(in crate::studio) struct RecoverableTaskPlan {
-    pub agent_id: String,
-    pub thread_id: String,
-    pub plan: RecoverablePlan,
-}
 
 pub(in crate::studio) struct ThreadRuntimeSeed {
     pub thread_revision: u64,
@@ -235,60 +221,25 @@ impl StudioStore {
         })
     }
 
-    /// 返回每个活动 Task 根会话最新的完整 Plan，供启动时修复缺失的确认投影。
-    pub(in crate::studio) async fn list_latest_task_plan_traces(
+    pub(crate) async fn read_thread_todo(
         &self,
-    ) -> Result<Vec<RecoverableTaskPlan>> {
-        let threads = thread::Entity::find()
-            .filter(thread::Column::Mode.eq("task"))
-            .filter(thread::Column::Archived.eq(0))
-            .filter(thread::Column::ParentThreadId.is_null())
-            .order_by_asc(thread::Column::Id)
-            .all(&self.db)
-            .await?;
-        let mut plans = Vec::new();
-        for thread in threads {
-            let thread_id = thread.id;
-            let history = item::Entity::find()
-                .filter(item::Column::ThreadId.eq(thread_id.clone()))
-                .filter(item::Column::StateKind.eq("plan"))
-                .order_by_desc(item::Column::Ordinal)
-                .all(&self.db)
-                .await?;
-            let plan = history.into_iter().find_map(|item| {
-                let item = match ThreadItem::try_from(item) {
-                    Ok(item) => item,
-                    Err(error) => {
-                        tracing::warn!(
-                            thread_id = %thread_id,
-                            error_bytes = error.to_string().len(),
-                            "skipping malformed Thread Item during plan recovery"
-                        );
-                        return None;
-                    }
-                };
-                let plan = item.plan()?;
-                if !matches!(plan.lifecycle(), ThreadContentLifecycle::Completed(_))
-                    || plan.content().trim().is_empty()
-                {
-                    return None;
-                }
-                let content = plan.content().to_string();
-                Some(RecoverablePlan {
-                    turn_id: item.turn_id,
-                    item_id: item.id,
-                    content,
-                })
-            });
-            let Some(plan) = plan else {
-                continue;
-            };
-            plans.push(RecoverableTaskPlan {
-                agent_id: thread_id.clone(),
-                thread_id,
-                plan,
-            });
-        }
-        Ok(plans)
+        thread_id: &str,
+    ) -> Result<Option<pl_protocol::TodoListSnapshot>> {
+        let Some(row) = thread_session_state::Entity::find_by_id(thread_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let state: pl_protocol::AgentWorkingState =
+            serde_json::from_str(&row.state_json).context("thread working state is invalid")?;
+        state
+            .sections
+            .iter()
+            .find(|section| section.id.as_str() == pl_core::CURRENT_TODO_SECTION_ID)
+            .map(|section| {
+                serde_json::from_str(&section.content).context("thread todo section is invalid")
+            })
+            .transpose()
     }
 }

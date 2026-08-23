@@ -31,7 +31,7 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 - `ThreadManager` 维护 Thread registry、父子关系和 spawn/close。
 - 每个 `ThreadActor` 串行拥有一个 Thread 的输入队列、活动 Turn、取消句柄和 live Item overlay。
 - `TurnEngine` 只负责模型采样、工具调用、interaction 等待和上下文压缩。
-- `TaskService` 管理 TaskRun、worktree、delivery、review、merge、project lease 与恢复，不修改
+- `TaskService` 管理 TaskRun、worktree、delivery、review、merge、问题记录与恢复，不修改
   Thread 状态机。
 - `studio.sqlite` 是所有 durable Thread/Turn/Item/Interaction 与 Studio 产品事实的唯一数据库。
 

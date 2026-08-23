@@ -538,34 +538,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskContinuationNeedsAttention => '需要处理';
 
   @override
-  String get statusTaskPhaseDesignUpdating => '更新设计';
+  String get statusTaskPhasePlanning => '规划中';
 
   @override
-  String get statusTaskPhaseImplementing => '实施中';
+  String get statusTaskPhasePendingConfirmation => '等待确认计划';
 
   @override
-  String get statusTaskPhaseMerging => '合并中';
+  String get statusTaskPhaseEditingDocuments => '编辑文档中';
+
+  @override
+  String get statusTaskPhaseWorking => '执行中';
 
   @override
   String get statusTaskPhaseReviewing => '审查中';
 
   @override
-  String get statusTaskPhaseReworking => '返工中';
-
-  @override
-  String get statusTaskPhaseStopping => '停止中';
-
-  @override
   String get statusTaskPhaseCompleted => '任务已完成';
-
-  @override
-  String get statusTaskPhaseBlocked => '任务已阻塞';
-
-  @override
-  String get statusTaskPhaseFailed => '任务失败';
-
-  @override
-  String get statusTaskPhaseCancelled => '任务已取消';
 
   @override
   String get statusTaskStatusPending => '待处理';
@@ -815,15 +803,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionContinueAfterAnswer => '回答后继续';
 
   @override
-  String get taskResumeTitle => '任务已在重启后暂停';
-
-  @override
-  String get taskResumeBody => '从 canonical Task 与 agent 状态继续，不追加新的提示词。';
-
-  @override
-  String get taskResumeAction => '继续任务';
-
-  @override
   String get taskRecoveryDialogTitle => '恢复并继续';
 
   @override
@@ -956,42 +935,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionReasonLabel => '原因';
 
   @override
-  String get interactionPlanConfirmTitle => '实施此计划？';
+  String get interactionPlanConfirmTitle => '确认此计划？';
 
   @override
-  String get interactionPlanConfirmSubtitle => '确认实施，或直接写下调整要求';
+  String get interactionPlanConfirmSubtitle => '确认计划，或直接写下调整要求';
 
   @override
-  String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
-
-  @override
-  String interactionPlanImplementFooterHint(String mode) {
-    return '实施会切回$mode模式并开始执行。';
+  String interactionPlanConfirmFooterHint(String mode) {
+    return '确认后将在$mode模式进入文档编辑检查点。';
   }
-
-  @override
-  String get interactionPlanIgnore => '忽略';
 
   @override
   String get interactionPlanAdjust => '告诉 Pure 如何调整';
 
   @override
-  String get interactionPlanImplement => '实施此计划';
+  String get interactionPlanConfirmAction => '确认计划';
 
   @override
   String get interactionPlanAdjustHint => '输入要调整的要求...';
 
   @override
   String get interactionPlanAdjustSubmit => '提交调整';
-
-  @override
-  String get interactionPlanEditingNotice => '继续规划：只提交你的调整说明。';
-
-  @override
-  String get interactionPlanViewNotice => '计划内容不会在这里编辑；请在 timeline 中查看完整计划。';
-
-  @override
-  String get interactionPlanContinueReason => 'continue planning';
 
   @override
   String get settingsProvidersTitle => '服务';
@@ -2175,34 +2139,22 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskContinuationNeedsAttention => '需要处理';
 
   @override
-  String get statusTaskPhaseDesignUpdating => '更新设计';
+  String get statusTaskPhasePlanning => '规划中';
 
   @override
-  String get statusTaskPhaseImplementing => '实施中';
+  String get statusTaskPhasePendingConfirmation => '等待确认计划';
 
   @override
-  String get statusTaskPhaseMerging => '合并中';
+  String get statusTaskPhaseEditingDocuments => '编辑文档中';
+
+  @override
+  String get statusTaskPhaseWorking => '执行中';
 
   @override
   String get statusTaskPhaseReviewing => '审查中';
 
   @override
-  String get statusTaskPhaseReworking => '返工中';
-
-  @override
-  String get statusTaskPhaseStopping => '停止中';
-
-  @override
   String get statusTaskPhaseCompleted => '任务已完成';
-
-  @override
-  String get statusTaskPhaseBlocked => '任务已阻塞';
-
-  @override
-  String get statusTaskPhaseFailed => '任务失败';
-
-  @override
-  String get statusTaskPhaseCancelled => '任务已取消';
 
   @override
   String get statusTaskStatusPending => '待处理';
@@ -2452,15 +2404,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get interactionContinueAfterAnswer => '回答后继续';
 
   @override
-  String get taskResumeTitle => '任务已在重启后暂停';
-
-  @override
-  String get taskResumeBody => '从 canonical Task 与 agent 状态继续，不追加新的提示词。';
-
-  @override
-  String get taskResumeAction => '继续任务';
-
-  @override
   String get taskRecoveryDialogTitle => '恢复并继续';
 
   @override
@@ -2593,42 +2536,27 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get interactionReasonLabel => '原因';
 
   @override
-  String get interactionPlanConfirmTitle => '实施此计划？';
+  String get interactionPlanConfirmTitle => '确认此计划？';
 
   @override
-  String get interactionPlanConfirmSubtitle => '确认实施，或直接写下调整要求';
+  String get interactionPlanConfirmSubtitle => '确认计划，或直接写下调整要求';
 
   @override
-  String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
-
-  @override
-  String interactionPlanImplementFooterHint(String mode) {
-    return '实施会切回$mode模式并开始执行。';
+  String interactionPlanConfirmFooterHint(String mode) {
+    return '确认后将在$mode模式进入文档编辑检查点。';
   }
-
-  @override
-  String get interactionPlanIgnore => '忽略';
 
   @override
   String get interactionPlanAdjust => '告诉 Pure 如何调整';
 
   @override
-  String get interactionPlanImplement => '实施此计划';
+  String get interactionPlanConfirmAction => '确认计划';
 
   @override
   String get interactionPlanAdjustHint => '输入要调整的要求...';
 
   @override
   String get interactionPlanAdjustSubmit => '提交调整';
-
-  @override
-  String get interactionPlanEditingNotice => '继续规划：只提交你的调整说明。';
-
-  @override
-  String get interactionPlanViewNotice => '计划内容不会在这里编辑；请在 timeline 中查看完整计划。';
-
-  @override
-  String get interactionPlanContinueReason => 'continue planning';
 
   @override
   String get settingsProvidersTitle => '服务';

@@ -6,18 +6,14 @@ use crate::studio::task_coordinator::{ReviewRoundStateKind, TaskRunStateKind};
 
 use super::super::task_run_record;
 
-pub(super) async fn active_implementation_run(
+pub(super) async fn active_working_run(
     tx: &sea_orm::DatabaseTransaction,
     thread_id: &str,
 ) -> Result<entities::task_run::Model> {
     let run = active_nonterminal_run(tx, thread_id).await?;
     let record = task_run_record(run.clone())?;
-    if !matches!(
-        record.kind(),
-        TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
-    ) || record.is_stop_requested()
-    {
-        bail!("review request requires implementing or reworking");
+    if record.kind() != TaskRunStateKind::Working {
+        bail!("review request requires working state");
     }
     Ok(run)
 }
@@ -28,11 +24,7 @@ pub(super) async fn active_nonterminal_run(
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
         .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
-        .filter(entities::task_run::Column::StateKind.is_not_in([
-            TaskRunStateKind::Completed.as_str(),
-            TaskRunStateKind::Failed.as_str(),
-            TaskRunStateKind::Cancelled.as_str(),
-        ]))
+        .filter(entities::task_run::Column::StateKind.ne(TaskRunStateKind::Completed.as_str()))
         .all(tx)
         .await?;
     match runs.as_slice() {

@@ -25,7 +25,7 @@ async fn offline_task_flow_completes_through_worktree_merge_review_and_continuat
 
 async fn run_offline_task_flow() -> Result<()> {
     let fixture = TaskFlowFixture::new().await?;
-    assert!(!fixture.workspace.join(".git").exists());
+    assert!(fixture.workspace.join(".git").exists());
 
     fixture
         .runtime
@@ -47,7 +47,7 @@ async fn run_offline_task_flow() -> Result<()> {
         .resolve_interaction(
             confirmation.interaction_id.clone(),
             InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
-                decision: PlanConfirmationResolution::ImplementFreshContext,
+                decision: PlanConfirmationResolution::Confirm,
                 content: None,
                 reason: None,
             }),
@@ -104,13 +104,13 @@ async fn run_offline_task_flow() -> Result<()> {
             &fixture.workspace,
             &["show", "-s", "--format=%an <%ae>", merge_commit]
         )?,
-        "Pure Studio <pure-studio@local>"
+        "Pure <pure@local>"
     );
     let merge_parents = git_output(
         &fixture.workspace,
         &["show", "-s", "--format=%P", merge_commit],
     )?;
-    assert_eq!(merge_parents.split_whitespace().count(), 2);
+    assert_eq!(merge_parents.split_whitespace().count(), 1);
 
     assert_eq!(task.reviews.len(), 1);
     assert_eq!(task.reviews[0].scope, StudioReviewScope::Delivery);
@@ -154,7 +154,7 @@ async fn run_offline_task_flow() -> Result<()> {
     assert!(matches!(
         persisted_confirmation.resolution(),
         Some(InteractionResolution::PlanConfirmation(payload))
-            if payload.decision == PlanConfirmationResolution::ImplementFreshContext
+            if payload.decision == PlanConfirmationResolution::Confirm
     ));
     assert!(
         fixture
@@ -212,7 +212,7 @@ async fn run_offline_required_review_flow() -> Result<()> {
         .resolve_interaction(
             confirmation.interaction_id,
             InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
-                decision: PlanConfirmationResolution::ImplementFreshContext,
+                decision: PlanConfirmationResolution::Confirm,
                 content: None,
                 reason: None,
             }),

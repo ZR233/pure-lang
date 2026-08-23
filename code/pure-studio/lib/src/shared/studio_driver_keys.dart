@@ -32,8 +32,7 @@ abstract final class StudioDriverKeys {
   static const composerStop = ValueKey<String>('composer-stop');
   static const composerPending = ValueKey<String>('composer-pending');
   static const composerError = ValueKey<String>('composer-error');
-  static const taskPaused = ValueKey<String>('task-paused');
-  static const taskResume = ValueKey<String>('task-resume');
+  static const taskRecoveryOpen = ValueKey<String>('task-recovery-open');
   static const taskRecoveryDialog = ValueKey<String>('task-recovery-dialog');
   static const taskRecoveryTarget = ValueKey<String>('task-recovery-target');
   static const taskRecoveryTailCount = ValueKey<String>(
@@ -48,10 +47,9 @@ abstract final class StudioDriverKeys {
   static const providerEdit = ValueKey<String>('provider-edit');
   static const providerSave = ValueKey<String>('provider-save');
   static const providerCancel = ValueKey<String>('provider-cancel');
-  static const planImplement = ValueKey<String>('plan-implement');
-  static const planDismiss = ValueKey<String>('plan-dismiss');
+  static const planConfirm = ValueKey<String>('plan-confirm');
   static const planAdjustmentInput = ValueKey<String>('plan-adjustment-input');
-  static const planContinue = ValueKey<String>('plan-continue');
+  static const planRevise = ValueKey<String>('plan-revise');
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');
   static const userInputSubmit = ValueKey<String>('user-input-submit');
@@ -187,8 +185,8 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> taskWorkUnit(String id) =>
       ValueKey<String>('task-work-unit-$id');
 
-  static ValueKey<String> taskFailure(String id) =>
-      ValueKey<String>('task-failure-$id');
+  static ValueKey<String> taskIssue(String id) =>
+      ValueKey<String>('task-issue-$id');
 
   static ValueKey<String> taskWorkUnitExecution(String id) =>
       ValueKey<String>('task-work-unit-$id-execution');

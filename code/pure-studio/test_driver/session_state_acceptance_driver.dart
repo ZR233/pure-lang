@@ -29,9 +29,8 @@ Future<void> main(List<String> arguments) async {
 
     await _resolveToolApproval(session, snapshots);
     await _resolveUserInput(session, snapshots);
-    await _resolvePlanContinue(session, snapshots);
-    await _resolvePlanImplement(session, snapshots);
-    await _resolvePlanDismiss(session, snapshots);
+    await _resolvePlanRevise(session, snapshots);
+    await _resolvePlanConfirm(session, snapshots);
     await _submitCompletedTurn(session, snapshots, options.promptFile);
 
     final finalSnapshot = await _snapshot(session, snapshots);
@@ -116,14 +115,14 @@ Future<void> _resolveUserInput(
   );
 }
 
-Future<void> _resolvePlanContinue(
+Future<void> _resolvePlanRevise(
   FlutterDriverSession session,
   File snapshots,
 ) async {
   final snapshot = await _waitForInteraction(
     session,
     snapshots,
-    id: 'driver-plan-continue',
+    id: 'driver-plan-revise',
     kind: 'planConfirmation',
   );
   _expectLockedCompletedOrigin(snapshot);
@@ -143,41 +142,21 @@ Future<void> _resolvePlanContinue(
     'plan adjustment rebuild',
     const Duration(seconds: 10),
   );
-  await _command(
-    session.tap(find.byValueKey('plan-continue')),
-    'continue planning',
-  );
+  await _command(session.tap(find.byValueKey('plan-revise')), 'revise plan');
 }
 
-Future<void> _resolvePlanImplement(
+Future<void> _resolvePlanConfirm(
   FlutterDriverSession session,
   File snapshots,
 ) async {
   final snapshot = await _waitForInteraction(
     session,
     snapshots,
-    id: 'driver-plan-implement',
+    id: 'driver-plan-confirm',
     kind: 'planConfirmation',
   );
   _expectLockedCompletedOrigin(snapshot);
-  await _command(
-    session.tap(find.byValueKey('plan-implement')),
-    'implement plan in fresh context',
-  );
-}
-
-Future<void> _resolvePlanDismiss(
-  FlutterDriverSession session,
-  File snapshots,
-) async {
-  final snapshot = await _waitForInteraction(
-    session,
-    snapshots,
-    id: 'driver-plan-dismiss',
-    kind: 'planConfirmation',
-  );
-  _expectLockedCompletedOrigin(snapshot);
-  await _command(session.tap(find.byValueKey('plan-dismiss')), 'dismiss plan');
+  await _command(session.tap(find.byValueKey('plan-confirm')), 'confirm plan');
 }
 
 Future<void> _submitCompletedTurn(

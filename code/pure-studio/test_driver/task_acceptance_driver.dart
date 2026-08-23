@@ -48,9 +48,13 @@ Future<void> main(List<String> arguments) async {
         );
         return;
       case AcceptanceDriverMode.resume:
-        final resume = await _resumeTaskIfPaused(session, options, snapshots);
-        recoveryApplied = resume.recoveryApplied;
-        taskTarget = resume.target;
+        final recovery = await _recoverTaskConversationIfNeeded(
+          session,
+          options,
+          snapshots,
+        );
+        recoveryApplied = recovery.recoveryApplied;
+        taskTarget = recovery.target;
         if (recoveryApplied) await progressState.resetAfterRecovery();
     }
 
@@ -67,11 +71,11 @@ Future<void> main(List<String> arguments) async {
       options: options,
       budgetRecoveryEvidence: budgetRecoveryEvidence,
     );
-    if (options.stopAtRecoveryPause &&
+    if (options.stopAtRecoveryPoint &&
         _hasFailedExecutorRecoveryCandidate(finalSnapshot)) {
       stdout.writeln(
         jsonEncode({
-          'event': 'taskPausedForRecovery',
+          'event': 'taskAwaitingConversationRecovery',
           'attempt': options.attempt,
           'capturedAt': DateTime.now().toUtc().toIso8601String(),
           'task': finalSnapshot['task'],
@@ -80,7 +84,7 @@ Future<void> main(List<String> arguments) async {
       );
       stdout.writeln(
         jsonEncode({
-          'result': 'paused',
+          'result': 'needsRecovery',
           'mode': options.mode.label,
           'attempt': options.attempt,
           'recoveryApplied': recoveryApplied,
@@ -89,7 +93,7 @@ Future<void> main(List<String> arguments) async {
       );
       return;
     }
-    if (options.expectedTaskPhase == 'failed') {
+    if (options.expectedTaskOutcome == 'failed') {
       validateFatalTaskFailure(finalSnapshot);
       await _openFatalTaskFailureDetail(session, finalSnapshot);
     } else {
@@ -160,9 +164,15 @@ Future<void> _openFatalTaskFailureDetail(
 ) async {
   final task = snapshot['task'] as Map<String, dynamic>;
   final runId = task['runId'] as String;
-  final failure = task['terminalFailure'] as Map<String, dynamic>;
-  final failureId = failure['id'] as String;
-  final phaseReadout = find.byValueKey('task-runtime-$runId-phase-failed');
+  final issues = (task['issues'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .where((issue) => issue['disposition'] == 'fatal')
+      .toList();
+  if (issues.length != 1) {
+    throw StateError('failed Task does not expose one fatal issue');
+  }
+  final failureId = issues.single['id'] as String;
+  final phaseReadout = find.byValueKey('task-runtime-$runId-phase-completed');
 
   await _driverCommand(
     session.waitFor(phaseReadout, timeout: const Duration(seconds: 30)),
@@ -210,7 +220,7 @@ Future<_TaskObservationTarget> _startNewTask(
   );
   await _driverCommand(
     session.waitFor(
-      find.byValueKey('plan-implement'),
+      find.byValueKey('plan-confirm'),
       timeout: const Duration(seconds: 30),
     ),
     'plan confirmation',
@@ -221,7 +231,7 @@ Future<_TaskObservationTarget> _startNewTask(
     snapshots,
     options,
     description: 'implement plan tap',
-    action: () => session.tap(find.byValueKey('plan-implement')),
+    action: () => session.tap(find.byValueKey('plan-confirm')),
     postcondition: (snapshot) =>
         isSelectedProjectWorkspace(snapshot, options.workspace!) &&
         isTaskThread(snapshot, threadId) &&
@@ -232,7 +242,7 @@ Future<_TaskObservationTarget> _startNewTask(
 }
 
 Future<({bool recoveryApplied, _TaskObservationTarget target})>
-_resumeTaskIfPaused(
+_recoverTaskConversationIfNeeded(
   FlutterDriverSession session,
   _DriverOptions options,
   File snapshots,
@@ -247,7 +257,8 @@ _resumeTaskIfPaused(
   );
   final task = snapshot['task'] as Map<String, dynamic>;
   final target = _TaskObservationTarget.fromSnapshot(snapshot);
-  if (task['phase'] == 'completed' || !_isTaskPaused(snapshot)) {
+  if (task['phase'] == 'completed' ||
+      !_hasFailedExecutorRecoveryCandidate(snapshot)) {
     return (recoveryApplied: false, target: target);
   }
   if (options.recoveryCount >= 3) {
@@ -256,9 +267,22 @@ _resumeTaskIfPaused(
     );
   }
 
+  final runId = task['runId'] as String;
+  final phase = task['phase'] as String;
   await _driverCommand(
-    session.tap(find.byValueKey('task-resume')),
-    'open Task recovery',
+    session.tap(find.byValueKey('task-runtime-$runId-phase-$phase')),
+    'open Task runtime detail',
+  );
+  await _driverCommand(
+    session.waitFor(
+      find.byValueKey('task-recovery-open'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'conversation recovery action',
+  );
+  await _driverCommand(
+    session.tap(find.byValueKey('task-recovery-open')),
+    'open conversation recovery',
   );
   await _driverCommand(
     session.waitFor(
@@ -285,8 +309,12 @@ _resumeTaskIfPaused(
     options,
     description: 'Task recovery apply',
     action: () => session.tap(find.byValueKey('task-recovery-apply')),
-    postcondition: (snapshot) =>
-        target.matches(snapshot) && !_isTaskPaused(snapshot),
+    postcondition: (snapshot) {
+      final recovery = snapshot['taskRecovery'];
+      return target.matches(snapshot) &&
+          recovery is Map<String, dynamic> &&
+          recovery['result'] is Map<String, dynamic>;
+    },
     deadline: options.taskDeadline,
   );
   stdout.writeln(
@@ -742,20 +770,10 @@ Future<Map<String, dynamic>> _waitForTaskCompletion(
     final task = snapshot['task'];
     if (task is Map<String, dynamic>) {
       final phase = task['phase'] as String? ?? '';
-      if (phase == options.expectedTaskPhase) return snapshot;
-      if (options.stopAtRecoveryPause &&
+      if (phase == 'completed') return snapshot;
+      if (options.stopAtRecoveryPoint &&
           _hasFailedExecutorRecoveryCandidate(snapshot)) {
         return snapshot;
-      }
-      if (const {
-        'completed',
-        'blocked',
-        'failed',
-        'cancelled',
-      }.contains(phase)) {
-        throw StateError(
-          'Task entered terminal failure phase $phase: ${task['statusMessage']}',
-        );
       }
       final fingerprint = taskProgressFingerprint(snapshot);
       if (fingerprint != progress.fingerprint) {
@@ -819,11 +837,6 @@ bool _hasPlanConfirmation(Map<String, dynamic> snapshot) {
       planContent.isNotEmpty &&
       interaction is Map<String, dynamic> &&
       interaction['kind'] == 'planConfirmation';
-}
-
-bool _isTaskPaused(Map<String, dynamic> snapshot) {
-  final workspace = snapshot['workspace'];
-  return workspace is Map<String, dynamic> && workspace['isTaskPaused'] == true;
 }
 
 bool _hasFailedExecutorRecoveryCandidate(Map<String, dynamic> snapshot) {
@@ -914,9 +927,9 @@ class _DriverOptions {
     required this.recoveryCount,
     required this.recoveryMode,
     required this.injectSnapshotDisconnect,
-    required this.stopAtRecoveryPause,
+    required this.stopAtRecoveryPoint,
     required this.expectBudgetRecovery,
-    required this.expectedTaskPhase,
+    required this.expectedTaskOutcome,
   });
 
   final AcceptanceDriverMode mode;
@@ -932,9 +945,9 @@ class _DriverOptions {
   final int recoveryCount;
   final AcceptanceRecoveryMode recoveryMode;
   final bool injectSnapshotDisconnect;
-  final bool stopAtRecoveryPause;
+  final bool stopAtRecoveryPoint;
   final bool expectBudgetRecovery;
-  final String expectedTaskPhase;
+  final String expectedTaskOutcome;
 
   static _DriverOptions parse(List<String> arguments) {
     final values = <String, List<String>>{};
@@ -979,10 +992,11 @@ class _DriverOptions {
     final deadline = deadlineValue == null
         ? DateTime.now().add(taskTimeout)
         : DateTime.parse(deadlineValue).toUtc();
-    final expectedTaskPhase = optional('expected-task-phase') ?? 'completed';
-    if (!const {'completed', 'failed'}.contains(expectedTaskPhase)) {
+    final expectedTaskOutcome =
+        optional('expected-task-outcome') ?? 'succeeded';
+    if (!const {'succeeded', 'failed'}.contains(expectedTaskOutcome)) {
       throw ArgumentError(
-        'unsupported --expected-task-phase $expectedTaskPhase',
+        'unsupported --expected-task-outcome $expectedTaskOutcome',
       );
     }
     return _DriverOptions(
@@ -1001,9 +1015,9 @@ class _DriverOptions {
         optional('recovery-mode') ?? 'auto',
       ),
       injectSnapshotDisconnect: boolean('inject-snapshot-disconnect'),
-      stopAtRecoveryPause: boolean('stop-at-recovery-pause'),
+      stopAtRecoveryPoint: boolean('stop-at-recovery-point'),
       expectBudgetRecovery: boolean('expect-budget-recovery'),
-      expectedTaskPhase: expectedTaskPhase,
+      expectedTaskOutcome: expectedTaskOutcome,
     );
   }
 }

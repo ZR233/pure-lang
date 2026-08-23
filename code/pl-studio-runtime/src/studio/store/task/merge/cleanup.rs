@@ -23,14 +23,6 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("recorded merge task run not found")?;
-        let lease = entities::project_lease::Entity::find()
-            .filter(entities::project_lease::Column::TaskRunId.eq(run.id.clone()))
-            .one(&self.db)
-            .await?
-            .context("recorded merge project lease not found")?;
-        if lease.project_id != run.project_id {
-            bail!("recorded merge project lease no longer matches the TaskRun");
-        }
         let work_unit = entities::work_unit::Entity::find_by_id(merge.work_unit_id.clone())
             .one(&self.db)
             .await?

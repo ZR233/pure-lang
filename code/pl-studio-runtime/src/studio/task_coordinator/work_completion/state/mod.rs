@@ -4,8 +4,6 @@ mod lifecycle;
 use serde::Serialize;
 
 pub(crate) use content::{WorkCompletionContent, WorkCompletionKind};
-#[cfg(test)]
-pub(crate) use lifecycle::ReviewedCompletion;
 pub(crate) use lifecycle::{
     WorkCompletionCommand, WorkCompletionState, WorkCompletionStatus,
     WorkCompletionTransitionDecision, WorkCompletionTransitionError,

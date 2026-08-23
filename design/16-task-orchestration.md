@@ -3,8 +3,8 @@
 本文说明工作室如何组织一项需要计划、分工、审查和整合的任务。正文面向第一次接触任务模式的
 读者，只使用中文业务名称；程序中的状态名、工具名和字段名集中放在文末的实现名称对照附录。
 
-本章描述下一版目标设计。旧程序尚未完成改造时，应以本文说明的业务含义作为后续实现依据，
-不能用旧状态或旧工具反过来解释本文。
+本章描述当前唯一有效的任务编排设计。数据库、工具协议、状态联合和 UI 投影都直接使用本文定义，
+不提供旧状态、旧工具或旧数据库记录的运行期兼容入口。
 
 ## 16.1 先理解任务模式
 
@@ -258,9 +258,10 @@ flowchart LR
 操作失败表示业务条件已经通过，但资源创建、子对话持久化、代理注册、激活或补偿时出错。结果必须
 说明失败阶段、原始原因、可恢复性、受影响资源、补偿结果、当前记录最终状态和全部可行后续路径。
 
-转换拒绝、资源操作失败和补偿失败都保持主任务原状态。可恢复问题独立保存并展示在状态查询中，不形成
-主状态，也不因“存在未解决问题”笼统禁止其他动作。某项动作如果依赖相关资源完整性，应直接列出缺少
-的业务事实；问题记录本身不是额外门禁。
+转换拒绝保持主任务原状态且没有任何副作用。资源操作失败和补偿失败必须返回事务提交或补偿后的
+canonical 最终状态：失败发生在业务事务提交前时仍是原状态；业务事实已经提交时不得伪装成拒绝或
+虚报原状态。可恢复问题独立保存并展示在状态查询中，不形成主状态，也不因“存在未解决问题”笼统禁止
+其他动作。某项动作如果依赖相关资源完整性，应直接列出缺少的业务事实；问题记录本身不是额外门禁。
 
 ### 16.5.4 解决问题
 
@@ -276,8 +277,9 @@ flowchart LR
 每次写入都校验调用者拥有对应任务、工作单或审查轮，并使用记录版本进行比较更新。身份不匹配时返回
 结构化拒绝，但不能泄露其他任务的路径、内容和资源详情。
 
-每个会创建记录或资源的调用都携带稳定调用编号：相同编号和相同规范输入返回第一次结果；相同编号但
-输入不同返回冲突；新编号表示新尝试。重复调用不能重复创建资源、推进状态或发送唤醒。
+每个会创建记录或资源的调用都使用 Runtime 从当前 provider tool call 注入的稳定调用编号；该编号不由
+模型填写。相同编号和相同规范输入返回第一次结果；相同编号但输入不同返回冲突；新编号表示新尝试。
+重复调用不能重复创建资源、推进状态或发送唤醒。
 
 ## 16.6 拟定计划、等待确认和编辑文档
 
@@ -432,7 +434,7 @@ flowchart LR
 选择合并、挑选提交、压缩、变基或手工修改，也自行解决冲突；任务服务不执行这些动作。
 
 整合完成后，计划者提交合并记账，记录完成声明修订、声明的整合前后提交标识、整合方法、摘要和重复
-调用编号。所有提交标识都是调用者声明的审计值。工具只检查归属、交付已批准、执行者已关闭、记录版本、
+调用编号。调用编号由 Runtime 注入；所有提交标识是模型声明的审计值。工具只检查归属、交付已批准、执行者已关闭、记录版本、
 重复调用和连续合并记录的字段关系，不读取主工作区或验证版本库提交。
 
 成功记账新增不可变合并记录，把工作单改为已合并，并授权资源层清理对应独立工作目录。主任务继续保持
@@ -736,7 +738,7 @@ flowchart LR
 
 ### 甲.3 重复调用
 
-所有会产生记录、资源、交互或唤醒的操作都携带稳定调用编号：
+所有会产生记录、资源、交互或唤醒的操作都使用 Runtime 从 provider tool call 注入的稳定调用编号：
 
 - 相同编号和相同规范输入返回第一次结果；
 - 相同编号但输入不同返回稳定冲突；
@@ -838,11 +840,11 @@ flowchart LR
 | 模型执行轮次 | `Turn` |
 | 对话 | `Thread` |
 
-目标设计删除 `ProjectLease`，不再保存项目占用记录。
+当前设计没有项目占用记录；同一项目的多个根对话可以并行拥有活动任务。
 
 ### 附录二：任务主状态和完成结果
 
-目标主状态是一个强类型枚举：
+主状态是一个强类型枚举：
 
 ```text
 TaskRunState =
@@ -881,47 +883,27 @@ TaskFailureKind =
 | 代理判定无法继续 | `Failed { kind: UnableToProceed }` |
 | 系统致命故障 | `Failed { kind: Fatal }` |
 
-### 附录三：旧主状态到新设计的概念映射
+### 附录三：不兼容边界
 
-下一版数据库不迁移旧运行任务，下表只帮助理解设计变化：
-
-| 旧概念或旧实现名称 | 新实现名称 | 处理方式 |
-| --- | --- | --- |
-| 计划前 `Planning` | `Planning` | 改为任务记录本身的状态 |
-| 计划前 `PendingConfirmation` | `PendingConfirmation` | 改为同一任务记录的状态 |
-| `DesignUpdating` | `EditingDocuments` | 改名并保留非空摘要门槛 |
-| `Implementing` | `Working` | 合并到工作中 |
-| `Reworking` | `Working` | 合并到工作中 |
-| `Merging` | `Working` | 删除主状态，保留合并记录 |
-| `Reviewing` | `Reviewing` | 保留为综合审查 |
-| `Stopping` | 无主状态 | 停止改为模型执行控制动作 |
-| `Blocked` | 来源主状态加 `TaskIssue` | 问题不再投影主状态 |
-| `Paused` | 当前主状态加执行活动 | 无活动执行不再投影主状态 |
-| `Completed` | `Completed { Succeeded }` | 成功终态 |
-| `Failed` | `Completed { Failed }` | 失败改为完成结果 |
-| `Cancelled` | 无 | 删除取消终态，不迁移旧任务 |
+当前数据库结构不迁移其他任务状态形状；版本不匹配时重建产品数据库。任务状态、工具输入和 Bridge
+联合都只接受本章列出的当前变体，未知状态或字段直接拒绝。重建数据库不扫描、重置或删除磁盘上的
+独立工作目录和分支；失去持久化所有者的资源保留到明确的孤儿资源恢复流程处理。
 
 ### 附录四：工具名称
 
-| 中文职责 | 实现名称 | 下一版处理 |
+| 中文职责 | 实现名称 | 行为 |
 | --- | --- | --- |
-| 查询当前任务状态 | `task_status` | 保留并分别返回任务状态和执行活动 |
-| 统一状态动作 | `task_transition` | 新增统一入口 |
-| 提交计划 | `plan_exit` | 由 `task_transition.submitPlan` 取代 |
-| 完成文档编辑 | `task_finalize_design` | 由 `task_transition.finishDocumentEditing` 取代 |
-| 开始或继续综合审查 | `task_request_integrated_review` | 由 `task_transition.beginIntegratedReview` 取代 |
-| 撤销综合审查 | 无 | 使用 `task_transition.cancelIntegratedReview` |
-| 完成任务 | `task_complete` | 由 `task_transition.complete` 取代 |
-| 解决可恢复问题 | 既有恢复接口 | 使用 `task_transition.resolveIssue`，不改变主状态 |
-| 停止模型执行 | `task_stop` | 保留为执行控制入口，不属于 `task_transition` |
-| 创建执行者 | `task_spawn_executor` | 保留 |
-| 提交执行者完成声明 | `report_completion` | 保留 |
-| 请求交付审查 | `task_request_delivery_review` | 保留 |
-| 提交审查结论 | `review_exit` | 保留 |
-| 登记合并结果 | `task_record_merge` | 保留，不改变主状态 |
-| 读取工作说明 | `read_work_unit_handoff` | 保留 |
-| 读取完整审查轮 | `read_review_round` | 保留 |
-| 读取逐文件覆盖 | `read_review_file_coverage` | 保留 |
+| 查询当前任务状态 | `task_status` | 分别返回任务状态、执行活动、进度、问题和完成门槛 |
+| 统一状态动作 | `task_transition` | 提交下列六种状态动作并执行版本比较更新 |
+| 停止模型执行 | `task_stop` | 记录停止事件并推进执行代次，不改变主状态 |
+| 创建执行者 | `task_spawn_executor` | 校验结构化蓝图并创建工作单和独立工作目录 |
+| 提交执行者完成声明 | `report_completion` | 保存不可变完成声明 |
+| 请求交付审查 | `task_request_delivery_review` | 冻结一份完成声明并创建审查轮 |
+| 提交审查结论 | `review_exit` | 提交当前审查轮的结构化结论 |
+| 登记合并结果 | `task_record_merge` | 保存合并记录，不改变主状态 |
+| 读取工作说明 | `read_work_unit_handoff` | 读取完整持久化实施蓝图 |
+| 读取完整审查轮 | `read_review_round` | 分页读取审查事实和 findings |
+| 读取逐文件覆盖 | `read_review_file_coverage` | 分页读取逐文件覆盖 |
 
 `task_transition` 只支持以下 `action`：
 
@@ -941,7 +923,6 @@ resolveIssue
 ```text
 task_transition {
   action,
-  requestedByCallId,
   expectedRevision,
   expectedGeneration,
   summary?,
@@ -1023,6 +1004,8 @@ failed {
   cause,
   compensation,
   currentState,
+  revision,
+  generation,
   availablePaths
 }
 ```
@@ -1108,7 +1091,7 @@ task_status {
 | 状态种类索引列 | `state_kind` |
 | 记录版本 | `revision` |
 | 执行代次 | `generation` |
-| 请求调用编号 | `requestedByCallId` |
+| 持久化调用编号 | `requested_by_call_id`（Runtime 注入，不是模型输入） |
 | 被替代工作单编号 | `supersedesWorkUnitId` |
 | 结果提交 | `headCommit` |
 | 改动路径 | `changedFiles` |

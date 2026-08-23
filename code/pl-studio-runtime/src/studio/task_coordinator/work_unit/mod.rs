@@ -2,6 +2,7 @@
 
 mod state;
 
+use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::{Context, Result};
@@ -22,6 +23,7 @@ pub(crate) struct WorkUnitContext {
     pub(crate) worktree_path: String,
     pub(crate) branch: String,
     pub(crate) attempt: u32,
+    pub(crate) supersedes_work_unit_id: Option<String>,
     pub(crate) executor_thread_id: Option<String>,
     pub(crate) requested_by_call_id: String,
 }
@@ -123,6 +125,17 @@ impl WorkUnit {
     }
 }
 
+pub(crate) fn current_work_units(work_units: &[WorkUnit]) -> Vec<&WorkUnit> {
+    let superseded = work_units
+        .iter()
+        .filter_map(|unit| unit.supersedes_work_unit_id.as_deref())
+        .collect::<HashSet<_>>();
+    work_units
+        .iter()
+        .filter(|unit| !superseded.contains(unit.id.as_str()))
+        .collect()
+}
+
 pub(crate) fn decode_work_unit_state(value: &str) -> Result<WorkUnitState> {
     serde_json::from_str(value).context("invalid stored WorkUnit state JSON")
 }
@@ -143,6 +156,7 @@ mod tests {
                 worktree_path: "path".to_string(),
                 branch: "branch".to_string(),
                 attempt: 1,
+                supersedes_work_unit_id: None,
                 executor_thread_id: None,
                 requested_by_call_id: "call-1".to_string(),
             },

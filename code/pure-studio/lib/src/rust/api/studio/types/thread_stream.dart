@@ -153,11 +153,7 @@ sealed class BridgePlanConfirmationInteractionState
   }) = BridgePlanConfirmationInteractionState_Expired;
 }
 
-enum BridgePlanConfirmationResolution {
-  implementFreshContext,
-  continuePlanning,
-  dismiss,
-}
+enum BridgePlanConfirmationResolution { confirm, revisePlan }
 
 enum BridgePromptPrefixChangedReason {
   initial,

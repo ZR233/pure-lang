@@ -71,27 +71,25 @@ mod tests {
     #[test]
     fn task_root_and_child_roles_receive_isolated_prompts() {
         let planner = StudioMode::Task.instructions_for("planner", true);
-        assert!(planner.contains("通过 `plan_exit` 提交可执行计划"));
-        assert!(planner.contains("不会提供 `exec` / `write_stdin`"));
-        assert!(planner.contains("不得创建项目、写文件、初始化 Git、提交代码"));
-        assert!(planner.contains("Runtime 不检查、提交、reset 或补偿 Git"));
-        assert!(planner.contains("commit 字段是 opaque audit value"));
+        assert!(planner.contains("TaskRun 只有 `planning`"));
+        assert!(planner.contains("`task_transition` 提交主状态事实"));
+        assert!(planner.contains("状态不限制普通读取、写入、命令或 Git 工具"));
+        assert!(planner.contains("同一项目允许多个根会话的 Task 并行"));
 
         let explorer = StudioMode::Task.instructions_for("explorer", false);
         assert!(explorer.contains("只读探索"));
-        assert!(explorer.contains("不得调用 `plan_exit`"));
-        assert!(!explorer.contains("理解充分后通过 `plan_exit` 提交可执行计划"));
+        assert!(explorer.contains("不得调用 `task_transition`"));
 
         let executor = StudioMode::Task.instructions_for("executor", false);
         assert!(executor.contains("以 `report_completion` 结束"));
-        assert!(executor.contains("不得调用 `plan_exit`"));
+        assert!(executor.contains("不得调用 `task_transition`"));
 
         let reviewer = StudioMode::Task.instructions_for("reviewer", false);
         assert!(reviewer.contains("以 `review_exit` 结束"));
-        assert!(reviewer.contains("不得调用 `plan_exit`"));
+        assert!(reviewer.contains("不得调用 `task_transition`"));
 
         let unknown = StudioMode::Task.instructions_for("custom", false);
-        assert!(unknown.contains("不得调用 `plan_exit`"));
+        assert!(unknown.contains("不得调用 `task_transition`"));
         assert!(unknown.contains("不承担 root planner"));
     }
 

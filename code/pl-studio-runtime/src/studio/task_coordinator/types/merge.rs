@@ -149,31 +149,6 @@ impl ReviewFileCoverage {
     pub(crate) fn is_complete(&self) -> bool {
         self.files.iter().all(|file| file.reviewed)
     }
-
-    #[cfg(test)]
-    pub(crate) fn accepted_attempt(&self) -> Self {
-        Self {
-            version: self.version,
-            diagnostics_revision: self.diagnostics_revision,
-            files: self
-                .files
-                .iter()
-                .map(|file| ReviewFileReview {
-                    path: file.path.clone(),
-                    reviewed: true,
-                })
-                .collect(),
-            last_diagnostics: Some(ReviewExitDiagnostics {
-                submitted_count: self.files.len(),
-                missing_files: Vec::new(),
-                unreviewed_files: Vec::new(),
-                duplicate_files: Vec::new(),
-                extra_files: Vec::new(),
-                invalid_paths: Vec::new(),
-                violations: Vec::new(),
-            }),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +199,8 @@ pub(crate) struct ReviewExitViolation {
 
 pub(crate) struct BeginIntegratedReview {
     pub(crate) requested_by_call_id: String,
+    pub(crate) expected_revision: u64,
+    pub(crate) expected_generation: u64,
     pub(crate) reviewed_head: String,
     pub(crate) changed_files: Vec<String>,
 }
@@ -250,17 +227,6 @@ impl ReviewScope {
             _ => None,
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) struct CreateWorkUnit {
-    pub(crate) task_run_id: String,
-    pub(crate) title: String,
-    pub(crate) scope_hints: Vec<String>,
-    pub(crate) base_commit: String,
-    pub(crate) worktree_path: String,
-    pub(crate) branch: String,
-    pub(crate) attempt: u32,
 }
 
 pub(crate) struct AllocateExecutor {

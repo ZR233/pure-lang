@@ -113,14 +113,19 @@ impl StudioStore {
                 Some(ReviewScope::Integrated) => {
                     apply_task_command(
                         &tx,
-                        run,
-                        TaskCommand::BeginReworking {
-                            status_message: format!("reviewer spawn failed: {error}"),
+                        run.clone(),
+                        TaskCommand::ReturnToWorking {
+                            summary: format!("reviewer spawn failed: {error}"),
                         },
                     )
                     .await?;
                 }
                 None => bail!("invalid stored review scope"),
+            }
+            if round.scope == ReviewScope::Delivery.as_str() {
+                super::super::compare_and_swap_task_run(&tx, &run, None)
+                    .await?
+                    .context("TaskRun delivery review failure lost its revision CAS")?;
             }
             Ok(())
         }

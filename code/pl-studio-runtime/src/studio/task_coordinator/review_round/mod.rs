@@ -7,8 +7,6 @@ use serde::Serialize;
 
 use super::{ReviewDesignReference, ReviewFileCoverage, ReviewFinding, ReviewScope, ReviewVerdict};
 
-#[cfg(test)]
-pub(crate) use state::ChangesRequiredReview;
 pub(crate) use state::{
     ReviewRoundCommand, ReviewRoundState, ReviewRoundStateKind, ReviewRoundTransitionDecision,
     ReviewRoundTransitionError,

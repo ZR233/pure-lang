@@ -115,9 +115,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let task_phase = active_task_run.as_ref().map(|run| run.kind());
         #[cfg(debug_assertions)]
         let task_driver_budget = debug_task_driver_budget_fixture()?;
-        if let Some(run) = active_task_run.as_ref() {
-            ensure_task_accepts_turn(run)?;
-        }
         if mode == StudioMode::Task
             && context.snapshot.identity.parent_id.is_some()
             && matches!(
@@ -381,20 +378,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .with_prompt_scope(prompt_scope)
                 .with_interaction_callback(interaction_callback),
         );
-        if is_root
-            && task_phase == Some(crate::studio::task_coordinator::TaskRunStateKind::DesignUpdating)
-        {
-            let run = active_task_run
-                .as_ref()
-                .ok_or_else(|| turn_error("designUpdating turn has no active TaskRun"))?;
-            options = options.with_tool_completion_callback(
-                self.coordinator.design_tool_completion_callback(
-                    run.id.clone(),
-                    context.turn_id.to_string(),
-                    workspace_root.clone(),
-                ),
-            );
-        }
         #[cfg(debug_assertions)]
         if let Some(fixture) = task_driver_budget
             && mode == StudioMode::Task
@@ -595,13 +578,6 @@ fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<Su
     })
 }
 
-fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRun) -> Result<()> {
-    if run.is_stop_requested() {
-        return Err(turn_error("task is quiescing; no new turn may start"));
-    }
-    Ok(())
-}
-
 fn anyhow_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
 }
@@ -609,16 +585,6 @@ fn anyhow_error(error: impl std::fmt::Display) -> PureError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::studio::task_coordinator::{
-        DesignProgress, FinalizedDesign, StoppingState, TaskContext, TaskRun, TaskRunState,
-        TaskStopOrigin, TaskStopReason, TaskStopRequest,
-    };
-
-    #[test]
-    fn stop_requested_task_rejects_every_new_turn() {
-        let run = stopped_run();
-        assert!(ensure_task_accepts_turn(&run).is_err());
-    }
 
     #[test]
     fn root_role_is_derived_from_mode_regardless_of_stale_identity() {
@@ -674,31 +640,5 @@ mod tests {
                 compaction_timeout_ms: 250,
             })
         );
-    }
-
-    fn stopped_run() -> TaskRun {
-        TaskRun {
-            context: TaskContext {
-                id: "task-run".to_string(),
-                project_id: "project".to_string(),
-                root_thread_id: "session".to_string(),
-                plan: "plan".to_string(),
-                workspace_root: "C:/workspace".to_string(),
-            },
-            state: TaskRunState::Stopping(StoppingState::new(
-                DesignProgress::from_finalized(FinalizedDesign {
-                    summary: "design complete".to_string(),
-                }),
-                7,
-                TaskStopRequest {
-                    origin: TaskStopOrigin::UserRequest,
-                    reason: TaskStopReason::new("stop").unwrap(),
-                    requested_at: 1,
-                },
-            )),
-            revision: 1,
-            created_at: 1,
-            updated_at: 1,
-        }
     }
 }

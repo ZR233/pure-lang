@@ -115,11 +115,7 @@ class ToolApprovalResolutionCommand extends InteractionResolutionCommand {
   final String? reason;
 }
 
-enum PlanConfirmationDecision {
-  implementFreshContext,
-  continuePlanning,
-  dismiss,
-}
+enum PlanConfirmationDecision { confirm, revisePlan }
 
 class PlanConfirmationResolutionCommand extends InteractionResolutionCommand {
   const PlanConfirmationResolutionCommand({

@@ -145,7 +145,12 @@ pub(crate) async fn build_review_prompt(
     render_template(
         COMMON_TEMPLATE,
         [
-            ("PLAN", run.plan.clone()),
+            (
+                "PLAN",
+                run.plan_content()
+                    .context("TaskRun has no frozen plan")?
+                    .to_string(),
+            ),
             ("SCOPE_BLOCK", scope_block),
             (
                 "PRIOR_REVIEWS_JSON",

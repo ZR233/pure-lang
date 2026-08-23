@@ -248,7 +248,7 @@ provider kind、code 和 HTTP status；即使 assistant Item 正文为空，Time
 Item error 或 Turn failure message。recoverable failure 使用警告视觉与“可继续”语义，不伪装成
 完成或自动重试。fatal Task 不提供同 Task 恢复按钮；用户修复 Provider 后新建 Task。
 
-`task_complete` 被结构门禁拒绝时，tool block 展示稳定 code 和用户可读 message；成功完成不展开
+`task_transition.complete` 被结构门禁拒绝时，tool block 展示稳定 code 和用户可读 message；成功完成不展开
 冗余结果详情。任何 UI 投影都不得显示 API Key 原文；Bridge 已提供的 agent error/reason 在
 directory 增量更新和 selected agent 重建时必须保留。
 
@@ -265,8 +265,8 @@ directory 增量更新和 selected agent 重建时必须保留。
 - 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
-- 空正文 provider failure、fatal/recoverable Task 状态、agent directory 错误保留与
-  `task_complete` 门禁拒绝 message 有 widget test；
+- 空正文 provider failure、`Completed { Failed }` / recoverable issue 投影、agent directory 错误保留与
+  `task_transition.complete` 门禁拒绝 message 有 widget test；
 - Flutter analyze、widget/integration tests 通过；
 - Flutter Driver 验收覆盖侧栏翻页到底、时间线驱逐回源与关机阶段序列；真实 runtime harness
   在隔离 `PURE_STUDIO_HOME` 下验证 write-behind flush、pending 归零、二次启动数据完整与

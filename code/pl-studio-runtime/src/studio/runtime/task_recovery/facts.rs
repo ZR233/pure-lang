@@ -14,32 +14,12 @@ pub(super) const fn recovery_state_from_task_kind(
     kind: TaskRunStateKind,
 ) -> StudioTaskRecoveryState {
     match kind {
-        TaskRunStateKind::DesignUpdating => StudioTaskRecoveryState::DesignUpdating,
-        TaskRunStateKind::Implementing => StudioTaskRecoveryState::Implementing,
-        TaskRunStateKind::Merging => StudioTaskRecoveryState::Merging,
+        TaskRunStateKind::Planning => StudioTaskRecoveryState::Planning,
+        TaskRunStateKind::PendingConfirmation => StudioTaskRecoveryState::PendingConfirmation,
+        TaskRunStateKind::EditingDocuments => StudioTaskRecoveryState::EditingDocuments,
+        TaskRunStateKind::Working => StudioTaskRecoveryState::Working,
         TaskRunStateKind::Reviewing => StudioTaskRecoveryState::Reviewing,
-        TaskRunStateKind::Reworking => StudioTaskRecoveryState::Reworking,
-        TaskRunStateKind::Stopping => StudioTaskRecoveryState::Stopping,
-        TaskRunStateKind::Blocked => StudioTaskRecoveryState::Blocked,
         TaskRunStateKind::Completed => StudioTaskRecoveryState::Completed,
-        TaskRunStateKind::Failed => StudioTaskRecoveryState::Failed,
-        TaskRunStateKind::Cancelled => StudioTaskRecoveryState::Cancelled,
-    }
-}
-pub(super) const fn task_kind_from_recovery_state(
-    state: StudioTaskRecoveryState,
-) -> TaskRunStateKind {
-    match state {
-        StudioTaskRecoveryState::DesignUpdating => TaskRunStateKind::DesignUpdating,
-        StudioTaskRecoveryState::Implementing => TaskRunStateKind::Implementing,
-        StudioTaskRecoveryState::Merging => TaskRunStateKind::Merging,
-        StudioTaskRecoveryState::Reviewing => TaskRunStateKind::Reviewing,
-        StudioTaskRecoveryState::Reworking => TaskRunStateKind::Reworking,
-        StudioTaskRecoveryState::Stopping => TaskRunStateKind::Stopping,
-        StudioTaskRecoveryState::Blocked => TaskRunStateKind::Blocked,
-        StudioTaskRecoveryState::Completed => TaskRunStateKind::Completed,
-        StudioTaskRecoveryState::Failed => TaskRunStateKind::Failed,
-        StudioTaskRecoveryState::Cancelled => TaskRunStateKind::Cancelled,
     }
 }
 pub(super) fn tool_summary(tool: &ThreadToolItem) -> String {

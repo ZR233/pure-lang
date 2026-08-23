@@ -24,7 +24,7 @@ pub(super) fn planner_response(
 ) -> Result<(&'static str, String)> {
     if exercise_recovery {
         match step {
-            8 => {
+            10 => {
                 return Ok((
                     "final(executor failure observed)",
                     final_text(
@@ -33,16 +33,16 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            9 => {
+            11 => {
                 return Ok((
                     RECOVERY_INTERRUPTION_ACTION,
                     final_text(
-                        "task-paused-for-recovery",
-                        "The failure is durably recorded. The Task is paused for explicit recovery.",
+                        "task-waiting-for-continuation",
+                        "The failure is durably recorded. The Task state is unchanged and can continue with an ordinary new message.",
                     ),
                 ));
             }
-            10 => {
+            12 => {
                 return Ok((
                     "task_status(after recovery)",
                     tool_call(
@@ -52,7 +52,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            11 => {
+            13 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "send_message(recovered executor)",
@@ -66,13 +66,13 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            12.. => step -= 5,
-            0..=7 => {}
+            14.. => step -= 6,
+            0..=9 => {}
         }
     }
     if exercise_budget_recovery {
         match step {
-            7 => {
+            9 => {
                 return Ok((
                     "final(budget NeedsAttention observed)",
                     final_text(
@@ -81,7 +81,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            8 => {
+            10 => {
                 return Ok((
                     "task_status(budget NeedsAttention)",
                     tool_call(
@@ -91,7 +91,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            9 => {
+            11 => {
                 progress.budget_recovery_message_sent = true;
                 let executor_id = executor_id(progress)?;
                 return Ok((
@@ -106,7 +106,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            10 => {
+            12 => {
                 return Ok((
                     "task_status(recovered running)",
                     tool_call(
@@ -116,7 +116,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            11..=14 => {
+            13..=16 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "wait_agents(recovered executor)",
@@ -127,7 +127,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            15 => {
+            17 => {
                 return Ok((
                     "task_status(recovered completion)",
                     tool_call(
@@ -137,7 +137,7 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            16 => {
+            18 => {
                 let executor_id = executor_id(progress)?;
                 return Ok((
                     "task_request_delivery_review",
@@ -148,8 +148,8 @@ pub(super) fn planner_response(
                     ),
                 ));
             }
-            17.. => step -= 5,
-            0..=6 => {}
+            19.. => step -= 5,
+            0..=8 => {}
         }
     }
     let response = match step {
@@ -162,18 +162,19 @@ pub(super) fn planner_response(
             ),
         ),
         1 => (
-            "plan_exit",
-            tool_call(
-                "plan",
-                "plan_exit",
-                serde_json::json!({
-                    "content": "# Offline Task Driver plan\n\n1. Record the durable contract in `design/task-flow.md`.\n2. Spawn a fresh executor worktree and implement `src/feature.txt`.\n3. Review the delivery, merge it, perform integrated review, and complete the Task."
-                }),
-            ),
+            "task_status(planning)",
+            tool_call("status-planning", "task_status", serde_json::json!({})),
         ),
         2 => (
-            "final",
-            final_text("plan-submitted", "Plan submitted for confirmation."),
+            "task_transition(submit-plan)",
+            transition_call(
+                progress,
+                "submit-plan",
+                "submitPlan",
+                serde_json::json!({
+                    "summary": "# Offline Task Driver plan\n\n1. Record the durable contract in `design/task-flow.md`.\n2. Spawn a fresh executor worktree and implement `src/feature.txt`.\n3. Review the delivery, merge it, perform integrated review, and complete the Task."
+                }),
+            )?,
         ),
         3 => (
             "apply_patch(initial design)",
@@ -184,33 +185,92 @@ pub(super) fn planner_response(
             ),
         ),
         4 => (
-            "task_finalize_design",
+            "exec(commit design)",
             tool_call(
-                "finalize-design",
-                "task_finalize_design",
-                serde_json::json!({"summary": "Recorded the executor contract in design/task-flow.md."}),
+                "commit-design",
+                "exec",
+                serde_json::json!({
+                    "command": "git add -- design/task-flow.md && git -c user.name=\"Pure Studio\" -c user.email=pure-studio@local commit -m \"docs: record offline Task contract\""
+                }),
             ),
         ),
         5 => (
+            "task_status(editing-documents)",
+            tool_call(
+                "status-editing-documents",
+                "task_status",
+                serde_json::json!({}),
+            ),
+        ),
+        6 => (
+            "task_transition(finish-document-editing)",
+            transition_call(
+                progress,
+                "finish-document-editing",
+                "finishDocumentEditing",
+                serde_json::json!({"summary": "Recorded the executor contract in design/task-flow.md."}),
+            )?,
+        ),
+        7 => (
             "task_spawn_executor",
             tool_call(
                 "spawn-executor",
                 "task_spawn_executor",
                 serde_json::json!({
                     "taskName": "offline_executor",
-                    "message": "Create src/feature.txt with the exact required content, commit it, verify it, and report the completion for review.",
-                    "scopeHints": ["design"],
-                    "acceptanceCriteria": ["src/feature.txt contains the exact required line", "all changes are committed"],
-                    "evidence": [{"path": "design/task-flow.md", "line": 1, "symbol": "Offline Task Flow"}],
-                    "verificationCommands": [{
-                        "command": "git diff --check",
-                        "cwd": ".",
-                        "purpose": "verify the patch has no whitespace errors"
-                    }]
+                    "objective": "Create and commit src/feature.txt with the exact fixture content.",
+                    "scope": {
+                        "inScope": ["Create the deterministic feature fixture and verify its committed diff."],
+                        "outOfScope": ["Do not change the Task design or merge the executor branch."],
+                        "scopeHints": ["design"]
+                    },
+                    "implementationSteps": [{
+                        "id": "step-create",
+                        "instruction": "Create src/feature.txt with the exact fixture content from the confirmed plan.",
+                        "targets": [{"path": "src/feature.txt"}],
+                        "expectedOutcome": "The executor worktree contains the exact deterministic fixture file.",
+                        "criterionIds": ["criterion-content"]
+                    }, {
+                        "id": "step-commit",
+                        "instruction": "Commit the feature file and leave the executor worktree clean.",
+                        "targets": [{"path": "src/feature.txt"}],
+                        "expectedOutcome": "HEAD contains the feature file and the worktree is clean.",
+                        "criterionIds": ["criterion-commit"]
+                    }],
+                    "acceptanceCriteria": [{
+                        "id": "criterion-content",
+                        "requirement": "src/feature.txt has the exact required fixture content."
+                    }, {
+                        "id": "criterion-commit",
+                        "requirement": "The delivery commit is clean and has no whitespace errors."
+                    }],
+                    "dependencies": [],
+                    "evidence": [{
+                        "path": "design/task-flow.md",
+                        "symbol": "Offline Task Flow",
+                        "note": "Confirmed design contract for the fixture."
+                    }],
+                    "verification": {
+                        "commands": [{
+                            "id": "check-diff",
+                            "command": "git diff --check HEAD^ HEAD",
+                            "cwd": ".",
+                            "purpose": "Verify the committed patch has no whitespace errors.",
+                            "expectedOutcome": "The command exits successfully with no output.",
+                            "criterionIds": ["criterion-commit"]
+                        }],
+                        "inspections": [{
+                            "id": "inspect-feature",
+                            "instruction": "Inspect src/feature.txt and compare it with the confirmed fixture content.",
+                            "targets": [{"path": "src/feature.txt"}],
+                            "expectedOutcome": "The file content matches the confirmed contract exactly.",
+                            "criterionIds": ["criterion-content"]
+                        }]
+                    }
                 }),
             ),
         ),
-        6..=9 => {
+        8..=11 => {
             let executor_id = executor_id(progress)?;
             (
                 "wait_agents(executor)",
@@ -221,11 +281,11 @@ pub(super) fn planner_response(
                 ),
             )
         }
-        10 => (
+        12 => (
             "task_status(completion)",
             tool_call("status-completion", "task_status", serde_json::json!({})),
         ),
-        11 => {
+        13 => {
             let executor_id = executor_id(progress)?;
             (
                 "task_request_delivery_review",
@@ -236,11 +296,11 @@ pub(super) fn planner_response(
                 ),
             )
         }
-        12 => (
+        14 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        13 => (
+        15 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -248,7 +308,7 @@ pub(super) fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        14 => {
+        16 => {
             let executor_id = executor_id(progress)?;
             (
                 "close_agent(executor)",
@@ -259,7 +319,7 @@ pub(super) fn planner_response(
                 ),
             )
         }
-        15 => (
+        17 => (
             "task_status(after executor close)",
             tool_call(
                 "status-after-executor-close",
@@ -267,7 +327,7 @@ pub(super) fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        16 => {
+        18 => {
             let branch = task_worktree(workspace)?.branch;
             progress.expected_previous_head = Some(git_output(workspace, &["rev-parse", "HEAD"])?);
             (
@@ -283,7 +343,7 @@ pub(super) fn planner_response(
                 ),
             )
         }
-        17 => {
+        19 => {
             let executor_id = executor_id(progress)?;
             let previous = progress
                 .expected_previous_head
@@ -306,15 +366,20 @@ pub(super) fn planner_response(
                 ),
             )
         }
-        18 => (
-            "task_request_integrated_review",
-            tool_call(
-                "request-integrated-review",
-                "task_request_integrated_review",
-                serde_json::json!({}),
-            ),
+        20 => (
+            "task_status(review-gate)",
+            tool_call("status-review-gate", "task_status", serde_json::json!({})),
         ),
-        19 => (
+        21 => (
+            "task_transition(begin-integrated-review)",
+            transition_call(
+                progress,
+                "begin-integrated-review",
+                "beginIntegratedReview",
+                serde_json::json!({}),
+            )?,
+        ),
+        22 => (
             "list_agents(integrated-review)",
             tool_call(
                 "list-integrated-review",
@@ -322,7 +387,7 @@ pub(super) fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        20 => (
+        23 => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -330,11 +395,53 @@ pub(super) fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        21 => (
-            "task_complete",
-            tool_call("complete-task", "task_complete", serde_json::json!({})),
+        24 => (
+            "task_transition(complete)",
+            transition_call(
+                progress,
+                "complete-task",
+                "complete",
+                serde_json::json!({
+                    "outcome": "succeeded",
+                    "summary": "Offline Task Driver fixture completed after integrated review."
+                }),
+            )?,
         ),
         _ => bail!("unexpected planner request step {step}"),
     };
     Ok(response)
+}
+
+fn transition_call(
+    progress: &ScriptProgress,
+    call_id: &str,
+    action: &str,
+    fields: serde_json::Value,
+) -> Result<String> {
+    let mut input = fields
+        .as_object()
+        .cloned()
+        .context("task_transition fixture fields must be an object")?;
+    input.insert("action".to_string(), serde_json::json!(action));
+    input.insert(
+        "expectedRevision".to_string(),
+        serde_json::json!(
+            progress.task_revision.context(
+                "task_transition requires a preceding task_status or accepted transition"
+            )?
+        ),
+    );
+    input.insert(
+        "expectedGeneration".to_string(),
+        serde_json::json!(
+            progress.task_generation.context(
+                "task_transition requires a preceding task_status or accepted transition"
+            )?
+        ),
+    );
+    Ok(tool_call(
+        call_id,
+        "task_transition",
+        serde_json::Value::Object(input),
+    ))
 }

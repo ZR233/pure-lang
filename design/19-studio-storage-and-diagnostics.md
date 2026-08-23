@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v11；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v12；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
@@ -29,10 +29,10 @@ cache 重建。
 - interactions
 - attachments
 - app_settings
-- task_runs、task_failures、work_units、work_completions、review_rounds、merge_records、project_leases
+- task_runs、task_stop_events、task_issues、work_units、work_completions、review_rounds、merge_records
 - thread_context_segments、thread_session_state
 
-Turn、thread input、Item、Interaction、TaskRun、WorkUnit、ReviewRound、WorkCompletion、TaskFailure 与
+Turn、thread input、Item、Interaction、TaskRun、WorkUnit、ReviewRound、WorkCompletion、TaskIssue 与
 Merge cleanup 等具有生命周期的记录只保存一份完整 `state_json`。需要筛选的表使用从
 `state_json.kind` 生成的 stored `state_kind`；应用不得分别写 status、phase、reason、resolvedAt、
 failure 或 terminal flags。身份、外键、ordinal、revision、计费与查询所需的稳定公共列继续关系化。
@@ -90,11 +90,11 @@ revision 冲突不产生部分更新。Thread 局部重建保留 pinned handoff�
 Task/WorkUnit owner 与 usage。TaskRun 不保存项目 Git snapshot 或 fingerprint；WorkUnit 只保存
 worktree 创建后的资源事实和 caller 声明的审计数据。
 
-`task_failures` 以 `(task_run_id, source_turn_id)` 唯一保存来源 Thread/Turn/agent、WorkUnit 或
-ReviewRound、完整 `TurnFailure`、Task disposition 与 resolved 状态；`task_runs.terminal_failure_id`
-固定首个 fatal failure。Recoverable failure 只在同一来源 Thread 成功开启后续 Turn 时解决，fatal
-failure 永不被迟到 child 事件覆盖。fatal terminalization 使用 SQLite immediate 事务串行化首胜、
-Task/children/lease 更新，属于 Immediate flush 边界，数据库提交后才关闭进程内 agent。
+`task_issues` 以 `(task_run_id, source_turn_id)` 唯一保存来源 Thread/Turn/agent、WorkUnit 或
+ReviewRound，以及包含完整 `TurnFailure`、处置语义和解决事实的 canonical state。Recoverable issue
+只在同一来源 Thread 成功开启后续 Turn 时解决；首个 fatal issue 在 SQLite immediate 事务中把
+Task 与 children 一并结算为失败终态，迟到 child 事件不能覆盖该事实。数据库提交后才关闭进程内
+agent。同一项目的多条活动 Task 不创建项目租约，所有权、独立工作目录和版本比较更新负责隔离。
 
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
 `model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。Turn 终态聚合 usage 必须随 Immediate flush 持久化
@@ -119,13 +119,13 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 ## 19.3 不兼容库重建
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。Studio schema 只保留当前版本 v11 一个事实：不存在跨版本迁移链，任何非 v11
+fingerprint。Studio schema 只保留当前版本 v12 一个事实：不存在跨版本迁移链，任何非 v12
 库一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v11 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v12 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建

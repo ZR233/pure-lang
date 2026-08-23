@@ -62,8 +62,6 @@ pub struct StudioTaskRecoveryPreview {
     pub revision: u64,
     pub task_generation: u64,
     pub state: StudioTaskRecoveryState,
-    pub stop_requested: bool,
-    pub project_lease_id: String,
     pub recommended_thread_id: String,
     pub targets: Vec<StudioTaskRecoveryTarget>,
     pub completion_revision_fingerprint: String,
@@ -74,16 +72,12 @@ pub struct StudioTaskRecoveryPreview {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StudioTaskRecoveryState {
-    DesignUpdating,
-    Implementing,
-    Merging,
+    Planning,
+    PendingConfirmation,
+    EditingDocuments,
+    Working,
     Reviewing,
-    Reworking,
-    Stopping,
-    Blocked,
     Completed,
-    Failed,
-    Cancelled,
 }
 
 /// Applies a previously generated Task recovery preview.
@@ -147,6 +141,5 @@ pub struct StudioTaskRecoveryResult {
     pub after_transcript_hash: String,
     pub removed_item_count: u64,
     pub removed_input_count: u64,
-    pub stop_cleared: bool,
     pub resume_turn_id: String,
 }

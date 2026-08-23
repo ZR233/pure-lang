@@ -10,6 +10,7 @@ pub(crate) fn bridge_task_runtime(
         run_id: task.run_id,
         state: bridge_task_state(task.state),
         revision: task.revision,
+        generation: task.generation,
         integrated_review_gate: match task.integrated_review_gate {
             pl_studio_runtime::StudioIntegratedReviewGate::Required { reason } => {
                 BridgeIntegratedReviewGateDto::Required { reason }
@@ -34,8 +35,7 @@ pub(crate) fn bridge_task_runtime(
                 merge_record_id,
             },
         },
-        failures: task.failures.into_iter().map(bridge_task_failure).collect(),
-        terminal_failure: task.terminal_failure.map(bridge_task_failure),
+        issues: task.issues.into_iter().map(bridge_task_issue).collect(),
         work_units: task
             .work_units
             .into_iter()
@@ -46,6 +46,8 @@ pub(crate) fn bridge_task_runtime(
                 worktree_path: unit.worktree_path,
                 branch: unit.branch,
                 agent_id: unit.agent_id,
+                attempt: unit.attempt,
+                supersedes_work_unit_id: unit.supersedes_work_unit_id,
                 budget_slice_limit: unit.budget_slice_limit,
                 executor_progress_revision: unit.executor_progress_revision,
                 blueprint_fingerprint: unit.blueprint_fingerprint,
@@ -201,118 +203,72 @@ fn bridge_completion_state(state: StudioTaskCompletionState) -> BridgeTaskComple
 
 fn bridge_task_state(state: StudioTaskState) -> BridgeTaskState {
     match state {
-        StudioTaskState::DesignUpdating(state) => {
-            BridgeTaskState::DesignUpdating(BridgeDesignUpdatingTaskState {
-                generation: state.generation,
+        StudioTaskState::Planning(state) => BridgeTaskState::Planning(BridgePlanningTaskState {
+            request: state.request,
+        }),
+        StudioTaskState::PendingConfirmation(state) => {
+            BridgeTaskState::PendingConfirmation(BridgePendingConfirmationTaskState {
+                plan_revision: state.plan_revision,
             })
         }
-        StudioTaskState::Implementing(state) => {
-            BridgeTaskState::Implementing(BridgeImplementingTaskState {
-                generation: state.generation,
-                design: bridge_finalized_design(state.design),
+        StudioTaskState::EditingDocuments(state) => {
+            BridgeTaskState::EditingDocuments(BridgeEditingDocumentsTaskState {
+                plan_revision: state.plan_revision,
             })
         }
-        StudioTaskState::Merging(state) => BridgeTaskState::Merging(BridgeMergingTaskState {
-            generation: state.generation,
-            status_message: state.status_message,
-            design: bridge_finalized_design(state.design),
+        StudioTaskState::Working(state) => BridgeTaskState::Working(BridgeWorkingTaskState {
+            document_edit_summary: state.document_edit_summary,
         }),
         StudioTaskState::Reviewing(state) => BridgeTaskState::Reviewing(BridgeReviewingTaskState {
-            generation: state.generation,
-            status_message: state.status_message,
-            design: bridge_finalized_design(state.design),
-            target: bridge_review_target(state.target),
-        }),
-        StudioTaskState::Reworking(state) => BridgeTaskState::Reworking(BridgeReworkingTaskState {
-            generation: state.generation,
-            status_message: state.status_message,
-            design: bridge_finalized_design(state.design),
-        }),
-        StudioTaskState::Stopping(state) => BridgeTaskState::Stopping(BridgeStoppingTaskState {
-            generation: state.generation,
-            status_message: state.status_message,
-            design: bridge_design_progress(state.design),
-            request: bridge_stop_request(state.request),
-        }),
-        StudioTaskState::Blocked(state) => BridgeTaskState::Blocked(BridgeBlockedTaskState {
-            generation: state.generation,
-            message: state.message,
-            design: bridge_design_progress(state.design),
-            recovery: bridge_blocked_recovery(state.recovery),
+            target: BridgeIntegratedReviewTarget {
+                review_round_id: state.target.review_round_id,
+                reviewed_head: state.target.reviewed_head,
+                changed_files: state.target.changed_files,
+            },
         }),
         StudioTaskState::Completed(state) => BridgeTaskState::Completed(BridgeCompletedTaskState {
-            generation: state.generation,
-            design: bridge_finalized_design(state.design),
-        }),
-        StudioTaskState::Failed(state) => BridgeTaskState::Failed(BridgeFailedTaskState {
-            generation: state.generation,
-            message: state.message,
-            design: bridge_design_progress(state.design),
-            failure_id: state.failure_id,
-        }),
-        StudioTaskState::Cancelled(state) => BridgeTaskState::Cancelled(BridgeCancelledTaskState {
-            generation: state.generation,
-            message: state.message,
-            design: bridge_design_progress(state.design),
-            request: state.request.map(bridge_stop_request),
+            outcome: bridge_task_outcome(state.outcome),
         }),
     }
 }
 
-fn bridge_finalized_design(design: StudioFinalizedDesign) -> BridgeFinalizedDesign {
-    BridgeFinalizedDesign {
-        summary: design.summary,
-    }
-}
-
-fn bridge_design_progress(progress: StudioDesignProgress) -> BridgeDesignProgress {
-    match progress {
-        StudioDesignProgress::Updating(_) => {
-            BridgeDesignProgress::Updating(BridgeUpdatingDesign {})
-        }
-        StudioDesignProgress::Finalized(design) => {
-            BridgeDesignProgress::Finalized(bridge_finalized_design(design))
-        }
-    }
-}
-
-fn bridge_stop_request(request: StudioTaskStopRequest) -> BridgeTaskStopRequest {
-    BridgeTaskStopRequest {
-        origin: match request.origin {
-            StudioTaskStopOrigin::UserRequest => BridgeTaskStopOrigin::UserRequest,
-            StudioTaskStopOrigin::PlannerDecision => BridgeTaskStopOrigin::PlannerDecision,
-            StudioTaskStopOrigin::RuntimeFailure => BridgeTaskStopOrigin::RuntimeFailure,
-            StudioTaskStopOrigin::ApplicationShutdown => BridgeTaskStopOrigin::ApplicationShutdown,
+fn bridge_task_outcome(outcome: StudioTaskOutcome) -> BridgeTaskOutcome {
+    match outcome {
+        StudioTaskOutcome::Succeeded {
+            summary,
+            completed_at,
+            review_gate,
+        } => BridgeTaskOutcome::Succeeded {
+            summary,
+            completed_at,
+            review_gate: match review_gate {
+                StudioTaskReviewGate::NotRequiredNoDelivery => {
+                    BridgeTaskReviewGate::NotRequiredNoDelivery
+                }
+                StudioTaskReviewGate::NotRequiredSingleExecutor { work_unit_id } => {
+                    BridgeTaskReviewGate::NotRequiredSingleExecutor { work_unit_id }
+                }
+                StudioTaskReviewGate::IntegratedReview { review_round_id } => {
+                    BridgeTaskReviewGate::IntegratedReview { review_round_id }
+                }
+            },
         },
-        reason: request.reason,
-        requested_at: request.requested_at,
-    }
-}
-
-fn bridge_review_target(target: StudioTaskReviewTarget) -> BridgeTaskReviewTarget {
-    match target {
-        StudioTaskReviewTarget::Delivery {
-            work_unit_id,
-            completion_id,
-            completion_revision,
-            reviewed_head,
-        } => BridgeTaskReviewTarget::Delivery {
-            work_unit_id,
-            completion_id,
-            completion_revision,
-            reviewed_head,
+        StudioTaskOutcome::Failed {
+            kind,
+            summary,
+            evidence,
+            cause,
+            completed_at,
+        } => BridgeTaskOutcome::Failed {
+            kind: match kind {
+                StudioTaskFailureKind::UnableToProceed => BridgeTaskFailureKind::UnableToProceed,
+                StudioTaskFailureKind::Fatal => BridgeTaskFailureKind::Fatal,
+            },
+            summary,
+            evidence,
+            cause,
+            completed_at,
         },
-        StudioTaskReviewTarget::Integration { reviewed_head } => {
-            BridgeTaskReviewTarget::Integration { reviewed_head }
-        }
-    }
-}
-
-fn bridge_blocked_recovery(recovery: StudioBlockedRecovery) -> BridgeBlockedRecovery {
-    match recovery {
-        StudioBlockedRecovery::RetryMerge => BridgeBlockedRecovery::RetryMerge,
-        StudioBlockedRecovery::ResumeRework => BridgeBlockedRecovery::ResumeRework,
-        StudioBlockedRecovery::ManualOnly => BridgeBlockedRecovery::ManualOnly,
     }
 }
 
@@ -707,36 +663,34 @@ fn bridge_review_state(state: StudioTaskReviewState) -> BridgeTaskReviewState {
     }
 }
 
-fn bridge_task_failure(
-    failure: pl_studio_runtime::StudioTaskFailureRuntime,
-) -> BridgeTaskFailureDto {
-    let state = match failure.state {
-        StudioTaskFailureState::OpenRecoverable { failure } => {
-            BridgeTaskFailureState::OpenRecoverable {
+fn bridge_task_issue(issue: pl_studio_runtime::StudioTaskIssueRuntime) -> BridgeTaskIssueDto {
+    let state = match issue.state {
+        StudioTaskIssueState::OpenRecoverable { failure } => {
+            BridgeTaskIssueState::OpenRecoverable {
                 failure: bridge_task_failure_detail(failure),
             }
         }
-        StudioTaskFailureState::OpenFatal { failure } => BridgeTaskFailureState::OpenFatal {
+        StudioTaskIssueState::OpenFatal { failure } => BridgeTaskIssueState::OpenFatal {
             failure: bridge_task_failure_detail(failure),
         },
-        StudioTaskFailureState::Resolved {
+        StudioTaskIssueState::Resolved {
             failure,
             resolved_at,
-        } => BridgeTaskFailureState::Resolved {
+        } => BridgeTaskIssueState::Resolved {
             failure: bridge_task_failure_detail(failure),
             resolved_at,
         },
     };
-    BridgeTaskFailureDto {
-        id: failure.id,
-        source_thread_id: failure.source_thread_id,
-        source_turn_id: failure.source_turn_id,
-        source_agent_id: failure.source_agent_id,
-        source_role: failure.source_role,
-        work_unit_id: failure.work_unit_id,
-        review_round_id: failure.review_round_id,
+    BridgeTaskIssueDto {
+        id: issue.id,
+        source_thread_id: issue.source_thread_id,
+        source_turn_id: issue.source_turn_id,
+        source_agent_id: issue.source_agent_id,
+        source_role: issue.source_role,
+        work_unit_id: issue.work_unit_id,
+        review_round_id: issue.review_round_id,
         state,
-        created_at: failure.created_at,
+        created_at: issue.created_at,
     }
 }
 

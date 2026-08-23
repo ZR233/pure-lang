@@ -34,13 +34,9 @@ impl StudioStore {
         let mut matching = Vec::new();
         for work_unit in work_units {
             let Some(run) = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
-                .filter(entities::task_run::Column::StateKind.is_not_in([
-                    TaskRunStateKind::Stopping.as_str(),
-                    TaskRunStateKind::Completed.as_str(),
-                    TaskRunStateKind::Blocked.as_str(),
-                    TaskRunStateKind::Failed.as_str(),
-                    TaskRunStateKind::Cancelled.as_str(),
-                ]))
+                .filter(
+                    entities::task_run::Column::StateKind.eq(TaskRunStateKind::Working.as_str()),
+                )
                 .one(&self.db)
                 .await?
             else {
@@ -84,11 +80,7 @@ impl StudioStore {
                 .context("task run not found")?;
             let task = task_run_record(run.clone())?;
             let phase = task.kind();
-            if phase == TaskRunStateKind::Stopping
-                || phase == TaskRunStateKind::Blocked
-                || phase.is_terminal()
-                || task.is_stop_requested()
-            {
+            if phase != TaskRunStateKind::Working {
                 bail!("task is not accepting executor completion");
             }
             let work_unit_state = work_unit_state(&work_unit)?;

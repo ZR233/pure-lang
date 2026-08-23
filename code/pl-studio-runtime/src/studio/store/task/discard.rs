@@ -4,11 +4,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 use super::work_unit::{apply_work_unit_command, work_unit_record};
 
 use crate::studio::entity as entities;
-use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, TaskCommand, TaskRunStateKind, TaskStopOrigin, TaskStopReason,
-    TaskWorktreeDisposition, WaitingReviewPhase, WorkUnitCommand, WorkUnitStateKind,
+    ExecutorCloseDisposition, TaskWorktreeDisposition, WaitingReviewPhase, WorkUnitCommand,
+    WorkUnitStateKind,
 };
 
 struct ExecutorCloseScope {
@@ -29,32 +28,7 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("recovery cleanup task run not found")?;
-            let record = super::task_run_record(run.clone())?;
-            let phase = record.kind();
-            let now = unix_seconds();
-            if !phase.is_terminal() {
-                let reason = TaskStopReason::new("recovery cleanup requested by user")
-                    .context("recovery cleanup stop reason must not be empty")?;
-                let run = if phase == TaskRunStateKind::Stopping {
-                    run
-                } else {
-                    super::apply_task_command(
-                        &tx,
-                        run,
-                        TaskCommand::RequestStop((TaskStopOrigin::UserRequest, reason, now).into()),
-                    )
-                    .await?
-                };
-                let stopping = super::task_run_record(run.clone())?;
-                super::write_task_terminal_fact(
-                    &tx,
-                    run,
-                    TaskRunStateKind::Cancelled,
-                    Some("recovery cleanup requested by user".to_string()),
-                    Some(stopping.generation()),
-                )
-                .await?;
-            }
+            let _record = super::task_run_record(run)?;
 
             let work_units = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -75,10 +49,6 @@ impl StudioStore {
                     .await?;
                 }
             }
-            entities::project_lease::Entity::delete_many()
-                .filter(entities::project_lease::Column::TaskRunId.eq(task_run_id.to_string()))
-                .exec(&tx)
-                .await?;
             Ok(())
         }
         .await;

@@ -1,15 +1,9 @@
-//! 重启后活动 Task 的恢复扫描与恢复问题收集。
+//! 重启后恢复活动任务的模型执行与独立资源；恢复问题不改变主任务状态。
 
 use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
-use super::leases::{BranchKey, acquire_process_lease, release_process_lease};
-use super::{
-    MergingRecovery, TaskCoordinator, TaskRecoveryReport, TaskRun, TaskRunStateKind,
-    inspect_merging_recovery, is_retryable_merge_recovery_message,
-    resolve_worktree_recovery_groups,
-};
-
+use super::{TaskCoordinator, TaskRecoveryReport, TaskRun, resolve_worktree_recovery_groups};
 use crate::studio::runtime_state::{
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope,
@@ -21,32 +15,12 @@ impl TaskCoordinator {
         let mut prepared = Vec::new();
         let mut failed_agent_runs = HashSet::new();
         for run in self.store.list_active_task_runs().await? {
-            let key = BranchKey::new(&run.project_id);
-            if let Err(error) = acquire_process_lease(&key, &run.id) {
-                let message = error.to_string();
-                self.block_run(&run, message.clone()).await?;
-                self.push_recovery_issue(
-                    &mut report,
-                    &run,
-                    StudioRecoveryIssueScope::Thread,
-                    StudioRecoveryIssueCategory::ProcessLease,
-                    StudioRecoveryIssueAction::CleanupThread,
-                    message,
-                )
-                .await?;
-                continue;
-            }
-            self.owned_process_leases
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(key, run.id.clone());
             if let Err(error) = self
                 .store
                 .reconcile_task_agents_after_restart(&run.id)
                 .await
             {
                 let message = format!("agent restart reconciliation failed: {error}");
-                self.block_run(&run, message.clone()).await?;
                 self.push_recovery_issue(
                     &mut report,
                     &run,
@@ -59,36 +33,12 @@ impl TaskCoordinator {
                 failed_agent_runs.insert(run.id.clone());
                 continue;
             }
-            let run = self
-                .store
-                .read_task_run(&run.id)
-                .await?
-                .context("task run disappeared after agent restart reconciliation")?;
-            if run.kind() == TaskRunStateKind::Stopping {
-                let reason = run
-                    .stop_reason()
-                    .map_or("task stop resumed after restart", |reason| reason.as_str());
-                if let Err(error) = self
-                    .store
-                    .settle_agents_for_task_stop(&run.id, run.generation(), reason)
-                    .await
-                {
-                    let message = format!("task stop recovery settlement failed: {error}");
-                    self.block_run(&run, message.clone()).await?;
-                    self.push_recovery_issue(
-                        &mut report,
-                        &run,
-                        StudioRecoveryIssueScope::Thread,
-                        StudioRecoveryIssueCategory::AgentState,
-                        StudioRecoveryIssueAction::CleanupThread,
-                        message,
-                    )
-                    .await?;
-                    failed_agent_runs.insert(run.id.clone());
-                    continue;
-                }
-            }
-            prepared.push(run);
+            prepared.push(
+                self.store
+                    .read_task_run(&run.id)
+                    .await?
+                    .context("task run disappeared after restart reconciliation")?,
+            );
         }
 
         let owners = self.store.list_all_task_worktree_owners().await?;
@@ -97,9 +47,6 @@ impl TaskCoordinator {
         for failure in preflight.failures {
             for run in &failure.runs {
                 failed_preflight_runs.insert(run.id.clone());
-                if !run.kind().is_terminal() {
-                    self.block_run(run, failure.message.clone()).await?;
-                }
                 self.push_recovery_issue(
                     &mut report,
                     run,
@@ -111,107 +58,53 @@ impl TaskCoordinator {
                 .await?;
             }
         }
-        let groups = preflight.groups;
+
         let run_groups = preflight.run_groups;
-        let skipped_groups = failed_agent_runs
-            .iter()
-            .filter_map(|run_id| run_groups.get(run_id).cloned())
-            .collect::<HashSet<_>>();
         let mut successful_groups = HashSet::new();
-        for (key, group) in groups {
-            if skipped_groups.contains(&key) {
+        for (key, group) in preflight.groups {
+            if group
+                .owners
+                .iter()
+                .any(|owner| failed_agent_runs.contains(&owner.run.id))
+            {
                 continue;
             }
             if group.owners.iter().all(|owner| owner.resources.is_empty()) {
                 successful_groups.insert(key);
                 continue;
             }
-            if let Err(error) = self
+            match self
                 .reconcile_durable_worktrees(&group.repositories, &group.owners)
                 .await
             {
-                let message = format!("worktree restart reconciliation failed: {error}");
-                let affected = prepared
-                    .iter()
-                    .filter(|run| run_groups.get(&run.id) == Some(&key))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                for run in &affected {
-                    self.block_run(run, message.clone()).await?;
+                Ok(()) => {
+                    successful_groups.insert(key);
                 }
-                for owner in &group.owners {
-                    self.push_recovery_issue(
-                        &mut report,
-                        &owner.run,
-                        StudioRecoveryIssueScope::Thread,
-                        StudioRecoveryIssueCategory::Worktree,
-                        StudioRecoveryIssueAction::CleanupThread,
-                        message.clone(),
-                    )
-                    .await?;
+                Err(error) => {
+                    let message = format!("worktree restart reconciliation failed: {error}");
+                    for owner in &group.owners {
+                        self.push_recovery_issue(
+                            &mut report,
+                            &owner.run,
+                            StudioRecoveryIssueScope::Thread,
+                            StudioRecoveryIssueCategory::Worktree,
+                            StudioRecoveryIssueAction::CleanupThread,
+                            message.clone(),
+                        )
+                        .await?;
+                    }
                 }
-                continue;
             }
-            successful_groups.insert(key);
         }
 
-        for run in prepared {
-            if failed_preflight_runs.contains(&run.id) {
-                continue;
-            }
-            if !run_groups
-                .get(&run.id)
-                .is_some_and(|group| successful_groups.contains(group))
-            {
-                continue;
-            }
-            if run.kind() == TaskRunStateKind::Merging {
-                match inspect_merging_recovery(&run).await {
-                    MergingRecovery::Resume => report.recovered_runs.push(run),
-                }
-                continue;
-            }
-            if run.kind() == TaskRunStateKind::Stopping {
-                let reason = run
-                    .stop_reason()
-                    .map_or("task stop resumed after restart", |reason| reason.as_str());
-                let guard = self.lock_branch_mutation().await;
-                if let Err(error) = self
-                    .stop_task_locked(&run.id, run.generation(), reason, &guard)
-                    .await
-                {
-                    drop(guard);
-                    let message = format!("task stop recovery failed: {error}");
-                    self.block_run(&run, message.clone()).await?;
-                    self.push_recovery_issue(
-                        &mut report,
-                        &run,
-                        StudioRecoveryIssueScope::Thread,
-                        StudioRecoveryIssueCategory::AgentState,
-                        StudioRecoveryIssueAction::CleanupThread,
-                        message,
-                    )
-                    .await?;
-                }
-                continue;
-            }
-            report.recovered_runs.push(run);
-        }
-        for run in self.store.list_retryable_blocked_merge_task_runs().await? {
-            let message = run
-                .status_message()
-                .map(str::to_string)
-                .context("retryable merge recovery task is missing its diagnostic")?;
-            self.push_recovery_issue(
-                &mut report,
-                &run,
-                StudioRecoveryIssueScope::Thread,
-                StudioRecoveryIssueCategory::Merge,
-                StudioRecoveryIssueAction::Retry,
-                message,
-            )
-            .await?;
-        }
+        report
+            .recovered_runs
+            .extend(prepared.into_iter().filter(|run| {
+                !failed_preflight_runs.contains(&run.id)
+                    && run_groups
+                        .get(&run.id)
+                        .is_none_or(|group| successful_groups.contains(group))
+            }));
         Ok(report)
     }
 
@@ -219,41 +112,8 @@ impl TaskCoordinator {
         &self,
         issue: &StudioRecoveryIssue,
     ) -> Result<TaskRun> {
-        if issue.action != StudioRecoveryIssueAction::Retry
-            || issue.category != StudioRecoveryIssueCategory::Merge
-        {
-            bail!("recovery issue does not authorize merge reconciliation");
-        }
-        let task_run_id = issue
-            .task_run_id
-            .as_deref()
-            .context("merge recovery issue has no task run")?;
-        let run = self
-            .store
-            .read_task_run(task_run_id)
-            .await?
-            .context("merge recovery task run not found")?;
-        if run.kind() != TaskRunStateKind::Blocked
-            || run.root_thread_id != issue.thread_id.as_deref().unwrap_or_default()
-            || run.status_message() != Some(issue.message.as_str())
-            || !is_retryable_merge_recovery_message(&issue.message)
-        {
-            bail!("merge recovery state changed before retry");
-        }
-        let key = BranchKey::new(&run.project_id);
-        acquire_process_lease(&key, &run.id)?;
-        let retried = match self.store.retry_blocked_merge_task(&run).await {
-            Ok(retried) => retried,
-            Err(error) => {
-                release_process_lease(&key, &run.id);
-                return Err(error);
-            }
-        };
-        self.owned_process_leases
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key, retried.id.clone());
-        Ok(retried)
+        let _ = issue;
+        bail!("resource issues are resolved through task_transition.resolveIssue")
     }
 
     async fn push_recovery_issue(

@@ -149,7 +149,10 @@ class ThreadStatusBar extends ConsumerWidget {
                         mode: thread.mode,
                       ),
                     if (runtime.task case final task?)
-                      _TaskRuntimeReadout(task: task),
+                      _TaskRuntimeReadout(
+                        task: task,
+                        rootThreadId: thread.rootThreadId,
+                      ),
                     ContextUsageReadout(runtime: runtime),
                     if (showLspActivity && lspActiveServers.isNotEmpty)
                       _LspActivityReadout(servers: lspActiveServers),
@@ -300,15 +303,24 @@ class _LspActivityDetail extends StatelessWidget {
 }
 
 class _TaskRuntimeReadout extends StatelessWidget {
-  const _TaskRuntimeReadout({required this.task});
+  const _TaskRuntimeReadout({required this.task, required this.rootThreadId});
 
   final TaskRuntimeView task;
+  final String rootThreadId;
 
   @override
   Widget build(BuildContext context) {
-    final failure = task.terminalFailure ?? task.failures.lastOrNull;
-    final status = failure?.message ?? task.statusMessage ?? '';
-    final fatal = failure?.isFatal ?? false;
+    final issue = task.issues.lastOrNull;
+    final failedOutcome = switch (task.state) {
+      CompletedTaskStateView(outcome: final FailedTaskOutcomeView outcome) =>
+        outcome,
+      _ => null,
+    };
+    final status =
+        failedOutcome?.summary ?? issue?.message ?? task.stateSummary;
+    final fatal =
+        failedOutcome?.kind == TaskFailureKindView.fatal ||
+        (issue?.isFatal ?? false);
     final tooltip = status.isEmpty
         ? '${context.taskPhaseLabel(task.state.kind)} · ${task.runId}'
         : '${fatal ? context.l10n.statusTaskFailed : context.taskPhaseLabel(task.state.kind)} · $status';
@@ -321,19 +333,20 @@ class _TaskRuntimeReadout extends StatelessWidget {
           key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
           icon: fatal
               ? Icons.error_outline
-              : failure == null
+              : issue == null
               ? Icons.route_outlined
               : Icons.warning_amber_outlined,
           label: fatal
               ? context.l10n.statusTaskFailed
-              : failure == null
+              : issue == null
               ? context.taskPhaseLabel(task.state.kind)
               : context.l10n.statusTaskRecoverable,
           tooltip: tooltip,
           maxWidth: 120,
           interactive: true,
           detailWidth: 560,
-          detailBuilder: (context) => TaskRuntimeDetail(task: task),
+          detailBuilder: (context) =>
+              TaskRuntimeDetail(task: task, rootThreadId: rootThreadId),
         ),
       ),
     );

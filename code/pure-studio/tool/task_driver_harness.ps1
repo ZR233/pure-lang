@@ -820,14 +820,14 @@ try {
         '--plan-timeout-seconds', $PlanTimeoutSeconds.ToString(),
         '--task-timeout-seconds', $TaskTimeoutSeconds.ToString(),
         '--stall-timeout-seconds', $StallTimeoutSeconds.ToString()
-        '--expected-task-phase', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'failed' } else { 'completed' })
+        '--expected-task-outcome', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'failed' } else { 'succeeded' })
         '--expect-budget-recovery', $exerciseBudgetRecoveryEnabled.ToString().ToLowerInvariant()
     )
     if ($isScripted -and $Mode -eq 'New') {
         $driverArguments += @('--inject-snapshot-disconnect', 'true')
     }
     if ($Mode -eq 'New' -and $exerciseRecoveryEnabled) {
-        $driverArguments += @('--stop-at-recovery-pause', 'true')
+        $driverArguments += @('--stop-at-recovery-point', 'true')
     }
     if ($Mode -eq 'New') {
         $driverArguments += @('--prompt-file', $PromptFile)
@@ -913,11 +913,11 @@ try {
     if ([int]$manifest['originalPromptSubmissionCount'] -ne 1) {
         throw "acceptance requires exactly one original Prompt submission; observed $($manifest['originalPromptSubmissionCount'])"
     }
-    if (Test-JsonLogEvent -Path $driverStdout -Event 'taskPausedForRecovery') {
+    if (Test-JsonLogEvent -Path $driverStdout -Event 'taskAwaitingConversationRecovery') {
         if (-not $exerciseRecoveryEnabled -or $Mode -ne 'New') {
-            throw 'Task Driver stopped at a recovery pause outside the scripted New recovery scenario'
+            throw 'Task Driver stopped at a conversation recovery point outside the scripted New recovery scenario'
         }
-        $attemptRecord['status'] = 'paused'
+        $attemptRecord['status'] = 'needsRecovery'
     }
     elseif ($Mode -eq 'Observe') {
         $attemptRecord['status'] = 'observed'
@@ -928,8 +928,8 @@ try {
     $attemptRecord['finishedAt'] = [DateTime]::UtcNow.ToString('O')
     Write-AcceptanceManifest -Path $manifestPath -Manifest $manifest
 
-    if ($attemptRecord['status'] -eq 'paused') {
-        Write-Output "Task Driver paused durably for recovery. Continue with -Mode Resume and the same DriverHome."
+    if ($attemptRecord['status'] -eq 'needsRecovery') {
+        Write-Output "Task Driver reached a durable conversation recovery point. Continue with -Mode Resume and the same DriverHome."
     }
     elseif ($attemptRecord['status'] -eq 'observed') {
         Write-Output "Task Driver observed durable state successfully."

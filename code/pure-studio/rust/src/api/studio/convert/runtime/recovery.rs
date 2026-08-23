@@ -94,8 +94,6 @@ pub(crate) fn bridge_task_recovery_preview(
         revision: preview.revision,
         task_generation: preview.task_generation,
         state: bridge_task_recovery_state(preview.state),
-        stop_requested: preview.stop_requested,
-        project_lease_id: preview.project_lease_id,
         recommended_thread_id: preview.recommended_thread_id,
         targets: preview
             .targets
@@ -113,16 +111,12 @@ const fn bridge_task_recovery_state(
 ) -> BridgeTaskRecoveryState {
     use pl_protocol::studio::StudioTaskRecoveryState as Source;
     match state {
-        Source::DesignUpdating => BridgeTaskRecoveryState::DesignUpdating,
-        Source::Implementing => BridgeTaskRecoveryState::Implementing,
-        Source::Merging => BridgeTaskRecoveryState::Merging,
+        Source::Planning => BridgeTaskRecoveryState::Planning,
+        Source::PendingConfirmation => BridgeTaskRecoveryState::PendingConfirmation,
+        Source::EditingDocuments => BridgeTaskRecoveryState::EditingDocuments,
+        Source::Working => BridgeTaskRecoveryState::Working,
         Source::Reviewing => BridgeTaskRecoveryState::Reviewing,
-        Source::Reworking => BridgeTaskRecoveryState::Reworking,
-        Source::Stopping => BridgeTaskRecoveryState::Stopping,
-        Source::Blocked => BridgeTaskRecoveryState::Blocked,
         Source::Completed => BridgeTaskRecoveryState::Completed,
-        Source::Failed => BridgeTaskRecoveryState::Failed,
-        Source::Cancelled => BridgeTaskRecoveryState::Cancelled,
     }
 }
 
@@ -131,16 +125,12 @@ const fn protocol_task_recovery_state(
 ) -> pl_protocol::studio::StudioTaskRecoveryState {
     use pl_protocol::studio::StudioTaskRecoveryState as Target;
     match state {
-        BridgeTaskRecoveryState::DesignUpdating => Target::DesignUpdating,
-        BridgeTaskRecoveryState::Implementing => Target::Implementing,
-        BridgeTaskRecoveryState::Merging => Target::Merging,
+        BridgeTaskRecoveryState::Planning => Target::Planning,
+        BridgeTaskRecoveryState::PendingConfirmation => Target::PendingConfirmation,
+        BridgeTaskRecoveryState::EditingDocuments => Target::EditingDocuments,
+        BridgeTaskRecoveryState::Working => Target::Working,
         BridgeTaskRecoveryState::Reviewing => Target::Reviewing,
-        BridgeTaskRecoveryState::Reworking => Target::Reworking,
-        BridgeTaskRecoveryState::Stopping => Target::Stopping,
-        BridgeTaskRecoveryState::Blocked => Target::Blocked,
         BridgeTaskRecoveryState::Completed => Target::Completed,
-        BridgeTaskRecoveryState::Failed => Target::Failed,
-        BridgeTaskRecoveryState::Cancelled => Target::Cancelled,
     }
 }
 
@@ -174,7 +164,6 @@ pub(crate) fn bridge_task_recovery_result(
         after_transcript_hash: result.after_transcript_hash,
         removed_item_count: result.removed_item_count,
         removed_input_count: result.removed_input_count,
-        stop_cleared: result.stop_cleared,
         resume_turn_id: result.resume_turn_id,
     }
 }
@@ -239,8 +228,6 @@ fn task_recovery_preview_from_bridge(
         revision: preview.revision,
         task_generation: preview.task_generation,
         state: protocol_task_recovery_state(preview.state),
-        stop_requested: preview.stop_requested,
-        project_lease_id: preview.project_lease_id,
         recommended_thread_id: preview.recommended_thread_id,
         targets: preview
             .targets

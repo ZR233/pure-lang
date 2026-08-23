@@ -1,17 +1,11 @@
 use anyhow::{Context, Result};
 use pl_protocol::AgentWorkingState;
-#[cfg(test)]
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr,
 };
 
 use crate::studio::entity as entities;
-#[cfg(test)]
-use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
-#[cfg(test)]
-use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
     ExecutorContinuationRequest, ExecutorContinuationStateKind, TASK_EXECUTOR_HANDOFF_SECTION_ID,
     TaskExecutorHandoff, WorkUnit, WorkUnitCommand, WorkUnitContext, WorkUnitState,
@@ -19,79 +13,6 @@ use crate::studio::task_coordinator::{
 };
 
 impl StudioStore {
-    #[cfg(test)]
-    pub(crate) async fn create_work_unit(&self, input: CreateWorkUnit) -> Result<WorkUnit> {
-        let now = unix_seconds();
-        work_unit_record(
-            entities::work_unit::ActiveModel {
-                id: Set(new_id("work-unit")),
-                task_run_id: Set(input.task_run_id),
-                title: Set(input.title),
-                scope_hints_json: Set(serde_json::to_string(&input.scope_hints)?),
-                base_commit: Set(input.base_commit),
-                worktree_path: Set(input.worktree_path),
-                branch: Set(input.branch),
-                attempt: Set(input.attempt as i32),
-                executor_thread_id: Set(None),
-                requested_by_call_id: Set(String::new()),
-                state_json: Set(serde_json::to_string(&WorkUnitState::pending())?),
-                revision: Set(0),
-                created_at: Set(now),
-                updated_at: Set(now),
-                ..Default::default()
-            }
-            .insert(&self.db)
-            .await?,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn update_work_unit(
-        &self,
-        work_unit_id: &str,
-        state: WorkUnitState,
-        executor_thread_id: Option<String>,
-    ) -> Result<WorkUnit> {
-        let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
-            .one(&self.db)
-            .await?
-            .context("work unit not found")?;
-        let next_revision = model
-            .revision
-            .checked_add(1)
-            .context("WorkUnit revision overflow")?;
-        let result = entities::work_unit::Entity::update_many()
-            .col_expr(
-                entities::work_unit::Column::ExecutorThreadId,
-                Expr::value(executor_thread_id),
-            )
-            .col_expr(
-                entities::work_unit::Column::StateJson,
-                Expr::value(serde_json::to_string(&state)?),
-            )
-            .col_expr(
-                entities::work_unit::Column::Revision,
-                Expr::value(next_revision),
-            )
-            .col_expr(
-                entities::work_unit::Column::UpdatedAt,
-                Expr::value(unix_seconds()),
-            )
-            .filter(entities::work_unit::Column::Id.eq(model.id.clone()))
-            .filter(entities::work_unit::Column::Revision.eq(model.revision))
-            .exec(&self.db)
-            .await?;
-        if result.rows_affected != 1 {
-            anyhow::bail!("WorkUnit test update lost its revision CAS");
-        }
-        work_unit_record(
-            entities::work_unit::Entity::find_by_id(model.id)
-                .one(&self.db)
-                .await?
-                .context("WorkUnit disappeared after test update")?,
-        )
-    }
-
     #[cfg(test)]
     pub(crate) async fn update_work_unit_state_for_test(
         &self,
@@ -124,11 +45,13 @@ impl StudioStore {
             .executor_thread_id
             .as_deref()
             .context("executor work unit has no executor Thread identity")?;
-        let row =
+        let Some(row) =
             entities::thread_session_state::Entity::find_by_id(executor_thread_id.to_string())
                 .one(&self.db)
                 .await?
-                .context("executor session state is missing")?;
+        else {
+            return Ok(None);
+        };
         let state =
             AgentWorkingState::try_from(row).map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let sections = state
@@ -271,6 +194,7 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
             worktree_path: model.worktree_path,
             branch: model.branch,
             attempt: u32::try_from(model.attempt).context("work unit attempt is negative")?,
+            supersedes_work_unit_id: model.supersedes_work_unit_id,
             executor_thread_id: model.executor_thread_id,
             requested_by_call_id: model.requested_by_call_id,
         },

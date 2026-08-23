@@ -1,7 +1,6 @@
 mod agent_projection;
 mod completion;
 mod coordinator;
-mod design;
 pub(crate) mod git;
 mod merge;
 mod merge_cleanup;
@@ -10,19 +9,15 @@ pub(crate) mod review;
 mod review_round;
 mod scope_hint;
 mod spawn;
-mod task_failure;
+mod task_issue;
 mod task_run;
-#[cfg(test)]
-pub(crate) mod test_support;
+mod transition;
 mod types;
 mod work_completion;
 mod work_unit;
 
 pub(crate) use coordinator::*;
 pub(crate) use merge_cleanup::*;
-#[cfg(test)]
-pub(crate) use recovery::MERGE_RECOVERY_BLOCK_PREFIX;
-pub(crate) use recovery::is_retryable_merge_recovery_message;
 pub(crate) use review_round::*;
 pub(crate) use spawn::{
     OperationalTaskSpawnFailure, StudioSpawnIntent, StudioTaskSpawnPreparation,
@@ -30,11 +25,8 @@ pub(crate) use spawn::{
     TaskSpawnCompensation, TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode,
     TaskSpawnFailurePhase, TaskSpawnNextAction, TaskSpawnResource,
 };
-pub(crate) use task_failure::*;
+pub(crate) use task_issue::*;
 pub(crate) use task_run::*;
 pub(crate) use types::*;
 pub(crate) use work_completion::*;
 pub(crate) use work_unit::*;
-
-#[cfg(test)]
-mod unit_tests;

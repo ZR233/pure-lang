@@ -24,7 +24,7 @@ resource ownership, worktrees, delivery contracts, review authorization, or fres
 generic collaboration does not model. In Pure Studio Task mode, use `spawn_agent` only for
 explorers and `task_spawn_executor` for executors. Request review with
 `task_request_delivery_review` for an exact executor completion or
-`task_request_integrated_review` for the current integrated Task HEAD.
+`task_transition` with action `beginIntegratedReview` for the current integrated Task HEAD.
 
 ## Partitioning
 

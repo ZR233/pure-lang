@@ -11,13 +11,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 
+use super::transition::TransitionPath;
 use super::{
     BeginIntegratedReview, MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewRoundStateKind,
-    ReviewScope, ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff, TaskRun,
-    TaskRunStateKind, WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnit,
-    WorkUnitState, WorkUnitStateKind,
+    ReviewScope, ReviewVerdict, StudioSpawnIntent, TaskCoordinator, TaskExecutorHandoff,
+    TaskOutcome, TaskRun, TaskRunState, TaskRunStateKind, WorkCompletionKind, WorkCompletionRecord,
+    WorkCompletionStatus, WorkUnit, WorkUnitState, WorkUnitStateKind, current_work_units,
 };
 use crate::agent::worktree::git_compatible_path;
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
@@ -37,10 +39,6 @@ struct RequestDeliveryReviewInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RequestIntegratedReviewInput {}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 struct TaskStatusInput {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -51,7 +49,7 @@ struct ReadWorkUnitHandoffInput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RequestReviewOutput {
+pub(super) struct RequestReviewOutput {
     review_round_id: String,
     reviewer_agent_id: String,
     scope: ReviewScope,
@@ -64,14 +62,93 @@ struct RequestReviewOutput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskStatusOutput {
-    run: TaskRun,
-    integrated_review_gate: StudioIntegratedReviewGate,
+    task: ModelTaskStatus,
+    execution_activity: ModelExecutionActivity,
+    progress: ModelTaskProgress,
+    issues: Vec<super::TaskIssueRecord>,
+    completion_gate: ModelCompletionGate,
+    available_actions: Vec<TransitionPath>,
+    latest_completed_task: Option<ModelTaskStatus>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelTaskStatus {
+    task_run_id: String,
+    state: TaskRunState,
+    outcome: Option<TaskOutcome>,
+    revision: u64,
+    generation: u64,
+}
+
+impl ModelTaskStatus {
+    fn from_run(run: &TaskRun) -> Self {
+        Self {
+            task_run_id: run.id.clone(),
+            state: run.state.clone(),
+            outcome: run.state.outcome().cloned(),
+            revision: run.revision,
+            generation: run.generation(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ModelExecutionActivity {
+    planner_turns: Vec<ModelAgentExecution>,
+    executor_turns: Vec<ModelAgentExecution>,
+    reviewer_turns: Vec<ModelAgentExecution>,
+    queued_turns: Vec<ModelQueuedTurn>,
+    last_stop: Option<ModelStopEvent>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelAgentExecution {
+    agent_id: String,
+    role: String,
+    active_turn_id: Option<String>,
+    pending_inputs: usize,
+    state: serde_json::Value,
+    updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelQueuedTurn {
+    agent_id: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelStopEvent {
+    generation: u64,
+    origin: String,
+    reason: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelTaskProgress {
     work_units: Vec<ModelWorkUnit>,
     completions: Vec<ModelCompletion>,
     merge_candidates: Vec<MergeCandidate>,
-    merges: Vec<MergeRecord>,
+    merge_records: Vec<MergeRecord>,
     /// 概览：省略 findings 明细（由 `read_review_round` 分页全量读取，保证不截断）。
-    reviews: Vec<ModelReviewOverview>,
+    review_rounds: Vec<ModelReviewOverview>,
+    pending_interactions: Vec<pl_protocol::InteractionRequest>,
+    todo: Option<pl_protocol::TodoListSnapshot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelCompletionGate {
+    available: bool,
+    review_gate: StudioIntegratedReviewGate,
+    blockers: Vec<String>,
 }
 
 /// 单轮审查的概览投影：保留裁决与摘要，省略 findings 明细。
@@ -168,6 +245,7 @@ pub(super) struct ModelWorkUnit {
     relative_worktree_path: Option<String>,
     branch: String,
     attempt: u32,
+    supersedes_work_unit_id: Option<String>,
     executor_thread_id: Option<String>,
     requested_by_call_id: String,
     budget_slice_limit: u32,
@@ -225,76 +303,70 @@ impl TaskCoordinator {
                     .store
                     .begin_delivery_review(&thread_id, input.executor_agent_id.trim(), &call_id)
                     .await?;
-                coordinator
+                let output = coordinator
                     .spawn_reviewer(&thread_id, round, &call_id, &runtime)
-                    .await
+                    .await?;
+                ToolExecutionResult::<serde_json::Value>::json(output)
+                    .map(ToolExecutionResult::ending_turn)
+                    .map_err(anyhow::Error::from)
             }
         })
         .with_effect(ToolEffect::BranchControl)
     }
 
-    pub(crate) fn task_request_integrated_review_tool(
+    pub(super) async fn begin_integrated_review_transition(
         self: &Arc<Self>,
-        thread_id: impl Into<String>,
-        runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
-        let coordinator = self.clone();
-        let thread_id = thread_id.into();
-        FunctionToolDefinition::<RequestIntegratedReviewInput>::new(
-            "task_request_integrated_review",
-            "Start one fresh read-only integrated review for the durable integration declarations.",
-        )
-        .registered(move |_: RequestIntegratedReviewInput, context| {
-            let coordinator = coordinator.clone();
-            let thread_id = thread_id.clone();
-            let runtime = runtime.clone();
-            async move {
-                let call_id = provider_call_id(
-                    context.provider_call_id.as_deref(),
-                    "task_request_integrated_review",
-                )?;
-                let guard = coordinator.lock_branch_mutation().await;
-                let run = coordinator
-                    .preflight_integrated_review_locked(&thread_id, &guard)
-                    .await?;
-                let merges = coordinator.store.list_merge_records(&run.id).await?;
-                let completions = coordinator.store.list_work_completions(&run.id).await?;
-                let reviewed_head = merges
-                    .iter()
-                    .max_by_key(|merge| (merge.created_at, &merge.id))
-                    .map(|merge| merge.resulting_head.clone())
-                    .context("integrated review requires durable merge evidence")?;
-                let merged_completion_ids = merges
-                    .iter()
-                    .map(|merge| merge.completion_id.as_str())
-                    .collect::<std::collections::HashSet<_>>();
-                let mut changed_files = completions
-                    .iter()
-                    .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
-                    .flat_map(|completion| completion.changed_files().iter().cloned())
-                    .filter(|path| !path.starts_with("design/"))
-                    .collect::<Vec<_>>();
-                changed_files.sort();
-                changed_files.dedup();
-                let round = coordinator
-                    .store
-                    .begin_integrated_review(
-                        &thread_id,
-                        BeginIntegratedReview {
-                            requested_by_call_id: call_id.clone(),
-                            reviewed_head: reviewed_head.clone(),
-                            changed_files,
-                        },
-                    )
-                    .await?;
-                drop(guard);
-                debug_assert_eq!(round.reviewed_head, reviewed_head);
-                coordinator
-                    .spawn_reviewer(&thread_id, round, &call_id, &runtime)
-                    .await
-            }
-        })
-        .with_effect(ToolEffect::BranchControl)
+        thread_id: &str,
+        call_id: &str,
+        expected_revision: u64,
+        expected_generation: u64,
+        runtime: &AgentRuntimeHandle,
+    ) -> Result<RequestReviewOutput> {
+        let guard = self.lock_branch_mutation().await;
+        let run = self
+            .preflight_integrated_review_locked(thread_id, &guard)
+            .await?;
+        let (reviewed_head, changed_files) = if let Some(target) = run.state.review_target() {
+            (target.reviewed_head.clone(), target.changed_files.clone())
+        } else {
+            let merges = self.store.list_merge_records(&run.id).await?;
+            let completions = self.store.list_work_completions(&run.id).await?;
+            let reviewed_head = merges
+                .iter()
+                .max_by_key(|merge| (merge.created_at, &merge.id))
+                .map(|merge| merge.resulting_head.clone())
+                .context("integrated review requires durable merge evidence")?;
+            let merged_completion_ids = merges
+                .iter()
+                .map(|merge| merge.completion_id.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            let mut changed_files = completions
+                .iter()
+                .filter(|completion| merged_completion_ids.contains(completion.id.as_str()))
+                .flat_map(|completion| completion.changed_files().iter().cloned())
+                .filter(|path| !path.starts_with("design/"))
+                .collect::<Vec<_>>();
+            changed_files.sort();
+            changed_files.dedup();
+            (reviewed_head, changed_files)
+        };
+        let round = self
+            .store
+            .begin_integrated_review(
+                thread_id,
+                BeginIntegratedReview {
+                    requested_by_call_id: call_id.to_string(),
+                    expected_revision,
+                    expected_generation,
+                    reviewed_head: reviewed_head.clone(),
+                    changed_files,
+                },
+            )
+            .await?;
+        drop(guard);
+        debug_assert_eq!(round.reviewed_head, reviewed_head);
+        self.spawn_reviewer(thread_id, round, call_id, runtime)
+            .await
     }
 
     pub(crate) fn task_status_tool(
@@ -313,10 +385,18 @@ impl TaskCoordinator {
                 let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
-                    let run = coordinator
+                    let run = match coordinator
                         .store
-                        .read_active_task_run_for_root_thread(&thread_id)
-                        .await?;
+                        .find_active_task_run_for_root_thread(&thread_id)
+                        .await?
+                    {
+                        Some(run) => run,
+                        None => coordinator
+                            .store
+                            .find_latest_task_run_for_root_thread(&thread_id)
+                            .await?
+                            .context("TaskRun not found for this root Thread")?,
+                    };
                     let work_units = coordinator.store.list_work_units(&run.id).await?;
                     let completions = coordinator.store.list_work_completions(&run.id).await?;
                     let merges = coordinator.store.list_merge_records(&run.id).await?;
@@ -339,7 +419,8 @@ impl TaskCoordinator {
                     )
                     .await;
                     let reviews = review_records
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(ModelReviewOverview::from)
                         .collect::<Vec<_>>();
                     let mut model_work_units = Vec::with_capacity(work_units.len());
@@ -357,17 +438,62 @@ impl TaskCoordinator {
                             handoff.as_ref(),
                         ));
                     }
+                    let pending_interactions = coordinator
+                        .store
+                        .list_pending_interactions(&run.root_thread_id)
+                        .await?;
+                    let todo = coordinator.store.read_thread_todo(&run.root_thread_id).await?;
+                    let issues = coordinator.store.list_task_issues(&run.id).await?;
+                    let execution_activity = coordinator
+                        .model_execution_activity(&run, runtime.as_ref())
+                        .await?;
+                    let completion_blockers = completion_blockers(
+                        &run,
+                        &work_units,
+                        &review_records,
+                        &pending_interactions,
+                        todo.as_ref(),
+                        &integrated_review_gate,
+                        &execution_activity,
+                    );
+                    let completion_gate = ModelCompletionGate {
+                        available: completion_blockers.is_empty(),
+                        review_gate: integrated_review_gate.clone(),
+                        blockers: completion_blockers.clone(),
+                    };
+                    let available_actions = coordinator
+                        .transition_paths(&run, runtime.as_ref())
+                        .await?;
+                    let latest_completed_task = coordinator
+                        .store
+                        .list_task_runs_for_project(&run.project_id)
+                        .await?
+                        .into_iter()
+                        .filter(|candidate| {
+                            candidate.id != run.id && candidate.kind().is_terminal()
+                        })
+                        .max_by_key(|candidate| (candidate.updated_at, candidate.id.clone()))
+                        .as_ref()
+                        .map(ModelTaskStatus::from_run);
                     let output = TaskStatusOutput {
+                        task: ModelTaskStatus::from_run(&run),
+                        execution_activity,
+                        progress: ModelTaskProgress {
                         work_units: model_work_units,
                         completions: completions
                             .iter()
                             .map(|completion| ModelCompletion::new(&run, completion))
                             .collect(),
                         merge_candidates,
-                        merges,
-                        reviews,
-                        integrated_review_gate,
-                        run,
+                            merge_records: merges,
+                            review_rounds: reviews,
+                            pending_interactions,
+                            todo,
+                        },
+                        issues,
+                        completion_gate,
+                        available_actions,
+                        latest_completed_task,
                     };
                     // task_status 是只读概览；放宽预算保证中小任务一次读全，超大任务
                     // 的 findings 明细由 read_review_round 分页补充。
@@ -429,7 +555,7 @@ impl TaskCoordinator {
         round: ReviewRoundRecord,
         call_id: &str,
         runtime: &AgentRuntimeHandle,
-    ) -> Result<ToolExecutionResult> {
+    ) -> Result<RequestReviewOutput> {
         let prompt = match prompt::build_review_prompt(self, &round).await {
             Ok(prompt) => prompt,
             Err(error) => {
@@ -468,7 +594,7 @@ impl TaskCoordinator {
                 return Err(anyhow::anyhow!(error.to_string()));
             }
         };
-        let mut output = ToolExecutionResult::<serde_json::Value>::json(RequestReviewOutput {
+        Ok(RequestReviewOutput {
             review_round_id: round.id,
             reviewer_agent_id: handle.snapshot.identity.id.to_string(),
             scope: round.scope,
@@ -477,11 +603,6 @@ impl TaskCoordinator {
             completion_revision: round.completion_revision,
             round: round.round,
         })
-        .map_err(anyhow::Error::from)?;
-        // Reviewer completion can change the Planner workspace mutability and tool policy.
-        // End this turn so the product-owned continuation prepares a fresh canonical workspace.
-        output.ends_turn = true;
-        Ok(output)
     }
 
     pub(super) async fn preflight_integrated_review_locked(
@@ -496,12 +617,79 @@ impl TaskCoordinator {
             .await?;
         if !matches!(
             run.kind(),
-            TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
+            TaskRunStateKind::Working | TaskRunStateKind::Reviewing
         ) {
-            bail!("integrated review requires implementing or reworking");
+            bail!("integrated review requires working or reviewing state");
         }
-        self.ensure_process_lease_owned(&run)?;
         Ok(run)
+    }
+
+    pub(super) async fn model_execution_activity(
+        &self,
+        run: &TaskRun,
+        runtime: Option<&AgentRuntimeHandle>,
+    ) -> Result<ModelExecutionActivity> {
+        let root = crate::studio::agent_host::root_agent_id(&run.root_thread_id);
+        let snapshots = match runtime {
+            Some(runtime) => runtime.list().await.map_err(anyhow::Error::msg)?,
+            None => Vec::new(),
+        };
+        let mut planner_turns = Vec::new();
+        let mut executor_turns = Vec::new();
+        let mut reviewer_turns = Vec::new();
+        let mut queued_turns = Vec::new();
+        for snapshot in snapshots.into_iter().filter(|snapshot| {
+            snapshot.identity.id == root || snapshot.identity.parent_id.as_ref() == Some(&root)
+        }) {
+            let role = if snapshot.identity.id == root {
+                "planner".to_string()
+            } else {
+                snapshot.identity.role.as_str().to_string()
+            };
+            if snapshot.pending_inputs > 0 {
+                queued_turns.push(ModelQueuedTurn {
+                    agent_id: snapshot.identity.id.to_string(),
+                    count: snapshot.pending_inputs,
+                });
+            }
+            let execution = ModelAgentExecution {
+                agent_id: snapshot.identity.id.to_string(),
+                role: role.clone(),
+                active_turn_id: snapshot.active_turn_id().map(ToString::to_string),
+                pending_inputs: snapshot.pending_inputs,
+                state: serde_json::to_value(&snapshot.state)?,
+                updated_at: snapshot.updated_at,
+            };
+            match role.as_str() {
+                "planner" => planner_turns.push(execution),
+                "executor" => executor_turns.push(execution),
+                "reviewer" => reviewer_turns.push(execution),
+                _ => {}
+            }
+        }
+        let last_stop = crate::studio::entity::task_stop_event::Entity::find()
+            .filter(crate::studio::entity::task_stop_event::Column::TaskRunId.eq(run.id.clone()))
+            .order_by_desc(crate::studio::entity::task_stop_event::Column::Generation)
+            .order_by_desc(crate::studio::entity::task_stop_event::Column::CreatedAt)
+            .one(self.store.database())
+            .await?
+            .map(|event| -> Result<ModelStopEvent> {
+                Ok(ModelStopEvent {
+                    generation: u64::try_from(event.generation)
+                        .context("task stop generation is negative")?,
+                    origin: event.origin,
+                    reason: event.reason,
+                    created_at: event.created_at,
+                })
+            })
+            .transpose()?;
+        Ok(ModelExecutionActivity {
+            planner_turns,
+            executor_turns,
+            reviewer_turns,
+            queued_turns,
+            last_stop,
+        })
     }
 
     async fn merge_candidates(
@@ -512,7 +700,7 @@ impl TaskCoordinator {
         merges: &[MergeRecord],
         runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<Vec<MergeCandidate>> {
-        if run.kind() != TaskRunStateKind::Merging {
+        if run.kind() != TaskRunStateKind::Working {
             return Ok(Vec::new());
         }
         let mut candidates = Vec::new();
@@ -583,6 +771,90 @@ impl TaskCoordinator {
     }
 }
 
+pub(super) fn completion_blockers(
+    run: &TaskRun,
+    work_units: &[WorkUnit],
+    reviews: &[ReviewRoundRecord],
+    pending_interactions: &[pl_protocol::InteractionRequest],
+    todo: Option<&pl_protocol::TodoListSnapshot>,
+    review_gate: &StudioIntegratedReviewGate,
+    execution: &ModelExecutionActivity,
+) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if !matches!(
+        run.kind(),
+        TaskRunStateKind::Working | TaskRunStateKind::Reviewing
+    ) {
+        blockers.push("成功完成要求任务处于 working 或 reviewing".to_string());
+    }
+    for unit in current_work_units(work_units) {
+        if unit.kind() != WorkUnitStateKind::Completed {
+            blockers.push(format!(
+                "当前有效工作单 {} 尚未结算，状态为 {}",
+                unit.id,
+                unit.kind().as_str()
+            ));
+        }
+    }
+    for review in reviews.iter().filter(|review| review.kind().is_active()) {
+        blockers.push(format!("审查轮 {} 尚未结束", review.id));
+    }
+    for interaction in pending_interactions {
+        blockers.push(format!("用户交互 {} 尚未处理", interaction.interaction_id));
+    }
+    if let Some(todo) = todo {
+        for item in todo
+            .items
+            .iter()
+            .filter(|item| item.status != pl_protocol::TodoStatus::Completed)
+        {
+            blockers.push(format!("待办尚未完成：{}", item.step));
+        }
+    }
+    for activity in execution
+        .executor_turns
+        .iter()
+        .chain(&execution.reviewer_turns)
+        .filter(|activity| activity.active_turn_id.is_some() || activity.pending_inputs > 0)
+    {
+        blockers.push(format!(
+            "{} {} 仍有模型执行活动",
+            activity.role, activity.agent_id
+        ));
+    }
+    if let StudioIntegratedReviewGate::Required { reason } = review_gate {
+        blockers.push(format!("综合审查门槛尚未满足：{reason}"));
+    }
+    blockers
+}
+
+pub(super) fn integrated_review_blockers(
+    run: &TaskRun,
+    work_units: &[WorkUnit],
+    reviews: &[ReviewRoundRecord],
+    merges: &[MergeRecord],
+) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if !matches!(
+        run.kind(),
+        TaskRunStateKind::Working | TaskRunStateKind::Reviewing
+    ) {
+        blockers.push("综合审查要求任务处于 working 或 reviewing".to_string());
+    }
+    for unit in current_work_units(work_units) {
+        if unit.kind() != WorkUnitStateKind::Completed {
+            blockers.push(format!("当前有效工作单 {} 尚未结算", unit.id));
+        }
+    }
+    for review in reviews.iter().filter(|review| review.kind().is_active()) {
+        blockers.push(format!("审查轮 {} 尚未结束", review.id));
+    }
+    if run.kind() == TaskRunStateKind::Working && merges.is_empty() {
+        blockers.push("没有可冻结的合并记录；无交付任务应直接完成".to_string());
+    }
+    blockers
+}
+
 impl ModelWorkUnit {
     pub(super) fn new(
         run: &TaskRun,
@@ -602,6 +874,7 @@ impl ModelWorkUnit {
             ),
             branch: work_unit.branch.clone(),
             attempt: work_unit.attempt,
+            supersedes_work_unit_id: work_unit.supersedes_work_unit_id.clone(),
             executor_thread_id: work_unit.executor_thread_id.clone(),
             requested_by_call_id: work_unit.requested_by_call_id.clone(),
             budget_slice_limit: super::MAX_EXECUTOR_BUDGET_SLICES,

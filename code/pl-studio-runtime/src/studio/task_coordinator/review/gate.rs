@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use super::super::{
     MergeRecord, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRun, WorkCompletionKind,
     WorkCompletionRecord, WorkCompletionStatus, WorkUnit, WorkUnitCompletionOutcome,
-    WorkUnitStateKind,
+    WorkUnitStateKind, current_work_units,
 };
 use crate::StudioIntegratedReviewGate;
 
@@ -38,7 +38,7 @@ pub(crate) async fn integrated_review_gate(
     }
 
     if merges.is_empty() {
-        return if work_units.iter().all(|work_unit| {
+        return if current_work_units(work_units).iter().all(|work_unit| {
             matches!(
                 work_unit.completion_outcome(),
                 Some(WorkUnitCompletionOutcome::NoDelivery { .. })

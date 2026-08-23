@@ -1,9 +1,11 @@
 use super::StudioStore;
-use crate::StudioMode;
+use crate::studio::task_coordinator::{
+    AllocateExecutor, CreateTaskRun, TaskWorktreeDisposition, WorkUnitState, current_work_units,
+};
+use crate::{PlanConfirmationResolution, PlanConfirmationResolutionPayload, StudioMode};
 use sea_orm::ConnectionTrait;
 
 mod schema;
-mod task_coordinator;
 
 #[tokio::test]
 async fn archive_thread_rolls_back_the_complete_tree_on_update_failure() {
@@ -110,4 +112,122 @@ async fn unregistered_child_spawn_failure_is_persisted_as_canonical_faulted_stat
         store.read_thread(&child_id).await.unwrap().unwrap().status,
         pl_protocol::ThreadStatus::Faulted
     );
+}
+
+#[tokio::test]
+async fn same_project_allows_independent_active_tasks_on_different_root_threads() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let first = store
+        .create_thread(&project.id, "First", StudioMode::Task)
+        .await
+        .unwrap();
+    let second = store
+        .create_thread(&project.id, "Second", StudioMode::Task)
+        .await
+        .unwrap();
+
+    for (thread, request) in [(&first, "first request"), (&second, "second request")] {
+        store
+            .create_task_run(CreateTaskRun {
+                project_id: project.id.clone(),
+                root_thread_id: thread.id.clone(),
+                request: request.to_string(),
+                workspace_root: workspace.path().to_string_lossy().to_string(),
+            })
+            .await
+            .unwrap();
+    }
+
+    let runs = store.list_task_runs_for_project(&project.id).await.unwrap();
+    assert_eq!(runs.len(), 2);
+    assert!(runs.iter().all(|run| run.kind().as_str() == "planning"));
+}
+
+#[tokio::test]
+async fn failed_executor_allocation_creates_an_explicit_attempt_chain() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Attempts", StudioMode::Task)
+        .await
+        .unwrap();
+    store
+        .create_task_run(CreateTaskRun {
+            project_id: project.id,
+            root_thread_id: thread.id.clone(),
+            request: "deliver feature".to_string(),
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+        })
+        .await
+        .unwrap();
+    let (pending, interaction) = store
+        .submit_task_plan(&thread.id, "implementation plan", "plan-call", 0, 0)
+        .await
+        .unwrap();
+    let (editing, _) = store
+        .resolve_task_plan_confirmation(
+            &interaction.interaction_id,
+            PlanConfirmationResolutionPayload {
+                decision: PlanConfirmationResolution::Confirm,
+                content: None,
+                reason: None,
+            },
+        )
+        .await
+        .unwrap();
+    let working = store
+        .finish_task_document_editing(
+            &thread.id,
+            editing.revision,
+            editing.generation(),
+            "documents ready",
+        )
+        .await
+        .unwrap();
+    assert!(working.revision > pending.revision);
+
+    let first = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread.id.clone(),
+            title: "implement feature".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "executor-1".to_string(),
+            requested_by_call_id: "spawn-call-1".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(first.work_unit.attempt, 1);
+    assert_eq!(first.work_unit.supersedes_work_unit_id, None);
+    store
+        .update_work_unit_state_for_test(
+            &first.work_unit.id,
+            WorkUnitState::failed_for_test(
+                "spawn-1",
+                "allocation failed",
+                TaskWorktreeDisposition::Protect,
+            ),
+        )
+        .await
+        .unwrap();
+
+    let second = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread.id,
+            title: "implement feature".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "executor-2".to_string(),
+            requested_by_call_id: "spawn-call-2".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(second.work_unit.attempt, 2);
+    assert_eq!(
+        second.work_unit.supersedes_work_unit_id.as_deref(),
+        Some(first.work_unit.id.as_str())
+    );
+    let units = store.list_work_units(&working.id).await.unwrap();
+    assert_eq!(current_work_units(&units), vec![&second.work_unit]);
 }

@@ -1,14 +1,14 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
-  testWidgets('task_complete rejection exposes its stable code and message', (
+  testWidgets('task_transition rejection exposes its stable code and message', (
     tester,
   ) async {
     final part = _toolTimelinePart(
       id: 'task-complete-1',
       groupId: 'task-complete-group',
       turnId: 'turn-task-complete',
-      name: 'task_complete',
+      name: 'task_transition',
       status: 'failed',
       result: jsonEncode({
         'status': 'rejected',
@@ -39,14 +39,14 @@ void registerTimelineToolTests() {
     );
   });
 
-  testWidgets('completed task_complete hides its result payload', (
+  testWidgets('completed task_transition hides its result payload', (
     tester,
   ) async {
     final part = _toolTimelinePart(
       id: 'task-complete-2',
       groupId: 'task-complete-completed-group',
       turnId: 'turn-task-completed',
-      name: 'task_complete',
+      name: 'task_transition',
       status: 'succeeded',
       result: jsonEncode({
         'status': 'completed',

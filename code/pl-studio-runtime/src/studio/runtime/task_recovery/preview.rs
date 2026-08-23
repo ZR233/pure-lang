@@ -36,14 +36,6 @@ impl StudioRuntime {
             .read_active_task_run_for_root_thread(root_thread_id)
             .await?;
         ensure_recoverable_phase(run.kind())?;
-        let lease = self
-            .store
-            .read_project_lease(&run.id)
-            .await?
-            .context("Task recovery requires the durable project lease")?;
-        if lease.project_id != run.project_id {
-            bail!("Task recovery project lease does not match the TaskRun");
-        }
         let runtime = self.agent_framework().await?.handle();
         ensure_task_tree_idle(&runtime, root_thread_id).await?;
 
@@ -108,8 +100,6 @@ impl StudioRuntime {
             revision: run.revision,
             task_generation: run.generation(),
             state: recovery_state_from_task_kind(run.kind()),
-            stop_requested: run.is_stop_requested(),
-            project_lease_id: lease.id,
             recommended_thread_id,
             targets,
             completion_revision_fingerprint: record_fingerprint(&completions)?,
@@ -322,12 +312,7 @@ pub(super) fn belongs_to_root(
     false
 }
 pub(super) fn ensure_recoverable_phase(phase: TaskRunStateKind) -> Result<()> {
-    if matches!(
-        phase,
-        TaskRunStateKind::DesignUpdating
-            | TaskRunStateKind::Implementing
-            | TaskRunStateKind::Reworking
-    ) {
+    if !phase.is_terminal() {
         Ok(())
     } else {
         bail!(

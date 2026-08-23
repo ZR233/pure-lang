@@ -165,8 +165,6 @@ class TaskRecoveryPreview {
     required this.revision,
     required this.taskGeneration,
     required this.state,
-    required this.stopRequested,
-    required this.projectLeaseId,
     required this.recommendedThreadId,
     required this.targets,
     required this.completionRevisionFingerprint,
@@ -180,8 +178,6 @@ class TaskRecoveryPreview {
   final int revision;
   final int taskGeneration;
   final TaskStateKind state;
-  final bool stopRequested;
-  final String projectLeaseId;
   final String recommendedThreadId;
   final List<TaskRecoveryTarget> targets;
   final String completionRevisionFingerprint;
@@ -226,7 +222,6 @@ class TaskRecoveryResult {
     required this.afterTranscriptHash,
     required this.removedItemCount,
     required this.removedInputCount,
-    required this.stopCleared,
     required this.resumeTurnId,
     this.workUnitId,
   });
@@ -244,6 +239,5 @@ class TaskRecoveryResult {
   final String afterTranscriptHash;
   final int removedItemCount;
   final int removedInputCount;
-  final bool stopCleared;
   final String resumeTurnId;
 }

@@ -126,19 +126,4 @@ impl StudioRuntime {
             initialization_entry_barrier: None,
         })
     }
-
-    #[cfg(test)]
-    pub(crate) fn interactions(&self) -> &InteractionService {
-        &self.agent_facility.interactions
-    }
-
-    #[cfg(test)]
-    pub(crate) fn product_events(&self) -> &ProductEventBus {
-        &self.agent_facility.product_events
-    }
-
-    #[cfg(test)]
-    pub(crate) fn skill_catalog_runtime(&self) -> &SkillCatalogRuntime {
-        &self.skills
-    }
 }

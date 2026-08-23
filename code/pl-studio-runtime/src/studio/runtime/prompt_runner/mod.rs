@@ -16,8 +16,6 @@ use super::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioSubmitPromptResponse,
 };
 
-const TASK_RESUME_MESSAGE: &str = "Resume the active Task from canonical durable state. Read task_status and list_agents before choosing the next state-machine transition. Do not recreate completed work or infer review outcomes from pre-restart context.";
-
 impl StudioRuntime {
     /// Starts a new active Turn for a Thread.
     pub async fn start_turn(
@@ -76,13 +74,30 @@ impl StudioRuntime {
             options,
         } = request;
         validate_prompt_content(&prompt, &attachment_ids)?;
-        self.ensure_prompt_runtime_ready().await?;
-        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
         let thread_record = self
             .store
             .read_thread(&thread_id)
             .await?
             .context("selected Thread not found")?;
+        if thread_record.mode == crate::StudioMode::Task
+            && thread_record.thread_kind == ThreadKind::Root
+            && self
+                .store
+                .find_active_task_run_for_root_thread(&thread_id)
+                .await?
+                .is_none()
+        {
+            let project = self
+                .store
+                .read_project(&thread_record.project_id)
+                .await?
+                .context("Task project not found")?;
+            self.task_coordinator
+                .start_task(&thread_id, &prompt, &project.path)
+                .await?;
+        }
+        self.ensure_prompt_runtime_ready().await?;
+        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
         let snapshot = handle
             .snapshot(agent_id.clone())
             .await
@@ -120,74 +135,6 @@ impl StudioRuntime {
         Ok(())
     }
 
-    /// Resumes a paused Task after an explicit user action without projecting a
-    /// synthetic user message into the Planner timeline.
-    pub async fn resume_task(&self, thread_id: String) -> Result<StudioSubmitPromptResponse> {
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        if !self.runtime_snapshot().await?.state.is_ready() {
-            bail!("Studio runtime is not ready");
-        }
-        let thread_record = self
-            .store
-            .read_thread(&thread_id)
-            .await?
-            .context("resume Task Thread not found")?;
-        if thread_record.thread_kind != ThreadKind::Root {
-            bail!("only a root Task Thread can be resumed");
-        }
-        if thread_record.status != pl_protocol::ThreadStatus::Idle {
-            bail!("Task Thread is not paused");
-        }
-        let run = self
-            .store
-            .find_active_task_run_for_root_thread(&thread_id)
-            .await?
-            .context("active Task run not found")?;
-        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
-        let snapshot = handle
-            .snapshot(agent_id.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        if snapshot.active_turn_id().is_some()
-            || snapshot.pending_inputs > 0
-            || !snapshot.state.is_idle()
-        {
-            bail!("Task Planner is already active or has pending input");
-        }
-        self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
-            .await?;
-
-        let thread = pl_core::ThreadId::new(thread_id.clone())?;
-        let resume_revision = thread_record
-            .runtime_updated_at
-            .unwrap_or(thread_record.updated_at);
-        let mail_id = format!("task-resume:{}:{resume_revision}", run.id);
-        let metadata = serde_json::json!({
-            "kind": "taskResume",
-            "taskRunId": run.id,
-            "source": "user",
-        });
-        let turn_id = handle
-            .submit(
-                agent_id,
-                pl_core::AgentSubmitRequest::start(thread.clone(), TASK_RESUME_MESSAGE)
-                    .with_presentation(pl_core::MailboxPresentation::Hidden)
-                    .with_metadata(metadata)
-                    .with_mail_id(mail_id),
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        let cursor = handle
-            .thread_snapshot(&thread)
-            .map_err(|error| anyhow::anyhow!(error))?
-            .revision;
-        Ok(StudioSubmitPromptResponse {
-            thread_id,
-            turn_id: turn_id.into_string(),
-            cursor,
-        })
-    }
-
     pub async fn stop_prompt(&self, thread_id: String) -> Result<StudioStopPromptResponse> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
@@ -201,11 +148,6 @@ impl StudioRuntime {
                 .expect("fixed user stop reason must not be empty");
             self.task_coordinator
                 .stop_task(&thread_id, &handle, TaskStopOrigin::UserRequest, reason)
-                .await?;
-            let emitter = self.interaction_emitter(thread_id.clone());
-            self.agent_facility
-                .interactions
-                .cancel_thread(&thread_id, "interrupted by user", emitter)
                 .await?;
             return Ok(StudioStopPromptResponse {
                 thread_id,

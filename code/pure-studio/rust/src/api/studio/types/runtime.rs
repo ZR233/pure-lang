@@ -271,8 +271,6 @@ pub struct BridgeTaskRecoveryPreviewDto {
     pub revision: u64,
     pub task_generation: u64,
     pub state: BridgeTaskRecoveryState,
-    pub stop_requested: bool,
-    pub project_lease_id: String,
     pub recommended_thread_id: String,
     pub targets: Vec<BridgeTaskRecoveryTargetDto>,
     pub completion_revision_fingerprint: String,
@@ -283,16 +281,12 @@ pub struct BridgeTaskRecoveryPreviewDto {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum BridgeTaskRecoveryState {
-    DesignUpdating,
-    Implementing,
-    Merging,
+    Planning,
+    PendingConfirmation,
+    EditingDocuments,
+    Working,
     Reviewing,
-    Reworking,
-    Stopping,
-    Blocked,
     Completed,
-    Failed,
-    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -322,7 +316,6 @@ pub struct BridgeTaskRecoveryResultDto {
     pub after_transcript_hash: String,
     pub removed_item_count: u64,
     pub removed_input_count: u64,
-    pub stop_cleared: bool,
     pub resume_turn_id: String,
 }
 
@@ -332,9 +325,9 @@ pub struct BridgeTaskRuntimeDto {
     pub run_id: String,
     pub state: BridgeTaskState,
     pub revision: u64,
+    pub generation: u64,
     pub integrated_review_gate: BridgeIntegratedReviewGateDto,
-    pub failures: Vec<BridgeTaskFailureDto>,
-    pub terminal_failure: Option<BridgeTaskFailureDto>,
+    pub issues: Vec<BridgeTaskIssueDto>,
     pub work_units: Vec<BridgeTaskWorkUnitDto>,
     pub completions: Vec<BridgeTaskCompletionDto>,
     pub merges: Vec<BridgeTaskMergeDto>,
@@ -344,153 +337,88 @@ pub struct BridgeTaskRuntimeDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum BridgeTaskState {
-    DesignUpdating(BridgeDesignUpdatingTaskState),
-    Implementing(BridgeImplementingTaskState),
-    Merging(BridgeMergingTaskState),
+    Planning(BridgePlanningTaskState),
+    PendingConfirmation(BridgePendingConfirmationTaskState),
+    EditingDocuments(BridgeEditingDocumentsTaskState),
+    Working(BridgeWorkingTaskState),
     Reviewing(BridgeReviewingTaskState),
-    Reworking(BridgeReworkingTaskState),
-    Stopping(BridgeStoppingTaskState),
-    Blocked(BridgeBlockedTaskState),
     Completed(BridgeCompletedTaskState),
-    Failed(BridgeFailedTaskState),
-    Cancelled(BridgeCancelledTaskState),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeDesignUpdatingTaskState {
-    pub generation: u64,
+pub struct BridgePlanningTaskState {
+    pub request: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeImplementingTaskState {
-    pub generation: u64,
-    pub design: BridgeFinalizedDesign,
+pub struct BridgePendingConfirmationTaskState {
+    pub plan_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeMergingTaskState {
-    pub generation: u64,
-    pub status_message: Option<String>,
-    pub design: BridgeFinalizedDesign,
+pub struct BridgeEditingDocumentsTaskState {
+    pub plan_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeWorkingTaskState {
+    pub document_edit_summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeReviewingTaskState {
-    pub generation: u64,
-    pub status_message: Option<String>,
-    pub design: BridgeFinalizedDesign,
-    pub target: BridgeTaskReviewTarget,
+    pub target: BridgeIntegratedReviewTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeReworkingTaskState {
-    pub generation: u64,
-    pub status_message: String,
-    pub design: BridgeFinalizedDesign,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeStoppingTaskState {
-    pub generation: u64,
-    pub status_message: String,
-    pub design: BridgeDesignProgress,
-    pub request: BridgeTaskStopRequest,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeBlockedTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: BridgeDesignProgress,
-    pub recovery: BridgeBlockedRecovery,
+pub struct BridgeIntegratedReviewTarget {
+    pub review_round_id: String,
+    pub reviewed_head: String,
+    pub changed_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeCompletedTaskState {
-    pub generation: u64,
-    pub design: BridgeFinalizedDesign,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeFailedTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: BridgeDesignProgress,
-    pub failure_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeCancelledTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: BridgeDesignProgress,
-    pub request: Option<BridgeTaskStopRequest>,
+    pub outcome: BridgeTaskOutcome,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum BridgeDesignProgress {
-    Updating(BridgeUpdatingDesign),
-    Finalized(BridgeFinalizedDesign),
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeUpdatingDesign {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeFinalizedDesign {
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeTaskStopRequest {
-    pub origin: BridgeTaskStopOrigin,
-    pub reason: String,
-    pub requested_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum BridgeTaskStopOrigin {
-    UserRequest,
-    PlannerDecision,
-    RuntimeFailure,
-    ApplicationShutdown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum BridgeTaskReviewTarget {
-    Delivery {
-        work_unit_id: String,
-        completion_id: String,
-        completion_revision: u32,
-        reviewed_head: String,
+pub enum BridgeTaskOutcome {
+    Succeeded {
+        summary: String,
+        completed_at: i64,
+        review_gate: BridgeTaskReviewGate,
     },
-    Integration {
-        reviewed_head: String,
+    Failed {
+        kind: BridgeTaskFailureKind,
+        summary: String,
+        evidence: String,
+        cause: String,
+        completed_at: i64,
     },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum BridgeBlockedRecovery {
-    RetryMerge,
-    ResumeRework,
-    ManualOnly,
+pub enum BridgeTaskFailureKind {
+    UnableToProceed,
+    Fatal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeTaskReviewGate {
+    NotRequiredNoDelivery,
+    NotRequiredSingleExecutor { work_unit_id: String },
+    IntegratedReview { review_round_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -513,7 +441,7 @@ pub enum BridgeIntegratedReviewGateDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeTaskFailureDto {
+pub struct BridgeTaskIssueDto {
     pub id: String,
     pub source_thread_id: String,
     pub source_turn_id: String,
@@ -521,13 +449,13 @@ pub struct BridgeTaskFailureDto {
     pub source_role: String,
     pub work_unit_id: Option<String>,
     pub review_round_id: Option<String>,
-    pub state: BridgeTaskFailureState,
+    pub state: BridgeTaskIssueState,
     pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum BridgeTaskFailureState {
+pub enum BridgeTaskIssueState {
     OpenRecoverable {
         failure: BridgeTaskFailureDetail,
     },
@@ -560,6 +488,8 @@ pub struct BridgeTaskWorkUnitDto {
     pub worktree_path: String,
     pub branch: String,
     pub agent_id: Option<String>,
+    pub attempt: u32,
+    pub supersedes_work_unit_id: Option<String>,
     pub budget_slice_limit: u32,
     pub executor_progress_revision: u64,
     pub blueprint_fingerprint: Option<String>,

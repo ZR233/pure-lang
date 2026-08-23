@@ -561,34 +561,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskContinuationNeedsAttention => 'Needs attention';
 
   @override
-  String get statusTaskPhaseDesignUpdating => 'Updating design';
+  String get statusTaskPhasePlanning => 'Planning';
 
   @override
-  String get statusTaskPhaseImplementing => 'Implementing';
+  String get statusTaskPhasePendingConfirmation => 'Awaiting plan confirmation';
 
   @override
-  String get statusTaskPhaseMerging => 'Merging';
+  String get statusTaskPhaseEditingDocuments => 'Editing documents';
+
+  @override
+  String get statusTaskPhaseWorking => 'Working';
 
   @override
   String get statusTaskPhaseReviewing => 'Reviewing';
 
   @override
-  String get statusTaskPhaseReworking => 'Reworking';
-
-  @override
-  String get statusTaskPhaseStopping => 'Stopping';
-
-  @override
   String get statusTaskPhaseCompleted => 'Task completed';
-
-  @override
-  String get statusTaskPhaseBlocked => 'Task blocked';
-
-  @override
-  String get statusTaskPhaseFailed => 'Task failed';
-
-  @override
-  String get statusTaskPhaseCancelled => 'Task cancelled';
 
   @override
   String get statusTaskStatusPending => 'Pending';
@@ -845,16 +833,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get interactionContinueAfterAnswer => 'Continue after answering';
 
   @override
-  String get taskResumeTitle => 'Task paused after restart';
-
-  @override
-  String get taskResumeBody =>
-      'Continue from canonical Task and agent state without adding a new prompt.';
-
-  @override
-  String get taskResumeAction => 'Continue task';
-
-  @override
   String get taskRecoveryDialogTitle => 'Recover and continue';
 
   @override
@@ -990,46 +968,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get interactionReasonLabel => 'Reason';
 
   @override
-  String get interactionPlanConfirmTitle => 'Implement this plan?';
+  String get interactionPlanConfirmTitle => 'Confirm this plan?';
 
   @override
   String get interactionPlanConfirmSubtitle =>
-      'Implement it, or describe what should change.';
+      'Confirm it, or describe what should change.';
 
   @override
-  String get interactionPlanEditingFooterHint =>
-      'Only your adjustment will be sent; the plan body is not returned.';
-
-  @override
-  String interactionPlanImplementFooterHint(String mode) {
-    return 'Implementing switches back to $mode mode and starts execution.';
+  String interactionPlanConfirmFooterHint(String mode) {
+    return 'Confirming starts the document-editing checkpoint in $mode mode.';
   }
-
-  @override
-  String get interactionPlanIgnore => 'Ignore';
 
   @override
   String get interactionPlanAdjust => 'Tell Pure how to adjust';
 
   @override
-  String get interactionPlanImplement => 'Implement this plan';
+  String get interactionPlanConfirmAction => 'Confirm plan';
 
   @override
   String get interactionPlanAdjustHint => 'Describe what should change...';
 
   @override
   String get interactionPlanAdjustSubmit => 'Submit adjustment';
-
-  @override
-  String get interactionPlanEditingNotice =>
-      'Continue planning: only your adjustment will be submitted.';
-
-  @override
-  String get interactionPlanViewNotice =>
-      'Plan content is not edited here; review the full plan in the timeline.';
-
-  @override
-  String get interactionPlanContinueReason => 'continue planning';
 
   @override
   String get settingsProvidersTitle => 'Providers';

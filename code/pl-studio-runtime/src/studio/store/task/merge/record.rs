@@ -10,9 +10,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    MergeCleanupState, MergeMethod, MergeRecord, RecordTaskMerge, ReviewRoundStateKind,
-    TaskCommand, TaskRunStateKind, WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand,
-    WorkUnitStateKind,
+    MergeCleanupState, MergeMethod, MergeRecord, RecordTaskMerge, TaskRunStateKind,
+    WorkCompletionKind, WorkCompletionStatus, WorkUnitCommand, WorkUnitStateKind,
 };
 
 impl StudioStore {
@@ -22,7 +21,7 @@ impl StudioStore {
             let runs = entities::task_run::Entity::find()
                 .filter(entities::task_run::Column::RootThreadId.eq(input.thread_id.clone()))
                 .filter(
-                    entities::task_run::Column::StateKind.eq(TaskRunStateKind::Merging.as_str()),
+                    entities::task_run::Column::StateKind.eq(TaskRunStateKind::Working.as_str()),
                 )
                 .all(&tx)
                 .await?;
@@ -31,15 +30,6 @@ impl StudioStore {
                 [] => bail!("merging TaskRun not found"),
                 _ => bail!("multiple merging TaskRuns found"),
             };
-            let lease = entities::project_lease::Entity::find()
-                .filter(entities::project_lease::Column::TaskRunId.eq(run.id.clone()))
-                .one(&tx)
-                .await?
-                .context("task project lease not found")?;
-            if lease.project_id != run.project_id {
-                bail!("ProjectLease changed before merge accounting");
-            }
-
             let work_unit = entities::work_unit::Entity::find_by_id(input.work_unit_id.clone())
                 .one(&tx)
                 .await?
@@ -138,37 +128,7 @@ impl StudioStore {
             )
             .await?;
 
-            let remaining_approved = entities::work_unit::Entity::find()
-                .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
-                .filter(
-                    entities::work_unit::Column::StateKind
-                        .eq(WorkUnitStateKind::ReviewPassed.as_str()),
-                )
-                .one(&tx)
-                .await?
-                .is_some();
-            let prior_rework = entities::review_round::Entity::find()
-                .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
-                .filter(
-                    entities::review_round::Column::StateKind
-                        .eq(ReviewRoundStateKind::ChangesRequired.as_str()),
-                )
-                .one(&tx)
-                .await?
-                .is_some();
-            let record = super::super::task_run_record(run.clone())?;
-            let next_state = if remaining_approved {
-                record.state.clone()
-            } else if prior_rework {
-                record
-                    .decide(TaskCommand::BeginReworking {
-                        status_message: "merged delivery still requires rework".to_string(),
-                    })?
-                    .next_state
-            } else {
-                record.decide(TaskCommand::BeginImplementing)?.next_state
-            };
-            super::super::compare_and_swap_task_run(&tx, &run, Some(&next_state))
+            super::super::compare_and_swap_task_run(&tx, &run, None)
                 .await?
                 .context("TaskRun merge accounting lost its revision CAS")?;
 

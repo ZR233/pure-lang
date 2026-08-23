@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OpenTaskFailure {
+pub(crate) struct OpenTaskIssue {
     failure: pl_protocol::TurnFailure,
 }
 
-impl OpenTaskFailure {
+impl OpenTaskIssue {
     pub(crate) fn new(failure: pl_protocol::TurnFailure) -> Self {
         Self { failure }
     }

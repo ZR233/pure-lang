@@ -4,8 +4,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use pl_studio_runtime::{
-    ConfigStore, InteractionKind, InteractionRequest, StudioHostKind, StudioMode, StudioRole,
-    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime, StudioTaskState,
+    ConfigStore, InteractionKind, InteractionRequest, StudioConfig, StudioHostKind, StudioMode,
+    StudioRole, StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime,
+    StudioTaskState,
 };
 
 use super::git::git_output;
@@ -30,12 +31,7 @@ pub struct LiveTaskFixture {
 impl LiveTaskFixture {
     pub async fn new() -> Result<Self> {
         let installed_config = InstalledConfigGuard::load()?;
-        let config = installed_config.store.load().with_context(|| {
-            format!(
-                "installed Studio config `{}` is invalid",
-                installed_config.path.display()
-            )
-        })?;
+        let config = &installed_config.config;
         let route_diagnostics = StudioRole::all()
             .into_iter()
             .map(|role| {
@@ -59,7 +55,7 @@ impl LiveTaskFixture {
         tokio::fs::create_dir_all(&studio_home).await?;
         tokio::fs::write(
             studio_home.join("config.toml"),
-            &installed_config.original_bytes,
+            &installed_config.runtime_bytes,
         )
         .await?;
         tokio::fs::create_dir_all(&workspace).await?;
@@ -68,6 +64,21 @@ impl LiveTaskFixture {
             "# Live Task Fixture\n\nBuild the requested project in this repository.\n",
         )
         .await?;
+        tokio::fs::write(workspace.join(".gitignore"), ".pure/\ntarget/\n").await?;
+        git_output(&workspace, &["init", "--initial-branch=main"])?;
+        git_output(&workspace, &["add", "README.md", ".gitignore"])?;
+        git_output(
+            &workspace,
+            &[
+                "-c",
+                "user.name=Pure Studio",
+                "-c",
+                "user.email=pure-studio@local",
+                "commit",
+                "-m",
+                "test: initialize temporary live Task project",
+            ],
+        )?;
 
         let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
             studio_home: Some(studio_home.clone()),
@@ -110,17 +121,17 @@ impl LiveTaskFixture {
                 .await?;
             if let Some(unexpected) = pending
                 .iter()
-                .find(|interaction| interaction.kind != InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() != InteractionKind::PlanConfirmation)
             {
                 bail!(
                     "unexpected interaction before plan confirmation: {:?}\n{}",
-                    unexpected.kind,
+                    unexpected.kind(),
                     self.diagnostics().await
                 );
             }
             if let Some(confirmation) = pending
                 .into_iter()
-                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+                .find(|interaction| interaction.kind() == InteractionKind::PlanConfirmation)
             {
                 return Ok(confirmation);
             }
@@ -165,7 +176,7 @@ impl LiveTaskFixture {
             if let Some(interaction) = pending.first() {
                 bail!(
                     "unexpected pending interaction while Task was running: {:?}\n{}",
-                    interaction.kind,
+                    interaction.kind(),
                     self.diagnostics().await
                 );
             }
@@ -191,7 +202,15 @@ impl LiveTaskFixture {
                     .any(|thread| {
                         thread.root_thread_id == self.thread_id
                             && thread.parent_thread_id.is_some()
-                            && matches!(thread.status.as_str(), "queued" | "running" | "waiting")
+                            && matches!(
+                                thread.status,
+                                pl_protocol::ThreadStatus::Queued
+                                    | pl_protocol::ThreadStatus::Running
+                                    | pl_protocol::ThreadStatus::WaitingTool
+                                    | pl_protocol::ThreadStatus::WaitingInteraction
+                                    | pl_protocol::ThreadStatus::Cancelling
+                                    | pl_protocol::ThreadStatus::Closing
+                            )
                     });
 
             if self
@@ -243,13 +262,17 @@ impl LiveTaskFixture {
         snapshot
             .items
             .into_iter()
-            .filter_map(|item| match item.content {
-                pl_protocol::ThreadItemContent::ToolCall { tool }
-                    if tool.name == "task_spawn_executor" =>
+            .filter_map(|item| {
+                let tool = item.tool()?;
+                if tool.invocation().name() != "task_spawn_executor"
+                    || !matches!(tool.state(), pl_protocol::ThreadToolState::Succeeded(_))
                 {
-                    tool.result.map(|result| (tool.arguments, result))
+                    return None;
                 }
-                _ => None,
+                Some((
+                    tool.invocation().arguments().to_owned(),
+                    tool.terminal_output()?.result().to_owned(),
+                ))
             })
             .filter_map(|(arguments, result)| {
                 match successful_executor_scope_hints(&arguments, &result) {
@@ -266,13 +289,17 @@ impl LiveTaskFixture {
         snapshot
             .items
             .into_iter()
-            .filter_map(|item| match item.content {
-                pl_protocol::ThreadItemContent::ToolCall { tool }
-                    if tool.name == "task_record_merge" =>
+            .filter_map(|item| {
+                let tool = item.tool()?;
+                if tool.invocation().name() != "task_record_merge"
+                    || !matches!(tool.state(), pl_protocol::ThreadToolState::Succeeded(_))
                 {
-                    tool.result.map(|result| (tool.arguments, result))
+                    return None;
                 }
-                _ => None,
+                Some((
+                    tool.invocation().arguments().to_owned(),
+                    tool.terminal_output()?.result().to_owned(),
+                ))
             })
             .map(|(arguments, result)| {
                 let result: serde_json::Value = serde_json::from_str(&result)
@@ -383,42 +410,79 @@ fn successful_executor_scope_hints(arguments: &str, result: &str) -> Result<Opti
 }
 
 struct InstalledConfigGuard {
-    store: ConfigStore,
     path: PathBuf,
-    original_bytes: Vec<u8>,
+    original_bytes: Option<Vec<u8>>,
+    runtime_bytes: Vec<u8>,
+    config: StudioConfig,
 }
 
 impl InstalledConfigGuard {
     fn load() -> Result<Self> {
         let store = ConfigStore::default_app()?;
-        if !store.config_exists() {
-            bail!(
-                "installed Studio config is missing at `{}`",
-                store.paths().config_file().display()
-            );
-        }
         let path = store.paths().config_file().to_path_buf();
-        let original_bytes = std::fs::read(&path)
-            .with_context(|| format!("failed to read installed config `{}`", path.display()))?;
+        let (config, original_bytes, runtime_bytes) = if store.config_exists() {
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("failed to read installed config `{}`", path.display()))?;
+            let config = store.load().with_context(|| {
+                format!("installed Studio config `{}` is invalid", path.display())
+            })?;
+            (config, Some(bytes.clone()), bytes)
+        } else {
+            let mut config = StudioConfig::default_config();
+            let default_provider = config
+                .models
+                .providers
+                .iter_mut()
+                .find_map(|(id, provider)| (id.as_str() == "deepseek").then_some(provider))
+                .context("default Studio config has no deepseek provider")?;
+            default_provider.bearer_token_env = Some("DEEPSEEK_API_KEY".to_string());
+            if !config
+                .models
+                .providers
+                .values()
+                .any(|provider| provider.resolved_bearer_token().is_some())
+            {
+                bail!(
+                    "installed Studio config is missing at `{}` and the default provider environment credential is unavailable",
+                    path.display()
+                );
+            }
+            let bytes = toml::to_string_pretty(&config)
+                .context("failed to serialize isolated default Studio config")?
+                .into_bytes();
+            (config, None, bytes)
+        };
         Ok(Self {
-            store,
             path,
             original_bytes,
+            runtime_bytes,
+            config,
         })
     }
 
     fn assert_unchanged(&self) -> Result<()> {
-        let current = std::fs::read(&self.path).with_context(|| {
-            format!(
-                "failed to reread installed config `{}`",
-                self.path.display()
-            )
-        })?;
-        if current != self.original_bytes {
-            bail!(
-                "live Task test modified installed Studio config `{}`",
-                self.path.display()
-            );
+        match &self.original_bytes {
+            Some(original) => {
+                let current = std::fs::read(&self.path).with_context(|| {
+                    format!(
+                        "failed to reread installed config `{}`",
+                        self.path.display()
+                    )
+                })?;
+                if &current != original {
+                    bail!(
+                        "live Task test modified installed Studio config `{}`",
+                        self.path.display()
+                    );
+                }
+            }
+            None if self.path.exists() => {
+                bail!(
+                    "live Task test unexpectedly created installed Studio config `{}`",
+                    self.path.display()
+                );
+            }
+            None => {}
         }
         Ok(())
     }
@@ -426,9 +490,12 @@ impl InstalledConfigGuard {
 
 impl Drop for InstalledConfigGuard {
     fn drop(&mut self) {
-        let unchanged = std::fs::read(&self.path)
-            .map(|current| current == self.original_bytes)
-            .unwrap_or(false);
+        let unchanged = match &self.original_bytes {
+            Some(original) => std::fs::read(&self.path)
+                .map(|current| current == *original)
+                .unwrap_or(false),
+            None => !self.path.exists(),
+        };
         if !unchanged {
             eprintln!(
                 "ERROR: installed Studio config changed during live Task test: {}",
@@ -468,60 +535,65 @@ impl Drop for TempRoot {
 
 fn task_state_name(state: &StudioTaskState) -> &'static str {
     match state {
-        StudioTaskState::DesignUpdating(_) => "designUpdating",
-        StudioTaskState::Implementing(_) => "implementing",
-        StudioTaskState::Merging(_) => "merging",
+        StudioTaskState::Planning(_) => "planning",
+        StudioTaskState::PendingConfirmation(_) => "pendingConfirmation",
+        StudioTaskState::EditingDocuments(_) => "editingDocuments",
+        StudioTaskState::Working(_) => "working",
         StudioTaskState::Reviewing(_) => "reviewing",
-        StudioTaskState::Reworking(_) => "reworking",
-        StudioTaskState::Stopping(_) => "stopping",
-        StudioTaskState::Blocked(_) => "blocked",
         StudioTaskState::Completed(_) => "completed",
-        StudioTaskState::Failed(_) => "failed",
-        StudioTaskState::Cancelled(_) => "cancelled",
     }
 }
 
 fn task_state_message(state: &StudioTaskState) -> Option<&str> {
     match state {
-        StudioTaskState::Merging(state) => state.status_message.as_deref(),
-        StudioTaskState::Reviewing(state) => state.status_message.as_deref(),
-        StudioTaskState::Reworking(state) => Some(&state.status_message),
-        StudioTaskState::Stopping(state) => Some(&state.status_message),
-        StudioTaskState::Blocked(state) => Some(&state.message),
-        StudioTaskState::Failed(state) => Some(&state.message),
-        StudioTaskState::Cancelled(state) => Some(&state.message),
-        StudioTaskState::DesignUpdating(_)
-        | StudioTaskState::Implementing(_)
-        | StudioTaskState::Completed(_) => None,
+        StudioTaskState::Planning(state) => Some(&state.request),
+        StudioTaskState::Working(state) => Some(&state.document_edit_summary),
+        StudioTaskState::Reviewing(state) => Some(&state.target.reviewed_head),
+        StudioTaskState::Completed(state) => match &state.outcome {
+            pl_studio_runtime::StudioTaskOutcome::Succeeded { summary, .. }
+            | pl_studio_runtime::StudioTaskOutcome::Failed { summary, .. } => Some(summary),
+        },
+        StudioTaskState::PendingConfirmation(_) | StudioTaskState::EditingDocuments(_) => None,
     }
 }
 
 fn is_live_failure(state: &StudioTaskState) -> bool {
     matches!(
         state,
-        StudioTaskState::Blocked(_) | StudioTaskState::Failed(_) | StudioTaskState::Cancelled(_)
+        StudioTaskState::Completed(pl_studio_runtime::StudioCompletedTaskState {
+            outcome: pl_studio_runtime::StudioTaskOutcome::Failed { .. }
+        })
     )
 }
 
 fn compact_item_diagnostic(item: &pl_protocol::ThreadItem) -> String {
-    let content = match &item.content {
-        pl_protocol::ThreadItemContent::ToolCall { tool } => format!(
+    let content = if let Some(tool) = item.tool() {
+        format!(
             "tool={} arguments={} result={}",
-            tool.name,
-            truncate_diagnostic(&tool.arguments, 800),
-            truncate_diagnostic(tool.result.as_deref().unwrap_or(""), 1_200)
-        ),
-        pl_protocol::ThreadItemContent::AgentMessage { channel, text } => {
-            format!(
-                "text channel={channel:?} value={}",
-                truncate_diagnostic(text, 1_200)
+            tool.invocation().name(),
+            truncate_diagnostic(tool.invocation().arguments(), 800),
+            truncate_diagnostic(
+                tool.terminal_output()
+                    .map(pl_protocol::ThreadToolOutput::result)
+                    .unwrap_or(""),
+                1_200,
             )
-        }
-        content => truncate_diagnostic(&format!("{content:?}"), 1_200),
+        )
+    } else if let Some(text) = item.text() {
+        format!(
+            "text channel={:?} value={}",
+            text.channel(),
+            truncate_diagnostic(text.text(), 1_200)
+        )
+    } else {
+        truncate_diagnostic(&format!("{:?}", item.state()), 1_200)
     };
     format!(
-        "item={} turn={} status={:?} error={:?} {content}",
-        item.id, item.turn_id, item.status, item.error
+        "item={} turn={} kind={:?} failure={:?} {content}",
+        item.id,
+        item.turn_id,
+        item.kind(),
+        item.failure()
     )
 }
 

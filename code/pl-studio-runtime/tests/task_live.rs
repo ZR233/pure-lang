@@ -11,8 +11,10 @@ use git::git_output;
 use live_fixture::{LIVE_VERIFY_MARKER, LiveTaskFixture, command_output, normalized_text};
 use pl_studio_runtime::{
     InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskCompletionContent,
-    StudioTaskCompletionState, StudioTaskReviewState, StudioTaskState, StudioTaskWorkUnitState,
+    PlanConfirmationResolutionPayload, StudioReviewScope, StudioSubmitPromptOptions,
+    StudioSubmitPromptRequest, StudioTaskCompletionContent, StudioTaskCompletionState,
+    StudioTaskOutcome, StudioTaskReviewState, StudioTaskState, StudioTaskWorkUnitState,
+    StudioWorkUnitCompletionOutcome, ThreadStatus,
 };
 
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -56,27 +58,27 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
 
     let confirmation = fixture.wait_for_plan_confirmation().await?;
     fixture.wait_for_no_active_turns().await?;
-    if confirmation.status != InteractionStatus::Pending {
+    if confirmation.status() != InteractionStatus::Pending {
         bail!(
             "plan confirmation was not pending: {:?}",
-            confirmation.status
+            confirmation.status()
         );
     }
     let resolution = fixture
         .runtime
         .resolve_interaction(
             confirmation.interaction_id,
-            InteractionResolution::PlanConfirmation {
-                decision: PlanConfirmationResolution::ImplementFreshContext,
+            InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
+                decision: PlanConfirmationResolution::Confirm,
                 content: None,
                 reason: None,
-            },
+            }),
         )
         .await?;
-    if resolution.interaction.status != InteractionStatus::Resolved {
+    if resolution.interaction.status() != InteractionStatus::Resolved {
         bail!(
             "plan confirmation did not resolve: {:?}",
-            resolution.interaction.status
+            resolution.interaction.status()
         );
     }
 
@@ -91,14 +93,24 @@ async fn assert_task_invariants(
     fixture: &LiveTaskFixture,
     task: &pl_studio_runtime::StudioTaskRuntime,
 ) -> Result<()> {
-    if !matches!(&task.state, StudioTaskState::Completed(_)) {
-        bail!("Task state is `{:?}` instead of `completed`", task.state);
+    match &task.state {
+        StudioTaskState::Completed(completed) => match &completed.outcome {
+            StudioTaskOutcome::Succeeded { .. } => {}
+            StudioTaskOutcome::Failed { summary, .. } => {
+                bail!("Task completed with a failed outcome: {summary}")
+            }
+        },
+        state => bail!("Task state is `{state:?}` instead of `completed`"),
     }
     if task.work_units.is_empty() {
         bail!("Task did not create an executor work unit");
     }
     for unit in &task.work_units {
-        if !matches!(&unit.state, StudioTaskWorkUnitState::Merged(_)) {
+        if !matches!(
+            &unit.state,
+            StudioTaskWorkUnitState::Completed(completed)
+                if matches!(completed.outcome, StudioWorkUnitCompletionOutcome::Merged { .. })
+        ) {
             bail!(
                 "work unit `{}` finished with state `{:?}`",
                 unit.id,
@@ -132,9 +144,9 @@ async fn assert_task_invariants(
             .read_thread(executor_thread_id)
             .await?
             .context("merged work unit references a missing executor Thread")?;
-        if executor.status != "closed" {
+        if executor.status != ThreadStatus::Closed {
             bail!(
-                "executor Thread `{executor_thread_id}` finished with status `{}`",
+                "executor Thread `{executor_thread_id}` finished with status `{:?}`",
                 executor.status
             );
         }
@@ -161,10 +173,14 @@ async fn assert_task_invariants(
         bail!("Task did not preserve the requested focused scopeHints: {scope_hints:?}");
     }
     if !task.completions.iter().any(|completion| {
-        completion
-            .changed_files
-            .iter()
-            .any(|path| path != "game-core.mjs" && !path.starts_with("design/"))
+        matches!(
+            &completion.content,
+            StudioTaskCompletionContent::Delivery(delivery)
+                if delivery
+                    .changed_files
+                    .iter()
+                    .any(|path| path != "game-core.mjs" && !path.starts_with("design/"))
+        )
     }) {
         bail!("executor completion did not prove that scopeHints are non-authoritative");
     }
@@ -177,6 +193,12 @@ async fn assert_task_invariants(
             task.merges.len()
         );
     }
+    let expected_head = task
+        .merges
+        .last()
+        .context("completed delivery Task has no durable merge")?
+        .resulting_head
+        .as_str();
     for arguments in &recorded_merges {
         let executor_agent_id = arguments["executorAgentId"]
             .as_str()
@@ -227,12 +249,7 @@ async fn assert_task_invariants(
         )?;
         git_output(
             &fixture.workspace,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                resulting_head,
-                &task.expected_head,
-            ],
+            &["merge-base", "--is-ancestor", resulting_head, expected_head],
         )?;
     }
 
@@ -257,7 +274,7 @@ async fn assert_task_invariants(
                 || task
                     .reviews
                     .iter()
-                    .any(|review| review.scope == "integrated")
+                    .any(|review| review.scope == StudioReviewScope::Integrated)
             {
                 bail!("single-executor equivalent task unexpectedly created integrated review");
             }
@@ -271,10 +288,10 @@ async fn assert_task_invariants(
                 .iter()
                 .find(|review| review.id == *review_round_id)
                 .context("satisfied review gate references a missing round")?;
-            if review.scope != "integrated"
-                || !matches!(&review.state, StudioTaskReviewState::Pass { .. })
+            if review.scope != StudioReviewScope::Integrated
+                || !matches!(&review.state, StudioTaskReviewState::Passed { .. })
                 || review.reviewed_head != *reviewed_head
-                || reviewed_head != &task.expected_head
+                || reviewed_head != expected_head
             {
                 bail!("integrated review gate does not match a passing current review");
             }
@@ -296,11 +313,11 @@ async fn assert_task_invariants(
                     StudioTaskCompletionContent::Delivery(value) => value.head_commit.as_str(),
                     StudioTaskCompletionContent::NoDelivery(_) => "",
                 };
-                review.scope == "delivery"
+                review.scope == StudioReviewScope::Delivery
                     && review.completion_id.as_deref() == Some(completion.id.as_str())
                     && review.completion_revision == Some(completion.revision)
                     && review.reviewed_head == completion_head
-                    && matches!(&review.state, StudioTaskReviewState::Pass { .. })
+                    && matches!(&review.state, StudioTaskReviewState::Passed { .. })
             })
     }) {
         bail!("an approved completion has no matching passing delivery review");
@@ -323,8 +340,8 @@ async fn assert_task_invariants(
     {
         bail!("Task retained active turns");
     }
-    if git_output(&fixture.workspace, &["rev-parse", "HEAD"])? != task.expected_head {
-        bail!("workspace HEAD does not match Task expectedHead");
+    if git_output(&fixture.workspace, &["rev-parse", "HEAD"])? != expected_head {
+        bail!("workspace HEAD does not match the final durable merge head");
     }
     if !git_output(&fixture.workspace, &["status", "--porcelain"])?.is_empty() {
         bail!("workspace Git tree is dirty");
@@ -408,6 +425,10 @@ Keep deterministic gameplay rules in game-core.mjs so verify.mjs can import them
 verify.mjs must use node:assert to verify movement boundaries, shooting, collision, scoring, and restart, then print exactly this success marker on its own line:
 {LIVE_VERIFY_MARKER}
 
-In Task mode, during DesignUpdating use ordinary repository tools such as apply_patch to create design/shooter.md, then call task_finalize_design exactly once. Do not look for or call a dedicated design-update tool, and do not require a second design edit after implementation. After finalize, spawn one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps, repository targets, stable acceptance criteria, and command or inspection checks that cover every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Read the shared integrated review gate, and do not create an integrated reviewer when it reports the single-executor equivalent exemption. If it reports required, request integrated review and repair failures through the normal Task workflow. Only call task_complete when the gate permits it. The final Git worktree must be clean."#
+Follow the Task state machine all the way to a successful Completed outcome. Start by reading task_status. In Planning, submit the concrete plan with task_transition action submitPlan, using the exact expectedRevision and expectedGeneration returned by task_status. Stop and wait for plan confirmation. After confirmation moves the Task to EditingDocuments, use ordinary repository tools to create design/shooter.md and commit that design document, then read task_status again and use task_transition action finishDocumentEditing with the fresh revision and generation.
+
+In Working, spawn exactly one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps with repository targets, stable acceptance criteria, design evidence, and command or inspection checks covering every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints, not write authorization: that executor must deliver and commit every required non-design file, including files outside the hint. Wait for its Completion, request delivery review, wait for the reviewer, and only proceed after the delivery passes. Close the approved executor, integrate its branch with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and the actual before/after HEADs.
+
+Read task_status after recording the merge. If completionGate requires integrated review, call task_transition action beginIntegratedReview with the current expectedRevision and expectedGeneration, wait for the reviewer, and read task_status again; if the gate grants the single-executor equivalent exemption, do not create an integrated reviewer. Repair any reported issue through the normal Task workflow. When and only when completionGate allows success, call task_transition action complete with outcome succeeded, a concise summary, and the latest exact expectedRevision and expectedGeneration. Leave the final Git worktree clean."#
     )
 }

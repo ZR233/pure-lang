@@ -409,11 +409,6 @@ class _TaskRecoveryFacts extends StatelessWidget {
       children: [
         Chip(label: Text('Task ${preview.runId}')),
         Chip(label: Text(context.taskPhaseLabel(preview.state))),
-        if (preview.stopRequested)
-          const Chip(
-            avatar: Icon(Icons.stop_circle_outlined, size: 16),
-            label: Text('StopRequested'),
-          ),
       ],
     );
   }

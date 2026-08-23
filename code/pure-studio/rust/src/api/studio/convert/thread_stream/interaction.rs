@@ -158,13 +158,8 @@ fn plan_confirmation_resolution(
     value: PlanConfirmationResolution,
 ) -> BridgePlanConfirmationResolution {
     match value {
-        PlanConfirmationResolution::ImplementFreshContext => {
-            BridgePlanConfirmationResolution::ImplementFreshContext
-        }
-        PlanConfirmationResolution::ContinuePlanning => {
-            BridgePlanConfirmationResolution::ContinuePlanning
-        }
-        PlanConfirmationResolution::Dismiss => BridgePlanConfirmationResolution::Dismiss,
+        PlanConfirmationResolution::Confirm => BridgePlanConfirmationResolution::Confirm,
+        PlanConfirmationResolution::RevisePlan => BridgePlanConfirmationResolution::RevisePlan,
     }
 }
 

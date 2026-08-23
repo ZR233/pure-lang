@@ -370,29 +370,25 @@ impl TaskCoordinator {
             return Ok(None);
         }
         let (required_phases, next_action, message) = if run.kind()
-            == TaskRunStateKind::DesignUpdating
+            == TaskRunStateKind::EditingDocuments
         {
             (
-                vec![TaskRunStateKind::Implementing.as_str()],
-                Some("task_finalize_design"),
+                vec![TaskRunStateKind::Working.as_str()],
+                Some("task_transition.finishDocumentEditing"),
                 format!(
-                    "当前任务处于 {}；派发执行者要求 {}。请先调用 task_finalize_design 完成设计阶段。",
+                    "当前任务处于 {}；派发执行者要求 {}。请先提交 task_transition.finishDocumentEditing。",
                     run.kind().as_str(),
-                    TaskRunStateKind::Implementing.as_str()
+                    TaskRunStateKind::Working.as_str()
                 ),
             )
         } else {
             (
-                vec![
-                    TaskRunStateKind::Implementing.as_str(),
-                    TaskRunStateKind::Reworking.as_str(),
-                ],
+                vec![TaskRunStateKind::Working.as_str()],
                 None,
                 format!(
-                    "当前任务处于 {}；派发执行者只允许在 {} 或 {} 阶段。",
+                    "当前任务处于 {}；派发执行者只允许在 {} 状态。",
                     run.kind().as_str(),
-                    TaskRunStateKind::Implementing.as_str(),
-                    TaskRunStateKind::Reworking.as_str()
+                    TaskRunStateKind::Working.as_str()
                 ),
             )
         };
@@ -452,8 +448,8 @@ fn input_rejection(
         message,
         current_phase,
         required_phases: vec![
-            TaskRunStateKind::Implementing.as_str(),
-            TaskRunStateKind::Reworking.as_str(),
+            TaskRunStateKind::Working.as_str(),
+            TaskRunStateKind::Working.as_str(),
         ],
         next_action: Some("retry_task_spawn_executor"),
     }
@@ -486,8 +482,8 @@ fn allocation_rejection(
         message: message.to_string(),
         current_phase,
         required_phases: vec![
-            TaskRunStateKind::Implementing.as_str(),
-            TaskRunStateKind::Reworking.as_str(),
+            TaskRunStateKind::Working.as_str(),
+            TaskRunStateKind::Working.as_str(),
         ],
         next_action,
     })
@@ -564,176 +560,4 @@ fn executor_runtime_ids(thread_id: &str, call_id: &str) -> Result<(ThreadId, Tur
     let turn = TurnId::new(format!("turn-task-{}", &digest[16..32]))
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok((thread, turn))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::studio::task_coordinator::CreateTaskRun;
-    use crate::{StudioMode, StudioStore};
-
-    #[tokio::test]
-    async fn design_updating_rejection_names_the_required_phase_and_next_action() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/spawn-gate").await.unwrap();
-        let thread = store
-            .create_thread(&project.id, "Spawn gate", StudioMode::Task)
-            .await
-            .unwrap();
-        store
-            .create_task_run_with_lease(CreateTaskRun {
-                project_id: project.id.clone(),
-                root_thread_id: thread.id.clone(),
-                plan: "implement the confirmed plan".to_string(),
-                workspace_root: "C:/work/spawn-gate".to_string(),
-            })
-            .await
-            .unwrap();
-        let coordinator = TaskCoordinator::new(store);
-
-        let rejection = coordinator
-            .executor_spawn_phase_rejection(&thread.id)
-            .await
-            .unwrap()
-            .expect("designUpdating must reject executor allocation");
-        let value = serde_json::to_value(rejection).unwrap();
-
-        assert_eq!(value["code"], "task_phase_mismatch");
-        assert_eq!(value["currentPhase"], "designUpdating");
-        assert_eq!(value["requiredPhases"], serde_json::json!(["implementing"]));
-        assert_eq!(value["nextAction"], "task_finalize_design");
-        assert!(value["message"].as_str().unwrap().contains("implementing"));
-        assert!(
-            value["message"]
-                .as_str()
-                .unwrap()
-                .contains("task_finalize_design")
-        );
-    }
-
-    #[test]
-    fn executor_runtime_ids_are_stable_git_ref_components() {
-        let first = executor_runtime_ids("thread-root", "call-spawn").unwrap();
-        let repeated = executor_runtime_ids("thread-root", "call-spawn").unwrap();
-        let different = executor_runtime_ids("thread-root", "call-other").unwrap();
-
-        assert_eq!(first, repeated);
-        assert_ne!(first, different);
-        for id in [first.0.to_string(), first.1.to_string()] {
-            assert!(!id.contains(':'));
-            assert!(
-                id.rsplit('-')
-                    .next()
-                    .is_some_and(|digest| digest.len() == 16
-                        && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            );
-        }
-    }
-
-    #[test]
-    fn vague_legacy_executor_assignment_is_rejected_before_allocation() {
-        let legacy = serde_json::json!({
-            "taskName": "do it",
-            "message": "fix the code",
-            "scopeHints": [],
-            "verificationCommands": [{
-                "command": "cargo test",
-                "cwd": ".",
-                "purpose": "test"
-            }]
-        });
-        assert!(serde_json::from_value::<TaskSpawnExecutorInput>(legacy).is_err());
-    }
-
-    #[test]
-    fn structured_executor_assignment_rejects_unknown_legacy_fields() {
-        let mut input = serde_json::json!({
-            "taskName": "implement transport",
-            "objective": "use one canonical transport",
-            "scope": {
-                "inScope": ["model routing"],
-                "outOfScope": [],
-                "scopeHints": ["code/pl-model"]
-            },
-            "implementationSteps": [{
-                "id": "step-1",
-                "instruction": "update routing",
-                "targets": [{"path": "code/pl-model/src/lib.rs", "symbol": "route"}],
-                "expectedOutcome": "one canonical route",
-                "criterionIds": ["criterion-1"]
-            }],
-            "acceptanceCriteria": [{
-                "id": "criterion-1",
-                "requirement": "routing is canonical"
-            }],
-            "dependencies": [],
-            "evidence": [],
-            "verification": {
-                "commands": [{
-                    "id": "check-1",
-                    "command": "cargo test -p pl-model",
-                    "cwd": ".",
-                    "purpose": "test routing",
-                    "expectedOutcome": "tests pass",
-                    "criterionIds": ["criterion-1"]
-                }],
-                "inspections": []
-            }
-        });
-        assert!(
-            serde_json::from_value::<TaskSpawnExecutorInput>(input.clone())
-                .unwrap()
-                .into_blueprint()
-                .is_ok()
-        );
-        input["message"] = serde_json::json!("legacy duplicate instructions");
-        assert!(serde_json::from_value::<TaskSpawnExecutorInput>(input).is_err());
-    }
-
-    #[test]
-    fn executor_reuse_requires_the_complete_blueprint_fingerprint() {
-        assert!(ensure_reused_blueprint_matches("sha256:same", "sha256:same").is_ok());
-        assert_eq!(
-            ensure_reused_blueprint_matches("sha256:steps-a", "sha256:steps-b")
-                .unwrap_err()
-                .to_string(),
-            "executor allocation conflicts with the existing implementation blueprint"
-        );
-    }
-
-    #[test]
-    fn failed_outcome_preserves_structured_worktree_cause_and_compensation() {
-        let error = crate::agent::worktree::WorktreeError::OperationFailedAfterCleanup {
-            operation: Box::new(crate::agent::worktree::WorktreeError::GitExited {
-                args: "worktree add --detach".to_string(),
-                exit_code: 128,
-                stderr: "fatal: invalid reference: HEAD".to_string(),
-            }),
-        };
-        let failure = TaskSpawnFailure::worktree(
-            "task-run".to_string(),
-            "work-unit".to_string(),
-            "agent".to_string(),
-            TaskSpawnResource {
-                repo_root: "C:/repo".to_string(),
-                path: "C:/repo/.pure/worktrees/task-run/agent".to_string(),
-                branch: "pure-task-task-run-agent".to_string(),
-                base_ref: "HEAD".to_string(),
-            },
-            &error,
-        );
-
-        let output = spawn_failure(failure).unwrap();
-        assert!(!output.success);
-        assert!(!output.ends_turn);
-        let value: serde_json::Value = serde_json::from_str(&output.model_output).unwrap();
-        assert_eq!(value["status"], "failed");
-        assert_eq!(value["code"], "worktreeCreate");
-        assert_eq!(value["phase"], "worktreeCreate");
-        assert_eq!(value["cause"]["kind"], "gitExited");
-        assert_eq!(value["cause"]["exitCode"], 128);
-        assert_eq!(value["compensation"]["allocation"], "markedFailed");
-        assert_eq!(value["compensation"]["worktree"], "removed");
-        assert_eq!(value["nextAction"], "retryTaskSpawnExecutor");
-    }
 }

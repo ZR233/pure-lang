@@ -109,12 +109,12 @@ coalescing key 属于 runtime envelope 元数据，不进入自然语言提示�
 Studio 使用专门的 durable interaction continuation 命令。`request_user_input` 产生 typed
 `InteractionRequested` observation；ThreadActor 必须先把 pending Interaction 与原 Turn 终态一起
 通过 Immediate flush 持久化，才允许原 Turn terminal。UserInput 回答和 PlanConfirmation
-`ContinuePlanning` 都由 ThreadActor 在一个 `ThreadCommit` 中同时提交 resolved Interaction、mail ID
+`Confirm` 与 `RevisePlan` 都由 ThreadActor 在一个 `ThreadCommit` 中同时提交 resolved Interaction、mail ID
 为 `interaction-resolution:{interactionId}` 的 hidden input 和 `TurnQueued` runtime fact。该命令固定
 采用 StartOrQueue，不读取 `active_turn_id` 猜测进程内 waiter，不 steer 活动 Turn，也不设置 queue
 coalescing key。Interaction 提交与 resolution 属于 Immediate flush 边界，落库失败上报并 resync；
-重复命令以 pending/resolved Interaction 与稳定 mail ID 幂等收束。PlanConfirmation 的 fresh Turn
-仍继承 Planner `RequiredTool(plan_exit)`，调整完成后必须再次产生新的确认。
+重复命令以 pending/resolved Interaction 与稳定 mail ID 幂等收束。`RevisePlan` 的 fresh Turn
+仍继承 Planner `RequiredTool(task_transition)`，调整完成后必须再次提交计划并产生新的确认。
 
 RunningTurn 必须把“pending Interaction 已 durable 提交”携带为显式 completion boundary。Host 的
 `RequiredTool` policy 不能把这个边界重写成 validation failure；它只在普通 Turn completion 时检查

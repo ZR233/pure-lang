@@ -809,298 +809,6 @@ as BridgeFaultedAgent,
 }
 
 /// @nodoc
-mixin _$BridgeDesignProgress {
-
- Object get field0;
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeDesignProgress&&const DeepCollectionEquality().equals(other.field0, field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(field0));
-
-@override
-String toString() {
-  return 'BridgeDesignProgress(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-class $BridgeDesignProgressCopyWith<$Res>  {
-$BridgeDesignProgressCopyWith(BridgeDesignProgress _, $Res Function(BridgeDesignProgress) __);
-}
-
-
-/// Adds pattern-matching-related methods to [BridgeDesignProgress].
-extension BridgeDesignProgressPatterns on BridgeDesignProgress {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeDesignProgress_Updating value)?  updating,TResult Function( BridgeDesignProgress_Finalized value)?  finalized,required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating() when updating != null:
-return updating(_that);case BridgeDesignProgress_Finalized() when finalized != null:
-return finalized(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeDesignProgress_Updating value)  updating,required TResult Function( BridgeDesignProgress_Finalized value)  finalized,}){
-final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating():
-return updating(_that);case BridgeDesignProgress_Finalized():
-return finalized(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeDesignProgress_Updating value)?  updating,TResult? Function( BridgeDesignProgress_Finalized value)?  finalized,}){
-final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating() when updating != null:
-return updating(_that);case BridgeDesignProgress_Finalized() when finalized != null:
-return finalized(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeUpdatingDesign field0)?  updating,TResult Function( BridgeFinalizedDesign field0)?  finalized,required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating() when updating != null:
-return updating(_that.field0);case BridgeDesignProgress_Finalized() when finalized != null:
-return finalized(_that.field0);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeUpdatingDesign field0)  updating,required TResult Function( BridgeFinalizedDesign field0)  finalized,}) {final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating():
-return updating(_that.field0);case BridgeDesignProgress_Finalized():
-return finalized(_that.field0);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeUpdatingDesign field0)?  updating,TResult? Function( BridgeFinalizedDesign field0)?  finalized,}) {final _that = this;
-switch (_that) {
-case BridgeDesignProgress_Updating() when updating != null:
-return updating(_that.field0);case BridgeDesignProgress_Finalized() when finalized != null:
-return finalized(_that.field0);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-
-
-class BridgeDesignProgress_Updating extends BridgeDesignProgress {
-  const BridgeDesignProgress_Updating(this.field0): super._();
-
-
-@override final  BridgeUpdatingDesign field0;
-
-/// Create a copy of BridgeDesignProgress
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeDesignProgress_UpdatingCopyWith<BridgeDesignProgress_Updating> get copyWith => _$BridgeDesignProgress_UpdatingCopyWithImpl<BridgeDesignProgress_Updating>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeDesignProgress_Updating&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeDesignProgress.updating(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeDesignProgress_UpdatingCopyWith<$Res> implements $BridgeDesignProgressCopyWith<$Res> {
-  factory $BridgeDesignProgress_UpdatingCopyWith(BridgeDesignProgress_Updating value, $Res Function(BridgeDesignProgress_Updating) _then) = _$BridgeDesignProgress_UpdatingCopyWithImpl;
-@useResult
-$Res call({
- BridgeUpdatingDesign field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeDesignProgress_UpdatingCopyWithImpl<$Res>
-    implements $BridgeDesignProgress_UpdatingCopyWith<$Res> {
-  _$BridgeDesignProgress_UpdatingCopyWithImpl(this._self, this._then);
-
-  final BridgeDesignProgress_Updating _self;
-  final $Res Function(BridgeDesignProgress_Updating) _then;
-
-/// Create a copy of BridgeDesignProgress
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeDesignProgress_Updating(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeUpdatingDesign,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeDesignProgress_Finalized extends BridgeDesignProgress {
-  const BridgeDesignProgress_Finalized(this.field0): super._();
-
-
-@override final  BridgeFinalizedDesign field0;
-
-/// Create a copy of BridgeDesignProgress
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeDesignProgress_FinalizedCopyWith<BridgeDesignProgress_Finalized> get copyWith => _$BridgeDesignProgress_FinalizedCopyWithImpl<BridgeDesignProgress_Finalized>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeDesignProgress_Finalized&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeDesignProgress.finalized(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeDesignProgress_FinalizedCopyWith<$Res> implements $BridgeDesignProgressCopyWith<$Res> {
-  factory $BridgeDesignProgress_FinalizedCopyWith(BridgeDesignProgress_Finalized value, $Res Function(BridgeDesignProgress_Finalized) _then) = _$BridgeDesignProgress_FinalizedCopyWithImpl;
-@useResult
-$Res call({
- BridgeFinalizedDesign field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeDesignProgress_FinalizedCopyWithImpl<$Res>
-    implements $BridgeDesignProgress_FinalizedCopyWith<$Res> {
-  _$BridgeDesignProgress_FinalizedCopyWithImpl(this._self, this._then);
-
-  final BridgeDesignProgress_Finalized _self;
-  final $Res Function(BridgeDesignProgress_Finalized) _then;
-
-/// Create a copy of BridgeDesignProgress
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeDesignProgress_Finalized(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeFinalizedDesign,
-  ));
-}
-
-
-}
-
-/// @nodoc
 mixin _$BridgeExecutorContinuationState {
 
  BigInt get revision; int get sliceCount;
@@ -5716,20 +5424,20 @@ as BridgeReviewedCompletion,
 }
 
 /// @nodoc
-mixin _$BridgeTaskFailureState {
+mixin _$BridgeTaskIssueState {
 
  BridgeTaskFailureDetail get failure;
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskFailureStateCopyWith<BridgeTaskFailureState> get copyWith => _$BridgeTaskFailureStateCopyWithImpl<BridgeTaskFailureState>(this as BridgeTaskFailureState, _$identity);
+$BridgeTaskIssueStateCopyWith<BridgeTaskIssueState> get copyWith => _$BridgeTaskIssueStateCopyWithImpl<BridgeTaskIssueState>(this as BridgeTaskIssueState, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskFailureState&&(identical(other.failure, failure) || other.failure == failure));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskIssueState&&(identical(other.failure, failure) || other.failure == failure));
 }
 
 
@@ -5738,15 +5446,15 @@ int get hashCode => Object.hash(runtimeType,failure);
 
 @override
 String toString() {
-  return 'BridgeTaskFailureState(failure: $failure)';
+  return 'BridgeTaskIssueState(failure: $failure)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskFailureStateCopyWith<$Res>  {
-  factory $BridgeTaskFailureStateCopyWith(BridgeTaskFailureState value, $Res Function(BridgeTaskFailureState) _then) = _$BridgeTaskFailureStateCopyWithImpl;
+abstract mixin class $BridgeTaskIssueStateCopyWith<$Res>  {
+  factory $BridgeTaskIssueStateCopyWith(BridgeTaskIssueState value, $Res Function(BridgeTaskIssueState) _then) = _$BridgeTaskIssueStateCopyWithImpl;
 @useResult
 $Res call({
  BridgeTaskFailureDetail failure
@@ -5757,14 +5465,14 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskFailureStateCopyWithImpl<$Res>
-    implements $BridgeTaskFailureStateCopyWith<$Res> {
-  _$BridgeTaskFailureStateCopyWithImpl(this._self, this._then);
+class _$BridgeTaskIssueStateCopyWithImpl<$Res>
+    implements $BridgeTaskIssueStateCopyWith<$Res> {
+  _$BridgeTaskIssueStateCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskFailureState _self;
-  final $Res Function(BridgeTaskFailureState) _then;
+  final BridgeTaskIssueState _self;
+  final $Res Function(BridgeTaskIssueState) _then;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') @override $Res call({Object? failure = null,}) {
   return _then(_self.copyWith(
@@ -5776,8 +5484,8 @@ as BridgeTaskFailureDetail,
 }
 
 
-/// Adds pattern-matching-related methods to [BridgeTaskFailureState].
-extension BridgeTaskFailureStatePatterns on BridgeTaskFailureState {
+/// Adds pattern-matching-related methods to [BridgeTaskIssueState].
+extension BridgeTaskIssueStatePatterns on BridgeTaskIssueState {
 /// A variant of `map` that fallback to returning `orElse`.
 ///
 /// It is equivalent to doing:
@@ -5790,12 +5498,12 @@ extension BridgeTaskFailureStatePatterns on BridgeTaskFailureState {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskFailureState_OpenRecoverable value)?  openRecoverable,TResult Function( BridgeTaskFailureState_OpenFatal value)?  openFatal,TResult Function( BridgeTaskFailureState_Resolved value)?  resolved,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskIssueState_OpenRecoverable value)?  openRecoverable,TResult Function( BridgeTaskIssueState_OpenFatal value)?  openFatal,TResult Function( BridgeTaskIssueState_Resolved value)?  resolved,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable() when openRecoverable != null:
-return openRecoverable(_that);case BridgeTaskFailureState_OpenFatal() when openFatal != null:
-return openFatal(_that);case BridgeTaskFailureState_Resolved() when resolved != null:
+case BridgeTaskIssueState_OpenRecoverable() when openRecoverable != null:
+return openRecoverable(_that);case BridgeTaskIssueState_OpenFatal() when openFatal != null:
+return openFatal(_that);case BridgeTaskIssueState_Resolved() when resolved != null:
 return resolved(_that);case _:
   return orElse();
 
@@ -5814,12 +5522,12 @@ return resolved(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskFailureState_OpenRecoverable value)  openRecoverable,required TResult Function( BridgeTaskFailureState_OpenFatal value)  openFatal,required TResult Function( BridgeTaskFailureState_Resolved value)  resolved,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskIssueState_OpenRecoverable value)  openRecoverable,required TResult Function( BridgeTaskIssueState_OpenFatal value)  openFatal,required TResult Function( BridgeTaskIssueState_Resolved value)  resolved,}){
 final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable():
-return openRecoverable(_that);case BridgeTaskFailureState_OpenFatal():
-return openFatal(_that);case BridgeTaskFailureState_Resolved():
+case BridgeTaskIssueState_OpenRecoverable():
+return openRecoverable(_that);case BridgeTaskIssueState_OpenFatal():
+return openFatal(_that);case BridgeTaskIssueState_Resolved():
 return resolved(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -5834,12 +5542,12 @@ return resolved(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskFailureState_OpenRecoverable value)?  openRecoverable,TResult? Function( BridgeTaskFailureState_OpenFatal value)?  openFatal,TResult? Function( BridgeTaskFailureState_Resolved value)?  resolved,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskIssueState_OpenRecoverable value)?  openRecoverable,TResult? Function( BridgeTaskIssueState_OpenFatal value)?  openFatal,TResult? Function( BridgeTaskIssueState_Resolved value)?  resolved,}){
 final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable() when openRecoverable != null:
-return openRecoverable(_that);case BridgeTaskFailureState_OpenFatal() when openFatal != null:
-return openFatal(_that);case BridgeTaskFailureState_Resolved() when resolved != null:
+case BridgeTaskIssueState_OpenRecoverable() when openRecoverable != null:
+return openRecoverable(_that);case BridgeTaskIssueState_OpenFatal() when openFatal != null:
+return openFatal(_that);case BridgeTaskIssueState_Resolved() when resolved != null:
 return resolved(_that);case _:
   return null;
 
@@ -5859,9 +5567,9 @@ return resolved(_that);case _:
 
 @optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeTaskFailureDetail failure)?  openRecoverable,TResult Function( BridgeTaskFailureDetail failure)?  openFatal,TResult Function( BridgeTaskFailureDetail failure,  PlatformInt64 resolvedAt)?  resolved,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable() when openRecoverable != null:
-return openRecoverable(_that.failure);case BridgeTaskFailureState_OpenFatal() when openFatal != null:
-return openFatal(_that.failure);case BridgeTaskFailureState_Resolved() when resolved != null:
+case BridgeTaskIssueState_OpenRecoverable() when openRecoverable != null:
+return openRecoverable(_that.failure);case BridgeTaskIssueState_OpenFatal() when openFatal != null:
+return openFatal(_that.failure);case BridgeTaskIssueState_Resolved() when resolved != null:
 return resolved(_that.failure,_that.resolvedAt);case _:
   return orElse();
 
@@ -5882,9 +5590,9 @@ return resolved(_that.failure,_that.resolvedAt);case _:
 
 @optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeTaskFailureDetail failure)  openRecoverable,required TResult Function( BridgeTaskFailureDetail failure)  openFatal,required TResult Function( BridgeTaskFailureDetail failure,  PlatformInt64 resolvedAt)  resolved,}) {final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable():
-return openRecoverable(_that.failure);case BridgeTaskFailureState_OpenFatal():
-return openFatal(_that.failure);case BridgeTaskFailureState_Resolved():
+case BridgeTaskIssueState_OpenRecoverable():
+return openRecoverable(_that.failure);case BridgeTaskIssueState_OpenFatal():
+return openFatal(_that.failure);case BridgeTaskIssueState_Resolved():
 return resolved(_that.failure,_that.resolvedAt);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -5901,9 +5609,9 @@ return resolved(_that.failure,_that.resolvedAt);}
 
 @optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeTaskFailureDetail failure)?  openRecoverable,TResult? Function( BridgeTaskFailureDetail failure)?  openFatal,TResult? Function( BridgeTaskFailureDetail failure,  PlatformInt64 resolvedAt)?  resolved,}) {final _that = this;
 switch (_that) {
-case BridgeTaskFailureState_OpenRecoverable() when openRecoverable != null:
-return openRecoverable(_that.failure);case BridgeTaskFailureState_OpenFatal() when openFatal != null:
-return openFatal(_that.failure);case BridgeTaskFailureState_Resolved() when resolved != null:
+case BridgeTaskIssueState_OpenRecoverable() when openRecoverable != null:
+return openRecoverable(_that.failure);case BridgeTaskIssueState_OpenFatal() when openFatal != null:
+return openFatal(_that.failure);case BridgeTaskIssueState_Resolved() when resolved != null:
 return resolved(_that.failure,_that.resolvedAt);case _:
   return null;
 
@@ -5915,23 +5623,23 @@ return resolved(_that.failure,_that.resolvedAt);case _:
 /// @nodoc
 
 
-class BridgeTaskFailureState_OpenRecoverable extends BridgeTaskFailureState {
-  const BridgeTaskFailureState_OpenRecoverable({required this.failure}): super._();
+class BridgeTaskIssueState_OpenRecoverable extends BridgeTaskIssueState {
+  const BridgeTaskIssueState_OpenRecoverable({required this.failure}): super._();
 
 
 @override final  BridgeTaskFailureDetail failure;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskFailureState_OpenRecoverableCopyWith<BridgeTaskFailureState_OpenRecoverable> get copyWith => _$BridgeTaskFailureState_OpenRecoverableCopyWithImpl<BridgeTaskFailureState_OpenRecoverable>(this, _$identity);
+$BridgeTaskIssueState_OpenRecoverableCopyWith<BridgeTaskIssueState_OpenRecoverable> get copyWith => _$BridgeTaskIssueState_OpenRecoverableCopyWithImpl<BridgeTaskIssueState_OpenRecoverable>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskFailureState_OpenRecoverable&&(identical(other.failure, failure) || other.failure == failure));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskIssueState_OpenRecoverable&&(identical(other.failure, failure) || other.failure == failure));
 }
 
 
@@ -5940,15 +5648,15 @@ int get hashCode => Object.hash(runtimeType,failure);
 
 @override
 String toString() {
-  return 'BridgeTaskFailureState.openRecoverable(failure: $failure)';
+  return 'BridgeTaskIssueState.openRecoverable(failure: $failure)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskFailureState_OpenRecoverableCopyWith<$Res> implements $BridgeTaskFailureStateCopyWith<$Res> {
-  factory $BridgeTaskFailureState_OpenRecoverableCopyWith(BridgeTaskFailureState_OpenRecoverable value, $Res Function(BridgeTaskFailureState_OpenRecoverable) _then) = _$BridgeTaskFailureState_OpenRecoverableCopyWithImpl;
+abstract mixin class $BridgeTaskIssueState_OpenRecoverableCopyWith<$Res> implements $BridgeTaskIssueStateCopyWith<$Res> {
+  factory $BridgeTaskIssueState_OpenRecoverableCopyWith(BridgeTaskIssueState_OpenRecoverable value, $Res Function(BridgeTaskIssueState_OpenRecoverable) _then) = _$BridgeTaskIssueState_OpenRecoverableCopyWithImpl;
 @override @useResult
 $Res call({
  BridgeTaskFailureDetail failure
@@ -5959,17 +5667,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskFailureState_OpenRecoverableCopyWithImpl<$Res>
-    implements $BridgeTaskFailureState_OpenRecoverableCopyWith<$Res> {
-  _$BridgeTaskFailureState_OpenRecoverableCopyWithImpl(this._self, this._then);
+class _$BridgeTaskIssueState_OpenRecoverableCopyWithImpl<$Res>
+    implements $BridgeTaskIssueState_OpenRecoverableCopyWith<$Res> {
+  _$BridgeTaskIssueState_OpenRecoverableCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskFailureState_OpenRecoverable _self;
-  final $Res Function(BridgeTaskFailureState_OpenRecoverable) _then;
+  final BridgeTaskIssueState_OpenRecoverable _self;
+  final $Res Function(BridgeTaskIssueState_OpenRecoverable) _then;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @pragma('vm:prefer-inline') $Res call({Object? failure = null,}) {
-  return _then(BridgeTaskFailureState_OpenRecoverable(
+  return _then(BridgeTaskIssueState_OpenRecoverable(
 failure: null == failure ? _self.failure : failure // ignore: cast_nullable_to_non_nullable
 as BridgeTaskFailureDetail,
   ));
@@ -5981,23 +5689,23 @@ as BridgeTaskFailureDetail,
 /// @nodoc
 
 
-class BridgeTaskFailureState_OpenFatal extends BridgeTaskFailureState {
-  const BridgeTaskFailureState_OpenFatal({required this.failure}): super._();
+class BridgeTaskIssueState_OpenFatal extends BridgeTaskIssueState {
+  const BridgeTaskIssueState_OpenFatal({required this.failure}): super._();
 
 
 @override final  BridgeTaskFailureDetail failure;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskFailureState_OpenFatalCopyWith<BridgeTaskFailureState_OpenFatal> get copyWith => _$BridgeTaskFailureState_OpenFatalCopyWithImpl<BridgeTaskFailureState_OpenFatal>(this, _$identity);
+$BridgeTaskIssueState_OpenFatalCopyWith<BridgeTaskIssueState_OpenFatal> get copyWith => _$BridgeTaskIssueState_OpenFatalCopyWithImpl<BridgeTaskIssueState_OpenFatal>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskFailureState_OpenFatal&&(identical(other.failure, failure) || other.failure == failure));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskIssueState_OpenFatal&&(identical(other.failure, failure) || other.failure == failure));
 }
 
 
@@ -6006,15 +5714,15 @@ int get hashCode => Object.hash(runtimeType,failure);
 
 @override
 String toString() {
-  return 'BridgeTaskFailureState.openFatal(failure: $failure)';
+  return 'BridgeTaskIssueState.openFatal(failure: $failure)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskFailureState_OpenFatalCopyWith<$Res> implements $BridgeTaskFailureStateCopyWith<$Res> {
-  factory $BridgeTaskFailureState_OpenFatalCopyWith(BridgeTaskFailureState_OpenFatal value, $Res Function(BridgeTaskFailureState_OpenFatal) _then) = _$BridgeTaskFailureState_OpenFatalCopyWithImpl;
+abstract mixin class $BridgeTaskIssueState_OpenFatalCopyWith<$Res> implements $BridgeTaskIssueStateCopyWith<$Res> {
+  factory $BridgeTaskIssueState_OpenFatalCopyWith(BridgeTaskIssueState_OpenFatal value, $Res Function(BridgeTaskIssueState_OpenFatal) _then) = _$BridgeTaskIssueState_OpenFatalCopyWithImpl;
 @override @useResult
 $Res call({
  BridgeTaskFailureDetail failure
@@ -6025,17 +5733,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskFailureState_OpenFatalCopyWithImpl<$Res>
-    implements $BridgeTaskFailureState_OpenFatalCopyWith<$Res> {
-  _$BridgeTaskFailureState_OpenFatalCopyWithImpl(this._self, this._then);
+class _$BridgeTaskIssueState_OpenFatalCopyWithImpl<$Res>
+    implements $BridgeTaskIssueState_OpenFatalCopyWith<$Res> {
+  _$BridgeTaskIssueState_OpenFatalCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskFailureState_OpenFatal _self;
-  final $Res Function(BridgeTaskFailureState_OpenFatal) _then;
+  final BridgeTaskIssueState_OpenFatal _self;
+  final $Res Function(BridgeTaskIssueState_OpenFatal) _then;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @pragma('vm:prefer-inline') $Res call({Object? failure = null,}) {
-  return _then(BridgeTaskFailureState_OpenFatal(
+  return _then(BridgeTaskIssueState_OpenFatal(
 failure: null == failure ? _self.failure : failure // ignore: cast_nullable_to_non_nullable
 as BridgeTaskFailureDetail,
   ));
@@ -6047,24 +5755,24 @@ as BridgeTaskFailureDetail,
 /// @nodoc
 
 
-class BridgeTaskFailureState_Resolved extends BridgeTaskFailureState {
-  const BridgeTaskFailureState_Resolved({required this.failure, required this.resolvedAt}): super._();
+class BridgeTaskIssueState_Resolved extends BridgeTaskIssueState {
+  const BridgeTaskIssueState_Resolved({required this.failure, required this.resolvedAt}): super._();
 
 
 @override final  BridgeTaskFailureDetail failure;
  final  PlatformInt64 resolvedAt;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskFailureState_ResolvedCopyWith<BridgeTaskFailureState_Resolved> get copyWith => _$BridgeTaskFailureState_ResolvedCopyWithImpl<BridgeTaskFailureState_Resolved>(this, _$identity);
+$BridgeTaskIssueState_ResolvedCopyWith<BridgeTaskIssueState_Resolved> get copyWith => _$BridgeTaskIssueState_ResolvedCopyWithImpl<BridgeTaskIssueState_Resolved>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskFailureState_Resolved&&(identical(other.failure, failure) || other.failure == failure)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskIssueState_Resolved&&(identical(other.failure, failure) || other.failure == failure)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt));
 }
 
 
@@ -6073,15 +5781,15 @@ int get hashCode => Object.hash(runtimeType,failure,resolvedAt);
 
 @override
 String toString() {
-  return 'BridgeTaskFailureState.resolved(failure: $failure, resolvedAt: $resolvedAt)';
+  return 'BridgeTaskIssueState.resolved(failure: $failure, resolvedAt: $resolvedAt)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskFailureState_ResolvedCopyWith<$Res> implements $BridgeTaskFailureStateCopyWith<$Res> {
-  factory $BridgeTaskFailureState_ResolvedCopyWith(BridgeTaskFailureState_Resolved value, $Res Function(BridgeTaskFailureState_Resolved) _then) = _$BridgeTaskFailureState_ResolvedCopyWithImpl;
+abstract mixin class $BridgeTaskIssueState_ResolvedCopyWith<$Res> implements $BridgeTaskIssueStateCopyWith<$Res> {
+  factory $BridgeTaskIssueState_ResolvedCopyWith(BridgeTaskIssueState_Resolved value, $Res Function(BridgeTaskIssueState_Resolved) _then) = _$BridgeTaskIssueState_ResolvedCopyWithImpl;
 @override @useResult
 $Res call({
  BridgeTaskFailureDetail failure, PlatformInt64 resolvedAt
@@ -6092,20 +5800,695 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskFailureState_ResolvedCopyWithImpl<$Res>
-    implements $BridgeTaskFailureState_ResolvedCopyWith<$Res> {
-  _$BridgeTaskFailureState_ResolvedCopyWithImpl(this._self, this._then);
+class _$BridgeTaskIssueState_ResolvedCopyWithImpl<$Res>
+    implements $BridgeTaskIssueState_ResolvedCopyWith<$Res> {
+  _$BridgeTaskIssueState_ResolvedCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskFailureState_Resolved _self;
-  final $Res Function(BridgeTaskFailureState_Resolved) _then;
+  final BridgeTaskIssueState_Resolved _self;
+  final $Res Function(BridgeTaskIssueState_Resolved) _then;
 
-/// Create a copy of BridgeTaskFailureState
+/// Create a copy of BridgeTaskIssueState
 /// with the given fields replaced by the non-null parameter values.
 @override @pragma('vm:prefer-inline') $Res call({Object? failure = null,Object? resolvedAt = null,}) {
-  return _then(BridgeTaskFailureState_Resolved(
+  return _then(BridgeTaskIssueState_Resolved(
 failure: null == failure ? _self.failure : failure // ignore: cast_nullable_to_non_nullable
 as BridgeTaskFailureDetail,resolvedAt: null == resolvedAt ? _self.resolvedAt : resolvedAt // ignore: cast_nullable_to_non_nullable
 as PlatformInt64,
+  ));
+}
+
+
+}
+
+/// @nodoc
+mixin _$BridgeTaskOutcome {
+
+ String get summary; PlatformInt64 get completedAt;
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskOutcomeCopyWith<BridgeTaskOutcome> get copyWith => _$BridgeTaskOutcomeCopyWithImpl<BridgeTaskOutcome>(this as BridgeTaskOutcome, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskOutcome&&(identical(other.summary, summary) || other.summary == summary)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,summary,completedAt);
+
+@override
+String toString() {
+  return 'BridgeTaskOutcome(summary: $summary, completedAt: $completedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskOutcomeCopyWith<$Res>  {
+  factory $BridgeTaskOutcomeCopyWith(BridgeTaskOutcome value, $Res Function(BridgeTaskOutcome) _then) = _$BridgeTaskOutcomeCopyWithImpl;
+@useResult
+$Res call({
+ String summary, PlatformInt64 completedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeTaskOutcomeCopyWithImpl<$Res>
+    implements $BridgeTaskOutcomeCopyWith<$Res> {
+  _$BridgeTaskOutcomeCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskOutcome _self;
+  final $Res Function(BridgeTaskOutcome) _then;
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? summary = null,Object? completedAt = null,}) {
+  return _then(_self.copyWith(
+summary: null == summary ? _self.summary : summary // ignore: cast_nullable_to_non_nullable
+as String,completedAt: null == completedAt ? _self.completedAt : completedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeTaskOutcome].
+extension BridgeTaskOutcomePatterns on BridgeTaskOutcome {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskOutcome_Succeeded value)?  succeeded,TResult Function( BridgeTaskOutcome_Failed value)?  failed,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded() when succeeded != null:
+return succeeded(_that);case BridgeTaskOutcome_Failed() when failed != null:
+return failed(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskOutcome_Succeeded value)  succeeded,required TResult Function( BridgeTaskOutcome_Failed value)  failed,}){
+final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded():
+return succeeded(_that);case BridgeTaskOutcome_Failed():
+return failed(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskOutcome_Succeeded value)?  succeeded,TResult? Function( BridgeTaskOutcome_Failed value)?  failed,}){
+final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded() when succeeded != null:
+return succeeded(_that);case BridgeTaskOutcome_Failed() when failed != null:
+return failed(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String summary,  PlatformInt64 completedAt,  BridgeTaskReviewGate reviewGate)?  succeeded,TResult Function( BridgeTaskFailureKind kind,  String summary,  String evidence,  String cause,  PlatformInt64 completedAt)?  failed,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded() when succeeded != null:
+return succeeded(_that.summary,_that.completedAt,_that.reviewGate);case BridgeTaskOutcome_Failed() when failed != null:
+return failed(_that.kind,_that.summary,_that.evidence,_that.cause,_that.completedAt);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String summary,  PlatformInt64 completedAt,  BridgeTaskReviewGate reviewGate)  succeeded,required TResult Function( BridgeTaskFailureKind kind,  String summary,  String evidence,  String cause,  PlatformInt64 completedAt)  failed,}) {final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded():
+return succeeded(_that.summary,_that.completedAt,_that.reviewGate);case BridgeTaskOutcome_Failed():
+return failed(_that.kind,_that.summary,_that.evidence,_that.cause,_that.completedAt);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String summary,  PlatformInt64 completedAt,  BridgeTaskReviewGate reviewGate)?  succeeded,TResult? Function( BridgeTaskFailureKind kind,  String summary,  String evidence,  String cause,  PlatformInt64 completedAt)?  failed,}) {final _that = this;
+switch (_that) {
+case BridgeTaskOutcome_Succeeded() when succeeded != null:
+return succeeded(_that.summary,_that.completedAt,_that.reviewGate);case BridgeTaskOutcome_Failed() when failed != null:
+return failed(_that.kind,_that.summary,_that.evidence,_that.cause,_that.completedAt);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeTaskOutcome_Succeeded extends BridgeTaskOutcome {
+  const BridgeTaskOutcome_Succeeded({required this.summary, required this.completedAt, required this.reviewGate}): super._();
+
+
+@override final  String summary;
+@override final  PlatformInt64 completedAt;
+ final  BridgeTaskReviewGate reviewGate;
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskOutcome_SucceededCopyWith<BridgeTaskOutcome_Succeeded> get copyWith => _$BridgeTaskOutcome_SucceededCopyWithImpl<BridgeTaskOutcome_Succeeded>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskOutcome_Succeeded&&(identical(other.summary, summary) || other.summary == summary)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.reviewGate, reviewGate) || other.reviewGate == reviewGate));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,summary,completedAt,reviewGate);
+
+@override
+String toString() {
+  return 'BridgeTaskOutcome.succeeded(summary: $summary, completedAt: $completedAt, reviewGate: $reviewGate)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskOutcome_SucceededCopyWith<$Res> implements $BridgeTaskOutcomeCopyWith<$Res> {
+  factory $BridgeTaskOutcome_SucceededCopyWith(BridgeTaskOutcome_Succeeded value, $Res Function(BridgeTaskOutcome_Succeeded) _then) = _$BridgeTaskOutcome_SucceededCopyWithImpl;
+@override @useResult
+$Res call({
+ String summary, PlatformInt64 completedAt, BridgeTaskReviewGate reviewGate
+});
+
+
+$BridgeTaskReviewGateCopyWith<$Res> get reviewGate;
+
+}
+/// @nodoc
+class _$BridgeTaskOutcome_SucceededCopyWithImpl<$Res>
+    implements $BridgeTaskOutcome_SucceededCopyWith<$Res> {
+  _$BridgeTaskOutcome_SucceededCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskOutcome_Succeeded _self;
+  final $Res Function(BridgeTaskOutcome_Succeeded) _then;
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? summary = null,Object? completedAt = null,Object? reviewGate = null,}) {
+  return _then(BridgeTaskOutcome_Succeeded(
+summary: null == summary ? _self.summary : summary // ignore: cast_nullable_to_non_nullable
+as String,completedAt: null == completedAt ? _self.completedAt : completedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,reviewGate: null == reviewGate ? _self.reviewGate : reviewGate // ignore: cast_nullable_to_non_nullable
+as BridgeTaskReviewGate,
+  ));
+}
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeTaskReviewGateCopyWith<$Res> get reviewGate {
+
+  return $BridgeTaskReviewGateCopyWith<$Res>(_self.reviewGate, (value) {
+    return _then(_self.copyWith(reviewGate: value));
+  });
+}
+}
+
+/// @nodoc
+
+
+class BridgeTaskOutcome_Failed extends BridgeTaskOutcome {
+  const BridgeTaskOutcome_Failed({required this.kind, required this.summary, required this.evidence, required this.cause, required this.completedAt}): super._();
+
+
+ final  BridgeTaskFailureKind kind;
+@override final  String summary;
+ final  String evidence;
+ final  String cause;
+@override final  PlatformInt64 completedAt;
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskOutcome_FailedCopyWith<BridgeTaskOutcome_Failed> get copyWith => _$BridgeTaskOutcome_FailedCopyWithImpl<BridgeTaskOutcome_Failed>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskOutcome_Failed&&(identical(other.kind, kind) || other.kind == kind)&&(identical(other.summary, summary) || other.summary == summary)&&(identical(other.evidence, evidence) || other.evidence == evidence)&&(identical(other.cause, cause) || other.cause == cause)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,kind,summary,evidence,cause,completedAt);
+
+@override
+String toString() {
+  return 'BridgeTaskOutcome.failed(kind: $kind, summary: $summary, evidence: $evidence, cause: $cause, completedAt: $completedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskOutcome_FailedCopyWith<$Res> implements $BridgeTaskOutcomeCopyWith<$Res> {
+  factory $BridgeTaskOutcome_FailedCopyWith(BridgeTaskOutcome_Failed value, $Res Function(BridgeTaskOutcome_Failed) _then) = _$BridgeTaskOutcome_FailedCopyWithImpl;
+@override @useResult
+$Res call({
+ BridgeTaskFailureKind kind, String summary, String evidence, String cause, PlatformInt64 completedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeTaskOutcome_FailedCopyWithImpl<$Res>
+    implements $BridgeTaskOutcome_FailedCopyWith<$Res> {
+  _$BridgeTaskOutcome_FailedCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskOutcome_Failed _self;
+  final $Res Function(BridgeTaskOutcome_Failed) _then;
+
+/// Create a copy of BridgeTaskOutcome
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? kind = null,Object? summary = null,Object? evidence = null,Object? cause = null,Object? completedAt = null,}) {
+  return _then(BridgeTaskOutcome_Failed(
+kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
+as BridgeTaskFailureKind,summary: null == summary ? _self.summary : summary // ignore: cast_nullable_to_non_nullable
+as String,evidence: null == evidence ? _self.evidence : evidence // ignore: cast_nullable_to_non_nullable
+as String,cause: null == cause ? _self.cause : cause // ignore: cast_nullable_to_non_nullable
+as String,completedAt: null == completedAt ? _self.completedAt : completedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,
+  ));
+}
+
+
+}
+
+/// @nodoc
+mixin _$BridgeTaskReviewGate {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewGate);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeTaskReviewGate()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeTaskReviewGateCopyWith<$Res>  {
+$BridgeTaskReviewGateCopyWith(BridgeTaskReviewGate _, $Res Function(BridgeTaskReviewGate) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeTaskReviewGate].
+extension BridgeTaskReviewGatePatterns on BridgeTaskReviewGate {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskReviewGate_NotRequiredNoDelivery value)?  notRequiredNoDelivery,TResult Function( BridgeTaskReviewGate_NotRequiredSingleExecutor value)?  notRequiredSingleExecutor,TResult Function( BridgeTaskReviewGate_IntegratedReview value)?  integratedReview,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery() when notRequiredNoDelivery != null:
+return notRequiredNoDelivery(_that);case BridgeTaskReviewGate_NotRequiredSingleExecutor() when notRequiredSingleExecutor != null:
+return notRequiredSingleExecutor(_that);case BridgeTaskReviewGate_IntegratedReview() when integratedReview != null:
+return integratedReview(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskReviewGate_NotRequiredNoDelivery value)  notRequiredNoDelivery,required TResult Function( BridgeTaskReviewGate_NotRequiredSingleExecutor value)  notRequiredSingleExecutor,required TResult Function( BridgeTaskReviewGate_IntegratedReview value)  integratedReview,}){
+final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery():
+return notRequiredNoDelivery(_that);case BridgeTaskReviewGate_NotRequiredSingleExecutor():
+return notRequiredSingleExecutor(_that);case BridgeTaskReviewGate_IntegratedReview():
+return integratedReview(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskReviewGate_NotRequiredNoDelivery value)?  notRequiredNoDelivery,TResult? Function( BridgeTaskReviewGate_NotRequiredSingleExecutor value)?  notRequiredSingleExecutor,TResult? Function( BridgeTaskReviewGate_IntegratedReview value)?  integratedReview,}){
+final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery() when notRequiredNoDelivery != null:
+return notRequiredNoDelivery(_that);case BridgeTaskReviewGate_NotRequiredSingleExecutor() when notRequiredSingleExecutor != null:
+return notRequiredSingleExecutor(_that);case BridgeTaskReviewGate_IntegratedReview() when integratedReview != null:
+return integratedReview(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  notRequiredNoDelivery,TResult Function( String workUnitId)?  notRequiredSingleExecutor,TResult Function( String reviewRoundId)?  integratedReview,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery() when notRequiredNoDelivery != null:
+return notRequiredNoDelivery();case BridgeTaskReviewGate_NotRequiredSingleExecutor() when notRequiredSingleExecutor != null:
+return notRequiredSingleExecutor(_that.workUnitId);case BridgeTaskReviewGate_IntegratedReview() when integratedReview != null:
+return integratedReview(_that.reviewRoundId);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  notRequiredNoDelivery,required TResult Function( String workUnitId)  notRequiredSingleExecutor,required TResult Function( String reviewRoundId)  integratedReview,}) {final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery():
+return notRequiredNoDelivery();case BridgeTaskReviewGate_NotRequiredSingleExecutor():
+return notRequiredSingleExecutor(_that.workUnitId);case BridgeTaskReviewGate_IntegratedReview():
+return integratedReview(_that.reviewRoundId);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  notRequiredNoDelivery,TResult? Function( String workUnitId)?  notRequiredSingleExecutor,TResult? Function( String reviewRoundId)?  integratedReview,}) {final _that = this;
+switch (_that) {
+case BridgeTaskReviewGate_NotRequiredNoDelivery() when notRequiredNoDelivery != null:
+return notRequiredNoDelivery();case BridgeTaskReviewGate_NotRequiredSingleExecutor() when notRequiredSingleExecutor != null:
+return notRequiredSingleExecutor(_that.workUnitId);case BridgeTaskReviewGate_IntegratedReview() when integratedReview != null:
+return integratedReview(_that.reviewRoundId);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeTaskReviewGate_NotRequiredNoDelivery extends BridgeTaskReviewGate {
+  const BridgeTaskReviewGate_NotRequiredNoDelivery(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewGate_NotRequiredNoDelivery);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeTaskReviewGate.notRequiredNoDelivery()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeTaskReviewGate_NotRequiredSingleExecutor extends BridgeTaskReviewGate {
+  const BridgeTaskReviewGate_NotRequiredSingleExecutor({required this.workUnitId}): super._();
+
+
+ final  String workUnitId;
+
+/// Create a copy of BridgeTaskReviewGate
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWith<BridgeTaskReviewGate_NotRequiredSingleExecutor> get copyWith => _$BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWithImpl<BridgeTaskReviewGate_NotRequiredSingleExecutor>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewGate_NotRequiredSingleExecutor&&(identical(other.workUnitId, workUnitId) || other.workUnitId == workUnitId));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,workUnitId);
+
+@override
+String toString() {
+  return 'BridgeTaskReviewGate.notRequiredSingleExecutor(workUnitId: $workUnitId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWith<$Res> implements $BridgeTaskReviewGateCopyWith<$Res> {
+  factory $BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWith(BridgeTaskReviewGate_NotRequiredSingleExecutor value, $Res Function(BridgeTaskReviewGate_NotRequiredSingleExecutor) _then) = _$BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWithImpl;
+@useResult
+$Res call({
+ String workUnitId
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWithImpl<$Res>
+    implements $BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWith<$Res> {
+  _$BridgeTaskReviewGate_NotRequiredSingleExecutorCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskReviewGate_NotRequiredSingleExecutor _self;
+  final $Res Function(BridgeTaskReviewGate_NotRequiredSingleExecutor) _then;
+
+/// Create a copy of BridgeTaskReviewGate
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? workUnitId = null,}) {
+  return _then(BridgeTaskReviewGate_NotRequiredSingleExecutor(
+workUnitId: null == workUnitId ? _self.workUnitId : workUnitId // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeTaskReviewGate_IntegratedReview extends BridgeTaskReviewGate {
+  const BridgeTaskReviewGate_IntegratedReview({required this.reviewRoundId}): super._();
+
+
+ final  String reviewRoundId;
+
+/// Create a copy of BridgeTaskReviewGate
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskReviewGate_IntegratedReviewCopyWith<BridgeTaskReviewGate_IntegratedReview> get copyWith => _$BridgeTaskReviewGate_IntegratedReviewCopyWithImpl<BridgeTaskReviewGate_IntegratedReview>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewGate_IntegratedReview&&(identical(other.reviewRoundId, reviewRoundId) || other.reviewRoundId == reviewRoundId));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,reviewRoundId);
+
+@override
+String toString() {
+  return 'BridgeTaskReviewGate.integratedReview(reviewRoundId: $reviewRoundId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskReviewGate_IntegratedReviewCopyWith<$Res> implements $BridgeTaskReviewGateCopyWith<$Res> {
+  factory $BridgeTaskReviewGate_IntegratedReviewCopyWith(BridgeTaskReviewGate_IntegratedReview value, $Res Function(BridgeTaskReviewGate_IntegratedReview) _then) = _$BridgeTaskReviewGate_IntegratedReviewCopyWithImpl;
+@useResult
+$Res call({
+ String reviewRoundId
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeTaskReviewGate_IntegratedReviewCopyWithImpl<$Res>
+    implements $BridgeTaskReviewGate_IntegratedReviewCopyWith<$Res> {
+  _$BridgeTaskReviewGate_IntegratedReviewCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskReviewGate_IntegratedReview _self;
+  final $Res Function(BridgeTaskReviewGate_IntegratedReview) _then;
+
+/// Create a copy of BridgeTaskReviewGate
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? reviewRoundId = null,}) {
+  return _then(BridgeTaskReviewGate_IntegratedReview(
+reviewRoundId: null == reviewRoundId ? _self.reviewRoundId : reviewRoundId // ignore: cast_nullable_to_non_nullable
+as String,
   ));
 }
 
@@ -6817,335 +7200,6 @@ as String,
 }
 
 /// @nodoc
-mixin _$BridgeTaskReviewTarget {
-
- String get reviewedHead;
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskReviewTargetCopyWith<BridgeTaskReviewTarget> get copyWith => _$BridgeTaskReviewTargetCopyWithImpl<BridgeTaskReviewTarget>(this as BridgeTaskReviewTarget, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewTarget&&(identical(other.reviewedHead, reviewedHead) || other.reviewedHead == reviewedHead));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,reviewedHead);
-
-@override
-String toString() {
-  return 'BridgeTaskReviewTarget(reviewedHead: $reviewedHead)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskReviewTargetCopyWith<$Res>  {
-  factory $BridgeTaskReviewTargetCopyWith(BridgeTaskReviewTarget value, $Res Function(BridgeTaskReviewTarget) _then) = _$BridgeTaskReviewTargetCopyWithImpl;
-@useResult
-$Res call({
- String reviewedHead
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskReviewTargetCopyWithImpl<$Res>
-    implements $BridgeTaskReviewTargetCopyWith<$Res> {
-  _$BridgeTaskReviewTargetCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskReviewTarget _self;
-  final $Res Function(BridgeTaskReviewTarget) _then;
-
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? reviewedHead = null,}) {
-  return _then(_self.copyWith(
-reviewedHead: null == reviewedHead ? _self.reviewedHead : reviewedHead // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-}
-
-
-/// Adds pattern-matching-related methods to [BridgeTaskReviewTarget].
-extension BridgeTaskReviewTargetPatterns on BridgeTaskReviewTarget {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskReviewTarget_Delivery value)?  delivery,TResult Function( BridgeTaskReviewTarget_Integration value)?  integration,required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery() when delivery != null:
-return delivery(_that);case BridgeTaskReviewTarget_Integration() when integration != null:
-return integration(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskReviewTarget_Delivery value)  delivery,required TResult Function( BridgeTaskReviewTarget_Integration value)  integration,}){
-final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery():
-return delivery(_that);case BridgeTaskReviewTarget_Integration():
-return integration(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskReviewTarget_Delivery value)?  delivery,TResult? Function( BridgeTaskReviewTarget_Integration value)?  integration,}){
-final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery() when delivery != null:
-return delivery(_that);case BridgeTaskReviewTarget_Integration() when integration != null:
-return integration(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String workUnitId,  String completionId,  int completionRevision,  String reviewedHead)?  delivery,TResult Function( String reviewedHead)?  integration,required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery() when delivery != null:
-return delivery(_that.workUnitId,_that.completionId,_that.completionRevision,_that.reviewedHead);case BridgeTaskReviewTarget_Integration() when integration != null:
-return integration(_that.reviewedHead);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String workUnitId,  String completionId,  int completionRevision,  String reviewedHead)  delivery,required TResult Function( String reviewedHead)  integration,}) {final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery():
-return delivery(_that.workUnitId,_that.completionId,_that.completionRevision,_that.reviewedHead);case BridgeTaskReviewTarget_Integration():
-return integration(_that.reviewedHead);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String workUnitId,  String completionId,  int completionRevision,  String reviewedHead)?  delivery,TResult? Function( String reviewedHead)?  integration,}) {final _that = this;
-switch (_that) {
-case BridgeTaskReviewTarget_Delivery() when delivery != null:
-return delivery(_that.workUnitId,_that.completionId,_that.completionRevision,_that.reviewedHead);case BridgeTaskReviewTarget_Integration() when integration != null:
-return integration(_that.reviewedHead);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskReviewTarget_Delivery extends BridgeTaskReviewTarget {
-  const BridgeTaskReviewTarget_Delivery({required this.workUnitId, required this.completionId, required this.completionRevision, required this.reviewedHead}): super._();
-
-
- final  String workUnitId;
- final  String completionId;
- final  int completionRevision;
-@override final  String reviewedHead;
-
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskReviewTarget_DeliveryCopyWith<BridgeTaskReviewTarget_Delivery> get copyWith => _$BridgeTaskReviewTarget_DeliveryCopyWithImpl<BridgeTaskReviewTarget_Delivery>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewTarget_Delivery&&(identical(other.workUnitId, workUnitId) || other.workUnitId == workUnitId)&&(identical(other.completionId, completionId) || other.completionId == completionId)&&(identical(other.completionRevision, completionRevision) || other.completionRevision == completionRevision)&&(identical(other.reviewedHead, reviewedHead) || other.reviewedHead == reviewedHead));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,workUnitId,completionId,completionRevision,reviewedHead);
-
-@override
-String toString() {
-  return 'BridgeTaskReviewTarget.delivery(workUnitId: $workUnitId, completionId: $completionId, completionRevision: $completionRevision, reviewedHead: $reviewedHead)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskReviewTarget_DeliveryCopyWith<$Res> implements $BridgeTaskReviewTargetCopyWith<$Res> {
-  factory $BridgeTaskReviewTarget_DeliveryCopyWith(BridgeTaskReviewTarget_Delivery value, $Res Function(BridgeTaskReviewTarget_Delivery) _then) = _$BridgeTaskReviewTarget_DeliveryCopyWithImpl;
-@override @useResult
-$Res call({
- String workUnitId, String completionId, int completionRevision, String reviewedHead
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskReviewTarget_DeliveryCopyWithImpl<$Res>
-    implements $BridgeTaskReviewTarget_DeliveryCopyWith<$Res> {
-  _$BridgeTaskReviewTarget_DeliveryCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskReviewTarget_Delivery _self;
-  final $Res Function(BridgeTaskReviewTarget_Delivery) _then;
-
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? workUnitId = null,Object? completionId = null,Object? completionRevision = null,Object? reviewedHead = null,}) {
-  return _then(BridgeTaskReviewTarget_Delivery(
-workUnitId: null == workUnitId ? _self.workUnitId : workUnitId // ignore: cast_nullable_to_non_nullable
-as String,completionId: null == completionId ? _self.completionId : completionId // ignore: cast_nullable_to_non_nullable
-as String,completionRevision: null == completionRevision ? _self.completionRevision : completionRevision // ignore: cast_nullable_to_non_nullable
-as int,reviewedHead: null == reviewedHead ? _self.reviewedHead : reviewedHead // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskReviewTarget_Integration extends BridgeTaskReviewTarget {
-  const BridgeTaskReviewTarget_Integration({required this.reviewedHead}): super._();
-
-
-@override final  String reviewedHead;
-
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskReviewTarget_IntegrationCopyWith<BridgeTaskReviewTarget_Integration> get copyWith => _$BridgeTaskReviewTarget_IntegrationCopyWithImpl<BridgeTaskReviewTarget_Integration>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskReviewTarget_Integration&&(identical(other.reviewedHead, reviewedHead) || other.reviewedHead == reviewedHead));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,reviewedHead);
-
-@override
-String toString() {
-  return 'BridgeTaskReviewTarget.integration(reviewedHead: $reviewedHead)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskReviewTarget_IntegrationCopyWith<$Res> implements $BridgeTaskReviewTargetCopyWith<$Res> {
-  factory $BridgeTaskReviewTarget_IntegrationCopyWith(BridgeTaskReviewTarget_Integration value, $Res Function(BridgeTaskReviewTarget_Integration) _then) = _$BridgeTaskReviewTarget_IntegrationCopyWithImpl;
-@override @useResult
-$Res call({
- String reviewedHead
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskReviewTarget_IntegrationCopyWithImpl<$Res>
-    implements $BridgeTaskReviewTarget_IntegrationCopyWith<$Res> {
-  _$BridgeTaskReviewTarget_IntegrationCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskReviewTarget_Integration _self;
-  final $Res Function(BridgeTaskReviewTarget_Integration) _then;
-
-/// Create a copy of BridgeTaskReviewTarget
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? reviewedHead = null,}) {
-  return _then(BridgeTaskReviewTarget_Integration(
-reviewedHead: null == reviewedHead ? _self.reviewedHead : reviewedHead // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-
-}
-
-/// @nodoc
 mixin _$BridgeTaskState {
 
  Object get field0;
@@ -7189,20 +7243,16 @@ extension BridgeTaskStatePatterns on BridgeTaskState {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskState_DesignUpdating value)?  designUpdating,TResult Function( BridgeTaskState_Implementing value)?  implementing,TResult Function( BridgeTaskState_Merging value)?  merging,TResult Function( BridgeTaskState_Reviewing value)?  reviewing,TResult Function( BridgeTaskState_Reworking value)?  reworking,TResult Function( BridgeTaskState_Stopping value)?  stopping,TResult Function( BridgeTaskState_Blocked value)?  blocked,TResult Function( BridgeTaskState_Completed value)?  completed,TResult Function( BridgeTaskState_Failed value)?  failed,TResult Function( BridgeTaskState_Cancelled value)?  cancelled,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTaskState_Planning value)?  planning,TResult Function( BridgeTaskState_PendingConfirmation value)?  pendingConfirmation,TResult Function( BridgeTaskState_EditingDocuments value)?  editingDocuments,TResult Function( BridgeTaskState_Working value)?  working,TResult Function( BridgeTaskState_Reviewing value)?  reviewing,TResult Function( BridgeTaskState_Completed value)?  completed,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating() when designUpdating != null:
-return designUpdating(_that);case BridgeTaskState_Implementing() when implementing != null:
-return implementing(_that);case BridgeTaskState_Merging() when merging != null:
-return merging(_that);case BridgeTaskState_Reviewing() when reviewing != null:
-return reviewing(_that);case BridgeTaskState_Reworking() when reworking != null:
-return reworking(_that);case BridgeTaskState_Stopping() when stopping != null:
-return stopping(_that);case BridgeTaskState_Blocked() when blocked != null:
-return blocked(_that);case BridgeTaskState_Completed() when completed != null:
-return completed(_that);case BridgeTaskState_Failed() when failed != null:
-return failed(_that);case BridgeTaskState_Cancelled() when cancelled != null:
-return cancelled(_that);case _:
+case BridgeTaskState_Planning() when planning != null:
+return planning(_that);case BridgeTaskState_PendingConfirmation() when pendingConfirmation != null:
+return pendingConfirmation(_that);case BridgeTaskState_EditingDocuments() when editingDocuments != null:
+return editingDocuments(_that);case BridgeTaskState_Working() when working != null:
+return working(_that);case BridgeTaskState_Reviewing() when reviewing != null:
+return reviewing(_that);case BridgeTaskState_Completed() when completed != null:
+return completed(_that);case _:
   return orElse();
 
 }
@@ -7220,20 +7270,16 @@ return cancelled(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskState_DesignUpdating value)  designUpdating,required TResult Function( BridgeTaskState_Implementing value)  implementing,required TResult Function( BridgeTaskState_Merging value)  merging,required TResult Function( BridgeTaskState_Reviewing value)  reviewing,required TResult Function( BridgeTaskState_Reworking value)  reworking,required TResult Function( BridgeTaskState_Stopping value)  stopping,required TResult Function( BridgeTaskState_Blocked value)  blocked,required TResult Function( BridgeTaskState_Completed value)  completed,required TResult Function( BridgeTaskState_Failed value)  failed,required TResult Function( BridgeTaskState_Cancelled value)  cancelled,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTaskState_Planning value)  planning,required TResult Function( BridgeTaskState_PendingConfirmation value)  pendingConfirmation,required TResult Function( BridgeTaskState_EditingDocuments value)  editingDocuments,required TResult Function( BridgeTaskState_Working value)  working,required TResult Function( BridgeTaskState_Reviewing value)  reviewing,required TResult Function( BridgeTaskState_Completed value)  completed,}){
 final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating():
-return designUpdating(_that);case BridgeTaskState_Implementing():
-return implementing(_that);case BridgeTaskState_Merging():
-return merging(_that);case BridgeTaskState_Reviewing():
-return reviewing(_that);case BridgeTaskState_Reworking():
-return reworking(_that);case BridgeTaskState_Stopping():
-return stopping(_that);case BridgeTaskState_Blocked():
-return blocked(_that);case BridgeTaskState_Completed():
-return completed(_that);case BridgeTaskState_Failed():
-return failed(_that);case BridgeTaskState_Cancelled():
-return cancelled(_that);}
+case BridgeTaskState_Planning():
+return planning(_that);case BridgeTaskState_PendingConfirmation():
+return pendingConfirmation(_that);case BridgeTaskState_EditingDocuments():
+return editingDocuments(_that);case BridgeTaskState_Working():
+return working(_that);case BridgeTaskState_Reviewing():
+return reviewing(_that);case BridgeTaskState_Completed():
+return completed(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -7247,20 +7293,16 @@ return cancelled(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskState_DesignUpdating value)?  designUpdating,TResult? Function( BridgeTaskState_Implementing value)?  implementing,TResult? Function( BridgeTaskState_Merging value)?  merging,TResult? Function( BridgeTaskState_Reviewing value)?  reviewing,TResult? Function( BridgeTaskState_Reworking value)?  reworking,TResult? Function( BridgeTaskState_Stopping value)?  stopping,TResult? Function( BridgeTaskState_Blocked value)?  blocked,TResult? Function( BridgeTaskState_Completed value)?  completed,TResult? Function( BridgeTaskState_Failed value)?  failed,TResult? Function( BridgeTaskState_Cancelled value)?  cancelled,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTaskState_Planning value)?  planning,TResult? Function( BridgeTaskState_PendingConfirmation value)?  pendingConfirmation,TResult? Function( BridgeTaskState_EditingDocuments value)?  editingDocuments,TResult? Function( BridgeTaskState_Working value)?  working,TResult? Function( BridgeTaskState_Reviewing value)?  reviewing,TResult? Function( BridgeTaskState_Completed value)?  completed,}){
 final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating() when designUpdating != null:
-return designUpdating(_that);case BridgeTaskState_Implementing() when implementing != null:
-return implementing(_that);case BridgeTaskState_Merging() when merging != null:
-return merging(_that);case BridgeTaskState_Reviewing() when reviewing != null:
-return reviewing(_that);case BridgeTaskState_Reworking() when reworking != null:
-return reworking(_that);case BridgeTaskState_Stopping() when stopping != null:
-return stopping(_that);case BridgeTaskState_Blocked() when blocked != null:
-return blocked(_that);case BridgeTaskState_Completed() when completed != null:
-return completed(_that);case BridgeTaskState_Failed() when failed != null:
-return failed(_that);case BridgeTaskState_Cancelled() when cancelled != null:
-return cancelled(_that);case _:
+case BridgeTaskState_Planning() when planning != null:
+return planning(_that);case BridgeTaskState_PendingConfirmation() when pendingConfirmation != null:
+return pendingConfirmation(_that);case BridgeTaskState_EditingDocuments() when editingDocuments != null:
+return editingDocuments(_that);case BridgeTaskState_Working() when working != null:
+return working(_that);case BridgeTaskState_Reviewing() when reviewing != null:
+return reviewing(_that);case BridgeTaskState_Completed() when completed != null:
+return completed(_that);case _:
   return null;
 
 }
@@ -7277,19 +7319,15 @@ return cancelled(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeDesignUpdatingTaskState field0)?  designUpdating,TResult Function( BridgeImplementingTaskState field0)?  implementing,TResult Function( BridgeMergingTaskState field0)?  merging,TResult Function( BridgeReviewingTaskState field0)?  reviewing,TResult Function( BridgeReworkingTaskState field0)?  reworking,TResult Function( BridgeStoppingTaskState field0)?  stopping,TResult Function( BridgeBlockedTaskState field0)?  blocked,TResult Function( BridgeCompletedTaskState field0)?  completed,TResult Function( BridgeFailedTaskState field0)?  failed,TResult Function( BridgeCancelledTaskState field0)?  cancelled,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgePlanningTaskState field0)?  planning,TResult Function( BridgePendingConfirmationTaskState field0)?  pendingConfirmation,TResult Function( BridgeEditingDocumentsTaskState field0)?  editingDocuments,TResult Function( BridgeWorkingTaskState field0)?  working,TResult Function( BridgeReviewingTaskState field0)?  reviewing,TResult Function( BridgeCompletedTaskState field0)?  completed,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating() when designUpdating != null:
-return designUpdating(_that.field0);case BridgeTaskState_Implementing() when implementing != null:
-return implementing(_that.field0);case BridgeTaskState_Merging() when merging != null:
-return merging(_that.field0);case BridgeTaskState_Reviewing() when reviewing != null:
-return reviewing(_that.field0);case BridgeTaskState_Reworking() when reworking != null:
-return reworking(_that.field0);case BridgeTaskState_Stopping() when stopping != null:
-return stopping(_that.field0);case BridgeTaskState_Blocked() when blocked != null:
-return blocked(_that.field0);case BridgeTaskState_Completed() when completed != null:
-return completed(_that.field0);case BridgeTaskState_Failed() when failed != null:
-return failed(_that.field0);case BridgeTaskState_Cancelled() when cancelled != null:
-return cancelled(_that.field0);case _:
+case BridgeTaskState_Planning() when planning != null:
+return planning(_that.field0);case BridgeTaskState_PendingConfirmation() when pendingConfirmation != null:
+return pendingConfirmation(_that.field0);case BridgeTaskState_EditingDocuments() when editingDocuments != null:
+return editingDocuments(_that.field0);case BridgeTaskState_Working() when working != null:
+return working(_that.field0);case BridgeTaskState_Reviewing() when reviewing != null:
+return reviewing(_that.field0);case BridgeTaskState_Completed() when completed != null:
+return completed(_that.field0);case _:
   return orElse();
 
 }
@@ -7307,19 +7345,15 @@ return cancelled(_that.field0);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeDesignUpdatingTaskState field0)  designUpdating,required TResult Function( BridgeImplementingTaskState field0)  implementing,required TResult Function( BridgeMergingTaskState field0)  merging,required TResult Function( BridgeReviewingTaskState field0)  reviewing,required TResult Function( BridgeReworkingTaskState field0)  reworking,required TResult Function( BridgeStoppingTaskState field0)  stopping,required TResult Function( BridgeBlockedTaskState field0)  blocked,required TResult Function( BridgeCompletedTaskState field0)  completed,required TResult Function( BridgeFailedTaskState field0)  failed,required TResult Function( BridgeCancelledTaskState field0)  cancelled,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgePlanningTaskState field0)  planning,required TResult Function( BridgePendingConfirmationTaskState field0)  pendingConfirmation,required TResult Function( BridgeEditingDocumentsTaskState field0)  editingDocuments,required TResult Function( BridgeWorkingTaskState field0)  working,required TResult Function( BridgeReviewingTaskState field0)  reviewing,required TResult Function( BridgeCompletedTaskState field0)  completed,}) {final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating():
-return designUpdating(_that.field0);case BridgeTaskState_Implementing():
-return implementing(_that.field0);case BridgeTaskState_Merging():
-return merging(_that.field0);case BridgeTaskState_Reviewing():
-return reviewing(_that.field0);case BridgeTaskState_Reworking():
-return reworking(_that.field0);case BridgeTaskState_Stopping():
-return stopping(_that.field0);case BridgeTaskState_Blocked():
-return blocked(_that.field0);case BridgeTaskState_Completed():
-return completed(_that.field0);case BridgeTaskState_Failed():
-return failed(_that.field0);case BridgeTaskState_Cancelled():
-return cancelled(_that.field0);}
+case BridgeTaskState_Planning():
+return planning(_that.field0);case BridgeTaskState_PendingConfirmation():
+return pendingConfirmation(_that.field0);case BridgeTaskState_EditingDocuments():
+return editingDocuments(_that.field0);case BridgeTaskState_Working():
+return working(_that.field0);case BridgeTaskState_Reviewing():
+return reviewing(_that.field0);case BridgeTaskState_Completed():
+return completed(_that.field0);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -7333,19 +7367,15 @@ return cancelled(_that.field0);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeDesignUpdatingTaskState field0)?  designUpdating,TResult? Function( BridgeImplementingTaskState field0)?  implementing,TResult? Function( BridgeMergingTaskState field0)?  merging,TResult? Function( BridgeReviewingTaskState field0)?  reviewing,TResult? Function( BridgeReworkingTaskState field0)?  reworking,TResult? Function( BridgeStoppingTaskState field0)?  stopping,TResult? Function( BridgeBlockedTaskState field0)?  blocked,TResult? Function( BridgeCompletedTaskState field0)?  completed,TResult? Function( BridgeFailedTaskState field0)?  failed,TResult? Function( BridgeCancelledTaskState field0)?  cancelled,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgePlanningTaskState field0)?  planning,TResult? Function( BridgePendingConfirmationTaskState field0)?  pendingConfirmation,TResult? Function( BridgeEditingDocumentsTaskState field0)?  editingDocuments,TResult? Function( BridgeWorkingTaskState field0)?  working,TResult? Function( BridgeReviewingTaskState field0)?  reviewing,TResult? Function( BridgeCompletedTaskState field0)?  completed,}) {final _that = this;
 switch (_that) {
-case BridgeTaskState_DesignUpdating() when designUpdating != null:
-return designUpdating(_that.field0);case BridgeTaskState_Implementing() when implementing != null:
-return implementing(_that.field0);case BridgeTaskState_Merging() when merging != null:
-return merging(_that.field0);case BridgeTaskState_Reviewing() when reviewing != null:
-return reviewing(_that.field0);case BridgeTaskState_Reworking() when reworking != null:
-return reworking(_that.field0);case BridgeTaskState_Stopping() when stopping != null:
-return stopping(_that.field0);case BridgeTaskState_Blocked() when blocked != null:
-return blocked(_that.field0);case BridgeTaskState_Completed() when completed != null:
-return completed(_that.field0);case BridgeTaskState_Failed() when failed != null:
-return failed(_that.field0);case BridgeTaskState_Cancelled() when cancelled != null:
-return cancelled(_that.field0);case _:
+case BridgeTaskState_Planning() when planning != null:
+return planning(_that.field0);case BridgeTaskState_PendingConfirmation() when pendingConfirmation != null:
+return pendingConfirmation(_that.field0);case BridgeTaskState_EditingDocuments() when editingDocuments != null:
+return editingDocuments(_that.field0);case BridgeTaskState_Working() when working != null:
+return working(_that.field0);case BridgeTaskState_Reviewing() when reviewing != null:
+return reviewing(_that.field0);case BridgeTaskState_Completed() when completed != null:
+return completed(_that.field0);case _:
   return null;
 
 }
@@ -7356,23 +7386,23 @@ return cancelled(_that.field0);case _:
 /// @nodoc
 
 
-class BridgeTaskState_DesignUpdating extends BridgeTaskState {
-  const BridgeTaskState_DesignUpdating(this.field0): super._();
+class BridgeTaskState_Planning extends BridgeTaskState {
+  const BridgeTaskState_Planning(this.field0): super._();
 
 
-@override final  BridgeDesignUpdatingTaskState field0;
+@override final  BridgePlanningTaskState field0;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskState_DesignUpdatingCopyWith<BridgeTaskState_DesignUpdating> get copyWith => _$BridgeTaskState_DesignUpdatingCopyWithImpl<BridgeTaskState_DesignUpdating>(this, _$identity);
+$BridgeTaskState_PlanningCopyWith<BridgeTaskState_Planning> get copyWith => _$BridgeTaskState_PlanningCopyWithImpl<BridgeTaskState_Planning>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_DesignUpdating&&(identical(other.field0, field0) || other.field0 == field0));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Planning&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -7381,18 +7411,18 @@ int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeTaskState.designUpdating(field0: $field0)';
+  return 'BridgeTaskState.planning(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskState_DesignUpdatingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_DesignUpdatingCopyWith(BridgeTaskState_DesignUpdating value, $Res Function(BridgeTaskState_DesignUpdating) _then) = _$BridgeTaskState_DesignUpdatingCopyWithImpl;
+abstract mixin class $BridgeTaskState_PlanningCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
+  factory $BridgeTaskState_PlanningCopyWith(BridgeTaskState_Planning value, $Res Function(BridgeTaskState_Planning) _then) = _$BridgeTaskState_PlanningCopyWithImpl;
 @useResult
 $Res call({
- BridgeDesignUpdatingTaskState field0
+ BridgePlanningTaskState field0
 });
 
 
@@ -7400,19 +7430,19 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskState_DesignUpdatingCopyWithImpl<$Res>
-    implements $BridgeTaskState_DesignUpdatingCopyWith<$Res> {
-  _$BridgeTaskState_DesignUpdatingCopyWithImpl(this._self, this._then);
+class _$BridgeTaskState_PlanningCopyWithImpl<$Res>
+    implements $BridgeTaskState_PlanningCopyWith<$Res> {
+  _$BridgeTaskState_PlanningCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskState_DesignUpdating _self;
-  final $Res Function(BridgeTaskState_DesignUpdating) _then;
+  final BridgeTaskState_Planning _self;
+  final $Res Function(BridgeTaskState_Planning) _then;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_DesignUpdating(
+  return _then(BridgeTaskState_Planning(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeDesignUpdatingTaskState,
+as BridgePlanningTaskState,
   ));
 }
 
@@ -7422,23 +7452,23 @@ as BridgeDesignUpdatingTaskState,
 /// @nodoc
 
 
-class BridgeTaskState_Implementing extends BridgeTaskState {
-  const BridgeTaskState_Implementing(this.field0): super._();
+class BridgeTaskState_PendingConfirmation extends BridgeTaskState {
+  const BridgeTaskState_PendingConfirmation(this.field0): super._();
 
 
-@override final  BridgeImplementingTaskState field0;
+@override final  BridgePendingConfirmationTaskState field0;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskState_ImplementingCopyWith<BridgeTaskState_Implementing> get copyWith => _$BridgeTaskState_ImplementingCopyWithImpl<BridgeTaskState_Implementing>(this, _$identity);
+$BridgeTaskState_PendingConfirmationCopyWith<BridgeTaskState_PendingConfirmation> get copyWith => _$BridgeTaskState_PendingConfirmationCopyWithImpl<BridgeTaskState_PendingConfirmation>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Implementing&&(identical(other.field0, field0) || other.field0 == field0));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_PendingConfirmation&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -7447,18 +7477,18 @@ int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeTaskState.implementing(field0: $field0)';
+  return 'BridgeTaskState.pendingConfirmation(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskState_ImplementingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_ImplementingCopyWith(BridgeTaskState_Implementing value, $Res Function(BridgeTaskState_Implementing) _then) = _$BridgeTaskState_ImplementingCopyWithImpl;
+abstract mixin class $BridgeTaskState_PendingConfirmationCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
+  factory $BridgeTaskState_PendingConfirmationCopyWith(BridgeTaskState_PendingConfirmation value, $Res Function(BridgeTaskState_PendingConfirmation) _then) = _$BridgeTaskState_PendingConfirmationCopyWithImpl;
 @useResult
 $Res call({
- BridgeImplementingTaskState field0
+ BridgePendingConfirmationTaskState field0
 });
 
 
@@ -7466,19 +7496,19 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskState_ImplementingCopyWithImpl<$Res>
-    implements $BridgeTaskState_ImplementingCopyWith<$Res> {
-  _$BridgeTaskState_ImplementingCopyWithImpl(this._self, this._then);
+class _$BridgeTaskState_PendingConfirmationCopyWithImpl<$Res>
+    implements $BridgeTaskState_PendingConfirmationCopyWith<$Res> {
+  _$BridgeTaskState_PendingConfirmationCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskState_Implementing _self;
-  final $Res Function(BridgeTaskState_Implementing) _then;
+  final BridgeTaskState_PendingConfirmation _self;
+  final $Res Function(BridgeTaskState_PendingConfirmation) _then;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Implementing(
+  return _then(BridgeTaskState_PendingConfirmation(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeImplementingTaskState,
+as BridgePendingConfirmationTaskState,
   ));
 }
 
@@ -7488,23 +7518,23 @@ as BridgeImplementingTaskState,
 /// @nodoc
 
 
-class BridgeTaskState_Merging extends BridgeTaskState {
-  const BridgeTaskState_Merging(this.field0): super._();
+class BridgeTaskState_EditingDocuments extends BridgeTaskState {
+  const BridgeTaskState_EditingDocuments(this.field0): super._();
 
 
-@override final  BridgeMergingTaskState field0;
+@override final  BridgeEditingDocumentsTaskState field0;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeTaskState_MergingCopyWith<BridgeTaskState_Merging> get copyWith => _$BridgeTaskState_MergingCopyWithImpl<BridgeTaskState_Merging>(this, _$identity);
+$BridgeTaskState_EditingDocumentsCopyWith<BridgeTaskState_EditingDocuments> get copyWith => _$BridgeTaskState_EditingDocumentsCopyWithImpl<BridgeTaskState_EditingDocuments>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Merging&&(identical(other.field0, field0) || other.field0 == field0));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_EditingDocuments&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -7513,18 +7543,18 @@ int get hashCode => Object.hash(runtimeType,field0);
 
 @override
 String toString() {
-  return 'BridgeTaskState.merging(field0: $field0)';
+  return 'BridgeTaskState.editingDocuments(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeTaskState_MergingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_MergingCopyWith(BridgeTaskState_Merging value, $Res Function(BridgeTaskState_Merging) _then) = _$BridgeTaskState_MergingCopyWithImpl;
+abstract mixin class $BridgeTaskState_EditingDocumentsCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
+  factory $BridgeTaskState_EditingDocumentsCopyWith(BridgeTaskState_EditingDocuments value, $Res Function(BridgeTaskState_EditingDocuments) _then) = _$BridgeTaskState_EditingDocumentsCopyWithImpl;
 @useResult
 $Res call({
- BridgeMergingTaskState field0
+ BridgeEditingDocumentsTaskState field0
 });
 
 
@@ -7532,19 +7562,85 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeTaskState_MergingCopyWithImpl<$Res>
-    implements $BridgeTaskState_MergingCopyWith<$Res> {
-  _$BridgeTaskState_MergingCopyWithImpl(this._self, this._then);
+class _$BridgeTaskState_EditingDocumentsCopyWithImpl<$Res>
+    implements $BridgeTaskState_EditingDocumentsCopyWith<$Res> {
+  _$BridgeTaskState_EditingDocumentsCopyWithImpl(this._self, this._then);
 
-  final BridgeTaskState_Merging _self;
-  final $Res Function(BridgeTaskState_Merging) _then;
+  final BridgeTaskState_EditingDocuments _self;
+  final $Res Function(BridgeTaskState_EditingDocuments) _then;
 
 /// Create a copy of BridgeTaskState
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Merging(
+  return _then(BridgeTaskState_EditingDocuments(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeMergingTaskState,
+as BridgeEditingDocumentsTaskState,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeTaskState_Working extends BridgeTaskState {
+  const BridgeTaskState_Working(this.field0): super._();
+
+
+@override final  BridgeWorkingTaskState field0;
+
+/// Create a copy of BridgeTaskState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeTaskState_WorkingCopyWith<BridgeTaskState_Working> get copyWith => _$BridgeTaskState_WorkingCopyWithImpl<BridgeTaskState_Working>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Working&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,field0);
+
+@override
+String toString() {
+  return 'BridgeTaskState.working(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeTaskState_WorkingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
+  factory $BridgeTaskState_WorkingCopyWith(BridgeTaskState_Working value, $Res Function(BridgeTaskState_Working) _then) = _$BridgeTaskState_WorkingCopyWithImpl;
+@useResult
+$Res call({
+ BridgeWorkingTaskState field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeTaskState_WorkingCopyWithImpl<$Res>
+    implements $BridgeTaskState_WorkingCopyWith<$Res> {
+  _$BridgeTaskState_WorkingCopyWithImpl(this._self, this._then);
+
+  final BridgeTaskState_Working _self;
+  final $Res Function(BridgeTaskState_Working) _then;
+
+/// Create a copy of BridgeTaskState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeTaskState_Working(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeWorkingTaskState,
   ));
 }
 
@@ -7620,204 +7716,6 @@ as BridgeReviewingTaskState,
 /// @nodoc
 
 
-class BridgeTaskState_Reworking extends BridgeTaskState {
-  const BridgeTaskState_Reworking(this.field0): super._();
-
-
-@override final  BridgeReworkingTaskState field0;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskState_ReworkingCopyWith<BridgeTaskState_Reworking> get copyWith => _$BridgeTaskState_ReworkingCopyWithImpl<BridgeTaskState_Reworking>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Reworking&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeTaskState.reworking(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskState_ReworkingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_ReworkingCopyWith(BridgeTaskState_Reworking value, $Res Function(BridgeTaskState_Reworking) _then) = _$BridgeTaskState_ReworkingCopyWithImpl;
-@useResult
-$Res call({
- BridgeReworkingTaskState field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskState_ReworkingCopyWithImpl<$Res>
-    implements $BridgeTaskState_ReworkingCopyWith<$Res> {
-  _$BridgeTaskState_ReworkingCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskState_Reworking _self;
-  final $Res Function(BridgeTaskState_Reworking) _then;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Reworking(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeReworkingTaskState,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskState_Stopping extends BridgeTaskState {
-  const BridgeTaskState_Stopping(this.field0): super._();
-
-
-@override final  BridgeStoppingTaskState field0;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskState_StoppingCopyWith<BridgeTaskState_Stopping> get copyWith => _$BridgeTaskState_StoppingCopyWithImpl<BridgeTaskState_Stopping>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Stopping&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeTaskState.stopping(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskState_StoppingCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_StoppingCopyWith(BridgeTaskState_Stopping value, $Res Function(BridgeTaskState_Stopping) _then) = _$BridgeTaskState_StoppingCopyWithImpl;
-@useResult
-$Res call({
- BridgeStoppingTaskState field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskState_StoppingCopyWithImpl<$Res>
-    implements $BridgeTaskState_StoppingCopyWith<$Res> {
-  _$BridgeTaskState_StoppingCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskState_Stopping _self;
-  final $Res Function(BridgeTaskState_Stopping) _then;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Stopping(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeStoppingTaskState,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskState_Blocked extends BridgeTaskState {
-  const BridgeTaskState_Blocked(this.field0): super._();
-
-
-@override final  BridgeBlockedTaskState field0;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskState_BlockedCopyWith<BridgeTaskState_Blocked> get copyWith => _$BridgeTaskState_BlockedCopyWithImpl<BridgeTaskState_Blocked>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Blocked&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeTaskState.blocked(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskState_BlockedCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_BlockedCopyWith(BridgeTaskState_Blocked value, $Res Function(BridgeTaskState_Blocked) _then) = _$BridgeTaskState_BlockedCopyWithImpl;
-@useResult
-$Res call({
- BridgeBlockedTaskState field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskState_BlockedCopyWithImpl<$Res>
-    implements $BridgeTaskState_BlockedCopyWith<$Res> {
-  _$BridgeTaskState_BlockedCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskState_Blocked _self;
-  final $Res Function(BridgeTaskState_Blocked) _then;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Blocked(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeBlockedTaskState,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
 class BridgeTaskState_Completed extends BridgeTaskState {
   const BridgeTaskState_Completed(this.field0): super._();
 
@@ -7875,138 +7773,6 @@ class _$BridgeTaskState_CompletedCopyWithImpl<$Res>
   return _then(BridgeTaskState_Completed(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeCompletedTaskState,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskState_Failed extends BridgeTaskState {
-  const BridgeTaskState_Failed(this.field0): super._();
-
-
-@override final  BridgeFailedTaskState field0;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskState_FailedCopyWith<BridgeTaskState_Failed> get copyWith => _$BridgeTaskState_FailedCopyWithImpl<BridgeTaskState_Failed>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Failed&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeTaskState.failed(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskState_FailedCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_FailedCopyWith(BridgeTaskState_Failed value, $Res Function(BridgeTaskState_Failed) _then) = _$BridgeTaskState_FailedCopyWithImpl;
-@useResult
-$Res call({
- BridgeFailedTaskState field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskState_FailedCopyWithImpl<$Res>
-    implements $BridgeTaskState_FailedCopyWith<$Res> {
-  _$BridgeTaskState_FailedCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskState_Failed _self;
-  final $Res Function(BridgeTaskState_Failed) _then;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Failed(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeFailedTaskState,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeTaskState_Cancelled extends BridgeTaskState {
-  const BridgeTaskState_Cancelled(this.field0): super._();
-
-
-@override final  BridgeCancelledTaskState field0;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeTaskState_CancelledCopyWith<BridgeTaskState_Cancelled> get copyWith => _$BridgeTaskState_CancelledCopyWithImpl<BridgeTaskState_Cancelled>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTaskState_Cancelled&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeTaskState.cancelled(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeTaskState_CancelledCopyWith<$Res> implements $BridgeTaskStateCopyWith<$Res> {
-  factory $BridgeTaskState_CancelledCopyWith(BridgeTaskState_Cancelled value, $Res Function(BridgeTaskState_Cancelled) _then) = _$BridgeTaskState_CancelledCopyWithImpl;
-@useResult
-$Res call({
- BridgeCancelledTaskState field0
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeTaskState_CancelledCopyWithImpl<$Res>
-    implements $BridgeTaskState_CancelledCopyWith<$Res> {
-  _$BridgeTaskState_CancelledCopyWithImpl(this._self, this._then);
-
-  final BridgeTaskState_Cancelled _self;
-  final $Res Function(BridgeTaskState_Cancelled) _then;
-
-/// Create a copy of BridgeTaskState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeTaskState_Cancelled(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeCancelledTaskState,
   ));
 }
 

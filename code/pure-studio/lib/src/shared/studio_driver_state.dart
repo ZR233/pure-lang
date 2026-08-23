@@ -136,7 +136,6 @@ abstract final class StudioDriverState {
               'threadMode': workspace.thread.mode.name,
               'threadStatus': workspace.thread.status.name,
               'isBusy': workspace.isBusy,
-              'isTaskPaused': workspace.isTaskPaused,
               'composer': {
                 'mode': workspace.composerMode.name,
                 'lockedByInteraction': workspace.activeInteraction != null,
@@ -182,8 +181,6 @@ abstract final class StudioDriverState {
     'runId': preview.runId,
     'taskGeneration': preview.taskGeneration,
     'phase': preview.state.name,
-    'stopRequested': preview.stopRequested,
-    'projectLeaseId': preview.projectLeaseId,
     'recommendedThreadId': preview.recommendedThreadId,
     'targets': [
       for (final target in preview.targets)
@@ -233,29 +230,46 @@ abstract final class StudioDriverState {
     'afterTranscriptHash': result.afterTranscriptHash,
     'removedItemCount': result.removedItemCount,
     'removedInputCount': result.removedInputCount,
-    'stopCleared': result.stopCleared,
     'resumeTurnId': result.resumeTurnId,
   };
 
   static Map<String, Object?> _taskJson(TaskRuntimeView task) => {
     'runId': task.runId,
     'phase': task.state.kind.name,
-    'statusMessage': task.statusMessage,
-    'taskGeneration': task.taskGeneration,
+    'stateSummary': task.stateSummary,
+    'generation': task.generation,
+    'outcome': switch (task.state) {
+      CompletedTaskStateView(outcome: final SucceededTaskOutcomeView outcome) =>
+        {
+          'kind': 'succeeded',
+          'summary': outcome.summary,
+          'completedAt': outcome.completedAt.toUtc().toIso8601String(),
+        },
+      CompletedTaskStateView(outcome: final FailedTaskOutcomeView outcome) => {
+        'kind': 'failed',
+        'failureKind': outcome.kind.name,
+        'summary': outcome.summary,
+        'evidence': outcome.evidence,
+        'cause': outcome.cause,
+        'completedAt': outcome.completedAt.toUtc().toIso8601String(),
+      },
+      PlanningTaskStateView() ||
+      PendingConfirmationTaskStateView() ||
+      EditingDocumentsTaskStateView() ||
+      WorkingTaskStateView() ||
+      ReviewingTaskStateView() => null,
+    },
     'integratedReviewGate': _integratedReviewGateJson(
       task.integratedReviewGate,
     ),
-    'failures': [
-      for (final failure in task.failures) _taskFailureJson(failure),
-    ],
-    'terminalFailure': task.terminalFailure == null
-        ? null
-        : _taskFailureJson(task.terminalFailure!),
+    'issues': [for (final issue in task.issues) _taskIssueJson(issue)],
     'workUnits': [
       for (final unit in task.workUnits)
         {
           'id': unit.id,
           'title': unit.title,
+          'attempt': unit.attempt,
+          'supersedesWorkUnitId': unit.supersedesWorkUnitId,
           'status': unit.status,
           'worktreePath': unit.worktreePath,
           'branch': unit.branch,
@@ -360,23 +374,23 @@ abstract final class StudioDriverState {
     },
   };
 
-  static Map<String, Object?> _taskFailureJson(TaskFailureView failure) => {
-    'id': failure.id,
-    'sourceThreadId': failure.sourceThreadId,
-    'sourceTurnId': failure.sourceTurnId,
-    'sourceAgentId': failure.sourceAgentId,
-    'sourceRole': failure.sourceRole,
-    'workUnitId': failure.workUnitId,
-    'reviewRoundId': failure.reviewRoundId,
-    'disposition': failure.disposition,
-    'category': failure.category,
-    'providerKind': failure.providerKind,
-    'code': failure.code,
-    'httpStatus': failure.httpStatus,
-    'message': failure.message,
-    'retryable': failure.retryable,
-    'resolvedAt': failure.resolvedAt?.toUtc().toIso8601String(),
-    'createdAt': failure.createdAt.toUtc().toIso8601String(),
+  static Map<String, Object?> _taskIssueJson(TaskIssueView issue) => {
+    'id': issue.id,
+    'sourceThreadId': issue.sourceThreadId,
+    'sourceTurnId': issue.sourceTurnId,
+    'sourceAgentId': issue.sourceAgentId,
+    'sourceRole': issue.sourceRole,
+    'workUnitId': issue.workUnitId,
+    'reviewRoundId': issue.reviewRoundId,
+    'disposition': issue.disposition,
+    'category': issue.category,
+    'providerKind': issue.providerKind,
+    'code': issue.code,
+    'httpStatus': issue.httpStatus,
+    'message': issue.message,
+    'retryable': issue.retryable,
+    'resolvedAt': issue.resolvedAt?.toUtc().toIso8601String(),
+    'createdAt': issue.createdAt.toUtc().toIso8601String(),
   };
 
   static Map<String, Object?> _timelineProgress(AgentWorkspaceView workspace) {

@@ -6,9 +6,9 @@ pub struct StudioTaskRuntime {
     pub run_id: String,
     pub state: StudioTaskState,
     pub revision: u64,
+    pub generation: u64,
     pub integrated_review_gate: StudioIntegratedReviewGate,
-    pub failures: Vec<StudioTaskFailureRuntime>,
-    pub terminal_failure: Option<StudioTaskFailureRuntime>,
+    pub issues: Vec<StudioTaskIssueRuntime>,
     pub work_units: Vec<StudioTaskWorkUnitRuntime>,
     pub completions: Vec<StudioTaskCompletionRuntime>,
     pub merges: Vec<StudioTaskMergeRuntime>,
@@ -18,131 +18,88 @@ pub struct StudioTaskRuntime {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum StudioTaskState {
-    DesignUpdating(StudioDesignUpdatingTaskState),
-    Implementing(StudioImplementingTaskState),
-    Merging(StudioMergingTaskState),
+    Planning(StudioPlanningTaskState),
+    PendingConfirmation(StudioPendingConfirmationTaskState),
+    EditingDocuments(StudioEditingDocumentsTaskState),
+    Working(StudioWorkingTaskState),
     Reviewing(StudioReviewingTaskState),
-    Reworking(StudioReworkingTaskState),
-    Stopping(StudioStoppingTaskState),
-    Blocked(StudioBlockedTaskState),
     Completed(StudioCompletedTaskState),
-    Failed(StudioFailedTaskState),
-    Cancelled(StudioCancelledTaskState),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioDesignUpdatingTaskState {
-    pub generation: u64,
+pub struct StudioPlanningTaskState {
+    pub request: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioImplementingTaskState {
-    pub generation: u64,
-    pub design: StudioFinalizedDesign,
+pub struct StudioPendingConfirmationTaskState {
+    pub plan_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioMergingTaskState {
-    pub generation: u64,
-    pub status_message: Option<String>,
-    pub design: StudioFinalizedDesign,
+pub struct StudioEditingDocumentsTaskState {
+    pub plan_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioWorkingTaskState {
+    pub document_edit_summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioReviewingTaskState {
-    pub generation: u64,
-    pub status_message: Option<String>,
-    pub design: StudioFinalizedDesign,
-    pub target: StudioTaskReviewTarget,
+    pub target: StudioIntegratedReviewTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioReworkingTaskState {
-    pub generation: u64,
-    pub status_message: String,
-    pub design: StudioFinalizedDesign,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioStoppingTaskState {
-    pub generation: u64,
-    pub status_message: String,
-    pub design: StudioDesignProgress,
-    pub request: StudioTaskStopRequest,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioBlockedTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: StudioDesignProgress,
-    pub recovery: StudioBlockedRecovery,
+pub struct StudioIntegratedReviewTarget {
+    pub review_round_id: String,
+    pub reviewed_head: String,
+    pub changed_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioCompletedTaskState {
-    pub generation: u64,
-    pub design: StudioFinalizedDesign,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioFailedTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: StudioDesignProgress,
-    pub failure_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioCancelledTaskState {
-    pub generation: u64,
-    pub message: String,
-    pub design: StudioDesignProgress,
-    pub request: Option<StudioTaskStopRequest>,
+    pub outcome: StudioTaskOutcome,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum StudioDesignProgress {
-    Updating(StudioUpdatingDesign),
-    Finalized(StudioFinalizedDesign),
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioUpdatingDesign {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioFinalizedDesign {
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioTaskStopRequest {
-    pub origin: StudioTaskStopOrigin,
-    pub reason: String,
-    pub requested_at: i64,
+pub enum StudioTaskOutcome {
+    Succeeded {
+        summary: String,
+        completed_at: i64,
+        review_gate: StudioTaskReviewGate,
+    },
+    Failed {
+        kind: StudioTaskFailureKind,
+        summary: String,
+        evidence: String,
+        cause: String,
+        completed_at: i64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum StudioTaskStopOrigin {
-    UserRequest,
-    PlannerDecision,
-    RuntimeFailure,
-    ApplicationShutdown,
+pub enum StudioTaskFailureKind {
+    UnableToProceed,
+    Fatal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum StudioTaskReviewGate {
+    NotRequiredNoDelivery,
+    NotRequiredSingleExecutor { work_unit_id: String },
+    IntegratedReview { review_round_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -159,17 +116,9 @@ pub enum StudioTaskReviewTarget {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum StudioBlockedRecovery {
-    RetryMerge,
-    ResumeRework,
-    ManualOnly,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioTaskFailureRuntime {
+pub struct StudioTaskIssueRuntime {
     pub id: String,
     pub source_thread_id: String,
     pub source_turn_id: String,
@@ -177,13 +126,13 @@ pub struct StudioTaskFailureRuntime {
     pub source_role: String,
     pub work_unit_id: Option<String>,
     pub review_round_id: Option<String>,
-    pub state: StudioTaskFailureState,
+    pub state: StudioTaskIssueState,
     pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum StudioTaskFailureState {
+pub enum StudioTaskIssueState {
     OpenRecoverable {
         failure: pl_protocol::TurnFailure,
     },
@@ -196,7 +145,7 @@ pub enum StudioTaskFailureState {
     },
 }
 
-impl StudioTaskFailureState {
+impl StudioTaskIssueState {
     pub const fn resolved_at(&self) -> Option<i64> {
         match self {
             Self::OpenRecoverable { .. } | Self::OpenFatal { .. } => None,
@@ -214,6 +163,8 @@ pub struct StudioTaskWorkUnitRuntime {
     pub worktree_path: String,
     pub branch: String,
     pub agent_id: Option<String>,
+    pub attempt: u32,
+    pub supersedes_work_unit_id: Option<String>,
     pub budget_slice_limit: u32,
     pub executor_progress_revision: u64,
     pub blueprint_fingerprint: Option<String>,

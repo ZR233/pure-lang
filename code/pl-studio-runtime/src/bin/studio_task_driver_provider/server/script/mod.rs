@@ -53,6 +53,8 @@ pub(super) struct ScriptProgress {
     pub(super) compaction_hung: bool,
     pub(super) budget_recovery_message_sent: bool,
     pub(super) budget_resumed_turn_seen: bool,
+    task_revision: Option<u64>,
+    task_generation: Option<u64>,
     expected_previous_head: Option<String>,
 }
 
@@ -68,17 +70,30 @@ pub(super) fn role(request: &serde_json::Value) -> Result<ScriptRole> {
     if names.contains("review_exit") {
         return Ok(ScriptRole::Reviewer);
     }
-    if names.contains("plan_exit") || names.contains("task_status") {
+    if names.contains("task_status") || names.contains("task_transition") {
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
 }
 
 pub(super) fn observe_request(progress: &mut ScriptProgress, request: &serde_json::Value) {
-    if progress.executor_agent_id.is_none() {
-        progress.executor_agent_id = function_call_outputs(request)
-            .filter_map(parse_output)
-            .find_map(|output| find_string_field(&output, "agentId"));
+    for output in function_call_outputs(request).filter_map(parse_output) {
+        if progress.executor_agent_id.is_none() {
+            progress.executor_agent_id = find_string_field(&output, "agentId");
+        }
+        let task = if let Some(task) = output.get("task") {
+            task
+        } else if output.get("generation").is_some() {
+            &output
+        } else {
+            continue;
+        };
+        if let Some(revision) = task.get("revision").and_then(serde_json::Value::as_u64) {
+            progress.task_revision = Some(revision);
+        }
+        if let Some(generation) = task.get("generation").and_then(serde_json::Value::as_u64) {
+            progress.task_generation = Some(generation);
+        }
     }
 }
 
@@ -230,31 +245,21 @@ mod tests {
         };
 
         let (action, body) =
-            planner_response(&mut progress, Path::new("."), 7, false, true).unwrap();
+            planner_response(&mut progress, Path::new("."), 9, false, true).unwrap();
         assert_eq!(action, "final(budget NeedsAttention observed)");
         assert!(body.contains("Waiting for the queued Planner wake"));
 
         let expected = [
-            (8, "task_status", serde_json::json!({})),
+            (10, "task_status", serde_json::json!({})),
             (
-                9,
+                11,
                 "send_message",
                 serde_json::json!({
                     "target": "executor-original",
                     "message": "Resume the same WorkUnit and worktree. This message refreshes your budget; continue the original implementation and report completion without spawning replacement work."
                 }),
             ),
-            (10, "task_status", serde_json::json!({})),
-            (
-                11,
-                "wait_agents",
-                serde_json::json!({"targets": ["executor-original"]}),
-            ),
-            (
-                12,
-                "wait_agents",
-                serde_json::json!({"targets": ["executor-original"]}),
-            ),
+            (12, "task_status", serde_json::json!({})),
             (
                 13,
                 "wait_agents",
@@ -265,13 +270,23 @@ mod tests {
                 "wait_agents",
                 serde_json::json!({"targets": ["executor-original"]}),
             ),
-            (15, "task_status", serde_json::json!({})),
+            (
+                15,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
             (
                 16,
+                "wait_agents",
+                serde_json::json!({"targets": ["executor-original"]}),
+            ),
+            (17, "task_status", serde_json::json!({})),
+            (
+                18,
                 "task_request_delivery_review",
                 serde_json::json!({"executorAgentId": "executor-original"}),
             ),
-            (17, "list_agents", serde_json::json!({})),
+            (19, "list_agents", serde_json::json!({})),
         ];
 
         for (step, expected_name, expected_arguments) in expected {

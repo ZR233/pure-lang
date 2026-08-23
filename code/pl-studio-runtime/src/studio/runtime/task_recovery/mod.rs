@@ -19,7 +19,7 @@ use crate::studio::{
 };
 
 use super::StudioRuntime;
-use facts::{selected_input_hashes, task_kind_from_recovery_state};
+use facts::selected_input_hashes;
 use validation::validate_turn_suffix;
 
 impl StudioRuntime {
@@ -113,18 +113,6 @@ impl StudioRuntime {
                 .map_err(anyhow::Error::msg)?
         };
 
-        let phase = task_kind_from_recovery_state(request.preview.state);
-        let stop_cleared = if request.preview.stop_requested {
-            self.store
-                .clear_task_stop_for_recovery(
-                    &request.preview.run_id,
-                    request.preview.task_generation,
-                    phase,
-                )
-                .await?
-        } else {
-            false
-        };
         let resume_mail_id = format!(
             "task-recovery:{}:{}",
             request.preview.run_id, recovery.facts.recovery_revision
@@ -157,7 +145,6 @@ impl StudioRuntime {
             after_transcript_hash: recovery.facts.after_transcript_hash,
             removed_item_count: recovery.removed_item_count,
             removed_input_count: recovery.removed_input_count,
-            stop_cleared,
             resume_turn_id: resume_turn_id.to_string(),
         })
     }
@@ -220,18 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn recovery_phase_excludes_review_merge_and_terminal_states() {
+    fn conversation_recovery_accepts_every_nonterminal_task_state() {
         for phase in [
-            TaskRunStateKind::Merging,
+            TaskRunStateKind::Planning,
+            TaskRunStateKind::PendingConfirmation,
+            TaskRunStateKind::EditingDocuments,
+            TaskRunStateKind::Working,
             TaskRunStateKind::Reviewing,
-            TaskRunStateKind::Stopping,
-            TaskRunStateKind::Completed,
-            TaskRunStateKind::Blocked,
-            TaskRunStateKind::Failed,
-            TaskRunStateKind::Cancelled,
         ] {
-            assert!(ensure_recoverable_phase(phase).is_err(), "{phase:?}");
+            ensure_recoverable_phase(phase).unwrap();
         }
+        assert!(ensure_recoverable_phase(TaskRunStateKind::Completed).is_err());
     }
 
     #[test]

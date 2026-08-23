@@ -61,11 +61,11 @@ void registerDemoProjectTests() {
               rootThreadId: 'thread-main',
               task: TaskRuntimeView(
                 runId: 'task-run-active',
-                state: const ImplementingTaskStateView(
-                  generation: 0,
-                  design: TaskFinalizedDesignView('test design'),
+                state: const WorkingTaskStateView(
+                  documentEditSummary: 'test documents updated',
                 ),
                 revision: 0,
+                generation: 0,
                 workUnits: [],
                 completions: [],
                 merges: [],
@@ -131,17 +131,12 @@ void registerDemoProjectTests() {
         ('driver-tool', InteractionKind.toolApproval, 'driver-origin-turn'),
         ('driver-input', InteractionKind.userInput, 'driver-origin-turn'),
         (
-          'driver-plan-continue',
+          'driver-plan-revise',
           InteractionKind.planConfirmation,
           'driver-origin-turn',
         ),
         (
-          'driver-plan-implement',
-          InteractionKind.planConfirmation,
-          'driver-origin-turn',
-        ),
-        (
-          'driver-plan-dismiss',
+          'driver-plan-confirm',
           InteractionKind.planConfirmation,
           'driver-origin-turn',
         ),

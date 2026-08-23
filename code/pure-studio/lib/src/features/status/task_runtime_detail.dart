@@ -4,12 +4,18 @@ import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/runtime_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../interaction/task_recovery_dialog.dart';
 import 'status_detail_popover.dart';
 
 class TaskRuntimeDetail extends StatelessWidget {
-  const TaskRuntimeDetail({required this.task, super.key});
+  const TaskRuntimeDetail({
+    required this.task,
+    required this.rootThreadId,
+    super.key,
+  });
 
   final TaskRuntimeView task;
+  final String rootThreadId;
 
   @override
   Widget build(BuildContext context) {
@@ -27,32 +33,38 @@ class TaskRuntimeDetail extends StatelessWidget {
                 StatusDetailRow(
                   key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
                   label: context.taskPhaseLabel(task.state.kind),
-                  value: task.statusMessage ?? task.runId,
+                  value: task.stateSummary,
                   valueKey: StudioDriverKeys.taskStatus(
                     task.runId,
-                    task.statusMessage ?? '',
+                    task.stateSummary,
                   ),
                   valueMaxLines: 2,
                 ),
                 StatusDetailRow(label: 'Task ID', value: task.runId),
-                if (task.stopRequestedOrigin case final origin?)
-                  StatusDetailRow(
-                    key: const ValueKey('task-stop-origin'),
-                    label: 'Stop · generation ${task.taskGeneration}',
-                    value:
-                        '${_stopOriginLabel(origin)}: '
-                        '${task.stopRequestedReason ?? '-'}',
-                    valueMaxLines: 2,
+                StatusDetailRow(
+                  label: 'Generation',
+                  value: task.generation.toString(),
+                ),
+                if (_canRecoverConversation(task))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: OutlinedButton.icon(
+                      key: StudioDriverKeys.taskRecoveryOpen,
+                      onPressed: () =>
+                          showTaskRecoveryDialog(context, rootThreadId),
+                      icon: const Icon(Icons.history_outlined, size: 17),
+                      label: Text(context.l10n.taskRecoveryDialogTitle),
+                    ),
                   ),
               ],
             ),
-            if (task.failures.isNotEmpty) ...[
+            if (task.issues.isNotEmpty) ...[
               const _SectionDivider(),
               StatusDetailPanel(
                 title: context.l10n.statusTaskFailures,
                 children: [
-                  for (final failure in task.failures)
-                    _TaskFailureDetail(failure: failure),
+                  for (final issue in task.issues)
+                    _TaskIssueDetail(issue: issue),
                 ],
               ),
             ],
@@ -102,40 +114,53 @@ class TaskRuntimeDetail extends StatelessWidget {
   }
 }
 
-class _TaskFailureDetail extends StatelessWidget {
-  const _TaskFailureDetail({required this.failure});
+bool _canRecoverConversation(TaskRuntimeView task) {
+  if (!task.isActive) return false;
+  return task.issues.any(
+        (issue) => issue.state is OpenRecoverableTaskIssueView,
+      ) ||
+      task.workUnits.any(
+        (unit) => const {
+          TaskWorkUnitStateKind.paused,
+          TaskWorkUnitStateKind.failed,
+        }.contains(unit.state.kind),
+      );
+}
 
-  final TaskFailureView failure;
+class _TaskIssueDetail extends StatelessWidget {
+  const _TaskIssueDetail({required this.issue});
+
+  final TaskIssueView issue;
 
   @override
   Widget build(BuildContext context) {
     final metadata = [
-      failure.providerKind ?? failure.category,
-      ?failure.code,
-      if (failure.httpStatus case final status?) 'HTTP $status',
+      issue.providerKind ?? issue.category,
+      ?issue.code,
+      if (issue.httpStatus case final status?) 'HTTP $status',
     ].join(' · ');
     return Padding(
-      key: StudioDriverKeys.taskFailure(failure.id),
+      key: StudioDriverKeys.taskIssue(issue.id),
       padding: const EdgeInsets.only(bottom: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ItemHeading(
-            title: '${failure.sourceRole} · ${failure.sourceAgentId}',
-            status: failure.isFatal
+            title: '${issue.sourceRole} · ${issue.sourceAgentId}',
+            status: issue.isFatal
                 ? context.l10n.statusTaskFailed
                 : context.l10n.statusTaskRecoverable,
           ),
           StatusDetailRow(
             label: context.l10n.statusTaskError,
-            value: failure.message,
+            value: issue.message,
             valueMaxLines: 4,
           ),
           if (metadata.isNotEmpty)
             StatusDetailRow(label: 'Provider', value: metadata),
           StatusDetailRow(
             label: context.l10n.statusTaskNextStep,
-            value: failure.isFatal
+            value: issue.isFatal
                 ? context.l10n.statusTaskFatalHint
                 : context.l10n.statusTaskRecoverableHint,
             valueMaxLines: 2,
@@ -459,10 +484,3 @@ class _SectionDivider extends StatelessWidget {
 
 String _shortCommit(String value) =>
     value.length <= 10 ? value : value.substring(0, 10);
-
-String _stopOriginLabel(TaskStopOriginView origin) => switch (origin) {
-  TaskStopOriginView.userRequest => 'UserRequest',
-  TaskStopOriginView.plannerDecision => 'PlannerDecision',
-  TaskStopOriginView.runtimeFailure => 'RuntimeFailure',
-  TaskStopOriginView.applicationShutdown => 'ApplicationShutdown',
-};

@@ -11,8 +11,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, BlockedRecovery, ExecutorAllocation, TaskCommand, TaskRunStateKind,
-    TaskSpawnFailure, WorkUnit, WorkUnitCommand, WorkUnitState, WorkUnitStateKind,
+    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, TaskSpawnFailure, WorkUnit,
+    WorkUnitCommand, WorkUnitState, WorkUnitStateKind,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -40,25 +40,15 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let run_model = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(thread_id))
-            .filter(entities::task_run::Column::StateKind.is_not_in([
-                TaskRunStateKind::Completed.as_str(),
-                TaskRunStateKind::Failed.as_str(),
-                TaskRunStateKind::Cancelled.as_str(),
-            ]))
+            .filter(entities::task_run::Column::StateKind.ne(TaskRunStateKind::Completed.as_str()))
             .order_by_desc(entities::task_run::Column::UpdatedAt)
             .order_by_desc(entities::task_run::Column::Id)
             .one(&tx)
             .await?
             .context("active task run not found for this session")?;
-        let run = task_run_record(run_model)?;
-        if run.is_stop_requested() {
-            bail!("executor allocation is not allowed after task stop was requested");
-        }
-        if !matches!(
-            run.kind(),
-            TaskRunStateKind::Implementing | TaskRunStateKind::Reworking
-        ) {
-            bail!("executor allocation requires task phase implementing or reworking");
+        let run = task_run_record(run_model.clone())?;
+        if run.kind() != TaskRunStateKind::Working {
+            bail!("executor allocation requires working state");
         }
         let existing = entities::work_unit::Entity::find()
             .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
@@ -83,7 +73,7 @@ impl StudioStore {
                 reused: true,
             });
         }
-        if run.kind() == TaskRunStateKind::Implementing {
+        if run.kind() == TaskRunStateKind::Working {
             for existing_unit in existing
                 .iter()
                 .filter(|unit| is_active_work_unit(&unit.state_kind))
@@ -108,12 +98,18 @@ impl StudioStore {
         if active.len() >= MAX_ACTIVE_EXECUTORS {
             bail!("task executor concurrency limit reached: at most 4 active executors");
         }
-        let mut previous_attempt = 0;
-        for existing_unit in &existing {
-            if stored_scope_matches(existing_unit, &scope_hints)? {
-                previous_attempt = previous_attempt.max(existing_unit.attempt.max(0) as u32);
+        let mut previous = None;
+        for unit in &existing {
+            if normalize_executor_title(&unit.title)? == title
+                && stored_scope_matches(unit, &scope_hints)?
+                && previous.is_none_or(|current: &entities::work_unit::Model| {
+                    (unit.attempt, &unit.id) > (current.attempt, &current.id)
+                })
+            {
+                previous = Some(unit);
             }
         }
+        let previous_attempt = previous.map_or(0, |unit| unit.attempt.max(0) as u32);
         let attempt = previous_attempt
             .checked_add(1)
             .context("executor attempt overflow")?;
@@ -142,6 +138,7 @@ impl StudioStore {
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
                 attempt: Set(attempt_i32),
+                supersedes_work_unit_id: Set(previous.map(|unit| unit.id.clone())),
                 executor_thread_id: Set(Some(agent_id)),
                 requested_by_call_id: Set(requested_by_call_id),
                 state_json: Set(serde_json::to_string(&WorkUnitState::pending())?),
@@ -153,6 +150,9 @@ impl StudioStore {
             .insert(&tx)
             .await?,
         )?;
+        super::compare_and_swap_task_run(&tx, &run_model, None)
+            .await?
+            .context("TaskRun executor allocation lost its revision CAS")?;
         tx.commit().await?;
         Ok(ExecutorAllocation {
             run,
@@ -264,33 +264,6 @@ impl StudioStore {
             },
         };
         apply_work_unit_command(&tx, work_unit, command).await?;
-        if let ExecutorAllocationTransition::Fail(failure) = &transition
-            && failure.needs_attention()
-        {
-            let run = entities::task_run::Entity::find_by_id(
-                failure
-                    .task_run_id
-                    .as_deref()
-                    .context("spawn failure omitted its TaskRun owner")?
-                    .to_string(),
-            )
-            .one(&tx)
-            .await?
-            .context("TaskRun not found while blocking failed executor allocation")?;
-            let record = task_run_record(run.clone())?;
-            if !record.kind().is_terminal() && record.kind() != TaskRunStateKind::Blocked {
-                super::apply_task_command(
-                    &tx,
-                    run,
-                    TaskCommand::Block {
-                        message: failure.message.clone(),
-                        recovery: BlockedRecovery::ManualOnly,
-                    },
-                )
-                .await?;
-                super::delete_blocked_project_lease(&tx, &record.id).await?;
-            }
-        }
         tx.commit().await?;
         Ok(())
     }

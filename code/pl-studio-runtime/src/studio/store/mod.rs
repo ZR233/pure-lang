@@ -18,9 +18,9 @@ pub struct StudioStore {
     attachments_dir: PathBuf,
 }
 
-pub(in crate::studio) use agent_framework::{RecoverablePlan, UnregisteredThreadFault};
+pub(in crate::studio) use agent_framework::UnregisteredThreadFault;
 pub use error::StudioDatabaseError;
-pub(in crate::studio) use task::PendingTaskInteractions;
+pub(in crate::studio) use task::issue::ResolveTaskIssue;
 pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
@@ -29,19 +29,6 @@ impl StudioStore {
 
     pub(crate) fn attachments_dir(&self) -> &std::path::Path {
         &self.attachments_dir
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn execute_test_sql(&self, sql: &str) {
-        use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-
-        self.db
-            .execute_raw(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                sql.to_string(),
-            ))
-            .await
-            .unwrap();
     }
 }
 

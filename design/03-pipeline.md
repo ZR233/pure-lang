@@ -94,8 +94,8 @@ TaskRun 绑定 rootThreadId。WorkUnit 绑定 executorThreadId，ReviewRound 绑
 不存在独立 AgentOutcome 表。WorkUnit/ReviewRound 保存产品授权所需的 call ID、attempt、role、
 status 与 error，Thread/Turn 提供运行状态和 progress。
 
-Task 更新只进入 product stream。TaskService 保留 design、worktree、delivery review、merge、
-conflict、integrated review、stop、project lease 与安全清理合同；这些状态不进入 Thread stream。
+Task 更新只进入 product stream。TaskService 保留文档编辑、worktree、delivery review、merge、
+conflict、integrated review、stop、问题记录与安全清理合同；这些状态不进入 Thread stream。
 
 ## 3.6 恢复
 

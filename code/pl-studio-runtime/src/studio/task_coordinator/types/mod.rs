@@ -2,9 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
-use super::TaskFailureDisposition;
+use super::TaskIssueDisposition;
 use super::work_completion::WorkCompletionRecord;
-use super::{TaskRun, TaskRunStateKind, WorkUnit};
+use super::{TaskRun, WorkUnit};
 
 mod merge;
 pub(crate) use merge::*;
@@ -19,6 +19,15 @@ pub(crate) enum TaskStopOrigin {
 }
 
 impl TaskStopOrigin {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::UserRequest => "userRequest",
+            Self::PlannerDecision => "plannerDecision",
+            Self::RuntimeFailure => "runtimeFailure",
+            Self::ApplicationShutdown => "applicationShutdown",
+        }
+    }
+
     pub(crate) fn stops_root_turn(self) -> bool {
         !matches!(self, Self::PlannerDecision)
     }
@@ -46,16 +55,6 @@ impl std::ops::Deref for TaskStopReason {
     fn deref(&self) -> &Self::Target {
         self.as_str()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProjectLeaseRecord {
-    pub(crate) id: String,
-    pub(crate) task_run_id: String,
-    pub(crate) project_id: String,
-    pub(crate) acquired_at: i64,
-    pub(crate) updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -92,20 +91,11 @@ pub(crate) struct TaskWorktreeOwnerResource {
     pub(crate) cleanup_state: TaskWorktreeCleanupState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DesignFinalizeOutput {
-    pub(crate) task_run_id: String,
-    pub(crate) summary: String,
-    pub(crate) revision: u64,
-    pub(crate) state: TaskRunStateKind,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateTaskRun {
     pub(crate) project_id: String,
     pub(crate) root_thread_id: String,
-    pub(crate) plan: String,
+    pub(crate) request: String,
     pub(crate) workspace_root: String,
 }
 
@@ -258,10 +248,10 @@ pub(crate) struct DeliveryScope {
 mod tests {
     use pl_protocol::{ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory};
 
-    use super::TaskFailureDisposition;
+    use super::TaskIssueDisposition;
 
     #[test]
-    fn task_failure_disposition_uses_typed_failure_semantics() {
+    fn task_issue_disposition_uses_typed_failure_semantics() {
         let cases = [
             (
                 failure(
@@ -269,7 +259,7 @@ mod tests {
                     Some(ProviderFailureKind::Authentication),
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Fatal,
+                TaskIssueDisposition::Fatal,
             ),
             (
                 failure(
@@ -277,7 +267,7 @@ mod tests {
                     Some(ProviderFailureKind::Configuration),
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Fatal,
+                TaskIssueDisposition::Fatal,
             ),
             (
                 failure(
@@ -285,7 +275,7 @@ mod tests {
                     Some(ProviderFailureKind::Protocol),
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Fatal,
+                TaskIssueDisposition::Fatal,
             ),
             (
                 failure(
@@ -293,7 +283,7 @@ mod tests {
                     Some(ProviderFailureKind::Capacity),
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Recoverable,
+                TaskIssueDisposition::Recoverable,
             ),
             (
                 failure(
@@ -303,7 +293,7 @@ mod tests {
                         retry_after_ms: None,
                     },
                 ),
-                TaskFailureDisposition::Recoverable,
+                TaskIssueDisposition::Recoverable,
             ),
             (
                 failure(
@@ -311,11 +301,11 @@ mod tests {
                     None,
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Recoverable,
+                TaskIssueDisposition::Recoverable,
             ),
             (
                 failure(TurnFailureCategory::Tool, None, RetryDisposition::Permanent),
-                TaskFailureDisposition::Fatal,
+                TaskIssueDisposition::Fatal,
             ),
             (
                 failure(
@@ -323,13 +313,13 @@ mod tests {
                     None,
                     RetryDisposition::Permanent,
                 ),
-                TaskFailureDisposition::Fatal,
+                TaskIssueDisposition::Fatal,
             ),
         ];
 
         for (failure, expected) in cases {
             assert_eq!(
-                TaskFailureDisposition::for_turn_failure(&failure),
+                TaskIssueDisposition::for_turn_failure(&failure),
                 expected,
                 "unexpected disposition for {failure:?}"
             );

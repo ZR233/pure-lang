@@ -682,13 +682,13 @@ class _ToolGroupItemRow extends StatelessWidget {
     if (item.part.status == 'succeeded') {
       return null;
     }
-    if (item.name == 'task_complete') {
-      return _taskCompleteRejectionDetail(result);
+    if (item.name == 'task_transition') {
+      return _taskTransitionRejectionDetail(result);
     }
     return result;
   }
 
-  String _taskCompleteRejectionDetail(String result) {
+  String _taskTransitionRejectionDetail(String result) {
     try {
       final decoded = jsonDecode(result);
       if (decoded is! Map) return result;

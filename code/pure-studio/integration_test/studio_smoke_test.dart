@@ -79,16 +79,12 @@ void main() {
       'Keep the typed origin-turn assertion.',
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(StudioDriverKeys.planContinue), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.planContinue));
+    expect(find.byKey(StudioDriverKeys.planRevise), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.planRevise));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(StudioDriverKeys.planImplement), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.planImplement));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(StudioDriverKeys.planDismiss), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.planDismiss));
+    expect(find.byKey(StudioDriverKeys.planConfirm), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.planConfirm));
     await tester.pumpAndSettle();
 
     expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);

@@ -708,12 +708,10 @@ frb.BridgeInteractionResolution _interactionResolutionFromDomain(
     ) =>
       frb.BridgeInteractionResolution.planConfirmation(
         decision: switch (decision) {
-          PlanConfirmationDecision.implementFreshContext =>
-            frb.BridgePlanConfirmationResolution.implementFreshContext,
-          PlanConfirmationDecision.continuePlanning =>
-            frb.BridgePlanConfirmationResolution.continuePlanning,
-          PlanConfirmationDecision.dismiss =>
-            frb.BridgePlanConfirmationResolution.dismiss,
+          PlanConfirmationDecision.confirm =>
+            frb.BridgePlanConfirmationResolution.confirm,
+          PlanConfirmationDecision.revisePlan =>
+            frb.BridgePlanConfirmationResolution.revisePlan,
         },
         content: content,
         reason: reason,

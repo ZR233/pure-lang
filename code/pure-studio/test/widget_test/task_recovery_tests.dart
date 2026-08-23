@@ -1,135 +1,18 @@
 part of '../widget_test.dart';
 
 void registerTaskRecoveryTests() {
-  test('idle active Task is paused only for a settled executor failure', () {
-    final base = _emptyState();
-    final root = base.selectedThread!.copyWith(
-      mode: StudioMode.task,
-      status: ThreadStatusView.idle,
-      rootThreadId: 'session-1',
-    );
-
-    AgentWorkspaceView workspaceFor(TaskWorkUnitView workUnit) {
-      final task = TaskRuntimeView(
-        runId: 'run-46',
-        state: const ImplementingTaskStateView(
-          generation: 1,
-          design: TaskFinalizedDesignView('test design'),
-        ),
-        revision: 0,
-        workUnits: [workUnit],
-        completions: const [],
-        merges: const [],
-        reviews: const [],
-      );
-      return AgentWorkspaceView(
-        thread: root,
-        rootThread: root,
-        syncState: AgentWorkspaceSyncState.ready,
-        timelineRows: const [],
-        todo: null,
-        runtime: _testRuntime().copyWith(task: task),
-        turn: null,
-        activeInteraction: null,
-        composer: const ComposerThreadState.idle(),
-        composerMode: AgentComposerMode.editable,
-        permissionMode: PermissionMode.requestApproval,
-        providers: const [],
-        roles: const [],
-        agents: const [],
-      );
-    }
-
-    expect(
-      workspaceFor(
-        _taskRecoveryWorkUnit(
-          state: WaitingReviewTaskWorkUnitStateView(
-            AwaitingReportTaskWaitingReviewView(
-              outcome: const FailedTaskExecutorOutcomeView(
-                sourceTurnId: 'turn-failed',
-                detail: 'provider failed',
-              ),
-              continuation: IdleTaskExecutorContinuationView(
-                revision: BigInt.zero,
-                sliceCount: 1,
-              ),
-            ),
-          ),
-        ),
-      ).isTaskPaused,
-      isTrue,
-    );
-    expect(
-      workspaceFor(
-        _taskRecoveryWorkUnit(
-          state: RunningTaskWorkUnitStateView(
-            activity: const AllocatedTaskRunningActivityView(),
-            continuation: IdleTaskExecutorContinuationView(
-              revision: BigInt.zero,
-              sliceCount: 1,
-            ),
-          ),
-        ),
-      ).isTaskPaused,
-      isFalse,
-    );
-  });
-
   testWidgets(
-    'paused Task previews recovery and applies one selected Turn exactly once',
+    'explicit conversation recovery applies one selected Turn exactly once',
     (tester) async {
       final preview = _taskRecoveryPreviewFixture();
       final base = _emptyState();
-      final root = base.selectedThread!.copyWith(
-        mode: StudioMode.task,
-        status: ThreadStatusView.faulted,
-        rootThreadId: 'session-1',
-      );
-      final task = TaskRuntimeView(
-        runId: preview.runId,
-        state: ImplementingTaskStateView(
-          generation: preview.taskGeneration,
-          design: const TaskFinalizedDesignView('test design'),
-        ),
-        revision: preview.revision,
-        workUnits: const [],
-        completions: const [],
-        merges: const [],
-        reviews: const [],
-      );
-      final runtime = _testRuntime().copyWith(task: task);
-      final workspace = AgentWorkspaceView(
-        thread: root,
-        rootThread: root,
-        syncState: AgentWorkspaceSyncState.ready,
-        timelineRows: const [],
-        todo: null,
-        runtime: runtime,
-        turn: null,
-        activeInteraction: null,
-        composer: const ComposerThreadState.idle(),
-        composerMode: AgentComposerMode.editable,
-        permissionMode: PermissionMode.requestApproval,
-        providers: const [],
-        roles: const [],
-        agents: const [],
-      );
-      final initial = base.copyWith(
-        threadDirectory: ThreadDirectoryWindow(threads: [root]),
-        workspacesByThread: {
-          root.id: base.selectedWorkspace!.copyWith(
-            thread: root,
-            runtime: runtime,
-          ),
-        },
-      );
-      final api = _FakeStudioApi(initial)
+      final api = _FakeStudioApi(base)
         ..taskRecoveryPreview = preview
         ..taskRecoveryResult = TaskRecoveryResult(
           recoveryId: 'server-recovery-id',
           runId: preview.runId,
           workUnitId: 'wu-1',
-          rootThreadId: root.id,
+          rootThreadId: 'session-1',
           targetThreadId: 'executor-1',
           mode: ConversationRecoveryMode.rebuildThread,
           recoveryRevision: 2,
@@ -139,7 +22,6 @@ void registerTaskRecoveryTests() {
           afterTranscriptHash: 'after',
           removedItemCount: 3,
           removedInputCount: 1,
-          stopCleared: true,
           resumeTurnId: 'resume-turn',
         );
 
@@ -148,14 +30,21 @@ void registerTaskRecoveryTests() {
           overrides: [studioApiProvider.overrideWithValue(api)],
           child: _localizedApp(
             locale: const Locale('zh'),
-            home: Scaffold(body: ComposerDock(workspace: workspace)),
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: FilledButton(
+                  onPressed: () =>
+                      unawaited(showTaskRecoveryDialog(context, 'session-1')),
+                  child: const Text('recover'),
+                ),
+              ),
+            ),
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(StudioDriverKeys.taskPaused), findsOneWidget);
-      await tester.tap(find.byKey(StudioDriverKeys.taskResume));
+      await tester.tap(find.text('recover'));
       await tester.pumpAndSettle();
 
       expect(find.byKey(StudioDriverKeys.taskRecoveryDialog), findsOneWidget);
@@ -254,19 +143,6 @@ void registerTaskRecoveryTests() {
   );
 }
 
-TaskWorkUnitView _taskRecoveryWorkUnit({
-  required TaskWorkUnitStateView state,
-}) => TaskWorkUnitView(
-  id: 'wu-1',
-  title: 'executor',
-  state: state,
-  worktreePath: r'C:\workspace-wu-1',
-  branch: 'task-wu-1',
-  agentId: 'executor-1',
-  budgetSliceLimit: 4,
-  executorProgressRevision: BigInt.zero,
-);
-
 TaskRecoveryPreview _taskRecoveryPreviewFixture() {
   return TaskRecoveryPreview(
     previewToken: 'preview-token',
@@ -274,9 +150,7 @@ TaskRecoveryPreview _taskRecoveryPreviewFixture() {
     runId: 'run-46',
     revision: 8,
     taskGeneration: 3,
-    state: TaskStateKind.implementing,
-    stopRequested: true,
-    projectLeaseId: 'lease-1',
+    state: TaskStateKind.working,
     recommendedThreadId: 'executor-1',
     targets: [
       TaskRecoveryTarget(

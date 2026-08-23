@@ -11,8 +11,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
-    let root = unique_test_root("schema-v11");
+async fn creates_canonical_schema_v12_with_six_state_tasks() {
+    let root = unique_test_root("schema-v12");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -33,12 +33,12 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
         "attachments",
         "app_settings",
         "task_runs",
-        "task_failures",
+        "task_stop_events",
+        "task_issues",
         "work_units",
         "work_completions",
         "review_rounds",
         "merge_records",
-        "project_leases",
     ] {
         assert!(
             table_exists(store.database(), table).await,
@@ -77,6 +77,7 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
     }
     let work_unit_columns = table_columns(store.database(), "work_units").await;
     assert!(work_unit_columns.contains(&"scope_hints_json".to_string()));
+    assert!(work_unit_columns.contains(&"supersedes_work_unit_id".to_string()));
     assert!(work_unit_columns.contains(&"state_json".to_string()));
     assert!(work_unit_columns.contains(&"state_kind".to_string()));
     assert!(work_unit_columns.contains(&"revision".to_string()));
@@ -136,7 +137,7 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
     ] {
         assert!(!task_run_columns.contains(&removed.to_string()));
     }
-    let task_failure_columns = table_columns(store.database(), "task_failures").await;
+    let task_issue_columns = table_columns(store.database(), "task_issues").await;
     for column in [
         "task_run_id",
         "source_thread_id",
@@ -150,14 +151,14 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
         "revision",
     ] {
         assert!(
-            task_failure_columns.contains(&column.to_string()),
-            "missing task_failures.{column}"
+            task_issue_columns.contains(&column.to_string()),
+            "missing task_issues.{column}"
         );
     }
     for column in ["disposition", "failure_json", "resolved_at"] {
         assert!(
-            !task_failure_columns.contains(&column.to_string()),
-            "obsolete task_failures.{column} still exists"
+            !task_issue_columns.contains(&column.to_string()),
+            "obsolete task_issues.{column} still exists"
         );
     }
     let turn_columns = table_columns(store.database(), "turns").await;
@@ -239,7 +240,7 @@ async fn creates_canonical_schema_v11_with_data_carrying_state_enums() {
 }
 
 #[tokio::test]
-async fn schema_v10_database_is_rebuilt_to_v11_without_migration() {
+async fn incompatible_schema_is_rebuilt_to_current_without_migration() {
     let root = unique_test_root("schema-v10-rebuild");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
@@ -253,7 +254,7 @@ async fn schema_v10_database_is_rebuilt_to_v11_without_migration() {
         .await
         .unwrap();
     drop(store);
-    // 旧库只有版本号低于 v11；Studio schema 单版本精确重建，不再迁移。
+    // 旧库版本与当前 schema 不一致；Studio schema 单版本精确重建，不做迁移。
     create_database(&database_path, "PRAGMA user_version = 10;").await;
 
     let rebuilt = StudioStore::open(&database_path).await.unwrap();
@@ -262,7 +263,7 @@ async fn schema_v10_database_is_rebuilt_to_v11_without_migration() {
         schema_version(rebuilt.database()).await,
         STUDIO_DATABASE_SCHEMA_VERSION
     );
-    // 重建丢弃旧数据，而不是把 v10 行迁移进 v11。
+    // 重建丢弃旧数据，而不是把旧行迁移进当前 schema。
     assert!(rebuilt.list_projects().await.unwrap().is_empty());
 
     drop(rebuilt);

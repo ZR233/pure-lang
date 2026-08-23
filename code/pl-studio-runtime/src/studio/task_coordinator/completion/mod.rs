@@ -1,54 +1,20 @@
+//! Task 执行停止控制。任务完成统一由 `task_transition` 提交。
+
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
-use pl_protocol::{TodoListSnapshot, TodoStatus};
+use anyhow::{Result, bail};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    TaskCoordinator, TaskRun, TaskRunStateKind, TaskStopOrigin, TaskStopReason, WaitingReviewPhase,
-    WorkUnitStateKind,
-};
+use super::{TaskCoordinator, TaskRun, TaskStopOrigin, TaskStopReason};
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
-use crate::{AgentRuntimeHandle, AgentState, StudioIntegratedReviewGate, ToolEffect};
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct CompleteTaskInput {}
+use crate::{AgentRuntimeHandle, AgentState, ToolEffect};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StopTaskInput {
-    /// Human-readable reason for stopping the task.
+    /// Human-readable reason for interrupting the current task executions.
     reason: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TaskCompletionOutput {
-    run: TaskRun,
-    integrated_review_gate: StudioIntegratedReviewGate,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
-enum TaskCompleteOutcome {
-    Completed(Box<TaskCompletionOutput>),
-    Rejected {
-        code: &'static str,
-        recoverable: bool,
-        message: String,
-    },
-}
-
-impl TaskCompleteOutcome {
-    fn rejected(code: &'static str, message: impl Into<String>) -> Self {
-        Self::Rejected {
-            code,
-            recoverable: true,
-            message: message.into(),
-        }
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -56,40 +22,9 @@ impl TaskCompleteOutcome {
 pub(crate) struct TaskStopOutput {
     status: &'static str,
     run: TaskRun,
-    deferred_agent_id: Option<String>,
 }
 
 impl TaskCoordinator {
-    pub(crate) fn task_complete_tool(
-        self: &Arc<Self>,
-        thread_id: impl Into<String>,
-    ) -> RegisteredTool {
-        let coordinator = self.clone();
-        let thread_id = thread_id.into();
-        FunctionToolDefinition::<CompleteTaskInput>::new(
-            "task_complete",
-            "Complete a design-consistent task when its shared integrated-review gate is satisfied or explicitly not required.",
-        )
-        .registered(move |_: CompleteTaskInput, context| {
-            let coordinator = coordinator.clone();
-            let thread_id = thread_id.clone();
-            async move {
-                let todo = context.working_set.current_todo();
-                let outcome = coordinator.complete_task(&thread_id, todo.as_ref()).await?;
-                let output = serde_json::to_string(&outcome)?;
-                Ok::<ToolExecutionResult<serde_json::Value>, anyhow::Error>(match outcome {
-                    TaskCompleteOutcome::Completed(_) => {
-                        ToolExecutionResult::<serde_json::Value>::success(output).ending_turn()
-                    }
-                    TaskCompleteOutcome::Rejected { .. } => {
-                        ToolExecutionResult::<serde_json::Value>::failure(output)
-                    }
-                })
-            }
-        })
-        .with_effect(ToolEffect::BranchControl)
-    }
-
     pub(crate) fn task_stop_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
@@ -99,7 +34,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<StopTaskInput>::new(
             "task_stop",
-            "Stop the current task after safely settling its durable agents and resources.",
+            "Persist a stop event, advance the execution generation, and interrupt active model turns without changing the Task state.",
         )
         .registered(move |input: StopTaskInput, _context| {
             let coordinator = coordinator.clone();
@@ -132,307 +67,20 @@ impl TaskCoordinator {
         origin: TaskStopOrigin,
         reason: TaskStopReason,
     ) -> Result<TaskStopOutput> {
-        let mut terminal_facts = self.subscribe_terminal_facts();
-        let requested = {
-            let branch_guard = self.lock_branch_mutation().await;
-            self.ensure_branch_mutation_guard(&branch_guard)?;
-            let _allocation_guard = self.allocation_lock.lock().await;
-            let run = self
-                .preflight_task_stop_request_locked(thread_id, &branch_guard)
-                .await?;
-            self.store
-                .request_task_stop(&run.id, origin, &reason)
-                .await?
-        };
-        interrupt_task_agents(runtime, thread_id, origin).await?;
-        wait_for_terminal_outcomes(self, &requested.id, &mut terminal_facts).await?;
         let run = self
             .store
-            .read_task_run(&requested.id)
-            .await?
-            .context("task run disappeared after stop request")?;
-        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
-            return Ok(TaskStopOutput {
-                status: "deferred",
-                run,
-                deferred_agent_id: Some(executor_thread_id),
-            });
-        }
-        let run = {
-            let branch_guard = self.lock_branch_mutation().await;
-            self.ensure_branch_mutation_guard(&branch_guard)?;
-            let _allocation_guard = self.allocation_lock.lock().await;
-            let run = self
-                .preflight_task_stop_locked(thread_id, &branch_guard)
-                .await?;
-            self.store
-                .begin_task_stop(&run.id, requested.generation())
-                .await?
-        };
-        self.store
-            .settle_agents_for_task_stop(&run.id, requested.generation(), reason.as_str())
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
-        close_task_children(runtime, thread_id).await?;
-        let branch_guard = self.lock_branch_mutation().await;
         let stopped = self
-            .stop_task_locked(
-                &run.id,
-                requested.generation(),
-                reason.as_str(),
-                &branch_guard,
-            )
+            .store
+            .request_task_stop(&run.id, origin, &reason)
             .await?;
+        interrupt_task_agents(runtime, thread_id, origin).await?;
         Ok(TaskStopOutput {
-            status: "cancelled",
+            status: "interrupted",
             run: stopped,
-            deferred_agent_id: None,
         })
     }
-
-    async fn complete_task(
-        &self,
-        thread_id: &str,
-        todo: Option<&TodoListSnapshot>,
-    ) -> Result<TaskCompleteOutcome> {
-        let guard = self.lock_branch_mutation().await;
-        self.ensure_branch_mutation_guard(&guard)?;
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
-        if run.is_stop_requested() {
-            return Ok(TaskCompleteOutcome::rejected(
-                "stopRequested",
-                "task_complete is unavailable after task_stop was requested",
-            ));
-        }
-        if let Some(message) = incomplete_todo_message(todo) {
-            return Ok(TaskCompleteOutcome::rejected("todoIncomplete", message));
-        }
-        if run.design().is_none() {
-            return Ok(TaskCompleteOutcome::rejected(
-                "designNotFinalized",
-                "task design stage has not been finalized",
-            ));
-        }
-        let work_units = self.store.list_work_units(&run.id).await?;
-        if work_units
-            .iter()
-            .any(|unit| unit.kind() != WorkUnitStateKind::Completed)
-        {
-            return Ok(TaskCompleteOutcome::rejected(
-                "deliveriesIncomplete",
-                "all executor deliveries must be merged or recorded as no-delivery",
-            ));
-        }
-        let completions = self.store.list_work_completions(&run.id).await?;
-        let merges = self.store.list_merge_records(&run.id).await?;
-        let reviews = self.store.list_review_rounds(&run.id).await?;
-        let integrated_review_gate = super::review::integrated_review_gate(
-            &run,
-            &work_units,
-            &completions,
-            &merges,
-            &reviews,
-        )
-        .await;
-        match (&integrated_review_gate, run.kind()) {
-            (StudioIntegratedReviewGate::Required { reason }, _) => {
-                return Ok(TaskCompleteOutcome::rejected(
-                    "reviewRequired",
-                    reason.clone(),
-                ));
-            }
-            (StudioIntegratedReviewGate::SatisfiedByReview { .. }, TaskRunStateKind::Reviewing)
-            | (
-                StudioIntegratedReviewGate::NotRequiredNoDelivery
-                | StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent { .. },
-                TaskRunStateKind::Implementing
-                | TaskRunStateKind::Reworking
-                | TaskRunStateKind::Reviewing,
-            ) => {}
-            _ => {
-                return Ok(TaskCompleteOutcome::rejected(
-                    "wrongPhase",
-                    format!(
-                        "task_complete cannot consume the current review gate in phase {}",
-                        run.kind().as_str()
-                    ),
-                ));
-            }
-        }
-        // 子 Thread 的 WorkUnit 已全部结算，其残留 Interaction 不再阻塞完成；
-        // 只有 root 自身的 pending Interaction 仍是未闭合的用户边界。
-        let pending_interactions = self.store.list_pending_interactions(thread_id).await?;
-        if !pending_interactions.is_empty() {
-            const PREVIEW_LIMIT: usize = 8;
-            let total = pending_interactions.len();
-            let preview = pending_interactions
-                .iter()
-                .take(PREVIEW_LIMIT)
-                .map(|interaction| format!("{}/{}", thread_id, interaction.interaction_id))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let remaining = total.saturating_sub(PREVIEW_LIMIT);
-            let suffix = if remaining == 0 {
-                String::new()
-            } else {
-                format!("，另有 {remaining} 条")
-            };
-            return Ok(TaskCompleteOutcome::rejected(
-                "pendingInteraction",
-                format!(
-                    "Task root Thread 仍有 {total} 条 pending Interaction：{preview}{suffix}；请先解决或取消后重试 task_complete"
-                ),
-            ));
-        }
-        if let Err(error) = self.ensure_process_lease_owned(&run) {
-            return Ok(TaskCompleteOutcome::rejected(
-                "leaseConflict",
-                error.to_string(),
-            ));
-        }
-        let completed = self
-            .store
-            .complete_task(thread_id, &integrated_review_gate)
-            .await;
-        let completed = match completed {
-            Ok(completed) => completed,
-            Err(error) => {
-                if let Some(pending) =
-                    error.downcast_ref::<crate::studio::store::PendingTaskInteractions>()
-                {
-                    return Ok(TaskCompleteOutcome::rejected(
-                        "pendingInteraction",
-                        pending.user_message(),
-                    ));
-                }
-                return Ok(TaskCompleteOutcome::rejected(
-                    "stateConflict",
-                    format!("task completion state changed before accounting: {error}"),
-                ));
-            }
-        };
-        self.release_owned_process_lease(&run.id);
-        Ok(TaskCompleteOutcome::Completed(Box::new(
-            TaskCompletionOutput {
-                run: completed,
-                integrated_review_gate,
-            },
-        )))
-    }
-
-    pub(super) async fn preflight_task_stop_locked(
-        &self,
-        thread_id: &str,
-        guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRun> {
-        self.ensure_branch_mutation_guard(guard)?;
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
-        self.validate_stop_request(&run).await?;
-        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
-            bail!(
-                "task_stop deferred: executor {} finished without report_completion; \
-                 request an explicit completion before stopping the task",
-                executor_thread_id
-            );
-        }
-        Ok(run)
-    }
-
-    async fn preflight_task_stop_request_locked(
-        &self,
-        thread_id: &str,
-        guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRun> {
-        self.ensure_branch_mutation_guard(guard)?;
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
-        self.validate_stop_request(&run).await?;
-        Ok(run)
-    }
-
-    pub(super) async fn stop_task_locked(
-        &self,
-        task_run_id: &str,
-        expected_generation: u64,
-        reason: &str,
-        guard: &super::BranchMutationGuard<'_>,
-    ) -> Result<TaskRun> {
-        self.ensure_branch_mutation_guard(guard)?;
-        let run = self
-            .store
-            .read_task_run(task_run_id)
-            .await?
-            .context("task run not found while stopping")?;
-        self.validate_stop_request(&run).await?;
-        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
-            bail!(
-                "task_stop deferred: executor {} still requires report_completion",
-                executor_thread_id
-            );
-        }
-        let cancelled = self
-            .store
-            .cancel_task_and_release_lease(&run.id, expected_generation, reason)
-            .await?;
-        self.release_owned_process_lease(&run.id);
-        self.publish_terminal_fact(&cancelled.id);
-        Ok(cancelled)
-    }
-
-    async fn awaiting_completion_executor(&self, run: &TaskRun) -> Result<Option<String>> {
-        let work_unit = self
-            .store
-            .list_work_units(&run.id)
-            .await?
-            .into_iter()
-            .find(|work_unit| {
-                matches!(
-                    work_unit.waiting_review_phase(),
-                    Some(WaitingReviewPhase::AwaitingReport(_))
-                )
-            });
-        let Some(work_unit) = work_unit else {
-            return Ok(None);
-        };
-        Ok(work_unit.executor_thread_id.clone())
-    }
-
-    async fn validate_stop_request(&self, run: &TaskRun) -> Result<()> {
-        self.ensure_process_lease_owned(run)?;
-        if run.kind() == TaskRunStateKind::Merging {
-            bail!("task_stop requires the pending merge accounting step to finish first");
-        }
-        Ok(())
-    }
-}
-
-/// 存在未完成条目时返回拒绝说明；无 todo 或全部 completed 返回 `None`。
-fn incomplete_todo_message(todo: Option<&TodoListSnapshot>) -> Option<String> {
-    let snapshot = todo?;
-    let unfinished = snapshot
-        .items
-        .iter()
-        .filter(|item| item.status != TodoStatus::Completed)
-        .collect::<Vec<_>>();
-    if unfinished.is_empty() {
-        return None;
-    }
-    let preview = unfinished
-        .iter()
-        .map(|item| format!("[{:?}] {}", item.status, item.step))
-        .collect::<Vec<_>>()
-        .join("; ");
-    Some(format!(
-        "todo list has {} unfinished item(s): {preview}; mark them completed via update_todo_list before task_complete",
-        unfinished.len()
-    ))
 }
 
 async fn interrupt_task_agents(
@@ -441,7 +89,7 @@ async fn interrupt_task_agents(
     origin: TaskStopOrigin,
 ) -> Result<()> {
     let root = crate::studio::agent_host::root_agent_id(thread_id);
-    let children = runtime
+    let agents = runtime
         .list()
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?
@@ -457,75 +105,13 @@ async fn interrupt_task_agents(
             )
         })
         .collect::<Vec<_>>();
-    for child in &children {
-        if let Some(turn_id) = child.active_turn_id().cloned() {
+    for agent in agents {
+        if let Some(turn_id) = agent.active_turn_id().cloned() {
             runtime
-                .cancel_turn(child.identity.id.clone(), turn_id)
+                .cancel_turn(agent.identity.id, turn_id)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         }
-    }
-    Ok(())
-}
-
-async fn wait_for_terminal_outcomes(
-    coordinator: &TaskCoordinator,
-    task_run_id: &str,
-    terminal_facts: &mut tokio::sync::broadcast::Receiver<String>,
-) -> Result<()> {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let active_executor = coordinator
-                .store
-                .list_work_units(task_run_id)
-                .await?
-                .into_iter()
-                .any(|unit| unit.kind() == WorkUnitStateKind::Running);
-            let active_reviewer = coordinator
-                .store
-                .list_review_rounds(task_run_id)
-                .await?
-                .into_iter()
-                .any(|round| round.kind().is_active());
-            let active = active_executor || active_reviewer;
-            if !active {
-                return Ok::<(), anyhow::Error>(());
-            }
-            match terminal_facts.recv().await {
-                Ok(changed_task_run_id) if changed_task_run_id == task_run_id => {}
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    bail!("task terminal fact subscription closed");
-                }
-            }
-        }
-    })
-    .await
-    .map_err(|_| anyhow::anyhow!("timed out waiting for task agent terminal facts"))??;
-    Ok(())
-}
-
-async fn close_task_children(runtime: &AgentRuntimeHandle, thread_id: &str) -> Result<()> {
-    let root = crate::studio::agent_host::root_agent_id(thread_id);
-    let children = runtime
-        .list()
-        .await
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?
-        .into_iter()
-        .filter(|snapshot| snapshot.identity.parent_id.as_ref() == Some(&root))
-        .filter(|snapshot| {
-            !matches!(
-                snapshot.state,
-                AgentState::Closing(_) | AgentState::Closed(_)
-            )
-        })
-        .map(|snapshot| snapshot.identity.id)
-        .collect::<Vec<_>>();
-    for child in children {
-        runtime
-            .close(child)
-            .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     }
     Ok(())
 }

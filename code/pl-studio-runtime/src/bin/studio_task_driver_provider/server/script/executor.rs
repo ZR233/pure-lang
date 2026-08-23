@@ -125,7 +125,14 @@ pub(super) fn executor_response(
                     serde_json::json!({
                         "kind": "delivery",
                         "headCommit": head,
-                        "verificationSummary": "offline fixture content committed"
+                        "changedFiles": ["src/feature.txt"],
+                        "verificationResults": [{
+                            "checkId": "check-diff",
+                            "summary": "git diff --check HEAD^ HEAD completed without whitespace errors"
+                        }, {
+                            "checkId": "inspect-feature",
+                            "summary": "src/feature.txt matches the confirmed fixture content exactly"
+                        }]
                     }),
                 ),
             )

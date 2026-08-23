@@ -142,16 +142,12 @@ void main() {
   test('fatal authentication failure keeps typed redacted evidence', () {
     expect(() => validateFatalTaskFailure(_failedSnapshot()), returnsNormally);
 
+    final invalid = _failedSnapshot();
+    final task = invalid['task'] as Map<String, dynamic>;
     final failure =
-        (_failedSnapshot()['task'] as Map<String, dynamic>)['terminalFailure']
-            as Map<String, dynamic>;
+        (task['issues'] as List<dynamic>).single as Map<String, dynamic>;
     failure['message'] = 'Invalid API key sk-driver-secret';
-    expect(
-      () => validateFatalTaskFailure({
-        'task': {'phase': 'failed', 'terminalFailure': failure},
-      }),
-      throwsA(isA<StateError>()),
-    );
+    expect(() => validateFatalTaskFailure(invalid), throwsA(isA<StateError>()));
   });
 
   test(
@@ -188,7 +184,7 @@ void main() {
 Map<String, dynamic> _budgetRecoverySnapshot({required bool needsAttention}) =>
     {
       'task': {
-        'phase': 'implementing',
+        'phase': 'working',
         'workUnits': [
           {
             'id': 'work-unit-1',
@@ -231,7 +227,7 @@ Map<String, dynamic> _snapshot({required String activity}) => {
   },
   'task': {
     'runId': 'task-run-1',
-    'phase': 'implementing',
+    'phase': 'working',
     'statusMessage': null,
     'taskGeneration': 0,
     'workUnits': [
@@ -260,6 +256,7 @@ Map<String, dynamic> _completedSnapshot() => {
   'task': {
     'runId': 'task-run-1',
     'phase': 'completed',
+    'outcome': {'kind': 'succeeded', 'summary': 'Completed the fixture Task.'},
     'integratedReviewGate': {
       'status': 'notRequiredSingleExecutorEquivalent',
       'workUnitId': 'work-unit-1',
@@ -291,14 +288,21 @@ Map<String, dynamic> _completedSnapshot() => {
 
 Map<String, dynamic> _failedSnapshot() => {
   'task': {
-    'phase': 'failed',
-    'terminalFailure': {
-      'disposition': 'fatal',
-      'providerKind': 'authentication',
-      'code': 'invalid_api_key',
-      'httpStatus': 401,
-      'retryable': false,
-      'message': 'Invalid API key provided: <redacted>',
+    'phase': 'completed',
+    'outcome': {
+      'kind': 'failed',
+      'failureKind': 'fatal',
+      'summary': 'Provider authentication failed.',
     },
+    'issues': [
+      {
+        'disposition': 'fatal',
+        'providerKind': 'authentication',
+        'code': 'invalid_api_key',
+        'httpStatus': 401,
+        'retryable': false,
+        'message': 'Invalid API key provided: <redacted>',
+      },
+    ],
   },
 };

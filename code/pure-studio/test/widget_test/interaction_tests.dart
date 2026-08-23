@@ -88,7 +88,7 @@ void registerInteractionTests() {
             .resolveActiveInteraction(
               'session-1',
               const PlanConfirmationResolutionCommand(
-                decision: PlanConfirmationDecision.dismiss,
+                decision: PlanConfirmationDecision.revisePlan,
               ),
             ),
         throwsStateError,
@@ -131,7 +131,7 @@ void registerInteractionTests() {
         .resolveActiveInteraction(
           'session-1',
           const PlanConfirmationResolutionCommand(
-            decision: PlanConfirmationDecision.continuePlanning,
+            decision: PlanConfirmationDecision.revisePlan,
             reason: 'expand risks',
           ),
         );
@@ -139,7 +139,7 @@ void registerInteractionTests() {
     expect(api.resolveInteractionCount, 1);
     expect(api.resolvedInteraction, {
       'type': 'planConfirmation',
-      'decision': 'continuePlanning',
+      'decision': 'revisePlan',
       'reason': 'expand risks',
     });
   });

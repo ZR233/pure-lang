@@ -31,14 +31,6 @@ pub(crate) struct ReviewedCompletion {
 }
 
 impl ReviewedCompletion {
-    #[cfg(test)]
-    pub(crate) fn new(review_round_id: String, decided_at: i64) -> Self {
-        Self {
-            review_round_id,
-            decided_at,
-        }
-    }
-
     fn from_command(review_round_id: String, decided_at: i64) -> Self {
         Self {
             review_round_id,

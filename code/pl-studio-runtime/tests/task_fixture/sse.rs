@@ -2,16 +2,6 @@ pub(super) fn tool_call(id: &str, name: &str, arguments: serde_json::Value) -> S
     tool_calls(id, [(id.to_string(), name.to_string(), arguments)])
 }
 
-pub(super) fn repeated_tool_call(id: &str, name: &str, arguments: serde_json::Value) -> String {
-    tool_calls(
-        id,
-        [
-            (format!("{id}-first"), name.to_string(), arguments.clone()),
-            (format!("{id}-duplicate"), name.to_string(), arguments),
-        ],
-    )
-}
-
 fn tool_calls(
     response_id: &str,
     calls: impl IntoIterator<Item = (String, String, serde_json::Value)>,
@@ -56,48 +46,6 @@ fn tool_calls(
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
         }
     }));
-    events
-        .into_iter()
-        .map(|event| format!("data: {event}\n\n"))
-        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
-        .collect()
-}
-
-pub(super) fn final_text(id: &str, content: &str) -> String {
-    let item_id = format!("msg_{id}");
-    let events = [
-        serde_json::json!({
-            "type": "response.output_item.added",
-            "item": {
-                "id": item_id,
-                "type": "message",
-                "role": "assistant",
-                "phase": "final_answer"
-            }
-        }),
-        serde_json::json!({
-            "type": "response.output_text.delta",
-            "item_id": item_id,
-            "delta": content
-        }),
-        serde_json::json!({
-            "type": "response.output_item.done",
-            "item": {
-                "id": item_id,
-                "type": "message",
-                "role": "assistant",
-                "phase": "final_answer",
-                "content": [{"type": "output_text", "text": content}]
-            }
-        }),
-        serde_json::json!({
-            "type": "response.completed",
-            "response": {
-                "id": format!("response_{id}"),
-                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-            }
-        }),
-    ];
     events
         .into_iter()
         .map(|event| format!("data: {event}\n\n"))

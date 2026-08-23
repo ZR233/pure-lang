@@ -123,13 +123,10 @@ fn interaction_resolution(
             reason,
         } => InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
             decision: match decision {
-                BridgePlanConfirmationResolution::ImplementFreshContext => {
-                    PlanConfirmationResolution::ImplementFreshContext
+                BridgePlanConfirmationResolution::Confirm => PlanConfirmationResolution::Confirm,
+                BridgePlanConfirmationResolution::RevisePlan => {
+                    PlanConfirmationResolution::RevisePlan
                 }
-                BridgePlanConfirmationResolution::ContinuePlanning => {
-                    PlanConfirmationResolution::ContinuePlanning
-                }
-                BridgePlanConfirmationResolution::Dismiss => PlanConfirmationResolution::Dismiss,
             },
             content,
             reason,

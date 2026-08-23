@@ -15,8 +15,9 @@ use super::server::{ScriptMode, ScriptedModelServer};
 pub const DESIGN_PATH: &str = "design/task-flow.md";
 pub const FEATURE_PATH: &str = "src/feature.txt";
 pub const FEATURE_CONTENT: &str = "offline integration verified\n";
-pub const PLANNER_FOLLOWUP_PATH: &str = "src/planner-followup.txt";
-pub const PLANNER_FOLLOWUP_CONTENT: &str = "planner merge adjustment verified\n";
+pub const PLANNER_FOLLOWUP_PATH: &str = FEATURE_PATH;
+pub const PLANNER_FOLLOWUP_CONTENT: &str =
+    "offline integration verified\nplanner merge adjustment verified\n";
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -41,6 +42,21 @@ impl TaskFlowFixture {
         tokio::fs::create_dir_all(&home).await?;
         tokio::fs::create_dir_all(&workspace).await?;
         tokio::fs::write(workspace.join("README.md"), "# Offline Task Fixture\n").await?;
+        tokio::fs::write(workspace.join(".gitignore"), ".pure/\ntarget/\n").await?;
+        git_output(&workspace, &["init", "--initial-branch=main"])?;
+        git_output(&workspace, &["add", "README.md", ".gitignore"])?;
+        git_output(
+            &workspace,
+            &[
+                "-c",
+                "user.name=Pure Studio",
+                "-c",
+                "user.email=pure-studio@local",
+                "commit",
+                "-m",
+                "test: initialize temporary Task project",
+            ],
+        )?;
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let base_url = format!("http://{}", listener.local_addr()?);

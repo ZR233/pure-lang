@@ -1,38 +1,35 @@
 use anyhow::{Context, Result};
 
 use crate::{
-    StudioBlockedRecovery, StudioBlockedTaskState, StudioBudgetLimitKind, StudioBudgetLimitRuntime,
-    StudioBudgetUsageRuntime, StudioCancelledTaskState, StudioCancelledWorkUnit,
-    StudioChangesRequiredWorkUnit, StudioCompletedTaskState, StudioCompletedWorkUnit,
-    StudioDesignProgress, StudioDesignUpdatingTaskState, StudioExecutorContinuationState,
-    StudioExecutorTerminalOutcome, StudioFailedTaskState, StudioFailedWorkUnit,
-    StudioFinalizedDesign, StudioImplementingTaskState, StudioIntegratedReviewGate,
-    StudioMergeCleanupState, StudioMergeMethod, StudioMergingTaskState, StudioPausedWorkUnit,
-    StudioPendingWorkUnit, StudioReadyForReviewCompletion, StudioReviewPassedOutcome,
-    StudioReviewPassedWorkUnit, StudioReviewScope, StudioReviewedCompletion,
-    StudioReviewingTaskState, StudioReworkingTaskState, StudioRunningWorkUnit,
-    StudioRunningWorkUnitActivity, StudioStoppingTaskState, StudioTaskCompletionContent,
-    StudioTaskCompletionRuntime, StudioTaskCompletionState, StudioTaskDeliveryCompletion,
-    StudioTaskDesignReferenceRuntime, StudioTaskFailureRuntime, StudioTaskFailureState,
-    StudioTaskMergeRuntime, StudioTaskNoDeliveryCompletion, StudioTaskReviewFindingRuntime,
-    StudioTaskReviewRuntime, StudioTaskReviewState, StudioTaskReviewTarget, StudioTaskRuntime,
+    StudioBudgetLimitKind, StudioBudgetLimitRuntime, StudioBudgetUsageRuntime,
+    StudioCancelledWorkUnit, StudioChangesRequiredWorkUnit, StudioCompletedTaskState,
+    StudioCompletedWorkUnit, StudioEditingDocumentsTaskState, StudioExecutorContinuationState,
+    StudioExecutorTerminalOutcome, StudioFailedWorkUnit, StudioIntegratedReviewGate,
+    StudioIntegratedReviewTarget, StudioMergeCleanupState, StudioMergeMethod, StudioPausedWorkUnit,
+    StudioPendingConfirmationTaskState, StudioPendingWorkUnit, StudioPlanningTaskState,
+    StudioReadyForReviewCompletion, StudioReviewPassedOutcome, StudioReviewPassedWorkUnit,
+    StudioReviewScope, StudioReviewedCompletion, StudioReviewingTaskState, StudioRunningWorkUnit,
+    StudioRunningWorkUnitActivity, StudioTaskCompletionContent, StudioTaskCompletionRuntime,
+    StudioTaskCompletionState, StudioTaskDeliveryCompletion, StudioTaskDesignReferenceRuntime,
+    StudioTaskFailureKind, StudioTaskIssueRuntime, StudioTaskIssueState, StudioTaskMergeRuntime,
+    StudioTaskNoDeliveryCompletion, StudioTaskOutcome, StudioTaskReviewFindingRuntime,
+    StudioTaskReviewGate, StudioTaskReviewRuntime, StudioTaskReviewState, StudioTaskRuntime,
     StudioTaskSpawnCompensation, StudioTaskSpawnCompensationState, StudioTaskSpawnFailure,
     StudioTaskSpawnFailureCode, StudioTaskSpawnFailurePhase, StudioTaskSpawnNextAction,
-    StudioTaskSpawnResource, StudioTaskState, StudioTaskStopOrigin, StudioTaskStopRequest,
-    StudioTaskWorkUnitRuntime, StudioTaskWorkUnitState, StudioTaskWorktreeDisposition,
-    StudioUpdatingDesign, StudioWaitingReviewPhase, StudioWaitingReviewWorkUnit,
+    StudioTaskSpawnResource, StudioTaskState, StudioTaskWorkUnitRuntime, StudioTaskWorkUnitState,
+    StudioTaskWorktreeDisposition, StudioWaitingReviewPhase, StudioWaitingReviewWorkUnit,
     StudioWorkUnitCompletionOutcome, StudioWorkUnitFailure, StudioWorkUnitPauseReason,
-    StudioWorktreeFailureCause, StudioWorktreeFailureCauseKind,
+    StudioWorkingTaskState, StudioWorktreeFailureCause, StudioWorktreeFailureCauseKind,
 };
 
 use super::{
     StudioStore,
     task_coordinator::{
-        BlockedRecovery, DesignProgress, ExecutorContinuationState, MergeCleanupState, MergeRecord,
-        ReviewPassedOutcome, ReviewRoundRecord, ReviewRoundState, ReviewTarget, RunningActivity,
-        TaskFailureState, TaskRun, TaskRunState, TaskStopOrigin, WaitingReviewPhase,
-        WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitCompletionOutcome,
-        WorkUnitFailure, WorkUnitPauseReason, WorkUnitState, WorkUnitStateKind,
+        ExecutorContinuationState, MergeCleanupState, MergeRecord, ReviewPassedOutcome,
+        ReviewRoundRecord, ReviewRoundState, RunningActivity, TaskIssueState, TaskOutcome,
+        TaskReviewGate, TaskRun, TaskRunState, WaitingReviewPhase, WorkCompletionKind,
+        WorkCompletionRecord, WorkCompletionStatus, WorkUnitCompletionOutcome, WorkUnitFailure,
+        WorkUnitPauseReason, WorkUnitState, WorkUnitStateKind,
     },
 };
 
@@ -73,6 +70,8 @@ pub(crate) async fn load_task_runtime(
             worktree_path: unit.worktree_path.clone(),
             branch: unit.branch.clone(),
             agent_id: unit.executor_thread_id.clone(),
+            attempt: unit.attempt,
+            supersedes_work_unit_id: unit.supersedes_work_unit_id.clone(),
             budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
             executor_progress_revision,
             blueprint_fingerprint: handoff
@@ -103,14 +102,14 @@ pub(crate) async fn load_task_runtime(
         &reviews,
     )
     .await;
-    let failures = store.list_task_failures(&run.id).await?;
+    let issues = store.list_task_issues(&run.id).await?;
     studio_task_runtime(
         run,
         work_unit_runtimes,
         completions,
         merges,
         reviews,
-        failures,
+        issues,
         integrated_review_gate,
     )
     .map(Some)
@@ -122,41 +121,33 @@ fn studio_task_runtime(
     completions: Vec<WorkCompletionRecord>,
     merges: Vec<MergeRecord>,
     reviews: Vec<ReviewRoundRecord>,
-    failures: Vec<super::task_coordinator::TaskFailureRecord>,
+    issues: Vec<super::task_coordinator::TaskIssueRecord>,
     integrated_review_gate: StudioIntegratedReviewGate,
 ) -> Result<StudioTaskRuntime> {
-    let terminal_failure_id = run.terminal_failure_id();
-    let all_failures = failures
+    let issues = issues
         .into_iter()
-        .map(|failure| {
-            let state = studio_task_failure_state(&failure);
-            StudioTaskFailureRuntime {
-                id: failure.id,
-                source_thread_id: failure.source_thread_id,
-                source_turn_id: failure.source_turn_id,
-                source_agent_id: failure.source_agent_id,
-                source_role: failure.source_role,
-                work_unit_id: failure.work_unit_id,
-                review_round_id: failure.review_round_id,
+        .map(|issue| {
+            let state = studio_task_issue_state(&issue);
+            StudioTaskIssueRuntime {
+                id: issue.id,
+                source_thread_id: issue.source_thread_id,
+                source_turn_id: issue.source_turn_id,
+                source_agent_id: issue.source_agent_id,
+                source_role: issue.source_role,
+                work_unit_id: issue.work_unit_id,
+                review_round_id: issue.review_round_id,
                 state,
-                created_at: failure.created_at,
+                created_at: issue.created_at,
             }
         })
         .collect::<Vec<_>>();
-    let terminal_failure = terminal_failure_id
-        .and_then(|id| all_failures.iter().find(|failure| failure.id == id))
-        .cloned();
-    let failures = all_failures
-        .into_iter()
-        .filter(|failure| failure.state.resolved_at().is_none())
-        .collect();
     Ok(StudioTaskRuntime {
         run_id: run.id.clone(),
         state: studio_task_state(&run)?,
         revision: run.revision,
+        generation: run.generation(),
         integrated_review_gate,
-        failures,
-        terminal_failure,
+        issues,
         work_units,
         completions: completions
             .into_iter()
@@ -318,17 +309,17 @@ fn studio_merge_cleanup_state(state: &MergeCleanupState) -> StudioMergeCleanupSt
     }
 }
 
-fn studio_task_failure_state(
-    failure: &super::task_coordinator::TaskFailureRecord,
-) -> StudioTaskFailureState {
+fn studio_task_issue_state(
+    failure: &super::task_coordinator::TaskIssueRecord,
+) -> StudioTaskIssueState {
     match &failure.state {
-        TaskFailureState::OpenRecoverable(_) => StudioTaskFailureState::OpenRecoverable {
+        TaskIssueState::OpenRecoverable(_) => StudioTaskIssueState::OpenRecoverable {
             failure: failure.failure().clone(),
         },
-        TaskFailureState::OpenFatal(_) => StudioTaskFailureState::OpenFatal {
+        TaskIssueState::OpenFatal(_) => StudioTaskIssueState::OpenFatal {
             failure: failure.failure().clone(),
         },
-        TaskFailureState::Resolved(state) => StudioTaskFailureState::Resolved {
+        TaskIssueState::Resolved(state) => StudioTaskIssueState::Resolved {
             failure: failure.failure().clone(),
             resolved_at: state.resolved_at(),
         },
@@ -337,122 +328,97 @@ fn studio_task_failure_state(
 
 fn studio_task_state(run: &TaskRun) -> Result<StudioTaskState> {
     Ok(match &run.state {
-        TaskRunState::DesignUpdating(state) => {
-            StudioTaskState::DesignUpdating(StudioDesignUpdatingTaskState {
-                generation: state.generation(),
+        TaskRunState::Planning(_) => StudioTaskState::Planning(StudioPlanningTaskState {
+            request: run.context.request.clone(),
+        }),
+        TaskRunState::PendingConfirmation(_) => {
+            StudioTaskState::PendingConfirmation(StudioPendingConfirmationTaskState {
+                plan_revision: run
+                    .state
+                    .plan_revision()
+                    .context("pending confirmation has no plan revision")?,
             })
         }
-        TaskRunState::Implementing(state) => {
-            StudioTaskState::Implementing(StudioImplementingTaskState {
-                generation: state.generation(),
-                design: studio_finalized_design(state.design())?,
+        TaskRunState::EditingDocuments(_) => {
+            StudioTaskState::EditingDocuments(StudioEditingDocumentsTaskState {
+                plan_revision: run
+                    .state
+                    .plan_revision()
+                    .context("document editing has no plan revision")?,
             })
         }
-        TaskRunState::Merging(state) => StudioTaskState::Merging(StudioMergingTaskState {
-            generation: state.generation(),
-            status_message: state.status_message().map(str::to_string),
-            design: studio_finalized_design(state.design())?,
+        TaskRunState::Working(_) => StudioTaskState::Working(StudioWorkingTaskState {
+            document_edit_summary: run
+                .state
+                .document_edit_summary()
+                .context("working task has no document edit summary")?
+                .to_string(),
         }),
-        TaskRunState::Reviewing(state) => StudioTaskState::Reviewing(StudioReviewingTaskState {
-            generation: state.generation(),
-            status_message: state.status_message().map(str::to_string),
-            design: studio_finalized_design(state.design())?,
-            target: studio_review_target(state.target()),
-        }),
-        TaskRunState::Reworking(state) => StudioTaskState::Reworking(StudioReworkingTaskState {
-            generation: state.generation(),
-            status_message: state.status_message().to_string(),
-            design: studio_finalized_design(state.design())?,
-        }),
-        TaskRunState::Stopping(state) => StudioTaskState::Stopping(StudioStoppingTaskState {
-            generation: state.generation(),
-            status_message: state.status_message().to_string(),
-            design: studio_design_progress(state.design()),
-            request: studio_stop_request(state.request()),
-        }),
-        TaskRunState::Blocked(state) => StudioTaskState::Blocked(StudioBlockedTaskState {
-            generation: state.generation(),
-            message: state.message().to_string(),
-            design: studio_design_progress(state.design()),
-            recovery: studio_blocked_recovery(state.recovery()),
-        }),
-        TaskRunState::Completed(state) => StudioTaskState::Completed(StudioCompletedTaskState {
-            generation: state.generation(),
-            design: studio_finalized_design(state.design())?,
-        }),
-        TaskRunState::Failed(state) => StudioTaskState::Failed(StudioFailedTaskState {
-            generation: state.generation(),
-            message: state.message().to_string(),
-            design: studio_design_progress(state.design()),
-            failure_id: state.failure_id().map(str::to_string),
-        }),
-        TaskRunState::Cancelled(state) => StudioTaskState::Cancelled(StudioCancelledTaskState {
-            generation: state.generation(),
-            message: state.message().to_string(),
-            design: studio_design_progress(state.design()),
-            request: state.request().map(studio_stop_request),
+        TaskRunState::Reviewing(_) => {
+            let target = run
+                .state
+                .review_target()
+                .context("reviewing task has no frozen target")?;
+            StudioTaskState::Reviewing(StudioReviewingTaskState {
+                target: StudioIntegratedReviewTarget {
+                    review_round_id: target.review_round_id.clone(),
+                    reviewed_head: target.reviewed_head.clone(),
+                    changed_files: target.changed_files.clone(),
+                },
+            })
+        }
+        TaskRunState::Completed(_) => StudioTaskState::Completed(StudioCompletedTaskState {
+            outcome: studio_task_outcome(
+                run.state
+                    .outcome()
+                    .context("completed task has no outcome")?,
+            ),
         }),
     })
 }
 
-fn studio_finalized_design(design: &DesignProgress) -> Result<StudioFinalizedDesign> {
-    let DesignProgress::Finalized(design) = design else {
-        anyhow::bail!("Task state requiring a finalized design contains updating design progress");
-    };
-    Ok(StudioFinalizedDesign {
-        summary: design.summary.clone(),
-    })
-}
-
-fn studio_design_progress(design: &DesignProgress) -> StudioDesignProgress {
-    match design {
-        DesignProgress::Updating => StudioDesignProgress::Updating(StudioUpdatingDesign {}),
-        DesignProgress::Finalized(design) => {
-            StudioDesignProgress::Finalized(StudioFinalizedDesign {
-                summary: design.summary.clone(),
-            })
-        }
-    }
-}
-
-fn studio_stop_request(
-    request: &super::task_coordinator::TaskStopRequest,
-) -> StudioTaskStopRequest {
-    StudioTaskStopRequest {
-        origin: match request.origin {
-            TaskStopOrigin::UserRequest => StudioTaskStopOrigin::UserRequest,
-            TaskStopOrigin::PlannerDecision => StudioTaskStopOrigin::PlannerDecision,
-            TaskStopOrigin::RuntimeFailure => StudioTaskStopOrigin::RuntimeFailure,
-            TaskStopOrigin::ApplicationShutdown => StudioTaskStopOrigin::ApplicationShutdown,
+fn studio_task_outcome(outcome: &TaskOutcome) -> StudioTaskOutcome {
+    match outcome {
+        TaskOutcome::Succeeded {
+            summary,
+            completed_at,
+            review_gate,
+        } => StudioTaskOutcome::Succeeded {
+            summary: summary.clone(),
+            completed_at: *completed_at,
+            review_gate: match review_gate {
+                TaskReviewGate::NotRequiredNoDelivery => {
+                    StudioTaskReviewGate::NotRequiredNoDelivery
+                }
+                TaskReviewGate::NotRequiredSingleExecutor { work_unit_id } => {
+                    StudioTaskReviewGate::NotRequiredSingleExecutor {
+                        work_unit_id: work_unit_id.clone(),
+                    }
+                }
+                TaskReviewGate::IntegratedReview { review_round_id } => {
+                    StudioTaskReviewGate::IntegratedReview {
+                        review_round_id: review_round_id.clone(),
+                    }
+                }
+            },
         },
-        reason: request.reason.as_str().to_string(),
-        requested_at: request.requested_at,
-    }
-}
-
-fn studio_blocked_recovery(recovery: &BlockedRecovery) -> StudioBlockedRecovery {
-    match recovery {
-        BlockedRecovery::RetryMerge => StudioBlockedRecovery::RetryMerge,
-        BlockedRecovery::ResumeRework => StudioBlockedRecovery::ResumeRework,
-        BlockedRecovery::ManualOnly => StudioBlockedRecovery::ManualOnly,
-    }
-}
-
-fn studio_review_target(target: &ReviewTarget) -> StudioTaskReviewTarget {
-    match target {
-        ReviewTarget::Delivery {
-            work_unit_id,
-            completion_id,
-            completion_revision,
-            reviewed_head,
-        } => StudioTaskReviewTarget::Delivery {
-            work_unit_id: work_unit_id.clone(),
-            completion_id: completion_id.clone(),
-            completion_revision: *completion_revision,
-            reviewed_head: reviewed_head.clone(),
-        },
-        ReviewTarget::Integration { reviewed_head } => StudioTaskReviewTarget::Integration {
-            reviewed_head: reviewed_head.clone(),
+        TaskOutcome::Failed {
+            kind,
+            summary,
+            evidence,
+            cause,
+            completed_at,
+        } => StudioTaskOutcome::Failed {
+            kind: match kind {
+                super::task_coordinator::TaskFailureKind::UnableToProceed => {
+                    StudioTaskFailureKind::UnableToProceed
+                }
+                super::task_coordinator::TaskFailureKind::Fatal => StudioTaskFailureKind::Fatal,
+            },
+            summary: summary.clone(),
+            evidence: evidence.clone(),
+            cause: cause.clone(),
+            completed_at: *completed_at,
         },
     }
 }

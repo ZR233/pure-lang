@@ -8,8 +8,8 @@ use super::cleanup::cleanup_accepted_delivery;
 use super::scope::delivery_from_completion;
 use super::validation::ensure_preflight_delivery_identity;
 use crate::studio::task_coordinator::{
-    MergeMethod, MergeRecord, ProjectLeaseRecord, RecordTaskMerge, TaskCoordinator, TaskMergeScope,
-    TaskRun, TaskRunStateKind, WorkCompletionRecord, WorkUnit,
+    MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator, TaskMergeScope, TaskRunStateKind,
+    WorkCompletionRecord, WorkUnit,
 };
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, ToolEffect};
@@ -96,14 +96,8 @@ impl TaskCoordinator {
         let scope = self
             .load_planner_merge_scope(thread_id, executor_agent_id, input.completion_revision)
             .await?;
-        self.ensure_process_lease_owned(&scope.run)?;
-
         let expected_previous_head = input.expected_previous_head.trim().to_string();
         let resulting_head = input.resulting_head.trim().to_string();
-        ensure!(
-            scope.lease.project_id == scope.run.project_id,
-            "project lease does not match the durable TaskRun"
-        );
         ensure!(
             resulting_head != expected_previous_head,
             "resultingHead must advance beyond expectedPreviousHead"
@@ -139,14 +133,9 @@ impl TaskCoordinator {
             .store
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
-        if run.kind() != TaskRunStateKind::Merging {
+        if run.kind() != TaskRunStateKind::Working {
             bail!("task_record_merge requires phase merging");
         }
-        let lease = self
-            .store
-            .read_project_lease(&run.id)
-            .await?
-            .context("task project lease not found")?;
         let work_units = self
             .store
             .list_work_units(&run.id)
@@ -185,8 +174,6 @@ impl TaskCoordinator {
             "executor must be canonically closed before merge accounting"
         );
         Ok(PlannerMergeScope {
-            run,
-            lease,
             work_unit,
             completion,
         })
@@ -253,8 +240,6 @@ fn validate_recorded_input(
 }
 
 struct PlannerMergeScope {
-    run: TaskRun,
-    lease: ProjectLeaseRecord,
     work_unit: WorkUnit,
     completion: WorkCompletionRecord,
 }

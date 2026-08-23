@@ -495,9 +495,8 @@ pub enum ToolApprovalResolution {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PlanConfirmationResolution {
-    ImplementFreshContext,
-    ContinuePlanning,
-    Dismiss,
+    Confirm,
+    RevisePlan,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
