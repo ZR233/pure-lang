@@ -170,6 +170,10 @@ void validateTaskCompletion(
   if (outcome == null || outcome['kind'] != 'succeeded') {
     throw StateError('Task did not complete with a succeeded outcome');
   }
+  final outcomeSummary = outcome['summary'] as String?;
+  if (outcomeSummary == null || outcomeSummary.trim().isEmpty) {
+    throw StateError('Task completed without a final summary');
+  }
   final workUnits = (task['workUnits'] as List<dynamic>? ?? const [])
       .cast<Map<String, dynamic>>();
   final completions = (task['completions'] as List<dynamic>? ?? const [])
@@ -193,10 +197,9 @@ void validateTaskCompletion(
   final pathExists = worktreeExists ?? (path) => Directory(path).existsSync();
   for (final unit in workUnits) {
     final workUnitId = unit['id'];
-    final expectedStatus = noDelivery ? 'noDelivery' : 'merged';
-    if (unit['status'] != expectedStatus) {
+    if (unit['status'] != 'completed') {
       throw StateError(
-        'WorkUnit $workUnitId is not $expectedStatus: ${unit['status']}',
+        'WorkUnit $workUnitId is not completed: ${unit['status']}',
       );
     }
     final worktreePath = unit['worktreePath'] as String?;
@@ -207,13 +210,17 @@ void validateTaskCompletion(
     }
     if (noDelivery) {
       final unitCompletions = completions
-          .where((completion) => completion['workUnitId'] == workUnitId)
+          .where(
+            (completion) =>
+                completion['workUnitId'] == workUnitId &&
+                completion['status'] == 'approved',
+          )
           .toList();
-      if (unitCompletions.isEmpty ||
-          unitCompletions.any(
-            (completion) => completion['kind'] != 'noDelivery',
-          )) {
-        throw StateError('WorkUnit $workUnitId has no noDelivery completion');
+      if (unitCompletions.length != 1 ||
+          unitCompletions.single['kind'] != 'noDelivery') {
+        throw StateError(
+          'WorkUnit $workUnitId has no approved noDelivery completion',
+        );
       }
       continue;
     }
@@ -239,10 +246,34 @@ void validateTaskCompletion(
               completion['workUnitId'] == workUnitId,
         )
         .toList();
-    if (matchingCompletions.length != 1 ||
-        matchingCompletions.single['revision'] != merge['completionRevision']) {
+    if (matchingCompletions.length != 1) {
       throw StateError(
         'WorkUnit $workUnitId merge does not match its completion revision',
+      );
+    }
+    final completion = matchingCompletions.single;
+    if (completion['revision'] != merge['completionRevision'] ||
+        completion['status'] != 'approved' ||
+        completion['kind'] != 'delivery' ||
+        completion['headCommit'] != merge['deliveryHead']) {
+      throw StateError(
+        'WorkUnit $workUnitId merge does not match its approved delivery',
+      );
+    }
+    final deliveryReviews = reviews
+        .where(
+          (review) =>
+              review['scope'] == 'delivery' &&
+              review['workUnitId'] == workUnitId &&
+              review['completionId'] == completion['id'] &&
+              review['completionRevision'] == completion['revision'] &&
+              review['reviewedHead'] == completion['headCommit'] &&
+              review['verdict'] == 'passed',
+        )
+        .toList();
+    if (deliveryReviews.length != 1) {
+      throw StateError(
+        'WorkUnit $workUnitId has no matching passed delivery review',
       );
     }
   }
@@ -255,7 +286,7 @@ void validateTaskCompletion(
             (review) =>
                 review['id'] == gate['reviewRoundId'] &&
                 review['scope'] == 'integrated' &&
-                review['verdict'] == 'pass' &&
+                review['verdict'] == 'passed' &&
                 review['reviewedHead'] == gate['reviewedHead'],
           )
           .toList();
@@ -292,6 +323,14 @@ void validateTaskCompletion(
       workspace['isBusy'] != false ||
       workspace['activeInteraction'] != null) {
     throw StateError('Task completed with an active turn or interaction');
+  }
+  final timeline = workspace['timelineProgress'] as Map<String, dynamic>?;
+  final rows = (timeline?['rows'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>();
+  if (!rows.any(
+    (row) => row['type'] == 'finalAnswer' && row['text'] == outcomeSummary,
+  )) {
+    throw StateError('Task final summary is missing from the Timeline');
   }
 }
 

@@ -98,7 +98,7 @@ pub(super) fn finalize_tool_item(
                 ToolRuntimeEvent::CacheHit { .. } => {}
                 ToolRuntimeEvent::OutputMetrics { .. } => {}
                 ToolRuntimeEvent::OutputBudget { .. } => {}
-                ToolRuntimeEvent::EndTurn => {}
+                ToolRuntimeEvent::EndTurn { .. } => {}
             }
         }
     }
@@ -226,7 +226,7 @@ fn tool_execution_record_from_envelope(
             | ToolRuntimeEvent::ExecutionFailed
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn => None,
+            | ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .unwrap_or((
             model_visible_text.len() as u64,
@@ -275,7 +275,7 @@ fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Valu
             | ToolRuntimeEvent::OutputMetrics { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
             | ToolRuntimeEvent::ExecutionFailed
-            | ToolRuntimeEvent::EndTurn => None,
+            | ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .flatten()
         .cloned()
@@ -295,7 +295,7 @@ fn audit_metadata(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Value>
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputMetrics { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn => None,
+            | ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .collect()
 }
@@ -325,7 +325,7 @@ fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::Trace
         | ToolRuntimeEvent::ExecutionFailed
         | ToolRuntimeEvent::CacheHit { .. }
         | ToolRuntimeEvent::OutputBudget { .. }
-        | ToolRuntimeEvent::EndTurn => None,
+        | ToolRuntimeEvent::EndTurn { .. } => None,
     })
 }
 

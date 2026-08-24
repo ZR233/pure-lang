@@ -781,6 +781,66 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
 }
 
 #[tokio::test]
+async fn ending_tool_content_becomes_persisted_turn_final_text() {
+    let (base_url, bodies, handle) = serve_sse_sequence(vec![text_then_tool_call_sse(
+        "end-turn-content",
+        "Submitting final completion.",
+        "end_turn_content",
+    )])
+    .await;
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
+    core.register_test_tool(EndTurnContentTool);
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-end-turn-content".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("finish with a visible marker".to_string())
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert!(result.is_completed());
+    assert_eq!(result.content, "TASK_E2E_DONE");
+    assert_eq!(bodies.lock().unwrap().len(), 1);
+    assert!(session.messages().iter().any(|message| {
+        message.role == MessageRole::Assistant
+            && message.content == MessageContent::Text("TASK_E2E_DONE".to_string())
+    }));
+    assert!(result.trace_events.iter().any(|event| match &event.kind {
+        TraceEventKind::TracePartCompleted { item } => item.text().is_some_and(|text| {
+            text.channel() == TraceTextChannel::Final && text.content() == "TASK_E2E_DONE"
+        }),
+        TraceEventKind::TracePartStarted { .. }
+        | TraceEventKind::TracePartDelta { .. }
+        | TraceEventKind::TracePartFailed { .. }
+        | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::SkillActivated { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => false,
+    }));
+    assert!(result.trace_events.iter().any(|event| match &event.kind {
+        TraceEventKind::TracePartCompleted { item } => item.text().is_some_and(|text| {
+            text.channel() == TraceTextChannel::Final
+                && text.content() == "Submitting final completion."
+        }),
+        TraceEventKind::TracePartStarted { .. }
+        | TraceEventKind::TracePartDelta { .. }
+        | TraceEventKind::TracePartFailed { .. }
+        | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::SkillActivated { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => false,
+    }));
+}
+
+#[tokio::test]
 async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     let responses = vec![
         tool_call_sse("large-artifact", "large_artifact"),
@@ -893,6 +953,9 @@ struct HostedToolProbe;
 #[derive(Debug)]
 struct LargeArtifactTool;
 
+#[derive(Debug)]
+struct EndTurnContentTool;
+
 impl Tool for HostedToolProbe {
     fn name(&self) -> &str {
         "git_status"
@@ -985,6 +1048,49 @@ impl Tool for LargeArtifactTool {
                     })],
                 }],
             })
+        }
+        .boxed()
+    }
+}
+
+impl Tool for EndTurnContentTool {
+    fn name(&self) -> &str {
+        "end_turn_content"
+    }
+
+    fn description(&self) -> &str {
+        "Ends the turn with canonical final assistant content"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        None
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        async {
+            Ok(
+                crate::tool::ToolExecutionResult::<serde_json::Value>::success("completed")
+                    .ending_turn_with_content("TASK_E2E_DONE")
+                    .into_tool_output(),
+            )
         }
         .boxed()
     }
@@ -1100,6 +1206,68 @@ fn tool_call_sse(id: &str, name: &str) -> String {
     let item_id = format!("fc_{id}");
     let call_id = format!("call_{id}");
     [
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": "{}"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": format!("response_{id}"),
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+            }
+        }),
+    ]
+    .into_iter()
+    .map(|event| format!("data: {event}\n\n"))
+    .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+    .collect()
+}
+
+fn text_then_tool_call_sse(id: &str, content: &str, name: &str) -> String {
+    let message_id = format!("msg_{id}");
+    let item_id = format!("fc_{id}");
+    let call_id = format!("call_{id}");
+    [
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": message_id,
+            "delta": content
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": content}]
+            }
+        }),
         serde_json::json!({
             "type": "response.output_item.added",
             "item": {

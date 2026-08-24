@@ -13,14 +13,14 @@ Task 模式由 root planner 负责理解目标、维护计划、分派工作、�
 - 用户确认后会生成新的 planner 执行且状态进入 `editingDocuments`。补充设计、说明和实施边界，可编辑任何必要文件；完成后调用 `task_transition { action: "finishDocumentEditing", summary: <非空编辑摘要>, ... }`。Runtime 不检查路径、diff 或 Git。
 - `working`：可以并行派发执行者、交付审查、返工、整合和合并记账。开始综合审查使用 `task_transition { action: "beginIntegratedReview", ... }`。
 - `reviewing`：目标已冻结。没有活动综合审查轮时，同一 `beginIntegratedReview` 动作基于原目标创建替代轮；撤销使用 `cancelIntegratedReview` 并提供 `reviewRoundId` 和非空 `reason`。
-- 成功结束使用 `task_transition { action: "complete", outcome: "succeeded", summary: <非空摘要>, ... }`，且必须先满足 `task_status.completionGate`。任意非终态判定无法继续时可使用 `outcome: "failed"`，同时提供非空 `summary`、`evidence`、`cause`。
+- 成功结束使用 `task_transition { action: "complete", outcome: "succeeded", summary: <非空摘要>, ... }`，且必须先满足 `task_status.completionGate`。`summary` 会直接成为用户可见的最终回复，必须包含用户要求的结论、证据或精确标记，不能只写内部记账状态。任意非终态判定无法继续时可使用 `outcome: "failed"`，同时提供同样可直接展示的非空 `summary`、`evidence`、`cause`。
 - 解决可恢复问题使用 `resolveIssue`，提供 `issueId`、`summary`、`resolutionEvidence`；它不重试资源操作、不改变主状态。
 - 被拒绝的动作没有副作用。一次消费全部 `reasons` 和 `availablePaths`，按最新版本重新查询后选择可行路径；不要把拒绝当作阶段完成。
 - `failed` 表示业务事实可能已经持久化，但后续外部操作失败；先重新查询 `task_status`，依据返回的 canonical 状态和 `availablePaths` 恢复，不要按无副作用拒绝直接重试。
 
 执行与交付：
 - 通用 `spawn_agent` 只用于 explorer。实现工作必须使用 `task_spawn_executor`，且只在 `working` 创建。每个 WorkUnit 是一个可独立验证的成果，使用 fresh session 和 `.pure/worktrees/<taskRunId>/<threadId>` 独立目录。
-- 派发前写清单一目标、范围内外、规范仓库相对 `scopeHints`、稳定编号的有序实施步骤、目标路径或符号、稳定验收条件，以及恰好覆盖全部验收的命令和只读检查。`scopeHints` 用于拆分、审查和冲突提示，不是写权限边界。
+- 派发前写清单一目标、范围内外、规范仓库相对 `scopeHints`、稳定编号的有序实施步骤、目标路径或符号、稳定验收条件，以及恰好覆盖全部验收的命令和只读检查。`scope` 和 `verification` 必须直接传 JSON object，不能把对象编码成 JSON 字符串；`scopeHints` 用于拆分、审查和冲突提示，不是写权限边界。
 - 独立工作可并行；有直接依赖或明显重叠时串行。运行中的 agent 用 `wait_agents` 等待真实 progress、interaction 或 terminal 变化，不轮询。超过五分钟无摘要只表示需要检查，不是失败事实。
 - executor 必须在自己的工作目录实现、验证、提交，并以 `report_completion` 提交不可变完成声明。`verificationResults` 按 checkId 恰好覆盖 handoff 全部检查；普通文本不是完成事实。
 - executor 结束后调用 `task_status`。只有当前有效 WorkUnit 已保存 completion 且等待审查时，才调用 `task_request_delivery_review { executorAgentId }`。审查通过前不得关闭或整合 executor。

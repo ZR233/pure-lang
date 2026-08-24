@@ -88,6 +88,7 @@ async fn validate_cleanup_identity(scope: &TaskMergeScope) -> anyhow::Result<Cle
     }
     let branch_tip = branch.stdout_text()?.trim().to_string();
     let worktree_head = checked_git(worktree, vec!["rev-parse".into(), "HEAD".into()]).await?;
+    let delivery_head = resolve_delivery_head(worktree, &scope.delivery.head_commit).await?;
     let worktree_branch = checked_git(
         worktree,
         vec![
@@ -98,13 +99,25 @@ async fn validate_cleanup_identity(scope: &TaskMergeScope) -> anyhow::Result<Cle
         ],
     )
     .await?;
-    if branch_tip != scope.delivery.head_commit
-        || worktree_head != scope.delivery.head_commit
+    if branch_tip != delivery_head
+        || worktree_head != delivery_head
         || worktree_branch != scope.work_unit.branch
     {
         anyhow::bail!("executor branch or worktree tip drifted before cleanup");
     }
     Ok(CleanupPresence::Present)
+}
+
+async fn resolve_delivery_head(worktree: &Path, delivery_head: &str) -> Result<String> {
+    checked_git(
+        worktree,
+        vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            format!("{delivery_head}^{{commit}}"),
+        ],
+    )
+    .await
 }
 
 async fn verify_cleanup_result(
@@ -132,4 +145,40 @@ fn cleanup_is_already_absent(path: &str, error: &str) -> bool {
 
 fn cleanup_failure(detail: String) -> MergeCleanupResult {
     MergeCleanupResult::Failed { detail }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn short_delivery_head_resolves_to_the_canonical_commit() {
+        let repository = tempfile::tempdir().expect("temporary repository");
+        checked_git(
+            repository.path(),
+            vec!["init".into(), "-b".into(), "main".into()],
+        )
+        .await
+        .expect("initialize repository");
+        std::fs::write(repository.path().join("README.md"), "fixture\n").expect("write fixture");
+        checked_git(repository.path(), vec!["add".into(), "README.md".into()])
+            .await
+            .expect("stage fixture");
+        checked_git(
+            repository.path(),
+            vec!["commit".into(), "-m".into(), "initialize fixture".into()],
+        )
+        .await
+        .expect("commit fixture");
+        let full_head = checked_git(repository.path(), vec!["rev-parse".into(), "HEAD".into()])
+            .await
+            .expect("resolve full head");
+        let short_head = &full_head[..7];
+
+        let resolved = resolve_delivery_head(repository.path(), short_head)
+            .await
+            .expect("resolve short head");
+
+        assert_eq!(resolved, full_head);
+    }
 }

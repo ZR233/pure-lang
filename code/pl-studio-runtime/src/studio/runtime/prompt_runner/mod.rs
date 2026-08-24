@@ -68,6 +68,16 @@ impl StudioRuntime {
         &self,
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
+        let thread_record = self.read_owned_thread(&request.thread_id).await?;
+        self.submit_prompt_for_owned_thread_with_lifecycle_lock(request, thread_record)
+            .await
+    }
+
+    pub(super) async fn submit_prompt_for_owned_thread_with_lifecycle_lock(
+        &self,
+        request: StudioSubmitPromptRequest,
+        thread_record: ThreadRecord,
+    ) -> Result<StudioSubmitPromptResponse> {
         let StudioSubmitPromptRequest {
             thread_id,
             prompt,
@@ -76,7 +86,10 @@ impl StudioRuntime {
         } = request;
         validate_prompt_content(&prompt, &attachment_ids)?;
         self.ensure_persistence_accepts_new_work()?;
-        let thread_record = self.read_owned_thread(&thread_id).await?;
+        anyhow::ensure!(
+            thread_record.id == thread_id,
+            "prompt Thread does not match its canonical owner"
+        );
         if thread_record.mode == crate::StudioMode::Task
             && thread_record.thread_kind == ThreadKind::Root
             && !self.task_runtime.has_active_task(&thread_id).await
@@ -94,7 +107,9 @@ impl StudioRuntime {
                 .await?;
         }
         self.ensure_prompt_runtime_ready().await?;
-        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
+        let (handle, agent_id) = self
+            .ensure_thread_agent_for_record(thread_record.clone())
+            .await?;
         let mut snapshot = handle
             .snapshot(agent_id.clone())
             .await
@@ -252,11 +267,19 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)> {
+        let target = self.read_owned_thread(thread_id).await?;
+        self.ensure_thread_agent_for_record(target).await
+    }
+
+    async fn ensure_thread_agent_for_record(
+        &self,
+        target: ThreadRecord,
+    ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
-        let target = self.read_owned_thread(thread_id).await?;
         let target_agent_id = pl_core::ThreadId::new(target.agent_path.clone())?;
         let target_root_thread_id = target.root_thread_id.clone();
+        let target_thread_id = target.id.clone();
         let mut missing = Vec::new();
         let mut current = target;
         loop {
@@ -281,7 +304,7 @@ impl StudioRuntime {
             .snapshot(target_agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        self.residency.touch(thread_id).await;
+        self.residency.touch(&target_thread_id).await;
         self.enforce_residency_limit().await;
         let _ = self.task_runtime.activate(&target_root_thread_id).await?;
         crate::studio::agent_host::materialize_pending_task_planner_wakes(

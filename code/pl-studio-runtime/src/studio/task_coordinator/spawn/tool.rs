@@ -33,7 +33,7 @@ struct TaskSpawnExecutorInput {
     /// Concrete outcome this work unit must deliver.
     #[schemars(length(min = 1))]
     objective: String,
-    /// Explicit semantic and repository scope.
+    /// Explicit semantic and repository scope as a JSON object; never stringify this object.
     scope: TaskExecutorScope,
     /// Ordered implementation blueprint with repository targets.
     #[schemars(length(min = 1))]
@@ -45,7 +45,7 @@ struct TaskSpawnExecutorInput {
     dependencies: Vec<TaskExecutorDependency>,
     /// Stable repository evidence already collected.
     evidence: Vec<TaskExecutorEvidence>,
-    /// Commands and inspections that prove every acceptance criterion.
+    /// Commands and inspections as a JSON object; never stringify this object.
     verification: TaskExecutorVerificationContract,
 }
 
@@ -550,4 +550,53 @@ fn executor_runtime_ids(thread_id: &str, call_id: &str) -> Result<(ThreadId, Tur
     let turn = TurnId::new(format!("turn-task-{}", &digest[16..32]))
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok((thread, turn))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_spawn_executor_schema_inlines_structured_contract_objects() {
+        let schema = FunctionToolDefinition::<TaskSpawnExecutorInput>::new(
+            "task_spawn_executor",
+            "test contract",
+        )
+        .input_schema();
+        let properties = schema["properties"]
+            .as_object()
+            .expect("task_spawn_executor properties");
+
+        for field in ["scope", "verification"] {
+            let property = properties[field]
+                .as_object()
+                .unwrap_or_else(|| panic!("{field} schema must be an object"));
+            assert_eq!(
+                property.get("type").and_then(serde_json::Value::as_str),
+                Some("object"),
+                "{field} must be directly model-visible as an object"
+            );
+            assert!(
+                !property.contains_key("$ref"),
+                "{field} must not rely on a provider resolving a top-level property ref"
+            );
+        }
+
+        let scope = properties["scope"]["properties"]
+            .as_object()
+            .expect("scope properties");
+        for field in ["inScope", "outOfScope", "scopeHints"] {
+            assert_eq!(scope[field]["type"], "array", "scope.{field} schema");
+        }
+
+        let verification = properties["verification"]["properties"]
+            .as_object()
+            .expect("verification properties");
+        for field in ["commands", "inspections"] {
+            assert_eq!(
+                verification[field]["type"], "array",
+                "verification.{field} schema"
+            );
+        }
+    }
 }

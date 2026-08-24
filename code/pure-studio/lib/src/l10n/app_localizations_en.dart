@@ -508,6 +508,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskRecoverable => 'Can continue';
 
   @override
+  String get statusTaskPaused => 'Paused';
+
+  @override
   String get statusTaskFailures => 'Task failures';
 
   @override
@@ -517,6 +520,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get statusTaskRecoverableHint =>
       'This task can continue after the cause is corrected.';
+
+  @override
+  String get statusTaskPausedHint =>
+      'No model turn is active. Send a message to continue this task.';
 
   @override
   String get statusTaskExecution => 'Execution';

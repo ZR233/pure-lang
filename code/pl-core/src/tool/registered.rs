@@ -141,7 +141,11 @@ pub enum ToolRuntimeEvent {
     OutputBudget {
         max_bytes: usize,
     },
-    EndTurn,
+    /// 当前工具结果结束本轮；可选内容成为该 Turn 的 canonical 最终 assistant 回复。
+    EndTurn {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_content: Option<String>,
+    },
 }
 
 /// 运行时动态注册的工具。

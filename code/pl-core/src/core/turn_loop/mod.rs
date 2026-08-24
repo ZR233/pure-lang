@@ -615,7 +615,29 @@ pub(super) async fn run_turn_with_trace(
             tool_result
                 .runtime_events
                 .iter()
-                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
+                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn { .. }))
+        });
+        let end_turn_content = tool_results.iter().find_map(|tool_result| {
+            tool_result
+                .runtime_events
+                .iter()
+                .find_map(|event| match event {
+                    crate::tool::ToolRuntimeEvent::EndTurn {
+                        final_content: Some(content),
+                    } => Some(content.clone()),
+                    crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+                    | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+                    | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
+                    | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
+                    | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
+                    | crate::tool::ToolRuntimeEvent::ExecutionFailed
+                    | crate::tool::ToolRuntimeEvent::CacheHit { .. }
+                    | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
+                    | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
+                    | crate::tool::ToolRuntimeEvent::EndTurn {
+                        final_content: None,
+                    } => None,
+                })
         });
         let remaining_context_tokens = model_info
             .resolved_auto_compact_limit()
@@ -650,6 +672,10 @@ pub(super) async fn run_turn_with_trace(
                 tool_result.result.clone(),
                 receipt.clone(),
             );
+        }
+        if let Some(content) = end_turn_content {
+            session.push_assistant_response(content.clone(), None);
+            last_content = content;
         }
         inference::record(
             &options,

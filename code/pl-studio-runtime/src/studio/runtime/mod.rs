@@ -373,10 +373,9 @@ impl StudioRuntime {
             .await;
         self.close_project_agent_trees(&thread_ids).await?;
         for thread_id in &thread_ids {
-            let emitter = self.interaction_emitter(thread_id.clone());
             self.agent_facility
                 .interactions
-                .cancel_thread(thread_id, "project cleaned up", emitter)
+                .cancel_thread_for_project_cleanup(thread_id, "project cleaned up")
                 .await?;
         }
         self.task_coordinator

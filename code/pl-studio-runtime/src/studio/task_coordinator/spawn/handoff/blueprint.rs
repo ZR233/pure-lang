@@ -47,6 +47,7 @@ pub(crate) struct TaskExecutorTarget {
 /// 一个 WorkUnit 的范围说明。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(inline)]
 pub(crate) struct TaskExecutorScope {
     pub(crate) in_scope: Vec<String>,
     pub(crate) out_of_scope: Vec<String>,
@@ -98,6 +99,7 @@ pub(crate) struct TaskExecutorVerificationInspection {
 /// Fresh executor 不依赖 planner transcript 也能恢复的验证契约。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(inline)]
 pub(crate) struct TaskExecutorVerificationContract {
     pub(crate) commands: Vec<TaskExecutorVerificationCommand>,
     pub(crate) inspections: Vec<TaskExecutorVerificationInspection>,

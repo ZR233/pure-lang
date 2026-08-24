@@ -44,6 +44,49 @@ fn test_product_config(
 }
 
 #[tokio::test]
+async fn start_new_thread_accepts_first_prompt_before_publishing_thread() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    let database = root.path().join("studio.sqlite");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let store = StudioStore::open(&database).await.unwrap();
+    let runtime = StudioRuntime::new(store, config_store).unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+
+    let response = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "First prompt".to_string(),
+            prompt: "Inspect the temporary project.".to_string(),
+            attachment_ids: Vec::new(),
+            mode: StudioMode::Simple,
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.thread.project_id, project.id);
+    assert_eq!(response.thread.mode, StudioMode::Simple);
+    assert_eq!(response.submission.thread_id, response.thread.id);
+    assert!(
+        runtime
+            .agent_facility
+            .product_events
+            .thread_snapshot(&response.thread.id)
+            .is_some(),
+        "accepted Thread must become visible only after its first prompt is queued"
+    );
+    assert!(runtime.thread_snapshot(&response.thread.id).await.is_ok());
+
+    runtime.shutdown_runtime().await.unwrap();
+}
+
+#[tokio::test]
 async fn task_hot_record_is_committed_before_runtime_readiness_is_checked() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("home");
@@ -157,3 +200,62 @@ async fn cold_start_restores_plan_confirmation_after_loading_memory_directories(
 
 mod deepseek_cache;
 mod openai_cache;
+
+#[tokio::test]
+async fn project_cleanup_cancels_pending_interaction_for_nonresident_thread() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store.save(&StudioConfig::default_config()).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(
+            &project.id,
+            "Nonresident pending interaction",
+            StudioMode::Simple,
+        )
+        .await
+        .unwrap();
+    let interaction = crate::InteractionRequest::user_input(
+        "cleanup-pending",
+        pl_protocol::InteractionScope {
+            thread_id: thread.id.clone(),
+            turn_id: "turn-cleanup-pending".to_string(),
+            item_id: Some("item-cleanup-pending".to_string()),
+            tool_id: Some("ask_user".to_string()),
+            agent_path: Some(thread.agent_path.clone()),
+        },
+        Vec::new(),
+        1,
+    );
+    store.upsert_interaction(&interaction).await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store).unwrap();
+    let preview = runtime.preview_project_cleanup(&project.id).await.unwrap();
+
+    runtime
+        .cleanup_project(&project.id, &preview.expected_revision)
+        .await
+        .unwrap();
+
+    assert!(store.list_projects().await.unwrap().is_empty());
+    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
+    assert!(
+        store
+            .list_pending_interactions(&thread.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .read_interaction(&interaction.interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status(),
+        crate::InteractionStatus::Cancelled
+    );
+}

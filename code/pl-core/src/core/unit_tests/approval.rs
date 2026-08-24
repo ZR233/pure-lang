@@ -99,6 +99,59 @@ async fn request_approval_allows_external_path_after_user_approval() {
 }
 
 #[tokio::test]
+async fn workspace_tool_without_approval_skips_approved_trace_phase() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut core = test_turn_engine();
+    core.register_test_tool(WriteFileTool);
+    let tool_call = ToolCall::function(
+        "provider-item-1",
+        "write_file",
+        serde_json::json!({
+            "path": "note.txt",
+            "content": "direct",
+            "mode": "create",
+        }),
+        "call-1",
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let records = execute_tool_calls(
+        &[tool_call],
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            lease: core.acquire_tool_lease().unwrap(),
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace: crate::tool::AgentWorkspace::local(workspace.path().to_path_buf()),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let events = recorder.drain();
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
+    assert_eq!(
+        tool_statuses(&events, "turn-1-provider-item-1"),
+        vec![
+            TestToolPhase::Started,
+            TestToolPhase::Running,
+            TestToolPhase::Succeeded,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn unknown_tool_records_one_terminal_event_and_tool_result() {
     let core = test_turn_engine();
     let tool_call = ToolCall::function(

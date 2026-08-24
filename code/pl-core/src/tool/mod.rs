@@ -92,7 +92,9 @@ mod tests {
                 ToolRuntimeEvent::OutputArtifacts {
                     artifacts: vec![serde_json::json!({"id": "artifact-1"})],
                 },
-                ToolRuntimeEvent::EndTurn,
+                ToolRuntimeEvent::EndTurn {
+                    final_content: Some("final answer".to_string()),
+                },
             ],
         };
 
@@ -103,6 +105,7 @@ mod tests {
                 output: "model output".to_string(),
                 model_output: "model output".to_string(),
                 ends_turn: true,
+                end_turn_content: Some("final answer".to_string()),
                 output_artifacts: vec![ArtifactRecord {
                     id: "artifact-1".to_string(),
                 }],

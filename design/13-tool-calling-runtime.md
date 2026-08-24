@@ -181,6 +181,11 @@ pending Interaction 是一种成功的 Turn completion boundary，不是业务 f
 改写为 validation failure；用户答复后的 fresh Turn 仍按原 role policy 继续，只有真正完成该阶段时
 才必须调用 required tool。
 
+`EndTurn` 可携带由业务工具提供的 canonical final content。Runtime 必须先把该内容作为 assistant
+消息写入 session，并将其投影为当前 Turn 的最终文本，再提交 terminal checkpoint；未携带内容时保留
+模型在该 Turn 已产生的最后正文。Task 完成工具使用持久化的 completion summary 作为 canonical final
+content，避免完成事实已落库但 Timeline 只显示通用兜底文案。
+
 Studio 回答 UserInput 时，把 resolved Interaction 与一个 hidden durable input 放入同一个
 `ThreadCommit`。mail ID 固定为 `interaction-resolution:{interactionId}`，提交策略固定为
 `StartOrQueue`：Thread idle 时开启 fresh Turn，有活动 Turn 时只排队，绝不 steer 当前 Turn；该输入

@@ -101,7 +101,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             | crate::tool::ToolRuntimeEvent::CacheHit { .. }
             | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
             | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-            | crate::tool::ToolRuntimeEvent::EndTurn => None,
+            | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .flatten()
         .map(compact_artifact_reference)
@@ -120,7 +120,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolRuntimeEvent::ExecutionFailed
         | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
         | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn => None,
+        | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
     });
     let metrics = result.runtime_events.iter().find_map(|event| match event {
         crate::tool::ToolRuntimeEvent::OutputMetrics {
@@ -137,7 +137,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolRuntimeEvent::ExecutionFailed
         | crate::tool::ToolRuntimeEvent::CacheHit { .. }
         | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn => None,
+        | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
     });
     ToolResultReceipt {
         call_id: result.call_id.clone(),

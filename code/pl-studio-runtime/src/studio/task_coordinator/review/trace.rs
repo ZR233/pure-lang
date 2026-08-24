@@ -17,6 +17,7 @@ pub(super) struct ReviewTrace {
 pub(super) async fn inspect_review_trace(
     session: &crate::AgentSession,
     workspace: &Path,
+    design_required: bool,
 ) -> Result<ReviewTrace> {
     let arguments_by_call_id = tool_call_arguments_by_id(session.messages());
     let mut locator_seen = false;
@@ -100,6 +101,19 @@ pub(super) async fn inspect_review_trace(
             .or_default()
             .push_str(text.unwrap_or_default());
     }
+    append_trace_gate_violations(locator_seen, design_required, &read_design, &mut violations);
+    Ok(ReviewTrace {
+        read_design,
+        violations,
+    })
+}
+
+fn append_trace_gate_violations(
+    locator_seen: bool,
+    design_required: bool,
+    read_design: &BTreeMap<String, String>,
+    violations: &mut Vec<ReviewExitViolation>,
+) {
     if !locator_seen {
         violations.push(ReviewExitViolation {
             code: "locatorMissing".to_string(),
@@ -108,17 +122,13 @@ pub(super) async fn inspect_review_trace(
             location: None,
         });
     }
-    if read_design.is_empty() {
+    if design_required && read_design.is_empty() {
         violations.push(ReviewExitViolation {
             code: "designReadMissing".to_string(),
             message: "必须成功读取至少一个相关 design 文档".to_string(),
             location: None,
         });
     }
-    Ok(ReviewTrace {
-        read_design,
-        violations,
-    })
 }
 
 fn is_design_read_candidate(path: &str) -> bool {
@@ -214,4 +224,21 @@ async fn validate_design_read_path(workspace: &Path, raw: &str) -> Result<String
         bail!("reviewer design reference is not a file");
     }
     Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn design_read_gate_depends_on_workspace_design_requirement() {
+        let mut without_design = Vec::new();
+        append_trace_gate_violations(true, false, &BTreeMap::new(), &mut without_design);
+        assert!(without_design.is_empty());
+
+        let mut with_design = Vec::new();
+        append_trace_gate_violations(true, true, &BTreeMap::new(), &mut with_design);
+        assert_eq!(with_design.len(), 1);
+        assert_eq!(with_design[0].code, "designReadMissing");
+    }
 }

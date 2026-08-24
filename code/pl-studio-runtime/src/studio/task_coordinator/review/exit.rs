@@ -24,7 +24,7 @@ struct ReviewExitInput {
     verdict: ReviewExitVerdict,
     /// 简洁的整体审查结论。
     summary: String,
-    /// 审查期间实际读取的 design 章节。
+    /// 审查期间实际读取的 design 章节；项目没有 design Markdown 文档时为空。
     design_references: Vec<ReviewDesignReference>,
     /// 所有确定、离散、可执行的未解决 finding；pass 时必须为空。
     findings: Vec<ReviewFinding>,
@@ -152,10 +152,17 @@ impl TaskCoordinator {
                     .file_reviews
                     .as_ref()
                     .context("pending review has no frozen file coverage snapshot")?;
-                let trace =
-                    inspect_review_trace(&context.parent_session, context.workspace.root()).await?;
+                let design_required =
+                    super::prompt::has_design_docs(context.workspace.root())?;
+                let trace = inspect_review_trace(
+                    &context.parent_session,
+                    context.workspace.root(),
+                    design_required,
+                )
+                .await?;
                 let validation = validate_review_exit(
                     input,
+                    design_required,
                     &trace.read_design,
                     &frozen.expected_paths(),
                     trace.violations,
@@ -230,6 +237,7 @@ impl TaskCoordinator {
 
 fn validate_review_exit(
     input: ReviewExitInput,
+    design_required: bool,
     read_design: &BTreeMap<String, String>,
     expected_files: &[String],
     mut violations: Vec<ReviewExitViolation>,
@@ -269,7 +277,7 @@ fn validate_review_exit(
         | ReviewVerdict::Pending
         | ReviewVerdict::Failed => {}
     }
-    if input.design_references.is_empty() {
+    if design_required && input.design_references.is_empty() {
         push_violation(
             &mut violations,
             "designReferenceMissing",
@@ -312,7 +320,7 @@ fn validate_review_exit(
             || finding.body.to_ascii_lowercase().contains("design")
             || finding.title.contains("设计")
             || finding.body.contains("设计");
-        if design_claim && finding.design_references.is_empty() {
+        if design_required && design_claim && finding.design_references.is_empty() {
             push_violation(
                 &mut violations,
                 "findingDesignReferenceMissing",
@@ -626,6 +634,7 @@ mod tests {
                     reviewed: true,
                 },
             ]),
+            true,
             &read_design(),
             &expected,
             Vec::new(),
@@ -642,8 +651,13 @@ mod tests {
 
     #[test]
     fn empty_frozen_file_list_accepts_only_empty_submission() {
-        let accepted =
-            validate_review_exit(pass_input(Vec::new()), &read_design(), &[], Vec::new());
+        let accepted = validate_review_exit(
+            pass_input(Vec::new()),
+            true,
+            &read_design(),
+            &[],
+            Vec::new(),
+        );
         assert!(accepted.file_reviews.is_complete());
         assert!(
             accepted
@@ -659,6 +673,7 @@ mod tests {
                 path: "src/extra.rs".to_string(),
                 reviewed: true,
             }]),
+            true,
             &read_design(),
             &[],
             Vec::new(),
@@ -691,6 +706,7 @@ mod tests {
                     reviewed: true,
                 }],
             },
+            true,
             &read_design(),
             &["src/lib.rs".to_string()],
             vec![ReviewExitViolation {
@@ -717,5 +733,43 @@ mod tests {
         assert!(codes.contains("findingContentMissing"));
         assert!(codes.contains("recommendationMissing"));
         assert!(codes.contains("findingDesignReferenceMissing"));
+    }
+
+    #[test]
+    fn empty_design_references_are_allowed_only_without_design_docs() {
+        let input = || ReviewExitInput {
+            verdict: ReviewExitVerdict::Pass,
+            summary: "已完整审查".to_string(),
+            design_references: Vec::new(),
+            findings: Vec::new(),
+            file_reviews: vec![ReviewFileReviewInput {
+                path: "README.md".to_string(),
+                reviewed: true,
+            }],
+        };
+        let expected = ["README.md".to_string()];
+
+        let without_design =
+            validate_review_exit(input(), false, &BTreeMap::new(), &expected, Vec::new());
+        assert!(without_design.file_reviews.is_complete());
+        assert!(
+            without_design
+                .file_reviews
+                .last_diagnostics
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+
+        let with_design =
+            validate_review_exit(input(), true, &BTreeMap::new(), &expected, Vec::new());
+        let violations = &with_design
+            .file_reviews
+            .last_diagnostics
+            .as_ref()
+            .unwrap()
+            .violations;
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].code, "designReferenceMissing");
     }
 }

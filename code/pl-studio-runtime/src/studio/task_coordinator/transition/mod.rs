@@ -141,6 +141,7 @@ impl TaskCoordinator {
                     .run;
                 let action = input.action;
                 let requested_outcome = input.outcome;
+                let requested_summary = input.summary.clone();
                 let previous_state = current.kind();
                 let input_blockers = input.validation_blockers();
                 if !input_blockers.is_empty() {
@@ -188,7 +189,16 @@ impl TaskCoordinator {
                             available_actions,
                         };
                         let result = transition_result(output)?;
-                        Ok::<_, anyhow::Error>(if ends_turn { result.ending_turn() } else { result })
+                        Ok::<_, anyhow::Error>(if !ends_turn {
+                            result
+                        } else if matches!(action, TransitionAction::Complete) {
+                            result.ending_turn_with_content(
+                                requested_summary
+                                    .context("successful complete transition requires summary")?,
+                            )
+                        } else {
+                            result.ending_turn()
+                        })
                     }
                     Err(error) => {
                         let latest = match coordinator.task_runtime.aggregate(&thread_id).await {

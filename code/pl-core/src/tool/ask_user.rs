@@ -152,7 +152,9 @@ impl Tool for AskUserTool {
                         ToolRuntimeEvent::InteractionRequested {
                             interaction: Box::new(interaction),
                         },
-                        ToolRuntimeEvent::EndTurn,
+                        ToolRuntimeEvent::EndTurn {
+                            final_content: None,
+                        },
                     ],
                 ),
             };
@@ -421,7 +423,9 @@ mod tests {
         assert_eq!(interaction.kind(), pl_protocol::InteractionKind::UserInput);
         assert_eq!(
             output.runtime_events[1],
-            crate::tool::ToolRuntimeEvent::EndTurn
+            crate::tool::ToolRuntimeEvent::EndTurn {
+                final_content: None,
+            }
         );
     }
 

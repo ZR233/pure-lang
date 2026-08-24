@@ -84,12 +84,15 @@ impl StudioRuntime {
             .create_thread(&request.project_id, &request.title, request.mode)
             .await?;
         let submission = self
-            .submit_prompt_with_lifecycle_lock(StudioSubmitPromptRequest {
-                thread_id: thread.id.clone(),
-                prompt: request.prompt,
-                attachment_ids: request.attachment_ids,
-                options: request.options,
-            })
+            .submit_prompt_for_owned_thread_with_lifecycle_lock(
+                StudioSubmitPromptRequest {
+                    thread_id: thread.id.clone(),
+                    prompt: request.prompt,
+                    attachment_ids: request.attachment_ids,
+                    options: request.options,
+                },
+                thread.clone(),
+            )
             .await;
         let submission = match submission {
             Ok(submission) => submission,

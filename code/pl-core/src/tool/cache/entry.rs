@@ -37,7 +37,7 @@ pub(super) fn cache_entry(
             | ToolRuntimeEvent::ExecutionFailed
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn => None,
+            | ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .unwrap_or_else(|| {
             crate::working_set::canonical_content_hash(output.description.as_bytes())
@@ -87,7 +87,7 @@ pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKi
             | ToolRuntimeEvent::ExecutionFailed
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn => None,
+            | ToolRuntimeEvent::EndTurn { .. } => None,
         })
         .unwrap_or((0, entry.result_hash.clone()));
     output

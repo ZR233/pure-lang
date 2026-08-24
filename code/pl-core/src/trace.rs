@@ -181,7 +181,7 @@ impl TraceRecorder {
     }
 
     pub fn ensure_assistant_text_item(&mut self, turn_id: &str, content: &str) {
-        if content.trim().is_empty() || self.has_assistant_text_content(turn_id) {
+        if content.trim().is_empty() || self.has_assistant_text_content(turn_id, content) {
             return;
         }
         let timestamp = unix_seconds();
@@ -448,7 +448,7 @@ impl TraceRecorder {
         self.broadcast(AgentEvent::TracePartStarted { item });
     }
 
-    fn has_assistant_text_content(&self, turn_id: &str) -> bool {
+    fn has_assistant_text_content(&self, turn_id: &str, content: &str) -> bool {
         self.events.iter().any(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
@@ -458,7 +458,7 @@ impl TraceRecorder {
                         item.state(),
                         TracePartState::Text(text)
                             if text.channel() == TraceTextChannel::Final
-                                && !text.content().trim().is_empty()
+                                && text.content() == content
                     )
             }
             TraceEventKind::TracePartDelta { event } => {
@@ -468,7 +468,7 @@ impl TraceRecorder {
                         TraceDelta::Text {
                             channel: TraceTextChannel::Final,
                             delta,
-                        } if !delta.trim().is_empty()
+                        } if delta == content
                     )
             }
             TraceEventKind::InteractionChanged { .. }

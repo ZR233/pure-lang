@@ -88,9 +88,6 @@ fn prove_single_executor_equivalence(
     if delivery_head != candidate.merge.delivery_head {
         bail!("MergeRecord 的交付提交不是获准 completion 提交")
     }
-    if candidate.merge.resulting_head != candidate.merge.delivery_head {
-        bail!("合并结果声明与获准交付声明不同")
-    }
 
     let delivery_review = reviews
         .iter()
@@ -183,5 +180,199 @@ fn single_executor_candidate<'a>(
 fn required(reason: impl Into<String>) -> StudioIntegratedReviewGate {
     StudioIntegratedReviewGate::Required {
         reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::task_coordinator::{
+        MergeCleanupState, MergeMethod, ReviewPassedOutcome, ReviewRoundCommand, ReviewRoundState,
+        TaskContext, TaskRunState, WorkCompletionCommand, WorkCompletionContent,
+        WorkCompletionState, WorkUnitCommand, WorkUnitContext, WorkUnitState,
+    };
+
+    #[test]
+    fn single_executor_review_reuse_allows_distinct_resulting_head() {
+        let run = TaskRun {
+            context: TaskContext {
+                id: "task-1".to_string(),
+                project_id: "project-1".to_string(),
+                root_thread_id: "thread-root".to_string(),
+                request: "request".to_string(),
+                plan: None,
+                workspace_root: "workspace".to_string(),
+            },
+            state: TaskRunState::new(),
+            revision: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let work_unit = completed_work_unit();
+        let completion = approved_completion();
+        let merge = MergeRecord {
+            id: "merge-1".to_string(),
+            task_run_id: "task-1".to_string(),
+            work_unit_id: "work-1".to_string(),
+            completion_id: "completion-1".to_string(),
+            completion_revision: 1,
+            executor_agent_id: "executor-1".to_string(),
+            expected_previous_head: "base".to_string(),
+            resulting_head: "cherry-picked-head".to_string(),
+            delivery_head: "delivery-head".to_string(),
+            method: MergeMethod::CherryPick,
+            summary: "merged".to_string(),
+            cleanup: MergeCleanupState::pending(),
+            revision: 0,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let review = passing_delivery_review();
+
+        assert_eq!(
+            integrated_review_gate_now(&run, &[work_unit], &[completion], &[merge], &[review],),
+            StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+                work_unit_id: "work-1".to_string(),
+                completion_revision: 1,
+                merge_record_id: "merge-1".to_string(),
+            }
+        );
+    }
+
+    fn completed_work_unit() -> WorkUnit {
+        let state = next_work_unit(WorkUnitState::pending(), WorkUnitCommand::Activate);
+        let state = next_work_unit(
+            state,
+            WorkUnitCommand::SubmitCompletion {
+                completion_id: "completion-1".to_string(),
+                completion_revision: 1,
+                verification_summary: "verified".to_string(),
+            },
+        );
+        let state = next_work_unit(
+            state,
+            WorkUnitCommand::BeginReview {
+                review_round_id: "review-1".to_string(),
+            },
+        );
+        let state = next_work_unit(
+            state,
+            WorkUnitCommand::PassReview {
+                review_round_id: "review-1".to_string(),
+                outcome: ReviewPassedOutcome::Delivery,
+            },
+        );
+        let state = next_work_unit(
+            state,
+            WorkUnitCommand::CompleteMerge {
+                merge_record_id: "merge-1".to_string(),
+            },
+        );
+        WorkUnit {
+            context: WorkUnitContext {
+                id: "work-1".to_string(),
+                task_run_id: "task-1".to_string(),
+                title: "work".to_string(),
+                scope_hints: Vec::new(),
+                base_commit: "base".to_string(),
+                worktree_path: "worktree".to_string(),
+                branch: "branch".to_string(),
+                attempt: 1,
+                supersedes_work_unit_id: None,
+                executor_thread_id: Some("executor-1".to_string()),
+                requested_by_call_id: "spawn-call".to_string(),
+            },
+            state,
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn next_work_unit(state: WorkUnitState, command: WorkUnitCommand) -> WorkUnitState {
+        state.decide("work-1", command).unwrap().next_state()
+    }
+
+    fn approved_completion() -> WorkCompletionRecord {
+        let state = WorkCompletionState::ready_for_review()
+            .decide(
+                "completion-1",
+                WorkCompletionCommand::Approve {
+                    review_round_id: "review-1".to_string(),
+                    decided_at: 1,
+                },
+            )
+            .unwrap()
+            .next_state();
+        WorkCompletionRecord {
+            id: "completion-1".to_string(),
+            task_run_id: "task-1".to_string(),
+            work_unit_id: "work-1".to_string(),
+            executor_agent_id: "executor-1".to_string(),
+            revision: 1,
+            content: WorkCompletionContent::delivery(
+                "delivery-head".to_string(),
+                vec!["README.md".to_string()],
+            )
+            .unwrap(),
+            state,
+            state_revision: 1,
+            base_commit: "base".to_string(),
+            verification_summary: "verified".to_string(),
+            worktree_path: "worktree".to_string(),
+            branch: "branch".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn passing_delivery_review() -> ReviewRoundRecord {
+        let reviewer_thread_id = "reviewer-1".to_string();
+        let state = ReviewRoundState::pending_dispatch()
+            .decide(
+                "review-1",
+                ReviewRoundCommand::Dispatch {
+                    reviewer_thread_id: reviewer_thread_id.clone(),
+                },
+            )
+            .unwrap()
+            .next_state();
+        let state = state
+            .decide(
+                "review-1",
+                ReviewRoundCommand::Start {
+                    reviewer_thread_id: reviewer_thread_id.clone(),
+                },
+            )
+            .unwrap()
+            .next_state();
+        let state = state
+            .decide(
+                "review-1",
+                ReviewRoundCommand::Pass {
+                    reviewer_thread_id,
+                    summary: "pass".to_string(),
+                },
+            )
+            .unwrap()
+            .next_state();
+        ReviewRoundRecord {
+            id: "review-1".to_string(),
+            task_run_id: "task-1".to_string(),
+            round: 1,
+            scope: ReviewScope::Delivery,
+            work_unit_id: Some("work-1".to_string()),
+            completion_id: Some("completion-1".to_string()),
+            completion_revision: Some(1),
+            reviewed_head: "delivery-head".to_string(),
+            requested_by_call_id: "review-call".to_string(),
+            state,
+            design_references: Vec::new(),
+            findings: Vec::new(),
+            file_reviews: None,
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+        }
     }
 }

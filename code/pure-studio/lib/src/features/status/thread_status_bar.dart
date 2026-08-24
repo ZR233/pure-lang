@@ -152,6 +152,7 @@ class ThreadStatusBar extends ConsumerWidget {
                       _TaskRuntimeReadout(
                         task: task,
                         rootThreadId: thread.rootThreadId,
+                        paused: _taskExecutionIsPaused(task, thread),
                       ),
                     ContextUsageReadout(runtime: runtime),
                     if (showLspActivity && lspActiveServers.isNotEmpty)
@@ -303,10 +304,15 @@ class _LspActivityDetail extends StatelessWidget {
 }
 
 class _TaskRuntimeReadout extends StatelessWidget {
-  const _TaskRuntimeReadout({required this.task, required this.rootThreadId});
+  const _TaskRuntimeReadout({
+    required this.task,
+    required this.rootThreadId,
+    required this.paused,
+  });
 
   final TaskRuntimeView task;
   final String rootThreadId;
+  final bool paused;
 
   @override
   Widget build(BuildContext context) {
@@ -316,41 +322,81 @@ class _TaskRuntimeReadout extends StatelessWidget {
         outcome,
       _ => null,
     };
+    final paused = this.paused && failedOutcome == null && issue == null;
     final status =
-        failedOutcome?.summary ?? issue?.message ?? task.stateSummary;
+        failedOutcome?.summary ??
+        issue?.message ??
+        (paused ? context.l10n.statusTaskPausedHint : task.stateSummary);
     final fatal =
         failedOutcome?.kind == TaskFailureKindView.fatal ||
         (issue?.isFatal ?? false);
+    final taskLabel = paused
+        ? context.l10n.statusTaskPaused
+        : context.taskPhaseLabel(task.state.kind);
     final tooltip = status.isEmpty
         ? '${context.taskPhaseLabel(task.state.kind)} · ${task.runId}'
-        : '${fatal ? context.l10n.statusTaskFailed : context.taskPhaseLabel(task.state.kind)} · $status';
+        : '${fatal ? context.l10n.statusTaskFailed : taskLabel} · $status';
+    final readout = _StatusReadout(
+      key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
+      icon: fatal
+          ? Icons.error_outline
+          : issue != null
+          ? Icons.warning_amber_outlined
+          : paused
+          ? Icons.pause_circle_outline
+          : Icons.route_outlined,
+      label: fatal
+          ? context.l10n.statusTaskFailed
+          : issue != null
+          ? context.l10n.statusTaskRecoverable
+          : taskLabel,
+      tooltip: tooltip,
+      maxWidth: 120,
+      interactive: true,
+      detailWidth: 560,
+      detailBuilder: (context) => TaskRuntimeDetail(
+        task: task,
+        rootThreadId: rootThreadId,
+        paused: paused,
+      ),
+    );
     return KeyedSubtree(
       key: StudioDriverKeys.taskRuntime(task.runId),
       child: Semantics(
         key: StudioDriverKeys.taskStatus(task.runId, status),
         label: tooltip,
-        child: _StatusReadout(
-          key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
-          icon: fatal
-              ? Icons.error_outline
-              : issue == null
-              ? Icons.route_outlined
-              : Icons.warning_amber_outlined,
-          label: fatal
-              ? context.l10n.statusTaskFailed
-              : issue == null
-              ? context.taskPhaseLabel(task.state.kind)
-              : context.l10n.statusTaskRecoverable,
-          tooltip: tooltip,
-          maxWidth: 120,
-          interactive: true,
-          detailWidth: 560,
-          detailBuilder: (context) =>
-              TaskRuntimeDetail(task: task, rootThreadId: rootThreadId),
-        ),
+        child: paused
+            ? KeyedSubtree(
+                key: StudioDriverKeys.taskPaused(task.runId),
+                child: readout,
+              )
+            : readout,
       ),
     );
   }
+}
+
+bool _taskExecutionIsPaused(TaskRuntimeView task, StudioThread thread) {
+  if (!thread.isRoot ||
+      thread.status != ThreadStatusView.idle ||
+      !task.isActive ||
+      task.state.kind == TaskStateKind.pendingConfirmation) {
+    return false;
+  }
+  final activeWorkUnit = task.workUnits.any(
+    (unit) => const {
+      TaskWorkUnitStateKind.pending,
+      TaskWorkUnitStateKind.running,
+    }.contains(unit.state.kind),
+  );
+  final activeReview = task.reviews.any(
+    (review) => const {
+      TaskReviewStateKind.pendingDispatch,
+      TaskReviewStateKind.dispatched,
+      TaskReviewStateKind.running,
+    }.contains(review.state.kind),
+  );
+  return !activeWorkUnit && !activeReview;
 }
 
 String _runtimeCapabilityLabel(

@@ -678,7 +678,10 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final state = _stateWithPlannerModels();
-    final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
+    final thread = state.selectedThread!.copyWith(
+      mode: StudioMode.task,
+      status: ThreadStatusView.running,
+    );
     final api = _FakeStudioApi(
       state.copyWith(
         threadDirectory: ThreadDirectoryWindow(threads: [thread]),
@@ -768,6 +771,85 @@ void registerShellSettingsTests() {
     expect(api.modeUpdate, isNull);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'idle active task is presented as paused without changing phase',
+    (tester) async {
+      tester.view.physicalSize = const Size(760, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _stateWithPlannerModels();
+      final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
+      final api = _FakeStudioApi(
+        state.copyWith(
+          threadDirectory: ThreadDirectoryWindow(threads: [thread]),
+          workspacesByThread: {
+            thread.id: state.selectedWorkspace!.copyWith(
+              thread: thread,
+              runtime: const ThreadRuntimeView(
+                model: 'planner/local',
+                contextTokens: 1200,
+                contextWindow: 100000,
+                totalTokens: 1800,
+                costLabel: '',
+                activeSkills: [],
+                activeMcpServers: [],
+                activeLspServers: [],
+                agentCount: 1,
+              ),
+            ),
+          },
+          taskDirectory: TaskDirectoryState(
+            values: [
+              TaskDirectoryEntryView(
+                rootThreadId: 'session-1',
+                task: TaskRuntimeView(
+                  runId: 'task-run-1',
+                  state: const WorkingTaskStateView(
+                    documentEditSummary: 'test documents updated',
+                  ),
+                  revision: 0,
+                  generation: 0,
+                  workUnits: [],
+                  completions: [],
+                  merges: [],
+                  reviews: [],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byType(ThreadStatusBar),
+          matching: find.text('Paused'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.taskPaused('task-run-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.working),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('running thread locks the session mode selector', (tester) async {
     tester.view.physicalSize = const Size(760, 720);

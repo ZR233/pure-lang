@@ -11,11 +11,13 @@ class TaskRuntimeDetail extends StatelessWidget {
   const TaskRuntimeDetail({
     required this.task,
     required this.rootThreadId,
+    required this.paused,
     super.key,
   });
 
   final TaskRuntimeView task;
   final String rootThreadId;
+  final bool paused;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,12 @@ class TaskRuntimeDetail extends StatelessWidget {
                   ),
                   valueMaxLines: 2,
                 ),
+                if (paused)
+                  StatusDetailRow(
+                    label: context.l10n.statusTaskPaused,
+                    value: context.l10n.statusTaskPausedHint,
+                    valueMaxLines: 2,
+                  ),
                 StatusDetailRow(label: 'Task ID', value: task.runId),
                 StatusDetailRow(
                   label: 'Generation',

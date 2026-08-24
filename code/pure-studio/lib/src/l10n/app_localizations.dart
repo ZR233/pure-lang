@@ -968,6 +968,12 @@ abstract class AppLocalizations {
   /// **'Can continue'**
   String get statusTaskRecoverable;
 
+  /// No description provided for @statusTaskPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get statusTaskPaused;
+
   /// No description provided for @statusTaskFailures.
   ///
   /// In en, this message translates to:
@@ -985,6 +991,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This task can continue after the cause is corrected.'**
   String get statusTaskRecoverableHint;
+
+  /// No description provided for @statusTaskPausedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'No model turn is active. Send a message to continue this task.'**
+  String get statusTaskPausedHint;
 
   /// No description provided for @statusTaskExecution.
   ///

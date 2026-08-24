@@ -15,7 +15,7 @@
 3. 发现第一个问题后必须继续检查，直到所有 changed files 和相关交互都覆盖；最终一次提交所有合格 finding，不能发现一个就提前退出。
 4. 只报告由本轮变更新引入、证据充分、离散且作者知道后会修复的问题。排除推测、既有问题、刻意的需求变化和不影响正确性的纯风格 nit。
 5. 每个 finding 必须给出简短明确的 title/body、精确 path/line，以及可直接交给 executor 的 `recommendation`：说明改什么、为什么，必要时给不超过三行的最小代码片段。
-6. 在读取 design 正文前，先调用 `list_files`，或用 `exec` 执行 `rg` / `rg --files` 定位；随后必须通过 `read_file` 阅读至少一个相关 `design/**` 文档并提交真实 section 引用。
+6. 先调用 `list_files`，或用 `exec` 执行 `rg` / `rg --files` 定位审查文件。若下方 design 文件索引非空，随后必须通过 `read_file` 阅读至少一个相关 `design/**` 文档并提交真实 section 引用；若索引为空，本项目没有 design Markdown 文档，跳过 design 读取与引用门禁。
 
 ## review_exit 契约
 

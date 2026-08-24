@@ -301,6 +301,7 @@ pub(super) async fn execute_tool_call_batch(
         approval_request.id = trace_part_id.clone();
         let requested_access = requested_workspace_access(tool_call, context.workspace.root());
         let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
+        let mut awaited_approval = false;
         let decision =
             match decide_tool_permission(context.options, &approval_request, requested_access) {
                 PermissionDecision::Approved { workspace_access } => {
@@ -308,6 +309,7 @@ pub(super) async fn execute_tool_call_batch(
                     ToolApprovalDecision::Approved
                 }
                 PermissionDecision::NeedsUserApproval { workspace_access } => {
+                    awaited_approval = true;
                     emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("工具 `{name}` 正在等待授权。"));
@@ -323,6 +325,7 @@ pub(super) async fn execute_tool_call_batch(
                     decision
                 }
                 PermissionDecision::NeedsAiReview { workspace_access } => {
+                    awaited_approval = true;
                     emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("正在审查工具 `{name}`。"));
@@ -361,7 +364,9 @@ pub(super) async fn execute_tool_call_batch(
             ToolApprovalDecision::Approved => {
                 let mut tool_context = tool_context;
                 tool_context.workspace_access = execution_workspace_access;
-                emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
+                if awaited_approval {
+                    emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
+                }
                 emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Running);
                 progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
                 let invocation =

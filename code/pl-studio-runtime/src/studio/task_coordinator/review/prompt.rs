@@ -151,11 +151,15 @@ pub(crate) async fn build_review_prompt(
             ),
             (
                 "DESIGN_INDEX",
-                design_index
-                    .iter()
-                    .map(|path| format!("- {path}"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
+                if design_index.is_empty() {
+                    "- （无 `design/**` Markdown 文档；跳过 design 读取与引用门禁）".to_string()
+                } else {
+                    design_index
+                        .iter()
+                        .map(|path| format!("- {path}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                },
             ),
         ],
     )
@@ -241,6 +245,10 @@ fn design_index(workspace: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
+pub(super) fn has_design_docs(workspace: &Path) -> Result<bool> {
+    Ok(!design_index(workspace)?.is_empty())
+}
+
 fn relative_path(workspace: &Path, path: PathBuf) -> Result<String> {
     Ok(path
         .strip_prefix(workspace)
@@ -310,5 +318,16 @@ mod tests {
         assert!(rendered.contains("diff"));
         assert!(!rendered.contains("{{"));
         assert!(!rendered.contains("}}"));
+    }
+
+    #[test]
+    fn design_requirement_tracks_markdown_index() {
+        let workspace = tempfile::tempdir().unwrap();
+        assert!(!has_design_docs(workspace.path()).unwrap());
+
+        std::fs::create_dir_all(workspace.path().join("design/nested")).unwrap();
+        std::fs::write(workspace.path().join("design/nested/guide.md"), "# Guide\n").unwrap();
+
+        assert!(has_design_docs(workspace.path()).unwrap());
     }
 }

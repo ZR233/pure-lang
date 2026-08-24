@@ -98,6 +98,29 @@ void main() {
     );
   });
 
+  test('completed task rejects a missing final summary Timeline row', () {
+    final snapshot = _completedSnapshot();
+    final workspace = snapshot['workspace'] as Map<String, dynamic>;
+    final timeline = workspace['timelineProgress'] as Map<String, dynamic>;
+    final rows = timeline['rows'] as List<dynamic>;
+    rows.clear();
+
+    expect(
+      () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('completed no-delivery task uses the canonical completed state', () {
+    expect(
+      () => validateTaskCompletion(
+        _noDeliveryCompletedSnapshot(),
+        worktreeExists: (_) => false,
+      ),
+      returnsNormally,
+    );
+  });
+
   test('completed task accepts a matching integrated review gate', () {
     final snapshot = _completedSnapshot();
     final task = snapshot['task'] as Map<String, dynamic>;
@@ -106,14 +129,13 @@ void main() {
       'reviewRoundId': 'review-1',
       'reviewedHead': 'head-2',
     };
-    task['reviews'] = [
-      {
-        'id': 'review-1',
-        'scope': 'integrated',
-        'verdict': 'pass',
-        'reviewedHead': 'head-2',
-      },
-    ];
+    final reviews = task['reviews'] as List<dynamic>;
+    reviews.add({
+      'id': 'review-1',
+      'scope': 'integrated',
+      'verdict': 'passed',
+      'reviewedHead': 'head-2',
+    });
 
     expect(
       () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
@@ -124,14 +146,13 @@ void main() {
   test('single-executor exemption rejects an unexpected integrated review', () {
     final snapshot = _completedSnapshot();
     final task = snapshot['task'] as Map<String, dynamic>;
-    task['reviews'] = [
-      {
-        'id': 'review-1',
-        'scope': 'integrated',
-        'verdict': 'pass',
-        'reviewedHead': 'head-2',
-      },
-    ];
+    final reviews = task['reviews'] as List<dynamic>;
+    reviews.add({
+      'id': 'review-1',
+      'scope': 'integrated',
+      'verdict': 'passed',
+      'reviewedHead': 'head-2',
+    });
 
     expect(
       () => validateTaskCompletion(snapshot, worktreeExists: (_) => false),
@@ -252,7 +273,15 @@ Map<String, dynamic> _snapshot({required String activity}) => {
 };
 
 Map<String, dynamic> _completedSnapshot() => {
-  'workspace': {'isBusy': false, 'activeInteraction': null},
+  'workspace': {
+    'isBusy': false,
+    'activeInteraction': null,
+    'timelineProgress': {
+      'rows': [
+        {'type': 'finalAnswer', 'text': 'Completed the fixture Task.'},
+      ],
+    },
+  },
   'task': {
     'runId': 'task-run-1',
     'phase': 'completed',
@@ -266,12 +295,19 @@ Map<String, dynamic> _completedSnapshot() => {
     'workUnits': [
       {
         'id': 'work-unit-1',
-        'status': 'merged',
+        'status': 'completed',
         'worktreePath': r'C:\work\.pure\worktrees\run\agent',
       },
     ],
     'completions': [
-      {'id': 'completion-1', 'workUnitId': 'work-unit-1', 'revision': 1},
+      {
+        'id': 'completion-1',
+        'workUnitId': 'work-unit-1',
+        'revision': 1,
+        'kind': 'delivery',
+        'status': 'approved',
+        'headCommit': 'head-1',
+      },
     ],
     'merges': [
       {
@@ -279,10 +315,66 @@ Map<String, dynamic> _completedSnapshot() => {
         'workUnitId': 'work-unit-1',
         'completionId': 'completion-1',
         'completionRevision': 1,
+        'deliveryHead': 'head-1',
         'cleanupStatus': 'discarded',
       },
     ],
-    'reviews': <dynamic>[],
+    'reviews': [
+      {
+        'id': 'review-delivery-1',
+        'scope': 'delivery',
+        'workUnitId': 'work-unit-1',
+        'completionId': 'completion-1',
+        'completionRevision': 1,
+        'reviewedHead': 'head-1',
+        'verdict': 'passed',
+      },
+    ],
+  },
+};
+
+Map<String, dynamic> _noDeliveryCompletedSnapshot() => {
+  'workspace': {
+    'isBusy': false,
+    'activeInteraction': null,
+    'timelineProgress': {
+      'rows': [
+        {'type': 'finalAnswer', 'text': 'No delivery was required.'},
+      ],
+    },
+  },
+  'task': {
+    'runId': 'task-run-1',
+    'phase': 'completed',
+    'outcome': {'kind': 'succeeded', 'summary': 'No delivery was required.'},
+    'integratedReviewGate': {'status': 'notRequiredNoDelivery'},
+    'workUnits': [
+      {
+        'id': 'work-unit-1',
+        'status': 'completed',
+        'worktreePath': r'C:\work\.pure\worktrees\run\agent',
+      },
+    ],
+    'completions': [
+      {
+        'id': 'completion-1',
+        'workUnitId': 'work-unit-1',
+        'revision': 1,
+        'kind': 'noDelivery',
+        'status': 'approved',
+      },
+    ],
+    'merges': <dynamic>[],
+    'reviews': [
+      {
+        'id': 'review-delivery-1',
+        'scope': 'delivery',
+        'workUnitId': 'work-unit-1',
+        'completionId': 'completion-1',
+        'completionRevision': 1,
+        'verdict': 'passed',
+      },
+    ],
   },
 };
 

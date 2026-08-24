@@ -309,7 +309,7 @@ mod tests {
         }
 
         assert_eq!(session.items().len(), 200);
-        assert!(session.items().chunks_exact(2).all(|pair| {
+        assert!(session.items().as_chunks::<2>().0.iter().all(|pair| {
             pair[0]
                 .as_message()
                 .is_some_and(|message| message.role == MessageRole::Assistant)

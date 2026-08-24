@@ -133,6 +133,24 @@ impl InteractionService {
             .await
     }
 
+    /// 项目移除在 agent tree 退役后直接持久化剩余 pending Interaction。
+    ///
+    /// 被移除项目中的已关闭 Thread 可能不再驻留于产品目录，因而不能依赖
+    /// ThreadActor emitter；项目随后整体离开目录，不需要再发布逐 Thread 热事件。
+    pub(in crate::studio) async fn cancel_thread_for_project_cleanup(
+        &self,
+        thread_id: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let store = self.store.clone();
+        let emitter = Arc::new(move |interaction: InteractionRequest| {
+            let store = store.clone();
+            async move { store.upsert_interaction(&interaction).await }.boxed()
+        });
+        self.cancel_pending_interactions(thread_id, reason, emitter, InteractionCancelScope::All)
+            .await
+    }
+
     pub async fn cancel_recovered_tool_approvals(
         &self,
         thread_id: &str,

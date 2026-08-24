@@ -487,6 +487,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskRecoverable => '可继续';
 
   @override
+  String get statusTaskPaused => '已暂停';
+
+  @override
   String get statusTaskFailures => '任务错误';
 
   @override
@@ -494,6 +497,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
+
+  @override
+  String get statusTaskPausedHint => '当前没有模型执行；发送消息可继续此任务。';
 
   @override
   String get statusTaskExecution => '执行状态';
@@ -2106,6 +2112,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskRecoverable => '可继续';
 
   @override
+  String get statusTaskPaused => '已暂停';
+
+  @override
   String get statusTaskFailures => '任务错误';
 
   @override
@@ -2113,6 +2122,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
+
+  @override
+  String get statusTaskPausedHint => '当前没有模型执行；发送消息可继续此任务。';
 
   @override
   String get statusTaskExecution => '执行状态';

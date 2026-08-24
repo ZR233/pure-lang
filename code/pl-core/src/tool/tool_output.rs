@@ -55,6 +55,7 @@ pub struct ToolExecutionResult<Artifact = serde_json::Value> {
     pub output: String,
     pub model_output: String,
     pub ends_turn: bool,
+    pub end_turn_content: Option<String>,
     pub output_artifacts: Vec<Artifact>,
     /// 声明的模型可见输出硬字节上限；`Some` 时要求 dispatch 越过默认 12KB 安全阈值。
     pub output_bytes_budget: Option<usize>,
@@ -81,6 +82,14 @@ impl<Artifact> ToolExecutionResult<Artifact> {
     /// 标记成功或失败结果写入 history 后立即结束当前 turn。
     pub fn ending_turn(mut self) -> Self {
         self.ends_turn = true;
+        self
+    }
+
+    /// 结束当前 turn，并把业务层提供的 canonical 摘要投影为最终 assistant 回复。
+    pub fn ending_turn_with_content(mut self, content: impl Into<String>) -> Self {
+        self.ends_turn = true;
+        let content = model_visible_tool_output(&content.into());
+        self.end_turn_content = (!content.trim().is_empty()).then_some(content);
         self
     }
 
@@ -125,6 +134,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             output,
             model_output,
             ends_turn,
+            end_turn_content: None,
             output_artifacts,
             output_bytes_budget: Some(max_output_bytes),
         }
@@ -163,6 +173,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             output,
             model_output: enforce_model_output_limit(&model_output, MAX_MODEL_TOOL_OUTPUT_BYTES),
             ends_turn,
+            end_turn_content: None,
             output_artifacts,
             output_bytes_budget: None,
         }
@@ -201,7 +212,9 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             runtime_events.push(ToolRuntimeEvent::OutputBudget { max_bytes });
         }
         if self.ends_turn {
-            runtime_events.push(ToolRuntimeEvent::EndTurn);
+            runtime_events.push(ToolRuntimeEvent::EndTurn {
+                final_content: self.end_turn_content,
+            });
         }
         ToolOutput {
             description: self.model_output,
@@ -235,7 +248,9 @@ impl ToolOutput {
             exit_code: if request.success { Some(0) } else { Some(1) },
             timed_out: false,
             runtime_events: if request.ends_turn {
-                vec![ToolRuntimeEvent::EndTurn]
+                vec![ToolRuntimeEvent::EndTurn {
+                    final_content: None,
+                }]
             } else {
                 Vec::new()
             },
@@ -273,7 +288,7 @@ impl ToolOutput {
                 ToolRuntimeEvent::CacheHit { .. } => None,
                 ToolRuntimeEvent::OutputMetrics { .. } => None,
                 ToolRuntimeEvent::OutputBudget { .. } => None,
-                ToolRuntimeEvent::EndTurn => None,
+                ToolRuntimeEvent::EndTurn { .. } => None,
             })
             .flatten()
             .filter_map(|value| serde_json::from_value(value.clone()).ok())
@@ -286,7 +301,7 @@ impl ToolOutput {
     /// 直接匹配 `ToolRuntimeEvent::EndTurn`。
     pub fn ends_turn(&self) -> bool {
         self.runtime_events.iter().any(|event| match event {
-            ToolRuntimeEvent::EndTurn => true,
+            ToolRuntimeEvent::EndTurn { .. } => true,
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
@@ -303,6 +318,27 @@ impl ToolOutput {
         })
     }
 
+    /// 返回结束工具声明的 canonical 最终 assistant 回复。
+    pub fn end_turn_content(&self) -> Option<&str> {
+        self.runtime_events.iter().find_map(|event| match event {
+            ToolRuntimeEvent::EndTurn {
+                final_content: Some(content),
+            } => Some(content.as_str()),
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputMetrics { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
+            | ToolRuntimeEvent::EndTurn {
+                final_content: None,
+            } => None,
+        })
+    }
+
     /// 将 canonical 工具输出投影回产品层常用的执行结果形态。
     ///
     /// 该方法统一 `ToolOutput` 的成功判定、模型可见输出、结束回合语义和 artifact
@@ -311,12 +347,14 @@ impl ToolOutput {
     where
         T: DeserializeOwned,
     {
-        ToolExecutionResult::with_model_output(
+        let mut result = ToolExecutionResult::with_model_output(
             self.exit_code.unwrap_or(0) == 0,
             self.description.clone(),
             self.description.clone(),
             self.ends_turn(),
             self.output_artifacts_as(),
-        )
+        );
+        result.end_turn_content = self.end_turn_content().map(str::to_string);
+        result
     }
 }
