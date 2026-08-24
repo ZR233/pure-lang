@@ -11,7 +11,7 @@ mod completion;
 pub(super) mod enabled_tools;
 mod inference;
 mod orchestration;
-mod plan_exit;
+mod plan;
 mod prompt_cache;
 mod tool_results;
 mod turn_setup;
@@ -22,7 +22,7 @@ use client_tool_search::{
 };
 use compaction::CompactionStep;
 use enabled_tools::record_enabled_tools;
-use plan_exit::record_plan_exit_items;
+use plan::record_plan_items;
 
 use crate::context_assembler::{ContextAssembler, TurnContextSnapshot};
 use crate::context_compaction::ensure_provider_can_consume_session;
@@ -602,7 +602,7 @@ pub(super) async fn run_turn_with_trace(
         billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
         progress.tool_detail(recorder, "工具执行完成，准备回写结果。");
-        record_plan_exit_items(recorder, &turn_id, &tool_results);
+        record_plan_items(recorder, &turn_id, &tool_results);
         let requested_interaction = tool_results.iter().any(|tool_result| {
             tool_result.runtime_events.iter().any(|event| {
                 matches!(
@@ -627,6 +627,7 @@ pub(super) async fn run_turn_with_trace(
                     } => Some(content.clone()),
                     crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
                     | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+                    | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
                     | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
                     | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
                     | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }

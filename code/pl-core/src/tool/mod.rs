@@ -106,6 +106,7 @@ mod tests {
                 model_output: "model output".to_string(),
                 ends_turn: true,
                 end_turn_content: Some("final answer".to_string()),
+                completed_plan_content: None,
                 output_artifacts: vec![ArtifactRecord {
                     id: "artifact-1".to_string(),
                 }],

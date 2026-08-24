@@ -31,6 +31,7 @@ pub(super) fn cache_entry(
             ToolRuntimeEvent::OutputMetrics { result_hash, .. } => Some(result_hash.clone()),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
@@ -81,6 +82,7 @@ pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKi
             } => Some((*artifact_bytes, result_hash.clone())),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }

@@ -91,6 +91,7 @@ pub(super) fn finalize_tool_item(
                         activation: activation.clone(),
                     });
                 }
+                ToolRuntimeEvent::PlanCompleted { .. } => {}
                 ToolRuntimeEvent::ToolResultRevision { .. } => {}
                 ToolRuntimeEvent::OutputArtifacts { .. } => {}
                 ToolRuntimeEvent::AuditMetadata { .. } => {}
@@ -220,6 +221,7 @@ fn tool_execution_record_from_envelope(
             } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
@@ -269,6 +271,7 @@ fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Valu
             ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
             | ToolRuntimeEvent::CacheHit { .. }
@@ -289,6 +292,7 @@ fn audit_metadata(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Value>
             ToolRuntimeEvent::AuditMetadata { metadata } => Some(metadata.clone()),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::ExecutionFailed
@@ -319,6 +323,7 @@ fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::Trace
         }),
         ToolRuntimeEvent::InteractionRequested { .. }
         | ToolRuntimeEvent::SkillActivated { .. }
+        | ToolRuntimeEvent::PlanCompleted { .. }
         | ToolRuntimeEvent::ToolResultRevision { .. }
         | ToolRuntimeEvent::OutputArtifacts { .. }
         | ToolRuntimeEvent::AuditMetadata { .. }

@@ -188,17 +188,12 @@ impl TaskCoordinator {
                             external_effects,
                             available_actions,
                         };
-                        let result = transition_result(output)?;
-                        Ok::<_, anyhow::Error>(if !ends_turn {
-                            result
-                        } else if matches!(action, TransitionAction::Complete) {
-                            result.ending_turn_with_content(
-                                requested_summary
-                                    .context("successful complete transition requires summary")?,
-                            )
-                        } else {
-                            result.ending_turn()
-                        })
+                        finalize_transition_result(
+                            transition_result(output)?,
+                            action,
+                            ends_turn,
+                            requested_summary,
+                        )
                     }
                     Err(error) => {
                         let latest = match coordinator.task_runtime.aggregate(&thread_id).await {
@@ -891,6 +886,31 @@ fn transition_result(output: TaskTransitionOutput) -> Result<ToolExecutionResult
     ToolExecutionResult::<serde_json::Value>::json(output).map_err(anyhow::Error::from)
 }
 
+fn finalize_transition_result(
+    result: ToolExecutionResult,
+    action: TransitionAction,
+    ends_turn: bool,
+    summary: Option<String>,
+) -> Result<ToolExecutionResult> {
+    if !ends_turn {
+        return Ok(result);
+    }
+    match action {
+        TransitionAction::SubmitPlan => Ok(result
+            .with_completed_plan(
+                summary.context("successful submitPlan transition requires summary")?,
+            )
+            .ending_turn()),
+        TransitionAction::Complete => Ok(result.ending_turn_with_content(
+            summary.context("successful complete transition requires summary")?,
+        )),
+        TransitionAction::FinishDocumentEditing
+        | TransitionAction::BeginIntegratedReview
+        | TransitionAction::CancelIntegratedReview
+        | TransitionAction::ResolveIssue => Ok(result.ending_turn()),
+    }
+}
+
 fn required<'a>(value: Option<&'a str>, message: &str) -> Result<&'a str> {
     value
         .map(str::trim)
@@ -1092,5 +1112,24 @@ mod tests {
         assert_eq!(value["revision"], 1);
         assert_eq!(value["generation"], 0);
         assert_eq!(value["compensation"]["status"], "stateVerificationRequired");
+    }
+
+    #[test]
+    fn accepted_submit_plan_emits_completed_plan_and_ends_turn() {
+        let output = finalize_transition_result(
+            ToolExecutionResult::success("{}"),
+            TransitionAction::SubmitPlan,
+            true,
+            Some("# 实施计划\n\n- 修复展示".to_string()),
+        )
+        .expect("submitPlan result should be finalized")
+        .into_tool_output();
+
+        assert!(output.ends_turn());
+        assert!(output.runtime_events.iter().any(|event| matches!(
+            event,
+            pl_core::ToolRuntimeEvent::PlanCompleted { content }
+                if content == "# 实施计划\n\n- 修复展示"
+        )));
     }
 }

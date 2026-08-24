@@ -56,6 +56,7 @@ pub struct ToolExecutionResult<Artifact = serde_json::Value> {
     pub model_output: String,
     pub ends_turn: bool,
     pub end_turn_content: Option<String>,
+    pub(crate) completed_plan_content: Option<String>,
     pub output_artifacts: Vec<Artifact>,
     /// 声明的模型可见输出硬字节上限；`Some` 时要求 dispatch 越过默认 12KB 安全阈值。
     pub output_bytes_budget: Option<usize>,
@@ -90,6 +91,15 @@ impl<Artifact> ToolExecutionResult<Artifact> {
         self.ends_turn = true;
         let content = model_visible_tool_output(&content.into());
         self.end_turn_content = (!content.trim().is_empty()).then_some(content);
+        self
+    }
+
+    /// 声明该工具已生成完整计划，由 turn 循环建立 canonical plan item。
+    pub fn with_completed_plan(mut self, content: impl Into<String>) -> Self {
+        let content = content.into();
+        if !content.trim().is_empty() {
+            self.completed_plan_content = Some(content);
+        }
         self
     }
 
@@ -135,6 +145,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             model_output,
             ends_turn,
             end_turn_content: None,
+            completed_plan_content: None,
             output_artifacts,
             output_bytes_budget: Some(max_output_bytes),
         }
@@ -174,6 +185,7 @@ impl<Artifact> ToolExecutionResult<Artifact> {
             model_output: enforce_model_output_limit(&model_output, MAX_MODEL_TOOL_OUTPUT_BYTES),
             ends_turn,
             end_turn_content: None,
+            completed_plan_content: None,
             output_artifacts,
             output_bytes_budget: None,
         }
@@ -201,6 +213,9 @@ impl<Artifact> ToolExecutionResult<Artifact> {
         let mut runtime_events = Vec::new();
         if !artifacts.is_empty() {
             runtime_events.push(ToolRuntimeEvent::OutputArtifacts { artifacts });
+        }
+        if let Some(content) = self.completed_plan_content {
+            runtime_events.push(ToolRuntimeEvent::PlanCompleted { content });
         }
         runtime_events.push(ToolRuntimeEvent::OutputMetrics {
             raw_bytes,
@@ -280,6 +295,7 @@ impl ToolOutput {
                 ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
                 ToolRuntimeEvent::InteractionRequested { .. }
                 | ToolRuntimeEvent::SkillActivated { .. }
+                | ToolRuntimeEvent::PlanCompleted { .. }
                 | ToolRuntimeEvent::AuditMetadata { .. }
                 | ToolRuntimeEvent::ExecutionFailed => None,
                 ToolRuntimeEvent::ToolResultRevision {
@@ -304,6 +320,7 @@ impl ToolOutput {
             ToolRuntimeEvent::EndTurn { .. } => true,
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
             | ToolRuntimeEvent::ExecutionFailed => false,
             ToolRuntimeEvent::ToolResultRevision {
@@ -326,6 +343,7 @@ impl ToolOutput {
             } => Some(content.as_str()),
             ToolRuntimeEvent::InteractionRequested { .. }
             | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::PlanCompleted { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::AuditMetadata { .. }
@@ -355,6 +373,19 @@ impl ToolOutput {
             self.output_artifacts_as(),
         );
         result.end_turn_content = self.end_turn_content().map(str::to_string);
+        result.completed_plan_content = self.runtime_events.iter().find_map(|event| match event {
+            ToolRuntimeEvent::PlanCompleted { content } => Some(content.clone()),
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::AuditMetadata { .. }
+            | ToolRuntimeEvent::ExecutionFailed
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputMetrics { .. }
+            | ToolRuntimeEvent::OutputBudget { .. }
+            | ToolRuntimeEvent::EndTurn { .. } => None,
+        });
         result
     }
 }

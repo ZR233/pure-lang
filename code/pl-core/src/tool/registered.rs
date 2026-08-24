@@ -111,6 +111,10 @@ pub enum ToolRuntimeEvent {
     SkillActivated {
         activation: SkillActivation,
     },
+    /// 当前工具已生成完整计划，由 turn 循环投影为 canonical plan item。
+    PlanCompleted {
+        content: String,
+    },
     ToolResultRevision {
         revision: u64,
     },

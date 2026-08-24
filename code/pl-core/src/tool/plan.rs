@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
 use super::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
     deserialize_tool_input,
 };
 use crate::turn::ToolEffect;
@@ -71,7 +71,9 @@ impl Tool for PlanExitTool {
                 output_file: PathBuf::new(),
                 exit_code: None,
                 timed_out: false,
-                runtime_events: Vec::new(),
+                runtime_events: vec![ToolRuntimeEvent::PlanCompleted {
+                    content: args.content.trim().to_string(),
+                }],
             })
         }.boxed()
     }
@@ -127,6 +129,12 @@ mod tests {
                 status: "submitted".to_string(),
                 message: "Plan submitted for user confirmation. Return a brief final acknowledgement and stop.".to_string(),
             }
+        );
+        assert_eq!(
+            output.runtime_events,
+            vec![ToolRuntimeEvent::PlanCompleted {
+                content: "# Plan\n\n- Do it".to_string(),
+            }]
         );
     }
 

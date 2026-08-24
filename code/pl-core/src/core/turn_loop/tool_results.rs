@@ -95,6 +95,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             }
             crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
             | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+            | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
             | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
             | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
             | crate::tool::ToolRuntimeEvent::ExecutionFailed
@@ -114,6 +115,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         } => Some((reused_from_call_id, result_hash, *total_bytes)),
         crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
         | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
@@ -131,6 +133,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
         crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
         | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
