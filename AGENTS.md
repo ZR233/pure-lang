@@ -42,16 +42,17 @@
   cargo dart format lib test
   ```
 
-### Windows GUI
+### 桌面 GUI
 
-- Windows GUI 构建和运行必须从仓库根目录通过 xtask：
+- GUI 构建和运行必须从仓库根目录通过 xtask（按当前 OS 选择目标平台：Windows / Linux）：
 
   ```powershell
   cargo xtask run-gui [--demo] [--driver]
   cargo xtask build-gui [--demo] [--no-clean] [--check-generated]
   ```
 
-- 不支持直接执行 `flutter build windows` 或 `flutter run -d windows`，也不新增 PowerShell GUI wrapper。
+- 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
+- Linux 首次构建需要系统依赖：`sudo apt-get install -y libgtk-3-dev`（Flutter Linux runner 必需）；Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `PURE_STUDIO_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
 - GUI smoke 使用 `cargo xtask run-gui --demo`；需要确定性数据和交互验收时使用 `cargo xtask run-gui --demo --driver`。
 - Driver 命令结束后，其 Flutter、DTD 和 GUI 子进程必须随 Windows Job Object 一起退出，不得残留。

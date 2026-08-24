@@ -2,7 +2,7 @@
 
 ## 11.1 UI 边界
 
-Pure Studio 是 Flutter Windows 桌面应用，使用 Material 3、Riverpod、`go_router` 和 typed
+Pure Studio 是 Flutter 桌面应用（Windows 为发布平台，Linux 为开发/验证平台），使用 Material 3、Riverpod、`go_router` 和 typed
 FRB。UI 只能通过 bridge 访问 StudioRuntime，不读取 SQLite 或配置文件。
 
 Flutter 分层保持简单：

@@ -438,10 +438,12 @@ fn prepare_bridge_artifacts(
 }
 
 fn needs_bridge_artifacts(target: DesktopTarget, demo_mode: DemoMode) -> bool {
-    matches!(
-        (target, demo_mode),
-        (DesktopTarget::Windows, DemoMode::Native)
-    )
+    // Native 模式在所有桌面平台都需要预构建桥库；Demo 模式纯 Dart 运行。
+    matches!(demo_mode, DemoMode::Native)
+        && matches!(
+            target,
+            DesktopTarget::Windows | DesktopTarget::Linux | DesktopTarget::Macos
+        )
 }
 
 fn run_flutter(
@@ -665,23 +667,15 @@ mod tests {
     }
 
     #[test]
-    fn native_windows_requires_bridge_but_demo_and_other_platforms_do_not() {
-        assert!(needs_bridge_artifacts(
+    fn native_targets_require_the_bridge_and_demo_mode_does_not() {
+        for target in [
             DesktopTarget::Windows,
-            DemoMode::Native
-        ));
-        assert!(!needs_bridge_artifacts(
-            DesktopTarget::Windows,
-            DemoMode::Demo
-        ));
-        assert!(!needs_bridge_artifacts(
-            DesktopTarget::Macos,
-            DemoMode::Native
-        ));
-        assert!(!needs_bridge_artifacts(
             DesktopTarget::Linux,
-            DemoMode::Native
-        ));
+            DesktopTarget::Macos,
+        ] {
+            assert!(needs_bridge_artifacts(target, DemoMode::Native));
+            assert!(!needs_bridge_artifacts(target, DemoMode::Demo));
+        }
     }
 
     #[test]

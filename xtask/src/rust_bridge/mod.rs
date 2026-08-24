@@ -40,10 +40,6 @@ impl RustBridgeArtifacts {
 }
 
 pub(crate) fn build(options: BuildRustBridgeOptions) -> Result<()> {
-    if !cfg!(target_os = "windows") {
-        bail!("build-rust-bridge is only supported for Flutter Windows builds");
-    }
-
     let workspace_root = resolve_workspace_root(&options.workspace_root)?;
     let artifacts = build_artifacts(
         &workspace_root,
@@ -151,7 +147,8 @@ fn artifact_candidates(
     let profile_dir = target_dir.join(profile_dir);
     RustBridgeArtifacts {
         dynamic_library: profile_dir.join(format!(
-            "{BRIDGE_TARGET_NAME}.{}",
+            "{}{BRIDGE_TARGET_NAME}.{}",
+            dynamic_library_prefix(),
             dynamic_library_extension()
         )),
         debug_symbols: debug_symbols_extension()
@@ -198,6 +195,16 @@ fn copy_artifact(source: &Path, output_dir: &Path) -> Result<()> {
 }
 
 #[cfg(target_os = "windows")]
+fn dynamic_library_prefix() -> &'static str {
+    ""
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dynamic_library_prefix() -> &'static str {
+    "lib"
+}
+
+#[cfg(target_os = "windows")]
 fn dynamic_library_extension() -> &'static str {
     "dll"
 }
@@ -234,7 +241,8 @@ mod tests {
         assert_eq!(
             debug.dynamic_library,
             target_dir.join("debug").join(format!(
-                "{BRIDGE_TARGET_NAME}.{}",
+                "{}{BRIDGE_TARGET_NAME}.{}",
+                dynamic_library_prefix(),
                 dynamic_library_extension()
             ))
         );
@@ -242,7 +250,8 @@ mod tests {
         assert_eq!(
             release.dynamic_library,
             target_dir.join("release").join(format!(
-                "{BRIDGE_TARGET_NAME}.{}",
+                "{}{BRIDGE_TARGET_NAME}.{}",
+                dynamic_library_prefix(),
                 dynamic_library_extension()
             ))
         );
