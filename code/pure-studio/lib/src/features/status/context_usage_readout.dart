@@ -106,10 +106,12 @@ class _ContextDetail extends StatelessWidget {
     final cost = runtime.estimatedCosts.isEmpty
         ? runtime.costLabel
         : formatRuntimeCosts(runtime.estimatedCosts);
-    final costWithPricingStatus = [
-      if (cost.isNotEmpty) cost,
-      if (runtime.hasUnpricedUsage) context.l10n.statusUnpricedUsageLabel,
-    ].join(' · ');
+    final costWithPricingStatus = cost.isEmpty
+        ? ''
+        : [
+            cost,
+            if (runtime.hasUnpricedUsage) context.l10n.statusUnpricedUsageLabel,
+          ].join(' · ');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -182,11 +184,12 @@ class _ContextDetail extends StatelessWidget {
                   label: context.l10n.statusInferenceCountLabel,
                   value: _formatCount(runtime.inferenceCount),
                 ),
-              if (costWithPricingStatus.isNotEmpty)
-                StatusDetailRow(
-                  label: context.l10n.statusCost,
-                  value: costWithPricingStatus,
-                ),
+              StatusDetailRow(
+                label: context.l10n.statusCost,
+                value: costWithPricingStatus.isEmpty
+                    ? '-'
+                    : costWithPricingStatus,
+              ),
               if (runtime.estimatedCacheSavings.isNotEmpty)
                 StatusDetailRow(
                   label: context.l10n.statusCacheSavingsLabel,

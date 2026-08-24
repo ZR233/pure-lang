@@ -87,6 +87,54 @@ void registerStatusAccessibilityTests() {
       }
     });
 
+    testWidgets('context detail shows dash when runtime has no costs', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _localizedApp(
+          home: const Scaffold(
+            body: Align(
+              alignment: Alignment.bottomLeft,
+              child: ContextUsageReadout(runtime: _contextRuntime),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final contextButton = find.bySemanticsLabel('Context');
+      await tester.tap(contextButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cost'), findsOneWidget);
+      expect(find.text('-'), findsOneWidget);
+      expect(find.text('Partially unpriced'), findsNothing);
+    });
+
+    testWidgets('context detail shows dash for fully unpriced usage', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _localizedApp(
+          home: const Scaffold(
+            body: Align(
+              alignment: Alignment.bottomLeft,
+              child: ContextUsageReadout(runtime: _unpricedRuntime),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final contextButton = find.bySemanticsLabel('Context');
+      await tester.tap(contextButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cost'), findsOneWidget);
+      expect(find.text('-'), findsOneWidget);
+      expect(find.text('Partially unpriced'), findsNothing);
+    });
+
     testWidgets('status bar omits direct cost and cache text readouts', (
       tester,
     ) async {
@@ -463,6 +511,19 @@ const _contextRuntime = ThreadRuntimeView(
   activeMcpServers: [],
   activeLspServers: [],
   agentCount: 0,
+);
+
+const _unpricedRuntime = ThreadRuntimeView(
+  model: 'planner/local',
+  contextTokens: 42,
+  contextWindow: 100,
+  totalTokens: 128,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+  hasUnpricedUsage: true,
 );
 
 const _cacheRuntime = ThreadRuntimeView(

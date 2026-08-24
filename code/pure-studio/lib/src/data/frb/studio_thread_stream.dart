@@ -538,9 +538,7 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     prefixChangedReason: usage.prefixChangedReason?.name,
     toolRegistryRevision: value.toolRegistryRevision?.toInt(),
     toolCatalogHash: value.toolCatalogHash,
-    costLabel: costLabel.isEmpty && usage.hasUnpricedUsage
-        ? 'unpriced usage'
-        : costLabel,
+    costLabel: costLabel,
     activeSkills: value.activeSkills,
     activeMcpServers: value.activeMcpServers,
     activeLspServers: value.activeLspServers,
