@@ -144,7 +144,7 @@ fn generate_gui_sources(
     ensure_frb_codegen_version()?;
     run_frb_codegen(workspace_root, app_dir)?;
     run_build_runner(app_dir)?;
-    normalize_generated_dart_whitespace(&app_dir.join("lib"))?;
+    normalize_generated_dart_files(&app_dir.join("lib"))?;
     run_tool("dart", &["format", "lib"], app_dir)?;
     run_tool("cargo", &["fmt", "--all"], workspace_root)?;
     write_codegen_fingerprint(workspace_root, app_dir)
@@ -261,7 +261,7 @@ fn fingerprint_files(workspace_root: &Path, files: &[String]) -> Result<String> 
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn normalize_generated_dart_whitespace(root: &Path) -> Result<()> {
+fn normalize_generated_dart_files(root: &Path) -> Result<()> {
     let mut directories = vec![root.to_path_buf()];
     while let Some(directory) = directories.pop() {
         for entry in fs::read_dir(&directory)
@@ -283,7 +283,7 @@ fn normalize_generated_dart_whitespace(root: &Path) -> Result<()> {
             }
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
-            let normalized = trim_trailing_horizontal_whitespace(&content);
+            let normalized = normalize_generated_dart_text(&content);
             if normalized != content {
                 fs::write(&path, normalized)
                     .with_context(|| format!("failed to normalize {}", path.display()))?;
@@ -305,17 +305,14 @@ fn is_generated_dart_path(root: &Path, path: &Path) -> bool {
         .any(|output| output.matches_dart_path(relative, file_name))
 }
 
-fn trim_trailing_horizontal_whitespace(content: &str) -> String {
+fn normalize_generated_dart_text(content: &str) -> String {
     let mut normalized = String::with_capacity(content.len());
     for chunk in content.split_inclusive('\n') {
         let (line, newline) = chunk
             .strip_suffix('\n')
             .map_or((chunk, ""), |line| (line, "\n"));
-        let (line, carriage_return) = line
-            .strip_suffix('\r')
-            .map_or((line, ""), |line| (line, "\r"));
+        let line = line.strip_suffix('\r').unwrap_or(line);
         normalized.push_str(line.trim_end_matches([' ', '\t']));
-        normalized.push_str(carriage_return);
         normalized.push_str(newline);
     }
     normalized
@@ -484,15 +481,15 @@ mod tests {
     }
 
     #[test]
-    fn generated_whitespace_normalization_preserves_line_endings() {
+    fn generated_text_normalization_uses_lf_and_trims_trailing_whitespace() {
         assert_eq!(
-            trim_trailing_horizontal_whitespace("alpha  \r\nbeta\t\ngamma  "),
-            "alpha\r\nbeta\ngamma"
+            normalize_generated_dart_text("alpha  \r\nbeta\t\ngamma  "),
+            "alpha\nbeta\ngamma"
         );
     }
 
     #[test]
-    fn generated_whitespace_normalization_excludes_handwritten_dart() {
+    fn generated_file_normalization_excludes_handwritten_dart() {
         let root = Path::new("lib");
 
         assert!(is_generated_dart_path(root, &root.join("models.g.dart")));

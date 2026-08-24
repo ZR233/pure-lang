@@ -133,6 +133,9 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   使本地手工改动由生成器恢复为 canonical 内容。生成流程中的依赖解析与 build_runner 都必须
   在返回前恢复已跟踪 lockfile 的 canonical hosted URL，并拒绝生成器改变依赖解析。当前锁定的 build_runner 会始终删除冲突
   输出，不得继续传递已移除的 `--delete-conflicting-outputs` 参数。
+- Git 索引中的文本统一规范化为 LF；编辑器、Rustfmt 和 xtask 生成的 canonical 文本也统一使用 LF。
+  Windows 与 Linux 平台的 Flutter 生成文件必须由 `.gitattributes` 显式固定为 LF，生成流程还必须
+  在格式化前将生成的 Dart 文本从 CRLF 规范化为 LF，避免平台相关的纯换行差异污染工作区。
 - `cargo xtask run-gui` 和 `cargo xtask build-gui` 在运行或构建前自动执行同一生成流程，
   并以覆盖 Dart、Rust API、生成输出和生成配置的内容指纹跳过无变化的重复生成，确保 GUI
   产物不会使用过期绑定，同时不拖慢连续运行。需要只检查生成一致性时使用
