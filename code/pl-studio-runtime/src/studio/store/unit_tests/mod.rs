@@ -1,14 +1,55 @@
 use super::StudioStore;
+use crate::studio::store::directory::{
+    DirectoryDelta, RegisteredChildThread, apply_directory_delta,
+};
 use crate::studio::task_coordinator::{
     AllocateExecutor, CreateTaskRun, TaskWorktreeDisposition, WorkUnitState, current_work_units,
 };
 use crate::{PlanConfirmationResolution, PlanConfirmationResolutionPayload, StudioMode};
-use sea_orm::ConnectionTrait;
+use pl_protocol::ThreadMode;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 
 mod schema;
 
+/// 测试 seed：在独立事务中直接应用一次目录 delta。
+async fn seed_directory(store: &StudioStore, delta: DirectoryDelta) {
+    let tx = store.database().begin().await.unwrap();
+    apply_directory_delta(&tx, &delta).await.unwrap();
+    tx.commit().await.unwrap();
+}
+
+async fn seed_child(
+    store: &StudioStore,
+    root: &super::super::records::ThreadRecord,
+    child_suffix: &str,
+    role: &str,
+) -> String {
+    let project = store
+        .read_thread(&root.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .project_id;
+    let child_id = format!("{}-{child_suffix}", root.id);
+    seed_directory(
+        store,
+        DirectoryDelta::register_child_thread(RegisteredChildThread {
+            id: child_id.clone(),
+            parent_thread_id: root.id.clone(),
+            agent_path: child_id.clone(),
+            project_id: project,
+            root_thread_id: root.root_thread_id.clone(),
+            mode: ThreadMode::Simple,
+            role: role.to_string(),
+            title: "Child".to_string(),
+        }),
+    )
+    .await;
+    child_id
+}
+
 #[tokio::test]
-async fn archive_thread_rolls_back_the_complete_tree_on_update_failure() {
+async fn directory_archive_rolls_back_the_complete_tree_on_update_failure() {
     let store = StudioStore::open_memory().await.unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let project = store.upsert_project(workspace.path()).await.unwrap();
@@ -16,17 +57,7 @@ async fn archive_thread_rolls_back_the_complete_tree_on_update_failure() {
         .create_thread(&project.id, "Root", StudioMode::Simple)
         .await
         .unwrap();
-    let child_id = format!("{}-child", root.id);
-    let child = store
-        .create_child_thread(crate::studio::ChildThreadSpec {
-            id: child_id.clone(),
-            parent_thread_id: root.id.clone(),
-            agent_path: child_id,
-            role: "executor".to_string(),
-            title: "Child".to_string(),
-        })
-        .await
-        .unwrap();
+    let child_id = seed_child(&store, &root, "child", "executor").await;
     store
         .database()
         .execute_unprepared(
@@ -38,13 +69,20 @@ async fn archive_thread_rolls_back_the_complete_tree_on_update_failure() {
         .await
         .unwrap();
 
-    let error = store.archive_thread(&root.id).await.unwrap_err();
-
+    let tx = store.database().begin().await.unwrap();
+    let error = apply_directory_delta(
+        &tx,
+        &DirectoryDelta::archive_threads(vec![root.id.clone(), child_id.clone()]),
+    )
+    .await
+    .unwrap_err();
     assert!(error.to_string().contains("forced child archive failure"));
-    let remaining = store.list_threads(&project.id).await.unwrap();
+    tx.rollback().await.unwrap();
+
+    let remaining = store.list_threads_for_root(&root.id).await.unwrap();
     assert_eq!(remaining.len(), 2);
     assert!(remaining.iter().any(|thread| thread.id == root.id));
-    assert!(remaining.iter().any(|thread| thread.id == child.id));
+    assert!(remaining.iter().any(|thread| thread.id == child_id));
 }
 
 #[tokio::test]
@@ -89,17 +127,7 @@ async fn unregistered_child_spawn_failure_is_persisted_as_canonical_faulted_stat
         .create_thread(&project.id, "Root", StudioMode::Task)
         .await
         .unwrap();
-    let child_id = format!("{}-executor", root.id);
-    store
-        .create_child_thread(crate::studio::ChildThreadSpec {
-            id: child_id.clone(),
-            parent_thread_id: root.id,
-            agent_path: child_id.clone(),
-            role: "executor".to_string(),
-            title: "Executor".to_string(),
-        })
-        .await
-        .unwrap();
+    let child_id = seed_child(&store, &root, "executor", "executor").await;
 
     assert_eq!(
         store

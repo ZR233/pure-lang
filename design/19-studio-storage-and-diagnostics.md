@@ -49,6 +49,14 @@ mutation 先在串行 owner 中完成全部校验和纯投影，以一个复合�
 并追加待落库批次，然后立即广播可观察事实。SQLite writer 在后台按 owner/revision 顺序异步落库；
 确认只推进 `durable_revision`，不得改变业务状态。
 
+Thread 与 Project 的目录事实（创建、child 注册、mode 变更、归档、项目打开/关闭）使用同一条
+提交纪律：目录命令在串行临界区内基于内存或冷加载的聚合完成校验，先以统一的 `DirectoryDelta`
+（upsert 记录 + removal 标识）更新内存目录并广播 `DirectoryChanged` 事件，再把同一 delta 追加进
+write-behind 队列。不存在命令路径上的同步直写 SQLite；SQLite 写入失败只影响持久化健康状态
+（Degraded/Blocked 与新工作门禁），不回滚已发布的内存事实、不使命令失败。writer 队列 FIFO 保证
+Thread 注册 delta 先于该 Thread 的首个 state commit 落库；owner 淘汰与关机排水的 `awaitDurable`
+屏障同时要求该 owner 没有未落库的目录 delta。
+
 不再存在“等待 SQLite 后才能发布”的 Immediate 提交。流式增量、Turn 终态、input claim/consume、
 Interaction、conversation recovery、Task 终态和计划者唤醒都以内存 commit 为可见边界。显式
 `awaitDurable(owner, revision)` 只用于正常关机、owner 淘汰、工作目录或分支删除以及其他不可逆
@@ -78,7 +86,9 @@ Item ordinal 是内存权威事实：由 ThreadEventBus（每线程唯一投影�
 与 SQLite 落库，三处同源。落库原样保留 item ordinal，不再从数据库派生顺序事实；恢复时
 `replace_snapshot` 以已落库 ordinal 种子化总线，续号从 max+1 继续。delta 不写库；terminal
 更新同一 Item 完整 payload。历史查询按 `(thread_id, turn_sequence)` keyset 分页，不使用
-OFFSET。
+OFFSET。Turn、thread input 与 submission 的 ordinal 在 writer 单写者事务内从 durable max
+派生：FIFO 单写者保证该派生结果与内存到达序一致，且不存在第二个写入方可以观察到中间态；
+这是 item 机制之外刻意保留的持久层内部顺序派生边界，不向上游协议暴露派生细节。
 
 ThreadEventBus 还按开始顺序保留当前驻留期观察到的 Turn 热窗口；Turn 完成并清除 `active_turn` 后
 仍留在该窗口。历史分页先按 cursor 选择热 Turn，再从 SQLite 读取冷页；相同 Turn 或 Item 标识以内存
@@ -160,10 +170,17 @@ Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch
 
 ## 19.4 归档与附件
 
-归档 project/thread 是可恢复的逻辑操作：在一个数据库事务中标记 Project 关闭和 Thread
-已归档，保留 Turn、Item、Interaction、attachment row 与附件文件。有活动 Task 时拒绝
-归档 Project。Task worktree 只能走 preview-confirm-revalidate 产品清理，普通归档不删除
-库外文件、worktree 或 branch。
+归档 project/thread 是可恢复的逻辑操作：命令先在内存更新目录（移除 Thread 条目、关闭
+Project），再把同一 `DirectoryDelta` 交给 write-behind writer，由后台批量事务标记 Project
+关闭和 Thread 已归档，保留 Turn、Item、Interaction、attachment row 与附件文件。有活动 Task
+时拒绝归档 Project。Task worktree 只能走 preview-confirm-revalidate 产品清理，普通归档
+不删除库外文件、worktree 或 branch。
+
+`reset_agent_sessions_for_root`、项目清理时的 `cancel_thread_for_project_cleanup`、重启恢复
+扫描的 `reconcile_task_agents_after_restart` 与 `mark_restart_user_input_recovered` 是仅有的
+"权威冷原语"：它们在 actor 已退役/线程可能不驻留、或 owner 尚未在内存建立的前提下直接结算
+SQLite，属于用户确认后的破坏性重置或单线程启动期收束边界（结算完成后 owner 才从冷基线装
+载），不得模仿其模式新增运行期直写路径。
 
 ## 19.5 诊断
 
@@ -186,23 +203,31 @@ hash、runId、Task generation、WorkUnit/worktree resource identity、初始时
 program 正文、caller 原始 JSON 与 cache key 均不得进入日志或 Flutter timeline。compaction 指标只保存
 替换前后 token 估算，不能保存被移除正文。
 
-## 19.6 内存驻留与目录索引
+## 19.6 内存驻留与冷热目录
 
-启动只从 `threads` 表构建常驻内存目录索引（全部未归档 Thread 的列表元数据），它是会话列表
-查询与 `ThreadDirectoryChanged` 事件的唯一来源，由内存权威 mutation 同步维护，不重读数据库。
-`list_threads_page` 以 `(updated_at, id)` keyset cursor 从索引分页，`readStudioState` 快照只携带
-首页目录条目与窗口游标；SQLite 只在启动重建索引时参与。
+Thread 目录不是全量内存索引，而是"活动热集合 + SQLite 冷分页"：
+
+- 热集合只包含仍有内存事实的 Thread：钉住集合恢复的 Thread、活动 Task 的 root、驻留 actor
+  以及目录 delta 尚未耐久化的新 Thread。LRU 淘汰（已等待耐久化）或归档时条目移出热集合。
+- `list_threads_page` 以 `(updated_at, id)` keyset 从 SQLite 冷分页（`archived=0` 过滤），再以
+  热集合 overlay：同 ID 内存条目覆盖冷行，cursor 边界排除重复，保证跨冷热边界不重复、不倒序。
+  该合并算法与 Turn 历史的冷热合并是同一个泛型组件。`readStudioState` 快照只携带首页目录条目
+  与窗口游标。
+- 启动不为目录做全量扫描；只有 Project 小集合目录在启动时整体载入内存。
 
 完整会话（transcript、working state、mailbox、Interaction）按需恢复：订阅、提交输入或 Task
 恢复引用时从 canonical 表加载并创建 ThreadActor；启动只为钉住集合（queued input、pending
 Interaction、活动 Task 引用）主动恢复。驻留 actor 由 manager 的 LRU 双端队列管理，订阅、提交
 或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无 pending input，超容量时从队首淘汰。
-淘汰前必须等待该 Thread 的目标 revision 耐久化，被淘汰 Thread 保留目录索引与全部
+淘汰前必须等待该 Thread 的目标 revision 与未落库目录 delta 耐久化，被淘汰 Thread 保留全部
 durable 状态，再次订阅时按需恢复。
 
-TaskRuntime 使用同一驻留原则：活动 Task 及未追平耐久修订的终态 Task 不得淘汰；只有终态且
-`durable_revision >= hot_revision` 时才可移除完整聚合，Task 目录条目继续保留。再次访问该条目时是
-显式冷激活，从 SQLite 恢复聚合基线，不允许活动事件用数据库快照覆盖驻留聚合。
+TaskRuntime 使用同一驻留原则，且启动只恢复活动 Task：以 `list_active_task_runs` 为源分页装载
+非终态聚合并 seed 耐久基线，终态 Task 一律作为冷数据，不参与启动装载。活动 Task 及未追平耐久
+修订的终态 Task 不得淘汰；只有终态且 `durable_revision >= hot_revision` 时才可移除完整聚合，
+Task 目录条目继续保留。再次访问该条目时是显式冷激活，从 SQLite 恢复聚合基线，不允许活动事件
+用数据库快照覆盖驻留聚合。Task 目录同样只有"活动 + 已显式激活"的热条目；线程被选中或订阅时
+显式激活其最新 Task，供该 Thread 的任务视图使用。
 
 会话内容查询遵循同一窗口语义：驻留 actor 的热窗口与未确认事实从内存读取，更早 Timeline 按
 `(thread_id, turn_sequence)` keyset 分页从 SQLite 读取；跨越冷热边界时按 item identity 和 ordinal

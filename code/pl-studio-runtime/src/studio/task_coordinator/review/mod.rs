@@ -463,15 +463,11 @@ impl TaskCoordinator {
                     let available_actions = coordinator
                         .transition_paths(&run, runtime.as_ref())
                         .await?;
+                    // 跨 Thread 的终态 Task 是冷数据：单条 keyset 查询回源 SQLite。
                     let latest_completed_task = coordinator
                         .store
-                        .list_task_runs_for_project(&run.project_id)
+                        .find_latest_completed_task_for_project(&run.project_id, &run.id)
                         .await?
-                        .into_iter()
-                        .filter(|candidate| {
-                            candidate.id != run.id && candidate.kind().is_terminal()
-                        })
-                        .max_by_key(|candidate| (candidate.updated_at, candidate.id.clone()))
                         .as_ref()
                         .map(ModelTaskStatus::from_run);
                     let output = TaskStatusOutput {

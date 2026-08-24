@@ -9,6 +9,7 @@ use crate::StudioMode;
 use crate::config::ConfigRuntime;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::ThreadRecord;
+use crate::studio::store::directory::{DirectoryDelta, ProjectRemoval};
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
     InteractionService, ProductEventBus, StudioActiveTurn, StudioRecoveryCleanupPreview,
@@ -125,7 +126,6 @@ pub struct StudioInterruptPromptResponse {
 pub struct StudioResolveInteractionResponse {
     pub thread_id: String,
     pub interaction: InteractionRequest,
-    pub threads: Vec<ThreadRecord>,
 }
 
 #[derive(Clone)]
@@ -322,7 +322,11 @@ impl StudioRuntime {
             let emitter = self.interaction_emitter(thread_id.to_string());
             self.agent_facility
                 .interactions
-                .cancel_thread(thread_id, "recovery context reset", emitter)
+                .cancel_thread(
+                    self.pending_thread_interactions(thread_id).await?,
+                    "recovery context reset",
+                    emitter,
+                )
                 .await?;
             self.store.reset_agent_sessions_for_root(thread_id).await?;
         }
@@ -381,18 +385,20 @@ impl StudioRuntime {
         self.task_coordinator
             .execute_recovery_cleanup(&issue, &preview)
             .await?;
-        self.store.quarantine_project(project_id).await?;
         self.agent_facility
             .resources
             .complete_cleanup_takeover(&root_thread_ids)
             .await;
         self.agent_facility
             .product_events
-            .remove_project_entry(project_id)
-            .await?;
-        self.agent_facility
-            .product_events
-            .apply_thread_delta(Vec::new(), thread_ids)
+            .commit_directory(DirectoryDelta {
+                project_removals: vec![ProjectRemoval {
+                    project_id: project_id.to_string(),
+                    thread_ids: thread_ids.clone(),
+                    closed_at: crate::studio::unix_seconds(),
+                }],
+                ..Default::default()
+            })
             .await?;
         let issues = self.recovery.remove_for_project(project_id);
         self.agent_facility

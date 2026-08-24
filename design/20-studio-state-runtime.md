@@ -81,12 +81,17 @@ actor；纯查询和 transport 重同步不激活、不修复、不投递 wake�
 ThreadActor 的驻留期 Turn 热窗口与完整 Item timeline，再用 SQLite 补齐更早页面。相同 Turn/Item
 标识一律以内存覆盖，热 cursor 可以直接衔接冷历史，不得为了历史页把数据库快照回写到 actor。
 
+`listThreadsPage(cursor, limit)` 与 Turn 历史使用同一个泛型冷热合并组件：SQLite keyset 冷页
+（`(updated_at, id)` 倒序、`archived=0`）叠加活动热集合 overlay，同 ID 内存覆盖冷行、cursor 边界
+排除重复。运行期会话列表、Task 视图与 Interaction 状态的读取一律内存优先；需要未驻留聚合时先
+显式冷激活，不允许查询路径静默回读数据库覆盖热事实。
+
 Product event 携带完整领域 snapshot：ProjectDirectoryChanged、TaskDirectoryChanged、
 AgentDirectoryChanged、SettingsStateChanged、RecoveryStateChanged、McpStateChanged、LspStateChanged、
 SkillsStateChanged、ProviderUsageStateChanged、UpdaterStateChanged、PersistenceStateChanged；唯一例外是
 `ThreadDirectoryChanged`，它携带增量 payload（upserted entries、removed ids 与 thread directory
-revision），由常驻内存目录索引派生（见 19.6），Flutter 按增量合并进分页窗口。信封 sequence 只用于
-transport lag；payload 自带领域 revision。
+revision），由内存目录 owner 的 `DirectoryDelta` 提交派生（见 19.6），Flutter 按增量合并进分页窗口。
+信封 sequence 只用于 transport lag；payload 自带领域 revision。
 
 `subscribeShutdownProgress()` 是独立的短生命周期 typed 流，只在 shutdown 期间可用，不复用
 product stream（它在关机早期被取消）。事件本身是 sealed 阶段状态，
@@ -107,11 +112,12 @@ FRB 的 `readStudioState` 与 HTTP 的 `GET /api/v1/state` 都只机械调用该
 ## 20.4 启动、Project 与 Thread
 
 每个宿主只允许一次启动，顺序固定为：解析绝对 Studio home；取得 `runtime.lock` 独占锁；打开并
-校验 SQLite；加载 `ConfigRuntime` 与 Usage/Updater last-known cache；从冷基线建立全部未归档
-Project、Thread 与 Agent 的内存目录索引；执行持久任务恢复扫描；把恢复后的活动 Task 聚合装载到
-TaskRuntime 并建立 Task 目录；启动 Thread framework；只为钉住集合（queued input、pending
+校验 SQLite；加载 `ConfigRuntime` 与 Usage/Updater last-known cache；从冷基线建立 Project 小集合
+目录；执行持久任务恢复扫描并把非终态 Task 聚合分页装载到 TaskRuntime（终态 Task 是冷数据，
+不参与启动装载）；启动 Thread framework；只为钉住集合（queued input、pending
 Interaction、活动 Task 引用）恢复 ThreadActor、恢复交互并 materialize pending wake，其余 Thread
-在订阅或提交输入时按需恢复；初始化 MCP
+在订阅或提交输入时按需恢复；Thread 目录不做启动全量装载，活动热集合由钉住恢复、活动 Task
+root 与运行期 `DirectoryDelta` 构成；初始化 MCP
 owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 system Skills；发布 runtime
 ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
 或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
@@ -136,10 +142,11 @@ probe 和 Skills discovery；不创建 Thread。相同 project/fingerprint 重�
 
 Project 可以合法地没有 root Thread。`openProject`、归档、普通查询、刷新与 resync 都不创建
 默认 Thread。产品 UI 唯一的新 root 创建入口是首次提交使用的 `startNewThread` command；它在
-同一生命周期临界区校验 Project 与输入、按请求 mode 创建 root Thread（起始页选择，缺省
-Simple）、提交首个 Turn，并在内存成功后发布目录增量。若内存转换失败，command 移除尚未公开的
-空 Thread；SQLite 写入失败则进入持久化降级，保留已经提交的热事实并暂停后续新工作。测试/Driver
-fixture 可以使用隔离的内部 seed 入口显式创建 Thread。
+同一生命周期临界区校验 Project 与输入、按请求 mode 以 `DirectoryDelta` 创建 root Thread 并
+立即发布目录增量（turn 构建需要热集合中的目录事实）、提交首个 Turn；若首个 Turn 提交失败，
+command 以归档 delta 移除尚未使用的空 Thread。SQLite 写入失败则进入持久化降级，保留已经
+提交的热事实并暂停后续新工作。测试/Driver fixture 可以使用隔离的内部 seed 入口显式创建
+Thread。
 
 ## 20.5 Settings 与 desired/live
 

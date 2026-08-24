@@ -1,7 +1,9 @@
 use anyhow::Result;
 
 use crate::config::{ConfigPaths, ConfigRuntime, ConfigStore};
-use crate::studio::agent_host::{StudioAgentRepository, StudioAgentResources};
+use crate::studio::agent_host::{
+    StudioAgentRepository, StudioAgentResources, ThreadWriteBehindWriter,
+};
 use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
@@ -85,8 +87,11 @@ impl StudioRuntime {
     ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
         let interactions = InteractionService::new(store.clone());
-        let product_events = ProductEventBus::new(store.clone());
-        let task_runtime = TaskRuntime::new(store.clone(), product_events.clone());
+        // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 的目录提交、
+        // TaskRuntime 与 ThreadRepository 必须共用同一 write-behind 队列。
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        let product_events = ProductEventBus::new(store.clone(), writer.clone());
+        let task_runtime = TaskRuntime::with_writer(store.clone(), product_events.clone(), writer);
         let persistence = StudioAgentRepository::with_writer(store.clone(), task_runtime.writer());
         product_events.observe_persistence(persistence.writer().subscribe_state());
         let task_coordinator =

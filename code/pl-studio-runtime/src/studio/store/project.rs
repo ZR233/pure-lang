@@ -3,16 +3,20 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
+#[cfg(test)]
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
-    DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Statement,
-    TransactionTrait,
+    ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection,
+    EntityTrait, QueryFilter, QueryOrder, Statement,
 };
 
 use crate::studio::entity as entities;
+#[cfg(test)]
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::project_record;
-use crate::studio::paths::{default_db_path, project_name, sqlite_read_only_url, sqlite_url};
+#[cfg(test)]
+use crate::studio::paths::project_name;
+use crate::studio::paths::{default_db_path, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
@@ -122,7 +126,12 @@ impl StudioStore {
         })
     }
 
-    pub async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
+    /// 测试 seed 入口：按 path 直接同步 upsert Project 行。
+    ///
+    /// 生产路径的打开必须经 `DirectoryDelta::upsert_project` +
+    /// `ProductEventBus::commit_directory`（内存先行、异步落库）。
+    #[cfg(test)]
+    pub(crate) async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
         use entities::project;
         let now = unix_seconds();
         let path = path.as_ref();
@@ -168,20 +177,20 @@ impl StudioStore {
         Ok(projects.into_iter().map(project_record).collect())
     }
 
-    pub async fn mark_project_opened(&self, project_id: &str) -> Result<()> {
+    /// 聚合冷加载：按 path 找到既有 Project 行身份事实。
+    pub(in crate::studio) async fn find_project_by_path(
+        &self,
+        path: &str,
+    ) -> Result<Option<ProjectRow>> {
         use entities::project;
-        if let Some(project) = project::Entity::find_by_id(project_id.to_string())
+        Ok(project::Entity::find()
+            .filter(project::Column::Path.eq(path.to_string()))
             .one(&self.db)
             .await?
-        {
-            let now = unix_seconds();
-            let mut active: project::ActiveModel = project.into();
-            active.updated_at = Set(now);
-            active.last_opened_at = Set(Some(now));
-            active.closed = Set(0);
-            active.update(&self.db).await?;
-        }
-        Ok(())
+            .map(|model| ProjectRow {
+                id: model.id,
+                created_at: model.created_at,
+            }))
     }
 
     pub async fn read_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
@@ -191,40 +200,13 @@ impl StudioStore {
             .await?
             .map(project_record))
     }
+}
 
-    pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
-        self.quarantine_project(project_id).await
-    }
-
-    pub(crate) async fn quarantine_project(
-        &self,
-        project_id: &str,
-    ) -> Result<Option<ProjectRecord>> {
-        use entities::{project, thread};
-        let Some(project) = project::Entity::find_by_id(project_id.to_string())
-            .one(&self.db)
-            .await?
-        else {
-            return Ok(None);
-        };
-        let tx = self.db.begin().await?;
-        let threads = thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(project_id.to_string()))
-            .all(&tx)
-            .await?;
-        for thread in threads {
-            let mut active: thread::ActiveModel = thread.into();
-            active.archived = Set(1);
-            active.updated_at = Set(unix_seconds());
-            active.update(&tx).await?;
-        }
-        let mut active: project::ActiveModel = project.into();
-        active.updated_at = Set(unix_seconds());
-        active.closed = Set(1);
-        let model = active.update(&tx).await?;
-        tx.commit().await?;
-        Ok(Some(project_record(model)))
-    }
+/// `find_project_by_path` 返回的持久身份事实。
+#[derive(Debug, Clone)]
+pub(in crate::studio) struct ProjectRow {
+    pub(in crate::studio) id: String,
+    pub(in crate::studio) created_at: i64,
 }
 
 async fn connect_sqlite(

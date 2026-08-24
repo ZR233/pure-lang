@@ -45,10 +45,26 @@ impl StudioRuntime {
                 .recover_active_tasks()
                 .await
                 .map_err(|error| startup_failure("recover_active_tasks", error))?;
-            self.task_runtime
-                .initialize()
+            // 只装载非终态聚合（终态 Task 是冷数据，显式访问时冷激活）。
+            let active_runs = self
+                .store
+                .list_active_task_runs()
                 .await
                 .map_err(|error| startup_failure("initialize_task_runtime", error))?;
+            self.task_runtime
+                .initialize(active_runs)
+                .await
+                .map_err(|error| startup_failure("initialize_task_runtime", error))?;
+            // 活动 Task root 进入热集合，供目录分页以内存事实覆盖冷行。
+            for root_thread_id in self.task_runtime.active_thread_ids().await {
+                if let Ok(Some(record)) = self.store.read_thread(&root_thread_id).await {
+                    let _ = self
+                        .agent_facility
+                        .product_events
+                        .apply_thread_delta(vec![pl_protocol::Thread::from(record)], Vec::new())
+                        .await;
+                }
+            }
             self.recover_interactions_after_restart()
                 .await
                 .map_err(|error| startup_failure("recover_interactions", error))?;

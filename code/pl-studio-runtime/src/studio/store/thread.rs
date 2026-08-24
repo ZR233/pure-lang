@@ -1,33 +1,37 @@
-//! Thread 目录记录及其稳定配置的持久化入口。
+//! Thread 目录记录的冷读取入口。
+//!
+//! 目录 mutation 已统一走 `store::directory::DirectoryDelta` 的 write-behind
+//! 通道（design/19 §19.2）；本文件只保留命令路径允许的聚合冷加载与分页查询。
 
 use anyhow::Result;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
+#[cfg(test)]
 use crate::StudioMode;
 use crate::studio::entity as entities;
-use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
-use crate::studio::store_support::non_empty_title;
-use pl_core::AgentState;
 
 impl StudioStore {
-    pub async fn create_thread(
+    /// 测试 seed 入口：直接同步创建 root Thread 行。
+    ///
+    /// 生产路径的创建必须经 `DirectoryDelta::register_root_thread` +
+    /// `ProductEventBus::commit_directory`（内存先行、异步落库）。
+    #[cfg(test)]
+    pub(crate) async fn create_thread(
         &self,
         project_id: &str,
         title: &str,
         mode: StudioMode,
     ) -> Result<ThreadRecord> {
-        use entities::thread;
+        use crate::studio::ids::{new_id, unix_seconds};
+        use crate::studio::store_support::non_empty_title;
+        use pl_core::AgentState;
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set};
         let now = unix_seconds();
         let id = new_id("thread");
-        let usage_json = serde_json::to_string(&pl_model::TokenUsage::default())?;
-        let state_json = serde_json::to_string(&AgentState::idle())?;
-        let model = thread::ActiveModel {
+        let model = entities::thread::ActiveModel {
             id: Set(id.clone()),
             project_id: Set(project_id.to_string()),
             title: Set(non_empty_title(title)),
@@ -36,67 +40,12 @@ impl StudioStore {
             parent_thread_id: Set(None),
             role: Set(mode.root_role().key().to_string()),
             agent_path: Set(id),
-            state_json: Set(state_json),
+            state_json: Set(serde_json::to_string(&AgentState::idle())?),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
             metadata_json: Set("null".to_string()),
-            usage_json: Set(usage_json),
-            last_context_tokens: Set(None),
-            trace_sequence: Set(0),
-            created_at: Set(now),
-            updated_at: Set(now),
-            archived: Set(0),
-            ..Default::default()
-        }
-        .insert(&self.db)
-        .await?;
-        thread_record(model)
-    }
-
-    pub(in crate::studio) async fn create_child_thread(
-        &self,
-        spec: ChildThreadSpec,
-    ) -> Result<ThreadRecord> {
-        use entities::thread;
-        anyhow::ensure!(
-            spec.id == spec.agent_path,
-            "Thread id and runtime identity must be identical"
-        );
-        if let Some(existing) = thread::Entity::find_by_id(spec.id.clone())
-            .one(&self.db)
-            .await?
-        {
-            let existing = thread_record(existing)?;
-            anyhow::ensure!(
-                existing.parent_thread_id.as_deref() == Some(spec.parent_thread_id.as_str()),
-                "Thread {} 已属于其他父 Thread",
-                spec.id
-            );
-            return Ok(existing);
-        }
-        let parent = thread::Entity::find_by_id(spec.parent_thread_id.clone())
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("父 Thread 不存在: {}", spec.parent_thread_id))?;
-        let now = unix_seconds();
-        let usage_json = serde_json::to_string(&pl_model::TokenUsage::default())?;
-        let state_json = serde_json::to_string(&AgentState::idle())?;
-        let model = thread::ActiveModel {
-            id: Set(spec.id.clone()),
-            project_id: Set(parent.project_id),
-            title: Set(non_empty_title(&spec.title)),
-            mode: Set(parent.mode),
-            root_thread_id: Set(parent.root_thread_id),
-            parent_thread_id: Set(Some(spec.parent_thread_id)),
-            role: Set(spec.role),
-            agent_path: Set(spec.id),
-            state_json: Set(state_json),
-            revision: Set(0),
-            runtime_revision: Set(None),
-            event_sequence: Set(0),
-            metadata_json: Set("null".to_string()),
-            usage_json: Set(usage_json),
+            usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default())?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
             created_at: Set(now),
@@ -122,12 +71,12 @@ impl StudioStore {
         threads.into_iter().map(thread_record).collect()
     }
 
-    pub async fn list_threads(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
+    /// 一棵 Thread 树的全部未归档成员（按 root_thread_id 直查，不扫全项目）。
+    pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
         use entities::thread;
         let threads = thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(project_id))
+            .filter(thread::Column::RootThreadId.eq(root_thread_id))
             .filter(thread::Column::Archived.eq(0))
-            .order_by_desc(thread::Column::UpdatedAt)
             .order_by_asc(thread::Column::CreatedAt)
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
@@ -167,89 +116,4 @@ impl StudioStore {
             .unwrap_or_default();
         Ok(u64::try_from(revision)?)
     }
-
-    pub async fn rename_thread(&self, thread_id: &str, title: &str) -> Result<()> {
-        use entities::thread;
-        if let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        {
-            let mut active: thread::ActiveModel = existing.into();
-            active.title = Set(non_empty_title(title));
-            active.updated_at = Set(unix_seconds());
-            active.update(&self.db).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn archive_thread(&self, thread_id: &str) -> Result<Option<ArchivedThreadTree>> {
-        use entities::thread;
-        let transaction = self.db.begin().await?;
-        let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(&transaction)
-            .await?
-        else {
-            return Ok(None);
-        };
-        let archived = thread_record(existing.clone())?;
-        let targets = if existing.parent_thread_id.is_none() {
-            thread::Entity::find()
-                .filter(thread::Column::RootThreadId.eq(thread_id))
-                .all(&transaction)
-                .await?
-        } else {
-            vec![existing]
-        };
-        let removed_thread_ids = targets
-            .iter()
-            .map(|target| target.id.clone())
-            .collect::<Vec<_>>();
-        let now = unix_seconds();
-        for target in targets {
-            let mut active: thread::ActiveModel = target.into();
-            active.archived = Set(1);
-            active.updated_at = Set(now);
-            active.update(&transaction).await?;
-        }
-        transaction.commit().await?;
-        Ok(Some(ArchivedThreadTree {
-            root: archived,
-            removed_thread_ids,
-        }))
-    }
-
-    pub async fn set_thread_mode(
-        &self,
-        thread_id: &str,
-        mode: StudioMode,
-    ) -> Result<Option<ThreadRecord>> {
-        use entities::thread;
-        if let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        {
-            let mut active: thread::ActiveModel = existing.into();
-            active.mode = Set(mode.label().to_string());
-            active.role = Set(mode.root_role().key().to_string());
-            active.updated_at = Set(unix_seconds());
-            let model = active.update(&self.db).await?;
-            return Ok(Some(thread_record(model)?));
-        }
-        Ok(None)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ArchivedThreadTree {
-    pub root: ThreadRecord,
-    pub removed_thread_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::studio) struct ChildThreadSpec {
-    pub id: String,
-    pub parent_thread_id: String,
-    pub agent_path: String,
-    pub role: String,
-    pub title: String,
 }

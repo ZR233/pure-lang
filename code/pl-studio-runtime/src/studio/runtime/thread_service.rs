@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioRole};
 use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
+use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord, ProjectRemoval};
 use crate::{StudioMode, resolve_workspace_root};
 
 use super::{
@@ -41,12 +42,55 @@ impl StudioRuntime {
         self.ensure_persistence_accepts_new_work()?;
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
-        let project = self.store.upsert_project(path).await?;
+        let path_text = path.to_string_lossy().to_string();
+        let name = crate::studio::paths::project_name(path);
+        let now = crate::studio::unix_seconds();
+        // 聚合冷加载：按 path 找到既有行或分配新 id，然后内存先行提交目录 delta。
+        let existing = self.store.find_project_by_path(&path_text).await?;
+        let (record, delta_record) = match existing {
+            Some(existing) => {
+                let delta_record = ProjectDirectoryRecord {
+                    id: existing.id.clone(),
+                    name: name.clone(),
+                    path: path_text.clone(),
+                    created_at: existing.created_at,
+                    updated_at: now,
+                    last_opened_at: Some(now),
+                    closed: false,
+                };
+                let public = ProjectRecord {
+                    id: existing.id.clone(),
+                    name,
+                    path: path_text,
+                    updated_at: now,
+                };
+                (public, delta_record)
+            }
+            None => {
+                let id = crate::studio::ids::new_id("project");
+                let delta_record = ProjectDirectoryRecord {
+                    id: id.clone(),
+                    name: name.clone(),
+                    path: path_text.clone(),
+                    created_at: now,
+                    updated_at: now,
+                    last_opened_at: Some(now),
+                    closed: false,
+                };
+                let public = ProjectRecord {
+                    id,
+                    name,
+                    path: path_text,
+                    updated_at: now,
+                };
+                (public, delta_record)
+            }
+        };
         self.agent_facility
             .product_events
-            .apply_project_entry(project.clone())
+            .commit_directory(DirectoryDelta::upsert_project(delta_record))
             .await?;
-        Ok(project)
+        Ok(record)
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
@@ -55,15 +99,13 @@ impl StudioRuntime {
 
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
         self.ensure_persistence_accepts_new_work()?;
-        let thread = self
-            .store
-            .create_thread(project_id, title, StudioMode::Simple)
-            .await?;
+        let (delta, thread) =
+            DirectoryDelta::register_root_thread(project_id, title, StudioMode::Simple);
         self.agent_facility
             .product_events
-            .apply_thread_delta(vec![thread.clone().into()], Vec::new())
+            .commit_directory(delta)
             .await?;
-        Ok(thread)
+        Ok(ThreadRecord::from_directory_thread(thread))
     }
 
     pub async fn start_new_thread(
@@ -74,15 +116,24 @@ impl StudioRuntime {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
         self.ensure_persistence_accepts_new_work()?;
-        self.store
-            .read_project(&request.project_id)
-            .await?
-            .context("selected Project not found")?;
+        // 校验走内存目录 owner：open_project 的落库是异步跟随的。
+        let projects = self.agent_facility.product_events.project_snapshot().await;
+        anyhow::ensure!(
+            projects
+                .iter()
+                .any(|project| project.id == request.project_id),
+            "selected Project not found"
+        );
 
-        let thread = self
-            .store
-            .create_thread(&request.project_id, &request.title, request.mode)
+        let (delta, thread) =
+            DirectoryDelta::register_root_thread(&request.project_id, &request.title, request.mode);
+        // 目录事实内存先行；SQLite 失败进入持久化降级而不是命令失败
+        // （design/20 §20.4）。
+        self.agent_facility
+            .product_events
+            .commit_directory(delta)
             .await?;
+        let thread = ThreadRecord::from_directory_thread(thread);
         let submission = self
             .submit_prompt_for_owned_thread_with_lifecycle_lock(
                 StudioSubmitPromptRequest {
@@ -106,10 +157,6 @@ impl StudioRuntime {
                 return Err(error);
             }
         };
-        self.agent_facility
-            .product_events
-            .apply_thread_delta(vec![thread.clone().into()], Vec::new())
-            .await?;
         Ok(StudioStartNewThreadResponse { thread, submission })
     }
 
@@ -140,13 +187,17 @@ impl StudioRuntime {
             .get(root_index + 1)
             .or_else(|| root_index.checked_sub(1).and_then(|index| roots.get(index)))
             .cloned();
-        let thread_tree = self
-            .store
-            .list_threads(&thread.project_id)
-            .await?
-            .into_iter()
-            .filter(|candidate| candidate.root_thread_id == thread_id)
-            .collect::<Vec<_>>();
+        // 冷端读出树成员，再叠加热集合中的同 root 条目（尚在落库途中的 child）。
+        let mut thread_tree = self.store.list_threads_for_root(&thread_id).await?;
+        for hot in self
+            .agent_facility
+            .product_events
+            .threads_for_root(&thread_id)
+        {
+            if !thread_tree.iter().any(|candidate| candidate.id == hot.id) {
+                thread_tree.push(ThreadRecord::from_directory_thread(hot));
+            }
+        }
         for candidate in &thread_tree {
             if self.thread_is_busy(&candidate.id).await? {
                 bail!("thread tree has an active turn or pending input");
@@ -156,21 +207,26 @@ impl StudioRuntime {
             let emitter = self.interaction_emitter(candidate.id.clone());
             self.agent_facility
                 .interactions
-                .cancel_thread(&candidate.id, "thread archived", emitter)
+                .cancel_thread(
+                    self.pending_thread_interactions(&candidate.id).await?,
+                    "thread archived",
+                    emitter,
+                )
                 .await?;
         }
-        let Some(archived) = self.store.archive_thread(&thread_id).await? else {
-            return Ok(None);
-        };
-        self.retire_archived_thread_tree(&archived.removed_thread_ids)
-            .await;
+        let removed_thread_ids = thread_tree
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .chain(std::iter::once(thread.id.clone()))
+            .collect::<Vec<_>>();
+        self.retire_archived_thread_tree(&removed_thread_ids).await;
         self.agent_facility
             .product_events
-            .apply_thread_delta(Vec::new(), archived.removed_thread_ids.clone())
+            .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
             .await?;
         Ok(Some(StudioArchiveThreadResult {
-            archived_root_id: archived.root.id,
-            removed_thread_ids: archived.removed_thread_ids,
+            archived_root_id: thread.id,
+            removed_thread_ids,
             next_root,
         }))
     }
@@ -181,28 +237,10 @@ impl StudioRuntime {
             .await
             .err();
         self.residency.remove(thread_id).await;
-        match self.store.archive_thread(thread_id).await {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                let error = anyhow::anyhow!("new Thread disappeared before compensation");
-                if let Some(cleanup_error) = actor_cleanup_error {
-                    return Err(error).context(format!(
-                        "actor cleanup also failed for new Thread {thread_id}: {cleanup_error:#}"
-                    ));
-                }
-                return Err(error);
-            }
-            Err(error) => {
-                if let Some(cleanup_error) = actor_cleanup_error {
-                    return Err(error).context(format!(
-                        "failed to archive new Thread {thread_id}; actor cleanup also failed: {cleanup_error:#}"
-                    ));
-                }
-                return Err(error).context(format!(
-                    "failed to archive new Thread {thread_id} during compensation"
-                ));
-            }
-        }
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.to_string()]))
+            .await?;
         if let Some(error) = actor_cleanup_error {
             return Err(error).context(format!(
                 "new Thread {thread_id} was archived but its actor cleanup failed"
@@ -226,6 +264,9 @@ impl StudioRuntime {
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         self.ensure_persistence_accepts_new_work()?;
+        let Some(project) = self.store.read_project(project_id).await? else {
+            return Ok(None);
+        };
         let thread_ids = self.store.list_project_thread_ids(project_id).await?;
         if self
             .task_runtime
@@ -243,31 +284,32 @@ impl StudioRuntime {
             let emitter = self.interaction_emitter(thread_id.clone());
             self.agent_facility
                 .interactions
-                .cancel_thread(thread_id, "project archived", emitter)
+                .cancel_thread(
+                    self.pending_thread_interactions(thread_id).await?,
+                    "project archived",
+                    emitter,
+                )
                 .await?;
         }
-        let archived = self.store.archive_project(project_id).await?;
-        if archived.is_some() {
-            self.agent_facility
-                .product_events
-                .remove_project_entry(project_id)
-                .await?;
-            self.agent_facility
-                .product_events
-                .apply_thread_delta(Vec::new(), thread_ids)
-                .await?;
-        }
-        Ok(archived)
+        self.retire_archived_thread_tree(&thread_ids).await;
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta {
+                project_removals: vec![ProjectRemoval {
+                    project_id: project.id.clone(),
+                    thread_ids,
+                    closed_at: crate::studio::unix_seconds(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        Ok(Some(project))
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
         self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let thread = self
-            .store
-            .read_thread(thread_id)
-            .await?
-            .context("selected Thread not found")?;
+        let thread = self.read_owned_thread(thread_id).await?;
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can change mode");
         }
@@ -285,11 +327,17 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while the Thread is running or has pending input");
         }
-        let updated_thread = self
-            .store
-            .set_thread_mode(thread_id, mode)
-            .await?
-            .context("selected Thread disappeared while changing mode")?;
+        let mut updated = pl_protocol::Thread::from(thread);
+        updated.mode = pl_protocol::ThreadMode::from(mode);
+        updated.role = mode.root_role().key().to_string();
+        updated.updated_at = crate::studio::unix_seconds();
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta {
+                thread_upserts: vec![updated],
+                ..Default::default()
+            })
+            .await?;
         let desired_role = mode.root_role().id();
         if snapshot.identity.role != desired_role
             && let Err(error) = handle.reconfigure_idle_role(agent_id, desired_role).await
@@ -302,10 +350,6 @@ impl StudioRuntime {
                 "thread mode actor role sync deferred"
             );
         }
-        self.agent_facility
-            .product_events
-            .apply_thread_delta(vec![updated_thread.into()], Vec::new())
-            .await?;
         Ok(())
     }
 
@@ -376,18 +420,16 @@ impl StudioRuntime {
         Ok(self.config_runtime.replace(current.revision, config)?)
     }
 
+    /// 未驻留即不 busy：钉住集合恢复保证有 pending 工作的 Thread 会被恢复，
+    /// LRU 只淘汰空闲且已耐久化的 actor（design/19 §19.6）。
     pub(super) async fn thread_is_busy(&self, thread_id: &str) -> Result<bool> {
-        if let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? {
-            return match handle.snapshot(agent_id).await {
-                Ok(snapshot) => {
-                    Ok(snapshot.active_turn_id().is_some() || snapshot.pending_inputs > 0)
-                }
-                Err(crate::AgentRuntimeError::NotFound(_)) => {
-                    self.store.thread_has_active_work(thread_id).await
-                }
-                Err(error) => Err(anyhow::anyhow!(error)),
-            };
+        let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? else {
+            return Ok(false);
+        };
+        match handle.snapshot(agent_id).await {
+            Ok(snapshot) => Ok(snapshot.active_turn_id().is_some() || snapshot.pending_inputs > 0),
+            Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(false),
+            Err(error) => Err(anyhow::anyhow!(error)),
         }
-        self.store.thread_has_active_work(thread_id).await
     }
 }

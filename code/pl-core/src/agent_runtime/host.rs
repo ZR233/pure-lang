@@ -228,8 +228,9 @@ impl AgentCommittedEvent {
 /// ThreadActor 使用的持久化端口。
 ///
 /// 内存 snapshot 是进程内唯一权威实例。`commit` 只把已经决定的事实加入
-/// 进程内待落库队列；SQLite 结果不得控制业务转换。`flush_pending` 与
-/// `pending_commit_count` 只供淘汰、不可逆外部动作和正常关机使用。
+/// 进程内待落库队列；SQLite 结果不得控制业务转换。`await_durable` 与
+/// `pending_commit_count` 只供淘汰、不可逆外部动作和正常关机使用；耐久屏障
+/// 只有显式目标修订号一种形式，全局排空属于宿主关机流程。
 pub trait ThreadRepository: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
@@ -249,15 +250,6 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
     fn commit(
         &self,
         commit: ThreadCommit,
-    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
-
-    /// 等待当前全部（或指定 Thread 的）pending commit 完成落库。
-    ///
-    /// LRU 淘汰与关机必须在 drop actor 之前调用；writer 已停止或存在不可恢复
-    /// 落库失败时返回错误。
-    fn flush_pending(
-        &self,
-        thread_id: Option<&super::ThreadId>,
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     /// 等待指定 Thread 的目标运行时修订号完成耐久化。

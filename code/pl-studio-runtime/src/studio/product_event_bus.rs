@@ -19,18 +19,25 @@ use crate::{
     StudioThreadDirectoryState, StudioUpdateStateSnapshot,
 };
 
-use super::{StudioStore, ids::unix_seconds};
+use super::StudioStore;
+use super::agent_host::ThreadWriteBehindWriter;
+use super::ids::unix_seconds;
+use super::merged_page::{HotColdEntry, merge_page_desc};
+use super::store::directory::{DirectoryDelta, RegisteredChildThread, ThreadDirectoryCursor};
 
-/// Thread directory 分页的默认页大小上限。
+/// Thread 目录分页的默认页大小上限。
 const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
 
 /// Studio 低频产品状态 owner 与事件通道。
 ///
-/// 启动时以 SQLite 建立恢复基线；运行期间 Project、Thread、Task 与 Agent 目录快照
-/// 都由内存增量提交维护。所有 `read_*` 都是纯查询，活动事件不得回读数据库覆盖热事实。
+/// 启动时以 SQLite 建立 Project 小集合基线；运行期间 Project、Thread、Task 与
+/// Agent 目录快照都由内存增量提交维护。所有 `read_*` 都是纯查询，活动事件不得
+/// 回读数据库覆盖热事实。Thread 目录是"活动热集合 + SQLite 冷分页 overlay"：
+/// `thread_index` 只保存仍有内存事实的 Thread，旧数据分页回源 SQLite。
 #[derive(Clone)]
 pub struct ProductEventBus {
     store: StudioStore,
+    writer: ThreadWriteBehindWriter,
     tx: broadcast::Sender<StudioProductEventEnvelope>,
     sequence: Arc<AtomicU64>,
     revisions: Arc<ProductStateRevisions>,
@@ -38,7 +45,8 @@ pub struct ProductEventBus {
     project_snapshot: Arc<Mutex<Vec<crate::ProjectRecord>>>,
     persistence_snapshot: Arc<std::sync::Mutex<PersistenceStateSnapshot>>,
     agents: Arc<Mutex<BTreeMap<String, StudioAgentDirectoryEntry>>>,
-    /// 常驻内存 Thread 目录索引（thread id → 列表元数据）。
+    /// 活动热集合（thread id → 列表元数据）：驻留/钉住/活动 Task root 与
+    /// 目录 delta 尚未耐久化的 Thread；不含纯冷数据。
     thread_index: Arc<std::sync::Mutex<HashMap<String, Thread>>>,
 }
 
@@ -57,11 +65,24 @@ struct DomainRevision {
     updated_at: AtomicI64,
 }
 
+impl HotColdEntry for Thread {
+    type Key = (i64, String);
+
+    fn page_key(&self) -> Self::Key {
+        (self.updated_at, self.id.clone())
+    }
+
+    fn entry_id(&self) -> &str {
+        &self.id
+    }
+}
+
 impl ProductEventBus {
-    pub fn new(store: StudioStore) -> Self {
+    pub(in crate::studio) fn new(store: StudioStore, writer: ThreadWriteBehindWriter) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
             store,
+            writer,
             tx,
             sequence: Arc::new(AtomicU64::new(0)),
             revisions: Arc::new(ProductStateRevisions::default()),
@@ -95,7 +116,10 @@ impl ProductEventBus {
         envelope
     }
 
-    /// 启动命令显式建立目录初始 revision 与内存目录索引；普通 read 不改变 revision。
+    /// 启动命令显式建立目录初始 revision 与 Project 小集合；普通 read 不改变 revision。
+    ///
+    /// Thread 目录不做启动全量装载：活动热集合由钉住集合恢复、活动 Task root
+    /// 与运行期目录 delta 构成，旧数据在分页查询时回源 SQLite。
     pub async fn initialize_directories(&self) -> Result<()> {
         self.initialize_revision(&self.revisions.project);
         self.initialize_revision(&self.revisions.thread);
@@ -104,30 +128,11 @@ impl ProductEventBus {
         self.initialize_revision(&self.revisions.recovery);
         *self.task_snapshot.lock().await = Some(Vec::new());
         *self.project_snapshot.lock().await = self.store.list_projects().await?;
-        let index_threads = self.load_index_threads().await?;
-        let mut index = self
-            .thread_index
+        self.thread_index
             .lock()
-            .expect("thread index lock poisoned");
-        index.clear();
-        for thread in index_threads {
-            index.insert(thread.id.clone(), thread);
-        }
+            .expect("thread index lock poisoned")
+            .clear();
         Ok(())
-    }
-
-    async fn load_index_threads(&self) -> Result<Vec<Thread>> {
-        let mut threads = Vec::new();
-        for project in self.store.list_projects().await? {
-            threads.extend(
-                self.store
-                    .list_threads(&project.id)
-                    .await?
-                    .into_iter()
-                    .map(Into::into),
-            );
-        }
-        Ok(threads)
     }
 
     pub async fn read_project_directory(&self) -> Result<StudioProjectDirectoryState> {
@@ -156,40 +161,57 @@ impl ProductEventBus {
         })
     }
 
-    /// 从内存目录索引按 `(updatedAt, id)` 倒序 keyset 分页。
+    /// 会话列表分页：SQLite 冷分页 + 活动热集合 overlay。
+    ///
+    /// 同 ID 热条目覆盖冷行，cursor 键排重；与 Turn 历史共用
+    /// [`merge_page_desc`] 合并核心。热集合条目可能尚未耐久化，冷页查询
+    /// 以 `limit + 1` 判定 has_more。
     pub async fn read_thread_directory_page(
         &self,
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<StudioThreadDirectoryPage> {
         let limit = limit.clamp(1, THREAD_DIRECTORY_PAGE_LIMIT);
-        let threads = self.sorted_thread_index();
-        let remaining = match cursor.and_then(decode_thread_cursor) {
-            Some(cursor_key) => threads
-                .into_iter()
-                .skip_while(|thread| thread_cursor_key(thread) >= cursor_key)
-                .collect::<Vec<_>>(),
-            None => threads,
-        };
-        let has_more = remaining.len() > limit;
-        let page = remaining.into_iter().take(limit).collect::<Vec<_>>();
-        let next_cursor = if has_more {
-            page.last().map(encode_thread_cursor)
-        } else {
-            None
-        };
+        let decoded = cursor.and_then(ThreadDirectoryCursor::decode);
+        let cursor_key = decoded
+            .as_ref()
+            .map(|cursor| (cursor.updated_at, cursor.id.clone()));
+        let cold = self
+            .store
+            .list_thread_directory_page(decoded.as_ref(), limit.saturating_add(1))
+            .await?;
+        let has_more = cold.len() > limit;
+        let hot = self
+            .thread_index
+            .lock()
+            .expect("thread index lock poisoned")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut merged = merge_page_desc(hot, cold, cursor_key.as_ref());
+        let has_more = has_more || merged.len() > limit;
+        merged.truncate(limit);
+        let next_cursor = has_more
+            .then(|| {
+                merged.last().map(|thread| ThreadDirectoryCursor {
+                    updated_at: thread.updated_at,
+                    id: thread.id.clone(),
+                })
+            })
+            .flatten()
+            .map(|cursor| cursor.encode());
         Ok(StudioThreadDirectoryPage {
             state: self.resource(
                 &self.revisions.thread,
                 StudioThreadDirectoryPageData {
-                    threads: page,
+                    threads: merged,
                     next_cursor,
                 },
             ),
         })
     }
 
-    /// 应用一次目录增量并发布 `ThreadDirectoryChanged` 事件。
+    /// 应用一次目录增量并发布 `ThreadDirectoryChanged` 事件（纯内存维护）。
     pub async fn apply_thread_delta(
         &self,
         upserted: Vec<Thread>,
@@ -219,6 +241,47 @@ impl ProductEventBus {
         )))
     }
 
+    /// 提交一次目录事实：先入 write-behind 队列，再更新内存热集合并广播事件。
+    ///
+    /// 这是 Thread/Project 目录 mutation 的唯一命令通道；SQLite 失败只影响
+    /// 持久化健康状态（Degraded/Blocked），内存事实保持已发布状态。
+    pub(in crate::studio) async fn commit_directory(
+        &self,
+        delta: DirectoryDelta,
+    ) -> Result<StudioProductEventEnvelope> {
+        self.writer.enqueue_directory(delta.clone()).await?;
+        let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
+            delta.thread_upserts.clone(),
+            delta
+                .thread_removals
+                .iter()
+                .flat_map(|removal| removal.thread_ids.iter().cloned())
+                .chain(
+                    delta
+                        .project_removals
+                        .iter()
+                        .flat_map(|removal| removal.thread_ids.iter().cloned()),
+                )
+                .collect(),
+        );
+        let envelope = self
+            .apply_thread_delta(thread_upserts, thread_removals)
+            .await?;
+        for project in &delta.project_upserts {
+            self.apply_project_entry(crate::ProjectRecord {
+                id: project.id.clone(),
+                name: project.name.clone(),
+                path: project.path.clone(),
+                updated_at: project.updated_at,
+            })
+            .await?;
+        }
+        for removal in &delta.project_removals {
+            self.remove_project_entry(&removal.project_id).await?;
+        }
+        Ok(envelope)
+    }
+
     fn sorted_thread_index(&self) -> Vec<Thread> {
         let mut threads = self
             .thread_index
@@ -236,13 +299,45 @@ impl ProductEventBus {
         threads
     }
 
-    /// 从常驻内存目录读取活动 Thread 元数据，不触发 SQLite 冷读取。
+    /// 从活动热集合读取 Thread 元数据；纯冷数据请走分页冷查询。
     pub(in crate::studio) fn thread_snapshot(&self, thread_id: &str) -> Option<Thread> {
         self.thread_index
             .lock()
             .expect("thread index lock poisoned")
             .get(thread_id)
             .cloned()
+    }
+
+    /// 注册一个 child Thread：热集合先行更新（spawn 后的首轮 turn 立即可读），
+    /// durable delta 经 write-behind 跟随。
+    pub(in crate::studio) async fn register_child_thread(
+        &self,
+        spec: RegisteredChildThread,
+    ) -> Result<()> {
+        let delta = DirectoryDelta::register_child_thread(spec);
+        self.writer.enqueue_directory(delta.clone()).await?;
+        self.apply_thread_delta(delta.thread_upserts, Vec::new())
+            .await?;
+        Ok(())
+    }
+
+    /// 热集合移除一个已耐久化且不再活动的 Thread 条目（LRU 淘汰路径）。
+    pub(in crate::studio) fn evict_thread_entry(&self, thread_id: &str) {
+        self.thread_index
+            .lock()
+            .expect("thread index lock poisoned")
+            .remove(thread_id);
+    }
+
+    /// 热集合中属于指定 root 的全部条目（树归档时叠加尚未落库的 child）。
+    pub(in crate::studio) fn threads_for_root(&self, root_thread_id: &str) -> Vec<Thread> {
+        self.thread_index
+            .lock()
+            .expect("thread index lock poisoned")
+            .values()
+            .filter(|thread| thread.root_thread_id == root_thread_id)
+            .cloned()
+            .collect()
     }
 
     pub async fn read_task_directory(&self) -> Result<StudioTaskDirectoryState> {
@@ -498,64 +593,48 @@ impl ProductEventBus {
     }
 }
 
-type ThreadCursorKey = (i64, String);
-
-fn thread_cursor_key(thread: &Thread) -> ThreadCursorKey {
-    (thread.updated_at, thread.id.clone())
-}
-
-fn encode_thread_cursor(thread: &Thread) -> String {
-    format!("v1:{}:{}", thread.updated_at, thread.id)
-}
-
-fn decode_thread_cursor(cursor: &str) -> Option<ThreadCursorKey> {
-    let rest = cursor.strip_prefix("v1:")?;
-    let (updated_at, id) = rest.split_once(':')?;
-    Some((updated_at.parse().ok()?, id.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::agent_host::ThreadWriteBehindWriter;
     use super::*;
 
-    async fn seed_directory_threads(count: i64) -> ProductEventBus {
+    async fn memory_bus() -> (StudioStore, ProductEventBus) {
         let store = StudioStore::open_memory().await.expect("memory store");
-        let runtime = ProductEventBus::new(store.clone());
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("pure-directory-{unique}"));
-        let project = store.upsert_project(&workspace).await.expect("project");
+        let bus = ProductEventBus::new(store.clone(), ThreadWriteBehindWriter::new(store.clone()));
+        bus.initialize_directories().await.expect("directories");
+        (store, bus)
+    }
+
+    async fn seed_cold_threads(store: &StudioStore, project_id: &str, count: i64) {
         for index in 0..count {
             store
                 .create_thread(
-                    &project.id,
+                    project_id,
                     &format!("Session {index}"),
                     crate::StudioMode::Simple,
                 )
                 .await
                 .expect("thread");
         }
-        runtime.initialize_directories().await.expect("directories");
-        runtime
+    }
+
+    async fn seed_project(store: &StudioStore) -> crate::ProjectRecord {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("pure-directory-{unique}"));
+        store.upsert_project(&workspace).await.expect("project")
     }
 
     #[tokio::test]
     async fn project_directory_changes_only_when_the_memory_owner_applies_a_fact() {
-        let store = StudioStore::open_memory().await.expect("memory store");
-        let runtime = ProductEventBus::new(store.clone());
-        runtime.initialize_directories().await.expect("directories");
-        let workspace = std::env::temp_dir().join("pure-project-memory-owner");
-        let project = store.upsert_project(&workspace).await.expect("project");
+        let (store, runtime) = memory_bus().await;
+        let project = seed_project(&store).await;
         runtime
             .apply_project_entry(project.clone())
             .await
             .expect("hot project");
-        store
-            .quarantine_project(&project.id)
-            .await
-            .expect("cold archive");
 
         let hot = runtime
             .read_project_directory()
@@ -581,8 +660,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_directory_page_walks_keyset_cursor_without_overlap() {
-        let runtime = seed_directory_threads(7).await;
+    async fn thread_directory_page_walks_cold_keyset_cursor_without_overlap() {
+        let (store, runtime) = memory_bus().await;
+        let project = seed_project(&store).await;
+        seed_cold_threads(&store, &project.id, 7).await;
+
         let first = runtime
             .read_thread_directory_page(None, 3)
             .await
@@ -613,31 +695,68 @@ mod tests {
         let third_data = third.state.value().expect("ready third page");
         assert_eq!(third_data.threads.len(), 1);
         assert!(third_data.next_cursor.is_none());
-
-        let all = runtime.read_thread_directory().await.expect("full read");
-        assert_eq!(all.state.value().expect("ready directory").threads.len(), 7);
     }
 
     #[tokio::test]
-    async fn thread_delta_updates_index_and_emits_removed_ids() {
-        let runtime = seed_directory_threads(1).await;
-        let threads = runtime.read_thread_directory().await.expect("read");
-        let thread = threads
-            .state
-            .value()
-            .expect("ready directory")
-            .threads
-            .first()
-            .expect("seeded thread")
-            .clone();
+    async fn hot_entries_overlay_cold_rows_and_fill_the_pending_window() {
+        let (store, runtime) = memory_bus().await;
+        let project = seed_project(&store).await;
+        seed_cold_threads(&store, &project.id, 3).await;
 
+        // 冷端第二页条目：一个被热事实覆盖，一个保持冷态。
+        let cold = store
+            .list_thread_directory_page(None, 10)
+            .await
+            .expect("cold page");
+        let oldest = cold.last().expect("oldest cold thread").clone();
+        let middle = cold[1].clone();
+        let mut hot_overlay = middle.clone();
+        hot_overlay.title = "hot refreshed".to_string();
+        hot_overlay.updated_at += 100;
+        // 尚未落库的新 Thread 只存在于热集合。
+        let mut pending = oldest.clone();
+        pending.id = format!("{}-new", pending.id);
+        pending.agent_path = pending.id.clone();
+        pending.updated_at += 200;
+
+        runtime
+            .apply_thread_delta(vec![hot_overlay.clone(), pending.clone()], Vec::new())
+            .await
+            .expect("hot delta");
+
+        let page = runtime
+            .read_thread_directory_page(None, 10)
+            .await
+            .expect("page");
+        let threads = page.state.value().expect("ready page").threads.clone();
+        assert_eq!(threads.len(), 4);
+        // 热覆盖胜出且位于其新 key 位置；未落库条目参与排序。
+        assert_eq!(threads.first().unwrap().id, pending.id);
+        assert_eq!(threads[1].id, hot_overlay.id);
+        assert_eq!(threads[1].title, "hot refreshed");
+        // 同 id 冷行被覆盖，不重复出现。
+        assert_eq!(threads.iter().filter(|t| t.id == hot_overlay.id).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn hot_removal_leaves_only_cold_entries_in_pages() {
+        let (store, runtime) = memory_bus().await;
+        let project = seed_project(&store).await;
+        seed_cold_threads(&store, &project.id, 1).await;
+        let cold = store
+            .list_thread_directory_page(None, 10)
+            .await
+            .expect("cold page");
+        let thread = cold.first().expect("seeded thread").clone();
+
+        // 热集合移除（归档/淘汰）后条目回到纯冷态，仍由冷分页可见。
         runtime
             .apply_thread_delta(Vec::new(), vec![thread.id.clone()])
             .await
             .expect("delta");
-        let after = runtime.read_thread_directory().await.expect("read");
+        let hot_only = runtime.read_thread_directory().await.expect("hot read");
         assert!(
-            after
+            hot_only
                 .state
                 .value()
                 .expect("ready directory")
@@ -650,7 +769,7 @@ mod tests {
             .await
             .expect("page");
         let page = page.state.value().expect("ready page");
-        assert!(page.threads.is_empty());
-        assert!(page.next_cursor.is_none());
+        assert_eq!(page.threads.len(), 1);
+        assert_eq!(page.threads.first().unwrap().id, thread.id);
     }
 }

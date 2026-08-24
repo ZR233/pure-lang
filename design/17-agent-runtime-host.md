@@ -68,7 +68,10 @@ pl-core 只保留三个窄端口：
 
 - `ThreadRepository`：纯持久化端口，接收已经由 ThreadActor 提交的
   Thread/Turn/Item/Input/Interaction 批次，提供耐久修订号、待写查询、显式屏障和惰性恢复读取；
-  它不返回业务转换结果，也不决定内存提交是否成立。
+  它不返回业务转换结果，也不决定内存提交是否成立。耐久屏障只有一种形式：显式
+  `awaitDurable(threadId, revision)`；端口不提供按线程的无目标 flush，全局排空只属于宿主关机
+  流程。实现侧 repository 与 TaskRuntime 共享同一个进程级 writer 实例，恢复出的耐久基线必须
+  seed 进该共享实例，不构造只读用的第二 writer。
 - `TurnFactory`：准备 TurnEngine、request、instructions、tools 与 execution policy。
 - `ChildLifecycle`：为 child Thread 准备/释放产品外部资源；Task 实现可以拒绝不安全的 close。
 

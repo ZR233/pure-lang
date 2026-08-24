@@ -4,7 +4,6 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::resolve_workspace_root;
-use crate::studio::agent_host::StudioAgentRepository;
 use crate::studio::{
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope,
@@ -45,9 +44,10 @@ impl StudioRuntime {
         &self,
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        let failures = StudioAgentRepository::new(self.store.clone())
-            .audit_registered_sessions()
-            .await?;
+        let Some(repository) = self.persistence_repository().await else {
+            return Ok(());
+        };
+        let failures = repository.audit_registered_sessions().await?;
         let mut failures_by_root = BTreeMap::<(String, String), Vec<_>>::new();
         for failure in failures {
             failures_by_root

@@ -61,24 +61,6 @@ impl StudioStore {
         Ok(UnregisteredThreadFault::Faulted)
     }
 
-    /// 只读判断 durable Thread 是否仍有活动 Turn 或未消费输入。
-    pub(in crate::studio) async fn thread_has_active_work(&self, thread_id: &str) -> Result<bool> {
-        let active_turn = turn::Entity::find()
-            .filter(turn::Column::ThreadId.eq(thread_id))
-            .filter(turn::Column::StateKind.is_in(["queued", "running"]))
-            .one(&self.db)
-            .await?;
-        if active_turn.is_some() {
-            return Ok(true);
-        }
-        Ok(thread_input::Entity::find()
-            .filter(thread_input::Column::ThreadId.eq(thread_id))
-            .filter(thread_input::Column::StateKind.ne("consumed"))
-            .one(&self.db)
-            .await?
-            .is_some())
-    }
-
     pub(in crate::studio) async fn reset_agent_sessions_for_root(
         &self,
         root_thread_id: &str,

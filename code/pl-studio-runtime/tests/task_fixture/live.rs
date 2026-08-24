@@ -20,6 +20,7 @@ pub struct LiveTaskFixture {
     pub runtime: StudioRuntime,
     pub store: StudioStore,
     pub workspace: PathBuf,
+    pub studio_home: PathBuf,
     pub thread_id: String,
     project_id: String,
     route_diagnostics: String,
@@ -30,6 +31,15 @@ pub struct LiveTaskFixture {
 
 impl LiveTaskFixture {
     pub async fn new() -> Result<Self> {
+        Self::new_with_mode(StudioMode::Task, "Live headless shooter task", true).await
+    }
+
+    /// `require_node` 为 false 时用于不依赖 Node.js 验收的 Simple 模式 live 流程。
+    pub async fn new_with_mode(
+        mode: StudioMode,
+        thread_title: &str,
+        require_node: bool,
+    ) -> Result<Self> {
         let installed_config = InstalledConfigGuard::load()?;
         let config = &installed_config.config;
         let route_diagnostics = StudioRole::all()
@@ -46,8 +56,12 @@ impl LiveTaskFixture {
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
-        let node_version = command_output(None, "node", &["--version"])
-            .context("Node.js is required before starting the live model test")?;
+        let node_version = if require_node {
+            command_output(None, "node", &["--version"])
+                .context("Node.js is required before starting the live model test")?
+        } else {
+            "not required".to_string()
+        };
 
         let root = TempRoot::new("pure-task-live-integration")?;
         let studio_home = root.path.join("home");
@@ -89,20 +103,17 @@ impl LiveTaskFixture {
         runtime.start_runtime().await?;
         let store = StudioStore::open(studio_home.join("studio/studio.sqlite")).await?;
         let project = runtime.open_project(&workspace).await?;
-        let session = runtime
-            .create_thread(&project.id, "Live headless shooter task")
-            .await?;
-        runtime
-            .set_thread_mode(&session.id, StudioMode::Task)
-            .await?;
+        let session = runtime.create_thread(&project.id, thread_title).await?;
+        runtime.set_thread_mode(&session.id, mode).await?;
 
-        eprintln!("live Task model routes:\n{route_diagnostics}");
+        eprintln!("live model routes:\n{route_diagnostics}");
         eprintln!("Node.js: {node_version}");
 
         Ok(Self {
             runtime,
             store,
-            workspace,
+            workspace: workspace.clone(),
+            studio_home,
             thread_id: session.id,
             project_id: project.id,
             route_diagnostics,
@@ -194,24 +205,23 @@ impl LiveTaskFixture {
                     );
                 }
             }
-            let child_is_active =
-                self.store
-                    .list_threads(&self.project_id)
-                    .await?
-                    .iter()
-                    .any(|thread| {
-                        thread.root_thread_id == self.thread_id
-                            && thread.parent_thread_id.is_some()
-                            && matches!(
-                                thread.status,
-                                pl_protocol::ThreadStatus::Queued
-                                    | pl_protocol::ThreadStatus::Running
-                                    | pl_protocol::ThreadStatus::WaitingTool
-                                    | pl_protocol::ThreadStatus::WaitingInteraction
-                                    | pl_protocol::ThreadStatus::Cancelling
-                                    | pl_protocol::ThreadStatus::Closing
-                            )
-                    });
+            let child_is_active = self
+                .store
+                .list_threads_for_root(&self.thread_id)
+                .await?
+                .iter()
+                .any(|thread| {
+                    thread.parent_thread_id.is_some()
+                        && matches!(
+                            thread.status,
+                            pl_protocol::ThreadStatus::Queued
+                                | pl_protocol::ThreadStatus::Running
+                                | pl_protocol::ThreadStatus::WaitingTool
+                                | pl_protocol::ThreadStatus::WaitingInteraction
+                                | pl_protocol::ThreadStatus::Cancelling
+                                | pl_protocol::ThreadStatus::Closing
+                        )
+                });
 
             if self
                 .runtime

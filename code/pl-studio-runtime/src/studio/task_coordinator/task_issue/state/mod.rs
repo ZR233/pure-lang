@@ -127,13 +127,6 @@ impl TaskIssueState {
         }
     }
 
-    pub(crate) const fn disposition(&self) -> TaskIssueDisposition {
-        match self {
-            Self::OpenRecoverable(_) | Self::Resolved(_) => TaskIssueDisposition::Recoverable,
-            Self::OpenFatal(_) => TaskIssueDisposition::Fatal,
-        }
-    }
-
     pub(crate) fn failure(&self) -> &TurnFailure {
         match self {
             Self::OpenRecoverable(state) | Self::OpenFatal(state) => state.failure(),

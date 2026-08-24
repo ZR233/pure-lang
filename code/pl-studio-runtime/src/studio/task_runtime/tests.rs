@@ -41,9 +41,15 @@ async fn sqlite_mutation_does_not_override_resident_hot_task() {
         })
         .await
         .expect("task run");
-    let events = ProductEventBus::new(store.clone());
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
     let runtime = TaskRuntime::new(store.clone(), events);
-    runtime.initialize().await.expect("initialize runtime");
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     assert!(matches!(
         runtime.snapshot(&thread.id).await.unwrap().state,
         StudioTaskState::Planning(_)
@@ -75,9 +81,15 @@ async fn hot_task_commits_publish_before_explicit_durability_barrier() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let events = ProductEventBus::new(store.clone());
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
     let runtime = TaskRuntime::new(store.clone(), events);
-    runtime.initialize().await.expect("initialize runtime");
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     let writer = runtime.writer();
 
     let created = runtime
@@ -127,9 +139,15 @@ async fn terminal_task_evicts_only_after_durability_and_cold_activates_again() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let events = ProductEventBus::new(store.clone());
-    let runtime = TaskRuntime::new(store, events.clone());
-    runtime.initialize().await.expect("initialize runtime");
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
+    let runtime = TaskRuntime::new(store.clone(), events.clone());
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -191,8 +209,17 @@ async fn faulted_root_terminalizes_task_once_as_fatal() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let runtime = TaskRuntime::new(store.clone(), ProductEventBus::new(store));
-    runtime.initialize().await.expect("initialize runtime");
+    let runtime = TaskRuntime::new(
+        store.clone(),
+        ProductEventBus::new(
+            store.clone(),
+            crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+        ),
+    );
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -249,8 +276,17 @@ async fn faulted_executor_fails_work_unit_and_leaves_one_hot_planner_wake() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let runtime = TaskRuntime::new(store.clone(), ProductEventBus::new(store));
-    runtime.initialize().await.expect("initialize runtime");
+    let runtime = TaskRuntime::new(
+        store.clone(),
+        ProductEventBus::new(
+            store.clone(),
+            crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+        ),
+    );
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     let run = runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -388,8 +424,17 @@ async fn faulted_reviewer_fails_review_and_wakes_healthy_planner() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let runtime = TaskRuntime::new(store.clone(), ProductEventBus::new(store));
-    runtime.initialize().await.expect("initialize runtime");
+    let runtime = TaskRuntime::new(
+        store.clone(),
+        ProductEventBus::new(
+            store.clone(),
+            crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+        ),
+    );
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -514,9 +559,15 @@ async fn child_fact_commit_advances_run_revision_and_noop_replay_does_not_advanc
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let events = ProductEventBus::new(store.clone());
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
     let runtime = TaskRuntime::new(store.clone(), events);
-    runtime.initialize().await.expect("initialize runtime");
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     let created = runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -606,9 +657,15 @@ async fn planner_wake_is_computed_and_deduplicated_from_hot_task_facts() {
         .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .expect("thread");
-    let events = ProductEventBus::new(store.clone());
-    let runtime = TaskRuntime::new(store, events);
-    runtime.initialize().await.expect("initialize runtime");
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
+    let runtime = TaskRuntime::new(store.clone(), events);
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
     let run = runtime
         .create_task(CreateTaskRun {
             project_id: project.id,
@@ -699,4 +756,80 @@ async fn planner_wake_is_computed_and_deduplicated_from_hot_task_facts() {
             .is_empty()
     );
     runtime.writer().shutdown().await.expect("shutdown writer");
+}
+
+#[tokio::test]
+async fn initialize_loads_only_non_terminal_task_aggregates() {
+    let store = StudioStore::open_memory().await.expect("memory store");
+    let workspace = std::env::temp_dir().join("pure-task-runtime-active-only");
+    let project = store.upsert_project(&workspace).await.expect("project");
+    let active = store
+        .create_thread(&project.id, "Active", StudioMode::Task)
+        .await
+        .expect("thread");
+    let finished = store
+        .create_thread(&project.id, "Finished", StudioMode::Task)
+        .await
+        .expect("thread");
+    for thread in [&active, &finished] {
+        store
+            .create_task_run(CreateTaskRun {
+                project_id: project.id.clone(),
+                root_thread_id: thread.id.clone(),
+                request: "implement".to_string(),
+                workspace_root: workspace.to_string_lossy().to_string(),
+            })
+            .await
+            .expect("task run");
+    }
+    // 直接把第二个 run 写成终态行（Completed 是六状态中唯一终态）。
+    let finished_run = store
+        .find_active_task_run_for_root_thread(&finished.id)
+        .await
+        .expect("query")
+        .expect("seeded run");
+    let finished_task = store
+        .read_task_run(&finished_run.id)
+        .await
+        .expect("read seeded run")
+        .expect("seeded run row");
+    let completed = finished_task
+        .state
+        .complete(super::super::task_coordinator::TaskOutcome::Succeeded {
+            summary: "done".to_string(),
+            completed_at: 1,
+            review_gate: super::super::task_coordinator::TaskReviewGate::NotRequiredNoDelivery,
+        })
+        .expect("complete decision");
+    sea_orm::ConnectionTrait::execute_unprepared(
+        store.database(),
+        &format!(
+            "UPDATE task_runs SET state_json = '{}' WHERE id = '{}'",
+            serde_json::to_string(&completed).unwrap(),
+            finished_run.id
+        ),
+    )
+    .await
+    .unwrap();
+
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
+    let runtime = TaskRuntime::new(store.clone(), events);
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
+
+    // 终态 Task 不参与启动装载；它保持冷数据，经显式 activate 可再驻留。
+    assert!(runtime.snapshot(&active.id).await.is_some());
+    assert!(runtime.snapshot(&finished.id).await.is_none());
+    assert!(
+        runtime
+            .activate(&finished.id)
+            .await
+            .expect("cold activate")
+            .is_some()
+    );
 }

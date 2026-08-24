@@ -4,6 +4,7 @@ use std::path::PathBuf;
 mod agent_framework;
 pub(super) mod attachment;
 pub(in crate::studio) mod conversation_recovery;
+pub(in crate::studio) mod directory;
 mod error;
 pub(in crate::studio) mod history;
 mod interaction;
@@ -20,7 +21,6 @@ pub struct StudioStore {
 
 pub(in crate::studio) use agent_framework::UnregisteredThreadFault;
 pub use error::StudioDatabaseError;
-pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db

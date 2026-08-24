@@ -53,6 +53,7 @@ impl StudioAgentHost {
             repository,
             turn_factory: StudioAgentTurnFactory::new(
                 store.clone(),
+                product_events.clone(),
                 config_runtime,
                 mcp_runtime,
                 mcp_shared_tools,
@@ -64,6 +65,7 @@ impl StudioAgentHost {
             ),
             lifecycle: StudioAgentLifecycle::new(
                 store.clone(),
+                product_events.clone(),
                 coordinator.clone(),
                 resources.clone(),
             ),

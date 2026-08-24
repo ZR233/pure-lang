@@ -107,13 +107,23 @@ impl StudioRuntime {
             snapshot.thread = self.read_protocol_thread(thread_id).await?;
             return Ok(snapshot);
         }
-        StudioAgentRepository::for_reads(self.store.clone())
+        self.persistence_repository()
+            .await
+            .context("Studio persistence writer is unavailable")?
             .read_thread_snapshot(thread_id)
             .await?
             .context("selected Thread not found")
     }
 
+    /// 查询路径使用的只读 repository 句柄（共享进程级 writer 的实例）。
+    pub(in crate::studio) async fn persistence_repository(&self) -> Option<StudioAgentRepository> {
+        self.agent_facility.persistence.lock().await.clone()
+    }
+
     /// 返回已存在 actor 的 handle；查询路径不得初始化 framework 或注册 actor。
+    ///
+    /// Studio Thread 的 runtime 身份恒等于其 Thread id（design/17 注册约定），
+    /// 因此驻留判定只看 runtime 目录；热集合未命中不阻断冷数据查询。
     pub(crate) async fn try_get_thread_handle(
         &self,
         thread_id: &str,
@@ -121,12 +131,7 @@ impl StudioRuntime {
         let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
             return Ok(None);
         };
-        let thread = self
-            .agent_facility
-            .product_events
-            .thread_snapshot(thread_id)
-            .context("selected Thread not found in the in-memory directory")?;
-        let agent_id = pl_core::ThreadId::new(thread.agent_path)?;
+        let agent_id = pl_core::ThreadId::new(thread_id.to_string())?;
         let handle = framework.handle();
         let is_registered = handle
             .directory_snapshot()
@@ -140,10 +145,18 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<pl_protocol::Thread> {
-        self.agent_facility
+        if let Some(thread) = self
+            .agent_facility
             .product_events
             .thread_snapshot(thread_id)
-            .context("selected Thread not found in the in-memory directory")
+        {
+            return Ok(thread);
+        }
+        // 冷数据回源：未驻留 Thread 的目录元数据从 SQLite 读取。
+        let Some(record) = self.store.read_thread(thread_id).await? else {
+            return Err(anyhow::anyhow!("selected Thread not found"));
+        };
+        Ok(pl_protocol::Thread::from(record))
     }
 
     pub(super) async fn start_lsp_state_watcher(&self) {
@@ -186,25 +199,14 @@ impl StudioRuntime {
             if self.residency.is_pinned(&thread_id) {
                 continue;
             }
-            let thread = self
-                .agent_facility
-                .product_events
-                .thread_snapshot(&thread_id);
-            let (agent_id, root_thread_id) = match thread {
-                Some(record) => match pl_core::ThreadId::new(record.agent_path) {
-                    Ok(agent_id) => (agent_id, record.root_thread_id),
-                    Err(error) => {
-                        tracing::warn!(
-                            thread_id = %thread_id,
-                            error_bytes = error.to_string().len(),
-                            "resident thread has an invalid agent path"
-                        );
-                        self.residency.remove(&thread_id).await;
-                        continue;
-                    }
-                },
-                None => {
-                    // Thread 已删除/归档；从驻留队列清除。
+            let agent_id = match pl_core::ThreadId::new(thread_id.clone()) {
+                Ok(agent_id) => agent_id,
+                Err(error) => {
+                    tracing::warn!(
+                        thread_id = %thread_id,
+                        error_bytes = error.to_string().len(),
+                        "resident thread has an invalid agent path"
+                    );
                     self.residency.remove(&thread_id).await;
                     continue;
                 }
@@ -231,7 +233,16 @@ impl StudioRuntime {
                     match handle.evict_agent(agent_id).await {
                         Ok(()) => {
                             self.residency.remove(&thread_id).await;
-                            let _ = self.task_runtime.evict_durable(&root_thread_id).await;
+                            // 耐久化完成后热集合条目退回冷数据，由分页查询回源。
+                            self.agent_facility
+                                .product_events
+                                .evict_thread_entry(&thread_id);
+                            if let Ok(Some(record)) = self.store.read_thread(&thread_id).await {
+                                let _ = self
+                                    .task_runtime
+                                    .evict_durable(&record.root_thread_id)
+                                    .await;
+                            }
                             tracing::debug!(
                                 thread_id = %thread_id,
                                 "evicted idle resident thread actor"

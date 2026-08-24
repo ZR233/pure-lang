@@ -8,7 +8,7 @@ use crate::{
     ResolveToolApproval, ResolveUserInput, ToolApprovalResolution, ToolApprovalResolutionPayload,
     UserInputResolution,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use futures::FutureExt;
 use tokio::sync::{Mutex, oneshot};
 
@@ -96,17 +96,14 @@ impl InteractionService {
         Ok(interaction)
     }
 
-    pub async fn resolve(
+    /// 解析一条交互。`interaction` 必须来自内存权威快照（驻留 actor 的
+    /// pending 列表）；已离开快照的历史交互由调用方冷读后传入。
+    pub async fn resolve_loaded(
         &self,
-        interaction_id: &str,
+        mut interaction: InteractionRequest,
         resolution: InteractionResolution,
         emitter: InteractionEmitter,
     ) -> Result<InteractionRequest> {
-        let mut interaction = self
-            .store
-            .read_interaction(interaction_id)
-            .await?
-            .context("interaction not found")?;
         if interaction.status() != InteractionStatus::Pending {
             return Ok(interaction);
         }
@@ -115,7 +112,11 @@ impl InteractionService {
         let decision = interaction.decide(command)?;
         interaction.apply(decision, now);
         self.persist_and_emit(interaction.clone(), emitter).await?;
-        if let Some(waiter) = self.waiters.lock().await.remove(interaction_id)
+        if let Some(waiter) = self
+            .waiters
+            .lock()
+            .await
+            .remove(&interaction.interaction_id)
             && let Some(resolution) = interaction.resolution()
         {
             let _ = waiter.sender.send(resolution);
@@ -123,20 +124,23 @@ impl InteractionService {
         Ok(interaction)
     }
 
+    /// 取消一个 Thread 的 pending 交互；`pending` 必须由调用方从内存权威
+    /// 快照读取（未驻留线程没有 pending 交互，可传空）。
     pub async fn cancel_thread(
         &self,
-        thread_id: &str,
+        pending: Vec<InteractionRequest>,
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
-        self.cancel_pending_interactions(thread_id, reason, emitter, InteractionCancelScope::All)
+        self.cancel_pending_interactions(pending, reason, emitter, InteractionCancelScope::All)
             .await
     }
 
     /// 项目移除在 agent tree 退役后直接持久化剩余 pending Interaction。
     ///
-    /// 被移除项目中的已关闭 Thread 可能不再驻留于产品目录，因而不能依赖
-    /// ThreadActor emitter；项目随后整体离开目录，不需要再发布逐 Thread 热事件。
+    /// 这是仅有的冷清理原语之一（design/19 §19.4）：被移除项目中的 Thread
+    /// 可能不再驻留，不能依赖 ThreadActor emitter；项目随后整体离开目录，
+    /// 不需要再发布逐 Thread 热事件。
     pub(in crate::studio) async fn cancel_thread_for_project_cleanup(
         &self,
         thread_id: &str,
@@ -147,18 +151,19 @@ impl InteractionService {
             let store = store.clone();
             async move { store.upsert_interaction(&interaction).await }.boxed()
         });
-        self.cancel_pending_interactions(thread_id, reason, emitter, InteractionCancelScope::All)
+        let pending = self.store.list_pending_interactions(thread_id).await?;
+        self.cancel_pending_interactions(pending, reason, emitter, InteractionCancelScope::All)
             .await
     }
 
     pub async fn cancel_recovered_tool_approvals(
         &self,
-        thread_id: &str,
+        pending: Vec<InteractionRequest>,
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
         self.cancel_pending_interactions(
-            thread_id,
+            pending,
             reason,
             emitter,
             InteractionCancelScope::ToolApprovalOnly,
@@ -168,12 +173,11 @@ impl InteractionService {
 
     async fn cancel_pending_interactions(
         &self,
-        thread_id: &str,
+        pending: Vec<InteractionRequest>,
         reason: &str,
         emitter: InteractionEmitter,
         scope: InteractionCancelScope,
     ) -> Result<()> {
-        let pending = self.store.list_pending_interactions(thread_id).await?;
         for mut interaction in pending {
             if !scope.includes(&interaction) {
                 continue;
@@ -450,9 +454,11 @@ mod tests {
                 },
             )]),
         });
+        let mut resolved_input = user_input_interaction("ask-1");
+        resolved_input.scope.thread_id = session_id.clone();
         let resolved = runtime
-            .resolve(
-                "ask-1",
+            .resolve_loaded(
+                resolved_input,
                 resolution.clone(),
                 emitter(store.clone(), events.clone()),
             )
@@ -482,7 +488,7 @@ mod tests {
 
         runtime
             .cancel_thread(
-                &session_id,
+                store.list_pending_interactions(&session_id).await.unwrap(),
                 "interrupted by test",
                 emitter(store.clone(), events.clone()),
             )
@@ -546,7 +552,7 @@ mod tests {
             .unwrap();
         runtime
             .cancel_recovered_tool_approvals(
-                &session_id,
+                store.list_pending_interactions(&session_id).await.unwrap(),
                 "application restarted",
                 emitter(store.clone(), events.clone()),
             )

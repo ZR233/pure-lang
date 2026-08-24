@@ -78,8 +78,19 @@ pub(super) struct ResolveTaskIssue<'a> {
 }
 
 impl TaskRuntime {
+    /// 测试构造：独立 writer 实例即可。
+    #[cfg(test)]
     pub(crate) fn new(store: StudioStore, product_events: ProductEventBus) -> Self {
         let writer = ThreadWriteBehindWriter::new(store.clone());
+        Self::with_writer(store, product_events, writer)
+    }
+
+    /// ThreadRepository、ProductEventBus 与 TaskRuntime 必须共享同一进程级 writer。
+    pub(in crate::studio) fn with_writer(
+        store: StudioStore,
+        product_events: ProductEventBus,
+        writer: ThreadWriteBehindWriter,
+    ) -> Self {
         Self {
             store,
             product_events,
@@ -108,26 +119,31 @@ impl TaskRuntime {
         )
     }
 
-    /// 从 SQLite 冷基线恢复最新 Task；此方法只在 Studio 启动时调用。
-    pub(crate) async fn initialize(&self) -> Result<()> {
+    /// 从 SQLite 冷基线恢复活动 Task；此方法只在 Studio 启动时调用。
+    ///
+    /// 只装载非终态聚合（终态 Task 是冷数据，显式访问时经 `activate` 冷激活），
+    /// 与恢复扫描共用 `list_active_task_runs` 的同一份活动快照。
+    pub(crate) async fn initialize(&self, active_runs: Vec<TaskRun>) -> Result<()> {
+        let active_roots = active_runs
+            .iter()
+            .map(|run| run.root_thread_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
         let mut restored = Vec::new();
-        for project in self.store.list_projects().await? {
-            for thread in self.store.list_root_threads(&project.id).await? {
-                if let Some(facts) =
-                    task_projection::load_task_aggregate(&self.store, &thread.id).await?
-                {
-                    let mut delivered_planner_wakes = HashSet::new();
-                    for wake in planner_wakes_for_facts(&facts)? {
-                        if self.store.task_planner_wake_was_delivered(&wake).await? {
-                            delivered_planner_wakes.insert(wake.mail_id());
-                        }
+        for root_thread_id in active_roots {
+            if let Some(facts) =
+                task_projection::load_task_aggregate(&self.store, &root_thread_id).await?
+            {
+                let mut delivered_planner_wakes = HashSet::new();
+                for wake in planner_wakes_for_facts(&facts)? {
+                    if self.store.task_planner_wake_was_delivered(&wake).await? {
+                        delivered_planner_wakes.insert(wake.mail_id());
                     }
-                    let entry = StudioTaskDirectoryEntry {
-                        root_thread_id: thread.id,
-                        task: facts.runtime.clone(),
-                    };
-                    restored.push((entry, facts, delivered_planner_wakes));
                 }
+                let entry = StudioTaskDirectoryEntry {
+                    root_thread_id,
+                    task: facts.runtime.clone(),
+                };
+                restored.push((entry, facts, delivered_planner_wakes));
             }
         }
         restored

@@ -26,7 +26,6 @@ impl StudioRuntime {
             return Ok(StudioResolveInteractionResponse {
                 thread_id,
                 interaction: current,
-                threads: Vec::new(),
             });
         }
         let InteractionContent::PlanConfirmation(plan) = &current.content else {
@@ -126,15 +125,9 @@ impl StudioRuntime {
             return Err(anyhow::anyhow!(error));
         }
 
-        let threads = if let Some(thread) = self.store.read_thread(&thread_id).await? {
-            self.store.list_root_threads(&thread.project_id).await?
-        } else {
-            Vec::new()
-        };
         Ok(StudioResolveInteractionResponse {
             thread_id,
             interaction: resolved,
-            threads,
         })
     }
 }

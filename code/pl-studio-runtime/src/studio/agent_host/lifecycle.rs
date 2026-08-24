@@ -8,19 +8,23 @@ use pl_core::{
 
 use crate::{PureError, Result, WorktreeError, WorktreeHandle, WorktreeManager};
 
+use crate::studio::product_event_bus::ProductEventBus;
+use crate::studio::records::ThreadRecord;
+use crate::studio::store::directory::RegisteredChildThread;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{
     ExecutorCloseDisposition, OperationalTaskSpawnFailure, StudioSpawnIntent,
     StudioTaskSpawnPreparation, StudioTaskSpawnRequest, TaskSpawnCompensation,
     TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode, TaskSpawnFailurePhase,
 };
-use crate::studio::{ChildThreadSpec, StudioStore, UnregisteredThreadFault};
+use crate::studio::{StudioStore, UnregisteredThreadFault};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
 
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentLifecycle {
     store: StudioStore,
+    product_events: ProductEventBus,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
 }
@@ -39,11 +43,13 @@ pub(in crate::studio) struct StudioCloseLease {
 impl StudioAgentLifecycle {
     pub(super) fn new(
         store: StudioStore,
+        product_events: ProductEventBus,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
     ) -> Self {
         Self {
             store,
+            product_events,
             coordinator,
             resources,
         }
@@ -68,12 +74,15 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .await
             .or_else(|| intent.studio_thread_id.clone())
             .ok_or_else(|| lifecycle_error("spawn has no Studio Thread boundary"))?;
-        let parent_thread = self
-            .store
-            .read_thread(&parent_thread_id)
-            .await
-            .map_err(|error| lifecycle_error(error.to_string()))?
-            .ok_or_else(|| lifecycle_error("spawn parent Studio Thread does not exist"))?;
+        let parent_thread = match self.product_events.thread_snapshot(&parent_thread_id) {
+            Some(thread) => ThreadRecord::from_directory_thread(thread),
+            None => self
+                .store
+                .read_thread(&parent_thread_id)
+                .await
+                .map_err(|error| lifecycle_error(error.to_string()))?
+                .ok_or_else(|| lifecycle_error("spawn parent Studio Thread does not exist"))?,
+        };
         let root_thread_id = parent_thread.root_thread_id.clone();
         if intent.spawn_kind.is_some()
             && intent.studio_thread_id.as_deref() != Some(root_thread_id.as_str())
@@ -130,12 +139,17 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             )
             .await);
         }
+        // child Thread 注册走目录通道：热集合先行，durable delta FIFO 先于该
+        // child 的首个 state commit 落库；SQLite 失败只影响持久化健康状态。
         if let Err(error) = self
-            .store
-            .create_child_thread(ChildThreadSpec {
+            .product_events
+            .register_child_thread(RegisteredChildThread {
                 id: child_thread_id.clone(),
-                parent_thread_id,
+                parent_thread_id: parent_thread_id.clone(),
                 agent_path: request.child.identity.id.to_string(),
+                project_id: parent_thread.project_id.clone(),
+                root_thread_id: root_thread_id.clone(),
+                mode: parent_thread.mode.into(),
                 role: request.child.identity.role.to_string(),
                 title: task_name.clone(),
             })

@@ -240,8 +240,23 @@ async fn project_cleanup_cancels_pending_interaction_for_nonresident_thread() {
         .await
         .unwrap();
 
+    // 目录事实经 write-behind 异步落库；断言前先排空 writer。
+    runtime
+        .persistence_repository()
+        .await
+        .unwrap()
+        .writer()
+        .flush()
+        .await
+        .unwrap();
     assert!(store.list_projects().await.unwrap().is_empty());
-    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
+    assert!(
+        store
+            .list_threads_for_root(&thread.root_thread_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         store
             .list_pending_interactions(&thread.id)
@@ -257,5 +272,82 @@ async fn project_cleanup_cancels_pending_interaction_for_nonresident_thread() {
             .unwrap()
             .status(),
         crate::InteractionStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn thread_directory_facts_survive_sqlite_write_failure_as_degraded() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(home),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+    // 排空项目目录 delta，保证触发器只影响后续 Thread 落库。
+    runtime
+        .persistence_repository()
+        .await
+        .unwrap()
+        .writer()
+        .flush()
+        .await
+        .unwrap();
+    sea_orm::ConnectionTrait::execute_unprepared(
+        runtime.store.database(),
+        "CREATE TRIGGER fail_thread_directory_insert \
+             BEFORE INSERT ON threads \
+             BEGIN SELECT RAISE(FAIL, 'forced directory insert failure'); END",
+    )
+    .await
+    .unwrap();
+
+    // 目录命令内存先行：SQLite 失败进入 Degraded，不回滚已发布的内存事实。
+    let thread = runtime
+        .create_thread(&project.id, "Degraded directory")
+        .await
+        .expect("directory command must not fail on SQLite errors");
+
+    let hot = runtime
+        .agent_facility
+        .product_events
+        .thread_snapshot(&thread.id)
+        .expect("hot thread fact must survive");
+    assert_eq!(hot.title, "Degraded directory");
+
+    // 触发器产生的是确定性 FAIL（Blocked 而非 Degraded）；两者都必须
+    // 表达"持久化不健康 + 新工作门禁关闭"，而不是命令回滚。
+    let mut unhealthy = false;
+    for _ in 0..100 {
+        if !runtime
+            .agent_facility
+            .product_events
+            .persistence_state()
+            .state
+            .accepts_new_work()
+        {
+            unhealthy = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        unhealthy,
+        "persistence must report an unhealthy state after SQLite failure"
+    );
+    // Degraded 暂停新生命周期：后续目录命令被新工作门禁拒绝。
+    assert!(
+        runtime
+            .create_thread(&project.id, "Blocked by gate")
+            .await
+            .is_err()
     );
 }

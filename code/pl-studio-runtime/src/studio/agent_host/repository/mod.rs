@@ -57,23 +57,13 @@ mod restore;
 mod unit_tests;
 
 impl StudioAgentRepository {
-    pub(in crate::studio) fn new(store: StudioStore) -> Self {
-        let writer = ThreadWriteBehindWriter::new(store.clone());
-        Self::with_writer(store, writer)
-    }
-
+    /// write-behind writer 共享实例构造：与 TaskRuntime、ProductEventBus 使用
+    /// 同一进程级 writer，恢复基线 seed 进该实例。
     pub(in crate::studio) fn with_writer(
         store: StudioStore,
         writer: ThreadWriteBehindWriter,
     ) -> Self {
         Self { writer, store }
-    }
-
-    /// 只读用途构造（restore_thread / read_thread_snapshot 等）。
-    ///
-    /// writer 不会被使用；禁止在该实例上调用 commit/flush。
-    pub(in crate::studio) fn for_reads(store: StudioStore) -> Self {
-        Self::new(store)
     }
 
     /// write-behind writer 句柄；关机排空与进度查询使用。
@@ -185,18 +175,6 @@ impl ThreadRepository for StudioAgentRepository {
 
     async fn commit(&self, commit: ThreadCommit) -> Result<(), Self::Error> {
         self.writer.enqueue(commit).await
-    }
-
-    async fn flush_pending(&self, thread_id: Option<&ThreadId>) -> Result<(), Self::Error> {
-        let Some(thread_id) = thread_id else {
-            return self.writer.flush().await;
-        };
-        let Some(revision) = self.writer.latest_queued_revision(thread_id.as_str()) else {
-            return Ok(());
-        };
-        self.writer
-            .await_durable(thread_id.as_str(), revision)
-            .await
     }
 
     async fn await_durable(&self, thread_id: &ThreadId, revision: u64) -> Result<(), Self::Error> {

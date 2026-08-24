@@ -243,13 +243,6 @@ impl ThreadRepository for TestRepository {
         Ok(())
     }
 
-    async fn flush_pending(
-        &self,
-        _thread_id: Option<&ThreadId>,
-    ) -> std::result::Result<(), Self::Error> {
-        Ok(())
-    }
-
     async fn await_durable(
         &self,
         _thread_id: &ThreadId,

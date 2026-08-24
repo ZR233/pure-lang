@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::{InteractionKind, InteractionResolution, InteractionStatus};
+use crate::{InteractionKind, InteractionRequest, InteractionResolution, InteractionStatus};
 use anyhow::{Context, Result, bail};
 use futures::FutureExt;
 
 use crate::config::StudioRole;
-use crate::studio::agent_host::{StudioAgentRepository, root_agent_id};
+use crate::studio::agent_host::root_agent_id;
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
 use crate::studio::{ThreadKind, ThreadRecord, ThreadVisibility};
@@ -202,7 +202,11 @@ impl StudioRuntime {
         let emitter = self.interaction_emitter(thread_id.clone());
         self.agent_facility
             .interactions
-            .cancel_thread(&thread_id, "interrupted by user", emitter)
+            .cancel_thread(
+                self.pending_thread_interactions(&thread_id).await?,
+                "interrupted by user",
+                emitter,
+            )
             .await?;
         Ok(StudioStopPromptResponse {
             thread_id,
@@ -281,7 +285,7 @@ impl StudioRuntime {
         let target_root_thread_id = target.root_thread_id.clone();
         let target_thread_id = target.id.clone();
         let mut missing = Vec::new();
-        let mut current = target;
+        let mut current = target.clone();
         loop {
             let agent_path = pl_core::ThreadId::new(current.agent_path.clone())?;
             match handle.snapshot(agent_path).await {
@@ -305,6 +309,11 @@ impl StudioRuntime {
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
         self.residency.touch(&target_thread_id).await;
+        // 激活即入热集合：目录分页在此之后能以内存事实覆盖冷行。
+        self.agent_facility
+            .product_events
+            .apply_thread_delta(vec![pl_protocol::Thread::from(target)], Vec::new())
+            .await?;
         self.enforce_residency_limit().await;
         let _ = self.task_runtime.activate(&target_root_thread_id).await?;
         crate::studio::agent_host::materialize_pending_task_planner_wakes(
@@ -329,7 +338,12 @@ impl StudioRuntime {
             .await?
             > 0;
         if registered {
-            let repository = StudioAgentRepository::for_reads(self.store.clone());
+            // 共享 writer 的 repository 实例：恢复基线 seed 进进程级 writer，
+            // 不构造即弃的第二 writer（design/17 §17.2）。
+            let repository = self
+                .persistence_repository()
+                .await
+                .context("Studio persistence writer is unavailable")?;
             let thread_id = pl_core::ThreadId::new(thread_record.id.clone())?;
             let Some(restored) = repository.restore_thread(&thread_id).await? else {
                 anyhow::bail!(
@@ -419,7 +433,10 @@ impl StudioRuntime {
         Ok(registration)
     }
 
-    async fn read_owned_thread(&self, thread_id: &str) -> Result<ThreadRecord> {
+    pub(in crate::studio::runtime) async fn read_owned_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<ThreadRecord> {
         let thread = self
             .agent_facility
             .product_events
@@ -466,8 +483,7 @@ impl StudioRuntime {
         // 这是已经开始的 Turn 的收束入口。持久化降级只暂停新的生命周期，
         // 不能阻止用户回答、审批或确认当前交互。
         let current = self
-            .store
-            .read_interaction(&interaction_id)
+            .read_interaction_for_resolve(&interaction_id)
             .await?
             .context("interaction not found")?;
         let thread_id = current.scope.thread_id.clone();
@@ -486,7 +502,6 @@ impl StudioRuntime {
             return Ok(StudioResolveInteractionResponse {
                 thread_id,
                 interaction: current,
-                threads: Vec::new(),
             });
         }
         let resolved = if current.kind() == InteractionKind::UserInput {
@@ -513,14 +528,53 @@ impl StudioRuntime {
         } else {
             self.agent_facility
                 .interactions
-                .resolve(&interaction_id, resolution, emitter)
+                .resolve_loaded(current, resolution, emitter)
                 .await?
         };
         Ok(StudioResolveInteractionResponse {
             thread_id,
             interaction: resolved,
-            threads: Vec::new(),
         })
+    }
+
+    /// 内存优先读取交互：pending 交互必须来自驻留 actor 的权威快照；
+    /// 已离开快照的历史交互（非 pending）回 SQLite 冷源。
+    pub(in crate::studio) async fn read_interaction_for_resolve(
+        &self,
+        interaction_id: &str,
+    ) -> Result<Option<InteractionRequest>> {
+        if let Some(framework) = self.agent_facility.framework.lock().await.clone() {
+            let handle = framework.handle();
+            for agent in handle.directory_snapshot().agents {
+                let Ok(snapshot) = handle.thread_snapshot(&agent.identity.id) else {
+                    continue;
+                };
+                if let Some(found) = snapshot
+                    .interactions
+                    .iter()
+                    .find(|candidate| candidate.interaction_id == interaction_id)
+                {
+                    return Ok(Some(found.clone()));
+                }
+            }
+        }
+        self.store.read_interaction(interaction_id).await
+    }
+
+    /// 读取驻留线程的 pending 交互；未驻留线程没有 pending 交互
+    /// （钉住集合恢复 + LRU 空闲淘汰不变量）。
+    pub(in crate::studio) async fn pending_thread_interactions(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<InteractionRequest>> {
+        let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? else {
+            return Ok(Vec::new());
+        };
+        match handle.thread_snapshot(&agent_id) {
+            Ok(snapshot) => Ok(snapshot.interactions),
+            Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(Vec::new()),
+            Err(error) => Err(anyhow::anyhow!(error)),
+        }
     }
 
     pub(super) async fn record_thread_facts(
@@ -606,7 +660,7 @@ impl StudioRuntime {
             self.agent_facility
                 .interactions
                 .cancel_recovered_tool_approvals(
-                    &thread_id,
+                    canonical.interactions.clone(),
                     "application restarted before approval completed",
                     emitter,
                 )

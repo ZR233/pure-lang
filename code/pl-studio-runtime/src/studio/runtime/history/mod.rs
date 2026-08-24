@@ -1,10 +1,23 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use pl_core::ThreadHotHistory;
 use pl_protocol::{ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn};
 
 use crate::studio::StudioRuntime;
+use crate::studio::merged_page::{HotColdEntry, overlay_cold_page};
+
+impl HotColdEntry for ThreadTurnHistory {
+    type Key = (i64, String);
+
+    fn page_key(&self) -> Self::Key {
+        (self.turn.updated_at, self.turn.id.clone())
+    }
+
+    fn entry_id(&self) -> &str {
+        &self.turn.id
+    }
+}
 
 impl StudioRuntime {
     pub async fn list_thread_turns(
@@ -32,29 +45,18 @@ impl StudioRuntime {
         hot: ThreadHotHistory,
     ) -> Result<ThreadTurnPage> {
         let selection = select_hot_turns(&hot.turns, cursor);
-        let mut merged = Vec::new();
-        let mut positions = HashMap::new();
-        let hot_turns = hot
-            .turns
-            .iter()
-            .cloned()
-            .map(|turn| (turn.id.clone(), turn))
-            .collect::<HashMap<_, _>>();
         let hot_items = hot_items_by_turn(hot.items);
-
-        for turn in selection.turns {
-            push_or_overlay(
-                &mut merged,
-                &mut positions,
-                ThreadTurnHistory {
-                    items: hot_items.get(&turn.id).cloned().unwrap_or_default(),
-                    turn,
-                    context_disposition: ThreadContextDisposition::Active,
-                },
-                &hot_turns,
-                &hot_items,
-            );
-        }
+        // 热窗口是最新后缀：合并核心按追加顺序保留热选择，冷页随后补齐更早
+        // 历史；同 id 热事实胜出，冷记录只补充 rolled-back disposition。
+        let mut merged = selection
+            .turns
+            .into_iter()
+            .map(|turn| ThreadTurnHistory {
+                items: hot_items.get(&turn.id).cloned().unwrap_or_default(),
+                turn,
+                context_disposition: ThreadContextDisposition::Active,
+            })
+            .collect::<Vec<_>>();
 
         let mut has_more = merged.len() > limit;
         if !has_more {
@@ -65,17 +67,16 @@ impl StudioRuntime {
                     .list_thread_turns(thread_id, cold_cursor.as_deref(), 200)
                     .await?;
                 let next_cursor = page.next_cursor;
-                for history in page.turns {
-                    if selection.excluded_turn_ids.contains(&history.turn.id) {
-                        continue;
-                    }
-                    push_or_overlay(&mut merged, &mut positions, history, &hot_turns, &hot_items);
-                    if merged.len() > limit {
-                        has_more = true;
-                        break;
-                    }
-                }
-                if has_more {
+                let cold = page
+                    .turns
+                    .into_iter()
+                    .filter(|history| !selection.excluded_turn_ids.contains(&history.turn.id))
+                    .collect::<Vec<_>>();
+                merged = overlay_cold_page(merged, cold, None, |cold, hot| {
+                    hot.context_disposition = cold.context_disposition;
+                });
+                if merged.len() > limit {
+                    has_more = true;
                     break;
                 }
                 let Some(next_cursor) = next_cursor else {
@@ -144,45 +145,6 @@ fn hot_items_by_turn(items: Vec<ThreadItem>) -> HashMap<String, Vec<ThreadItem>>
     by_turn
 }
 
-fn push_or_overlay(
-    merged: &mut Vec<ThreadTurnHistory>,
-    positions: &mut HashMap<String, usize>,
-    mut history: ThreadTurnHistory,
-    hot_turns: &HashMap<String, Turn>,
-    hot_items: &HashMap<String, Vec<ThreadItem>>,
-) {
-    if let Some(position) = positions.get(&history.turn.id).copied() {
-        // 热事实已经占位；冷记录只补充恢复上下文归属，不能覆盖业务状态。
-        merged[position].context_disposition = history.context_disposition;
-        return;
-    }
-    if let Some(turn) = hot_turns.get(&history.turn.id) {
-        history.turn = turn.clone();
-    }
-    history.items = overlay_items(
-        history.items,
-        hot_items.get(&history.turn.id).map(Vec::as_slice),
-    );
-    positions.insert(history.turn.id.clone(), merged.len());
-    merged.push(history);
-}
-
-fn overlay_items(cold: Vec<ThreadItem>, hot: Option<&[ThreadItem]>) -> Vec<ThreadItem> {
-    let Some(hot) = hot else {
-        return cold;
-    };
-    let mut by_id = cold
-        .into_iter()
-        .map(|item| (item.id.clone(), item))
-        .collect::<BTreeMap<_, _>>();
-    for item in hot {
-        by_id.insert(item.id.clone(), item.clone());
-    }
-    let mut items = by_id.into_values().collect::<Vec<_>>();
-    items.sort_by_key(|item| item.ordinal);
-    items
-}
-
 #[cfg(test)]
 mod tests {
     use pl_protocol::{ThreadContentLifecycle, ThreadItemState, ThreadTextChannel, ThreadTextItem};
@@ -233,31 +195,43 @@ mod tests {
     }
 
     #[test]
-    fn hot_turn_and_item_replace_same_identity_without_losing_cold_context() {
-        let hot_turn = turn("turn-2", 20);
-        let hot_item = item("item-2", "turn-2", 2, "hot");
-        let hot_turns = HashMap::from([("turn-2".to_string(), hot_turn.clone())]);
-        let hot_items = HashMap::from([("turn-2".to_string(), vec![hot_item.clone()])]);
-        let mut merged = Vec::new();
-        let mut positions = HashMap::new();
-
-        push_or_overlay(
-            &mut merged,
-            &mut positions,
+    fn cold_refines_hot_disposition_without_overriding_business_state() {
+        let hot = ThreadTurnHistory {
+            turn: turn("turn-2", 20),
+            items: vec![item("item-2", "turn-2", 2, "hot")],
+            context_disposition: ThreadContextDisposition::Active,
+        };
+        let cold = vec![
             ThreadTurnHistory {
                 turn: turn("turn-2", 2),
                 items: vec![item("item-2", "turn-2", 2, "cold")],
                 context_disposition: ThreadContextDisposition::RolledBack,
             },
-            &hot_turns,
-            &hot_items,
+            ThreadTurnHistory {
+                turn: turn("turn-1", 1),
+                items: vec![item("item-1", "turn-1", 1, "cold-only")],
+                context_disposition: ThreadContextDisposition::Active,
+            },
+        ];
+
+        let merged = overlay_cold_page(
+            vec![hot],
+            cold,
+            None,
+            |cold, hot: &mut ThreadTurnHistory| {
+                hot.context_disposition = cold.context_disposition;
+            },
         );
 
-        assert_eq!(merged[0].turn, hot_turn);
-        assert_eq!(merged[0].items, vec![hot_item]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].turn.updated_at, 20);
+        assert_eq!(merged[0].items, vec![item("item-2", "turn-2", 2, "hot")]);
         assert_eq!(
             merged[0].context_disposition,
             ThreadContextDisposition::RolledBack
         );
+        assert_eq!(merged[1].turn.id, "turn-1");
+        // 冷记录独有的 rolled-back item 与热 timeline 合并保留。
+        assert_eq!(merged[1].items[0].id, "item-1");
     }
 }

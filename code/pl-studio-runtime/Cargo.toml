@@ -50,6 +50,11 @@ path = "tests/task_live.rs"
 required-features = ["live-tests"]
 
 [[test]]
+name = "simple_live"
+path = "tests/simple_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
 name = "lsp_live"
 path = "tests/lsp_live.rs"
 required-features = ["live-tests"]

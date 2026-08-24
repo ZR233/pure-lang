@@ -176,12 +176,18 @@ async fn run_offline_task_flow() -> Result<()> {
         .runtime
         .set_thread_mode(&fixture.thread_id, StudioMode::Simple)
         .await?;
-    let session = fixture
-        .store
-        .read_thread(&fixture.thread_id)
-        .await?
-        .context("task session disappeared")?;
-    assert_eq!(session.mode, StudioMode::Simple);
+    // mode 变更经 write-behind 异步落库；轮询等待 durable 行跟随内存事实。
+    let mut durable_mode = None;
+    for _ in 0..100 {
+        if let Some(session) = fixture.store.read_thread(&fixture.thread_id).await? {
+            durable_mode = Some(session.mode);
+            if session.mode == StudioMode::Simple {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(durable_mode, Some(StudioMode::Simple));
 
     fixture.shutdown().await
 }

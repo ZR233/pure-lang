@@ -31,18 +31,27 @@ impl StudioRuntime {
         &self,
         root_thread_id: &str,
     ) -> Result<StudioTaskRecoveryPreview> {
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(root_thread_id)
-            .await?;
+        // 预览基于内存 owner 事实；未驻留聚合先显式冷激活（design/20 §20.3）。
+        let aggregate = self
+            .task_runtime
+            .activate(root_thread_id)
+            .await?
+            .with_context(|| {
+                format!("active task run not found for root Thread {root_thread_id}")
+            })?;
+        let run = aggregate.facts.run.clone();
+        anyhow::ensure!(
+            !run.kind().is_terminal(),
+            "active task run not found for this root Thread"
+        );
         ensure_recoverable_phase(run.kind())?;
         let runtime = self.agent_framework().await?.handle();
         ensure_task_tree_idle(&runtime, root_thread_id).await?;
 
-        let work_units = self.store.list_work_units(&run.id).await?;
-        let completions = self.store.list_work_completions(&run.id).await?;
-        let reviews = self.store.list_review_rounds(&run.id).await?;
-        let merges = self.store.list_merge_records(&run.id).await?;
+        let work_units = aggregate.facts.work_units;
+        let completions = aggregate.facts.completions;
+        let reviews = aggregate.facts.reviews;
+        let merges = aggregate.facts.merges;
         let mut candidates = Vec::new();
         for unit in work_units.iter().filter(|unit| eligible_executor(unit)) {
             let Some(thread_id) = unit.executor_thread_id.as_deref() else {

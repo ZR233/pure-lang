@@ -1,4 +1,5 @@
 pub use crate::attachment::MaterializedAttachment;
+use pl_protocol::LabeledEnum;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +30,39 @@ pub struct ThreadRecord {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub runtime_updated_at: Option<i64>,
+}
+
+impl ThreadRecord {
+    /// 从目录事实构造记录（创建命令返回值用）；runtime 派生列取缺省值。
+    pub(in crate::studio) fn from_directory_thread(thread: pl_protocol::Thread) -> Self {
+        let thread_kind = if thread.parent_thread_id.is_some() {
+            ThreadKind::Agent
+        } else {
+            ThreadKind::Root
+        };
+        Self {
+            thread_kind,
+            visibility: if thread.archived {
+                ThreadVisibility::Archived
+            } else {
+                ThreadVisibility::Active
+            },
+            id: thread.id,
+            project_id: thread.project_id,
+            title: thread.title,
+            mode: crate::StudioMode::from_label(thread.mode.label()).unwrap_or_default(),
+            created_at: thread.created_at,
+            updated_at: thread.updated_at,
+            parent_thread_id: thread.parent_thread_id,
+            root_thread_id: thread.root_thread_id,
+            agent_path: thread.agent_path,
+            role: thread.role,
+            status: thread.status,
+            summary: None,
+            error: None,
+            runtime_updated_at: None,
+        }
+    }
 }
 
 impl From<ThreadRecord> for pl_protocol::Thread {

@@ -10,22 +10,26 @@ mod work_completion;
 mod work_unit;
 
 use anyhow::{Context, Result, bail};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
-};
+#[cfg(test)]
+use sea_orm::{ActiveModelTrait, TransactionTrait};
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
+#[cfg(test)]
 use crate::StudioMode;
 use crate::studio::entity as entities;
-use crate::studio::ids::{new_id, unix_seconds};
+#[cfg(test)]
+use crate::studio::ids::new_id;
+use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
+#[cfg(test)]
+use crate::studio::task_coordinator::CreateTaskRun;
 use crate::studio::task_coordinator::{
-    CreateTaskRun, TaskCommand, TaskContext, TaskPlan, TaskRun, TaskRunState, TaskRunStateKind,
+    TaskCommand, TaskContext, TaskPlan, TaskRun, TaskRunState, TaskRunStateKind,
 };
 
 impl StudioStore {
     /// 在首个计划者执行前创建任务记录。该操作不访问项目版本库，也不获取项目租约。
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn create_task_run(&self, input: CreateTaskRun) -> Result<TaskRun> {
         validate_create_task_run(&input)?;
         let root_thread = self
@@ -78,6 +82,24 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         models.into_iter().map(task_run_record).collect()
+    }
+
+    /// 项目内最近一个已完成的其它 TaskRun（跨 Thread 冷数据，单条回源）。
+    pub(crate) async fn find_latest_completed_task_for_project(
+        &self,
+        project_id: &str,
+        excluded_run_id: &str,
+    ) -> Result<Option<TaskRun>> {
+        let models = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::ProjectId.eq(project_id.to_string()))
+            .filter(entities::task_run::Column::Id.ne(excluded_run_id.to_string()))
+            .filter(entities::task_run::Column::StateKind.eq(TaskRunStateKind::Completed.as_str()))
+            .order_by_desc(entities::task_run::Column::UpdatedAt)
+            .order_by_desc(entities::task_run::Column::Id)
+            .all(&self.db)
+            .await?;
+        // 六状态只有 Completed 是终态；state_kind 冗余列精确匹配。
+        models.into_iter().map(task_run_record).next().transpose()
     }
 
     pub(crate) async fn list_task_runs_for_project(
@@ -134,7 +156,7 @@ impl StudioStore {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn submit_task_plan(
         &self,
         root_thread_id: &str,
@@ -220,7 +242,7 @@ impl StudioStore {
         Ok((task_run_record(updated)?, interaction))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn apply_task_transition(
         &self,
         root_thread_id: &str,
@@ -240,7 +262,7 @@ impl StudioStore {
         task_run_record(updated)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn resolve_task_plan_confirmation(
         &self,
         interaction_id: &str,
@@ -306,7 +328,7 @@ impl StudioStore {
         Ok((task_run_record(updated_run)?, interaction))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn finish_task_document_editing(
         &self,
         root_thread_id: &str,
@@ -326,7 +348,7 @@ impl StudioStore {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     for (label, value) in [
         ("projectId", input.project_id.as_str()),
@@ -341,7 +363,7 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn ensure_task_version(run: &TaskRun, revision: u64, generation: u64) -> Result<()> {
     if run.revision != revision {
         bail!(
@@ -358,7 +380,7 @@ fn ensure_task_version(run: &TaskRun, revision: u64, generation: u64) -> Result<
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 async fn active_task_model<C>(
     connection: &C,
     root_thread_id: &str,
@@ -458,7 +480,7 @@ where
         .context("failed to reload TaskRun after revision CAS")
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 async fn compare_and_swap_task_run_with_plan<C>(
     connection: &C,
     model: &entities::task_run::Model,

@@ -16,6 +16,7 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
 
 use crate::PureError;
+use crate::studio::store::directory::{DirectoryDelta, apply_directory_delta};
 use crate::studio::task_persistence::{
     ApplyTaskCommitOutcome, TaskPersistenceCommit, apply_task_commit, validate_task_commit,
 };
@@ -44,6 +45,7 @@ const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 enum QueueEntry {
     ThreadCommit(Box<ThreadCommit>),
     TaskCommit(Box<TaskPersistenceCommit>),
+    Directory(Box<DirectoryDelta>),
     Barrier(oneshot::Sender<Result<(), PureError>>),
 }
 
@@ -51,7 +53,7 @@ impl QueueEntry {
     const fn is_commit(&self) -> bool {
         matches!(
             self,
-            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_)
+            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_) | QueueEntry::Directory(_)
         )
     }
 
@@ -59,7 +61,7 @@ impl QueueEntry {
         match self {
             Self::ThreadCommit(commit) => terminal_turn_key(commit),
             Self::TaskCommit(commit) if commit.ends_lifecycle() => Some(commit.lifecycle_key()),
-            Self::TaskCommit(_) | Self::Barrier(_) => None,
+            Self::TaskCommit(_) | Self::Directory(_) | Self::Barrier(_) => None,
         }
     }
 }
@@ -154,26 +156,6 @@ impl ThreadWriteBehindWriter {
             .copied()
     }
 
-    /// 返回当前已知的 owner 最新热修订；用于兼容无显式目标的旧 flush 调用。
-    pub(in crate::studio) fn latest_queued_revision(&self, owner_id: &str) -> Option<u64> {
-        let queued = self
-            .shared
-            .queue
-            .lock()
-            .expect("write-behind queue lock poisoned")
-            .iter()
-            .filter_map(|entry| match entry {
-                QueueEntry::ThreadCommit(commit) if commit.agent_id.as_str() == owner_id => {
-                    Some(commit.facts.revision)
-                }
-                QueueEntry::ThreadCommit(_)
-                | QueueEntry::TaskCommit(_)
-                | QueueEntry::Barrier(_) => None,
-            })
-            .max();
-        queued.or_else(|| self.durable_revision(owner_id))
-    }
-
     /// 记录从 SQLite 恢复出的耐久基线；只允许单调推进。
     pub(in crate::studio) fn seed_durable_revision(&self, owner_id: &str, revision: u64) {
         advance_durable_revision(&self.shared, owner_id, revision);
@@ -242,6 +224,51 @@ impl ThreadWriteBehindWriter {
         update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
         self.shared.work_notify.notify_one();
         Ok(())
+    }
+
+    /// 把内存目录 owner 已接受的目录事实送入同一 write-behind 队列。
+    ///
+    /// FIFO 保证注册 delta 先于同 Thread 的首个 state commit 落库；SQLite 失败
+    /// 只影响持久化健康状态，不回滚内存目录事实。
+    pub(in crate::studio) async fn enqueue_directory(
+        &self,
+        delta: DirectoryDelta,
+    ) -> Result<(), PureError> {
+        if delta.is_empty() {
+            return Err(store_error("directory delta must carry at least one fact"));
+        }
+        self.check_accepting()?;
+        self.ensure_task();
+        let mut progress = self.shared.progress.subscribe();
+        let mut pending = Some(delta);
+        loop {
+            self.check_accepting()?;
+            if self.try_enqueue_directory_now(pending.as_ref().expect("delta present"))? {
+                drop(pending.take());
+                self.record_visible_commit();
+                update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
+                self.shared.work_notify.notify_one();
+                return Ok(());
+            }
+            progress
+                .changed()
+                .await
+                .map_err(|_| store_error("write-behind progress channel closed"))?;
+        }
+    }
+
+    /// 目录 delta 占用普通容量；队满时对调用方施加背压。
+    fn try_enqueue_directory_now(&self, delta: &DirectoryDelta) -> Result<bool, PureError> {
+        let mut queue = self.lock_queue()?;
+        let ordinary = queue
+            .iter()
+            .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
+            .count();
+        if ordinary >= NORMAL_PENDING_COMMITS {
+            return Ok(false);
+        }
+        queue.push_back(QueueEntry::Directory(Box::new(delta.clone())));
+        Ok(true)
     }
 
     /// 等待一个 owner 的指定修订号被 SQLite 确认。
@@ -461,11 +488,7 @@ impl ThreadWriteBehindWriter {
 
         let ordinary = queue
             .iter()
-            .filter(|entry| match entry {
-                QueueEntry::ThreadCommit(commit) => terminal_turn_key(commit).is_none(),
-                QueueEntry::TaskCommit(commit) => !commit.ends_lifecycle(),
-                QueueEntry::Barrier(_) => false,
-            })
+            .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
             .count();
         if ordinary >= NORMAL_PENDING_COMMITS {
             return Ok(false);
@@ -885,6 +908,12 @@ async fn apply_batch(store: &StudioStore, batch: &PendingBatch) -> Result<(), Ba
                     return Err(classify_store_error(store_error(error)));
                 }
             },
+            QueueEntry::Directory(delta) => {
+                if let Err(error) = apply_directory_delta(&tx, delta).await {
+                    let _ = tx.rollback().await;
+                    return Err(classify_store_error(store_error(error)));
+                }
+            }
             QueueEntry::Barrier(_) => {}
         }
     }
@@ -987,7 +1016,7 @@ fn advance_batch_durability(shared: &WriterShared, batch: &PendingBatch) {
                     .and_modify(|revision| *revision = (*revision).max(commit.revision))
                     .or_insert(commit.revision);
             }
-            QueueEntry::Barrier(_) => {}
+            QueueEntry::Directory(_) | QueueEntry::Barrier(_) => {}
         }
     }
     if revisions.is_empty() && task_revisions.is_empty() {
@@ -1078,7 +1107,7 @@ fn advance_task_durable_revision(shared: &WriterShared, owner_id: &str, revision
 fn complete_applied_batch(batch: PendingBatch) {
     for entry in batch.entries {
         match entry {
-            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_) => {}
+            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_) | QueueEntry::Directory(_) => {}
             QueueEntry::Barrier(sender) => {
                 let _ = sender.send(Ok(()));
             }
@@ -1193,7 +1222,7 @@ fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
         .find_map(|entry| match entry {
             QueueEntry::ThreadCommit(commit) => Some(commit.facts.revision),
             QueueEntry::TaskCommit(commit) => Some(commit.revision),
-            QueueEntry::Barrier(_) => None,
+            QueueEntry::Directory(_) | QueueEntry::Barrier(_) => None,
         })
 }
 

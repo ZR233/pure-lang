@@ -22,6 +22,8 @@ use pl_core::{
 };
 
 use crate::config::ConfigRuntime;
+use crate::studio::product_event_bus::ProductEventBus;
+use crate::studio::records::ThreadRecord;
 use crate::studio::runtime::SkillCatalogRuntime;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionService, StudioStore};
@@ -35,6 +37,7 @@ use super::workspace_resolver::AgentWorkspaceResolver;
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentTurnFactory {
     store: StudioStore,
+    product_events: ProductEventBus,
     config_runtime: ConfigRuntime,
     mcp_runtime: McpRuntimeHandle,
     /// 与 MCP worker 共享的工具注册表；MCP 工具按 generation 发布于此。
@@ -50,6 +53,7 @@ impl StudioAgentTurnFactory {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         store: StudioStore,
+        product_events: ProductEventBus,
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
         mcp_shared_tools: std::sync::Arc<ToolRegistry>,
@@ -61,6 +65,7 @@ impl StudioAgentTurnFactory {
     ) -> Self {
         Self {
             store,
+            product_events,
             config_runtime,
             mcp_runtime,
             mcp_shared_tools,
@@ -85,18 +90,31 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .thread_id(&context.snapshot.identity.id)
             .await
             .ok_or_else(|| turn_error("agent has no Studio Thread boundary"))?;
-        let thread_record = self
-            .store
-            .read_thread(&thread_id)
+        // 内存优先读取目录事实：注册与 mode 变更的落库是异步跟随的。
+        let thread_record = match self.product_events.thread_snapshot(&thread_id) {
+            Some(thread) => ThreadRecord::from_directory_thread(thread),
+            None => self
+                .store
+                .read_thread(&thread_id)
+                .await
+                .map_err(anyhow_error)?
+                .ok_or_else(|| turn_error("selected Studio Thread not found"))?,
+        };
+        let project = match self
+            .product_events
+            .project_snapshot()
             .await
-            .map_err(anyhow_error)?
-            .ok_or_else(|| turn_error("selected Studio Thread not found"))?;
-        let project = self
-            .store
-            .read_project(&thread_record.project_id)
-            .await
-            .map_err(anyhow_error)?
-            .ok_or_else(|| turn_error("selected Studio project not found"))?;
+            .into_iter()
+            .find(|project| project.id == thread_record.project_id)
+        {
+            Some(project) => project,
+            None => self
+                .store
+                .read_project(&thread_record.project_id)
+                .await
+                .map_err(anyhow_error)?
+                .ok_or_else(|| turn_error("selected Studio project not found"))?,
+        };
         let config = self.config_runtime.read()?.config;
         let skills = self.skills.read(&thread_record.project_id).await;
         let skill_catalog = skills.catalog_or_empty();
