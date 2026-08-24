@@ -231,6 +231,30 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get runtimeFatalRetry;
 
+  /// No description provided for @persistenceDegraded.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving is temporarily unavailable. {count} in-memory update(s) are waiting; new work is paused.'**
+  String persistenceDegraded(int count);
+
+  /// No description provided for @persistenceRecovering.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving has recovered and is flushing {count} pending update(s). New work remains paused.'**
+  String persistenceRecovering(int count);
+
+  /// No description provided for @persistenceBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving is blocked with {count} pending update(s) and needs attention. New work is paused.'**
+  String persistenceBlocked(int count);
+
+  /// No description provided for @persistenceRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry saving'**
+  String get persistenceRetry;
+
   /// No description provided for @recoveryGlobalWarning.
   ///
   /// In en, this message translates to:

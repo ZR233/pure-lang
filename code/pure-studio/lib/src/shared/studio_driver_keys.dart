@@ -53,6 +53,10 @@ abstract final class StudioDriverKeys {
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');
   static const userInputSubmit = ValueKey<String>('user-input-submit');
+  static const fallbackUserInput = ValueKey<String>('fallback-user-input');
+  static const fallbackUserInputSubmit = ValueKey<String>(
+    'fallback-user-input-submit',
+  );
 
   static ValueKey<String> settingsTab(String id) =>
       ValueKey<String>('settings-tab-$id');

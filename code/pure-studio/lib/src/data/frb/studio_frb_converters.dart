@@ -29,6 +29,8 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       ProviderUsageStateChangedPayload(_providerUsageStateFromFrb(field0)),
     frb.BridgeProductEventPayload_UpdaterStateChanged(:final field0) =>
       UpdaterStateChangedPayload(updaterStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_PersistenceStateChanged(:final field0) =>
+      PersistenceStateChangedPayload(_persistenceStateFromFrb(field0)),
     frb.BridgeProductEventPayload_Stale(:final laggedEvents) => StalePayload(
       laggedEvents: laggedEvents.toInt(),
     ),
@@ -827,8 +829,63 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
     },
     providerUsageState: _providerUsageStateFromFrb(value.providerUsage),
     updaterState: updaterStateFromFrb(value.updater),
+    persistenceState: _persistenceStateFromFrb(value.persistence),
     selectedProjectId: null,
     selectedThreadId: null,
+  );
+}
+
+PersistenceStateSnapshot _persistenceStateFromFrb(
+  frb.BridgePersistenceStateSnapshot snapshot,
+) {
+  return PersistenceStateSnapshot(
+    revision: snapshot.revision.toInt(),
+    state: switch (snapshot.state) {
+      frb.BridgePersistenceState_Ready(:final pendingCommits) =>
+        ReadyPersistenceState(pendingCommits: pendingCommits.toInt()),
+      frb.BridgePersistenceState_Flushing(
+        :final pendingCommits,
+        :final oldestPendingRevision,
+      ) =>
+        FlushingPersistenceState(
+          pendingCommits: pendingCommits.toInt(),
+          oldestPendingRevision: oldestPendingRevision?.toInt(),
+        ),
+      frb.BridgePersistenceState_Degraded(
+        :final pendingCommits,
+        :final oldestPendingRevision,
+        :final firstFailedAt,
+        :final error,
+      ) =>
+        DegradedPersistenceState(
+          pendingCommits: pendingCommits.toInt(),
+          oldestPendingRevision: oldestPendingRevision?.toInt(),
+          firstFailedAt: firstFailedAt.toInt(),
+          error: _resourceError(error),
+        ),
+      frb.BridgePersistenceState_Recovering(
+        :final pendingCommits,
+        :final oldestPendingRevision,
+        :final firstFailedAt,
+      ) =>
+        RecoveringPersistenceState(
+          pendingCommits: pendingCommits.toInt(),
+          oldestPendingRevision: oldestPendingRevision?.toInt(),
+          firstFailedAt: firstFailedAt.toInt(),
+        ),
+      frb.BridgePersistenceState_Blocked(
+        :final pendingCommits,
+        :final oldestPendingRevision,
+        :final firstFailedAt,
+        :final error,
+      ) =>
+        BlockedPersistenceState(
+          pendingCommits: pendingCommits.toInt(),
+          oldestPendingRevision: oldestPendingRevision?.toInt(),
+          firstFailedAt: firstFailedAt.toInt(),
+          error: _resourceError(error),
+        ),
+    },
   );
 }
 

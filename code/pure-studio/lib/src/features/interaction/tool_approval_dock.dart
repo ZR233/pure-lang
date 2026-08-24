@@ -12,12 +12,14 @@ class ToolApprovalDock extends ConsumerStatefulWidget {
   const ToolApprovalDock({
     required this.threadId,
     required this.payload,
+    required this.enabled,
     this.trailing,
     super.key,
   });
 
   final String threadId;
   final InteractionPayloadSnapshot payload;
+  final bool enabled;
   final Widget? trailing;
 
   @override
@@ -55,13 +57,17 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
             key: StudioDriverKeys.toolDeny,
             icon: const Icon(Icons.close),
             label: Text(context.l10n.interactionReject),
-            onPressed: () => _resolve(ToolApprovalDecision.denied),
+            onPressed: widget.enabled
+                ? () => _resolve(ToolApprovalDecision.denied)
+                : null,
           ),
           FilledButton.icon(
             key: StudioDriverKeys.toolApprove,
             icon: const Icon(Icons.check),
             label: Text(context.l10n.interactionApprove),
-            onPressed: () => _resolve(ToolApprovalDecision.approved),
+            onPressed: widget.enabled
+                ? () => _resolve(ToolApprovalDecision.approved)
+                : null,
           ),
         ],
       ),
@@ -87,6 +93,7 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
           ],
           const SizedBox(height: 10),
           TextField(
+            enabled: widget.enabled,
             controller: _reasonController,
             minLines: 1,
             maxLines: 3,

@@ -17,7 +17,9 @@ shutdown/drop 后才释放。取得失败返回 typed `InstanceBusy`，不进入
 Provider Usage 与 Updater 的 last-known cache 复用现有 `app_settings`，键分别为
 `observed:providerUsage:v1` 和 `observed:studioUpdate:v1`，不新增 migration。内存 owner snapshot
 不是第二套 durable projection；进程重启后仅从 canonical tables/config 和这两个明确的 observed
-cache 重建。
+cache 重建。这里的“不是第二套 durable projection”只说明内存不承担跨进程耐久化；进程运行期间，
+Thread、Task、Project 及其目录 owner 的内存聚合是活动状态唯一可信事实，SQLite 不参与活动查询或
+状态转换。
 
 核心表：
 
@@ -42,18 +44,34 @@ runtime snapshot、agent outcome 或 durable event journal。
 
 ## 19.2 提交
 
-ThreadActor 的内存 snapshot 是会话的唯一权威实例。每次 mutation 先更新内存、递增 revision
-并广播可观察事实，然后把 `ThreadCommit` 送入 persistence 队列，由后台 write-behind writer
-异步落库。writer drain 队列后把一批 commit 按 thread 分组，在单个 SQLite 事务中按提交顺序
-应用并校验 thread revision 连续性；内存是唯一 writer，落库冲突属于内部错误，必须上报并
-触发 actor resync，不得静默重试或丢弃。
+ThreadActor、TaskRuntime 与产品目录 owner 的内存 snapshot 是各自活动聚合的唯一权威实例。每次
+mutation 先在串行 owner 中完成全部校验和纯投影，以一个复合状态原子替换 snapshot、递增 revision
+并追加待落库批次，然后立即广播可观察事实。SQLite writer 在后台按 owner/revision 顺序异步落库；
+确认只推进 `durable_revision`，不得改变业务状态。
 
-Flush 分为批量和 Immediate 两类：流式增量（Item start/terminal、trace、observation 等）按
-入队条数阈值或时间窗口批量落库；Turn 终态、durable input claim/consume、Interaction 提交与
-resolution、归档/重命名、conversation recovery、Task fatal terminalization 和 shutdown 属于
-Immediate flush 边界——内存先更新，但广播终态、调度 continuation 或关闭进程内 agent 之前
-必须等待包含该 commit 的事务完成。批窗口内尚未落库的流式增量在进程崩溃时可以丢弃；重启后
-以 SQLite 已提交状态为准恢复。数据库保持 `synchronous=FULL`，批量事务已摊薄 fsync 成本。
+不再存在“等待 SQLite 后才能发布”的 Immediate 提交。流式增量、Turn 终态、input claim/consume、
+Interaction、conversation recovery、Task 终态和计划者唤醒都以内存 commit 为可见边界。显式
+`awaitDurable(owner, revision)` 只用于正常关机、owner 淘汰、工作目录或分支删除以及其他不可逆
+外部动作。进程异常退出时尚未确认的内存事实可以丢失；重启以 SQLite 最后成功写入的 revision 为
+恢复基线。数据库保持 `synchronous=FULL`，批量事务继续摊薄 fsync 成本。
+
+writer 不得在重试耗尽后退出或删除批次。三次快速重试失败后进入 Degraded，继续以最多三十秒间隔
+退避重试；首次成功后进入 Recovering，积压清零后自动回到 Ready。结构冲突、数据库损坏或无法安全
+处理的容量错误进入 Blocked。公开的 `PersistenceState` 携带 revision、待写数量、最旧未保存修订号、
+首次失败时间和无敏感内容的错误摘要。Degraded、Recovering、Blocked 暂停新 Turn、新 Task 和新资源
+创建，但停止、查询、当前活动轮次收束和手动重试保持可用。
+
+队列上限仍为 1024 个批次，其中 768 个用于普通提交，256 个为已启动生命周期的终态收束预留。启动
+新生命周期前必须取得终态许可。普通区满时先合并同一活动 Item 的流式更新；仍无法释放时受控取消继续
+产生数据的轮次，并使用预留位置提交终态，禁止静默丢弃。正常关机必须等待 pending=0；强制退出必须
+明确告知最后耐久修订号之后的数据可能丢失。
+
+Faulted 可以保留来源 Turn 作为诊断身份，但该身份不再属于活动 Turn；同一个内存 commit 必须把
+对应 Turn 写为 Failed 并立即发布。诊断 Turn 缺少失败结果、身份不一致或结果不是失败终态时，在
+owner 替换前拒绝转换。合法的 Faulted commit、SQLite 错误或发布失败均不得再次把 Agent Faulted。
+类型化可恢复运行时或协议故障可以通过 `RecoverFaulted` 在验证快照、修订号和 transcript 后回到 Idle；
+聚合损坏与未知旧故障保持 Faulted。旧字符串故障只有命中已知 reasoning 分块错误且会话审计通过时
+才自动升级为可恢复协议故障。恢复不复活旧 Turn 或旧 TaskRun，下一条输入创建新的执行轮次。
 
 Item ordinal 是内存权威事实：由 ThreadEventBus（每线程唯一投影者）在通知首次应用时按
 到达序分配 `max(ordinal)+1`，此后不可变；分配后的规范化通知同时供给内存快照、订阅广播
@@ -62,6 +80,11 @@ Item ordinal 是内存权威事实：由 ThreadEventBus（每线程唯一投影�
 更新同一 Item 完整 payload。历史查询按 `(thread_id, turn_sequence)` keyset 分页，不使用
 OFFSET。
 
+ThreadEventBus 还按开始顺序保留当前驻留期观察到的 Turn 热窗口；Turn 完成并清除 `active_turn` 后
+仍留在该窗口。历史分页先按 cursor 选择热 Turn，再从 SQLite 读取冷页；相同 Turn 或 Item 标识以内存
+状态覆盖数据库内容，Item 按 owner 分配的 ordinal 重排。cursor 位于尚未落库的热 Turn 时，从热窗口
+继续后再衔接冷历史最新端，并排除 cursor 及其后的热标识，保证跨冷热边界不重复、不倒序。
+
 模型 transcript 与 Studio Timeline 分开持久化。`thread_context_segments` 按 Thread revision 保存
 `append | replace`：普通 checkpoint 只追加新增 `ModelContextItem` suffix；compaction、回滚或截断
 在同一事务删除旧 segment 并写入新的 replacement baseline。恢复时按 revision fold segment，
@@ -69,8 +92,10 @@ OFFSET。
 
 runtime 从每次 Thread transition 的提交前后 session 自动派生 transcript mutation；TurnFinished、
 rollover 和 child 注册不得以 `context=None` 丢弃已变化 transcript。Replace、session snapshot、
-Turn terminal 与 mailbox 状态在同一 SQLite 事务中提交；事务失败整体回滚并上报，由 resync
-收束内存与数据库的分叉。
+Turn terminal 与 mailbox 状态属于同一个持久化批次，并在 SQLite 中以单一事务应用；事务失败只
+回滚该次数据库尝试，不回滚已经发布的内存事实。writer 保留原批次并进入 Degraded 或 Blocked，
+重试成功后只推进 `durable_revision`；重同步只能从内存 owner 修复消费者投影，不得用旧数据库
+基线覆盖仍驻留的活动聚合。
 
 `thread_session_state` 每个 Thread 只有一行，replacement 保存 pinned working context、session note
 与 prompt generation 状态。Evidence Ledger 更新只覆盖这行的有界 working state，不复制完整
@@ -92,14 +117,15 @@ worktree 创建后的资源事实和 caller 声明的审计数据。
 
 `task_issues` 以 `(task_run_id, source_turn_id)` 唯一保存来源 Thread/Turn/agent、WorkUnit 或
 ReviewRound，以及包含完整 `TurnFailure`、处置语义和解决事实的 canonical state。Recoverable issue
-只在同一来源 Thread 成功开启后续 Turn 时解决；首个 fatal issue 在 SQLite immediate 事务中把
-Task 与 children 一并结算为失败终态，迟到 child 事件不能覆盖该事实。数据库提交后才关闭进程内
-agent。同一项目的多条活动 Task 不创建项目租约，所有权、独立工作目录和版本比较更新负责隔离。
+只在同一来源 Thread 成功开启后续 Turn 时解决；首个 fatal issue 在 TaskRuntime 的一个 owner
+transition 中把 Task 与 children 一并结算为失败终态，迟到 child 事件不能覆盖该事实。热提交后
+立即关闭进程内 agent，SQLite 异步跟随。同一项目的多条活动 Task 不创建项目租约，所有权、独立
+工作目录和版本比较更新负责隔离。
 
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
-`model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。Turn 终态聚合 usage 必须随 Immediate flush 持久化
-成功后，才发布 runtime usage 终态通知；turn 内增量 usage 通知跟随内存权威事实，落库由批量
-事务异步跟随。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
+`model_json`；`usage_json` 保存同一批次重算的 Turn 聚合。Turn 终态聚合 usage 与 runtime usage
+终态通知在同一内存提交后立即可见，落库由批量事务异步跟随。相同 inference ID 的相同记录幂等，
+内容冲突使持久化进入 Blocked；历史费用始终使用
 当时保存的价格和币种，不能按当前 catalog 重新计算。
 
 usage 区分 prompt、缓存读取、缓存写入、completion 与 reasoning token。归一化时缓存读取与
@@ -171,9 +197,13 @@ program 正文、caller 原始 JSON 与 cache key 均不得进入日志或 Flutt
 恢复引用时从 canonical 表加载并创建 ThreadActor；启动只为钉住集合（queued input、pending
 Interaction、活动 Task 引用）主动恢复。驻留 actor 由 manager 的 LRU 双端队列管理，订阅、提交
 或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无 pending input，超容量时从队首淘汰。
-淘汰前必须同步 flush 该 Thread 的全部 pending commits，被淘汰 Thread 保留目录索引与全部
+淘汰前必须等待该 Thread 的目标 revision 耐久化，被淘汰 Thread 保留目录索引与全部
 durable 状态，再次订阅时按需恢复。
 
-会话内容查询遵循同一窗口语义：Timeline 历史仍按 `(thread_id, turn_sequence)` keyset 分页从
-SQLite 读取，GUI 与 runtime 都不保留第二份完整历史；内存（GUI 已加载页或驻留 actor）未命中时
-一律回源 SQLite。
+TaskRuntime 使用同一驻留原则：活动 Task 及未追平耐久修订的终态 Task 不得淘汰；只有终态且
+`durable_revision >= hot_revision` 时才可移除完整聚合，Task 目录条目继续保留。再次访问该条目时是
+显式冷激活，从 SQLite 恢复聚合基线，不允许活动事件用数据库快照覆盖驻留聚合。
+
+会话内容查询遵循同一窗口语义：驻留 actor 的热窗口与未确认事实从内存读取，更早 Timeline 按
+`(thread_id, turn_sequence)` keyset 分页从 SQLite 读取；跨越冷热边界时按 item identity 和 ordinal
+以内存覆盖数据库记录。未驻留 actor 必须已经耐久化，查询可直接回源 SQLite。

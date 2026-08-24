@@ -84,6 +84,7 @@ async fn run_tool_failure_fixture(root: &Path) -> Result<()> {
     let project = runtime.open_project(&workspace).await?;
     let thread = runtime.create_thread(&project.id, "Tool failure").await?;
     runtime.start_runtime().await?;
+    runtime.reconcile_mcp_runtime().await?;
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread.id.clone(),
@@ -174,6 +175,7 @@ async fn run_interrupted_fixture(root: &Path) -> Result<()> {
         .create_thread(&project.id, "Late completion")
         .await?;
     runtime.start_runtime().await?;
+    runtime.reconcile_mcp_runtime().await?;
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread.id.clone(),
@@ -233,6 +235,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
         .create_thread(&project.id, "DeepSeek cache billing")
         .await?;
     runtime.start_runtime().await?;
+    runtime.reconcile_mcp_runtime().await?;
 
     for prompt in [
         "Run the cache fixture tools and create cache-result.txt.",
@@ -306,6 +309,7 @@ async fn run_fixture(root: &Path) -> Result<()> {
     let reopened_store = StudioStore::open(&database_path).await?;
     let reopened_runtime = StudioRuntime::new(reopened_store.clone(), config_store)?;
     reopened_runtime.start_runtime().await?;
+    reopened_runtime.reconcile_mcp_runtime().await?;
     let restored = reopened_runtime.thread_snapshot(&thread.id).await?;
     let restored_usage = restored
         .runtime

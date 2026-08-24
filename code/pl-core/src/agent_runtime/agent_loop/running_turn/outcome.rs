@@ -42,6 +42,9 @@ pub(crate) enum TurnExecutionTerminal {
     WorkerFailed {
         error: String,
     },
+    ProtocolFailed {
+        error: String,
+    },
 }
 
 impl From<TurnWorkerOutcome> for TurnExecutionTerminal {
@@ -101,6 +104,18 @@ pub(crate) fn turn_outcome(
                 pl_protocol::TurnFailureCategory::Internal,
                 error,
             )),
+            TokenUsage::default(),
+            RetainedTurnResult::Absent,
+        ),
+        TurnExecutionTerminal::ProtocolFailed { error } => (
+            pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure {
+                category: pl_protocol::TurnFailureCategory::Validation,
+                provider_kind: None,
+                code: Some("turnProtocolProjectionFailed".to_string()),
+                http_status: None,
+                message: error,
+                retry: pl_protocol::RetryDisposition::Permanent,
+            }),
             TokenUsage::default(),
             RetainedTurnResult::Absent,
         ),
@@ -197,6 +212,29 @@ mod tests {
 
     use super::*;
     use crate::TraceRecorder;
+
+    #[test]
+    fn projection_failure_is_a_turn_protocol_failure_not_an_agent_fault() {
+        let outcome = turn_outcome(
+            TurnId::new("turn-projection-failure").unwrap(),
+            ThreadId::new("thread-projection-failure").unwrap(),
+            TurnExecutionTerminal::ProtocolFailed {
+                error: "reasoning chunk index skipped an earlier chunk".to_string(),
+            },
+            Some(1),
+        );
+
+        let failure = outcome.outcome.outcome.failure().expect("failed turn");
+        assert_eq!(failure.category, TurnFailureCategory::Validation);
+        assert_eq!(
+            failure.code.as_deref(),
+            Some("turnProtocolProjectionFailed")
+        );
+        assert!(matches!(
+            outcome.retained_result,
+            RetainedTurnResult::Absent
+        ));
+    }
 
     #[test]
     fn required_tool_finalization_accepts_completed_tool() {

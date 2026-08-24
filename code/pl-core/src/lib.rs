@@ -103,7 +103,7 @@ pub use session::{AgentSession, AgentSessionForkPolicy};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use thread_event::{
     ThreadEventBus, ThreadEventBusHandle, ThreadEventError, ThreadEventOptions,
-    ThreadEventSubscription, ThreadNotificationFact,
+    ThreadEventSubscription, ThreadHotHistory, ThreadNotificationFact,
 };
 pub use tool::*;
 pub use trace::TraceRecorder;

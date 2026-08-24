@@ -15,7 +15,15 @@ impl StudioRuntime {
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
+        let persistence = self
+            .agent_facility
+            .persistence
+            .lock()
+            .await
+            .clone()
+            .context("Studio persistence writer is unavailable")?;
         let host = StudioAgentHost::new(
+            persistence,
             self.store.clone(),
             self.config_runtime.clone(),
             self.external_runtimes.mcp.clone(),
@@ -27,8 +35,6 @@ impl StudioRuntime {
             self.agent_facility.product_events.clone(),
             self.skills.clone(),
         );
-        // 记录 host 内部 repository 句柄，让 framework 被 take 后关机仍能排空 write-behind 队列。
-        *self.agent_facility.persistence.lock().await = Some(host.persistence());
         let runtime = std::sync::Arc::new(
             StudioAgentRuntime::start(host, runtime_options())
                 .await
@@ -36,15 +42,14 @@ impl StudioRuntime {
         );
         *framework = Some(runtime.clone());
         drop(framework);
-        // Pending wake/continuation 目标必须先驻留，attach 时 materialize 才不会
-        // 跳过（wake）或破坏性失败（executor continuation）。
-        let mut activation_targets = Vec::new();
-        for wake in self.store.list_pending_task_planner_wakes().await? {
-            activation_targets.push(wake.root_thread_id);
-        }
+        // 活动 Task 引用和 pending continuation 目标必须先驻留，attach 时
+        // materialize 才不会跳过（wake）或破坏性失败（executor continuation）。
+        let mut activation_targets = self.task_runtime.active_thread_ids().await;
         for continuation in self.store.list_pending_executor_continuations().await? {
             activation_targets.push(continuation.agent_id);
         }
+        activation_targets.sort();
+        activation_targets.dedup();
         for target in activation_targets {
             // Box::pin 引入间接层，避免与 ensure_thread_agent 的 async 递归。
             if let Err(error) = Box::pin(self.ensure_thread_agent(&target)).await {
@@ -95,19 +100,17 @@ impl StudioRuntime {
 
     /// 读取包含尚未终态化 delta overlay 的 authoritative Thread snapshot。
     pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
-        let repository = StudioAgentRepository::new(self.store.clone());
-        let mut snapshot = repository
-            .read_thread_snapshot(thread_id)
-            .await?
-            .context("selected Thread not found")?;
-        if let Some((handle, _)) = self.try_get_thread_handle(thread_id).await? {
-            let core_thread_id = pl_core::ThreadId::new(thread_id.to_string())?;
-            snapshot = handle
-                .thread_snapshot(&core_thread_id)
+        if let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? {
+            let mut snapshot = handle
+                .thread_snapshot(&agent_id)
                 .map_err(|error| anyhow::anyhow!(error))?;
             snapshot.thread = self.read_protocol_thread(thread_id).await?;
+            return Ok(snapshot);
         }
-        Ok(snapshot)
+        StudioAgentRepository::for_reads(self.store.clone())
+            .read_thread_snapshot(thread_id)
+            .await?
+            .context("selected Thread not found")
     }
 
     /// 返回已存在 actor 的 handle；查询路径不得初始化 framework 或注册 actor。
@@ -119,10 +122,10 @@ impl StudioRuntime {
             return Ok(None);
         };
         let thread = self
-            .store
-            .read_thread(thread_id)
-            .await?
-            .context("selected Thread not found")?;
+            .agent_facility
+            .product_events
+            .thread_snapshot(thread_id)
+            .context("selected Thread not found in the in-memory directory")?;
         let agent_id = pl_core::ThreadId::new(thread.agent_path)?;
         let handle = framework.handle();
         let is_registered = handle
@@ -137,12 +140,10 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<pl_protocol::Thread> {
-        Ok(self
-            .store
-            .read_thread(thread_id)
-            .await?
-            .context("selected Thread not found")?
-            .into())
+        self.agent_facility
+            .product_events
+            .thread_snapshot(thread_id)
+            .context("selected Thread not found in the in-memory directory")
     }
 
     pub(super) async fn start_lsp_state_watcher(&self) {
@@ -185,9 +186,13 @@ impl StudioRuntime {
             if self.residency.is_pinned(&thread_id) {
                 continue;
             }
-            let agent_id = match self.store.read_thread(&thread_id).await {
-                Ok(Some(record)) => match pl_core::ThreadId::new(record.agent_path) {
-                    Ok(agent_id) => agent_id,
+            let thread = self
+                .agent_facility
+                .product_events
+                .thread_snapshot(&thread_id);
+            let (agent_id, root_thread_id) = match thread {
+                Some(record) => match pl_core::ThreadId::new(record.agent_path) {
+                    Ok(agent_id) => (agent_id, record.root_thread_id),
                     Err(error) => {
                         tracing::warn!(
                             thread_id = %thread_id,
@@ -198,17 +203,9 @@ impl StudioRuntime {
                         continue;
                     }
                 },
-                Ok(None) => {
+                None => {
                     // Thread 已删除/归档；从驻留队列清除。
                     self.residency.remove(&thread_id).await;
-                    continue;
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        thread_id = %thread_id,
-                        error_bytes = error.to_string().len(),
-                        "failed to read resident thread for eviction"
-                    );
                     continue;
                 }
             };
@@ -218,7 +215,10 @@ impl StudioRuntime {
                     if snapshot.active_turn_id().is_none() && snapshot.pending_inputs == 0 =>
                 {
                     if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
-                        && let Err(error) = repository.writer().flush().await
+                        && let Err(error) = repository
+                            .writer()
+                            .await_durable(agent_id.as_str(), snapshot.revision)
+                            .await
                     {
                         tracing::warn!(
                             thread_id = %thread_id,
@@ -231,6 +231,7 @@ impl StudioRuntime {
                     match handle.evict_agent(agent_id).await {
                         Ok(()) => {
                             self.residency.remove(&thread_id).await;
+                            let _ = self.task_runtime.evict_durable(&root_thread_id).await;
                             tracing::debug!(
                                 thread_id = %thread_id,
                                 "evicted idle resident thread actor"
@@ -274,13 +275,19 @@ impl StudioRuntime {
 
     /// 排空 agent framework 的 write-behind 队列并停止 writer。
     pub(super) async fn flush_persistence(&self) -> Result<()> {
-        let repository = self.agent_facility.persistence.lock().await.take();
+        let repository = self.agent_facility.persistence.lock().await.clone();
         if let Some(repository) = repository {
+            repository
+                .writer()
+                .flush()
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             repository
                 .writer()
                 .shutdown()
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            self.agent_facility.persistence.lock().await.take();
         }
         Ok(())
     }

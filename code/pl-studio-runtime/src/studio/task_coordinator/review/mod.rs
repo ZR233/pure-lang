@@ -1,7 +1,7 @@
 mod coverage;
 mod exit;
 mod gate;
-pub(crate) use gate::integrated_review_gate;
+pub(crate) use gate::{integrated_review_gate, integrated_review_gate_now};
 pub(crate) mod prompt;
 mod read;
 mod trace;
@@ -300,7 +300,7 @@ impl TaskCoordinator {
                     "task_request_delivery_review",
                 )?;
                 let round = coordinator
-                    .store
+                    .task_runtime
                     .begin_delivery_review(&thread_id, input.executor_agent_id.trim(), &call_id)
                     .await?;
                 let output = coordinator
@@ -329,8 +329,13 @@ impl TaskCoordinator {
         let (reviewed_head, changed_files) = if let Some(target) = run.state.review_target() {
             (target.reviewed_head.clone(), target.changed_files.clone())
         } else {
-            let merges = self.store.list_merge_records(&run.id).await?;
-            let completions = self.store.list_work_completions(&run.id).await?;
+            let aggregate = self
+                .task_runtime
+                .aggregate(thread_id)
+                .await
+                .context("Task aggregate is not resident for integrated review")?;
+            let merges = aggregate.facts.merges;
+            let completions = aggregate.facts.completions;
             let reviewed_head = merges
                 .iter()
                 .max_by_key(|merge| (merge.created_at, &merge.id))
@@ -351,7 +356,7 @@ impl TaskCoordinator {
             (reviewed_head, changed_files)
         };
         let round = self
-            .store
+            .task_runtime
             .begin_integrated_review(
                 thread_id,
                 BeginIntegratedReview {
@@ -378,28 +383,22 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         FunctionToolDefinition::<TaskStatusInput>::new(
             "task_status",
-            "Read the canonical durable Task state, merge candidates, completions, reviews, merges, and findings.",
+            "Read the canonical in-memory Task state, merge candidates, completions, reviews, merges, and findings.",
         )
         .registered(move |_: TaskStatusInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
-                    let run = match coordinator
-                        .store
-                        .find_active_task_run_for_root_thread(&thread_id)
-                        .await?
-                    {
-                        Some(run) => run,
-                        None => coordinator
-                            .store
-                            .find_latest_task_run_for_root_thread(&thread_id)
-                            .await?
-                            .context("TaskRun not found for this root Thread")?,
-                    };
-                    let work_units = coordinator.store.list_work_units(&run.id).await?;
-                    let completions = coordinator.store.list_work_completions(&run.id).await?;
-                    let merges = coordinator.store.list_merge_records(&run.id).await?;
+                    let aggregate = coordinator
+                        .task_runtime
+                        .aggregate(&thread_id)
+                        .await
+                        .context("TaskRun not found for this root Thread")?;
+                    let run = aggregate.facts.run;
+                    let work_units = aggregate.facts.work_units;
+                    let completions = aggregate.facts.completions;
+                    let merges = aggregate.facts.merges;
                     let merge_candidates = coordinator
                         .merge_candidates(
                             &run,
@@ -409,7 +408,7 @@ impl TaskCoordinator {
                             runtime.as_ref(),
                         )
                         .await?;
-                    let review_records = coordinator.store.list_review_rounds(&run.id).await?;
+                    let review_records = aggregate.facts.reviews;
                     let integrated_review_gate = integrated_review_gate(
                         &run,
                         &work_units,
@@ -443,7 +442,7 @@ impl TaskCoordinator {
                         .list_pending_interactions(&run.root_thread_id)
                         .await?;
                     let todo = coordinator.store.read_thread_todo(&run.root_thread_id).await?;
-                    let issues = coordinator.store.list_task_issues(&run.id).await?;
+                    let issues = aggregate.facts.issues;
                     let execution_activity = coordinator
                         .model_execution_activity(&run, runtime.as_ref())
                         .await?;
@@ -527,9 +526,12 @@ impl TaskCoordinator {
                     bail!("workUnitId must not be empty")
                 }
                 let run = coordinator
-                    .store
-                    .read_active_task_run_for_root_thread(&thread_id)
-                    .await?;
+                    .task_runtime
+                    .aggregate(&thread_id)
+                    .await
+                    .context("active Task aggregate is not resident")?
+                    .facts
+                    .run;
                 let (work_unit, handoff) = coordinator
                     .store
                     .read_work_unit_handoff(work_unit_id)
@@ -559,7 +561,7 @@ impl TaskCoordinator {
         let prompt = match prompt::build_review_prompt(self, &round).await {
             Ok(prompt) => prompt,
             Err(error) => {
-                self.store
+                self.task_runtime
                     .fail_reviewer_spawn(thread_id, None, call_id, &error.to_string())
                     .await?;
                 return Err(error);
@@ -588,7 +590,7 @@ impl TaskCoordinator {
         let handle = match spawn {
             Ok(handle) => handle,
             Err(error) => {
-                self.store
+                self.task_runtime
                     .fail_reviewer_spawn(thread_id, None, call_id, &error.to_string())
                     .await?;
                 return Err(anyhow::anyhow!(error.to_string()));
@@ -612,9 +614,12 @@ impl TaskCoordinator {
     ) -> Result<TaskRun> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
+            .task_runtime
+            .aggregate(thread_id)
+            .await
+            .context("active Task aggregate is not resident")?
+            .facts
+            .run;
         if !matches!(
             run.kind(),
             TaskRunStateKind::Working | TaskRunStateKind::Reviewing

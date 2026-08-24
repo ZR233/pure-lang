@@ -15,12 +15,14 @@ class PlanConfirmationDock extends ConsumerStatefulWidget {
   const PlanConfirmationDock({
     required this.threadId,
     required this.planContent,
+    required this.enabled,
     this.trailing,
     super.key,
   });
 
   final String threadId;
   final String planContent;
+  final bool enabled;
   final Widget? trailing;
 
   @override
@@ -60,8 +62,8 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
         children: [
           _PlanAdjustmentInput(
             controller: _adjustmentController,
-            enabled: !_submitting,
-            canSubmit: canSubmitAdjustment && !_submitting,
+            enabled: widget.enabled && !_submitting,
+            canSubmit: widget.enabled && canSubmitAdjustment && !_submitting,
             onChanged: () => setState(() {}),
             onSubmit: _resolveRevisePlan,
           ),
@@ -71,7 +73,9 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
           ],
           const SizedBox(height: 12),
           _PlanDecisionActions(
-            onImplement: _submitting ? null : _resolveImplement,
+            onImplement: !widget.enabled || _submitting
+                ? null
+                : _resolveImplement,
           ),
         ],
       ),

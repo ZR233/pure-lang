@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 
 use crate::{
@@ -33,10 +35,114 @@ use super::{
     },
 };
 
-pub(crate) async fn load_task_runtime(
+/// 从 SQLite 冷基线一次性恢复出的完整 Task 聚合。
+///
+/// 该类型只在冷加载边界构造；活动查询由 `TaskRuntime` 克隆内存中的同一聚合，
+/// 不得再分别查询 TaskRun、WorkUnit、Completion、Merge、Review 和 Issue 表。
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedTaskAggregate {
+    pub(crate) run: TaskRun,
+    pub(crate) work_units: Vec<super::task_coordinator::WorkUnit>,
+    pub(crate) completions: Vec<WorkCompletionRecord>,
+    pub(crate) merges: Vec<MergeRecord>,
+    pub(crate) reviews: Vec<ReviewRoundRecord>,
+    pub(crate) issues: Vec<super::task_coordinator::TaskIssueRecord>,
+    pub(crate) runtime: StudioTaskRuntime,
+}
+
+impl LoadedTaskAggregate {
+    /// 为新 TaskRun 构造不依赖 SQLite 的空子事实聚合。
+    pub(crate) fn new(run: TaskRun) -> Result<Self> {
+        let runtime = studio_task_runtime(
+            run.clone(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            StudioIntegratedReviewGate::NotRequiredNoDelivery,
+        )?;
+        Ok(Self {
+            run,
+            work_units: Vec::new(),
+            completions: Vec::new(),
+            merges: Vec::new(),
+            reviews: Vec::new(),
+            issues: Vec::new(),
+            runtime,
+        })
+    }
+
+    /// TaskRun 单事实转换后刷新热目录投影；不访问 SQLite。
+    pub(crate) fn refresh_run_projection(&mut self) -> Result<()> {
+        self.runtime.run_id.clone_from(&self.run.id);
+        self.runtime.state = studio_task_state(&self.run)?;
+        self.runtime.revision = self.run.revision;
+        self.runtime.generation = self.run.generation();
+        Ok(())
+    }
+
+    /// 从内存领域事实重建完整热投影；保留 handoff 与执行进度等 Thread owner 元数据。
+    pub(crate) fn refresh_projection(&mut self) -> Result<()> {
+        let previous = self
+            .runtime
+            .work_units
+            .iter()
+            .cloned()
+            .map(|runtime| (runtime.id.clone(), runtime))
+            .collect::<HashMap<_, _>>();
+        let work_units = self
+            .work_units
+            .iter()
+            .map(|unit| {
+                let previous = previous.get(&unit.id);
+                Ok(StudioTaskWorkUnitRuntime {
+                    id: unit.id.clone(),
+                    title: unit.title.clone(),
+                    state: studio_work_unit_state(&unit.state)?,
+                    worktree_path: unit.worktree_path.clone(),
+                    branch: unit.branch.clone(),
+                    agent_id: unit.executor_thread_id.clone(),
+                    attempt: unit.attempt,
+                    supersedes_work_unit_id: unit.supersedes_work_unit_id.clone(),
+                    budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
+                    executor_progress_revision: previous
+                        .map_or(0, |runtime| runtime.executor_progress_revision),
+                    blueprint_fingerprint: previous
+                        .and_then(|runtime| runtime.blueprint_fingerprint.clone()),
+                    objective: previous.and_then(|runtime| runtime.objective.clone()),
+                    implementation_step_count: previous
+                        .map_or(0, |runtime| runtime.implementation_step_count),
+                    acceptance_criterion_count: previous
+                        .map_or(0, |runtime| runtime.acceptance_criterion_count),
+                    verification_count: previous.map_or(0, |runtime| runtime.verification_count),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let gate = super::task_coordinator::review::integrated_review_gate_now(
+            &self.run,
+            &self.work_units,
+            &self.completions,
+            &self.merges,
+            &self.reviews,
+        );
+        self.runtime = studio_task_runtime(
+            self.run.clone(),
+            work_units,
+            self.completions.clone(),
+            self.merges.clone(),
+            self.reviews.clone(),
+            self.issues.clone(),
+            gate,
+        )?;
+        Ok(())
+    }
+}
+
+pub(crate) async fn load_task_aggregate(
     store: &StudioStore,
     root_thread_id: &str,
-) -> Result<Option<StudioTaskRuntime>> {
+) -> Result<Option<LoadedTaskAggregate>> {
     let Some(run) = store
         .find_latest_task_run_for_root_thread(root_thread_id)
         .await?
@@ -103,16 +209,24 @@ pub(crate) async fn load_task_runtime(
     )
     .await;
     let issues = store.list_task_issues(&run.id).await?;
-    studio_task_runtime(
-        run,
+    let runtime = studio_task_runtime(
+        run.clone(),
         work_unit_runtimes,
+        completions.clone(),
+        merges.clone(),
+        reviews.clone(),
+        issues.clone(),
+        integrated_review_gate,
+    )?;
+    Ok(Some(LoadedTaskAggregate {
+        run,
+        work_units,
         completions,
         merges,
         reviews,
         issues,
-        integrated_review_gate,
-    )
-    .map(Some)
+        runtime,
+    }))
 }
 
 fn studio_task_runtime(

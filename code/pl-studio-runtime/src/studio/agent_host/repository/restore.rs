@@ -3,8 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use pl_core::{
-    AgentIdentity, AgentRoleId, AgentSession, AgentSnapshot, AgentState, AgentTurnOutcome,
-    DurableMailboxEnvelope, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
+    AgentCommand, AgentFaultClassification, AgentIdentity, AgentRecoveryTarget, AgentRoleId,
+    AgentSession, AgentSnapshot, AgentState, AgentTurnOutcome, DurableMailboxEnvelope,
+    FaultedAgentState, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
     ThreadContextState, ThreadId,
 };
 use pl_protocol::{PureError, ThreadItem, ThreadItemState, ThreadSnapshot, Turn};
@@ -118,7 +119,7 @@ impl StudioAgentRepository {
         parents: &BTreeMap<String, Option<String>>,
     ) -> Result<RestoredAgentRuntime, PureError> {
         let thread_id = ThreadId::new(model.id.clone())?;
-        let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
+        let (pending_inputs, mut active_input) = self.restore_inputs(thread_id.as_str()).await?;
         let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
             .await?
             .map(AgentTurnOutcome::try_from)
@@ -131,6 +132,19 @@ impl StudioAgentRepository {
                 model.state_kind
             )));
         }
+        let was_faulted = matches!(state, AgentState::Faulted(_));
+        let state = recover_validated_fault(state, last_turn.as_ref())?;
+        if was_faulted && state.is_idle() {
+            // Faulted 提交已经把旧 Turn 记录为失败；恢复不得复活其 claimed 输入。
+            // 下一次热提交会把该旧输入规范化为 consumed。
+            active_input = None;
+        }
+        let durable_revision =
+            u64_from_i64(model.runtime_revision.ok_or_else(|| {
+                store_error(format!("Thread {} actor is not registered", model.id))
+            })?)?;
+        self.writer
+            .seed_durable_revision(thread_id.as_str(), durable_revision);
         let snapshot = AgentSnapshot {
             identity: AgentIdentity {
                 id: thread_id,
@@ -146,9 +160,7 @@ impl StudioAgentRepository {
             pending_inputs: pending_inputs.len(),
             progress: None,
             last_turn,
-            revision: u64_from_i64(model.runtime_revision.ok_or_else(|| {
-                store_error(format!("Thread {} actor is not registered", model.id))
-            })?)?,
+            revision: durable_revision,
             event_sequence: u64_from_i64(model.event_sequence)?,
             updated_at: model.updated_at,
         };
@@ -311,6 +323,49 @@ impl StudioAgentRepository {
     }
 }
 
+const LEGACY_REASONING_CHUNK_FAULT: &str = "chunk index skipped an earlier chunk";
+
+/// 只兼容已经确认由旧 reasoning 分块编号回归造成的历史故障。
+///
+/// 调用本函数前，恢复入口已经完成 session hash 与 transcript 校验；实时投影仍保留
+/// 严格跳号检查，其他 Faulted 状态也继续 fail-closed。
+fn recover_validated_fault(
+    state: AgentState,
+    last_turn: Option<&AgentTurnOutcome>,
+) -> Result<AgentState, PureError> {
+    let AgentState::Faulted(faulted) = &state else {
+        return Ok(state);
+    };
+    let known_legacy_fault = faulted
+        .error()
+        .message
+        .contains(LEGACY_REASONING_CHUNK_FAULT)
+        && last_turn
+            .and_then(|turn| turn.outcome.failure())
+            .is_some_and(|failure| failure.message.contains(LEGACY_REASONING_CHUNK_FAULT));
+    if !faulted.classification().is_recoverable() && !known_legacy_fault {
+        return Ok(state);
+    }
+    let state = if known_legacy_fault
+        && faulted.classification() == AgentFaultClassification::LegacyUnknown
+    {
+        AgentState::Faulted(FaultedAgentState::classified(
+            faulted.error().clone(),
+            faulted.turn_id().cloned(),
+            AgentFaultClassification::RecoverableProtocol,
+        ))
+    } else {
+        state
+    };
+    tracing::warn!("recovering a validated typed Agent fault as an idle in-memory agent");
+    state
+        .decide(AgentCommand::RecoverFaulted {
+            target: AgentRecoveryTarget::Idle,
+        })
+        .map(|decision| decision.next_state)
+        .map_err(store_error)
+}
+
 fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<u32, PureError> {
     let mut current = id;
     let mut depth = 0_u32;
@@ -327,4 +382,73 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
         current = parent;
     }
     Ok(depth)
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{AgentTurnOutcome, FaultedAgentState, ThreadId, TurnId};
+    use pl_model::TokenUsage;
+    use pl_protocol::{StateError, TurnFailure, TurnFailureCategory, TurnOutcome};
+
+    use super::*;
+
+    #[test]
+    fn validated_legacy_reasoning_chunk_fault_recovers_to_idle() {
+        let outcome = AgentTurnOutcome {
+            turn_id: TurnId::new("turn-1").unwrap(),
+            thread_id: ThreadId::new("thread-1").unwrap(),
+            outcome: TurnOutcome::failed(TurnFailure::permanent(
+                TurnFailureCategory::Internal,
+                format!("projection failed: {LEGACY_REASONING_CHUNK_FAULT}"),
+            )),
+            usage: TokenUsage::default(),
+            started_at: Some(1),
+            finished_at: 2,
+        };
+        let state = AgentState::Faulted(FaultedAgentState::new(
+            StateError {
+                code: "agentRuntimeFault".to_string(),
+                message: format!("thread events failed: {LEGACY_REASONING_CHUNK_FAULT}"),
+                retryable: false,
+            },
+            Some(TurnId::new("turn-1").unwrap()),
+        ));
+
+        let recovered = recover_validated_fault(state, Some(&outcome)).unwrap();
+
+        assert!(recovered.is_idle());
+    }
+
+    #[test]
+    fn unrelated_fault_remains_faulted() {
+        let state = AgentState::Faulted(FaultedAgentState::new(
+            StateError {
+                code: "agentRuntimeFault".to_string(),
+                message: "aggregate validation failed".to_string(),
+                retryable: false,
+            },
+            None,
+        ));
+
+        let recovered = recover_validated_fault(state, None).unwrap();
+
+        assert!(matches!(recovered, AgentState::Faulted(_)));
+    }
+
+    #[test]
+    fn validated_typed_runtime_fault_recovers_without_matching_legacy_text() {
+        let state = AgentState::Faulted(FaultedAgentState::classified(
+            StateError {
+                code: "agentRuntimeRecoverable".to_string(),
+                message: "runtime loop failed after a verified commit".to_string(),
+                retryable: false,
+            },
+            None,
+            AgentFaultClassification::RecoverableRuntime,
+        ));
+
+        let recovered = recover_validated_fault(state, None).unwrap();
+
+        assert!(recovered.is_idle());
+    }
 }

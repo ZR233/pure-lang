@@ -1,16 +1,15 @@
 use pl_protocol::ThreadNotificationEnvelope;
 use pl_trace::TraceEvent;
 
-use super::super::host::{AgentCommitObserver, CommitDurability, ThreadRepository};
+use super::super::host::{AgentCommitObserver, PersistenceClass, ThreadRepository};
 use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeHost, AgentRuntimeResult,
-    DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadCommitOutcome, ThreadId,
-    ThreadMutation, TurnId,
+    DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadId, ThreadMutation, TurnId,
 };
 use super::AgentLoop;
 
-/// 一次 durable commit 成功后需要广播的 typed 事实。
+/// 一次内存 commit 成功后需要广播的 typed 事实。
 ///
 /// Builder 只描述发布内容和 Directory 更新策略；真正的发布顺序由
 /// [`AgentLoop::commit_and_publish`] 统一控制。
@@ -66,9 +65,9 @@ impl CommitPublication {
     }
 }
 
-/// 已准备完成、待入队 write-behind 队列的提交命令。
+/// 已准备完成、待加入内存待落库队列的提交命令。
 pub(super) struct PendingCommit {
-    durability: CommitDurability,
+    persistence: PersistenceClass,
     next_state: ThreadActorState,
     facts: DurableCommitFacts,
     mutation: ThreadMutation,
@@ -82,7 +81,7 @@ impl PendingCommit {
         mutation: ThreadMutation,
     ) -> Self {
         Self {
-            durability: CommitDurability::Batched,
+            persistence: PersistenceClass::Coalescible,
             next_state,
             facts,
             mutation,
@@ -90,9 +89,9 @@ impl PendingCommit {
         }
     }
 
-    /// 覆盖默认落库边界；只在 durable 边界调用点使用。
-    pub(super) fn durability(mut self, durability: CommitDurability) -> Self {
-        self.durability = durability;
+    /// 覆盖默认持久化分类。
+    pub(super) fn persistence(mut self, persistence: PersistenceClass) -> Self {
+        self.persistence = persistence;
         self
     }
 
@@ -106,11 +105,10 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
-    /// 统一执行 write-behind 入队与提交后的状态/事件发布模板。
+    /// 统一执行内存待落库入队与状态/事件发布模板。
     ///
-    /// 调用方负责准备领域 state、facts 与 mutation；本方法先把 commit 送入
-    /// repository（`Immediate` 边界会等待 flush 完成），返回 `Applied` 后才替换
-    /// 内存权威状态并广播可观察事实。
+    /// 调用方负责准备领域 state、facts 与 mutation；repository 只接受到进程内
+    /// 待落库队列，不等待 SQLite。接受后替换 owner snapshot 并立即广播同一事实。
     pub(super) async fn commit_and_publish(
         &mut self,
         commit: PendingCommit,
@@ -121,12 +119,11 @@ where
             expected_revision.saturating_add(1),
             "pending commit must advance the actor revision exactly once"
         );
-        let outcome = self
-            .host
+        self.host
             .repository()
             .commit(ThreadCommit {
                 agent_id: commit.next_state.snapshot.identity.id.clone(),
-                durability: commit.durability,
+                persistence: commit.persistence,
                 expected_revision: Some(expected_revision),
                 next_state: commit.next_state.clone(),
                 facts: commit.facts,
@@ -135,46 +132,44 @@ where
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
 
-        match outcome {
-            ThreadCommitOutcome::Applied => {
-                self.state = commit.next_state;
-                let Some(publication) = commit.publication else {
-                    return Ok(());
-                };
-                match &publication.directory_update {
-                    DirectoryUpdate::Unchanged => {}
-                    DirectoryUpdate::StoreSnapshot => self
-                        .runtime
-                        .directory
-                        .store_snapshot(self.state.snapshot.clone()),
-                    DirectoryUpdate::RuntimeEvent(event) => {
-                        self.runtime.directory.publish_runtime_event(event);
-                    }
-                }
-                self.runtime
-                    .thread_events
-                    .publish_batch(publication.thread_notifications.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                self.host
-                    .observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id: self.state.snapshot.identity.id.clone(),
-                        thread_id: publication.thread_id,
-                        turn_id: publication.turn_id,
-                        runtime_events: publication.runtime_events,
-                        trace_events: publication.trace_events,
-                        thread_notifications: publication.thread_notifications,
-                    })
-                    .await;
-                Ok(())
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                })
+        self.state = commit.next_state;
+        let Some(publication) = commit.publication else {
+            return Ok(());
+        };
+        match &publication.directory_update {
+            DirectoryUpdate::Unchanged => {}
+            DirectoryUpdate::StoreSnapshot => self
+                .runtime
+                .directory
+                .store_snapshot(self.state.snapshot.clone()),
+            DirectoryUpdate::RuntimeEvent(event) => {
+                self.runtime.directory.publish_runtime_event(event);
             }
         }
+        if let Err(error) = self
+            .runtime
+            .thread_events
+            .publish_batch(publication.thread_notifications.clone())
+            .await
+        {
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                revision = self.state.snapshot.revision,
+                error = %error,
+                "thread projection rejected a committed in-memory fact; subscribers must resync"
+            );
+        }
+        self.host
+            .observer()
+            .publish(AgentCommittedEvent {
+                agent_id: self.state.snapshot.identity.id.clone(),
+                thread_id: publication.thread_id,
+                turn_id: publication.turn_id,
+                runtime_events: publication.runtime_events,
+                trace_events: publication.trace_events,
+                thread_notifications: publication.thread_notifications,
+            })
+            .await;
+        Ok(())
     }
 }

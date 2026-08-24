@@ -88,7 +88,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1588827841;
+  int get rustContentHash => 184051359;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -288,6 +288,9 @@ abstract class RustLibApi extends BaseApi {
     required String interactionId,
     required BridgeInteractionResolution resolution,
   });
+
+  Future<BridgePersistenceStateSnapshot>
+  crateApiStudioHandlersRecoveryRetryPersistence();
 
   Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryRetryRecoveryIssue({
     required String issueId,
@@ -2018,6 +2021,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgePersistenceStateSnapshot>
+  crateApiStudioHandlersRecoveryRetryPersistence() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 49,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_persistence_state_snapshot,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersRecoveryRetryPersistenceConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersRecoveryRetryPersistenceConstMeta =>
+      const TaskConstMeta(debugName: "retry_persistence", argNames: []);
+
+  @override
   Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryRetryRecoveryIssue({
     required String issueId,
   }) {
@@ -2029,7 +2060,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 50,
             port: port_,
           );
         },
@@ -2066,7 +2097,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 51,
             port: port_,
           );
         },
@@ -2103,7 +2134,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 52,
             port: port_,
           );
         },
@@ -2141,7 +2172,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 53,
             port: port_,
           );
         },
@@ -2177,7 +2208,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2214,7 +2245,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 55,
             port: port_,
           );
         },
@@ -2252,7 +2283,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2289,7 +2320,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2333,7 +2364,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2380,7 +2411,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2410,7 +2441,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2446,7 +2477,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2476,7 +2507,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2511,7 +2542,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2548,7 +2579,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2585,7 +2616,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 64,
+              funcId: 65,
               port: port_,
             );
           },
@@ -2622,7 +2653,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 66,
             port: port_,
           );
         },
@@ -3086,6 +3117,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_pending_work_unit(raw);
+  }
+
+  @protected
+  BridgePersistenceStateSnapshot
+  dco_decode_box_autoadd_bridge_persistence_state_snapshot(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_persistence_state_snapshot(raw);
   }
 
   @protected
@@ -4973,6 +5011,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePersistenceState dco_decode_bridge_persistence_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgePersistenceState_Ready(
+          pendingCommits: dco_decode_u_64(raw[1]),
+        );
+      case 1:
+        return BridgePersistenceState_Flushing(
+          pendingCommits: dco_decode_u_64(raw[1]),
+          oldestPendingRevision: dco_decode_opt_box_autoadd_u_64(raw[2]),
+        );
+      case 2:
+        return BridgePersistenceState_Degraded(
+          pendingCommits: dco_decode_u_64(raw[1]),
+          oldestPendingRevision: dco_decode_opt_box_autoadd_u_64(raw[2]),
+          firstFailedAt: dco_decode_i_64(raw[3]),
+          error: dco_decode_box_autoadd_bridge_state_error(raw[4]),
+        );
+      case 3:
+        return BridgePersistenceState_Recovering(
+          pendingCommits: dco_decode_u_64(raw[1]),
+          oldestPendingRevision: dco_decode_opt_box_autoadd_u_64(raw[2]),
+          firstFailedAt: dco_decode_i_64(raw[3]),
+        );
+      case 4:
+        return BridgePersistenceState_Blocked(
+          pendingCommits: dco_decode_u_64(raw[1]),
+          oldestPendingRevision: dco_decode_opt_box_autoadd_u_64(raw[2]),
+          firstFailedAt: dco_decode_i_64(raw[3]),
+          error: dco_decode_box_autoadd_bridge_state_error(raw[4]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  BridgePersistenceStateSnapshot dco_decode_bridge_persistence_state_snapshot(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgePersistenceStateSnapshot(
+      revision: dco_decode_u_64(arr[0]),
+      state: dco_decode_bridge_persistence_state(arr[1]),
+    );
+  }
+
+  @protected
   BridgePlanConfirmationInteractionState
   dco_decode_bridge_plan_confirmation_interaction_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -5088,6 +5178,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           dco_decode_box_autoadd_bridge_updater_state_snapshot(raw[1]),
         );
       case 11:
+        return BridgeProductEventPayload_PersistenceStateChanged(
+          dco_decode_box_autoadd_bridge_persistence_state_snapshot(raw[1]),
+        );
+      case 12:
         return BridgeProductEventPayload_Stale(
           laggedEvents: dco_decode_u_64(raw[1]),
         );
@@ -6017,8 +6111,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return BridgeStudioStateSnapshot(
       runtime: dco_decode_runtime_snapshot(arr[0]),
       projectDirectory: dco_decode_bridge_project_directory_state(arr[1]),
@@ -6032,6 +6126,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       skillsByProject: dco_decode_list_bridge_skills_state_snapshot(arr[9]),
       providerUsage: dco_decode_bridge_provider_usage_state_snapshot(arr[10]),
       updater: dco_decode_bridge_updater_state_snapshot(arr[11]),
+      persistence: dco_decode_bridge_persistence_state_snapshot(arr[12]),
     );
   }
 
@@ -9689,6 +9784,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePersistenceStateSnapshot
+  sse_decode_box_autoadd_bridge_persistence_state_snapshot(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_persistence_state_snapshot(deserializer));
+  }
+
+  @protected
   BridgePlanConfirmationInteractionState
   sse_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
     SseDeserializer deserializer,
@@ -11948,6 +12052,81 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePersistenceState sse_decode_bridge_persistence_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_pendingCommits = sse_decode_u_64(deserializer);
+        return BridgePersistenceState_Ready(pendingCommits: var_pendingCommits);
+      case 1:
+        var var_pendingCommits = sse_decode_u_64(deserializer);
+        var var_oldestPendingRevision = sse_decode_opt_box_autoadd_u_64(
+          deserializer,
+        );
+        return BridgePersistenceState_Flushing(
+          pendingCommits: var_pendingCommits,
+          oldestPendingRevision: var_oldestPendingRevision,
+        );
+      case 2:
+        var var_pendingCommits = sse_decode_u_64(deserializer);
+        var var_oldestPendingRevision = sse_decode_opt_box_autoadd_u_64(
+          deserializer,
+        );
+        var var_firstFailedAt = sse_decode_i_64(deserializer);
+        var var_error = sse_decode_box_autoadd_bridge_state_error(deserializer);
+        return BridgePersistenceState_Degraded(
+          pendingCommits: var_pendingCommits,
+          oldestPendingRevision: var_oldestPendingRevision,
+          firstFailedAt: var_firstFailedAt,
+          error: var_error,
+        );
+      case 3:
+        var var_pendingCommits = sse_decode_u_64(deserializer);
+        var var_oldestPendingRevision = sse_decode_opt_box_autoadd_u_64(
+          deserializer,
+        );
+        var var_firstFailedAt = sse_decode_i_64(deserializer);
+        return BridgePersistenceState_Recovering(
+          pendingCommits: var_pendingCommits,
+          oldestPendingRevision: var_oldestPendingRevision,
+          firstFailedAt: var_firstFailedAt,
+        );
+      case 4:
+        var var_pendingCommits = sse_decode_u_64(deserializer);
+        var var_oldestPendingRevision = sse_decode_opt_box_autoadd_u_64(
+          deserializer,
+        );
+        var var_firstFailedAt = sse_decode_i_64(deserializer);
+        var var_error = sse_decode_box_autoadd_bridge_state_error(deserializer);
+        return BridgePersistenceState_Blocked(
+          pendingCommits: var_pendingCommits,
+          oldestPendingRevision: var_oldestPendingRevision,
+          firstFailedAt: var_firstFailedAt,
+          error: var_error,
+        );
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  BridgePersistenceStateSnapshot sse_decode_bridge_persistence_state_snapshot(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_revision = sse_decode_u_64(deserializer);
+    var var_state = sse_decode_bridge_persistence_state(deserializer);
+    return BridgePersistenceStateSnapshot(
+      revision: var_revision,
+      state: var_state,
+    );
+  }
+
+  @protected
   BridgePlanConfirmationInteractionState
   sse_decode_bridge_plan_confirmation_interaction_state(
     SseDeserializer deserializer,
@@ -12096,6 +12275,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
         return BridgeProductEventPayload_UpdaterStateChanged(var_field0);
       case 11:
+        var var_field0 =
+            sse_decode_box_autoadd_bridge_persistence_state_snapshot(
+              deserializer,
+            );
+        return BridgeProductEventPayload_PersistenceStateChanged(var_field0);
+      case 12:
         var var_laggedEvents = sse_decode_u_64(deserializer);
         return BridgeProductEventPayload_Stale(laggedEvents: var_laggedEvents);
       default:
@@ -13338,6 +13523,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_updater = sse_decode_bridge_updater_state_snapshot(deserializer);
+    var var_persistence = sse_decode_bridge_persistence_state_snapshot(
+      deserializer,
+    );
     return BridgeStudioStateSnapshot(
       runtime: var_runtime,
       projectDirectory: var_projectDirectory,
@@ -13351,6 +13539,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       skillsByProject: var_skillsByProject,
       providerUsage: var_providerUsage,
       updater: var_updater,
+      persistence: var_persistence,
     );
   }
 
@@ -18149,6 +18338,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_persistence_state_snapshot(
+    BridgePersistenceStateSnapshot self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_persistence_state_snapshot(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_plan_confirmation_interaction_state(
     BridgePlanConfirmationInteractionState self,
     SseSerializer serializer,
@@ -20153,6 +20351,67 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_persistence_state(
+    BridgePersistenceState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgePersistenceState_Ready(pendingCommits: final pendingCommits):
+        sse_encode_i_32(0, serializer);
+        sse_encode_u_64(pendingCommits, serializer);
+      case BridgePersistenceState_Flushing(
+        pendingCommits: final pendingCommits,
+        oldestPendingRevision: final oldestPendingRevision,
+      ):
+        sse_encode_i_32(1, serializer);
+        sse_encode_u_64(pendingCommits, serializer);
+        sse_encode_opt_box_autoadd_u_64(oldestPendingRevision, serializer);
+      case BridgePersistenceState_Degraded(
+        pendingCommits: final pendingCommits,
+        oldestPendingRevision: final oldestPendingRevision,
+        firstFailedAt: final firstFailedAt,
+        error: final error,
+      ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_u_64(pendingCommits, serializer);
+        sse_encode_opt_box_autoadd_u_64(oldestPendingRevision, serializer);
+        sse_encode_i_64(firstFailedAt, serializer);
+        sse_encode_box_autoadd_bridge_state_error(error, serializer);
+      case BridgePersistenceState_Recovering(
+        pendingCommits: final pendingCommits,
+        oldestPendingRevision: final oldestPendingRevision,
+        firstFailedAt: final firstFailedAt,
+      ):
+        sse_encode_i_32(3, serializer);
+        sse_encode_u_64(pendingCommits, serializer);
+        sse_encode_opt_box_autoadd_u_64(oldestPendingRevision, serializer);
+        sse_encode_i_64(firstFailedAt, serializer);
+      case BridgePersistenceState_Blocked(
+        pendingCommits: final pendingCommits,
+        oldestPendingRevision: final oldestPendingRevision,
+        firstFailedAt: final firstFailedAt,
+        error: final error,
+      ):
+        sse_encode_i_32(4, serializer);
+        sse_encode_u_64(pendingCommits, serializer);
+        sse_encode_opt_box_autoadd_u_64(oldestPendingRevision, serializer);
+        sse_encode_i_64(firstFailedAt, serializer);
+        sse_encode_box_autoadd_bridge_state_error(error, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_bridge_persistence_state_snapshot(
+    BridgePersistenceStateSnapshot self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.revision, serializer);
+    sse_encode_bridge_persistence_state(self.state, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_plan_confirmation_interaction_state(
     BridgePlanConfirmationInteractionState self,
     SseSerializer serializer,
@@ -20289,8 +20548,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           field0,
           serializer,
         );
-      case BridgeProductEventPayload_Stale(laggedEvents: final laggedEvents):
+      case BridgeProductEventPayload_PersistenceStateChanged(
+        field0: final field0,
+      ):
         sse_encode_i_32(11, serializer);
+        sse_encode_box_autoadd_bridge_persistence_state_snapshot(
+          field0,
+          serializer,
+        );
+      case BridgeProductEventPayload_Stale(laggedEvents: final laggedEvents):
+        sse_encode_i_32(12, serializer);
         sse_encode_u_64(laggedEvents, serializer);
     }
   }
@@ -21213,6 +21480,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_bridge_updater_state_snapshot(self.updater, serializer);
+    sse_encode_bridge_persistence_state_snapshot(self.persistence, serializer);
   }
 
   @protected

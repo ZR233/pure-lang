@@ -5,6 +5,7 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
+import '../types/response.dart';
 import '../types/runtime.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -46,6 +47,10 @@ Future<RuntimeSnapshot> retryRecoveryIssue({required String issueId}) => RustLib
     .instance
     .api
     .crateApiStudioHandlersRecoveryRetryRecoveryIssue(issueId: issueId);
+
+/// 跳过当前退避并立即重试保存积压的内存事实。
+Future<BridgePersistenceStateSnapshot> retryPersistence() =>
+    RustLib.instance.api.crateApiStudioHandlersRecoveryRetryPersistence();
 
 Future<RuntimeSnapshot> cleanupProject({
   required String projectId,

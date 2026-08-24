@@ -34,6 +34,7 @@ impl StudioRuntime {
         &self,
         request: StudioTaskRecoveryRequest,
     ) -> Result<StudioTaskRecoveryResult> {
+        self.ensure_persistence_accepts_new_work()?;
         if request.recovery_id.trim().is_empty() {
             bail!("Task recovery id must not be empty");
         }

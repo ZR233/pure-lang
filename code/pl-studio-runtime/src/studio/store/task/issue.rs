@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-    QueryOrder, SqliteTransactionMode, TransactionOptions, TransactionTrait, sea_query::Expr,
+    QueryOrder, SqliteTransactionMode, TransactionOptions, TransactionTrait,
 };
 
 use crate::studio::entity as entities;
@@ -9,87 +9,14 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     RecordTaskAgentFailure, ReviewRoundCommand, ReviewRoundStateKind, TaskCommand, TaskFailureKind,
-    TaskIssueCommand, TaskIssueDisposition, TaskIssueRecord, TaskIssueSettlement, TaskIssueState,
-    TaskIssueStateKind, TaskOutcome, TaskRun, TaskWorktreeDisposition, WorkUnitCommand,
-    WorkUnitStateKind,
+    TaskIssueDisposition, TaskIssueRecord, TaskIssueSettlement, TaskIssueState, TaskOutcome,
+    TaskWorktreeDisposition, WorkUnitCommand, WorkUnitStateKind,
 };
 
 use super::review::{review_round_state, update_review_round_state};
 use super::work_unit::{apply_work_unit_command, work_unit_record};
 
-pub(crate) struct ResolveTaskIssue<'a> {
-    pub(crate) root_thread_id: &'a str,
-    pub(crate) issue_id: &'a str,
-    pub(crate) requested_by_call_id: &'a str,
-    pub(crate) summary: &'a str,
-    pub(crate) evidence: &'a str,
-    pub(crate) expected_revision: u64,
-    pub(crate) expected_generation: u64,
-}
-
 impl StudioStore {
-    pub(crate) async fn resolve_task_issue(&self, input: ResolveTaskIssue<'_>) -> Result<TaskRun> {
-        let ResolveTaskIssue {
-            root_thread_id,
-            issue_id,
-            requested_by_call_id,
-            summary,
-            evidence,
-            expected_revision,
-            expected_generation,
-        } = input;
-        let (summary, evidence) = (summary.trim(), evidence.trim());
-        if issue_id.trim().is_empty() || summary.is_empty() || evidence.is_empty() {
-            anyhow::bail!("resolveIssue requires issueId, summary, and resolutionEvidence");
-        }
-        let tx = self.db.begin().await?;
-        let run_model = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
-            .filter(
-                entities::task_run::Column::StateKind
-                    .ne(crate::studio::task_coordinator::TaskRunStateKind::Completed.as_str()),
-            )
-            .one(&tx)
-            .await?
-            .context("active TaskRun not found")?;
-        let run = super::task_run_record(run_model.clone())?;
-        if run.revision != expected_revision || run.generation() != expected_generation {
-            anyhow::bail!(
-                "task version changed: expected revision {expected_revision}/generation {expected_generation}, actual {}/{}",
-                run.revision,
-                run.generation()
-            );
-        }
-        let issue_model = entities::task_issue::Entity::find_by_id(issue_id.trim().to_string())
-            .one(&tx)
-            .await?
-            .context("Task issue not found")?;
-        if issue_model.task_run_id != run.id {
-            anyhow::bail!("issueId does not belong to the active Task");
-        }
-        let issue = task_issue_record(issue_model.clone())?;
-        let decision = issue.decide(
-            issue.revision,
-            TaskIssueCommand::Resolve {
-                operation_id: requested_by_call_id.to_string(),
-                summary: summary.to_string(),
-                evidence: evidence.to_string(),
-                resolved_at: unix_seconds(),
-            },
-        )?;
-        let now = unix_seconds();
-        let mut active: entities::task_issue::ActiveModel = issue_model.into();
-        active.state_json = Set(serde_json::to_string(&decision.next_state())?);
-        active.revision = Set(i64::try_from(issue.revision.saturating_add(1))?);
-        active.updated_at = Set(now);
-        active.update(&tx).await?;
-        let updated = super::compare_and_swap_task_run(&tx, &run_model, None)
-            .await?
-            .context("Task issue resolution lost its TaskRun revision CAS")?;
-        tx.commit().await?;
-        super::task_run_record(updated)
-    }
-
     pub(crate) async fn record_task_agent_failure(
         &self,
         input: RecordTaskAgentFailure,
@@ -146,7 +73,8 @@ impl StudioStore {
                 .order_by_desc(entities::review_round::Column::Round)
                 .one(&tx)
                 .await?;
-            let state = TaskIssueState::open(input.failure.clone());
+            let state =
+                TaskIssueState::open_with_disposition(input.failure.clone(), input.disposition);
             let disposition = state.disposition();
             let now = unix_seconds();
             let issue_model = entities::task_issue::ActiveModel {
@@ -212,57 +140,6 @@ impl StudioStore {
             .into_iter()
             .map(task_issue_record)
             .collect()
-    }
-
-    pub(crate) async fn resolve_recoverable_task_issues(
-        &self,
-        source_thread_id: &str,
-    ) -> Result<()> {
-        let now = unix_seconds();
-        for model in entities::task_issue::Entity::find()
-            .filter(entities::task_issue::Column::SourceThreadId.eq(source_thread_id.to_string()))
-            .filter(
-                entities::task_issue::Column::StateKind
-                    .eq(TaskIssueStateKind::OpenRecoverable.as_str()),
-            )
-            .all(&self.db)
-            .await?
-        {
-            let record = task_issue_record(model.clone())?;
-            let decision = record.decide(
-                record.revision,
-                TaskIssueCommand::Resolve {
-                    operation_id: format!(
-                        "resolve-task-failure:{}:{}",
-                        source_thread_id, record.source_turn_id
-                    ),
-                    summary: "后续执行已成功启动".to_string(),
-                    evidence: format!("sourceThreadId={source_thread_id}"),
-                    resolved_at: now,
-                },
-            )?;
-            if !decision.changed() {
-                continue;
-            }
-            let result = entities::task_issue::Entity::update_many()
-                .col_expr(
-                    entities::task_issue::Column::StateJson,
-                    Expr::value(serde_json::to_string(&decision.next_state())?),
-                )
-                .col_expr(
-                    entities::task_issue::Column::Revision,
-                    Expr::value(model.revision.saturating_add(1)),
-                )
-                .col_expr(entities::task_issue::Column::UpdatedAt, Expr::value(now))
-                .filter(entities::task_issue::Column::Id.eq(model.id))
-                .filter(entities::task_issue::Column::Revision.eq(model.revision))
-                .exec(&self.db)
-                .await?;
-            if result.rows_affected != 1 {
-                anyhow::bail!("Task issue resolution lost its revision CAS");
-            }
-        }
-        Ok(())
     }
 }
 

@@ -24,6 +24,9 @@ class StudioController extends _$StudioController {
 
   StudioApi get _api => ref.read(studioApiProvider);
 
+  bool _acceptsNewWork(StudioState? current) =>
+      current?.persistenceState.acceptsNewWork ?? false;
+
   @override
   Future<StudioState> build() async {
     _productCoordinator = ProductStreamCoordinator(_api, _handleProductEvent);
@@ -86,6 +89,7 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> openProject(String path) async {
+    if (!_acceptsNewWork(state.value)) return;
     final project = await _api.openProject(path);
     await _api.activateProject(project.id);
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
@@ -155,6 +159,7 @@ class StudioController extends _$StudioController {
         .where((candidate) => candidate.id == threadId && candidate.isRoot)
         .firstOrNull;
     if (current == null ||
+        !_acceptsNewWork(current) ||
         thread == null ||
         current.recoveryIssue(
               scope: RecoveryIssueScope.thread,
@@ -184,6 +189,7 @@ class StudioController extends _$StudioController {
   Future<void> archiveProject(String projectId) async {
     final current = state.value;
     if (current == null ||
+        !_acceptsNewWork(current) ||
         (current.isBusy && current.selectedProjectId == projectId)) {
       return;
     }
@@ -201,6 +207,7 @@ class StudioController extends _$StudioController {
 
   Future<void> cleanupProject(String projectId, String expectedRevision) async {
     final current = state.value;
+    if (!_acceptsNewWork(current)) return;
     await _api.cleanupProject(projectId, expectedRevision);
     await _reloadProductState(
       selection: current?.selectedProjectId == projectId
@@ -347,7 +354,7 @@ class StudioController extends _$StudioController {
       final latest = state.value;
       if (latest == null) return;
       state = AsyncData(setThreadDirectoryLoading(latest, false));
-      ref.read(directoryLoadErrorProvider.notifier).state = error.toString();
+      ref.read(directoryLoadErrorProvider.notifier).set(error.toString());
     }
   }
 
@@ -391,6 +398,7 @@ class StudioController extends _$StudioController {
         current?.newThreadComposer ?? const ComposerThreadState.idle();
     final prompt = composer.draft.trim();
     if (current == null ||
+        !_acceptsNewWork(current) ||
         projectId == null ||
         current.selectedThreadId != null ||
         current.recoveryIssue(
@@ -518,6 +526,7 @@ class StudioController extends _$StudioController {
         : _workspaceUi(current, threadId).composer;
     final prompt = composer.draft.trim();
     if (current == null ||
+        !_acceptsNewWork(current) ||
         current.selectedThreadId != threadId ||
         prompt.isEmpty ||
         composer.isSubmissionPending) {
@@ -542,6 +551,9 @@ class StudioController extends _$StudioController {
   Future<TaskRecoveryResult> applyTaskRecovery(
     TaskRecoveryRequest request,
   ) async {
+    if (!_acceptsNewWork(state.value)) {
+      throw StateError('Persistence is unavailable; recovery is paused.');
+    }
     final result = await _api.applyTaskRecovery(request);
     await _refreshRecoveredHistory(result.targetThreadId);
     return result;
@@ -647,6 +659,7 @@ class StudioController extends _$StudioController {
     final current = state.value;
     final thread = current?.selectedThread;
     if (current == null ||
+        !_acceptsNewWork(current) ||
         thread == null ||
         !thread.isRoot ||
         thread.mode == mode ||
@@ -836,13 +849,14 @@ class StudioController extends _$StudioController {
     String issueId,
     String expectedRevision,
   ) async {
+    if (!_acceptsNewWork(state.value)) return;
     await _api.cleanupRecoveryIssue(issueId, expectedRevision);
     await _reloadProductState(selection: const _PreserveSelection());
   }
 
   Future<void> retryRecoveryIssue(String issueId) async {
     final current = state.value;
-    if (current == null) return;
+    if (current == null || !_acceptsNewWork(current)) return;
     final issue = current.recoveryIssue(id: issueId);
     if (issue == null || !issue.canRetry) return;
     await _api.retryRecoveryIssue(issueId);
@@ -859,6 +873,16 @@ class StudioController extends _$StudioController {
   }
 
   void retryInitialization() => ref.invalidateSelf();
+
+  Future<void> retryPersistence() async {
+    final current = state.value;
+    if (current == null) return;
+    final persistence = await _api.retryPersistence();
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+    state = AsyncData(applyPersistenceState(latest, persistence));
+  }
 
   Future<void> resolveActiveInteraction(
     String threadId,

@@ -183,6 +183,11 @@ async fn turn_and_item_lifecycle_updates_the_authoritative_snapshot() {
                 && value.text() == "hello world"
                 && matches!(value.lifecycle(), ThreadContentLifecycle::Completed(_))
     ));
+    let hot = bus.hot_history("thread-1").unwrap();
+    assert_eq!(hot.turns.len(), 1);
+    assert_eq!(hot.turns[0].id, "turn-1");
+    assert!(matches!(hot.turns[0].state, TurnState::Completed(_)));
+    assert_eq!(hot.items, snapshot.items);
 }
 
 #[tokio::test]

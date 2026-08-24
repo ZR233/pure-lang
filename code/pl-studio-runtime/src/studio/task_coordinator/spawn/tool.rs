@@ -106,10 +106,7 @@ impl TaskCoordinator {
             let thread_id = thread_id.clone();
             let coordinator = Arc::clone(&coordinator);
             async move {
-                let rejection = match coordinator
-                    .executor_spawn_phase_rejection(&thread_id)
-                    .await
-                {
+                let rejection = match coordinator.executor_spawn_phase_rejection(&thread_id).await {
                     Ok(rejection) => rejection,
                     Err(error) => {
                         return spawn_failure(TaskSpawnFailure::allocation(
@@ -122,17 +119,13 @@ impl TaskCoordinator {
                 if let Some(rejection) = rejection {
                     return spawn_rejection(rejection);
                 }
-                let active_run = match coordinator
-                    .store
-                    .read_active_task_run_for_root_thread(&thread_id)
-                    .await
-                {
-                    Ok(run) => run,
-                    Err(error) => {
+                let active_run = match coordinator.task_runtime.aggregate(&thread_id).await {
+                    Some(aggregate) => aggregate.facts.run,
+                    None => {
                         return spawn_failure(TaskSpawnFailure::allocation(
                             None,
                             String::new(),
-                            format!("failed to read active TaskRun: {error}"),
+                            "active TaskRun is not resident".to_string(),
                         ));
                     }
                 };
@@ -224,10 +217,7 @@ impl TaskCoordinator {
                         ));
                     }
                     if allocation.work_unit.kind() == WorkUnitStateKind::Running
-                        && runtime
-                            .snapshot(requested_thread_id.clone())
-                            .await
-                            .is_ok()
+                        && runtime.snapshot(requested_thread_id.clone()).await.is_ok()
                     {
                         let (_, existing) = match coordinator
                             .store
@@ -301,28 +291,23 @@ impl TaskCoordinator {
                 {
                     Ok(result) => result,
                     Err(error) => {
-                        let work_unit = match coordinator
-                            .store
-                            .read_work_unit(&allocation.work_unit.id)
+                        let Some(work_unit) = coordinator
+                            .task_runtime
+                            .aggregate(&thread_id)
                             .await
-                        {
-                            Ok(Some(work_unit)) => work_unit,
-                            Ok(None) => {
-                                return spawn_failure(missing_persisted_failure(
-                                    &allocation.run,
-                                    &allocation.work_unit,
-                                    &format!("executor spawn failed and WorkUnit disappeared: {error}"),
-                                ));
-                            }
-                            Err(read_error) => {
-                                return spawn_failure(missing_persisted_failure(
-                                    &allocation.run,
-                                    &allocation.work_unit,
-                                    &format!(
-                                        "executor spawn failed: {error}; failed to read WorkUnit failure: {read_error}"
-                                    ),
-                                ));
-                            }
+                            .and_then(|aggregate| {
+                                aggregate
+                                    .facts
+                                    .work_units
+                                    .into_iter()
+                                    .find(|unit| unit.id == allocation.work_unit.id)
+                            })
+                        else {
+                            return spawn_failure(missing_persisted_failure(
+                                &allocation.run,
+                                &allocation.work_unit,
+                                &format!("executor spawn failed and WorkUnit disappeared: {error}"),
+                            ));
                         };
                         if let Some(failure) = work_unit.spawn_failure() {
                             return spawn_failure(failure.clone());
@@ -333,11 +318,13 @@ impl TaskCoordinator {
                             &format!("executor spawn failed before recording its cause: {error}"),
                         );
                         let _ = coordinator
-                            .store
-                            .record_executor_spawn_failure(
+                            .task_runtime
+                            .update_executor_allocation(
                                 &work_unit.id,
                                 child_thread_id.as_str(),
-                                fallback.clone(),
+                                crate::studio::task_coordinator::WorkUnitCommand::FailSpawn {
+                                    failure: Box::new(fallback.clone()),
+                                },
                             )
                             .await;
                         return spawn_failure(fallback);
@@ -363,9 +350,12 @@ impl TaskCoordinator {
         thread_id: &str,
     ) -> Result<Option<TaskSpawnExecutorRejection>> {
         let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
+            .task_runtime
+            .aggregate(thread_id)
+            .await
+            .context("active Task aggregate is not resident")?
+            .facts
+            .run;
         if run.kind().allows_executor_spawn() {
             return Ok(None);
         }

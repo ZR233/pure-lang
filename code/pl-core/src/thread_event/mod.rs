@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use pl_protocol::{
     InteractionStatus, Thread, ThreadItem, ThreadItemDelta, ThreadNotification,
     ThreadNotificationEnvelope, ThreadSnapshot, ThreadSubscriptionRequest,
-    ThreadSubscriptionUpdate,
+    ThreadSubscriptionUpdate, Turn,
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
@@ -74,7 +74,22 @@ struct ThreadChannel {
 
 struct ThreadChannelState {
     snapshot: ThreadSnapshot,
+    /// 当前驻留期观察到的 Turn 热窗口，按开始顺序排列。
+    ///
+    /// 已完成 Turn 不能因 `snapshot.active_turn` 清空而丢失；Studio 历史分页用本窗口
+    /// 覆盖尚未耐久化或持久化版本落后的 SQLite 记录。
+    hot_turns: Vec<Turn>,
     subscribers: BTreeMap<u64, ThreadSubscriber>,
+}
+
+/// 驻留 Thread 的进程内历史窗口。
+///
+/// `turns` 只包含本次驻留期间观察到的 Turn，按开始顺序排列；`items` 是 Thread
+/// owner 当前持有的完整 timeline。调用方负责与冷历史按标识合并，内存事实优先。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThreadHotHistory {
+    pub turns: Vec<Turn>,
+    pub items: Vec<ThreadItem>,
 }
 
 struct ThreadSubscriber {
@@ -98,11 +113,12 @@ impl ThreadEventBus {
 
     pub fn replace_snapshot(&self, snapshot: ThreadSnapshot) -> Result<(), ThreadEventError> {
         let channel = self.channel_or_create(&snapshot.thread.id)?;
-        channel
+        let mut state = channel
             .state
             .lock()
-            .map_err(|_| ThreadEventError::LockPoisoned)?
-            .snapshot = snapshot;
+            .map_err(|_| ThreadEventError::LockPoisoned)?;
+        state.hot_turns = snapshot.active_turn.iter().cloned().collect();
+        state.snapshot = snapshot;
         Ok(())
     }
 
@@ -148,6 +164,18 @@ impl ThreadEventBus {
             .map_err(|_| ThreadEventError::LockPoisoned)?
             .snapshot
             .clone())
+    }
+
+    pub fn hot_history(&self, thread_id: &str) -> Result<ThreadHotHistory, ThreadEventError> {
+        let channel = self.channel(thread_id)?;
+        let state = channel
+            .state
+            .lock()
+            .map_err(|_| ThreadEventError::LockPoisoned)?;
+        Ok(ThreadHotHistory {
+            turns: state.hot_turns.clone(),
+            items: state.snapshot.items.clone(),
+        })
     }
 
     pub(crate) fn project(
@@ -213,6 +241,7 @@ impl ThreadEventBus {
                 .lock()
                 .map_err(|_| ThreadEventError::LockPoisoned)?;
             let notification = apply_notification(&mut state.snapshot, &notification)?;
+            record_hot_turn(&mut state.hot_turns, &notification.notification);
             let deliveries = state
                 .subscribers
                 .iter_mut()
@@ -257,6 +286,7 @@ impl ThreadEventBus {
             .lock()
             .map_err(|_| ThreadEventError::LockPoisoned)?;
         let notification = apply_notification(&mut state.snapshot, &notification)?;
+        record_hot_turn(&mut state.hot_turns, &notification.notification);
         state.subscribers.retain(|_, subscriber| {
             if subscriber.pending_lag > 0 {
                 match subscriber
@@ -327,6 +357,7 @@ impl ThreadEventBus {
                 Arc::new(ThreadChannel {
                     state: Mutex::new(ThreadChannelState {
                         snapshot: ThreadSnapshot::empty(thread_id),
+                        hot_turns: Vec::new(),
                         subscribers: BTreeMap::new(),
                     }),
                     publish_lock: AsyncMutex::new(()),
@@ -394,6 +425,10 @@ impl ThreadEventBusHandle {
 
     pub fn snapshot(&self, thread_id: &str) -> Result<ThreadSnapshot, ThreadEventError> {
         self.bus.snapshot(thread_id)
+    }
+
+    pub fn hot_history(&self, thread_id: &str) -> Result<ThreadHotHistory, ThreadEventError> {
+        self.bus.hot_history(thread_id)
     }
 
     pub(crate) fn project(
@@ -530,6 +565,25 @@ fn apply_notification(
     }
     snapshot.revision = normalized.revision;
     Ok(normalized)
+}
+
+fn record_hot_turn(turns: &mut Vec<Turn>, notification: &ThreadNotification) {
+    let turn = match notification {
+        ThreadNotification::TurnStarted { turn }
+        | ThreadNotification::TurnUpdated { turn }
+        | ThreadNotification::TurnCompleted { turn } => turn,
+        ThreadNotification::ItemStarted { .. }
+        | ThreadNotification::ItemDelta { .. }
+        | ThreadNotification::ItemCompleted { .. }
+        | ThreadNotification::InteractionChanged { .. }
+        | ThreadNotification::ThreadRuntimeUpdated { .. }
+        | ThreadNotification::Lagged { .. } => return,
+    };
+    if let Some(existing) = turns.iter_mut().find(|candidate| candidate.id == turn.id) {
+        *existing = turn.clone();
+    } else {
+        turns.push(turn.clone());
+    }
 }
 
 /// 唯一 ordinal 分配点：新 item 按到达序取 `max(ordinal)+1`（空快照从 1 起），

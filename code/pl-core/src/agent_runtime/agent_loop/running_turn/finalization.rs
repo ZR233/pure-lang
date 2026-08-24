@@ -36,6 +36,7 @@ pub(in crate::agent_runtime::agent_loop) struct RunningTurn {
     pub(in crate::agent_runtime::agent_loop) steer_sender:
         mpsc::UnboundedSender<super::super::DurableMailboxEnvelope>,
     pub(in crate::agent_runtime::agent_loop) budget_refresh: super::super::TurnBudgetRefreshHandle,
+    pub(in crate::agent_runtime::agent_loop) projection_failure: Option<String>,
 }
 
 impl RunningTurn {
@@ -50,6 +51,11 @@ impl RunningTurn {
         &self,
         outcome: TurnWorkerOutcome,
     ) -> TurnExecutionTerminal {
+        if let Some(error) = &self.projection_failure {
+            return TurnExecutionTerminal::ProtocolFailed {
+                error: error.clone(),
+            };
+        }
         match (&self.cancellation_state, outcome) {
             (RunningTurnCancellation::Open, outcome) => outcome.into(),
             (RunningTurnCancellation::Requested { cause }, TurnWorkerOutcome::Returned(result)) => {
@@ -248,6 +254,7 @@ where
             checkpoint_sequence: 0,
             steer_sender,
             budget_refresh,
+            projection_failure: None,
         });
     }
 

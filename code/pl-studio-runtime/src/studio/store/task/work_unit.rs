@@ -85,43 +85,6 @@ impl StudioStore {
             .collect()
     }
 
-    pub(crate) async fn find_work_unit_for_executor(
-        &self,
-        executor_agent_id: &str,
-    ) -> Result<Option<WorkUnit>> {
-        let work_units = entities::work_unit::Entity::find()
-            .filter(entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()))
-            .all(&self.db)
-            .await?;
-        match work_units.as_slice() {
-            [] => Ok(None),
-            [work_unit] => work_unit_record(work_unit.clone()).map(Some),
-            _ => anyhow::bail!("executor Thread owns multiple work units"),
-        }
-    }
-
-    pub(crate) async fn mark_executor_handoff_needs_attention(
-        &self,
-        executor_agent_id: &str,
-        error: &str,
-    ) -> Result<()> {
-        let work_unit = entities::work_unit::Entity::find()
-            .filter(entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()))
-            .one(&self.db)
-            .await?
-            .context("executor work unit not found")?;
-        apply_work_unit_command(
-            &self.db,
-            work_unit,
-            WorkUnitCommand::PauseOperational {
-                operation_id: format!("handoff-needs-attention:{executor_agent_id}"),
-                detail: error.to_string(),
-            },
-        )
-        .await?;
-        Ok(())
-    }
-
     pub(crate) async fn list_pending_executor_continuations(
         &self,
     ) -> Result<Vec<ExecutorContinuationRequest>> {

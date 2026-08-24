@@ -5,19 +5,17 @@ use pl_core::{AgentIdentity, AgentWorkspace, WorkspaceMutability, resolve_worksp
 
 use crate::StudioMode;
 use crate::config::StudioRole;
-use crate::studio::StudioStore;
 use crate::studio::records::{ProjectRecord, ThreadRecord};
 use crate::studio::task_coordinator::{ReviewScope, TaskRun, WorkCompletionRecord};
+use crate::studio::task_projection::LoadedTaskAggregate;
 
 /// 从 Studio durable owner 解析单个 Agent 的 canonical workspace。
 #[derive(Clone)]
-pub(super) struct AgentWorkspaceResolver {
-    store: StudioStore,
-}
+pub(super) struct AgentWorkspaceResolver {}
 
 impl AgentWorkspaceResolver {
-    pub(super) fn new(store: StudioStore) -> Self {
-        Self { store }
+    pub(super) fn new() -> Self {
+        Self {}
     }
 
     pub(super) async fn resolve(
@@ -25,18 +23,20 @@ impl AgentWorkspaceResolver {
         identity: &AgentIdentity,
         thread: &ThreadRecord,
         project: &ProjectRecord,
-        active_task_run: Option<&TaskRun>,
+        active_task: Option<&LoadedTaskAggregate>,
     ) -> Result<AgentWorkspace> {
         let mode = thread.mode;
         if identity.parent_id.is_none() {
-            return self.resolve_root(mode, project, active_task_run).await;
+            return self
+                .resolve_root(mode, project, active_task.map(|task| &task.run))
+                .await;
         }
         match identity.role.as_str() {
             role if role == StudioRole::Executor.key() && mode == StudioMode::Task => {
-                self.resolve_executor(identity, thread).await
+                self.resolve_executor(identity, thread, active_task).await
             }
             role if role == StudioRole::Reviewer.key() && mode == StudioMode::Task => {
-                self.resolve_reviewer(identity, thread).await
+                self.resolve_reviewer(identity, thread, active_task).await
             }
             role if role == StudioRole::Explorer.key() => {
                 let root = project_workspace(project)?;
@@ -74,22 +74,20 @@ impl AgentWorkspaceResolver {
         &self,
         identity: &AgentIdentity,
         thread: &ThreadRecord,
+        active_task: Option<&LoadedTaskAggregate>,
     ) -> Result<AgentWorkspace> {
-        let work_unit = self
-            .store
-            .find_work_unit_for_executor(identity.id.as_str())
-            .await?
-            .with_context(|| format!("executor {} has no durable WorkUnit owner", identity.id))?;
-        let run = self
-            .store
-            .read_task_run(&work_unit.task_run_id)
-            .await?
-            .context("executor WorkUnit task run not found")?;
+        let active_task = active_task.context("executor has no resident Task aggregate")?;
+        let work_unit = active_task
+            .work_units
+            .iter()
+            .find(|unit| unit.executor_thread_id.as_deref() == Some(identity.id.as_str()))
+            .with_context(|| format!("executor {} has no hot WorkUnit owner", identity.id))?;
+        let run = &active_task.run;
         ensure!(
             run.root_thread_id == thread.root_thread_id,
             "executor WorkUnit belongs to another TaskRun root"
         );
-        let root = validate_child_workspace(&work_unit.worktree_path, &work_unit.branch, &run)?;
+        let root = validate_child_workspace(&work_unit.worktree_path, &work_unit.branch, run)?;
         Ok(AgentWorkspace::confined(
             root,
             WorkspaceMutability::ReadWrite,
@@ -100,19 +98,15 @@ impl AgentWorkspaceResolver {
         &self,
         identity: &AgentIdentity,
         thread: &ThreadRecord,
+        active_task: Option<&LoadedTaskAggregate>,
     ) -> Result<AgentWorkspace> {
-        let round = self
-            .store
-            .find_review_round_for_reviewer(identity.id.as_str())
-            .await?
-            .with_context(|| {
-                format!("reviewer {} has no durable ReviewRound owner", identity.id)
-            })?;
-        let run = self
-            .store
-            .read_task_run(&round.task_run_id)
-            .await?
-            .context("review round TaskRun not found")?;
+        let active_task = active_task.context("reviewer has no resident Task aggregate")?;
+        let round = active_task
+            .reviews
+            .iter()
+            .find(|round| round.reviewer_thread_id() == Some(identity.id.as_str()))
+            .with_context(|| format!("reviewer {} has no hot ReviewRound owner", identity.id))?;
+        let run = &active_task.run;
         ensure!(
             run.root_thread_id == thread.root_thread_id,
             "review round belongs to another TaskRun root"
@@ -123,14 +117,14 @@ impl AgentWorkspaceResolver {
                     .completion_id
                     .as_deref()
                     .context("delivery review has no completion id")?;
-                let completion = self
-                    .store
-                    .read_work_completion(completion_id)
-                    .await?
+                let completion = active_task
+                    .completions
+                    .iter()
+                    .find(|completion| completion.id == completion_id)
                     .context("delivery review completion not found")?;
-                validate_delivery_target(&round, &completion)?;
+                validate_delivery_target(round, completion)?;
                 let root =
-                    validate_child_workspace(&completion.worktree_path, &completion.branch, &run)?;
+                    validate_child_workspace(&completion.worktree_path, &completion.branch, run)?;
                 let expected_head = completion
                     .head_commit()
                     .unwrap_or(completion.base_commit.as_str());
@@ -141,7 +135,7 @@ impl AgentWorkspaceResolver {
                 root
             }
             ReviewScope::Integrated => {
-                validate_main_workspace(Path::new(&run.workspace_root), &run).await?
+                validate_main_workspace(Path::new(&run.workspace_root), run).await?
             }
         };
         Ok(AgentWorkspace::confined(

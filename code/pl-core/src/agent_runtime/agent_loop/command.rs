@@ -30,6 +30,9 @@ pub(crate) enum AgentLoopCommand {
         request: ConversationRecoveryRequest,
         reply: oneshot::Sender<AgentRuntimeResult<ConversationRecoveryResult>>,
     },
+    RecoverFaulted {
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     CancelTurn {
         turn_id: TurnId,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,

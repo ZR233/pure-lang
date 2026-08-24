@@ -2,12 +2,12 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
-use super::host::{AgentCommitObserver, CommitDurability, ThreadRepository};
+use super::host::{AgentCommitObserver, PersistenceClass, ThreadRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentCommand, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
     AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentState, AgentTurnOutcome,
-    MailboxDeliveryState, RestoredAgentRuntime, ThreadCommitOutcome, ThreadId, TurnId,
+    MailboxDeliveryState, RestoredAgentRuntime, ThreadId, TurnId,
 };
 use crate::thread_event::{project_runtime_event, runtime_event_thread_id};
 use crate::{ThreadEventBus, ThreadEventBusHandle, ThreadEventOptions};
@@ -242,11 +242,10 @@ where
             });
         }
         agent.state.session.thread_revision = projected.through_revision;
-        let commit_outcome = host
-            .repository()
+        host.repository()
             .commit(super::ThreadCommit {
                 agent_id: agent.state.snapshot.identity.id.clone(),
-                durability: CommitDurability::Immediate,
+                persistence: PersistenceClass::Settlement,
                 expected_revision: Some(expected_revision),
                 next_state: agent.state.clone(),
                 facts: super::DurableCommitFacts::from_state(
@@ -260,35 +259,32 @@ where
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        match commit_outcome {
-            ThreadCommitOutcome::Applied => {
-                // 恢复事件与普通 actor commit 使用同一个 parent subscription 事实源。
-                thread_events
-                    .publish_batch(projected.notifications.clone())
-                    .await
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                host.observer()
-                    .publish(AgentCommittedEvent {
-                        agent_id: event.agent_id.clone(),
-                        thread_id: Some(thread_key),
-                        turn_id: projected
-                            .notifications
-                            .first()
-                            .and_then(notification_turn_id)
-                            .and_then(|value| TurnId::new(value).ok()),
-                        runtime_events: vec![event],
-                        trace_events: Vec::new(),
-                        thread_notifications: thread_notifications.clone(),
-                    })
-                    .await
-            }
-            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-                return Err(AgentRuntimeError::RevisionConflict {
-                    expected: Some(expected_revision),
-                    actual: actual_revision,
-                });
-            }
+        // 恢复事件与普通 actor commit 使用同一个 parent subscription 事实源。
+        if let Err(error) = thread_events
+            .publish_batch(projected.notifications.clone())
+            .await
+        {
+            tracing::error!(
+                agent_id = %agent.state.snapshot.identity.id,
+                revision = agent.state.snapshot.revision,
+                error = %error,
+                "recovery projection rejected a committed in-memory fact; subscribers must resync"
+            );
         }
+        host.observer()
+            .publish(AgentCommittedEvent {
+                agent_id: event.agent_id.clone(),
+                thread_id: Some(thread_key),
+                turn_id: projected
+                    .notifications
+                    .first()
+                    .and_then(notification_turn_id)
+                    .and_then(|value| TurnId::new(value).ok()),
+                runtime_events: vec![event],
+                trace_events: Vec::new(),
+                thread_notifications: thread_notifications.clone(),
+            })
+            .await;
         if let Some(restored_thread) = agent.thread_snapshot.as_mut() {
             restored_thread.snapshot = projection.snapshot;
         } else {

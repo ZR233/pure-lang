@@ -68,14 +68,13 @@ impl TaskCoordinator {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             async move {
-                let run = coordinator
-                    .store
-                    .read_active_task_run_for_root_thread(&thread_id)
-                    .await?;
                 let round = coordinator
-                    .store
-                    .list_review_rounds(&run.id)
-                    .await?
+                    .task_runtime
+                    .aggregate(&thread_id)
+                    .await
+                    .context("active Task aggregate is not resident")?
+                    .facts
+                    .reviews
                     .into_iter()
                     .find(|round| round.id == input.round_id)
                     .context("review round not found in active task")?;

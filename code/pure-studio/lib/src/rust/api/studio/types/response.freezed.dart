@@ -2209,6 +2209,563 @@ as BridgeStoppedResource,
 }
 
 /// @nodoc
+mixin _$BridgePersistenceState {
+
+ BigInt get pendingCommits;
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceStateCopyWith<BridgePersistenceState> get copyWith => _$BridgePersistenceStateCopyWithImpl<BridgePersistenceState>(this as BridgePersistenceState, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits);
+
+@override
+String toString() {
+  return 'BridgePersistenceState(pendingCommits: $pendingCommits)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceStateCopyWith<$Res>  {
+  factory $BridgePersistenceStateCopyWith(BridgePersistenceState value, $Res Function(BridgePersistenceState) _then) = _$BridgePersistenceStateCopyWithImpl;
+@useResult
+$Res call({
+ BigInt pendingCommits
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceStateCopyWithImpl<$Res>
+    implements $BridgePersistenceStateCopyWith<$Res> {
+  _$BridgePersistenceStateCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState _self;
+  final $Res Function(BridgePersistenceState) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? pendingCommits = null,}) {
+  return _then(_self.copyWith(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [BridgePersistenceState].
+extension BridgePersistenceStatePatterns on BridgePersistenceState {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgePersistenceState_Ready value)?  ready,TResult Function( BridgePersistenceState_Flushing value)?  flushing,TResult Function( BridgePersistenceState_Degraded value)?  degraded,TResult Function( BridgePersistenceState_Recovering value)?  recovering,TResult Function( BridgePersistenceState_Blocked value)?  blocked,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready() when ready != null:
+return ready(_that);case BridgePersistenceState_Flushing() when flushing != null:
+return flushing(_that);case BridgePersistenceState_Degraded() when degraded != null:
+return degraded(_that);case BridgePersistenceState_Recovering() when recovering != null:
+return recovering(_that);case BridgePersistenceState_Blocked() when blocked != null:
+return blocked(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgePersistenceState_Ready value)  ready,required TResult Function( BridgePersistenceState_Flushing value)  flushing,required TResult Function( BridgePersistenceState_Degraded value)  degraded,required TResult Function( BridgePersistenceState_Recovering value)  recovering,required TResult Function( BridgePersistenceState_Blocked value)  blocked,}){
+final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready():
+return ready(_that);case BridgePersistenceState_Flushing():
+return flushing(_that);case BridgePersistenceState_Degraded():
+return degraded(_that);case BridgePersistenceState_Recovering():
+return recovering(_that);case BridgePersistenceState_Blocked():
+return blocked(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgePersistenceState_Ready value)?  ready,TResult? Function( BridgePersistenceState_Flushing value)?  flushing,TResult? Function( BridgePersistenceState_Degraded value)?  degraded,TResult? Function( BridgePersistenceState_Recovering value)?  recovering,TResult? Function( BridgePersistenceState_Blocked value)?  blocked,}){
+final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready() when ready != null:
+return ready(_that);case BridgePersistenceState_Flushing() when flushing != null:
+return flushing(_that);case BridgePersistenceState_Degraded() when degraded != null:
+return degraded(_that);case BridgePersistenceState_Recovering() when recovering != null:
+return recovering(_that);case BridgePersistenceState_Blocked() when blocked != null:
+return blocked(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BigInt pendingCommits)?  ready,TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision)?  flushing,TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)?  degraded,TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt)?  recovering,TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)?  blocked,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready() when ready != null:
+return ready(_that.pendingCommits);case BridgePersistenceState_Flushing() when flushing != null:
+return flushing(_that.pendingCommits,_that.oldestPendingRevision);case BridgePersistenceState_Degraded() when degraded != null:
+return degraded(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);case BridgePersistenceState_Recovering() when recovering != null:
+return recovering(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt);case BridgePersistenceState_Blocked() when blocked != null:
+return blocked(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BigInt pendingCommits)  ready,required TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision)  flushing,required TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)  degraded,required TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt)  recovering,required TResult Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)  blocked,}) {final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready():
+return ready(_that.pendingCommits);case BridgePersistenceState_Flushing():
+return flushing(_that.pendingCommits,_that.oldestPendingRevision);case BridgePersistenceState_Degraded():
+return degraded(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);case BridgePersistenceState_Recovering():
+return recovering(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt);case BridgePersistenceState_Blocked():
+return blocked(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BigInt pendingCommits)?  ready,TResult? Function( BigInt pendingCommits,  BigInt? oldestPendingRevision)?  flushing,TResult? Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)?  degraded,TResult? Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt)?  recovering,TResult? Function( BigInt pendingCommits,  BigInt? oldestPendingRevision,  PlatformInt64 firstFailedAt,  BridgeStateError error)?  blocked,}) {final _that = this;
+switch (_that) {
+case BridgePersistenceState_Ready() when ready != null:
+return ready(_that.pendingCommits);case BridgePersistenceState_Flushing() when flushing != null:
+return flushing(_that.pendingCommits,_that.oldestPendingRevision);case BridgePersistenceState_Degraded() when degraded != null:
+return degraded(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);case BridgePersistenceState_Recovering() when recovering != null:
+return recovering(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt);case BridgePersistenceState_Blocked() when blocked != null:
+return blocked(_that.pendingCommits,_that.oldestPendingRevision,_that.firstFailedAt,_that.error);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgePersistenceState_Ready extends BridgePersistenceState {
+  const BridgePersistenceState_Ready({required this.pendingCommits}): super._();
+
+
+@override final  BigInt pendingCommits;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceState_ReadyCopyWith<BridgePersistenceState_Ready> get copyWith => _$BridgePersistenceState_ReadyCopyWithImpl<BridgePersistenceState_Ready>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState_Ready&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits);
+
+@override
+String toString() {
+  return 'BridgePersistenceState.ready(pendingCommits: $pendingCommits)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceState_ReadyCopyWith<$Res> implements $BridgePersistenceStateCopyWith<$Res> {
+  factory $BridgePersistenceState_ReadyCopyWith(BridgePersistenceState_Ready value, $Res Function(BridgePersistenceState_Ready) _then) = _$BridgePersistenceState_ReadyCopyWithImpl;
+@override @useResult
+$Res call({
+ BigInt pendingCommits
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceState_ReadyCopyWithImpl<$Res>
+    implements $BridgePersistenceState_ReadyCopyWith<$Res> {
+  _$BridgePersistenceState_ReadyCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState_Ready _self;
+  final $Res Function(BridgePersistenceState_Ready) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,}) {
+  return _then(BridgePersistenceState_Ready(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgePersistenceState_Flushing extends BridgePersistenceState {
+  const BridgePersistenceState_Flushing({required this.pendingCommits, this.oldestPendingRevision}): super._();
+
+
+@override final  BigInt pendingCommits;
+ final  BigInt? oldestPendingRevision;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceState_FlushingCopyWith<BridgePersistenceState_Flushing> get copyWith => _$BridgePersistenceState_FlushingCopyWithImpl<BridgePersistenceState_Flushing>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState_Flushing&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits)&&(identical(other.oldestPendingRevision, oldestPendingRevision) || other.oldestPendingRevision == oldestPendingRevision));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits,oldestPendingRevision);
+
+@override
+String toString() {
+  return 'BridgePersistenceState.flushing(pendingCommits: $pendingCommits, oldestPendingRevision: $oldestPendingRevision)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceState_FlushingCopyWith<$Res> implements $BridgePersistenceStateCopyWith<$Res> {
+  factory $BridgePersistenceState_FlushingCopyWith(BridgePersistenceState_Flushing value, $Res Function(BridgePersistenceState_Flushing) _then) = _$BridgePersistenceState_FlushingCopyWithImpl;
+@override @useResult
+$Res call({
+ BigInt pendingCommits, BigInt? oldestPendingRevision
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceState_FlushingCopyWithImpl<$Res>
+    implements $BridgePersistenceState_FlushingCopyWith<$Res> {
+  _$BridgePersistenceState_FlushingCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState_Flushing _self;
+  final $Res Function(BridgePersistenceState_Flushing) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,Object? oldestPendingRevision = freezed,}) {
+  return _then(BridgePersistenceState_Flushing(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,oldestPendingRevision: freezed == oldestPendingRevision ? _self.oldestPendingRevision : oldestPendingRevision // ignore: cast_nullable_to_non_nullable
+as BigInt?,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgePersistenceState_Degraded extends BridgePersistenceState {
+  const BridgePersistenceState_Degraded({required this.pendingCommits, this.oldestPendingRevision, required this.firstFailedAt, required this.error}): super._();
+
+
+@override final  BigInt pendingCommits;
+ final  BigInt? oldestPendingRevision;
+ final  PlatformInt64 firstFailedAt;
+ final  BridgeStateError error;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceState_DegradedCopyWith<BridgePersistenceState_Degraded> get copyWith => _$BridgePersistenceState_DegradedCopyWithImpl<BridgePersistenceState_Degraded>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState_Degraded&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits)&&(identical(other.oldestPendingRevision, oldestPendingRevision) || other.oldestPendingRevision == oldestPendingRevision)&&(identical(other.firstFailedAt, firstFailedAt) || other.firstFailedAt == firstFailedAt)&&(identical(other.error, error) || other.error == error));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits,oldestPendingRevision,firstFailedAt,error);
+
+@override
+String toString() {
+  return 'BridgePersistenceState.degraded(pendingCommits: $pendingCommits, oldestPendingRevision: $oldestPendingRevision, firstFailedAt: $firstFailedAt, error: $error)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceState_DegradedCopyWith<$Res> implements $BridgePersistenceStateCopyWith<$Res> {
+  factory $BridgePersistenceState_DegradedCopyWith(BridgePersistenceState_Degraded value, $Res Function(BridgePersistenceState_Degraded) _then) = _$BridgePersistenceState_DegradedCopyWithImpl;
+@override @useResult
+$Res call({
+ BigInt pendingCommits, BigInt? oldestPendingRevision, PlatformInt64 firstFailedAt, BridgeStateError error
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceState_DegradedCopyWithImpl<$Res>
+    implements $BridgePersistenceState_DegradedCopyWith<$Res> {
+  _$BridgePersistenceState_DegradedCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState_Degraded _self;
+  final $Res Function(BridgePersistenceState_Degraded) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,Object? oldestPendingRevision = freezed,Object? firstFailedAt = null,Object? error = null,}) {
+  return _then(BridgePersistenceState_Degraded(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,oldestPendingRevision: freezed == oldestPendingRevision ? _self.oldestPendingRevision : oldestPendingRevision // ignore: cast_nullable_to_non_nullable
+as BigInt?,firstFailedAt: null == firstFailedAt ? _self.firstFailedAt : firstFailedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,error: null == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
+as BridgeStateError,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgePersistenceState_Recovering extends BridgePersistenceState {
+  const BridgePersistenceState_Recovering({required this.pendingCommits, this.oldestPendingRevision, required this.firstFailedAt}): super._();
+
+
+@override final  BigInt pendingCommits;
+ final  BigInt? oldestPendingRevision;
+ final  PlatformInt64 firstFailedAt;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceState_RecoveringCopyWith<BridgePersistenceState_Recovering> get copyWith => _$BridgePersistenceState_RecoveringCopyWithImpl<BridgePersistenceState_Recovering>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState_Recovering&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits)&&(identical(other.oldestPendingRevision, oldestPendingRevision) || other.oldestPendingRevision == oldestPendingRevision)&&(identical(other.firstFailedAt, firstFailedAt) || other.firstFailedAt == firstFailedAt));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits,oldestPendingRevision,firstFailedAt);
+
+@override
+String toString() {
+  return 'BridgePersistenceState.recovering(pendingCommits: $pendingCommits, oldestPendingRevision: $oldestPendingRevision, firstFailedAt: $firstFailedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceState_RecoveringCopyWith<$Res> implements $BridgePersistenceStateCopyWith<$Res> {
+  factory $BridgePersistenceState_RecoveringCopyWith(BridgePersistenceState_Recovering value, $Res Function(BridgePersistenceState_Recovering) _then) = _$BridgePersistenceState_RecoveringCopyWithImpl;
+@override @useResult
+$Res call({
+ BigInt pendingCommits, BigInt? oldestPendingRevision, PlatformInt64 firstFailedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceState_RecoveringCopyWithImpl<$Res>
+    implements $BridgePersistenceState_RecoveringCopyWith<$Res> {
+  _$BridgePersistenceState_RecoveringCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState_Recovering _self;
+  final $Res Function(BridgePersistenceState_Recovering) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,Object? oldestPendingRevision = freezed,Object? firstFailedAt = null,}) {
+  return _then(BridgePersistenceState_Recovering(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,oldestPendingRevision: freezed == oldestPendingRevision ? _self.oldestPendingRevision : oldestPendingRevision // ignore: cast_nullable_to_non_nullable
+as BigInt?,firstFailedAt: null == firstFailedAt ? _self.firstFailedAt : firstFailedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgePersistenceState_Blocked extends BridgePersistenceState {
+  const BridgePersistenceState_Blocked({required this.pendingCommits, this.oldestPendingRevision, required this.firstFailedAt, required this.error}): super._();
+
+
+@override final  BigInt pendingCommits;
+ final  BigInt? oldestPendingRevision;
+ final  PlatformInt64 firstFailedAt;
+ final  BridgeStateError error;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgePersistenceState_BlockedCopyWith<BridgePersistenceState_Blocked> get copyWith => _$BridgePersistenceState_BlockedCopyWithImpl<BridgePersistenceState_Blocked>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePersistenceState_Blocked&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits)&&(identical(other.oldestPendingRevision, oldestPendingRevision) || other.oldestPendingRevision == oldestPendingRevision)&&(identical(other.firstFailedAt, firstFailedAt) || other.firstFailedAt == firstFailedAt)&&(identical(other.error, error) || other.error == error));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,pendingCommits,oldestPendingRevision,firstFailedAt,error);
+
+@override
+String toString() {
+  return 'BridgePersistenceState.blocked(pendingCommits: $pendingCommits, oldestPendingRevision: $oldestPendingRevision, firstFailedAt: $firstFailedAt, error: $error)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgePersistenceState_BlockedCopyWith<$Res> implements $BridgePersistenceStateCopyWith<$Res> {
+  factory $BridgePersistenceState_BlockedCopyWith(BridgePersistenceState_Blocked value, $Res Function(BridgePersistenceState_Blocked) _then) = _$BridgePersistenceState_BlockedCopyWithImpl;
+@override @useResult
+$Res call({
+ BigInt pendingCommits, BigInt? oldestPendingRevision, PlatformInt64 firstFailedAt, BridgeStateError error
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgePersistenceState_BlockedCopyWithImpl<$Res>
+    implements $BridgePersistenceState_BlockedCopyWith<$Res> {
+  _$BridgePersistenceState_BlockedCopyWithImpl(this._self, this._then);
+
+  final BridgePersistenceState_Blocked _self;
+  final $Res Function(BridgePersistenceState_Blocked) _then;
+
+/// Create a copy of BridgePersistenceState
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? pendingCommits = null,Object? oldestPendingRevision = freezed,Object? firstFailedAt = null,Object? error = null,}) {
+  return _then(BridgePersistenceState_Blocked(
+pendingCommits: null == pendingCommits ? _self.pendingCommits : pendingCommits // ignore: cast_nullable_to_non_nullable
+as BigInt,oldestPendingRevision: freezed == oldestPendingRevision ? _self.oldestPendingRevision : oldestPendingRevision // ignore: cast_nullable_to_non_nullable
+as BigInt?,firstFailedAt: null == firstFailedAt ? _self.firstFailedAt : firstFailedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,error: null == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
+as BridgeStateError,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$BridgeProjectDirectoryState {
 
 

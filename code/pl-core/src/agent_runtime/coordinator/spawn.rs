@@ -1,5 +1,5 @@
-use super::super::host::{CommitDurability, initial_transcript_mutation};
-use super::super::{AgentCommand, AgentIdentity, ThreadActorState};
+use super::super::host::{PersistenceClass, initial_transcript_mutation};
+use super::super::{AgentCommand, AgentFaultClassification, AgentIdentity, ThreadActorState};
 use super::*;
 
 enum SpawnCompensation {
@@ -30,11 +30,10 @@ where
             snapshot: Box::new(state.snapshot.clone()),
         },
     };
-    let outcome = host
-        .repository()
+    host.repository()
         .commit(ThreadCommit {
             agent_id: id.clone(),
-            durability: CommitDurability::Immediate,
+            persistence: PersistenceClass::Standard,
             expected_revision: None,
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(
@@ -48,15 +47,6 @@ where
         })
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-    match outcome {
-        ThreadCommitOutcome::Applied => {}
-        ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-            return Err(AgentRuntimeError::RevisionConflict {
-                expected: None,
-                actual: actual_revision,
-            });
-        }
-    }
     let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(id.as_str());
     thread_snapshot.revision = state.session.thread_revision;
     runtime
@@ -182,7 +172,7 @@ where
         .repository()
         .commit(ThreadCommit {
             agent_id: child_id.clone(),
-            durability: CommitDurability::Immediate,
+            persistence: PersistenceClass::Standard,
             expected_revision: None,
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(
@@ -195,8 +185,8 @@ where
             mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })
         .await;
-    let outcome = match persisted {
-        Ok(outcome) => outcome,
+    match persisted {
+        Ok(()) => {}
         Err(error) => {
             let reason = SpawnRollbackReason {
                 phase: SpawnRollbackPhase::AgentRegistration,
@@ -209,22 +199,6 @@ where
                 ))),
             };
         }
-    };
-    if let ThreadCommitOutcome::RevisionConflict { actual_revision } = outcome {
-        let conflict = AgentRuntimeError::RevisionConflict {
-            expected: None,
-            actual: actual_revision,
-        };
-        let reason = SpawnRollbackReason {
-            phase: SpawnRollbackPhase::AgentRegistration,
-            message: conflict.to_string(),
-        };
-        return match host.lifecycle().rollback_spawn(lease, reason).await {
-            Ok(()) => Err(conflict),
-            Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
-                "{conflict}; spawn rollback failed: {rollback_error}"
-            ))),
-        };
     }
     let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(child_id.as_str());
     thread_snapshot.revision = state.session.thread_revision;
@@ -336,6 +310,7 @@ where
                         retryable: false,
                     },
                     turn_id: None,
+                    classification: AgentFaultClassification::AggregateCorruption,
                 })
                 .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
         }
@@ -355,11 +330,10 @@ where
             },
         },
     };
-    let outcome = host
-        .repository()
+    host.repository()
         .commit(ThreadCommit {
             agent_id: state.snapshot.identity.id.clone(),
-            durability: CommitDurability::Immediate,
+            persistence: PersistenceClass::Settlement,
             expected_revision: Some(expected_revision),
             next_state: state.clone(),
             facts: DurableCommitFacts::from_state(
@@ -373,19 +347,9 @@ where
         })
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-    match outcome {
-        ThreadCommitOutcome::Applied => {
-            runtime.directory.store_snapshot(state.snapshot.clone());
-            host.observer()
-                .publish(AgentCommittedEvent::runtime(event))
-                .await;
-            Ok(state)
-        }
-        ThreadCommitOutcome::RevisionConflict { actual_revision } => {
-            Err(AgentRuntimeError::RevisionConflict {
-                expected: Some(expected_revision),
-                actual: actual_revision,
-            })
-        }
-    }
+    runtime.directory.store_snapshot(state.snapshot.clone());
+    host.observer()
+        .publish(AgentCommittedEvent::runtime(event))
+        .await;
+    Ok(state)
 }

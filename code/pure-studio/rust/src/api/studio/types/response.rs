@@ -27,6 +27,43 @@ pub struct BridgeStudioStateSnapshot {
     pub skills_by_project: Vec<BridgeSkillsStateSnapshot>,
     pub provider_usage: BridgeProviderUsageStateSnapshot,
     pub updater: BridgeUpdaterStateSnapshot,
+    pub persistence: BridgePersistenceStateSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgePersistenceStateSnapshot {
+    pub revision: u64,
+    pub state: BridgePersistenceState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgePersistenceState {
+    Ready {
+        pending_commits: u64,
+    },
+    Flushing {
+        pending_commits: u64,
+        oldest_pending_revision: Option<u64>,
+    },
+    Degraded {
+        pending_commits: u64,
+        oldest_pending_revision: Option<u64>,
+        first_failed_at: i64,
+        error: super::runtime::BridgeStateError,
+    },
+    Recovering {
+        pending_commits: u64,
+        oldest_pending_revision: Option<u64>,
+        first_failed_at: i64,
+    },
+    Blocked {
+        pending_commits: u64,
+        oldest_pending_revision: Option<u64>,
+        first_failed_at: i64,
+        error: super::runtime::BridgeStateError,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

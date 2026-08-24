@@ -104,15 +104,17 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let is_root = context.snapshot.identity.parent_id.is_none();
         // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
         let root_role = is_root.then(|| mode.root_role());
-        let active_task_run = if mode == StudioMode::Task {
-            self.store
-                .find_active_task_run_for_root_thread(&thread_record.root_thread_id)
+        let active_task = if mode == StudioMode::Task {
+            self.coordinator
+                .task_runtime()
+                .aggregate(&thread_record.root_thread_id)
                 .await
-                .map_err(anyhow_error)?
+                .filter(|aggregate| !aggregate.facts.run.kind().is_terminal())
         } else {
             None
         };
-        let task_phase = active_task_run.as_ref().map(|run| run.kind());
+        let active_task_run = active_task.as_ref().map(|aggregate| &aggregate.facts.run);
+        let task_phase = active_task_run.map(|run| run.kind());
         #[cfg(debug_assertions)]
         let task_driver_budget = debug_task_driver_budget_fixture()?;
         if mode == StudioMode::Task
@@ -128,12 +130,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             ));
         }
 
-        let workspace = AgentWorkspaceResolver::new(self.store.clone())
+        let workspace = AgentWorkspaceResolver::new()
             .resolve(
                 &context.snapshot.identity,
                 &thread_record,
                 &project,
-                active_task_run.as_ref(),
+                active_task.as_ref().map(|aggregate| &aggregate.facts),
             )
             .await
             .map_err(anyhow_error)?;
@@ -150,14 +152,16 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
         {
-            let run = active_task_run
+            let run =
+                active_task_run.ok_or_else(|| turn_error("Task executor has no active TaskRun"))?;
+            let work_unit = active_task
                 .as_ref()
-                .ok_or_else(|| turn_error("Task executor has no active TaskRun"))?;
-            let work_unit = self
-                .store
-                .find_work_unit_for_executor(context.snapshot.identity.id.as_str())
-                .await
-                .map_err(anyhow_error)?
+                .and_then(|aggregate| {
+                    aggregate.facts.work_units.iter().find(|unit| {
+                        unit.executor_thread_id.as_deref()
+                            == Some(context.snapshot.identity.id.as_str())
+                    })
+                })
                 .ok_or_else(|| turn_error("Task executor has no durable WorkUnit"))?;
             let section = context
                 .session
@@ -176,7 +180,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                         )?;
                     handoff.validate_owner(
                         run,
-                        &work_unit,
+                        work_unit,
                         context.snapshot.identity.id.as_str(),
                     )?;
                     Ok(section)
@@ -185,7 +189,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 Ok(section) => section,
                 Err(error) => {
                     let message = error.to_string();
-                    self.store
+                    self.coordinator
+                        .task_runtime()
                         .mark_executor_handoff_needs_attention(
                             context.snapshot.identity.id.as_str(),
                             &message,
@@ -195,7 +200,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                     return Err(turn_error(message));
                 }
             };
-            self.store
+            self.coordinator
+                .task_runtime()
                 .mark_executor_turn_started(
                     context.snapshot.identity.id.as_str(),
                     context.turn_id.as_str(),
@@ -249,7 +255,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 &thread_record.root_thread_id,
                 context.runtime.clone(),
                 &context.snapshot,
-                active_task_run.as_ref(),
+                active_task_run,
             );
         }
         let active_mcp_servers = self.mcp_runtime.available_server_names().await;

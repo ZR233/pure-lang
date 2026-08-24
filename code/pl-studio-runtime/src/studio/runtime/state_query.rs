@@ -68,6 +68,7 @@ impl StudioRuntime {
             skills_by_project,
             provider_usage: self.read_provider_usage_state().await,
             updater: self.read_update_state().await,
+            persistence: self.agent_facility.product_events.persistence_state(),
         })
     }
 

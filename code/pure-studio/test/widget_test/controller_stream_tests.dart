@@ -931,4 +931,208 @@ void registerControllerStreamTests() {
       );
     },
   );
+
+  test('persistence events apply only increasing revisions', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+
+    api.emitGlobal(
+      const StudioBridgeEvent(
+        payload: PersistenceStateChangedPayload(
+          PersistenceStateSnapshot(
+            revision: 2,
+            state: DegradedPersistenceState(
+              pendingCommits: 4,
+              oldestPendingRevision: 7,
+              firstFailedAt: 10,
+              error: ObservedResourceError(
+                code: 'sqliteBusy',
+                message: 'database is locked',
+                retryable: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    api.emitGlobal(
+      const StudioBridgeEvent(
+        payload: PersistenceStateChangedPayload(
+          PersistenceStateSnapshot(
+            revision: 1,
+            state: RecoveringPersistenceState(
+              pendingCommits: 2,
+              oldestPendingRevision: 8,
+              firstFailedAt: 10,
+            ),
+          ),
+        ),
+      ),
+    );
+    await pumpEventQueue();
+
+    final persistence = container
+        .read(studioControllerProvider)
+        .requireValue
+        .persistenceState;
+    expect(persistence.revision, 2);
+    expect(persistence.state, isA<DegradedPersistenceState>());
+    expect(persistence.state.pendingCommits, 4);
+  });
+
+  test('degraded persistence blocks submit but keeps stop available', () async {
+    final initial = _emptyState();
+    final workspace = initial.selectedWorkspace!.copyWith(
+      activeTurn: _testTurn(
+        threadId: 'session-1',
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.thinking,
+        ),
+        turnId: 'turn-active',
+      ),
+    );
+    final api = _FakeStudioApi(
+      initial.copyWith(
+        workspacesByThread: {'session-1': workspace},
+        persistenceState: const PersistenceStateSnapshot(
+          revision: 3,
+          state: DegradedPersistenceState(
+            pendingCommits: 1,
+            oldestPendingRevision: 2,
+            firstFailedAt: 1,
+            error: ObservedResourceError(
+              code: 'sqliteBusy',
+              message: 'database is locked',
+              retryable: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    controller.updateComposer('session-1', 'must not start');
+    await controller.submitComposer('session-1');
+    await controller.stop('session-1');
+
+    expect(api.submitPromptCount, 0);
+    expect(api.interruptedTurn, (threadId: 'session-1', turnId: 'turn-active'));
+  });
+
+  test(
+    'degraded persistence still allows the current interaction to settle',
+    () async {
+      const interaction = PendingInteraction(
+        id: 'interaction-degraded',
+        threadId: 'session-1',
+        turnId: 'turn-active',
+        kind: InteractionKind.userInput,
+        title: 'Question',
+        body: 'Continue?',
+      );
+      final initial = _emptyState();
+      final workspace = initial.selectedWorkspace!.copyWith(
+        interactions: const [interaction],
+      );
+      final api = _FakeStudioApi(
+        initial.copyWith(
+          workspacesByThread: {'session-1': workspace},
+          persistenceState: const PersistenceStateSnapshot(
+            revision: 3,
+            state: DegradedPersistenceState(
+              pendingCommits: 1,
+              oldestPendingRevision: 2,
+              firstFailedAt: 1,
+              error: ObservedResourceError(
+                code: 'sqliteBusy',
+                message: 'database is locked',
+                retryable: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      await container
+          .read(studioControllerProvider.notifier)
+          .resolveActiveInteraction(
+            'session-1',
+            const UserInputResolutionCommand(answers: []),
+          );
+
+      expect(api.resolvedInteractionId, interaction.id);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .selectedWorkspace!
+            .interactions,
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'manual persistence retry invokes the backend and accepts newer state',
+    () async {
+      final initial = _emptyState().copyWith(
+        persistenceState: const PersistenceStateSnapshot(
+          revision: 2,
+          state: DegradedPersistenceState(
+            pendingCommits: 2,
+            oldestPendingRevision: 1,
+            firstFailedAt: 1,
+            error: ObservedResourceError(
+              code: 'sqliteBusy',
+              message: 'database is locked',
+              retryable: true,
+            ),
+          ),
+        ),
+      );
+      final api = _FakeStudioApi(initial)
+        ..retryPersistenceState = const PersistenceStateSnapshot(
+          revision: 3,
+          state: RecoveringPersistenceState(
+            pendingCommits: 1,
+            oldestPendingRevision: 2,
+            firstFailedAt: 1,
+          ),
+        );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      await container
+          .read(studioControllerProvider.notifier)
+          .retryPersistence();
+
+      expect(api.retryPersistenceCallCount, 1);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .persistenceState
+            .state,
+        isA<RecoveringPersistenceState>(),
+      );
+    },
+  );
 }

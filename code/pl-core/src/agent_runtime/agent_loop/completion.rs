@@ -9,7 +9,7 @@ where
     H: AgentRuntimeHost,
 {
     pub(super) async fn finish_turn(&mut self, completion: TurnCompletion) {
-        let Some(active) = &self.active else {
+        let Some(active) = self.active.as_ref() else {
             return;
         };
         if active.turn_id != completion.turn_id
@@ -19,12 +19,20 @@ where
             return;
         }
         if let Err(error) = self.flush_pending_traces().await {
-            self.fault(error.to_string()).await;
-            return;
+            self.mark_projection_failure(&error);
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                error = %error,
+                "pending trace projection was rejected while settling the turn"
+            );
         }
         if let Err(error) = self.flush_pending_observations().await {
-            self.fault(error.to_string()).await;
-            return;
+            self.mark_projection_failure(&error);
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                error = %error,
+                "pending observation projection was rejected while settling the turn"
+            );
         }
         let compactions = completion
             .worker_outcome
@@ -35,8 +43,12 @@ where
                 .persist_turn_observation(compaction_observation(compaction, unix_timestamp()))
                 .await
             {
-                self.fault(error.to_string()).await;
-                return;
+                self.mark_projection_failure(&error);
+                tracing::error!(
+                    agent_id = %self.state.snapshot.identity.id,
+                    error = %error,
+                    "compaction observation was rejected while settling the turn"
+                );
             }
         }
         let active = self

@@ -1,6 +1,6 @@
 use pl_core::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentSnapshot, AgentState, MailboxBudgetAction, ThreadId,
+    AgentSnapshot, AgentState, AgentTurnOutcome, MailboxBudgetAction, ThreadId, TurnId,
 };
 use pl_trace::{TraceEvent, TraceEventKind};
 use tokio::sync::watch;
@@ -8,9 +8,10 @@ use tokio::sync::watch;
 use crate::config::StudioRole;
 use crate::{StudioAgentDirectoryEntry, StudioAgentProgressRuntime};
 
-use crate::studio::task_coordinator::RecordTaskAgentFailure;
-use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{ProductEventBus, StudioStore};
+use crate::studio::ProductEventBus;
+use crate::studio::task_coordinator::{
+    RecordTaskAgentFailure, TaskCoordinator, TaskIssueDisposition,
+};
 
 use super::super::resources::StudioAgentResources;
 use super::super::wait_for_runtime;
@@ -19,7 +20,6 @@ use super::mapping::studio_agent_state;
 use super::planner_wake::materialize_pending_task_planner_wakes;
 
 pub(super) struct StudioAgentEventProjector {
-    pub(super) store: StudioStore,
     pub(super) resources: StudioAgentResources,
     pub(super) product_events: ProductEventBus,
     pub(super) coordinator: std::sync::Arc<TaskCoordinator>,
@@ -70,18 +70,6 @@ impl StudioAgentEventProjector {
         for event in runtime_events {
             self.project_runtime_event(event, &thread_id).await?;
         }
-        if let Some(thread_id) = thread_id
-            && let Some(thread) = self
-                .store
-                .read_thread(&thread_id)
-                .await
-                .at("readThreadForTaskRefresh")?
-        {
-            self.product_events
-                .refresh_task(&thread.root_thread_id)
-                .await
-                .at("refreshThreadTask")?;
-        }
         Ok(())
     }
 
@@ -94,8 +82,68 @@ impl StudioAgentEventProjector {
             AgentRuntimeEventKind::Registered { snapshot }
             | AgentRuntimeEventKind::StateChanged { snapshot }
             | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
-            | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. }
-            | AgentRuntimeEventKind::Faulted { snapshot, .. } => {
+            | AgentRuntimeEventKind::TurnActivityChanged { snapshot, .. } => {
+                self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
+                    .await?;
+            }
+            AgentRuntimeEventKind::Faulted { snapshot, reason } => {
+                let outcome = snapshot
+                    .last_turn
+                    .clone()
+                    .unwrap_or_else(|| synthetic_fault_outcome(&snapshot, &reason));
+                let is_task_agent = self.resources.get(&snapshot.identity.id).await.is_some();
+                let is_executor =
+                    is_task_agent && snapshot.identity.role.as_str() == StudioRole::Executor.key();
+                let is_reviewer =
+                    is_task_agent && snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
+                let disposition = if (is_executor || is_reviewer)
+                    && self.planner_is_operational(thread_id.as_deref()).await?
+                {
+                    TaskIssueDisposition::Recoverable
+                } else {
+                    // 根计划者已经 Faulted，或者子代理已无健康计划者可以接管。
+                    TaskIssueDisposition::Fatal
+                };
+                let terminalized = self
+                    .settle_task_failure(
+                        event.agent_id.as_str(),
+                        thread_id.as_deref(),
+                        &snapshot,
+                        &outcome,
+                        Some(disposition),
+                    )
+                    .await?;
+                if !terminalized && is_executor {
+                    self.coordinator
+                        .task_runtime()
+                        .fail_faulted_executor(
+                            event.agent_id.as_str(),
+                            outcome.turn_id.as_str(),
+                            outcome
+                                .outcome
+                                .failure()
+                                .map_or(reason.as_str(), |failure| failure.message.as_str()),
+                        )
+                        .await
+                        .at("failFaultedExecutor")?;
+                } else if !terminalized && is_reviewer {
+                    self.coordinator
+                        .task_runtime()
+                        .settle_reviewer_turn_finished(event.agent_id.as_str(), &outcome.outcome)
+                        .await
+                        .at("settleFaultedReviewerTurn")?;
+                }
+                if !terminalized && (is_executor || is_reviewer) {
+                    materialize_pending_task_planner_wakes(
+                        &wait_for_runtime(self.runtime.clone())
+                            .await
+                            .at("waitForRuntimeToWakePlannerAfterFault")?,
+                        &self.coordinator.task_runtime(),
+                        None,
+                    )
+                    .await
+                    .at("wakePlannerAfterAgentFault")?;
+                }
                 self.emit_agent_snapshot(thread_id.as_deref(), *snapshot)
                     .await?;
             }
@@ -106,7 +154,8 @@ impl StudioAgentEventProjector {
                     == StudioRole::Executor.key()
                     && self.resources.get(&snapshot.identity.id).await.is_some();
                 if is_task_executor && input.budget_action == MailboxBudgetAction::Refresh {
-                    self.store
+                    self.coordinator
+                        .task_runtime()
                         .mark_executor_turn_started(
                             event.agent_id.as_str(),
                             input.turn_id.as_str(),
@@ -125,8 +174,9 @@ impl StudioAgentEventProjector {
                 ..
             } => {
                 if let Some(thread_id) = thread_id.as_deref() {
-                    self.store
-                        .resolve_recoverable_task_issues(thread_id)
+                    self.coordinator
+                        .task_runtime()
+                        .resolve_recoverable_issues(thread_id)
                         .await
                         .at("resolveRecoverableTaskIssue")?;
                 }
@@ -134,7 +184,8 @@ impl StudioAgentEventProjector {
                     == StudioRole::Executor.key()
                     && self.resources.get(&snapshot.identity.id).await.is_some();
                 if is_task_executor {
-                    self.store
+                    self.coordinator
+                        .task_runtime()
                         .mark_executor_turn_started(
                             event.agent_id.as_str(),
                             turn_id.as_str(),
@@ -150,37 +201,15 @@ impl StudioAgentEventProjector {
                 outcome, snapshot, ..
             }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
-                let terminalized = if let (Some(failure), Some(thread_id)) =
-                    (outcome.outcome.failure().cloned(), thread_id.as_deref())
-                {
-                    let thread = self
-                        .store
-                        .read_thread(thread_id)
-                        .await
-                        .at("readFailureThread")?;
-                    if let Some(thread) = thread {
-                        self.coordinator
-                            .handle_agent_turn_failure(
-                                RecordTaskAgentFailure {
-                                    root_thread_id: thread.root_thread_id,
-                                    source_thread_id: thread_id.to_string(),
-                                    source_turn_id: outcome.turn_id.to_string(),
-                                    source_agent_id: event.agent_id.to_string(),
-                                    source_role: snapshot.identity.role.to_string(),
-                                    failure,
-                                },
-                                &wait_for_runtime(self.runtime.clone())
-                                    .await
-                                    .at("waitForRuntimeToSettleFailure")?,
-                            )
-                            .await
-                            .at("settleTaskAgentFailure")?
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
+                let terminalized = self
+                    .settle_task_failure(
+                        event.agent_id.as_str(),
+                        thread_id.as_deref(),
+                        &snapshot,
+                        &outcome,
+                        None,
+                    )
+                    .await?;
                 let is_task_agent = self.resources.get(&snapshot.identity.id).await.is_some();
                 let is_executor =
                     is_task_agent && snapshot.identity.role.as_str() == StudioRole::Executor.key();
@@ -190,7 +219,8 @@ impl StudioAgentEventProjector {
                     // Fatal failure already terminalized every Task child atomically.
                 } else if is_executor {
                     let continuation = self
-                        .store
+                        .coordinator
+                        .task_runtime()
                         .settle_executor_turn_finished(event.agent_id.as_str(), &outcome)
                         .await
                         .at("settleExecutorTurnFinished")?;
@@ -203,13 +233,15 @@ impl StudioAgentEventProjector {
                         )
                         .await
                     {
-                        self.store
+                        self.coordinator
+                            .task_runtime()
                             .fail_executor_continuation(&continuation, &error.to_string())
                             .await
                             .at("failExecutorContinuation")?;
                     }
                 } else if is_reviewer {
-                    self.store
+                    self.coordinator
+                        .task_runtime()
                         .settle_reviewer_turn_finished(event.agent_id.as_str(), &outcome.outcome)
                         .await
                         .at("settleReviewerTurnFinished")?;
@@ -219,7 +251,7 @@ impl StudioAgentEventProjector {
                         &wait_for_runtime(self.runtime.clone())
                             .await
                             .at("waitForRuntimeToWakePlanner")?,
-                        &self.store,
+                        &self.coordinator.task_runtime(),
                         None,
                     )
                     .await
@@ -269,12 +301,9 @@ impl StudioAgentEventProjector {
             return Ok(());
         };
         let resource = self.resources.get(&snapshot.identity.id).await;
-        if let Some(thread) = self
-            .store
-            .read_thread(thread_id)
-            .await
-            .at("readThreadForAgentDirectory")?
-        {
+        if let Some(mut thread) = self.product_events.thread_snapshot(thread_id) {
+            thread.status = super::super::repository::labels::thread_status(&snapshot.state);
+            thread.updated_at = thread.updated_at.max(snapshot.updated_at);
             let progress = snapshot
                 .progress
                 .as_ref()
@@ -317,10 +346,8 @@ impl StudioAgentEventProjector {
                     summary_age_seconds,
                 })
                 .await;
-            // 目录走内存索引增量：这里 upsert 刚重读的 canonical Thread 行。
-            let directory_thread: pl_protocol::Thread = thread.into();
             self.product_events
-                .apply_thread_delta(vec![directory_thread], Vec::new())
+                .apply_thread_delta(vec![thread], Vec::new())
                 .await
                 .at("emitThreadDirectory")?;
         }
@@ -330,5 +357,163 @@ impl StudioAgentEventProjector {
                 .await;
         }
         Ok(())
+    }
+
+    async fn settle_task_failure(
+        &self,
+        source_agent_id: &str,
+        thread_id: Option<&str>,
+        snapshot: &AgentSnapshot,
+        outcome: &AgentTurnOutcome,
+        disposition: Option<TaskIssueDisposition>,
+    ) -> Result<bool, StudioAgentProjectionFailure> {
+        let Some(failure) = outcome.outcome.failure().cloned() else {
+            return Ok(false);
+        };
+        let disposition =
+            disposition.unwrap_or_else(|| TaskIssueDisposition::for_turn_failure(&failure));
+        let Some(thread_id) = thread_id else {
+            return Ok(false);
+        };
+        let Some(thread) = self.product_events.thread_snapshot(thread_id) else {
+            return Ok(false);
+        };
+        self.coordinator
+            .handle_agent_turn_failure(
+                RecordTaskAgentFailure {
+                    root_thread_id: thread.root_thread_id,
+                    source_thread_id: thread_id.to_string(),
+                    source_turn_id: outcome.turn_id.to_string(),
+                    source_agent_id: source_agent_id.to_string(),
+                    source_role: snapshot.identity.role.to_string(),
+                    failure,
+                    disposition,
+                },
+                &wait_for_runtime(self.runtime.clone())
+                    .await
+                    .at("waitForRuntimeToSettleFailure")?,
+            )
+            .await
+            .at("settleTaskAgentFailure")
+    }
+
+    async fn planner_is_operational(
+        &self,
+        thread_id: Option<&str>,
+    ) -> Result<bool, StudioAgentProjectionFailure> {
+        let Some(thread_id) = thread_id else {
+            return Ok(false);
+        };
+        let Some(thread) = self.product_events.thread_snapshot(thread_id) else {
+            return Ok(false);
+        };
+        let planner_id = crate::studio::agent_host::root_agent_id(&thread.root_thread_id);
+        let runtime = wait_for_runtime(self.runtime.clone())
+            .await
+            .at("waitForRuntimeToCheckPlanner")?;
+        let planner = match runtime.snapshot(planner_id).await {
+            Ok(snapshot) => snapshot,
+            Err(pl_core::AgentRuntimeError::NotFound(_)) => return Ok(false),
+            Err(error) => {
+                return Err(StudioAgentProjectionFailure {
+                    stage: "snapshotPlannerForFaultSettlement",
+                    source: anyhow::anyhow!(error.to_string()),
+                });
+            }
+        };
+        Ok(!matches!(
+            planner.state,
+            AgentState::Faulted(_) | AgentState::Closing(_) | AgentState::Closed(_)
+        ))
+    }
+}
+
+/// 某些 lifecycle/补偿故障没有可关联的模型 Turn。TaskRuntime 仍必须收到一个
+/// 稳定、类型化的终态，不能让 TaskRun 因缺少 `last_turn` 永久悬挂。
+fn synthetic_fault_outcome(snapshot: &AgentSnapshot, reason: &str) -> AgentTurnOutcome {
+    let turn_id = match &snapshot.state {
+        AgentState::Faulted(state) => state.turn_id().cloned(),
+        AgentState::Idle(_)
+        | AgentState::Queued(_)
+        | AgentState::Running(_)
+        | AgentState::WaitingTool(_)
+        | AgentState::WaitingInteraction(_)
+        | AgentState::Cancelling(_)
+        | AgentState::Closing(_)
+        | AgentState::Closed(_) => None,
+    }
+    .unwrap_or_else(|| {
+        TurnId::new(format!(
+            "fault-{}-{}",
+            snapshot.identity.id, snapshot.revision
+        ))
+        .expect("synthetic fault Turn identity is valid")
+    });
+    let message = match &snapshot.state {
+        AgentState::Faulted(state) => state.error().message.clone(),
+        AgentState::Idle(_)
+        | AgentState::Queued(_)
+        | AgentState::Running(_)
+        | AgentState::WaitingTool(_)
+        | AgentState::WaitingInteraction(_)
+        | AgentState::Cancelling(_)
+        | AgentState::Closing(_)
+        | AgentState::Closed(_) => reason.to_string(),
+    };
+    AgentTurnOutcome {
+        turn_id,
+        thread_id: snapshot.identity.id.clone(),
+        outcome: pl_protocol::TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
+            pl_protocol::TurnFailureCategory::Internal,
+            message,
+        )),
+        usage: pl_model::TokenUsage::default(),
+        started_at: None,
+        finished_at: snapshot.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{AgentIdentity, AgentRoleId, FaultedAgentState};
+    use pl_protocol::StateError;
+
+    use super::*;
+
+    #[test]
+    fn fault_without_diagnostic_turn_still_produces_stable_task_terminal() {
+        let snapshot = AgentSnapshot {
+            identity: AgentIdentity {
+                id: ThreadId::new("agent-fault-without-turn").unwrap(),
+                parent_id: None,
+                role: AgentRoleId::new("planner").unwrap(),
+                depth: 0,
+            },
+            state: AgentState::Faulted(FaultedAgentState::new(
+                StateError {
+                    code: "agentRuntimeFault".to_string(),
+                    message: "aggregate validation failed".to_string(),
+                    retryable: false,
+                },
+                None,
+            )),
+            pending_inputs: 0,
+            progress: None,
+            last_turn: None,
+            revision: 7,
+            event_sequence: 9,
+            updated_at: 11,
+        };
+
+        let first = synthetic_fault_outcome(&snapshot, "fallback");
+        let second = synthetic_fault_outcome(&snapshot, "fallback");
+
+        assert_eq!(first.turn_id, second.turn_id);
+        assert_eq!(first.turn_id.as_str(), "fault-agent-fault-without-turn-7");
+        assert_eq!(first.finished_at, 11);
+        assert_eq!(
+            first.outcome.failure().unwrap().message,
+            "aggregate validation failed"
+        );
     }
 }

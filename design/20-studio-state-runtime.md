@@ -14,9 +14,10 @@ Studio 使用 Command Query Separation（CQS）。查询只读取 owner 已发�
 - 启动、探测、重连、关闭 MCP/LSP 或其他子进程；
 - 调用 reconcile、reset、repair 或 ensure。
 
-系统不提供全局 `resetAll`、万能 StateManager 或第二套 durable projection。SQLite 仍是
-Project、Thread、Task 和 Recovery 的 canonical facts；内存 owner 只拥有其领域 live runtime
-和 last-known observation。
+系统不提供全局 `resetAll`、万能 StateManager 或第二套 durable projection。进程运行期间，
+Project、Thread、Task、Agent、Recovery 及其目录的内存 owner snapshot 是活动状态 canonical facts；
+SQLite 只提供启动恢复基线、未驻留聚合冷加载、历史分页和异步持久化。owner 激活后，查询和转换不得
+回读 SQLite 来覆盖内存事实。
 
 ## 20.2 公共 observed state
 
@@ -61,7 +62,7 @@ Rust install event 先通过命令转换为该状态并 durable commit，FRB 事
 
 `StudioRuntime::read_state()` 返回 `StudioStateSnapshot`，字段按领域保存完整快照：runtime、
 projectDirectory、threadDirectory、taskDirectory、agentDirectory、settings、recovery、mcp、lsp、
-skillsByProject、providerUsage 和 updater。它不接收 selected project/thread，不解析 workspace，
+skillsByProject、providerUsage、updater 和 persistence。它不接收 selected project/thread，不解析 workspace，
 不创建会话，不加载磁盘配置，也不执行外部检查。
 
 Thread 高频 workspace 继续独立：
@@ -72,13 +73,17 @@ subscribeThread(threadId)
 repairThreadRuntime(threadId)
 ```
 
-查询从 repository canonical state 读取，并通过 `tryGetThreadHandle` 合并已注册 actor 的 live
-overlay。actor 不存在时返回 `runtimeAvailability=inactive`；订阅返回
-`runtimeNotActivated`，只有 repair command 可以注册、恢复并重新投递 durable wake。
+查询优先从已注册 ThreadActor 的 canonical snapshot 读取；actor 不存在时只读 SQLite 冷基线并返回
+`runtimeAvailability=inactive`，不得让数据库行覆盖活动 owner。订阅是显式激活命令，可从冷基线创建
+actor；纯查询和 transport 重同步不激活、不修复、不投递 wake。
+
+`listThreadTurns(threadId, cursor, limit)` 是冷热历史查询：未驻留时直接读取 SQLite；驻留时先读取
+ThreadActor 的驻留期 Turn 热窗口与完整 Item timeline，再用 SQLite 补齐更早页面。相同 Turn/Item
+标识一律以内存覆盖，热 cursor 可以直接衔接冷历史，不得为了历史页把数据库快照回写到 actor。
 
 Product event 携带完整领域 snapshot：ProjectDirectoryChanged、TaskDirectoryChanged、
 AgentDirectoryChanged、SettingsStateChanged、RecoveryStateChanged、McpStateChanged、LspStateChanged、
-SkillsStateChanged、ProviderUsageStateChanged、UpdaterStateChanged；唯一例外是
+SkillsStateChanged、ProviderUsageStateChanged、UpdaterStateChanged、PersistenceStateChanged；唯一例外是
 `ThreadDirectoryChanged`，它携带增量 payload（upserted entries、removed ids 与 thread directory
 revision），由常驻内存目录索引派生（见 19.6），Flutter 按增量合并进分页窗口。信封 sequence 只用于
 transport lag；payload 自带领域 revision。
@@ -86,8 +91,9 @@ transport lag；payload 自带领域 revision。
 `subscribeShutdownProgress()` 是独立的短生命周期 typed 流，只在 shutdown 期间可用，不复用
 product stream（它在关机早期被取消）。事件本身是 sealed 阶段状态，
 固定顺序为 StoppingSubscriptions、CancellingTurns、FlushingPersistence、SuspendingTasks、
-StoppingMcp、StoppingLsp、Stopped；只有 `FlushingPersistence` 承载 pending commit 数，其完成
-事件必须携带 pending=0。并发
+StoppingMcp、StoppingLsp、Stopped；只有 `FlushingPersistence` 承载 pending commit 数。只有 writer
+确认 pending=0 才能进入后续正常关机阶段；落库失败时保持真实 pending 和 PersistenceState，不得
+伪报完成。并发
 shutdown 调用共享同一次阶段序列，`shutdownRuntimeForUpdate` 的 idle 关机复用同一协议。
 
 Flutter 对每个领域分别保存 canonical snapshot。新 revision 才整体替换，相同 revision 幂等
@@ -101,11 +107,11 @@ FRB 的 `readStudioState` 与 HTTP 的 `GET /api/v1/state` 都只机械调用该
 ## 20.4 启动、Project 与 Thread
 
 每个宿主只允许一次启动，顺序固定为：解析绝对 Studio home；取得 `runtime.lock` 独占锁；打开并
-校验 SQLite；加载
-`ConfigRuntime`；加载 Usage/Updater last-known cache；执行启动恢复；修复 root Thread role；
-启动 Thread framework；建立全部未归档 durable Thread 的内存目录索引；只为钉住集合（queued
-input、pending Interaction、活动 Task 引用）恢复 ThreadActor 并 materialize pending wake，其余
-Thread 在订阅或提交输入时按需恢复；初始化 MCP
+校验 SQLite；加载 `ConfigRuntime` 与 Usage/Updater last-known cache；从冷基线建立全部未归档
+Project、Thread 与 Agent 的内存目录索引；执行持久任务恢复扫描；把恢复后的活动 Task 聚合装载到
+TaskRuntime 并建立 Task 目录；启动 Thread framework；只为钉住集合（queued input、pending
+Interaction、活动 Task 引用）恢复 ThreadActor、恢复交互并 materialize pending wake，其余 Thread
+在订阅或提交输入时按需恢复；初始化 MCP
 owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 system Skills；发布 runtime
 ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
 或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
@@ -120,6 +126,9 @@ runtime 状态机，不保留第二套 `BridgeLifecycle`。
 `rootThreadId`，不能把 child 自己的合法 `ThreadId` 误判成 root 身份。历史 closed child 也必须能
 随目录恢复注册，旧版本持久化的合法 child Thread 不得让整个 Studio 启动失败。
 
+启动在 SQLite 基线上创建 Project/Thread/Task/Agent/Recovery 目录 owner，并把活动 Task 聚合恢复到
+TaskRuntime；此后产品目录只消费内存 owner 的类型化 commit，不再为活动事件重读数据库。
+
 启动后 Flutter 读取 Studio 状态，在本地选择健康 Project/root Thread，再显式调用一次
 `activateProject(projectId)`。activate 验证 workspace、切换 LSP membership、执行初始 LSP
 probe 和 Skills discovery；不创建 Thread。相同 project/fingerprint 重复调用是 no-op。刷新、
@@ -128,8 +137,9 @@ probe 和 Skills discovery；不创建 Thread。相同 project/fingerprint 重�
 Project 可以合法地没有 root Thread。`openProject`、归档、普通查询、刷新与 resync 都不创建
 默认 Thread。产品 UI 唯一的新 root 创建入口是首次提交使用的 `startNewThread` command；它在
 同一生命周期临界区校验 Project 与输入、按请求 mode 创建 root Thread（起始页选择，缺省
-Simple）、提交首个 Turn，并在成功后发布目录增量。若 Turn 同步提交失败，command 补偿归档尚未公开的空 Thread，客户端继续停留在
-未持久化起始页。测试/Driver fixture 可以使用隔离的内部 seed 入口显式创建 Thread。
+Simple）、提交首个 Turn，并在内存成功后发布目录增量。若内存转换失败，command 移除尚未公开的
+空 Thread；SQLite 写入失败则进入持久化降级，保留已经提交的热事实并暂停后续新工作。测试/Driver
+fixture 可以使用隔离的内部 seed 入口显式创建 Thread。
 
 ## 20.5 Settings 与 desired/live
 
@@ -204,7 +214,17 @@ id，重复 operation 只有 payload 完全一致才 no-op。持久化复用 `ap
 Recovery read 只读 registry；启动扫描属于 `startStudioRuntime`，重试、重扫、preview 和 cleanup
 都是明确 command。Project/Thread 局部错误保持隔离，不升级为全应用失败。
 
+启动恢复扫描还负责幂等收束历史悬挂：根 Agent 已 Faulted 而 TaskRun 仍非终态时，旧任务一次性写为
+`Completed(Fatal)` 并收束子事实。类型化可恢复 Agent 故障可经 `RecoverFaulted` 验证后恢复同一会话
+为 Idle；恢复只解除忙碌投影，不复活旧 Turn 或旧 TaskRun。聚合损坏和未知旧故障保持封闭，并向用户
+提供诊断与复制到新会话路径。
+
 ## 20.9 并发与验收
+
+持久化 owner 另行发布 Ready、Flushing、Degraded、Recovering、Blocked 五态和单调 revision。
+Degraded、Recovering、Blocked 是全局新工作准入门禁，不是 Task 或 Agent 业务状态；停止、查询、
+当前轮次收束和手动重试继续可用。Flutter 必须在控件和 controller 两层执行同一门禁，后端 command
+入口再次校验，避免迟到界面状态绕过限制。
 
 每个 owner 使用串行 command mailbox。同 fingerprint/scope 的 pending command 合并；新的 desired
 revision 使旧结果失效；reset、shutdown 与 reconcile 在生命周期锁上串行，但状态锁内不得等待
@@ -213,8 +233,8 @@ revision 使旧结果失效；reset、shutdown 与 reconcile 在生命周期锁�
 
 副作用探针覆盖 SQLite mutation、actor registration、durable wake、process spawn、Skills scan、
 Usage network、Updater fetch、MCP connector 与 LSP probe。所有 read 连续调用必须保持计数为零；
-SQLite mutation 探针同时验证 mutation 只来自后台 write-behind writer 的批量事务，Immediate
-flush 边界与关机 drain 有隔离测试，惰性恢复与 LRU 淘汰有回归测试。真实验收使用隔离
+SQLite mutation 探针同时验证 mutation 只来自后台 write-behind writer 的批量事务，持久化降级、
+自动恢复、显式耐久化屏障与关机 drain 有隔离测试，惰性恢复与 LRU 淘汰有回归测试。真实验收使用隔离
 `PURE_STUDIO_HOME`、`cargo xtask run-gui --driver`、Driver health `ok`、
 `set_frame_sync(false)`、稳定 `ValueKey`、SQLite 对比、Windows 进程审计和绝对路径截图；默认不使用
 Computer Use。

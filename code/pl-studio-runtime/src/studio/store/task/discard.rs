@@ -1,24 +1,14 @@
-use anyhow::{Context, Result, bail};
+//! 冷恢复资源清理前的数据库授权屏障。
+//!
+//! 正常活动 Task 不得调用本模块；该入口只服务启动恢复发现的孤立工作目录。
+
+use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, TransactionTrait};
 
 use super::work_unit::{apply_work_unit_command, work_unit_record};
-
 use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
-use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, TaskWorktreeDisposition, WaitingReviewPhase, WorkUnitCommand,
-    WorkUnitStateKind,
-};
-
-struct ExecutorCloseScope {
-    work_unit: entities::work_unit::Model,
-}
-
-#[derive(Clone, Copy)]
-struct ExecutorClosePlan {
-    disposition: ExecutorCloseDisposition,
-    cancel_active: bool,
-}
+use crate::studio::task_coordinator::{TaskWorktreeDisposition, WorkUnitCommand};
 
 impl StudioStore {
     pub(crate) async fn authorize_recovery_cleanup(&self, task_run_id: &str) -> Result<()> {
@@ -52,116 +42,15 @@ impl StudioStore {
             Ok(())
         }
         .await;
-        finish_transaction(tx, result).await
-    }
-
-    pub(crate) async fn settle_executor_close(
-        &self,
-        thread_id: &str,
-        work_unit_id: &str,
-        agent_id: &str,
-    ) -> Result<ExecutorCloseDisposition> {
-        let tx = self.db.begin().await?;
-        let result = async {
-            let ExecutorCloseScope { work_unit } =
-                load_executor_close_scope(&tx, thread_id, work_unit_id, agent_id).await?;
-            let plan = plan_executor_close(&work_unit)?;
-            if plan.disposition == ExecutorCloseDisposition::PreserveForMerge {
-                return Ok(plan.disposition);
+        match result {
+            Ok(()) => {
+                tx.commit().await?;
+                Ok(())
             }
-
-            if plan.cancel_active {
-                apply_work_unit_command(
-                    &tx,
-                    work_unit,
-                    WorkUnitCommand::Cancel {
-                        operation_id: format!("executor-close:{agent_id}"),
-                        reason: "executor discarded by planner".to_string(),
-                        disposition: TaskWorktreeDisposition::CleanupRequested,
-                    },
-                )
-                .await?;
+            Err(error) => {
+                tx.rollback().await?;
+                Err(error)
             }
-
-            Ok(plan.disposition)
-        }
-        .await;
-        finish_transaction(tx, result).await
-    }
-
-    pub(crate) async fn preflight_executor_close(
-        &self,
-        thread_id: &str,
-        work_unit_id: &str,
-        agent_id: &str,
-    ) -> Result<ExecutorCloseDisposition> {
-        let tx = self.db.begin().await?;
-        let result = async {
-            let scope = load_executor_close_scope(&tx, thread_id, work_unit_id, agent_id).await?;
-            Ok(plan_executor_close(&scope.work_unit)?.disposition)
-        }
-        .await;
-        finish_transaction(tx, result).await
-    }
-}
-
-async fn load_executor_close_scope(
-    tx: &sea_orm::DatabaseTransaction,
-    thread_id: &str,
-    work_unit_id: &str,
-    agent_id: &str,
-) -> Result<ExecutorCloseScope> {
-    let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
-        .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
-        .one(tx)
-        .await?
-        .context("executor work unit not found")?;
-    let run = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
-        .one(tx)
-        .await?
-        .context("executor task run not found")?;
-    if run.root_thread_id != thread_id
-        || work_unit.task_run_id != run.id
-        || work_unit.executor_thread_id.as_deref() != Some(agent_id)
-    {
-        bail!("executor close lifecycle identity does not match durable assignment");
-    }
-    Ok(ExecutorCloseScope { work_unit })
-}
-
-fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<ExecutorClosePlan> {
-    let record = work_unit_record(work_unit.clone())?;
-    if record.kind() == WorkUnitStateKind::ReviewPassed {
-        return Ok(ExecutorClosePlan {
-            disposition: ExecutorCloseDisposition::PreserveForMerge,
-            cancel_active: false,
-        });
-    }
-    if record.kind() == WorkUnitStateKind::ChangesRequired
-        || matches!(
-            record.waiting_review_phase(),
-            Some(WaitingReviewPhase::Ready(_) | WaitingReviewPhase::Reviewing(_))
-        )
-    {
-        bail!("executor cannot close while its completion review is active");
-    }
-
-    let active_pair = !record.kind().is_terminal();
-    Ok(ExecutorClosePlan {
-        disposition: ExecutorCloseDisposition::Discard,
-        cancel_active: active_pair,
-    })
-}
-
-async fn finish_transaction<T>(tx: sea_orm::DatabaseTransaction, result: Result<T>) -> Result<T> {
-    match result {
-        Ok(value) => {
-            tx.commit().await?;
-            Ok(value)
-        }
-        Err(error) => {
-            tx.rollback().await?;
-            Err(error)
         }
     }
 }

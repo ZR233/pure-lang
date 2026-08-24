@@ -2,9 +2,9 @@ use pl_protocol::{ObservedResource, Thread};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ProjectRecord, ProviderUsageStateSnapshot, SkillsStateSnapshot, StudioAgentDirectoryEntry,
-    StudioLspHealth, StudioMcpHealth, StudioRecoveryIssue, StudioTaskRuntime,
-    StudioUpdateStateSnapshot,
+    PersistenceStateSnapshot, ProjectRecord, ProviderUsageStateSnapshot, SkillsStateSnapshot,
+    StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryIssue,
+    StudioTaskRuntime, StudioUpdateStateSnapshot,
 };
 
 /// Studio 产品级事件信封。
@@ -35,6 +35,7 @@ pub enum StudioProductEventKind {
     SkillsStateChanged(StudioSkillsStateSnapshot),
     ProviderUsageStateChanged(ProviderUsageStateSnapshot),
     UpdaterStateChanged(StudioUpdateStateSnapshot),
+    PersistenceStateChanged(PersistenceStateSnapshot),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,4 +198,5 @@ pub struct StudioStateSnapshot {
     pub skills_by_project: Vec<StudioSkillsStateSnapshot>,
     pub provider_usage: ProviderUsageStateSnapshot,
     pub updater: StudioUpdateStateSnapshot,
+    pub persistence: PersistenceStateSnapshot,
 }

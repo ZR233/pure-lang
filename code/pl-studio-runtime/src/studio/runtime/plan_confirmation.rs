@@ -32,6 +32,7 @@ impl StudioRuntime {
         let InteractionContent::PlanConfirmation(plan) = &current.content else {
             unreachable!("plan confirmation resolution was validated before resolving");
         };
+        let original_plan = plan.content().trim().to_string();
         let InteractionResolution::PlanConfirmation(payload) = resolution else {
             unreachable!("resolution kind was validated before resolving");
         };
@@ -44,15 +45,55 @@ impl StudioRuntime {
                 .context("plan adjustment is empty")?;
         }
 
-        let (run, resolved) = self
-            .store
-            .resolve_task_plan_confirmation(&interaction_id, payload.clone())
+        let aggregate = self
+            .task_runtime
+            .aggregate(&thread_id)
+            .await
+            .context("plan confirmation Task aggregate is not resident")?;
+        let task_command = match payload.decision {
+            PlanConfirmationResolution::Confirm => {
+                crate::studio::task_coordinator::TaskCommand::ConfirmPlan {
+                    plan_revision: aggregate
+                        .facts
+                        .run
+                        .plan
+                        .as_ref()
+                        .context("pending confirmation TaskRun has no plan")?
+                        .revision,
+                }
+            }
+            PlanConfirmationResolution::RevisePlan => {
+                crate::studio::task_coordinator::TaskCommand::RequestPlanRevision
+            }
+        };
+        let mut resolved = current.clone();
+        let now = crate::studio::unix_seconds();
+        let interaction_decision = resolved.decide(
+            crate::InteractionCommand::ResolvePlanConfirmation(crate::ResolvePlanConfirmation {
+                interaction_id: resolved.interaction_id.clone(),
+                expected_revision: resolved.revision,
+                operation_id: format!("resolve:{}", resolved.interaction_id),
+                resolved_at: now,
+                decision: payload.decision,
+                content: payload.content.clone(),
+                reason: payload.reason.clone(),
+            }),
+        )?;
+        resolved.apply(interaction_decision, now);
+        let run = self
+            .task_runtime
+            .apply_run_command(
+                &thread_id,
+                aggregate.facts.run.revision,
+                aggregate.facts.run.generation(),
+                task_command,
+            )
             .await?;
         let message = match payload.decision {
             PlanConfirmationResolution::Confirm => EDIT_DOCUMENTS_MESSAGE.to_string(),
             PlanConfirmationResolution::RevisePlan => format!(
                 "{REVISE_PLAN_PREFIX}\n\n## 原计划\n\n{}\n\n## 用户调整要求\n\n{}",
-                plan.content().trim(),
+                original_plan,
                 payload.content.as_deref().unwrap_or_default().trim()
             ),
         };

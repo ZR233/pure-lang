@@ -136,7 +136,7 @@ where
         }
         next.refresh_mailbox_snapshot();
         self.commit_transition(
-            super::persist::TransitionCommit::new(next).immediate(),
+            super::persist::TransitionCommit::new(next).settlement(),
             |snapshot| AgentRuntimeEventKind::StateChanged {
                 snapshot: Box::new(snapshot),
             },

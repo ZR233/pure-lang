@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entity as entities;
@@ -20,22 +20,5 @@ impl StudioStore {
             .into_iter()
             .map(review_round_record)
             .collect()
-    }
-
-    pub(crate) async fn find_review_round_for_reviewer(
-        &self,
-        reviewer_agent_id: &str,
-    ) -> Result<Option<ReviewRoundRecord>> {
-        let rounds = entities::review_round::Entity::find()
-            .filter(
-                entities::review_round::Column::ReviewerThreadId.eq(reviewer_agent_id.to_string()),
-            )
-            .all(&self.db)
-            .await?;
-        match rounds.as_slice() {
-            [] => Ok(None),
-            [round] => review_round_record(round.clone()).map(Some),
-            _ => bail!("reviewer Thread owns multiple review rounds"),
-        }
     }
 }

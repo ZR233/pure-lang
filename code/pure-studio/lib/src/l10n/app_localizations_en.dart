@@ -79,6 +79,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get runtimeFatalRetry => 'Retry';
 
   @override
+  String persistenceDegraded(int count) {
+    return 'Saving is temporarily unavailable. $count in-memory update(s) are waiting; new work is paused.';
+  }
+
+  @override
+  String persistenceRecovering(int count) {
+    return 'Saving has recovered and is flushing $count pending update(s). New work remains paused.';
+  }
+
+  @override
+  String persistenceBlocked(int count) {
+    return 'Saving is blocked with $count pending update(s) and needs attention. New work is paused.';
+  }
+
+  @override
+  String get persistenceRetry => 'Retry saving';
+
+  @override
   String recoveryGlobalWarning(int count) {
     return '$count recovery issue(s) need attention';
   }

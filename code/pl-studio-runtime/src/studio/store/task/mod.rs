@@ -1,5 +1,5 @@
+#[cfg(test)]
 mod allocation;
-mod completion;
 mod discard;
 pub(super) mod issue;
 mod merge;
@@ -25,6 +25,7 @@ use crate::studio::task_coordinator::{
 
 impl StudioStore {
     /// 在首个计划者执行前创建任务记录。该操作不访问项目版本库，也不获取项目租约。
+    #[allow(dead_code)]
     pub(crate) async fn create_task_run(&self, input: CreateTaskRun) -> Result<TaskRun> {
         validate_create_task_run(&input)?;
         let root_thread = self
@@ -133,6 +134,7 @@ impl StudioStore {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn submit_task_plan(
         &self,
         root_thread_id: &str,
@@ -218,6 +220,7 @@ impl StudioStore {
         Ok((task_run_record(updated)?, interaction))
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn apply_task_transition(
         &self,
         root_thread_id: &str,
@@ -237,6 +240,7 @@ impl StudioStore {
         task_run_record(updated)
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn resolve_task_plan_confirmation(
         &self,
         interaction_id: &str,
@@ -302,6 +306,7 @@ impl StudioStore {
         Ok((task_run_record(updated_run)?, interaction))
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn finish_task_document_editing(
         &self,
         root_thread_id: &str,
@@ -321,6 +326,7 @@ impl StudioStore {
     }
 }
 
+#[allow(dead_code)]
 fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     for (label, value) in [
         ("projectId", input.project_id.as_str()),
@@ -335,6 +341,7 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn ensure_task_version(run: &TaskRun, revision: u64, generation: u64) -> Result<()> {
     if run.revision != revision {
         bail!(
@@ -351,6 +358,7 @@ fn ensure_task_version(run: &TaskRun, revision: u64, generation: u64) -> Result<
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn active_task_model<C>(
     connection: &C,
     root_thread_id: &str,
@@ -450,6 +458,7 @@ where
         .context("failed to reload TaskRun after revision CAS")
 }
 
+#[allow(dead_code)]
 async fn compare_and_swap_task_run_with_plan<C>(
     connection: &C,
     model: &entities::task_run::Model,

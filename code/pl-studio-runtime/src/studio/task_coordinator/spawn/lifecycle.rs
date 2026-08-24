@@ -109,6 +109,9 @@ impl TaskCoordinator {
         &self,
         request: &StudioTaskSpawnRequest,
     ) -> PureResult<StudioTaskSpawnPreparation> {
+        self.task_runtime
+            .ensure_accepts_new_work()
+            .map_err(|error| spawn_error(error.to_string()))?;
         match request.role.as_str() {
             "explorer" => self.prepare_explorer_spawn(request).await,
             "executor" => self.prepare_executor_spawn(request).await,
@@ -124,16 +127,13 @@ impl TaskCoordinator {
         if !request.scope_hints.is_empty() {
             return Err(spawn_error("explorer must not declare scopeHints"));
         }
-        let Some(_run) = self
-            .store
-            .list_active_task_runs()
+        if !self
+            .task_runtime
+            .has_active_task(&request.root_thread_id)
             .await
-            .map_err(store_spawn_error)?
-            .into_iter()
-            .find(|run| run.root_thread_id == request.root_thread_id)
-        else {
+        {
             return Ok(StudioTaskSpawnPreparation::without_worktree());
-        };
+        }
         Ok(StudioTaskSpawnPreparation::without_worktree())
     }
 
@@ -194,7 +194,7 @@ impl TaskCoordinator {
     ) -> PureResult<ExecutorAllocation> {
         let _mutation_guard = self.lock_branch_mutation().await;
         let _allocation_guard = self.allocation_lock.lock().await;
-        self.store
+        self.task_runtime
             .allocate_executor(input)
             .await
             .map_err(store_spawn_error)
@@ -208,7 +208,7 @@ impl TaskCoordinator {
             return Err(spawn_error("reviewer must not declare scopeHints"));
         }
         let round = self
-            .store
+            .task_runtime
             .authorize_reviewer_spawn(
                 &request.root_thread_id,
                 &request.requested_by_call_id,
@@ -234,16 +234,25 @@ impl TaskCoordinator {
                 let token = preparation.lifecycle_token().ok_or_else(|| {
                     spawn_error("executor spawn preparation has no allocation token")
                 })?;
-                self.store
-                    .activate_executor(token, &request.agent_id)
+                self.task_runtime
+                    .update_executor_allocation(
+                        token,
+                        &request.agent_id,
+                        crate::studio::task_coordinator::WorkUnitCommand::Activate,
+                    )
                     .await
                     .map_err(store_spawn_error)?;
             }
             "explorer" => {}
             "reviewer" => {
                 if let Some(token) = preparation.lifecycle_token() {
-                    self.store
-                        .activate_reviewer(token, &request.agent_id)
+                    self.task_runtime
+                        .apply_review_command(
+                            token,
+                            crate::studio::task_coordinator::ReviewRoundCommand::Start {
+                                reviewer_thread_id: request.agent_id.clone(),
+                            },
+                        )
                         .await
                         .map_err(store_spawn_error)?;
                 }
@@ -270,7 +279,7 @@ impl TaskCoordinator {
         preparation
             .finalize_executor_worktree(actual_base_commit)
             .map_err(|error| spawn_error(error.to_string()))?;
-        self.store
+        self.task_runtime
             .record_executor_worktree_base(&token, &request.agent_id, actual_base_commit)
             .await
             .map_err(store_spawn_error)?;
@@ -288,14 +297,20 @@ impl TaskCoordinator {
                 let token = preparation.lifecycle_token().ok_or_else(|| {
                     spawn_error("executor spawn preparation has no allocation token")
                 })?;
-                self.store
-                    .record_executor_spawn_failure(token, &request.agent_id, failure)
+                self.task_runtime
+                    .update_executor_allocation(
+                        token,
+                        &request.agent_id,
+                        crate::studio::task_coordinator::WorkUnitCommand::FailSpawn {
+                            failure: Box::new(failure),
+                        },
+                    )
                     .await
                     .map_err(store_spawn_error)?;
             }
             "explorer" => {}
             "reviewer" => {
-                self.store
+                self.task_runtime
                     .fail_reviewer_spawn(
                         &request.root_thread_id,
                         Some(&request.agent_id),
@@ -325,8 +340,8 @@ impl TaskCoordinator {
         let token = preparation
             .lifecycle_token()
             .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
-        self.store
-            .settle_executor_close(&request.root_thread_id, token, &request.agent_id)
+        self.task_runtime
+            .executor_close_disposition(&request.root_thread_id, token, &request.agent_id, true)
             .await
             .map_err(store_spawn_error)
     }
@@ -342,8 +357,8 @@ impl TaskCoordinator {
         let token = preparation
             .lifecycle_token()
             .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
-        self.store
-            .preflight_executor_close(&request.root_thread_id, token, &request.agent_id)
+        self.task_runtime
+            .executor_close_disposition(&request.root_thread_id, token, &request.agent_id, false)
             .await
             .map_err(store_spawn_error)
     }

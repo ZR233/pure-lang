@@ -236,8 +236,8 @@ mod tests {
     use std::collections::{BTreeMap, VecDeque};
 
     use pl_core::{
-        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, CommitDurability,
-        DurableCommitFacts, RunningAgentState, ThreadActorState, ThreadContextState, ThreadId,
+        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, DurableCommitFacts,
+        PersistenceClass, RunningAgentState, ThreadActorState, ThreadContextState, ThreadId,
         ThreadMutation, TurnId,
     };
     use pl_protocol::{
@@ -501,7 +501,7 @@ mod tests {
         };
         ThreadCommit {
             agent_id: thread_id.clone(),
-            durability: CommitDurability::Immediate,
+            persistence: PersistenceClass::Settlement,
             expected_revision: None,
             next_state: state,
             facts: DurableCommitFacts {

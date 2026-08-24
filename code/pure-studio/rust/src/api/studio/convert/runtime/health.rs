@@ -158,7 +158,7 @@ fn bridge_lsp_activity(activity: &LspAvailableActivity) -> BridgeLspActivity {
     }
 }
 
-fn bridge_state_error(error: &pl_protocol::StateError) -> BridgeStateError {
+pub(crate) fn bridge_state_error(error: &pl_protocol::StateError) -> BridgeStateError {
     BridgeStateError {
         code: error.code.clone(),
         message: error.message.clone(),

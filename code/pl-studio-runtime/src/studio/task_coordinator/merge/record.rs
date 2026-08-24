@@ -86,7 +86,10 @@ impl TaskCoordinator {
             .await?
         {
             validate_recorded_input(&record, &input, summary)?;
-            let scope = self.store.read_accepted_merge_scope(&record.id).await?;
+            let scope = self
+                .task_runtime
+                .read_accepted_merge_scope(&record.id)
+                .await?;
             self.validate_accepted_cleanup_replay(&scope).await?;
             return self.cleanup_recorded_merge(scope, runtime).await;
         }
@@ -104,7 +107,7 @@ impl TaskCoordinator {
         );
 
         let record = self
-            .store
+            .task_runtime
             .record_task_merge(RecordTaskMerge {
                 thread_id: thread_id.to_string(),
                 executor_agent_id: executor_agent_id.to_string(),
@@ -119,7 +122,10 @@ impl TaskCoordinator {
             .await?;
         drop(guard);
 
-        let scope = self.store.read_accepted_merge_scope(&record.id).await?;
+        let scope = self
+            .task_runtime
+            .read_accepted_merge_scope(&record.id)
+            .await?;
         self.cleanup_recorded_merge(scope, runtime).await
     }
 
@@ -129,17 +135,18 @@ impl TaskCoordinator {
         executor_agent_id: &str,
         completion_revision: u32,
     ) -> Result<PlannerMergeScope> {
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
+        let aggregate = self
+            .task_runtime
+            .aggregate(thread_id)
+            .await
+            .context("active Task aggregate is not resident")?;
+        let run = aggregate.facts.run;
         if run.kind() != TaskRunStateKind::Working {
             bail!("task_record_merge requires phase merging");
         }
-        let work_units = self
-            .store
-            .list_work_units(&run.id)
-            .await?
+        let work_units = aggregate
+            .facts
+            .work_units
             .into_iter()
             .filter(|unit| unit.executor_thread_id.as_deref() == Some(executor_agent_id))
             .collect::<Vec<_>>();
@@ -148,7 +155,7 @@ impl TaskCoordinator {
             [] => bail!("approved executor work unit not found"),
             _ => bail!("executor owns multiple work units"),
         };
-        let completions = self.store.list_work_completions(&run.id).await?;
+        let completions = aggregate.facts.completions;
         let completion = completions
             .into_iter()
             .find(|completion| {
@@ -185,19 +192,15 @@ impl TaskCoordinator {
         executor_agent_id: &str,
         completion_revision: u32,
     ) -> Result<Option<MergeRecord>> {
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
-        Ok(self
-            .store
-            .list_merge_records(&run.id)
-            .await?
-            .into_iter()
-            .find(|record| {
-                record.executor_agent_id == executor_agent_id
-                    && record.completion_revision == completion_revision
-            }))
+        let aggregate = self
+            .task_runtime
+            .aggregate(thread_id)
+            .await
+            .context("active Task aggregate is not resident")?;
+        Ok(aggregate.facts.merges.into_iter().find(|record| {
+            record.executor_agent_id == executor_agent_id
+                && record.completion_revision == completion_revision
+        }))
     }
 
     async fn cleanup_recorded_merge(
@@ -209,7 +212,7 @@ impl TaskCoordinator {
             return Ok(scope.merge);
         }
         let attempt = self
-            .store
+            .task_runtime
             .record_merge_cleanup_attempting(&scope.merge.id)
             .await?;
         let operation_id = attempt
@@ -218,7 +221,7 @@ impl TaskCoordinator {
             .context("merge cleanup attempt has no operation id")?
             .to_string();
         let cleanup = cleanup_accepted_delivery(&scope, runtime).await;
-        self.store
+        self.task_runtime
             .record_merge_cleanup(&scope.merge.id, &operation_id, cleanup)
             .await
     }

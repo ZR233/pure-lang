@@ -17,9 +17,9 @@ pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{
     AgentCommitObserver, AgentCommittedEvent, AgentLifecycleAdapter, AgentRuntimeHost,
-    AgentTurnFactory, CloseLifecycleRequest, CommitDurability, DurableCommitFacts,
+    AgentTurnFactory, CloseLifecycleRequest, DurableCommitFacts, PersistenceClass,
     RestoredAgentRuntime, RestoredThreadSnapshot, SpawnLifecycleRequest, SpawnRollbackPhase,
-    SpawnRollbackReason, ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadMutation,
+    SpawnRollbackReason, ThreadCommit, ThreadContextMutation, ThreadMutation,
     ThreadProjectionCommit, ThreadRepository,
 };
 pub use id::{ThreadId, TurnId};

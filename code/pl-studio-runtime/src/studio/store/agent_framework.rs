@@ -51,6 +51,7 @@ impl StudioStore {
                     retryable: false,
                 },
                 turn_id: None,
+                classification: pl_core::AgentFaultClassification::RecoverableRuntime,
             })?
             .next_state;
         let mut active = row.into_active_model();

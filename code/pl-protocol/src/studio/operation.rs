@@ -49,6 +49,7 @@ pub enum StudioOperation {
     PreviewRecoveryCleanup,
     CleanupRecoveryIssue,
     RetryRecoveryIssue,
+    RetryPersistence,
     PreviewProjectCleanup,
     CleanupProject,
     SubscribeProduct,
@@ -56,7 +57,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::ReadState,
         Self::OpenProject,
         Self::ActivateProject,
@@ -99,6 +100,7 @@ impl StudioOperation {
         Self::PreviewRecoveryCleanup,
         Self::CleanupRecoveryIssue,
         Self::RetryRecoveryIssue,
+        Self::RetryPersistence,
         Self::PreviewProjectCleanup,
         Self::CleanupProject,
         Self::SubscribeProduct,
@@ -149,6 +151,7 @@ impl StudioOperation {
             Self::PreviewRecoveryCleanup => "recovery.issueCleanupPreview",
             Self::CleanupRecoveryIssue => "recovery.issueCleanup",
             Self::RetryRecoveryIssue => "recovery.issueRetry",
+            Self::RetryPersistence => "persistence.retry",
             Self::PreviewProjectCleanup => "recovery.projectCleanupPreview",
             Self::CleanupProject => "recovery.projectCleanup",
             Self::SubscribeProduct => "studio.subscribeProduct",

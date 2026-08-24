@@ -132,14 +132,17 @@ impl TaskCoordinator {
                             && agent.parent_id.as_deref() == Some(root_agent_id.as_str())
                     })
                     .context("review_exit requires the harness-owned depth-1 reviewer")?;
-                let run = coordinator
-                    .store
-                    .read_active_task_run_for_root_thread(&thread_id)
-                    .await?;
-                let round = coordinator
-                    .store
-                    .find_review_round_for_reviewer(&reviewer.id)
-                    .await?
+                let aggregate = coordinator
+                    .task_runtime
+                    .aggregate(&thread_id)
+                    .await
+                    .context("active Task aggregate is not resident")?;
+                let run = aggregate.facts.run;
+                let round = aggregate
+                    .facts
+                    .reviews
+                    .into_iter()
+                    .find(|round| round.reviewer_thread_id() == Some(reviewer.id.as_str()))
                     .context("reviewer has no canonical ReviewRound")?;
                 ensure!(
                     round.task_run_id == run.id && round.verdict() == ReviewVerdict::Pending,
@@ -164,7 +167,7 @@ impl TaskCoordinator {
                     .is_some_and(|diagnostics| !diagnostics.is_empty())
                 {
                     let round = coordinator
-                        .store
+                        .task_runtime
                         .record_review_rejection(
                             &thread_id,
                             &reviewer.id,
@@ -179,7 +182,7 @@ impl TaskCoordinator {
                 }
 
                 let round = coordinator
-                    .store
+                    .task_runtime
                     .complete_task_review(
                         &thread_id,
                         &reviewer.id,
@@ -198,7 +201,7 @@ impl TaskCoordinator {
                     };
                     if let Err(error) = crate::studio::agent_host::materialize_task_planner_wake(
                         &runtime,
-                        &coordinator.store,
+                        &coordinator.task_runtime(),
                         &wake,
                     )
                     .await

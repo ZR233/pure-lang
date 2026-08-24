@@ -1,6 +1,6 @@
 use pl_trace::TraceEvent;
 
-use super::super::host::{CommitDurability, ThreadProjectionCommit, transcript_mutation};
+use super::super::host::{PersistenceClass, ThreadProjectionCommit, transcript_mutation};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::*;
 use super::commit::{CommitPublication, PendingCommit};
@@ -11,7 +11,7 @@ use crate::thread_event::{
 };
 
 pub(super) struct TransitionCommit {
-    durability_override: Option<CommitDurability>,
+    persistence_override: Option<PersistenceClass>,
     next_state: ThreadActorState,
     thread_facts: Vec<ThreadNotificationFact>,
     submission: Option<super::super::ProgressSubmissionCommit>,
@@ -20,16 +20,16 @@ pub(super) struct TransitionCommit {
 impl TransitionCommit {
     pub(super) fn new(next_state: ThreadActorState) -> Self {
         Self {
-            durability_override: None,
+            persistence_override: None,
             next_state,
             thread_facts: Vec::new(),
             submission: None,
         }
     }
 
-    /// 显式覆盖按事件类型推导的落库边界；只用于 durable 边界调用点。
-    pub(super) fn immediate(mut self) -> Self {
-        self.durability_override = Some(CommitDurability::Immediate);
+    /// 显式标记已启动生命周期的终态收束。
+    pub(super) fn settlement(mut self) -> Self {
+        self.persistence_override = Some(PersistenceClass::Settlement);
         self
     }
 
@@ -81,7 +81,7 @@ where
         }
         let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
-        let durability = observation_durability(&observed.observation);
+        let persistence = observation_persistence(&observed.observation);
         let expected_revision = self.state.snapshot.revision;
         let current = self
             .runtime
@@ -119,7 +119,7 @@ where
                     thread_id: thread_id.clone(),
                 },
             )
-            .durability(durability)
+            .persistence(persistence)
             .publish(
                 CommitPublication::new(Some(thread_id), Some(turn_id))
                     .store_directory_snapshot()
@@ -145,7 +145,7 @@ where
             .iter()
             .any(|trace| trace.session_id != thread_id.as_str())
         {
-            return Err(AgentRuntimeError::Repository(format!(
+            return Err(AgentRuntimeError::ThreadEvents(format!(
                 "trace session mismatch for agent {}",
                 self.state.snapshot.identity.id
             )));
@@ -222,7 +222,7 @@ where
         F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
     {
         let TransitionCommit {
-            durability_override,
+            persistence_override,
             mut next_state,
             thread_facts,
             submission,
@@ -333,11 +333,11 @@ where
             .first()
             .and_then(notification_turn_id)
             .and_then(|value| TurnId::new(value.to_string()).ok());
-        let durability =
-            durability_override.unwrap_or_else(|| CommitDurability::for_event(&event.kind));
+        let persistence =
+            persistence_override.unwrap_or_else(|| PersistenceClass::for_event(&event.kind));
         self.commit_and_publish(
             PendingCommit::new(next_state, facts, ThreadMutation::SnapshotAndQueue)
-                .durability(durability)
+                .persistence(persistence)
                 .publish(
                     CommitPublication::new(published_thread_id, published_turn_id)
                         .with_runtime_event(event)
@@ -348,13 +348,13 @@ where
     }
 }
 
-/// Interaction 的提交与 resolution 是 durable 边界；其余 observation 属于流式增量。
-fn observation_durability(observation: &TurnObservation) -> CommitDurability {
+/// Interaction 需要保留终态容量；其余 observation 可以作为流式增量调度。
+fn observation_persistence(observation: &TurnObservation) -> PersistenceClass {
     match observation {
-        TurnObservation::InteractionChanged { .. } => CommitDurability::Immediate,
+        TurnObservation::InteractionChanged { .. } => PersistenceClass::Settlement,
         TurnObservation::RuntimeDelta(_)
         | TurnObservation::TodoList(_)
         | TurnObservation::ContextCompacted { .. }
-        | TurnObservation::Diagnostic => CommitDurability::Batched,
+        | TurnObservation::Diagnostic => PersistenceClass::Coalescible,
     }
 }

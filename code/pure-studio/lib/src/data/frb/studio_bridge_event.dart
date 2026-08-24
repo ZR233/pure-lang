@@ -88,6 +88,11 @@ final class UpdaterStateChangedPayload extends StudioBridgeEventPayload {
   final UpdaterStateSnapshot state;
 }
 
+final class PersistenceStateChangedPayload extends StudioBridgeEventPayload {
+  const PersistenceStateChangedPayload(this.state);
+  final PersistenceStateSnapshot state;
+}
+
 final class StalePayload extends StudioBridgeEventPayload {
   const StalePayload({required this.laggedEvents});
   final int laggedEvents;

@@ -60,19 +60,19 @@ impl TaskCoordinator {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 async move {
-                    let run = coordinator
-                        .store
-                        .read_active_task_run_for_root_thread(&thread_id)
-                        .await?;
+                    let aggregate = coordinator
+                        .task_runtime
+                        .aggregate(&thread_id)
+                        .await
+                        .context("active Task aggregate is not resident")?;
                     let offset = input.offset.unwrap_or(DEFAULT_FINDING_OFFSET);
                     let limit = input
                         .limit
                         .unwrap_or(DEFAULT_FINDING_LIMIT)
                         .clamp(1, MAX_FINDING_LIMIT);
-                    let round = coordinator
-                        .store
-                        .list_review_rounds(&run.id)
-                        .await?
+                    let round = aggregate
+                        .facts
+                        .reviews
                         .into_iter()
                         .find(|candidate| candidate.id == input.round_id)
                         .with_context(|| {

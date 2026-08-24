@@ -143,6 +143,7 @@ pub struct StudioRuntime {
     provider_usage: ProviderUsageRuntime,
     updater: StudioUpdateRuntime,
     activation: ProjectActivationRuntime,
+    task_runtime: crate::studio::TaskRuntime,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]
@@ -187,12 +188,32 @@ struct ProjectActivation {
 }
 
 impl StudioRuntime {
+    pub(crate) fn ensure_persistence_accepts_new_work(&self) -> Result<()> {
+        let snapshot = self.agent_facility.product_events.persistence_state();
+        if snapshot.state.accepts_new_work() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "Studio persistence is unavailable; new work is paused until pending facts are durable"
+        )
+    }
+
+    /// 立即重试待落库事实；查询和停止路径不需要调用本命令。
+    pub async fn retry_persistence(&self) -> Result<crate::PersistenceStateSnapshot> {
+        let persistence = self.agent_facility.persistence.lock().await.clone();
+        let Some(persistence) = persistence else {
+            return Ok(self.agent_facility.product_events.persistence_state());
+        };
+        persistence.writer().retry_now();
+        Ok(persistence.writer().state_snapshot())
+    }
+
     /// Returns whether a turn or durable task prevents a safe application update.
     pub async fn is_busy_for_update(&self) -> Result<bool> {
         if !self.derive_active_turns().await?.is_empty() {
             return Ok(true);
         }
-        Ok(!self.store.list_active_task_runs().await?.is_empty())
+        Ok(self.task_runtime.has_any_active_task().await)
     }
 
     /// 从 agent framework 派生当前所有活动 turn。
@@ -229,7 +250,7 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<Option<crate::StudioTaskRuntime>> {
-        super::task_projection::load_task_runtime(&self.store, thread_id).await
+        Ok(self.task_runtime.snapshot(thread_id).await)
     }
 
     pub async fn preview_recovery_issue_cleanup(
@@ -257,6 +278,7 @@ impl StudioRuntime {
         project_id: &str,
         expected_revision: &str,
     ) -> Result<StudioRuntimeSnapshot> {
+        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
             .task_coordinator
@@ -271,6 +293,7 @@ impl StudioRuntime {
         issue_id: &str,
         expected_revision: &str,
     ) -> Result<StudioRuntimeSnapshot> {
+        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
             .recovery
@@ -366,11 +389,11 @@ impl StudioRuntime {
             .await;
         self.agent_facility
             .product_events
-            .emit_project_directory()
+            .remove_project_entry(project_id)
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_delta_for(&thread_ids)
+            .apply_thread_delta(Vec::new(), thread_ids)
             .await?;
         let issues = self.recovery.remove_for_project(project_id);
         self.agent_facility

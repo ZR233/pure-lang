@@ -3,6 +3,7 @@ import 'agent_workspace_view.dart';
 import 'collection_extensions.dart';
 import 'composer_models.dart';
 import 'interaction_models.dart';
+import 'persistence_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
 import 'runtime_models.dart';
@@ -44,6 +45,7 @@ class StudioState {
     required this.skillsByProject,
     required this.providerUsageState,
     required this.updaterState,
+    this.persistenceState = const PersistenceStateSnapshot.ready(),
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
     this.newThreadComposerByProject = const {},
@@ -71,6 +73,7 @@ class StudioState {
   final Map<String, SkillsStateSnapshot> skillsByProject;
   final ProviderUsageStateSnapshot providerUsageState;
   final UpdaterStateSnapshot updaterState;
+  final PersistenceStateSnapshot persistenceState;
 
   List<StudioProject> get projects => projectDirectory.values;
   List<StudioThread> get threads => threadDirectory.threads;
@@ -303,6 +306,7 @@ class StudioState {
     Map<String, SkillsStateSnapshot>? skillsByProject,
     ProviderUsageStateSnapshot? providerUsageState,
     UpdaterStateSnapshot? updaterState,
+    PersistenceStateSnapshot? persistenceState,
   }) {
     return StudioState(
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
@@ -329,6 +333,7 @@ class StudioState {
       skillsByProject: skillsByProject ?? this.skillsByProject,
       providerUsageState: providerUsageState ?? this.providerUsageState,
       updaterState: updaterState ?? this.updaterState,
+      persistenceState: persistenceState ?? this.persistenceState,
     );
   }
 }

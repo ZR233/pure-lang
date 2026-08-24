@@ -6,7 +6,6 @@ use serde::Serialize;
 
 pub(crate) use state::{
     TaskIssueCommand, TaskIssueDisposition, TaskIssueState, TaskIssueStateKind,
-    TaskIssueTransitionDecision, TaskIssueTransitionError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -30,22 +29,6 @@ impl TaskIssueRecord {
     pub(crate) fn failure(&self) -> &pl_protocol::TurnFailure {
         self.state.failure()
     }
-
-    pub(crate) fn decide(
-        &self,
-        expected_revision: u64,
-        command: TaskIssueCommand,
-    ) -> Result<TaskIssueTransitionDecision, TaskIssueTransitionError> {
-        if expected_revision != self.revision {
-            return Err(TaskIssueTransitionError::StaleRevision {
-                task_issue_id: self.id.clone(),
-                expected: expected_revision,
-                actual: self.revision,
-                command,
-            });
-        }
-        self.state.decide(&self.id, command)
-    }
 }
 
 pub(crate) struct RecordTaskAgentFailure {
@@ -55,6 +38,8 @@ pub(crate) struct RecordTaskAgentFailure {
     pub(crate) source_agent_id: String,
     pub(crate) source_role: String,
     pub(crate) failure: pl_protocol::TurnFailure,
+    /// Task owner 已根据来源角色和规划器健康状态决定的处置。
+    pub(crate) disposition: TaskIssueDisposition,
 }
 
 pub(crate) struct TaskIssueSettlement {

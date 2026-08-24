@@ -19,6 +19,7 @@ abstract class StudioApi {
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId);
   Future<void> cleanupRecoveryIssue(String issueId, String expectedRevision);
   Future<void> retryRecoveryIssue(String issueId);
+  Future<PersistenceStateSnapshot> retryPersistence();
   Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId);
   Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request);
   Future<SettingsStateSnapshot> setModelRole({
@@ -321,6 +322,12 @@ class FrbStudioApi implements StudioApi {
   Future<void> retryRecoveryIssue(String issueId) async {
     await _ensureReady();
     await _bridgeCall(() => frb.retryRecoveryIssue(issueId: issueId));
+  }
+
+  @override
+  Future<PersistenceStateSnapshot> retryPersistence() async {
+    await _ensureReady();
+    return _persistenceStateFromFrb(await _bridgeCall(frb.retryPersistence));
   }
 
   @override

@@ -138,6 +138,10 @@ where
                             let result = self.recover_conversation(request).boxed().await;
                             let _ = reply.send(result);
                         }
+                        AgentLoopCommand::RecoverFaulted { reply } => {
+                            let result = self.recover_faulted().boxed().await;
+                            let _ = reply.send(result);
+                        }
                         AgentLoopCommand::CancelTurn { turn_id, reply } => {
                             let result = self.cancel_turn(turn_id).boxed().await;
                             let _ = reply.send(result);
@@ -153,7 +157,11 @@ where
                         AgentLoopCommand::Checkpoint { checkpoint, reply } => {
                             let result = self.checkpoint(*checkpoint).boxed().await;
                             if let Err(error) = &result {
-                                self.fault(error.to_string()).boxed().await;
+                                tracing::error!(
+                                    agent_id = %self.state.snapshot.identity.id,
+                                    error = %error,
+                                    "checkpoint was rejected without faulting the agent"
+                                );
                             }
                             let _ = reply.send(result);
                         }
@@ -164,7 +172,11 @@ where
                         } => {
                             let result = self.record_thread_facts(thread_id, facts).boxed().await;
                             if let Err(error) = &result {
-                                self.fault(error.to_string()).boxed().await;
+                                tracing::error!(
+                                    agent_id = %self.state.snapshot.identity.id,
+                                    error = %error,
+                                    "thread facts were rejected without faulting the agent"
+                                );
                             }
                             let _ = reply.send(result);
                         }
@@ -217,7 +229,12 @@ where
                         continue;
                     };
                     if let Err(error) = self.persist_trace_batch(vec![trace]).boxed().await {
-                        self.fault(error.to_string()).boxed().await;
+                        self.mark_projection_failure(&error);
+                        tracing::error!(
+                            agent_id = %self.state.snapshot.identity.id,
+                            error = %error,
+                            "trace projection was rejected without faulting the agent"
+                        );
                     }
                 }
                 observation = self.channels.observation_receiver.recv() => {
@@ -225,12 +242,32 @@ where
                         continue;
                     };
                     if let Err(error) = self.persist_observation(observation).boxed().await {
-                        self.fault(error.to_string()).boxed().await;
+                        self.mark_projection_failure(&error);
+                        tracing::error!(
+                            agent_id = %self.state.snapshot.identity.id,
+                            error = %error,
+                            "observation projection was rejected without faulting the agent"
+                        );
                     }
                 }
             }
         }
         self.stop_active_turn();
+    }
+
+    /// 合法模型输入产生的 Thread/trace 投影错误只终结当前 Turn，不把 Agent
+    /// 永久置为 Faulted。持久化或外部观察者错误不属于此分类。
+    fn mark_projection_failure(&mut self, error: &AgentRuntimeError) {
+        let AgentRuntimeError::ThreadEvents(detail) = error else {
+            return;
+        };
+        let Some(active) = self.active.as_mut() else {
+            return;
+        };
+        if active.projection_failure.is_none() {
+            active.projection_failure = Some(format!("turn protocol projection failed: {detail}"));
+            active.cancellation.cancel();
+        }
     }
 
     async fn cancel_turn(&mut self, turn_id: TurnId) -> AgentRuntimeResult<()> {
@@ -318,11 +355,12 @@ where
         let mut next = self.state.clone();
         if let Err(error) = next.snapshot.transition(AgentCommand::Fault {
             error: pl_protocol::StateError {
-                code: "agentRuntimeFault".to_string(),
+                code: "agentRuntimeRecoverable".to_string(),
                 message: reason.clone(),
                 retryable: false,
             },
             turn_id: turn_id.clone(),
+            classification: AgentFaultClassification::RecoverableRuntime,
         }) {
             tracing::error!(
                 agent_id = %self.state.snapshot.identity.id,
@@ -358,11 +396,12 @@ where
             .snapshot
             .transition(AgentCommand::Fault {
                 error: pl_protocol::StateError {
-                    code: "agentRuntimeFault".to_string(),
+                    code: "agentRuntimeRecoverable".to_string(),
                     message: reason.clone(),
                     retryable: false,
                 },
                 turn_id,
+                classification: AgentFaultClassification::RecoverableRuntime,
             })
             .is_err()
         {

@@ -66,16 +66,22 @@ impl TaskCoordinator {
     }
 
     async fn replay_accepted_cleanup(&self, merge_id: &str) -> Result<()> {
-        let scope = self.store.read_accepted_merge_scope(merge_id).await?;
+        let scope = self
+            .task_runtime
+            .read_accepted_merge_scope(merge_id)
+            .await?;
         self.validate_accepted_cleanup_replay(&scope).await?;
-        let attempt = self.store.record_merge_cleanup_attempting(merge_id).await?;
+        let attempt = self
+            .task_runtime
+            .record_merge_cleanup_attempting(merge_id)
+            .await?;
         let operation_id = attempt
             .cleanup
             .operation_id()
             .context("merge cleanup replay has no operation id")?
             .to_string();
         let cleanup = super::merge::cleanup_accepted_delivery(&scope, None).await;
-        self.store
+        self.task_runtime
             .record_merge_cleanup(merge_id, &operation_id, cleanup.clone())
             .await?;
         if let MergeCleanupResult::Failed { detail } = cleanup {

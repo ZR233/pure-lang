@@ -19,12 +19,15 @@ abstract final class StudioDriverState {
   static StudioMode _newThreadMode = StudioMode.simple;
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
+  static PersistenceStateSnapshot _persistenceState =
+      const PersistenceStateSnapshot.ready();
 
   static void publishState(StudioState state) {
     _selectedProjectId = state.selectedProjectId;
     _selectedThreadId = state.selectedThreadId;
     _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
+    _persistenceState = state.persistenceState;
     _project = state.projects
         .where((project) => project.id == state.selectedProjectId)
         .firstOrNull;
@@ -124,6 +127,20 @@ abstract final class StudioDriverState {
             StoppingSubscriptionsProgress() || CancellingTurnsProgress() || SuspendingTasksProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
           }}',
       ],
+      'persistence': {
+        'revision': _persistenceState.revision,
+        'kind': switch (_persistenceState.state) {
+          ReadyPersistenceState() => 'ready',
+          FlushingPersistenceState() => 'flushing',
+          DegradedPersistenceState() => 'degraded',
+          RecoveringPersistenceState() => 'recovering',
+          BlockedPersistenceState() => 'blocked',
+        },
+        'pendingCommits': _persistenceState.state.pendingCommits,
+        'oldestPendingRevision': _persistenceState.state.oldestPendingRevision,
+        'firstFailedAt': _persistenceState.state.firstFailedAt,
+        'acceptsNewWork': _persistenceState.acceptsNewWork,
+      },
       'project': _project == null
           ? null
           : {'id': _project!.id, 'path': _project!.path},

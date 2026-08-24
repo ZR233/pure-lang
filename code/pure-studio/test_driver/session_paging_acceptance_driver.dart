@@ -87,12 +87,18 @@ Future<void> _acceptShutdownPhases(FlutterDriverClient client) async {
   final completed = await client.requestData('shutdown-await');
   stdout.writeln('shutdown: $completed');
   final phases = _shutdownPhases(await _snapshot(client));
+  final phaseEntries = _shutdownPhaseEntries(await _snapshot(client));
   stdout.writeln('shutdown phases: $phases');
   if (!sawOverlayWindow) {
     throw StateError('missed shutdown overlay window; phases=$phases');
   }
   if (!_phaseSequenceComplete(phases)) {
     throw StateError('shutdown phase sequence incomplete: $phases');
+  }
+  if (!phaseEntries.contains('flushingPersistence:0')) {
+    throw StateError(
+      'shutdown did not confirm persistence pending=0: $phaseEntries',
+    );
   }
 }
 
@@ -124,11 +130,16 @@ Map<String, Object?> _sidebarDirectory(Map<String, Object?> snapshot) {
 }
 
 List<String> _shutdownPhases(Map<String, Object?> snapshot) {
+  return [
+    for (final entry in _shutdownPhaseEntries(snapshot)) entry.split(':').first,
+  ];
+}
+
+List<String> _shutdownPhaseEntries(Map<String, Object?> snapshot) {
   final phases = snapshot['shutdownPhases'];
-  if (phases is List) {
-    return [for (final entry in phases) entry.toString().split(':').first];
-  }
-  return const [];
+  return phases is List
+      ? [for (final entry in phases) entry.toString()]
+      : const [];
 }
 
 Map<String, String> _parseArguments(List<String> args) {

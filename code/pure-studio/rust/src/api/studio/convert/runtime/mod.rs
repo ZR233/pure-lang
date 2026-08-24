@@ -5,6 +5,7 @@
 
 mod health;
 mod observed;
+mod persistence;
 mod recovery;
 mod snapshot;
 mod task;
@@ -12,6 +13,7 @@ mod updater;
 
 pub(crate) use health::*;
 pub(crate) use observed::*;
+pub(crate) use persistence::*;
 pub(crate) use recovery::*;
 pub(crate) use snapshot::*;
 pub(crate) use task::*;

@@ -249,7 +249,7 @@ impl TaskCoordinator {
                 .context("failed to resolve caller workspace path")?,
         );
         let scope = self
-            .store
+            .task_runtime
             .resolve_active_completion_scope(&subagent.id, &canonical_caller.to_string_lossy())
             .await?
             .context("active completion scope not found for this executor worktree")?;
@@ -278,8 +278,9 @@ impl TaskCoordinator {
                     &head_commit,
                     changed_files,
                 )?;
-                self.store
+                self.task_runtime
                     .create_work_completion(
+                        &scope.run.root_thread_id,
                         &scope.work_unit.id,
                         WorkCompletionContent::delivery(
                             delivery.head_commit.clone(),
@@ -301,8 +302,9 @@ impl TaskCoordinator {
                     caller_workspace,
                     verification_summary: &verification_summary,
                 })?;
-                self.store
+                self.task_runtime
                     .create_work_completion(
+                        &scope.run.root_thread_id,
                         &scope.work_unit.id,
                         WorkCompletionContent::no_delivery(),
                         verification_summary,

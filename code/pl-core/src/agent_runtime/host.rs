@@ -24,18 +24,22 @@ pub struct RestoredThreadSnapshot {
     pub snapshot: ThreadSnapshot,
 }
 
-/// Thread commit 的落库边界。
+/// Thread commit 的持久化调度分类。
 ///
-/// 内存 snapshot 是唯一权威实例；`Batched` 只入队、由后台 writer 批量落库，
-/// `Immediate` 额外等待包含该 commit 的批量事务完成后才返回。
+/// 所有分类都只表示进程内待落库队列的容量与合并策略，绝不决定内存事实何时
+/// 可见。需要等待 SQLite 的调用方必须使用独立的耐久化屏障。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommitDurability {
-    Batched,
-    Immediate,
+pub enum PersistenceClass {
+    /// 可由持久化实现与同一 owner、同一活动条目的后续增量安全合并。
+    Coalescible,
+    /// 不可合并的普通业务事实。
+    Standard,
+    /// 已开始生命周期的终态或停止事实，可使用终态预留容量。
+    Settlement,
 }
 
-impl CommitDurability {
-    /// 按 runtime 事件类型推导默认落库边界。
+impl PersistenceClass {
+    /// 按 runtime 事件类型推导默认持久化分类。
     ///
     /// 输入队列、Turn 终态、注册与故障是 durable 边界；活动投影与普通状态
     /// 变化属于流式增量。调用点可用显式标记覆盖默认值。
@@ -44,24 +48,24 @@ impl CommitDurability {
             super::AgentRuntimeEventKind::Registered { .. }
             | super::AgentRuntimeEventKind::TurnQueued { .. }
             | super::AgentRuntimeEventKind::TurnStarted { .. }
-            | super::AgentRuntimeEventKind::ThreadOpened { .. }
-            | super::AgentRuntimeEventKind::TurnFinished { .. }
+            | super::AgentRuntimeEventKind::ThreadOpened { .. } => Self::Standard,
+            super::AgentRuntimeEventKind::TurnFinished { .. }
             | super::AgentRuntimeEventKind::RecoveryCancelledTurn { .. }
-            | super::AgentRuntimeEventKind::Faulted { .. } => Self::Immediate,
+            | super::AgentRuntimeEventKind::Faulted { .. } => Self::Settlement,
             super::AgentRuntimeEventKind::StateChanged { .. }
-            | super::AgentRuntimeEventKind::TurnActivityChanged { .. } => Self::Batched,
+            | super::AgentRuntimeEventKind::TurnActivityChanged { .. } => Self::Coalescible,
         }
     }
 }
 
 /// ThreadActor 的一次原子提交。
 ///
-/// 实现先把 commit 写入 write-behind 队列并按 [`CommitDurability`] 决定是否等待
-/// flush；内存 state 在 commit 返回 `Applied` 后由 runtime 更新并广播事件。
+/// Runtime 在单线程 owner 中把本提交加入进程内待落库队列并发布同一份内存事实；
+/// SQLite 只在后台异步跟随。
 #[derive(Debug, Clone)]
 pub struct ThreadCommit {
     pub agent_id: ThreadId,
-    pub durability: CommitDurability,
+    pub persistence: PersistenceClass,
     pub expected_revision: Option<u64>,
     pub next_state: ThreadActorState,
     pub facts: DurableCommitFacts,
@@ -197,14 +201,7 @@ pub enum ThreadMutation {
     AppendThreadNotifications { thread_id: super::ThreadId },
 }
 
-/// repository CAS 提交结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThreadCommitOutcome {
-    Applied,
-    RevisionConflict { actual_revision: Option<u64> },
-}
-
-/// repository 已原子提交、可安全发布的事件批次。
+/// owner 已完成内存提交、可立即发布的事件批次。
 #[derive(Debug, Clone)]
 pub struct AgentCommittedEvent {
     pub agent_id: ThreadId,
@@ -228,11 +225,11 @@ impl AgentCommittedEvent {
     }
 }
 
-/// ThreadActor 使用的 canonical 存储端口。
+/// ThreadActor 使用的持久化端口。
 ///
-/// 内存 snapshot 是唯一权威实例：`commit` 先入队 write-behind writer，按
-/// `commit.durability` 决定是否等待 flush 完成后才返回 `Applied`；`flush_pending`
-/// 与 `pending_commit_count` 供淘汰和关机等待积压落库。
+/// 内存 snapshot 是进程内唯一权威实例。`commit` 只把已经决定的事实加入
+/// 进程内待落库队列；SQLite 结果不得控制业务转换。`flush_pending` 与
+/// `pending_commit_count` 只供淘汰、不可逆外部动作和正常关机使用。
 pub trait ThreadRepository: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
@@ -252,7 +249,7 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
     fn commit(
         &self,
         commit: ThreadCommit,
-    ) -> impl Future<Output = std::result::Result<ThreadCommitOutcome, Self::Error>> + Send;
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     /// 等待当前全部（或指定 Thread 的）pending commit 完成落库。
     ///
@@ -261,6 +258,15 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
     fn flush_pending(
         &self,
         thread_id: Option<&super::ThreadId>,
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+
+    /// 等待指定 Thread 的目标运行时修订号完成耐久化。
+    ///
+    /// 与全局 flush 不同，本屏障不会被其他 owner 的持续写入阻塞。
+    fn await_durable(
+        &self,
+        thread_id: &super::ThreadId,
+        revision: u64,
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     /// 当前尚未落库的 pending commit 数量，用于关机进度。

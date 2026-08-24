@@ -8,6 +8,16 @@ use super::super::{
 use crate::StudioIntegratedReviewGate;
 
 pub(crate) async fn integrated_review_gate(
+    run: &TaskRun,
+    work_units: &[WorkUnit],
+    completions: &[WorkCompletionRecord],
+    merges: &[MergeRecord],
+    reviews: &[ReviewRoundRecord],
+) -> StudioIntegratedReviewGate {
+    integrated_review_gate_now(run, work_units, completions, merges, reviews)
+}
+
+pub(crate) fn integrated_review_gate_now(
     _run: &TaskRun,
     work_units: &[WorkUnit],
     completions: &[WorkCompletionRecord],

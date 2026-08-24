@@ -4,6 +4,7 @@ export 'collection_extensions.dart';
 export 'composer_models.dart';
 export 'failure_models.dart';
 export 'interaction_models.dart';
+export 'persistence_models.dart';
 export 'provider_models.dart';
 export 'recovery_models.dart';
 export 'runtime_models.dart';

@@ -20,7 +20,6 @@ pub struct StudioStore {
 
 pub(in crate::studio) use agent_framework::UnregisteredThreadFault;
 pub use error::StudioDatabaseError;
-pub(in crate::studio) use task::issue::ResolveTaskIssue;
 pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {

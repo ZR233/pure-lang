@@ -191,6 +191,14 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// 恢复已经类型化为可恢复、且内存聚合仍可验证的 Faulted Agent。
+    pub async fn recover_faulted(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(&agent_id, AgentLoopCommand::RecoverFaulted { reply })
+            .await?;
+        receive(receiver).await?
+    }
+
     /// 通过 host lifecycle saga 创建 child agent。
     pub async fn spawn(&self, request: AgentSpawnRequest) -> AgentRuntimeResult<AgentSpawnResult> {
         let (reply, receiver) = oneshot::channel();
@@ -405,6 +413,16 @@ impl AgentRuntimeHandle {
     pub fn thread_snapshot(&self, thread_id: &ThreadId) -> AgentRuntimeResult<ThreadSnapshot> {
         self.thread_events
             .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
+    }
+
+    /// 读取驻留 Thread 在当前进程观察到的热历史窗口。
+    pub fn thread_hot_history(
+        &self,
+        thread_id: &ThreadId,
+    ) -> AgentRuntimeResult<crate::ThreadHotHistory> {
+        self.thread_events
+            .hot_history(thread_id.as_str())
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
     }
 

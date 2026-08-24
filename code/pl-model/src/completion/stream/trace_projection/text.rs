@@ -8,6 +8,9 @@ use pl_trace::{
 use super::TraceProjection;
 use super::unix_seconds;
 
+/// 每个供应方 reasoning 分块都会投影成独立 TracePart，因此条目内索引从零开始。
+const LOCAL_THINKING_CHUNK_INDEX: u32 = 0;
+
 impl TraceProjection {
     pub(crate) fn start_text(
         &mut self,
@@ -113,7 +116,10 @@ impl TraceProjection {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        let trace_delta = TraceDelta::Thinking { chunk_index, delta };
+        let trace_delta = TraceDelta::Thinking {
+            chunk_index: LOCAL_THINKING_CHUNK_INDEX,
+            delta,
+        };
         let Some(item) = self.started.get_mut(&item_id) else {
             return events;
         };
@@ -145,7 +151,10 @@ impl TraceProjection {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        let trace_delta = TraceDelta::ReasoningContent { chunk_index, delta };
+        let trace_delta = TraceDelta::ReasoningContent {
+            chunk_index: LOCAL_THINKING_CHUNK_INDEX,
+            delta,
+        };
         let Some(item) = self.started.get_mut(&item_id) else {
             return events;
         };

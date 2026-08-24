@@ -3,8 +3,8 @@ use pl_core::{
     MailboxPresentation, ThreadId,
 };
 
-use crate::studio::StudioStore;
 use crate::studio::task_coordinator::ExecutorContinuationRequest;
+use crate::studio::{StudioStore, TaskRuntime};
 
 pub(super) async fn submit_executor_continuation(
     runtime: &AgentRuntimeHandle,
@@ -35,6 +35,7 @@ pub(super) async fn submit_executor_continuation(
 pub(super) async fn recover_executor_continuation(
     runtime: &AgentRuntimeHandle,
     store: &StudioStore,
+    task_runtime: &TaskRuntime,
     continuation: &ExecutorContinuationRequest,
 ) -> anyhow::Result<()> {
     if let Some(turn_id) = store.executor_continuation_turn_id(continuation).await? {
@@ -44,7 +45,7 @@ pub(super) async fn recover_executor_continuation(
             .active_turn_id()
             .is_some_and(|active| active.as_str() == turn_id)
         {
-            store
+            task_runtime
                 .mark_executor_turn_started(
                     &continuation.agent_id,
                     &turn_id,
@@ -58,7 +59,7 @@ pub(super) async fn recover_executor_continuation(
             .as_ref()
             .filter(|outcome| outcome.turn_id.as_str() == turn_id)
         {
-            if let Some(next) = store
+            if let Some(next) = task_runtime
                 .settle_executor_turn_finished(&continuation.agent_id, outcome)
                 .await?
             {

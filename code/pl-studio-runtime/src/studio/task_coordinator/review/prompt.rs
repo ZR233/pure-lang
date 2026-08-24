@@ -33,12 +33,15 @@ pub(crate) async fn build_review_prompt(
     coordinator: &TaskCoordinator,
     round: &ReviewRoundRecord,
 ) -> Result<String> {
-    let run = coordinator
-        .store
-        .read_task_run(&round.task_run_id)
-        .await?
-        .context("review task run not found")?;
-    let prior_reviews = coordinator.store.list_review_rounds(&run.id).await?;
+    let aggregate = coordinator
+        .task_runtime
+        .aggregate_for_run(&round.task_run_id)
+        .await
+        .context("review task run is not resident")?;
+    let run = aggregate.facts.run;
+    let prior_reviews = aggregate.facts.reviews;
+    let work_units = aggregate.facts.work_units;
+    let completions = aggregate.facts.completions;
     let design_index = design_index(Path::new(&run.workspace_root))?;
     let coverage = round
         .file_reviews
@@ -51,14 +54,10 @@ pub(crate) async fn build_review_prompt(
                 .completion_id
                 .as_deref()
                 .context("delivery review has no completion id")?;
-            let completion = coordinator
-                .store
-                .list_work_completions(&run.id)
-                .await?
-                .into_iter()
+            let completion = completions
+                .iter()
                 .find(|completion| completion.id == completion_id)
                 .context("delivery review completion not found")?;
-            let work_units = coordinator.store.list_work_units(&run.id).await?;
             let target_work_unit = work_units
                 .iter()
                 .find(|work_unit| work_unit.id == completion.work_unit_id)
@@ -88,7 +87,7 @@ pub(crate) async fn build_review_prompt(
                     ),
                     (
                         "COMPLETION_JSON",
-                        serde_json::to_string_pretty(&ModelCompletion::new(&run, &completion))?,
+                        serde_json::to_string_pretty(&ModelCompletion::new(&run, completion))?,
                     ),
                     (
                         "HANDOFF_JSON",
@@ -107,17 +106,11 @@ pub(crate) async fn build_review_prompt(
         }
         ReviewScope::Integrated => {
             let diff = "TaskService 不读取 Git diff；请以持久化 Completion/Merge 声明和冻结的 changedFiles 为审计范围。".to_string();
-            let completions = coordinator
-                .store
-                .list_work_completions(&run.id)
-                .await?
+            let completions = completions
                 .iter()
                 .map(|completion| ModelCompletion::new(&run, completion))
                 .collect::<Vec<_>>();
-            let work_units = coordinator
-                .store
-                .list_work_units(&run.id)
-                .await?
+            let work_units = work_units
                 .iter()
                 .map(|work_unit| ModelWorkUnit::new(&run, work_unit, None))
                 .collect::<Vec<_>>();

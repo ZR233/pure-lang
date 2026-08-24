@@ -38,28 +38,30 @@ impl StudioRuntime {
     }
 
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
+        self.ensure_persistence_accepts_new_work()?;
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
         let project = self.store.upsert_project(path).await?;
         self.agent_facility
             .product_events
-            .emit_project_directory()
+            .apply_project_entry(project.clone())
             .await?;
         Ok(project)
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
-        self.store.list_projects().await
+        Ok(self.agent_facility.product_events.project_snapshot().await)
     }
 
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
+        self.ensure_persistence_accepts_new_work()?;
         let thread = self
             .store
             .create_thread(project_id, title, StudioMode::Simple)
             .await?;
         self.agent_facility
             .product_events
-            .emit_thread_delta_for(std::slice::from_ref(&thread.id))
+            .apply_thread_delta(vec![thread.clone().into()], Vec::new())
             .await?;
         Ok(thread)
     }
@@ -71,6 +73,7 @@ impl StudioRuntime {
         super::prompt_runner::validate_prompt_content(&request.prompt, &request.attachment_ids)?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
+        self.ensure_persistence_accepts_new_work()?;
         self.store
             .read_project(&request.project_id)
             .await?
@@ -111,6 +114,7 @@ impl StudioRuntime {
         &self,
         thread_id: String,
     ) -> Result<Option<StudioArchiveThreadResult>> {
+        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let Some(thread) = self.store.read_thread(&thread_id).await? else {
             return Ok(None);
@@ -121,12 +125,7 @@ impl StudioRuntime {
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can be archived");
         }
-        if self
-            .store
-            .find_active_task_run_for_root_thread(&thread_id)
-            .await?
-            .is_some()
-        {
+        if self.task_runtime.has_active_task(&thread_id).await {
             bail!("thread cannot be archived while a task is active");
         }
         let roots = self.store.list_root_threads(&thread.project_id).await?;
@@ -223,16 +222,15 @@ impl StudioRuntime {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
+        self.ensure_persistence_accepts_new_work()?;
+        let thread_ids = self.store.list_project_thread_ids(project_id).await?;
         if self
-            .store
-            .list_task_runs_for_project(project_id)
-            .await?
-            .iter()
-            .any(|run| !run.kind().is_terminal())
+            .task_runtime
+            .has_active_task_for_roots(&thread_ids)
+            .await
         {
             bail!("project has an active task");
         }
-        let thread_ids = self.store.list_project_thread_ids(project_id).await?;
         for thread_id in &thread_ids {
             if self.thread_is_busy(thread_id).await? {
                 bail!("project has an active turn");
@@ -249,17 +247,18 @@ impl StudioRuntime {
         if archived.is_some() {
             self.agent_facility
                 .product_events
-                .emit_project_directory()
+                .remove_project_entry(project_id)
                 .await?;
             self.agent_facility
                 .product_events
-                .emit_thread_delta_for(&thread_ids)
+                .apply_thread_delta(Vec::new(), thread_ids)
                 .await?;
         }
         Ok(archived)
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
+        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let thread = self
             .store
@@ -269,12 +268,7 @@ impl StudioRuntime {
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can change mode");
         }
-        if self
-            .store
-            .find_active_task_run_for_root_thread(thread_id)
-            .await?
-            .is_some()
-        {
+        if self.task_runtime.has_active_task(thread_id).await {
             bail!("thread mode cannot change while a task is active");
         }
         let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
@@ -288,7 +282,11 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while the Thread is running or has pending input");
         }
-        self.store.set_thread_mode(thread_id, mode).await?;
+        let updated_thread = self
+            .store
+            .set_thread_mode(thread_id, mode)
+            .await?
+            .context("selected Thread disappeared while changing mode")?;
         let desired_role = mode.root_role().id();
         if snapshot.identity.role != desired_role
             && let Err(error) = handle.reconfigure_idle_role(agent_id, desired_role).await
@@ -303,7 +301,7 @@ impl StudioRuntime {
         }
         self.agent_facility
             .product_events
-            .emit_thread_delta_for(&[thread_id.to_string()])
+            .apply_thread_delta(vec![updated_thread.into()], Vec::new())
             .await?;
         Ok(())
     }

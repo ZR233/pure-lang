@@ -107,6 +107,9 @@ class _FakeStudioApi implements StudioApi {
   String? retriedRecoveryIssueId;
   String? retrySelectedProjectId;
   String? retrySelectedThreadId;
+  int retryPersistenceCallCount = 0;
+  Object? retryPersistenceError;
+  PersistenceStateSnapshot? retryPersistenceState;
   TaskRecoveryPreview? taskRecoveryPreview;
   TaskRecoveryResult? taskRecoveryResult;
   TaskRecoveryRequest? taskRecoveryRequest;
@@ -357,6 +360,13 @@ class _FakeStudioApi implements StudioApi {
     if (recoveryRetryState case final next?) {
       _currentState = _asNewerProductState(_currentState, next);
     }
+  }
+
+  @override
+  Future<PersistenceStateSnapshot> retryPersistence() async {
+    retryPersistenceCallCount += 1;
+    if (retryPersistenceError case final error?) throw error;
+    return retryPersistenceState ?? _currentState.persistenceState;
   }
 
   @override

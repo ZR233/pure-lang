@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use pl_core::{
     AgentSubmissionPage, AgentSubmissionRecord, DurableMailboxEnvelope, MailboxCommand,
-    MailboxDeliveryState, RestoredAgentRuntime, ThreadActorState, ThreadCommit,
-    ThreadCommitOutcome, ThreadId, ThreadRepository, TurnId,
+    MailboxDeliveryState, RestoredAgentRuntime, ThreadActorState, ThreadCommit, ThreadId,
+    ThreadRepository, TurnId,
 };
 use pl_protocol::ThreadSnapshot;
 use sea_orm::{
@@ -30,7 +30,7 @@ use labels::presentation_label;
 
 use input_metadata::serialize_input_metadata;
 use projection::{persist_state_turns, persist_thread_notifications};
-use write_behind::ThreadWriteBehindWriter;
+pub(in crate::studio) use write_behind::ThreadWriteBehindWriter;
 
 /// Studio 单库对 canonical Thread 状态的 write-behind repository。
 ///
@@ -58,10 +58,15 @@ mod unit_tests;
 
 impl StudioAgentRepository {
     pub(in crate::studio) fn new(store: StudioStore) -> Self {
-        Self {
-            writer: ThreadWriteBehindWriter::new(store.clone()),
-            store,
-        }
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        Self::with_writer(store, writer)
+    }
+
+    pub(in crate::studio) fn with_writer(
+        store: StudioStore,
+        writer: ThreadWriteBehindWriter,
+    ) -> Self {
+        Self { writer, store }
     }
 
     /// 只读用途构造（restore_thread / read_thread_snapshot 等）。
@@ -178,12 +183,26 @@ impl ThreadRepository for StudioAgentRepository {
         Ok(Some(self.restore_model(model, &parents).await?))
     }
 
-    async fn commit(&self, commit: ThreadCommit) -> Result<ThreadCommitOutcome, Self::Error> {
+    async fn commit(&self, commit: ThreadCommit) -> Result<(), Self::Error> {
         self.writer.enqueue(commit).await
     }
 
-    async fn flush_pending(&self, _thread_id: Option<&ThreadId>) -> Result<(), Self::Error> {
-        self.writer.flush().await
+    async fn flush_pending(&self, thread_id: Option<&ThreadId>) -> Result<(), Self::Error> {
+        let Some(thread_id) = thread_id else {
+            return self.writer.flush().await;
+        };
+        let Some(revision) = self.writer.latest_queued_revision(thread_id.as_str()) else {
+            return Ok(());
+        };
+        self.writer
+            .await_durable(thread_id.as_str(), revision)
+            .await
+    }
+
+    async fn await_durable(&self, thread_id: &ThreadId, revision: u64) -> Result<(), Self::Error> {
+        self.writer
+            .await_durable(thread_id.as_str(), revision)
+            .await
     }
 
     fn pending_commit_count(&self) -> usize {
@@ -237,10 +256,16 @@ async fn list_thread_submissions(
 }
 
 /// 在调用方事务内应用一次 Thread commit；不负责 begin/commit/rollback。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ApplyCommitOutcome {
+    Applied,
+    RevisionConflict { actual_revision: Option<u64> },
+}
+
 pub(super) async fn apply_state_commit(
     tx: &sea_orm::DatabaseTransaction,
     commit: &ThreadCommit,
-) -> Result<ThreadCommitOutcome, PureError> {
+) -> Result<ApplyCommitOutcome, PureError> {
     let thread_id = commit.agent_id.to_string();
     let Some(existing) = thread::Entity::find_by_id(thread_id.clone())
         .one(tx)
@@ -253,7 +278,7 @@ pub(super) async fn apply_state_commit(
     };
     let actual_revision = existing.runtime_revision.map(u64_from_i64).transpose()?;
     if actual_revision != commit.expected_revision {
-        return Ok(ThreadCommitOutcome::RevisionConflict { actual_revision });
+        return Ok(ApplyCommitOutcome::RevisionConflict { actual_revision });
     }
 
     let mut active = existing.into_active_model();
@@ -290,7 +315,7 @@ pub(super) async fn apply_state_commit(
     persist_session_snapshot(tx, commit).await?;
     persist_inference_billing(tx, commit).await?;
     persist_submission(tx, commit).await?;
-    Ok(ThreadCommitOutcome::Applied)
+    Ok(ApplyCommitOutcome::Applied)
 }
 
 /// 在同一事务内追加一条 durable 阶段提交记录（report_progress 触发）。
@@ -464,8 +489,8 @@ pub(super) mod test_support {
     use std::collections::VecDeque;
 
     use pl_core::{
-        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, CommitDurability,
-        DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadContextState, ThreadId,
+        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, DurableCommitFacts,
+        PersistenceClass, ThreadActorState, ThreadCommit, ThreadContextState, ThreadId,
         ThreadMutation,
     };
 
@@ -490,7 +515,7 @@ pub(super) mod test_support {
     /// 构造首次注册（expected_revision=None）的最小 ThreadCommit。
     pub(super) fn writer_test_commit(
         thread_id: &str,
-        durability: CommitDurability,
+        persistence: PersistenceClass,
     ) -> ThreadCommit {
         let thread_id = ThreadId::new(thread_id).expect("thread id");
         let state = ThreadActorState {
@@ -515,7 +540,7 @@ pub(super) mod test_support {
         };
         ThreadCommit {
             agent_id: thread_id.clone(),
-            durability,
+            persistence,
             expected_revision: None,
             facts: DurableCommitFacts::from_state(&state, Vec::new(), Vec::new(), None, None),
             next_state: state,

@@ -13,7 +13,7 @@ mod waiting_tool;
 pub use cancelling::CancellingAgentState;
 pub use closed::ClosedAgentState;
 pub use closing::ClosingAgentState;
-pub use faulted::FaultedAgentState;
+pub use faulted::{AgentFaultClassification, FaultedAgentState};
 pub use idle::IdleAgentState;
 pub use queued::QueuedAgentState;
 pub use running::RunningAgentState;
@@ -230,6 +230,15 @@ impl AgentState {
                     None => Self::idle(),
                 }))
             }
+            (Self::Faulted(state), AgentCommand::RecoverFaulted { target })
+                if state.classification().is_recoverable() =>
+            {
+                let next_state = match target {
+                    AgentRecoveryTarget::Idle => Self::idle(),
+                    AgentRecoveryTarget::Closed => Self::Closed(ClosedAgentState::new()),
+                };
+                Ok(AgentTransitionDecision::changed(next_state))
+            }
             (state, AgentCommand::Recover { target }) => {
                 let next_state = match target {
                     AgentRecoveryTarget::Idle => Self::idle(),
@@ -241,11 +250,16 @@ impl AgentState {
                     AgentTransitionDecision::changed(next_state)
                 })
             }
-            (state, AgentCommand::Fault { error, turn_id })
-                if !matches!(state, Self::Closed(_)) =>
-            {
+            (
+                state,
+                AgentCommand::Fault {
+                    error,
+                    turn_id,
+                    classification,
+                },
+            ) if !matches!(state, Self::Closed(_)) => {
                 Ok(AgentTransitionDecision::changed(Self::Faulted(
-                    FaultedAgentState::new(error, turn_id),
+                    FaultedAgentState::classified(error, turn_id, classification),
                 )))
             }
             (_, command) => Err(AgentTransitionError::new(current, &command)),
@@ -308,9 +322,13 @@ pub enum AgentCommand {
     Recover {
         target: AgentRecoveryTarget,
     },
+    RecoverFaulted {
+        target: AgentRecoveryTarget,
+    },
     Fault {
         error: pl_protocol::StateError,
         turn_id: Option<TurnId>,
+        classification: AgentFaultClassification,
     },
 }
 
@@ -330,6 +348,7 @@ impl AgentCommand {
             Self::Close => "close",
             Self::Restore { .. } => "restore",
             Self::Recover { .. } => "recover",
+            Self::RecoverFaulted { .. } => "recoverFaulted",
             Self::Fault { .. } => "fault",
         }
     }
@@ -443,6 +462,40 @@ mod tests {
                 .expect_err("idle must begin close before terminal close")
                 .to_string()
                 .contains("close")
+        );
+    }
+
+    #[test]
+    fn recover_faulted_accepts_only_typed_recoverable_faults() {
+        let error = pl_protocol::StateError {
+            code: "fault".to_string(),
+            message: "failed".to_string(),
+            retryable: false,
+        };
+        let recoverable = AgentState::Faulted(FaultedAgentState::classified(
+            error.clone(),
+            Some(turn("recoverable")),
+            AgentFaultClassification::RecoverableRuntime,
+        ));
+        let recovered = recoverable
+            .decide(AgentCommand::RecoverFaulted {
+                target: AgentRecoveryTarget::Idle,
+            })
+            .expect("recoverable fault")
+            .next_state;
+        assert!(recovered.is_idle());
+
+        let corrupt = AgentState::Faulted(FaultedAgentState::classified(
+            error,
+            None,
+            AgentFaultClassification::AggregateCorruption,
+        ));
+        assert!(
+            corrupt
+                .decide(AgentCommand::RecoverFaulted {
+                    target: AgentRecoveryTarget::Idle,
+                })
+                .is_err()
         );
     }
 }

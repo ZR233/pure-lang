@@ -45,6 +45,15 @@ impl StudioStore {
         })
     }
 
+    /// 缩短单连接的 SQLite 锁等待，仅供真实锁恢复测试使用。
+    #[cfg(test)]
+    pub(crate) async fn use_short_busy_timeout_for_test(&self) -> Result<()> {
+        self.db
+            .execute_unprepared("PRAGMA busy_timeout = 25")
+            .await?;
+        Ok(())
+    }
+
     pub(super) async fn open_database(path: &Path) -> Result<Self> {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;

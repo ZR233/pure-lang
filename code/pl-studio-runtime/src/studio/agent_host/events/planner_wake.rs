@@ -2,15 +2,20 @@ use pl_core::{
     AgentRuntimeHandle, AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxPresentation, ThreadId,
 };
 
-use crate::studio::StudioStore;
+use crate::studio::TaskRuntime;
 use crate::studio::task_coordinator::{TaskPlannerWakeRequest, TaskPlannerWakeSource};
 
 pub(in crate::studio) async fn materialize_task_planner_wake(
     runtime: &AgentRuntimeHandle,
-    store: &StudioStore,
+    task_runtime: &TaskRuntime,
     wake: &TaskPlannerWakeRequest,
 ) -> anyhow::Result<()> {
-    if store.task_planner_wake_was_delivered(wake).await? {
+    if !task_runtime
+        .pending_planner_wakes(Some(&wake.root_thread_id))
+        .await?
+        .into_iter()
+        .any(|candidate| candidate.mail_id() == wake.mail_id())
+    {
         return Ok(());
     }
     let (message, metadata) = match &wake.source {
@@ -58,26 +63,23 @@ pub(in crate::studio) async fn materialize_task_planner_wake(
                 .with_turn_policy(AgentTurnSubmitPolicy::StartOrQueue),
         )
         .await
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    task_runtime.mark_planner_wake_delivered(wake).await
 }
 
 pub(in crate::studio) async fn materialize_pending_task_planner_wakes(
     runtime: &AgentRuntimeHandle,
-    store: &StudioStore,
+    task_runtime: &TaskRuntime,
     root_thread_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    for wake in store.list_pending_task_planner_wakes().await? {
-        if root_thread_id.is_some_and(|root| wake.root_thread_id != root) {
-            continue;
-        }
+    for wake in task_runtime.pending_planner_wakes(root_thread_id).await? {
         let root_agent_id = crate::studio::agent_host::root_agent_id(&wake.root_thread_id);
         match runtime.snapshot(root_agent_id).await {
             Ok(_) => {}
             Err(pl_core::AgentRuntimeError::NotFound(_)) if root_thread_id.is_none() => continue,
             Err(error) => return Err(anyhow::anyhow!(error.to_string())),
         }
-        materialize_task_planner_wake(runtime, store, &wake).await?;
+        materialize_task_planner_wake(runtime, task_runtime, &wake).await?;
     }
     Ok(())
 }

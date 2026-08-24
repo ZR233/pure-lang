@@ -159,10 +159,7 @@ impl ThreadRepository for TestRepository {
             }))
     }
 
-    async fn commit(
-        &self,
-        commit: ThreadCommit,
-    ) -> std::result::Result<ThreadCommitOutcome, Self::Error> {
+    async fn commit(&self, commit: ThreadCommit) -> std::result::Result<(), Self::Error> {
         if commit.expected_revision.is_none()
             && std::mem::take(&mut *self.fail_registration.lock().unwrap())
         {
@@ -223,9 +220,10 @@ impl ThreadRepository for TestRepository {
             .get(&commit.agent_id)
             .map(|state| state.snapshot.revision);
         if actual != commit.expected_revision {
-            return Ok(ThreadCommitOutcome::RevisionConflict {
-                actual_revision: actual,
-            });
+            return Err(TestError(format!(
+                "thread revision conflict: expected {:?}, actual {actual:?}",
+                commit.expected_revision
+            )));
         }
         self.commits.lock().unwrap().push(commit.clone());
         self.mutations.lock().unwrap().push(commit.mutation.clone());
@@ -242,12 +240,20 @@ impl ThreadRepository for TestRepository {
                 .push(submission.into());
         }
         states.insert(commit.agent_id, commit.next_state);
-        Ok(ThreadCommitOutcome::Applied)
+        Ok(())
     }
 
     async fn flush_pending(
         &self,
         _thread_id: Option<&ThreadId>,
+    ) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn await_durable(
+        &self,
+        _thread_id: &ThreadId,
+        _revision: u64,
     ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
@@ -1316,7 +1322,7 @@ async fn successful_rollover_replacement_and_turn_finished_share_immediate_commi
         .collect::<Vec<_>>();
     assert_eq!(terminal_commits.len(), 1);
     let terminal = terminal_commits[0];
-    assert_eq!(terminal.durability, CommitDurability::Immediate);
+    assert_eq!(terminal.persistence, PersistenceClass::Settlement);
     let trace_parts = commits
         .iter()
         .flat_map(|commit| commit.facts.trace_events.iter())

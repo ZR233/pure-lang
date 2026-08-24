@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -213,6 +213,56 @@ sealed class BridgeMcpStateSnapshot with _$BridgeMcpStateSnapshot {
       BridgeMcpStateSnapshot_Failed;
   const factory BridgeMcpStateSnapshot.stopped(BridgeStoppedResource field0) =
       BridgeMcpStateSnapshot_Stopped;
+}
+
+@freezed
+sealed class BridgePersistenceState with _$BridgePersistenceState {
+  const BridgePersistenceState._();
+
+  const factory BridgePersistenceState.ready({required BigInt pendingCommits}) =
+      BridgePersistenceState_Ready;
+  const factory BridgePersistenceState.flushing({
+    required BigInt pendingCommits,
+    BigInt? oldestPendingRevision,
+  }) = BridgePersistenceState_Flushing;
+  const factory BridgePersistenceState.degraded({
+    required BigInt pendingCommits,
+    BigInt? oldestPendingRevision,
+    required PlatformInt64 firstFailedAt,
+    required BridgeStateError error,
+  }) = BridgePersistenceState_Degraded;
+  const factory BridgePersistenceState.recovering({
+    required BigInt pendingCommits,
+    BigInt? oldestPendingRevision,
+    required PlatformInt64 firstFailedAt,
+  }) = BridgePersistenceState_Recovering;
+  const factory BridgePersistenceState.blocked({
+    required BigInt pendingCommits,
+    BigInt? oldestPendingRevision,
+    required PlatformInt64 firstFailedAt,
+    required BridgeStateError error,
+  }) = BridgePersistenceState_Blocked;
+}
+
+class BridgePersistenceStateSnapshot {
+  final BigInt revision;
+  final BridgePersistenceState state;
+
+  const BridgePersistenceStateSnapshot({
+    required this.revision,
+    required this.state,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ state.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePersistenceStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          state == other.state;
 }
 
 class BridgeProjectDirectoryData {
@@ -550,6 +600,7 @@ class BridgeStudioStateSnapshot {
   final List<BridgeSkillsStateSnapshot> skillsByProject;
   final BridgeProviderUsageStateSnapshot providerUsage;
   final BridgeUpdaterStateSnapshot updater;
+  final BridgePersistenceStateSnapshot persistence;
 
   const BridgeStudioStateSnapshot({
     required this.runtime,
@@ -564,6 +615,7 @@ class BridgeStudioStateSnapshot {
     required this.skillsByProject,
     required this.providerUsage,
     required this.updater,
+    required this.persistence,
   });
 
   @override
@@ -579,7 +631,8 @@ class BridgeStudioStateSnapshot {
       lsp.hashCode ^
       skillsByProject.hashCode ^
       providerUsage.hashCode ^
-      updater.hashCode;
+      updater.hashCode ^
+      persistence.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -597,7 +650,8 @@ class BridgeStudioStateSnapshot {
           lsp == other.lsp &&
           skillsByProject == other.skillsByProject &&
           providerUsage == other.providerUsage &&
-          updater == other.updater;
+          updater == other.updater &&
+          persistence == other.persistence;
 }
 
 class BridgeTaskDirectoryData {

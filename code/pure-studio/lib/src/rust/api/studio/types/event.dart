@@ -97,6 +97,9 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.updaterStateChanged(
     BridgeUpdaterStateSnapshot field0,
   ) = BridgeProductEventPayload_UpdaterStateChanged;
+  const factory BridgeProductEventPayload.persistenceStateChanged(
+    BridgePersistenceStateSnapshot field0,
+  ) = BridgeProductEventPayload_PersistenceStateChanged;
   const factory BridgeProductEventPayload.stale({
     required BigInt laggedEvents,
   }) = BridgeProductEventPayload_Stale;

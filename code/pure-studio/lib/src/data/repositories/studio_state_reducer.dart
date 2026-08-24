@@ -56,8 +56,19 @@ StudioReduceResult reduceStudioEvent(
     UpdaterStateChangedPayload(:final state) => StudioReduceResult(
       applyUpdaterState(current, state),
     ),
+    PersistenceStateChangedPayload(:final state) => StudioReduceResult(
+      applyPersistenceState(current, state),
+    ),
     StalePayload() => StudioReduceResult(current),
   };
+}
+
+StudioState applyPersistenceState(
+  StudioState current,
+  PersistenceStateSnapshot next,
+) {
+  if (next.revision <= current.persistenceState.revision) return current;
+  return current.copyWith(persistenceState: next);
 }
 
 /// Authoritative snapshots replace the complete canonical workspace.

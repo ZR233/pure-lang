@@ -8,7 +8,7 @@ use crate::config::StudioRole;
 use crate::studio::agent_host::{StudioAgentRepository, root_agent_id};
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
-use crate::studio::{ThreadKind, ThreadRecord};
+use crate::studio::{ThreadKind, ThreadRecord, ThreadVisibility};
 use pl_core::ThreadRepository as _;
 
 use super::{
@@ -58,6 +58,7 @@ impl StudioRuntime {
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
         validate_prompt_content(&request.prompt, &request.attachment_ids)?;
+        self.ensure_persistence_accepts_new_work()?;
         // Serialize turn registration with the updater's final idle check.
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.submit_prompt_with_lifecycle_lock(request).await
@@ -74,34 +75,40 @@ impl StudioRuntime {
             options,
         } = request;
         validate_prompt_content(&prompt, &attachment_ids)?;
-        let thread_record = self
-            .store
-            .read_thread(&thread_id)
-            .await?
-            .context("selected Thread not found")?;
+        self.ensure_persistence_accepts_new_work()?;
+        let thread_record = self.read_owned_thread(&thread_id).await?;
         if thread_record.mode == crate::StudioMode::Task
             && thread_record.thread_kind == ThreadKind::Root
-            && self
-                .store
-                .find_active_task_run_for_root_thread(&thread_id)
-                .await?
-                .is_none()
+            && !self.task_runtime.has_active_task(&thread_id).await
         {
             let project = self
-                .store
-                .read_project(&thread_record.project_id)
-                .await?
-                .context("Task project not found")?;
+                .agent_facility
+                .product_events
+                .project_snapshot()
+                .await
+                .into_iter()
+                .find(|project| project.id == thread_record.project_id)
+                .context("Task project not found in the in-memory directory")?;
             self.task_coordinator
                 .start_task(&thread_id, &prompt, &project.path)
                 .await?;
         }
         self.ensure_prompt_runtime_ready().await?;
         let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
-        let snapshot = handle
+        let mut snapshot = handle
             .snapshot(agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
+        if matches!(
+            &snapshot.state,
+            pl_core::AgentState::Faulted(faulted)
+                if faulted.classification().is_recoverable()
+        ) {
+            snapshot = handle
+                .recover_faulted(agent_id.clone())
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?;
+        }
         self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
             .await?;
         let thread = pl_core::ThreadId::new(thread_id.clone())?;
@@ -138,12 +145,7 @@ impl StudioRuntime {
     pub async fn stop_prompt(&self, thread_id: String) -> Result<StudioStopPromptResponse> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
-        if self
-            .store
-            .find_active_task_run_for_root_thread(&thread_id)
-            .await?
-            .is_some()
-        {
+        if self.task_runtime.has_active_task(&thread_id).await {
             let reason = TaskStopReason::new("用户在 Studio 中请求停止任务")
                 .expect("fixed user stop reason must not be empty");
             self.task_coordinator
@@ -281,9 +283,10 @@ impl StudioRuntime {
             .map_err(|error| anyhow::anyhow!(error))?;
         self.residency.touch(thread_id).await;
         self.enforce_residency_limit().await;
+        let _ = self.task_runtime.activate(&target_root_thread_id).await?;
         crate::studio::agent_host::materialize_pending_task_planner_wakes(
             &handle,
-            &self.store,
+            &self.task_runtime,
             Some(&target_root_thread_id),
         )
         .await?;
@@ -394,10 +397,37 @@ impl StudioRuntime {
     }
 
     async fn read_owned_thread(&self, thread_id: &str) -> Result<ThreadRecord> {
-        self.store
-            .read_thread(thread_id)
-            .await?
-            .context("selected Thread not found")
+        let thread = self
+            .agent_facility
+            .product_events
+            .thread_snapshot(thread_id)
+            .context("selected Thread not found in the in-memory directory")?;
+        Ok(ThreadRecord {
+            id: thread.id,
+            project_id: thread.project_id,
+            title: thread.title,
+            mode: thread.mode.into(),
+            created_at: thread.created_at,
+            updated_at: thread.updated_at,
+            visibility: if thread.archived {
+                ThreadVisibility::Archived
+            } else {
+                ThreadVisibility::Active
+            },
+            thread_kind: if thread.parent_thread_id.is_some() {
+                ThreadKind::Agent
+            } else {
+                ThreadKind::Root
+            },
+            parent_thread_id: thread.parent_thread_id,
+            root_thread_id: thread.root_thread_id,
+            agent_path: thread.agent_path,
+            role: thread.role,
+            status: thread.status,
+            summary: None,
+            error: None,
+            runtime_updated_at: None,
+        })
     }
 
     async fn thread_agent_path(&self, thread_id: &str) -> Result<pl_core::ThreadId> {
@@ -410,6 +440,8 @@ impl StudioRuntime {
         interaction_id: String,
         resolution: InteractionResolution,
     ) -> Result<StudioResolveInteractionResponse> {
+        // 这是已经开始的 Turn 的收束入口。持久化降级只暂停新的生命周期，
+        // 不能阻止用户回答、审批或确认当前交互。
         let current = self
             .store
             .read_interaction(&interaction_id)

@@ -6,7 +6,7 @@ use pl_protocol::{
     ThreadNotification,
 };
 
-use super::super::host::{CommitDurability, ThreadProjectionCommit};
+use super::super::host::{PersistenceClass, ThreadProjectionCommit};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentRuntimeHost, AgentRuntimeResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
@@ -186,7 +186,7 @@ where
                     thread_id: thread_id.clone(),
                 },
             )
-            .durability(CommitDurability::Immediate)
+            .persistence(PersistenceClass::Settlement)
             .publish(
                 CommitPublication::new(Some(thread_id), None)
                     .store_directory_snapshot()

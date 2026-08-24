@@ -218,7 +218,11 @@ impl StudioStore {
         }))
     }
 
-    pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
+    pub async fn set_thread_mode(
+        &self,
+        thread_id: &str,
+        mode: StudioMode,
+    ) -> Result<Option<ThreadRecord>> {
         use entities::thread;
         if let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())
             .one(&self.db)
@@ -228,9 +232,10 @@ impl StudioStore {
             active.mode = Set(mode.label().to_string());
             active.role = Set(mode.root_role().key().to_string());
             active.updated_at = Set(unix_seconds());
-            active.update(&self.db).await?;
+            let model = active.update(&self.db).await?;
+            return Ok(Some(thread_record(model)?));
         }
-        Ok(())
+        Ok(None)
     }
 }
 

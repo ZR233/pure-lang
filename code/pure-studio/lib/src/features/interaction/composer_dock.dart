@@ -24,6 +24,11 @@ class ComposerDock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final persistenceAllowsNewWork = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.persistenceState.acceptsNewWork ?? false,
+      ),
+    );
     // Driver 快照需要完整 timelineRows；controls 视图为省内存清空了行。
     final full = switch (ref.watch(selectedAgentWorkspaceProvider)) {
       AsyncData(:final value) => value,
@@ -46,10 +51,15 @@ class ComposerDock extends ConsumerWidget {
             child: interaction == null
                 ? workspace.composerMode == AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
-                      : _PromptComposer(workspace: workspace)
+                      : _PromptComposer(
+                          workspace: workspace,
+                          enabled: persistenceAllowsNewWork,
+                        )
                 : _InteractionDock(
                     workspace: workspace,
                     interaction: interaction,
+                    // 活动交互属于当前 Turn 的收束；持久化降级只暂停新工作。
+                    enabled: true,
                   ),
           ),
         ),
@@ -147,9 +157,10 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
 }
 
 class _PromptComposer extends ConsumerWidget {
-  const _PromptComposer({required this.workspace});
+  const _PromptComposer({required this.workspace, required this.enabled});
 
   final AgentWorkspaceView workspace;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -157,7 +168,7 @@ class _PromptComposer extends ConsumerWidget {
     return _PromptComposerPanel(
       composer: workspace.composer,
       permissionMode: workspace.permissionMode,
-      enabled: true,
+      enabled: enabled,
       isBusy: workspace.isBusy,
       onChanged: (value) =>
           controller.updateComposer(workspace.threadId, value),
@@ -396,10 +407,15 @@ class _PermissionSelector extends ConsumerWidget {
 }
 
 class _InteractionDock extends StatelessWidget {
-  const _InteractionDock({required this.workspace, required this.interaction});
+  const _InteractionDock({
+    required this.workspace,
+    required this.interaction,
+    required this.enabled,
+  });
 
   final AgentWorkspaceView workspace;
   final PendingInteraction interaction;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -411,17 +427,20 @@ class _InteractionDock extends StatelessWidget {
       InteractionKind.toolApproval => ToolApprovalDock(
         threadId: workspace.threadId,
         payload: payload,
+        enabled: enabled,
         trailing: trailing,
       ),
       InteractionKind.userInput => UserInputDock(
         threadId: workspace.threadId,
         interactionId: interaction.id,
         payload: payload,
+        enabled: enabled,
         trailing: trailing,
       ),
       InteractionKind.planConfirmation => PlanConfirmationDock(
         threadId: workspace.threadId,
         planContent: payload.planContent,
+        enabled: enabled,
         trailing: trailing,
       ),
     };

@@ -290,6 +290,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePersistenceStateSnapshot
+  dco_decode_box_autoadd_bridge_persistence_state_snapshot(dynamic raw);
+
+  @protected
   BridgePlanConfirmationInteractionState
   dco_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
     dynamic raw,
@@ -936,6 +940,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePendingWorkUnit dco_decode_bridge_pending_work_unit(dynamic raw);
+
+  @protected
+  BridgePersistenceState dco_decode_bridge_persistence_state(dynamic raw);
+
+  @protected
+  BridgePersistenceStateSnapshot dco_decode_bridge_persistence_state_snapshot(
+    dynamic raw,
+  );
 
   @protected
   BridgePlanConfirmationInteractionState
@@ -2285,6 +2297,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePersistenceStateSnapshot
+  sse_decode_box_autoadd_bridge_persistence_state_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgePlanConfirmationInteractionState
   sse_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
     SseDeserializer deserializer,
@@ -3103,6 +3121,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePendingWorkUnit sse_decode_bridge_pending_work_unit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePersistenceState sse_decode_bridge_persistence_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePersistenceStateSnapshot sse_decode_bridge_persistence_state_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -4747,6 +4775,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_persistence_state_snapshot(
+    BridgePersistenceStateSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_plan_confirmation_interaction_state(
     BridgePlanConfirmationInteractionState self,
     SseSerializer serializer,
@@ -5706,6 +5740,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_pending_work_unit(
     BridgePendingWorkUnit self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_persistence_state(
+    BridgePersistenceState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_persistence_state_snapshot(
+    BridgePersistenceStateSnapshot self,
     SseSerializer serializer,
   );
 

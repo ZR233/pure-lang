@@ -94,15 +94,6 @@ impl TaskIssueTransitionDecision {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(crate) enum TaskIssueTransitionError {
-    #[error(
-        "Task issue {task_issue_id} revision is stale: expected {expected}, actual {actual}, command {command:?}"
-    )]
-    StaleRevision {
-        task_issue_id: String,
-        expected: u64,
-        actual: u64,
-        command: TaskIssueCommand,
-    },
     #[error("Task issue {task_issue_id} in {current:?} rejects command {command:?}")]
     IllegalTransition {
         task_issue_id: String,
@@ -112,8 +103,17 @@ pub(crate) enum TaskIssueTransitionError {
 }
 
 impl TaskIssueState {
+    #[cfg(test)]
     pub(crate) fn open(failure: TurnFailure) -> Self {
-        match TaskIssueDisposition::for_turn_failure(&failure) {
+        let disposition = TaskIssueDisposition::for_turn_failure(&failure);
+        Self::open_with_disposition(failure, disposition)
+    }
+
+    pub(crate) fn open_with_disposition(
+        failure: TurnFailure,
+        disposition: TaskIssueDisposition,
+    ) -> Self {
+        match disposition {
             TaskIssueDisposition::Recoverable => Self::OpenRecoverable(OpenTaskIssue::new(failure)),
             TaskIssueDisposition::Fatal => Self::OpenFatal(OpenTaskIssue::new(failure)),
         }
@@ -228,6 +228,25 @@ mod tests {
                     }
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn task_owner_can_scope_internal_child_failure_as_recoverable() {
+        let failure = TurnFailure::permanent(TurnFailureCategory::Internal, "child faulted");
+        assert_eq!(
+            TaskIssueState::open_with_disposition(failure, TaskIssueDisposition::Recoverable,)
+                .kind(),
+            TaskIssueStateKind::OpenRecoverable
+        );
+    }
+
+    #[test]
+    fn task_owner_can_force_faulted_planner_failure_to_fatal() {
+        let failure = TurnFailure::permanent(TurnFailureCategory::ProviderCapacity, "busy");
+        assert_eq!(
+            TaskIssueState::open_with_disposition(failure, TaskIssueDisposition::Fatal).kind(),
+            TaskIssueStateKind::OpenFatal
         );
     }
 

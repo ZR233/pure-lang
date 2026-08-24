@@ -128,6 +128,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(save_model_role))
         .routes(routes!(read_provider_usage))
         .routes(routes!(check_provider_usage))
+        .routes(routes!(retry_persistence))
         .routes(routes!(read_skills))
         .routes(routes!(discover_skills))
         .routes(routes!(read_mcp))
@@ -499,6 +500,17 @@ async fn check_provider_usage(
         state
             .runtime
             .check_provider_usage()
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/runtime/persistence/retry", operation_id = "persistence.retry", responses(StudioApiErrors, (status = 200)))]
+async fn retry_persistence(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .retry_persistence()
             .await
             .map_err(ApiError::from)?,
     ))

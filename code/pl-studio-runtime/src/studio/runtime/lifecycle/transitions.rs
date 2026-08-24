@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 
 use crate::studio::ids::unix_seconds;
 use crate::studio::{StudioRuntimeCommand, StudioRuntimeSnapshot};
@@ -23,12 +23,58 @@ impl StudioRuntime {
                 at: unix_seconds(),
             })?;
         let initialization = async {
-            self.recover_interactions_after_restart().await?;
-            let mut report = self.task_coordinator.recover_active_tasks().await?;
+            let settings = self
+                .config_runtime
+                .read()
+                .map_err(|error| startup_failure("read_configuration", error))?;
+            self.provider_usage
+                .load_cache()
+                .await
+                .map_err(|error| startup_failure("load_provider_usage", error))?;
+            self.updater
+                .load_cache()
+                .await
+                .map_err(|error| startup_failure("load_update_cache", error))?;
+            self.agent_facility
+                .product_events
+                .initialize_directories()
+                .await
+                .map_err(|error| startup_failure("initialize_product_directories", error))?;
+            let mut report = self
+                .task_coordinator
+                .recover_active_tasks()
+                .await
+                .map_err(|error| startup_failure("recover_active_tasks", error))?;
+            self.task_runtime
+                .initialize()
+                .await
+                .map_err(|error| startup_failure("initialize_task_runtime", error))?;
+            self.recover_interactions_after_restart()
+                .await
+                .map_err(|error| startup_failure("recover_interactions", error))?;
             self.append_session_recovery_issues(&mut report.issues)
-                .await?;
+                .await
+                .map_err(|error| startup_failure("recover_sessions", error))?;
             self.append_unavailable_project_recovery_issues(&mut report.issues)
-                .await?;
+                .await
+                .map_err(|error| startup_failure("recover_unavailable_projects", error))?;
+            // 惰性驻留：这里只启动 framework（restore_runtime 恢复钉住集合），
+            // 其余 Thread 在订阅、提交输入或修复时按需恢复。
+            let _ = self
+                .agent_framework()
+                .await
+                .map_err(|error| startup_failure("initialize_agent_framework", error))?;
+            self.start_mcp_health_watcher().await;
+            self.start_lsp_state_watcher().await;
+            self.start_mcp_reconcile_background()
+                .await
+                .map_err(|error| startup_failure("start_mcp_reconcile", error))?;
+            if settings.config.skills.system.enabled {
+                let _ = pl_core::skill::install_system_skills(&settings.config.skills)
+                    .map_err(|error| startup_failure("install_system_skills", error))?;
+            }
+            self.publish_settings_state(settings)
+                .map_err(|error| startup_failure("publish_settings", error))?;
             Ok::<_, anyhow::Error>(report)
         }
         .await;
@@ -64,30 +110,9 @@ impl StudioRuntime {
     }
 
     pub async fn start_runtime(&self) -> Result<StudioRuntimeSnapshot> {
-        if !self.runtime_snapshot().await?.state.is_ready() {
-            let _ = self.initialize_runtime().await?;
-        }
-        let settings = self.config_runtime.read()?;
-        self.provider_usage.load_cache().await?;
-        self.updater.load_cache().await?;
-        self.agent_facility
-            .product_events
-            .initialize_directories()
-            .await?;
-        // 惰性驻留：这里只启动 framework（restore_runtime 恢复钉住集合），
-        // 其余 Thread 在订阅、提交输入或修复时按需恢复。
-        let _ = self.agent_framework().await?;
-        self.start_mcp_health_watcher().await;
-        self.start_lsp_state_watcher().await;
-        self.start_mcp_reconcile_background().await?;
-        if settings.config.skills.system.enabled {
-            let _ = pl_core::skill::install_system_skills(&settings.config.skills)?;
-        }
-        self.publish_settings_state(settings)?;
-        self.agent_facility
-            .product_events
-            .emit_recovery_state(self.recovery.snapshot());
-        self.runtime_snapshot().await
+        self.initialize_runtime()
+            .await
+            .map_err(|error| startup_failure("initialize_runtime", error))
     }
 
     /// Stops all Studio runtime services.
@@ -137,12 +162,12 @@ impl StudioRuntime {
                 .emit(crate::StudioShutdownProgress::FlushingPersistence(
                     crate::FlushingPersistenceProgress::new(pending_before as u64),
                 ));
-            if let Err(error) = self.flush_persistence().await {
-                tracing::error!(
-                    error_bytes = error.to_string().len(),
-                    "failed to drain write-behind persistence during shutdown"
-                );
-            }
+            self.flush_persistence().await?;
+            let pending_after = self.pending_persistence_commits().await;
+            anyhow::ensure!(
+                pending_after == 0,
+                "normal shutdown cannot continue with {pending_after} pending persistence commits"
+            );
             self.shutdown_progress
                 .emit(crate::StudioShutdownProgress::FlushingPersistence(
                     crate::FlushingPersistenceProgress::new(0),
@@ -209,4 +234,14 @@ impl StudioRuntime {
     pub async fn shutdown(&self) {
         let _ = self.shutdown_runtime().await;
     }
+}
+
+fn startup_failure(stage: &'static str, error: impl Into<Error>) -> Error {
+    let error = error.into();
+    tracing::error!(
+        startup_stage = stage,
+        diagnostic_bytes = error.to_string().len(),
+        "Studio runtime startup stage failed"
+    );
+    error
 }

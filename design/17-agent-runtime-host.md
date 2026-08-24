@@ -14,8 +14,9 @@ snapshot 和 progress 命令直接发给目标 ThreadActor。只有 spawn/close 
 ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像、活动 RunningTurn、取消
 identity、live Item overlay 和当前 prompt generation/context baseline。它的内存 snapshot 是该
 会话的唯一权威实例，SQLite 由 write-behind 批量事务异步跟随（持久化语义见 19.2，驻留策略见
-19.6）。它不缓存完整历史，也不拥有 Task/worktree；context baseline 只用于生成模型输入差量，
-不能成为 runtime 事实源。
+19.6）。它保留当前驻留期观察到的 Turn 热窗口和完整 live Item timeline，用于覆盖尚未耐久化或版本
+落后的历史页；更早 Turn 仍从 SQLite 冷分页。它不拥有 Task/worktree；context baseline 只用于生成
+模型输入差量，不能成为 runtime 事实源。
 
 Agent lifecycle、activity 与 active Turn 不再是三个可独立写入的状态轴。唯一公开状态固定为：
 
@@ -32,6 +33,16 @@ input 通过显式 Queue/Start command 把 Idle 推进到 Queued/Running，不�
 同一次内存 commit 原子提交 state、runtime event 与 snapshot，directory watch 和产品投影读取同一
 状态事实源。
 
+Faulted 携带的可选 Turn 只用于关联故障来源，不表示该 Turn 仍在活动。故障收束包含来源 Turn 时，
+同一个内存 commit 必须同时保存 Faulted Agent 状态和该 Turn 的 Failed 终态，并立即发布；持久化
+投影不得再把这个诊断 Turn 投影为 queued/running。诊断 Turn 与 `last_turn` 的身份或终态不一致属于
+内存转换前的不变量破坏，必须拒绝该转换，不能先修改 owner 再由广播或 SQLite 错误把 Agent Faulted。
+
+Faulted 额外携带类型化故障分类：可恢复运行时故障、可恢复协议故障、聚合损坏和未知旧故障。只有前
+两类可接受 `RecoverFaulted`；该命令必须先验证快照、修订号、transcript 与诊断 Turn，终结遗留活动
+Turn、清除忙碌投影并回到 Idle。聚合损坏和未知旧故障保持 Faulted。旧字符串故障只有命中已知 reasoning
+分块回归且会话审计通过时，才能在恢复加载阶段升级为可恢复协议故障。
+
 Studio `AgentDirectoryChanged` 直接携带上述九态相邻标签 union；目录条目不再并列传输
 `status/lifecycle/activity/activeTurnId/error/reason`。Flutter 以 sealed `StudioAgentState` 穷尽消费，
 展示标签和 fault message 只能作为只读派生值。Faulted 的 `StateError` 保留 code、message、retryable
@@ -44,7 +55,8 @@ WaitingInteraction、Cancelling、Closing、Closed、Faulted；它不是另一�
 所有改变 canonical session 的 Thread transition 都由 runtime 根据提交前后 session 自动派生
 `Append | Replace | None`，调用方不能在 transcript 已变化时省略 context mutation。child 注册若
 携带非空初始 transcript，必须写 replacement baseline；工作上下文与 child snapshot 同次提交。
-TurnFinished/rollover 的 Immediate flush 完成之前不得发布终态或调度 continuation。
+TurnFinished/rollover 在内存提交后立即发布终态并调度 continuation，不等待 SQLite。只有会淘汰 owner、
+正常关机或执行不可逆外部动作时，才显式等待目标修订号耐久化。
 
 产品可通过受限命令重配置 idle ThreadActor 的 role。该命令要求 lifecycle Active、没有活动 Turn、
 active input 或 pending input，并通过 repository CAS 持久化 identity 与发布 directory revision；
@@ -54,15 +66,21 @@ active input 或 pending input，并通过 repository CAS 持久化 identity 与
 
 pl-core 只保留三个窄端口：
 
-- `ThreadRepository`：接收 Thread/Turn/Item/Input/Interaction mutation 写入 write-behind 队列
-  （Immediate 边界等待 flush 完成后返回），提供 pending 查询与按需 flush，并读取惰性恢复所需
-  状态。
+- `ThreadRepository`：纯持久化端口，接收已经由 ThreadActor 提交的
+  Thread/Turn/Item/Input/Interaction 批次，提供耐久修订号、待写查询、显式屏障和惰性恢复读取；
+  它不返回业务转换结果，也不决定内存提交是否成立。
 - `TurnFactory`：准备 TurnEngine、request、instructions、tools 与 execution policy。
 - `ChildLifecycle`：为 child Thread 准备/释放产品外部资源；Task 实现可以拒绝不安全的 close。
 
-通知由 pl-core 在内存 state 更新后直接发布，不经过额外 durable projection 或 replay
-journal；只有 Immediate 边界（Turn 终态、Interaction 提交与 resolution 等）等待 flush 完成后
-才发布终态事实。Task tool 自己事务性写 TaskService；core 不携带 product mutation。
+通知由 pl-core 在内存 state 更新后直接发布，不经过额外 durable projection 或 replay journal；
+Turn 终态、Interaction 提交与 resolution 都不等待 flush。发布通道关闭或消费者落后只记录诊断并
+触发从 ThreadActor 快照重同步，不得使已经提交的 Agent 进入 Faulted。Task tool 把类型化事实提交给
+TaskRuntime；core 不携带 SQLite mutation。
+
+合法 provider 输入上的 trace/Thread 投影准备错误只终结当前 Turn，使用类型化协议失败结果并让 Agent
+回到可接收输入状态。只有 ThreadActor 的复合聚合本身无法验证、或无法构造一致的 Turn 终态时，才允许
+进入 Faulted。每个独立 reasoning TracePart 内的 Thinking 与 ReasoningContent 首个增量都使用本地
+分块编号零；provider 原始 chunk index 只标识独立条目和摘要关联，条目内部真正跳号仍严格拒绝。
 
 ThreadEventBus 是 timeline 顺序的唯一分配者：新 item 的 ordinal 在通知首次应用时按到达序
 分配（`max+1`），首次分配后不可变；投影/广播/落库消费同一份规范化通知。生产者（runtime
@@ -84,7 +102,7 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 RunningTurn 包含 turnId、进程内 identity、canonical Turn running state、CancellationToken、abort handle、done、
 steer sender 与单一 budget-refresh signal。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
-abort；Turn 终态的 Immediate flush 完成后才能广播 turnCompleted。
+abort；Turn 终态完成内存提交后立即广播 turnCompleted。
 
 parent→direct-child `send_message` 是唯一预算刷新 mailbox。runtime 在 durable `TurnQueued` 提交且
 steer 被活动 Turn 接受后，以消息接受时刻推进 refresh signal；TurnEngine 在每个预算检查点应用
@@ -107,13 +125,14 @@ checkpoint 才 consume；进程在 checkpoint 前崩溃时仍可从 durable inpu
 coalescing key 属于 runtime envelope 元数据，不进入自然语言提示词或工具 schema。
 
 Studio 使用专门的 durable interaction continuation 命令。`request_user_input` 产生 typed
-`InteractionRequested` observation；ThreadActor 必须先把 pending Interaction 与原 Turn 终态一起
-通过 Immediate flush 持久化，才允许原 Turn terminal。UserInput 回答和 PlanConfirmation
+`InteractionRequested` observation；ThreadActor 必须把 pending Interaction 与原 Turn 终态放在
+同一个内存 commit 中，随后立即允许原 Turn terminal。UserInput 回答和 PlanConfirmation
 `Confirm` 与 `RevisePlan` 都由 ThreadActor 在一个 `ThreadCommit` 中同时提交 resolved Interaction、mail ID
 为 `interaction-resolution:{interactionId}` 的 hidden input 和 `TurnQueued` runtime fact。该命令固定
 采用 StartOrQueue，不读取 `active_turn_id` 猜测进程内 waiter，不 steer 活动 Turn，也不设置 queue
-coalescing key。Interaction 提交与 resolution 属于 Immediate flush 边界，落库失败上报并 resync；
-重复命令以 pending/resolved Interaction 与稳定 mail ID 幂等收束。`RevisePlan` 的 fresh Turn
+coalescing key。Interaction 提交与 resolution 立即对内存订阅者可见；落库失败进入全局持久化
+降级状态并暂停新工作，不回滚已提交事实。重复命令以 pending/resolved Interaction 与稳定 mail ID
+幂等收束。`RevisePlan` 的 fresh Turn
 仍继承 Planner `RequiredTool(task_transition)`，调整完成后必须再次提交计划并产生新的确认。
 
 RunningTurn 必须把“pending Interaction 已 durable 提交”携带为显式 completion boundary。Host 的
@@ -135,8 +154,8 @@ ThreadActor 另外提供 idle-only 的 conversation recovery 命令。Preview �
 working state、Turn 消费的 mailbox input 与 runtime/session revision，不产生 mutation；Apply 同时
 校验 expected runtime revision 与 expected session revision，并以 recoveryId 幂等。恢复时 transcript
 replacement、working state、recovery marker、Thread revision 和通知必须由同一个 `ThreadCommit`
-提交；conversation recovery 属于 Immediate flush 边界，内存是唯一 writer 不存在进程内冲突，
-落库失败上报并 resync。
+提交；conversation recovery 完成内存提交后立即可见，SQLite 异步跟随。内存是唯一 writer，不存在
+进程内冲突；落库失败只改变持久化健康状态。
 
 恢复模式为 `rewindTail | rebuildThread`。前者只接受经 user-message hash 和 tool 配对证明的安全
 前缀，后者只重建普通 transcript。两者均保留 Timeline、usage、session note、Evidence Ledger 和
@@ -156,7 +175,8 @@ Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
 pending wake。运行中 actor 缺失由 `repairThreadRuntime(threadId)` 或订阅/提交输入按需恢复；
 `readThreadSnapshot` 对未驻留 Thread 仍返回 typed inactive，不产生副作用。驻留 actor 由 manager
 的 LRU 双端队列管理：订阅、提交或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无
-pending input，超容量时从队首淘汰，淘汰前同步 flush 该 Thread 的全部 pending commits。订阅是
+pending input，超容量时从队首淘汰，淘汰前显式等待该 Thread 目标修订号耐久化，不要求冲刷无关
+owner。订阅是
 显式观察者注册：bridge 订阅 producer 存活期间持有驻留 pin，被观察的线程不参与淘汰，订阅
 取消/流关闭即解除 pin——淘汰一个仍被订阅的线程会让该订阅流永久静默（总线无事件也无关闭
 信号）。
@@ -182,6 +202,13 @@ ThreadId。Thread directory 保存 root/parent/role/path/status/progress，不�
 `wait_agents` 订阅 directory watch 后重读 snapshot，只因 progress、interaction 或 terminal
 变化返回，并只返回本次变化 agent 的最新 progress message 和精简状态；没有 timer、轮询或
 自动续轮。`list_agents` 保留完整目录查询，不作为 wait 后的重复刷新。child 内部 Item 只
-进入 child Thread。terminal/idle 的 canonical 判定必须同时要求没有 `activeTurnId`、activity 为
-idle 且 pending input 为零；fresh Turn 已分配 ID 但尚未发布首个 activity 的窗口不能泄漏上一
-Turn 的 `lastTurnOutcome`。`wait_until_idle` 与 `wait_agents` 共用该判定。
+进入 child Thread。Faulted/Closed 等非 operational 状态直接视为 terminal；Idle 只有在没有活动
+Turn 且 pending input 为零时才视为 settled。Faulted 携带的诊断 Turn 不属于 `activeTurnId` 判定。
+fresh Turn 已分配 ID 但尚未发布首个 activity 的窗口不能泄漏上一 Turn 的 `lastTurnOutcome`。
+`wait_until_idle` 与 `wait_agents` 共用该判定。
+
+Faulted 是当前 Agent 代次的 terminal 事实。Faulted Agent 与来源 Turn 失败结果完成同一内存提交后，
+runtime 立即发布目录 revision 并使 `wait_agents` 返回，同时把类型化终态投递给 TaskRuntime；SQLite
+在后台异步跟随。等待方不得复活或重放已经结束的来源 Turn。只有显式 `RecoverFaulted` 路径在快照、
+修订号与 transcript 全部验证通过后，才可终结遗留活动 Turn、清除忙碌投影并把同一会话 Agent 转为
+Idle；恢复创建下一条全新 Turn，不复活旧 TaskRun 或旧 Turn。聚合校验失败时继续保持 Faulted。

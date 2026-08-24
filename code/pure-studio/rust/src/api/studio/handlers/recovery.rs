@@ -1,11 +1,12 @@
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::runtime::{
-    bridge_recovery_cleanup_preview, bridge_task_recovery_preview, bridge_task_recovery_result,
-    task_recovery_request,
+    bridge_persistence_state, bridge_recovery_cleanup_preview, bridge_task_recovery_preview,
+    bridge_task_recovery_result, task_recovery_request,
 };
 use crate::api::studio::types::{
-    BridgeError, BridgeRecoveryCleanupPreviewDto, BridgeTaskRecoveryPreviewDto,
-    BridgeTaskRecoveryRequestDto, BridgeTaskRecoveryResultDto, RuntimeSnapshot,
+    BridgeError, BridgePersistenceStateSnapshot, BridgeRecoveryCleanupPreviewDto,
+    BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto, BridgeTaskRecoveryResultDto,
+    RuntimeSnapshot,
 };
 
 pub async fn preview_task_recovery(
@@ -71,6 +72,14 @@ pub async fn retry_recovery_issue(issue_id: String) -> Result<RuntimeSnapshot, B
     let snapshot = bridge.studio.retry_recovery_issue(&issue_id).await?;
     Ok(crate::api::studio::convert::runtime::runtime_snapshot(
         snapshot,
+    ))
+}
+
+/// 跳过当前退避并立即重试保存积压的内存事实。
+pub async fn retry_persistence() -> Result<BridgePersistenceStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_persistence_state(
+        bridge.studio.retry_persistence().await?,
     ))
 }
 

@@ -3,6 +3,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import 'agent_models.dart';
 import 'agent_workspace_view.dart';
 import 'interaction_models.dart';
+import 'persistence_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
 import 'runtime_models.dart';
@@ -18,11 +19,13 @@ part 'studio_projection_models.freezed.dart';
 abstract class ShellChromeView with _$ShellChromeView {
   const factory ShellChromeView({
     required List<StudioRecoveryIssue> applicationRecoveryIssues,
+    required PersistenceStateSnapshot persistenceState,
   }) = _ShellChromeView;
 
   factory ShellChromeView.fromState(StudioState state) {
     return ShellChromeView(
       applicationRecoveryIssues: state.applicationRecoveryIssues,
+      persistenceState: state.persistenceState,
     );
   }
 }

@@ -16,6 +16,40 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
+    pub(super) async fn recover_faulted(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
+        let AgentState::Faulted(faulted) = &self.state.snapshot.state else {
+            return Err(AgentRuntimeError::NotActive(
+                self.state.snapshot.identity.id.clone(),
+                self.state.snapshot.state.clone(),
+            ));
+        };
+        if !faulted.classification().is_recoverable() {
+            return Err(AgentRuntimeError::InvalidInput(
+                "faulted Agent requires manual recovery because its aggregate is not verified"
+                    .to_string(),
+            ));
+        }
+        let mut next = self.state.clone();
+        next.pending_inputs
+            .retain(|input| input.delivery_state.is_pending());
+        next.active_input = None;
+        next.refresh_mailbox_snapshot();
+        next.snapshot.progress = None;
+        next.snapshot
+            .transition(AgentCommand::RecoverFaulted {
+                target: super::super::AgentRecoveryTarget::Idle,
+            })
+            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+        self.commit_transition(
+            super::persist::TransitionCommit::new(next).settlement(),
+            |snapshot| AgentRuntimeEventKind::StateChanged {
+                snapshot: Box::new(snapshot),
+            },
+        )
+        .await?;
+        Ok(self.state.snapshot.clone())
+    }
+
     pub(super) async fn reconfigure_idle_role(
         &mut self,
         role: AgentRoleId,
@@ -43,7 +77,7 @@ where
         let mut next = self.state.clone();
         next.snapshot.identity.role = role;
         self.commit_transition(
-            super::persist::TransitionCommit::new(next).immediate(),
+            super::persist::TransitionCommit::new(next).settlement(),
             |snapshot| AgentRuntimeEventKind::StateChanged {
                 snapshot: Box::new(snapshot),
             },
@@ -98,7 +132,7 @@ where
         closing.active_input = None;
         if let Err(error) = self
             .commit_transition(
-                super::persist::TransitionCommit::new(closing).immediate(),
+                super::persist::TransitionCommit::new(closing).settlement(),
                 |snapshot| AgentRuntimeEventKind::StateChanged {
                     snapshot: Box::new(snapshot),
                 },
@@ -137,7 +171,7 @@ where
         closed.snapshot.pending_inputs = 0;
         if let Err(error) = self
             .commit_transition(
-                super::persist::TransitionCommit::new(closed).immediate(),
+                super::persist::TransitionCommit::new(closed).settlement(),
                 |snapshot| AgentRuntimeEventKind::StateChanged {
                     snapshot: Box::new(snapshot),
                 },
@@ -175,6 +209,7 @@ where
                     retryable: false,
                 },
                 turn_id: None,
+                classification: super::super::AgentFaultClassification::AggregateCorruption,
             },
         };
         next.snapshot
@@ -183,7 +218,7 @@ where
         let event_compensation = compensation;
         if let Err(error) = self
             .commit_transition(
-                super::persist::TransitionCommit::new(next).immediate(),
+                super::persist::TransitionCommit::new(next).settlement(),
                 move |snapshot| match event_compensation {
                     CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged {
                         snapshot: Box::new(snapshot),

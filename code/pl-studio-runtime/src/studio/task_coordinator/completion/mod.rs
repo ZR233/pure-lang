@@ -67,13 +67,9 @@ impl TaskCoordinator {
         origin: TaskStopOrigin,
         reason: TaskStopReason,
     ) -> Result<TaskStopOutput> {
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(thread_id)
-            .await?;
         let stopped = self
-            .store
-            .request_task_stop(&run.id, origin, &reason)
+            .task_runtime
+            .stop_task(thread_id, origin, &reason)
             .await?;
         interrupt_task_agents(runtime, thread_id, origin).await?;
         Ok(TaskStopOutput {

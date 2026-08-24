@@ -124,6 +124,57 @@ fn raw_reasoning_starts_the_part_and_later_summary_updates_the_same_part() {
 }
 
 #[test]
+fn provider_reasoning_chunk_indices_are_local_to_distinct_parts() {
+    let mut trace = trace();
+
+    let first = trace.append_reasoning_content_delta("thinking", 0, "first raw".to_string());
+    let second = trace.append_reasoning_content_delta("thinking", 1, "second raw".to_string());
+    let completed = trace
+        .complete_thinking(
+            "thinking",
+            Some(vec![
+                "first summary".to_string(),
+                "second summary".to_string(),
+            ]),
+        )
+        .into_iter()
+        .filter_map(completed_thinking_item)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        first.into_iter().find_map(delta_item_id),
+        Some("inference-1-reasoning-1".to_string())
+    );
+    assert_eq!(
+        second.into_iter().find_map(delta_item_id),
+        Some("inference-1-reasoning-2".to_string())
+    );
+    assert_eq!(completed.len(), 2);
+    assert_eq!(trace_part_text(&completed[0]), "first summary");
+    assert_eq!(trace_part_text(&completed[1]), "second summary");
+    assert_eq!(
+        completed[0]
+            .thinking()
+            .expect("first thinking part")
+            .content()
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<String>(),
+        "first raw"
+    );
+    assert_eq!(
+        completed[1]
+            .thinking()
+            .expect("second thinking part")
+            .content()
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<String>(),
+        "second raw"
+    );
+}
+
+#[test]
 fn raw_only_reasoning_is_preserved_in_the_authoritative_part() {
     let mut trace = trace();
 

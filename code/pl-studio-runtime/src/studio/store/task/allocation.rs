@@ -1,26 +1,20 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait, sea_query::Expr,
+    TransactionTrait,
 };
 
 use super::task_run_record;
-use super::work_unit::{apply_work_unit_command, work_unit_record, work_unit_state};
+use super::work_unit::work_unit_record;
 use crate::agent::worktree::git_compatible_path;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, TaskSpawnFailure, WorkUnit,
-    WorkUnitCommand, WorkUnitState, WorkUnitStateKind,
+    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, WorkUnitState,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
-
-enum ExecutorAllocationTransition {
-    Activate,
-    Fail(Box<TaskSpawnFailure>),
-}
 
 impl StudioStore {
     pub(crate) async fn allocate_executor(
@@ -159,113 +153,6 @@ impl StudioStore {
             work_unit,
             reused: false,
         })
-    }
-
-    pub(crate) async fn activate_executor(&self, work_unit_id: &str, agent_id: &str) -> Result<()> {
-        self.update_executor_allocation(
-            work_unit_id,
-            agent_id,
-            ExecutorAllocationTransition::Activate,
-        )
-        .await
-    }
-
-    pub(crate) async fn record_executor_spawn_failure(
-        &self,
-        work_unit_id: &str,
-        agent_id: &str,
-        failure: TaskSpawnFailure,
-    ) -> Result<()> {
-        self.update_executor_allocation(
-            work_unit_id,
-            agent_id,
-            ExecutorAllocationTransition::Fail(Box::new(failure)),
-        )
-        .await
-    }
-
-    pub(crate) async fn record_executor_worktree_base(
-        &self,
-        work_unit_id: &str,
-        agent_id: &str,
-        actual_base_commit: &str,
-    ) -> Result<WorkUnit> {
-        let actual_base_commit = actual_base_commit.trim();
-        if actual_base_commit.is_empty() {
-            bail!("executor worktree resolved an empty base commit");
-        }
-        let tx = self.db.begin().await?;
-        let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
-            .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
-            .one(&tx)
-            .await?
-            .context("executor work unit not found while recording worktree base")?;
-        let state = work_unit_state(&model)?;
-        if state.kind() != WorkUnitStateKind::Pending {
-            bail!("executor worktree base can only be recorded for a pending WorkUnit");
-        }
-        if model.base_commit == actual_base_commit {
-            let work_unit = work_unit_record(model)?;
-            tx.commit().await?;
-            return Ok(work_unit);
-        }
-        if model.base_commit != "HEAD" {
-            bail!("executor WorkUnit base commit changed before worktree creation completed");
-        }
-        let next_revision = model
-            .revision
-            .checked_add(1)
-            .context("WorkUnit revision overflow")?;
-        let update = entities::work_unit::Entity::update_many()
-            .col_expr(
-                entities::work_unit::Column::BaseCommit,
-                Expr::value(actual_base_commit.to_string()),
-            )
-            .col_expr(
-                entities::work_unit::Column::Revision,
-                Expr::value(next_revision),
-            )
-            .col_expr(
-                entities::work_unit::Column::UpdatedAt,
-                Expr::value(unix_seconds()),
-            )
-            .filter(entities::work_unit::Column::Id.eq(model.id.clone()))
-            .filter(entities::work_unit::Column::Revision.eq(model.revision))
-            .exec(&tx)
-            .await?;
-        if update.rows_affected != 1 {
-            bail!("WorkUnit base commit update lost its revision CAS");
-        }
-        let updated = entities::work_unit::Entity::find_by_id(model.id)
-            .one(&tx)
-            .await?
-            .context("WorkUnit disappeared after base commit update")?;
-        let work_unit = work_unit_record(updated)?;
-        tx.commit().await?;
-        Ok(work_unit)
-    }
-
-    async fn update_executor_allocation(
-        &self,
-        work_unit_id: &str,
-        agent_id: &str,
-        transition: ExecutorAllocationTransition,
-    ) -> Result<()> {
-        let tx = self.db.begin().await?;
-        let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
-            .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
-            .one(&tx)
-            .await?
-            .context("executor work unit not found")?;
-        let command = match &transition {
-            ExecutorAllocationTransition::Activate => WorkUnitCommand::Activate,
-            ExecutorAllocationTransition::Fail(failure) => WorkUnitCommand::FailSpawn {
-                failure: Box::new(failure.as_ref().clone()),
-            },
-        };
-        apply_work_unit_command(&tx, work_unit, command).await?;
-        tx.commit().await?;
-        Ok(())
     }
 }
 

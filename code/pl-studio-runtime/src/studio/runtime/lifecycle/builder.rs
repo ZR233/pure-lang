@@ -1,10 +1,12 @@
 use anyhow::Result;
 
 use crate::config::{ConfigPaths, ConfigRuntime, ConfigStore};
-use crate::studio::agent_host::StudioAgentResources;
+use crate::studio::agent_host::{StudioAgentRepository, StudioAgentResources};
 use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionService, ProductEventBus, StudioRuntimeState, StudioStore};
+use crate::studio::{
+    InteractionService, ProductEventBus, StudioRuntimeState, StudioStore, TaskRuntime,
+};
 use crate::{McpConnector, McpRuntime};
 
 use super::super::StudioRuntime;
@@ -82,9 +84,13 @@ impl StudioRuntime {
         instance_lock: Option<RuntimeLock>,
     ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
-        let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
         let interactions = InteractionService::new(store.clone());
         let product_events = ProductEventBus::new(store.clone());
+        let task_runtime = TaskRuntime::new(store.clone(), product_events.clone());
+        let persistence = StudioAgentRepository::with_writer(store.clone(), task_runtime.writer());
+        product_events.observe_persistence(persistence.writer().subscribe_state());
+        let task_coordinator =
+            std::sync::Arc::new(TaskCoordinator::new(store.clone(), task_runtime.clone()));
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
         let mcp_shared_tools = std::sync::Arc::new(pl_core::ToolRegistry::new());
@@ -111,7 +117,7 @@ impl StudioRuntime {
                 framework: Default::default(),
                 resources: StudioAgentResources::default(),
                 interactions,
-                persistence: Default::default(),
+                persistence: std::sync::Arc::new(tokio::sync::Mutex::new(Some(persistence))),
                 product_events: product_events.clone(),
             },
             runtime_state,
@@ -120,6 +126,7 @@ impl StudioRuntime {
             provider_usage,
             updater,
             activation: Default::default(),
+            task_runtime,
             task_coordinator,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]

@@ -6,17 +6,17 @@ use std::sync::{
 
 use anyhow::Result;
 use pl_protocol::{ObservedResource, Thread};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::{
-    ProviderUsageStateSnapshot, SkillsStateSnapshot, StudioAgentDirectoryData,
-    StudioAgentDirectoryEntry, StudioAgentDirectoryState, StudioLspStateSnapshot,
-    StudioMcpStateSnapshot, StudioProductEventEnvelope, StudioProductEventKind,
-    StudioProjectDirectoryData, StudioProjectDirectoryState, StudioRecoveryStateSnapshot,
-    StudioSettingsStateSnapshot, StudioTaskDirectoryData, StudioTaskDirectoryEntry,
-    StudioTaskDirectoryState, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
-    StudioThreadDirectoryPage, StudioThreadDirectoryPageData, StudioThreadDirectoryState,
-    StudioUpdateStateSnapshot,
+    PersistenceStateSnapshot, ProviderUsageStateSnapshot, SkillsStateSnapshot,
+    StudioAgentDirectoryData, StudioAgentDirectoryEntry, StudioAgentDirectoryState,
+    StudioLspStateSnapshot, StudioMcpStateSnapshot, StudioProductEventEnvelope,
+    StudioProductEventKind, StudioProjectDirectoryData, StudioProjectDirectoryState,
+    StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot, StudioTaskDirectoryData,
+    StudioTaskDirectoryEntry, StudioTaskDirectoryState, StudioThreadDirectoryData,
+    StudioThreadDirectoryDelta, StudioThreadDirectoryPage, StudioThreadDirectoryPageData,
+    StudioThreadDirectoryState, StudioUpdateStateSnapshot,
 };
 
 use super::{StudioStore, ids::unix_seconds};
@@ -26,10 +26,8 @@ const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
 
 /// Studio 低频产品状态 owner 与事件通道。
 ///
-/// SQLite 是 project/thread/task 的 canonical facts；`threads` 的列表元数据在启动时
-/// 建成常驻内存目录索引，此后由增量 mutation 同步维护——目录查询与
-/// `ThreadDirectoryChanged` 事件都从索引派生，不重读数据库。其余目录只持有单调
-/// revision、agent live directory 与 transport。所有 `read_*` 都是纯查询。
+/// 启动时以 SQLite 建立恢复基线；运行期间 Project、Thread、Task 与 Agent 目录快照
+/// 都由内存增量提交维护。所有 `read_*` 都是纯查询，活动事件不得回读数据库覆盖热事实。
 #[derive(Clone)]
 pub struct ProductEventBus {
     store: StudioStore,
@@ -37,6 +35,8 @@ pub struct ProductEventBus {
     sequence: Arc<AtomicU64>,
     revisions: Arc<ProductStateRevisions>,
     task_snapshot: Arc<Mutex<Option<Vec<StudioTaskDirectoryEntry>>>>,
+    project_snapshot: Arc<Mutex<Vec<crate::ProjectRecord>>>,
+    persistence_snapshot: Arc<std::sync::Mutex<PersistenceStateSnapshot>>,
     agents: Arc<Mutex<BTreeMap<String, StudioAgentDirectoryEntry>>>,
     /// 常驻内存 Thread 目录索引（thread id → 列表元数据）。
     thread_index: Arc<std::sync::Mutex<HashMap<String, Thread>>>,
@@ -66,6 +66,10 @@ impl ProductEventBus {
             sequence: Arc::new(AtomicU64::new(0)),
             revisions: Arc::new(ProductStateRevisions::default()),
             task_snapshot: Arc::new(Mutex::new(None)),
+            project_snapshot: Arc::new(Mutex::new(Vec::new())),
+            persistence_snapshot: Arc::new(std::sync::Mutex::new(
+                PersistenceStateSnapshot::default(),
+            )),
             agents: Arc::new(Mutex::new(BTreeMap::new())),
             thread_index: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -98,7 +102,8 @@ impl ProductEventBus {
         self.initialize_revision(&self.revisions.task);
         self.initialize_revision(&self.revisions.agent);
         self.initialize_revision(&self.revisions.recovery);
-        *self.task_snapshot.lock().await = Some(self.load_tasks().await?);
+        *self.task_snapshot.lock().await = Some(Vec::new());
+        *self.project_snapshot.lock().await = self.store.list_projects().await?;
         let index_threads = self.load_index_threads().await?;
         let mut index = self
             .thread_index
@@ -130,10 +135,14 @@ impl ProductEventBus {
             state: self.resource(
                 &self.revisions.project,
                 StudioProjectDirectoryData {
-                    projects: self.store.list_projects().await?,
+                    projects: self.project_snapshot.lock().await.clone(),
                 },
             ),
         })
+    }
+
+    pub(in crate::studio) async fn project_snapshot(&self) -> Vec<crate::ProjectRecord> {
+        self.project_snapshot.lock().await.clone()
     }
 
     pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
@@ -210,30 +219,6 @@ impl ProductEventBus {
         )))
     }
 
-    /// 重读受影响 Thread 的 canonical 行并发布目录增量（归档/删除按移除处理）。
-    ///
-    /// 直接 store mutation（创建、归档、重命名、状态修复）之后调用；actor 的
-    /// write-behind 提交由 observer 路径维护索引。
-    pub async fn emit_thread_delta_for(&self, thread_ids: &[String]) -> Result<()> {
-        let mut upserted = Vec::new();
-        let mut removed = Vec::new();
-        for id in thread_ids {
-            match self.store.read_thread(id).await? {
-                Some(record)
-                    if record.visibility != crate::studio::records::ThreadVisibility::Archived =>
-                {
-                    upserted.push(record.into())
-                }
-                _ => removed.push(id.clone()),
-            }
-        }
-        if upserted.is_empty() && removed.is_empty() {
-            return Ok(());
-        }
-        self.apply_thread_delta(upserted, removed).await?;
-        Ok(())
-    }
-
     fn sorted_thread_index(&self) -> Vec<Thread> {
         let mut threads = self
             .thread_index
@@ -251,15 +236,27 @@ impl ProductEventBus {
         threads
     }
 
+    /// 从常驻内存目录读取活动 Thread 元数据，不触发 SQLite 冷读取。
+    pub(in crate::studio) fn thread_snapshot(&self, thread_id: &str) -> Option<Thread> {
+        self.thread_index
+            .lock()
+            .expect("thread index lock poisoned")
+            .get(thread_id)
+            .cloned()
+    }
+
     pub async fn read_task_directory(&self) -> Result<StudioTaskDirectoryState> {
+        let tasks = self.task_snapshot.lock().await.clone().unwrap_or_default();
         Ok(StudioTaskDirectoryState {
-            state: self.resource(
-                &self.revisions.task,
-                StudioTaskDirectoryData {
-                    tasks: self.load_tasks().await?,
-                },
-            ),
+            state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
         })
+    }
+
+    pub(in crate::studio) async fn initialize_task_directory(
+        &self,
+        tasks: Vec<StudioTaskDirectoryEntry>,
+    ) {
+        *self.task_snapshot.lock().await = Some(tasks);
     }
 
     pub async fn read_agent_directory(&self) -> StudioAgentDirectoryState {
@@ -282,7 +279,38 @@ impl ProductEventBus {
         }
     }
 
-    pub async fn emit_project_directory(&self) -> Result<StudioProductEventEnvelope> {
+    /// 把调用方已经提交的 Project 事实直接应用到内存目录。
+    pub async fn apply_project_entry(
+        &self,
+        project: crate::ProjectRecord,
+    ) -> Result<StudioProductEventEnvelope> {
+        let mut projects = self.project_snapshot.lock().await;
+        if let Some(existing) = projects.iter_mut().find(|entry| entry.id == project.id) {
+            *existing = project;
+        } else {
+            projects.push(project);
+        }
+        projects.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        drop(projects);
+        self.bump(&self.revisions.project);
+        let state = self.read_project_directory().await?;
+        Ok(self.emit(StudioProductEventKind::ProjectDirectoryChanged(state)))
+    }
+
+    /// 从活动 Project 目录移除一个已归档或隔离的 Project。
+    pub async fn remove_project_entry(
+        &self,
+        project_id: &str,
+    ) -> Result<StudioProductEventEnvelope> {
+        self.project_snapshot
+            .lock()
+            .await
+            .retain(|project| project.id != project_id);
         self.bump(&self.revisions.project);
         let state = self.read_project_directory().await?;
         Ok(self.emit(StudioProductEventKind::ProjectDirectoryChanged(state)))
@@ -304,17 +332,51 @@ impl ProductEventBus {
         self.emit_agent_directory(self.read_agent_directory().await)
     }
 
-    /// 重新读取并在内容真正变化时发布完整 task directory。
-    pub async fn refresh_task(
+    /// 应用 TaskRuntime 已经提交的完整热投影。
+    pub async fn apply_task_entry(
         &self,
-        _root_thread_id: &str,
+        entry: StudioTaskDirectoryEntry,
     ) -> Result<Option<StudioProductEventEnvelope>> {
-        let tasks = self.load_tasks().await?;
         let mut previous = self.task_snapshot.lock().await;
-        if previous.as_ref() == Some(&tasks) {
+        let tasks = previous.get_or_insert_default();
+        if tasks
+            .iter()
+            .find(|task| task.root_thread_id == entry.root_thread_id)
+            == Some(&entry)
+        {
             return Ok(None);
         }
-        *previous = Some(tasks.clone());
+        if let Some(existing) = tasks
+            .iter_mut()
+            .find(|task| task.root_thread_id == entry.root_thread_id)
+        {
+            *existing = entry;
+        } else {
+            tasks.push(entry);
+        }
+        tasks.sort_by(|left, right| left.root_thread_id.cmp(&right.root_thread_id));
+        let tasks = tasks.clone();
+        drop(previous);
+        self.bump(&self.revisions.task);
+        Ok(Some(self.emit(
+            StudioProductEventKind::TaskDirectoryChanged(StudioTaskDirectoryState {
+                state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
+            }),
+        )))
+    }
+
+    pub async fn remove_task_entry(
+        &self,
+        root_thread_id: &str,
+    ) -> Result<Option<StudioProductEventEnvelope>> {
+        let mut previous = self.task_snapshot.lock().await;
+        let tasks = previous.get_or_insert_default();
+        let length = tasks.len();
+        tasks.retain(|task| task.root_thread_id != root_thread_id);
+        if tasks.len() == length {
+            return Ok(None);
+        }
+        let tasks = tasks.clone();
         drop(previous);
         self.bump(&self.revisions.task);
         Ok(Some(self.emit(
@@ -369,22 +431,37 @@ impl ProductEventBus {
         self.emit(StudioProductEventKind::UpdaterStateChanged(state))
     }
 
-    async fn load_tasks(&self) -> Result<Vec<StudioTaskDirectoryEntry>> {
-        let mut tasks = Vec::new();
-        for project in self.store.list_projects().await? {
-            for thread in self.store.list_root_threads(&project.id).await? {
-                if let Some(task) =
-                    super::task_projection::load_task_runtime(&self.store, &thread.id).await?
-                {
-                    tasks.push(StudioTaskDirectoryEntry {
-                        root_thread_id: thread.id,
-                        task,
-                    });
-                }
+    pub fn persistence_state(&self) -> PersistenceStateSnapshot {
+        self.persistence_snapshot
+            .lock()
+            .expect("persistence snapshot lock poisoned")
+            .clone()
+    }
+
+    pub(in crate::studio) fn observe_persistence(
+        &self,
+        mut state: watch::Receiver<PersistenceStateSnapshot>,
+    ) {
+        let bus = self.clone();
+        bus.update_persistence(state.borrow().clone());
+        tokio::spawn(async move {
+            while state.changed().await.is_ok() {
+                bus.update_persistence(state.borrow_and_update().clone());
             }
+        });
+    }
+
+    fn update_persistence(&self, state: PersistenceStateSnapshot) {
+        let mut current = self
+            .persistence_snapshot
+            .lock()
+            .expect("persistence snapshot lock poisoned");
+        if state.revision <= current.revision {
+            return;
         }
-        tasks.sort_by(|left, right| left.root_thread_id.cmp(&right.root_thread_id));
-        Ok(tasks)
+        *current = state.clone();
+        drop(current);
+        self.emit(StudioProductEventKind::PersistenceStateChanged(state));
     }
 
     fn initialize_revision(&self, state: &DomainRevision) {
@@ -462,6 +539,45 @@ mod tests {
         }
         runtime.initialize_directories().await.expect("directories");
         runtime
+    }
+
+    #[tokio::test]
+    async fn project_directory_changes_only_when_the_memory_owner_applies_a_fact() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let runtime = ProductEventBus::new(store.clone());
+        runtime.initialize_directories().await.expect("directories");
+        let workspace = std::env::temp_dir().join("pure-project-memory-owner");
+        let project = store.upsert_project(&workspace).await.expect("project");
+        runtime
+            .apply_project_entry(project.clone())
+            .await
+            .expect("hot project");
+        store
+            .quarantine_project(&project.id)
+            .await
+            .expect("cold archive");
+
+        let hot = runtime
+            .read_project_directory()
+            .await
+            .expect("hot directory");
+        assert_eq!(hot.state.value().unwrap().projects, vec![project.clone()]);
+
+        runtime
+            .remove_project_entry(&project.id)
+            .await
+            .expect("remove hot project");
+        assert!(
+            runtime
+                .read_project_directory()
+                .await
+                .unwrap()
+                .state
+                .value()
+                .unwrap()
+                .projects
+                .is_empty()
+        );
     }
 
     #[tokio::test]

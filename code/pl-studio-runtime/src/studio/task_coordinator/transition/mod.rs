@@ -6,7 +6,10 @@ use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{TaskCoordinator, TaskRun, TaskRunStateKind};
+use super::{
+    TaskCommand, TaskCoordinator, TaskFailureKind, TaskOutcome, TaskReviewGate, TaskRun,
+    TaskRunStateKind,
+};
 use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
 use crate::{AgentRuntimeHandle, StudioIntegratedReviewGate, ToolEffect};
 
@@ -130,9 +133,12 @@ impl TaskCoordinator {
                     .as_deref()
                     .context("task_transition requires a provider call id")?;
                 let current = coordinator
-                    .store
-                    .read_active_task_run_for_root_thread(&thread_id)
-                    .await?;
+                    .task_runtime
+                    .aggregate(&thread_id)
+                    .await
+                    .context("active TaskRun is not resident in TaskRuntime")?
+                    .facts
+                    .run;
                 let action = input.action;
                 let requested_outcome = input.outcome;
                 let previous_state = current.kind();
@@ -185,26 +191,15 @@ impl TaskCoordinator {
                         Ok::<_, anyhow::Error>(if ends_turn { result.ending_turn() } else { result })
                     }
                     Err(error) => {
-                        let latest = match coordinator.store.read_task_run(&current.id).await {
-                            Ok(Some(latest)) => latest,
-                            Ok(None) => {
+                        let latest = match coordinator.task_runtime.aggregate(&thread_id).await {
+                            Some(latest) => latest.facts.run,
+                            None => {
                                 return transition_result(TaskTransitionOutput::failed(
                                     &current,
                                     action,
                                     format!(
                                         "{error}; transition audit could not find TaskRun {}",
                                         current.id
-                                    ),
-                                    state_only_transition_paths(current.kind()),
-                                    false,
-                                ));
-                            }
-                            Err(audit_error) => {
-                                return transition_result(TaskTransitionOutput::failed(
-                                    &current,
-                                    action,
-                                    format!(
-                                        "{error}; transition audit failed to read canonical TaskRun: {audit_error}"
                                     ),
                                     state_only_transition_paths(current.kind()),
                                     false,
@@ -267,10 +262,30 @@ impl TaskCoordinator {
                     input.summary.as_deref(),
                     "submitPlan requires summary as the complete plan",
                 )?;
-                let (run, interaction) = self
-                    .store
-                    .submit_task_plan(thread_id, plan, requested_by_call_id, version.0, version.1)
+                let run = self
+                    .task_runtime
+                    .submit_plan(thread_id, plan, version.0, version.1)
                     .await?;
+                let plan_revision = run
+                    .plan
+                    .as_ref()
+                    .context("submitted Task plan disappeared")?
+                    .revision;
+                let interaction_id = format!("plan-confirmation-{}-{requested_by_call_id}", run.id);
+                let now = crate::studio::unix_seconds();
+                let interaction = crate::InteractionRequest::plan_confirmation(
+                    interaction_id.clone(),
+                    crate::InteractionScope {
+                        thread_id: thread_id.to_string(),
+                        turn_id: requested_by_call_id.to_string(),
+                        item_id: Some(interaction_id.clone()),
+                        tool_id: Some(requested_by_call_id.to_string()),
+                        agent_path: Some(thread_id.to_string()),
+                    },
+                    format!("{}:{plan_revision}", run.id),
+                    plan,
+                    now,
+                );
                 runtime
                     .record_thread_facts(
                         crate::studio::agent_host::root_agent_id(thread_id),
@@ -284,11 +299,6 @@ impl TaskCoordinator {
                     )
                     .await
                     .map_err(anyhow::Error::msg)?;
-                let plan_revision = run
-                    .plan
-                    .as_ref()
-                    .context("submitted Task plan disappeared")?
-                    .revision;
                 Ok((
                     run,
                     vec![
@@ -304,8 +314,15 @@ impl TaskCoordinator {
                     "finishDocumentEditing requires summary",
                 )?;
                 let run = self
-                    .store
-                    .finish_task_document_editing(thread_id, version.0, version.1, summary)
+                    .task_runtime
+                    .apply_run_command(
+                        thread_id,
+                        version.0,
+                        version.1,
+                        TaskCommand::FinishDocumentEditing {
+                            summary: summary.to_string(),
+                        },
+                    )
                     .await?;
                 let mail_id = format!("task-working:{}:{}", run.id, run.revision);
                 runtime
@@ -339,9 +356,12 @@ impl TaskCoordinator {
                     )
                     .await?;
                 let run = self
-                    .store
-                    .read_active_task_run_for_root_thread(thread_id)
-                    .await?;
+                    .task_runtime
+                    .aggregate(thread_id)
+                    .await
+                    .context("integrated-review Task aggregate is not resident")?
+                    .facts
+                    .run;
                 Ok((
                     run,
                     vec![serde_json::to_value(&review)?],
@@ -359,7 +379,7 @@ impl TaskCoordinator {
                     "cancelIntegratedReview requires reason",
                 )?;
                 let run = self
-                    .store
+                    .task_runtime
                     .cancel_integrated_review(
                         thread_id,
                         review_round_id,
@@ -381,14 +401,16 @@ impl TaskCoordinator {
                 let run = match outcome {
                     CompletionOutcomeInput::Succeeded => {
                         ensure_no_active_task_children(runtime, thread_id).await?;
-                        let current = self
-                            .store
-                            .read_active_task_run_for_root_thread(thread_id)
-                            .await?;
-                        let work_units = self.store.list_work_units(&current.id).await?;
-                        let completions = self.store.list_work_completions(&current.id).await?;
-                        let merges = self.store.list_merge_records(&current.id).await?;
-                        let reviews = self.store.list_review_rounds(&current.id).await?;
+                        let aggregate = self
+                            .task_runtime
+                            .aggregate(thread_id)
+                            .await
+                            .context("active Task aggregate is not resident")?;
+                        let current = aggregate.facts.run;
+                        let work_units = aggregate.facts.work_units;
+                        let completions = aggregate.facts.completions;
+                        let merges = aggregate.facts.merges;
+                        let reviews = aggregate.facts.reviews;
                         let gate = super::review::integrated_review_gate(
                             &current,
                             &work_units,
@@ -400,25 +422,51 @@ impl TaskCoordinator {
                         if matches!(gate, StudioIntegratedReviewGate::Required { .. }) {
                             bail!("success completion gate is not satisfied: {gate:?}");
                         }
-                        self.store
-                            .complete_task(thread_id, &gate, summary, version.0, version.1)
+                        if !self
+                            .store
+                            .list_pending_interactions(thread_id)
+                            .await?
+                            .is_empty()
+                        {
+                            bail!("task root Thread still has pending interactions");
+                        }
+                        if self.store.read_thread_todo(thread_id).await?.is_some() {
+                            bail!("task root Thread still has an unfinished todo");
+                        }
+                        self.task_runtime
+                            .complete_task(
+                                thread_id,
+                                version.0,
+                                version.1,
+                                TaskOutcome::Succeeded {
+                                    summary: summary.to_string(),
+                                    completed_at: crate::studio::unix_seconds(),
+                                    review_gate: task_review_gate(&gate)?,
+                                },
+                            )
                             .await?
                     }
                     CompletionOutcomeInput::Failed => {
-                        self.store
-                            .fail_task(
+                        self.task_runtime
+                            .complete_task(
                                 thread_id,
-                                summary,
-                                required(
-                                    input.evidence.as_deref(),
-                                    "failed completion requires evidence",
-                                )?,
-                                required(
-                                    input.cause.as_deref(),
-                                    "failed completion requires cause",
-                                )?,
                                 version.0,
                                 version.1,
+                                TaskOutcome::Failed {
+                                    kind: TaskFailureKind::UnableToProceed,
+                                    summary: summary.to_string(),
+                                    evidence: required(
+                                        input.evidence.as_deref(),
+                                        "failed completion requires evidence",
+                                    )?
+                                    .to_string(),
+                                    cause: required(
+                                        input.cause.as_deref(),
+                                        "failed completion requires cause",
+                                    )?
+                                    .to_string(),
+                                    completed_at: crate::studio::unix_seconds(),
+                                },
                             )
                             .await?
                     }
@@ -439,16 +487,18 @@ impl TaskCoordinator {
                     "resolveIssue requires resolutionEvidence",
                 )?;
                 let run = self
-                    .store
-                    .resolve_task_issue(crate::studio::store::ResolveTaskIssue {
-                        root_thread_id: thread_id,
-                        issue_id,
-                        requested_by_call_id,
-                        summary,
-                        evidence,
-                        expected_revision: version.0,
-                        expected_generation: version.1,
-                    })
+                    .task_runtime
+                    .resolve_issue(
+                        thread_id,
+                        crate::studio::task_runtime::ResolveTaskIssue {
+                            issue_id,
+                            operation_id: requested_by_call_id,
+                            summary,
+                            evidence,
+                            expected_revision: version.0,
+                            expected_generation: version.1,
+                        },
+                    )
                     .await?;
                 Ok((
                     run,
@@ -467,16 +517,25 @@ impl TaskCoordinator {
         run: &TaskRun,
         runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<Vec<TransitionPath>> {
-        let work_units = self.store.list_work_units(&run.id).await?;
-        let completions = self.store.list_work_completions(&run.id).await?;
-        let merges = self.store.list_merge_records(&run.id).await?;
-        let reviews = self.store.list_review_rounds(&run.id).await?;
+        let aggregate = self
+            .task_runtime
+            .aggregate(&run.root_thread_id)
+            .await
+            .context("Task aggregate is not resident while assembling transition paths")?;
+        anyhow::ensure!(
+            aggregate.facts.run.id == run.id,
+            "resident Task aggregate changed while assembling transition paths"
+        );
+        let work_units = aggregate.facts.work_units;
+        let completions = aggregate.facts.completions;
+        let merges = aggregate.facts.merges;
+        let reviews = aggregate.facts.reviews;
         let pending_interactions = self
             .store
             .list_pending_interactions(&run.root_thread_id)
             .await?;
         let todo = self.store.read_thread_todo(&run.root_thread_id).await?;
-        let issues = self.store.list_task_issues(&run.id).await?;
+        let issues = aggregate.facts.issues;
         let execution = self.model_execution_activity(run, runtime).await?;
         let review_gate = super::review::integrated_review_gate(
             run,
@@ -540,6 +599,25 @@ impl TaskCoordinator {
         }
         Ok(paths)
     }
+}
+
+fn task_review_gate(gate: &StudioIntegratedReviewGate) -> Result<TaskReviewGate> {
+    Ok(match gate {
+        StudioIntegratedReviewGate::NotRequiredNoDelivery => TaskReviewGate::NotRequiredNoDelivery,
+        StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
+            work_unit_id, ..
+        } => TaskReviewGate::NotRequiredSingleExecutor {
+            work_unit_id: work_unit_id.clone(),
+        },
+        StudioIntegratedReviewGate::SatisfiedByReview {
+            review_round_id, ..
+        } => TaskReviewGate::IntegratedReview {
+            review_round_id: review_round_id.clone(),
+        },
+        StudioIntegratedReviewGate::Required { reason } => {
+            bail!("integrated review is still required: {reason}")
+        }
+    })
 }
 
 impl TaskTransitionInput {

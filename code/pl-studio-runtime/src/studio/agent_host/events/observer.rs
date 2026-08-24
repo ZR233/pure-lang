@@ -16,6 +16,7 @@ pub(in crate::studio) struct StudioAgentCommitObserver {
     sender: mpsc::UnboundedSender<AgentCommittedEvent>,
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
     store: StudioStore,
+    coordinator: std::sync::Arc<TaskCoordinator>,
 }
 
 impl StudioAgentCommitObserver {
@@ -29,7 +30,6 @@ impl StudioAgentCommitObserver {
         let (runtime, runtime_receiver) = watch::channel(None);
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let projector = StudioAgentEventProjector {
-            store: store.clone(),
             resources,
             product_events,
             coordinator: coordinator.clone(),
@@ -50,6 +50,7 @@ impl StudioAgentCommitObserver {
             sender,
             runtime,
             store,
+            coordinator,
         }
     }
 
@@ -58,10 +59,16 @@ impl StudioAgentCommitObserver {
         match self.store.list_pending_executor_continuations().await {
             Ok(continuations) => {
                 for continuation in continuations {
-                    if let Err(error) =
-                        recover_executor_continuation(&runtime, &self.store, &continuation).await
+                    if let Err(error) = recover_executor_continuation(
+                        &runtime,
+                        &self.store,
+                        &self.coordinator.task_runtime(),
+                        &continuation,
+                    )
+                    .await
                         && let Err(store_error) = self
-                            .store
+                            .coordinator
+                            .task_runtime()
                             .fail_executor_continuation(&continuation, &error.to_string())
                             .await
                     {
@@ -78,7 +85,8 @@ impl StudioAgentCommitObserver {
             ),
         }
         if let Err(error) =
-            materialize_pending_task_planner_wakes(&runtime, &self.store, None).await
+            materialize_pending_task_planner_wakes(&runtime, &self.coordinator.task_runtime(), None)
+                .await
         {
             tracing::warn!(
                 error_bytes = error.to_string().len(),

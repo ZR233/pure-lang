@@ -2,9 +2,9 @@ use anyhow::Result;
 use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 
 use super::runtime::{
-    bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_project_directory,
-    bridge_provider_usage_state, bridge_recovery_state, bridge_settings_state, bridge_skills_state,
-    bridge_task_directory, bridge_update_state,
+    bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_persistence_state,
+    bridge_project_directory, bridge_provider_usage_state, bridge_recovery_state,
+    bridge_settings_state, bridge_skills_state, bridge_task_directory, bridge_update_state,
 };
 use super::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
@@ -62,6 +62,9 @@ pub(crate) fn bridge_product_event(
             }
             StudioProductEventKind::UpdaterStateChanged(state) => {
                 BridgeProductEventPayload::UpdaterStateChanged(bridge_update_state(state))
+            }
+            StudioProductEventKind::PersistenceStateChanged(state) => {
+                BridgeProductEventPayload::PersistenceStateChanged(bridge_persistence_state(state))
             }
         },
     })

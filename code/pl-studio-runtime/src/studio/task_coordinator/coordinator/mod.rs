@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use tokio::sync::MutexGuard;
 
 use super::{CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskWorktreeOwnerSnapshot};
+use crate::studio::TaskRuntime;
 use crate::studio::runtime_state::StudioRecoveryIssue;
 use crate::studio::store::StudioStore;
 use crate::{AgentRuntimeHandle, AgentState};
@@ -50,6 +51,7 @@ impl PartialEq<Vec<TaskRun>> for TaskRecoveryReport {
 /// 持久化 Task 模式事实并协调独立工作目录资源。
 pub(crate) struct TaskCoordinator {
     pub(super) store: StudioStore,
+    pub(super) task_runtime: TaskRuntime,
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
     branch_mutation_owner: Arc<()>,
@@ -62,6 +64,10 @@ pub(crate) struct BranchMutationGuard<'a> {
 }
 
 impl TaskCoordinator {
+    pub(in crate::studio) fn task_runtime(&self) -> TaskRuntime {
+        self.task_runtime.clone()
+    }
+
     pub(in crate::studio) async fn handle_agent_turn_failure(
         &self,
         input: RecordTaskAgentFailure,
@@ -69,7 +75,7 @@ impl TaskCoordinator {
     ) -> Result<bool> {
         let root_thread_id = input.root_thread_id.clone();
         let source_agent_id = input.source_agent_id.clone();
-        let Some(settlement) = self.store.record_task_agent_failure(input).await? else {
+        let Some(settlement) = self.task_runtime.record_agent_failure(input).await? else {
             return Ok(false);
         };
         if !settlement.terminalized {
@@ -106,9 +112,10 @@ impl TaskCoordinator {
         Ok(true)
     }
 
-    pub(crate) fn new(store: StudioStore) -> Self {
+    pub(crate) fn new(store: StudioStore, task_runtime: TaskRuntime) -> Self {
         Self {
             store,
+            task_runtime,
             allocation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_owner: Arc::new(()),
@@ -138,6 +145,7 @@ impl TaskCoordinator {
         request: &str,
         repository: impl AsRef<Path>,
     ) -> Result<TaskRun> {
+        self.task_runtime.ensure_accepts_new_work()?;
         if request.trim().is_empty() {
             bail!("task request must not be empty");
         }
@@ -146,14 +154,16 @@ impl TaskCoordinator {
             .read_thread(root_thread_id)
             .await?
             .context("task root Thread not found")?;
-        self.store
-            .create_task_run(CreateTaskRun {
+        let run = self
+            .task_runtime
+            .create_task(CreateTaskRun {
                 project_id: root_thread.project_id,
                 root_thread_id: root_thread_id.to_string(),
                 request: request.trim().to_string(),
                 workspace_root: repository.as_ref().to_string_lossy().to_string(),
             })
-            .await
+            .await?;
+        Ok(run)
     }
 
     pub(crate) async fn block_continuation_failure(
@@ -162,9 +172,10 @@ impl TaskCoordinator {
         reason: String,
     ) -> Result<()> {
         let run = self
-            .store
-            .read_task_run(task_run_id)
-            .await?
+            .task_runtime
+            .aggregate_for_run(task_run_id)
+            .await
+            .map(|aggregate| aggregate.facts.run)
             .context("task run not found while blocking continuation failure")?;
         if !run.kind().is_terminal() {
             tracing::warn!(

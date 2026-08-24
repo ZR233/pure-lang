@@ -14,6 +14,7 @@ class UserInputDock extends ConsumerStatefulWidget {
     required this.threadId,
     required this.interactionId,
     required this.payload,
+    required this.enabled,
     this.trailing,
     super.key,
   });
@@ -21,6 +22,7 @@ class UserInputDock extends ConsumerStatefulWidget {
   final String threadId;
   final String interactionId;
   final InteractionPayloadSnapshot payload;
+  final bool enabled;
   final Widget? trailing;
 
   @override
@@ -67,7 +69,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
         controller: _fallbackController,
         trailing: widget.trailing,
         onChanged: () => setState(() {}),
-        onSubmit: _fallbackController.text.trim().isEmpty
+        onSubmit: !widget.enabled || _fallbackController.text.trim().isEmpty
             ? null
             : _submitFallbackAnswer,
       );
@@ -111,13 +113,15 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
                   ? context.l10n.interactionSubmitAnswers
                   : context.l10n.interactionNextQuestion,
             ),
-            onPressed: () {
-              if (isLast) {
-                _submitAnswers();
-              } else {
-                setState(() => _index += 1);
-              }
-            },
+            onPressed: widget.enabled
+                ? () {
+                    if (isLast) {
+                      _submitAnswers();
+                    } else {
+                      setState(() => _index += 1);
+                    }
+                  }
+                : null,
           ),
         ],
       ),
@@ -135,6 +139,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           ),
           const SizedBox(height: 12),
           _QuestionStep(
+            enabled: widget.enabled,
             question: question,
             questionKey: key,
             controller: _textControllers[key]!,
@@ -258,6 +263,7 @@ class _FallbackQuestionDock extends StatelessWidget {
       footer: DockActions(
         children: [
           FilledButton.icon(
+            key: StudioDriverKeys.fallbackUserInputSubmit,
             icon: const Icon(Icons.reply),
             label: Text(context.l10n.interactionAnswerButton),
             onPressed: onSubmit,
@@ -273,6 +279,7 @@ class _FallbackQuestionDock extends StatelessWidget {
             const SizedBox(height: 10),
           ],
           TextField(
+            key: StudioDriverKeys.fallbackUserInput,
             controller: controller,
             minLines: 1,
             maxLines: 4,
@@ -392,6 +399,7 @@ class _QuestionStep extends StatelessWidget {
     required this.selected,
     required this.onOptionChanged,
     required this.onTextChanged,
+    required this.enabled,
   });
 
   final UserQuestionView question;
@@ -400,6 +408,7 @@ class _QuestionStep extends StatelessWidget {
   final Set<String> selected;
   final void Function(String label, bool selected) onOptionChanged;
   final ValueChanged<String> onTextChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -426,7 +435,9 @@ class _QuestionStep extends StatelessWidget {
                 key: StudioDriverKeys.userInputOption(questionKey, optionIndex),
                 option: option,
                 selected: selected.contains(option.label),
-                onChanged: (value) => onOptionChanged(option.label, value),
+                onChanged: enabled
+                    ? (value) => onOptionChanged(option.label, value)
+                    : null,
               ),
             ),
         ],
@@ -435,6 +446,7 @@ class _QuestionStep extends StatelessWidget {
           TextField(
             key: StudioDriverKeys.userInputText(questionKey),
             controller: controller,
+            enabled: enabled,
             obscureText: question.isSecret,
             minLines: 1,
             maxLines: question.isSecret ? 1 : 4,
@@ -469,16 +481,22 @@ class _QuestionOptionRow extends StatelessWidget {
 
   final UserQuestionOptionView option;
   final bool selected;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return DockOptionRow(
-      title: option.label,
-      subtitle: option.description,
-      selected: selected,
-      onPressed: () => onChanged(!selected),
-      leading: _OptionMark(selected: selected),
+    return IgnorePointer(
+      ignoring: onChanged == null,
+      child: Opacity(
+        opacity: onChanged == null ? 0.55 : 1,
+        child: DockOptionRow(
+          title: option.label,
+          subtitle: option.description,
+          selected: selected,
+          onPressed: () => onChanged?.call(!selected),
+          leading: _OptionMark(selected: selected),
+        ),
+      ),
     );
   }
 }

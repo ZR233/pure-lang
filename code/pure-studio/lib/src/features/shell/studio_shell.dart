@@ -86,6 +86,10 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                       child: Column(
                         children: [
                           _Header(state: header),
+                          if (!chrome.persistenceState.acceptsNewWork)
+                            _PersistenceBanner(
+                              snapshot: chrome.persistenceState,
+                            ),
                           if (chrome.applicationRecoveryIssues.isNotEmpty)
                             _ApplicationRecoveryBanner(
                               issues: chrome.applicationRecoveryIssues,

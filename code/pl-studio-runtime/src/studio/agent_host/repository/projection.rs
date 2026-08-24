@@ -1,6 +1,6 @@
 //! Thread item 到 store 行投影的核心类型与 durable 投递身份落库。
 
-use pl_core::{AgentState, ThreadActorState, ThreadCommit};
+use pl_core::{AgentState, ThreadActorState, ThreadCommit, TurnId};
 use pl_protocol::{
     BudgetLimitedTurnState, CancelledTurnState, CompletedTurnState, FailedTurnState, PureError,
     QueuedTurnState, RunningTurnState, ThreadItem, ThreadNotification, Turn, TurnOutcome,
@@ -258,34 +258,9 @@ pub(super) async fn persist_state_turns(
         )
         .await?;
     }
-    if let Some(turn_id) = state.snapshot.active_turn_id() {
-        let turn_state = match &state.snapshot.state {
-            AgentState::Queued(_) => {
-                TurnState::Queued(QueuedTurnState::new(state.snapshot.updated_at))
-            }
-            AgentState::Running(_) => TurnState::Running(RunningTurnState::new(
-                state.snapshot.updated_at,
-                TurnPhase::Responding,
-            )),
-            AgentState::WaitingTool(_) => TurnState::Running(RunningTurnState::new(
-                state.snapshot.updated_at,
-                TurnPhase::RunningTool,
-            )),
-            AgentState::WaitingInteraction(_) => TurnState::Running(RunningTurnState::new(
-                state.snapshot.updated_at,
-                TurnPhase::Responding,
-            )),
-            AgentState::Cancelling(_) => TurnState::Running(RunningTurnState::new(
-                state.snapshot.updated_at,
-                TurnPhase::Persisting,
-            )),
-            AgentState::Faulted(_)
-            | AgentState::Idle(_)
-            | AgentState::Closing(_)
-            | AgentState::Closed(_) => {
-                return Err(store_error("Agent state exposes an invalid active Turn"));
-            }
-        };
+    if let Some(turn_id) = state.snapshot.active_turn_id()
+        && let Some(turn_state) = active_turn_projection(state, turn_id)?
+    {
         persist_turn_projection(
             tx,
             TurnProjection {
@@ -342,4 +317,49 @@ pub(super) async fn persist_state_turns(
         .await?;
     }
     Ok(())
+}
+
+fn active_turn_projection(
+    state: &ThreadActorState,
+    turn_id: &TurnId,
+) -> Result<Option<TurnState>, PureError> {
+    let turn_state = match &state.snapshot.state {
+        AgentState::Queued(_) => TurnState::Queued(QueuedTurnState::new(state.snapshot.updated_at)),
+        AgentState::Running(_) => TurnState::Running(RunningTurnState::new(
+            state.snapshot.updated_at,
+            TurnPhase::Responding,
+        )),
+        AgentState::WaitingTool(_) => TurnState::Running(RunningTurnState::new(
+            state.snapshot.updated_at,
+            TurnPhase::RunningTool,
+        )),
+        AgentState::WaitingInteraction(_) => TurnState::Running(RunningTurnState::new(
+            state.snapshot.updated_at,
+            TurnPhase::Responding,
+        )),
+        AgentState::Cancelling(_) => TurnState::Running(RunningTurnState::new(
+            state.snapshot.updated_at,
+            TurnPhase::Persisting,
+        )),
+        AgentState::Faulted(_) => {
+            let outcome = state.snapshot.last_turn.as_ref().ok_or_else(|| {
+                store_error("Faulted Agent diagnostic Turn is missing its failed outcome")
+            })?;
+            if &outcome.turn_id != turn_id {
+                return Err(store_error(
+                    "Faulted Agent diagnostic Turn does not match the last Turn outcome",
+                ));
+            }
+            if !matches!(outcome.outcome, TurnOutcome::Failed(_)) {
+                return Err(store_error(
+                    "Faulted Agent diagnostic Turn must have a failed outcome",
+                ));
+            }
+            return Ok(None);
+        }
+        AgentState::Idle(_) | AgentState::Closing(_) | AgentState::Closed(_) => {
+            return Err(store_error("Agent state exposes an invalid active Turn"));
+        }
+    };
+    Ok(Some(turn_state))
 }

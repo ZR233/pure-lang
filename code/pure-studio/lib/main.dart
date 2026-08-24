@@ -21,17 +21,18 @@ void bootstrapStudio({ProviderContainer? container}) {
     _recordDartError(error, stack);
     return true;
   };
-  runZonedGuarded(
-    () => runApp(
-      container == null
-          ? const ProviderScope(child: PureStudioApp())
-          : UncontrolledProviderScope(
-              container: container,
-              child: const PureStudioApp(),
-            ),
-    ),
-    _recordDartError,
-  );
+  runZonedGuarded(() {
+    if (container case final external?) {
+      runApp(
+        UncontrolledProviderScope(
+          container: external,
+          child: const PureStudioApp(),
+        ),
+      );
+      return;
+    }
+    runApp(const ProviderScope(child: PureStudioApp()));
+  }, _recordDartError);
 }
 
 void _recordDartError(Object error, StackTrace? stack) {
