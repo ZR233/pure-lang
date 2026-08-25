@@ -43,7 +43,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[web_search]` — search mode, context size, allowed domains, location.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
 
-Sections left at defaults are omitted from the file.
+Some sections are omitted when left at defaults (`runtime`, `instructions`, `skills`, `lsp`, `ui`); others are always written — a default save still keeps `[web_search]` with `mode = "cached"`.
 
 ## Credentials
 
