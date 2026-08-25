@@ -209,13 +209,32 @@ fn installs_system_skills_with_marker() {
             .join(SKILL_FILE_NAME)
             .exists()
     );
+    let studio_config_doc = system_dir.join("studio-config").join(SKILL_FILE_NAME);
     assert!(
-        system_dir
-            .join("studio-config")
-            .join(SKILL_FILE_NAME)
-            .exists()
+        studio_config_doc.exists(),
+        "installed studio-config skill document must exist"
     );
     assert!(system_dir.join(super::SYSTEM_MARKER_FILE_NAME).exists());
+
+    let content = fs::read_to_string(&studio_config_doc)
+        .expect("installed studio-config skill document must be readable");
+    let metadata = validate_skill_document(&content, Some("studio-config"))
+        .expect("installed studio-config skill document must have valid frontmatter");
+
+    assert_eq!(
+        metadata.name, "studio-config",
+        "installed studio-config skill name must match its directory"
+    );
+    assert_eq!(
+        metadata.category.as_deref(),
+        Some("guides"),
+        "installed studio-config skill must keep the guides category"
+    );
+    assert!(
+        content.contains("~/.pure/config.toml"),
+        "installed studio-config skill must document the canonical config path"
+    );
+
     fs::remove_dir_all(user).unwrap();
 }
 
