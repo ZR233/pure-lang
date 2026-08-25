@@ -176,7 +176,9 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
 2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，
 并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库
-但禁止手改。
+但禁止手改。`generate-gui` 是唯一主动更新已跟踪 GUI 生成文件的入口；普通
+`run-gui`/`build-gui` 不执行生成器或可写格式化，`check-gui-generated`、
+`verify-gui` 与显式 `build-gui --check-generated` 才重新生成并验证 canonical 输出。
 
 ## 2.10 数据版本
 

@@ -22,8 +22,9 @@ cargo xtask build-gui --check-generated # CI/发布拒绝未提交的生成差�
 `run-gui` 和 `build-gui` 会在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
 `pubspec.lock`、`pubspec_overrides.yaml` 和 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用
 Flutter `--no-pub` 热路径，不重复解析依赖或改写 lockfile。
-两者还通过 `.dart_tool/pure-xtask-codegen.sha256` 跟踪 Dart、Rust API、生成输出和生成配置；
-指纹变化时统一刷新 Riverpod、Freezed、l10n 和 FRB 文件，未变化时跳过耗时生成。
+普通 `run-gui` 和 `build-gui` 不执行生成器或可写格式化；Riverpod、Freezed、l10n 和 FRB
+输入变化后必须先显式运行 `cargo xtask generate-gui`。`check-gui-generated`、`verify-gui`
+以及 `build-gui --check-generated` 会重新生成并检查未提交输出。
 Windows 下 xtask 先用普通前台 Cargo 命令在 workspace target 中构建 `pl-studio-bridge`，
 编译过程会实时显示在当前终端；完成后从对应 profile 目录定位 DLL/PDB，再交给 CMake 复制。
 CMake 不再启动 Cargo；直接执行 `flutter build/run windows` 会因缺少预编译 artifact 明确失败。
@@ -73,6 +74,8 @@ lib/src/rust/frb_generated.dart: error: The type 'BridgeEventPayload' is not
 cargo xtask generate-gui
 cargo xtask check-gui-generated
 ```
+
+普通 GUI build/run 不会自动修复不同步绑定，以保证构建不会修改已跟踪源码。
 
 > 生成文件不得手工修改，也不得直接调用单个生成器。当前项目使用
 > `flutter_rust_bridge = "=2.12.0"`（在 `Cargo.toml` 中锁定），xtask 会校验

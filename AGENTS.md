@@ -68,7 +68,9 @@
 
 - 不得手工修改生成文件，也不得直接调用单个生成器。
 - 修改生成输入后运行 `cargo xtask check-gui-generated` 检查 canonical 输出，并分开审查生成 diff 与手写 diff。
-- `run-gui` 和 `build-gui` 会按内容指纹自动刷新过期输出；需要 CI 级构建检查时使用 `cargo xtask build-gui --check-generated`。
+- 普通 `run-gui` 和 `build-gui` 只消费当前源码，不运行生成器或可写格式化；修改生成输入后必须先显式运行 `cargo xtask generate-gui`。
+- `check-gui-generated`、`verify-gui` 和 `build-gui --check-generated` 会重新生成并检查 canonical 输出，适用于提交前、CI 和发布门禁。
+- Git 索引与普通源码统一使用 LF；PowerShell、RC 和 Inno Setup 文件使用 CRLF，`.gitattributes` 与 `.editorconfig` 必须保持一致。不得通过全局 Git 配置、构建后索引刷新或全仓 renormalize 修复行尾。
 
 ## 工程边界
 

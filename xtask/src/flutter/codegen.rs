@@ -3,30 +3,15 @@ use super::{
 };
 use crate::{paths, process, pubspec_lock};
 use anyhow::{Context, Result, bail};
-use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const FRB_CODEGEN_VERSION: &str = "2.12.0";
-const CODEGEN_FINGERPRINT_FILE: &str = "pure-xtask-codegen.sha256";
-const CODEGEN_FINGERPRINT_VERSION: &str = "1";
 // build_runner 2.7+ always removes conflicting outputs. The former
 // --delete-conflicting-outputs option is removed and only emits a warning.
 const BUILD_RUNNER_ARGS: &[&str] = &["run", "build_runner", "build"];
-const CODEGEN_FINGERPRINT_PATHS: &[&str] = &[
-    "Cargo.toml",
-    "Cargo.lock",
-    ":(glob)code/**/Cargo.toml",
-    ":(glob)code/**/build.rs",
-    ":(glob)code/**/src/**/*.rs",
-    ":(glob)code/pure-studio/**/*.dart",
-    ":(glob)code/pure-studio/**/*.arb",
-    ":(glob)code/pure-studio/*.yaml",
-    "code/pure-studio/pubspec.lock",
-    "xtask/src/flutter/codegen.rs",
-];
 const GENERATED_OUTPUTS: &[GeneratedOutput] = &[
     GeneratedOutput::dart(
         ":(glob)code/pure-studio/lib/**/*.g.dart",
@@ -46,12 +31,6 @@ const GENERATED_OUTPUTS: &[GeneratedOutput] = &[
     ),
     GeneratedOutput::other("code/pure-studio/rust/src/frb_generated.rs"),
 ];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GenerationPolicy {
-    Always,
-    WhenInputsChange,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GeneratedDartPath {
@@ -103,7 +82,7 @@ pub(super) fn generate_gui() -> Result<()> {
     let app_dir = paths::studio_app_dir(&workspace_root);
     print_context(&workspace_root, &app_dir);
 
-    generate_gui_sources(&workspace_root, &app_dir, GenerationPolicy::Always)
+    generate_gui_sources(&workspace_root, &app_dir)
 }
 
 pub(super) fn check_gui_generated() -> Result<()> {
@@ -114,40 +93,20 @@ pub(super) fn check_gui_generated() -> Result<()> {
     check_gui_generated_sources(&workspace_root, &app_dir)
 }
 
-pub(super) fn refresh_gui_generated_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    generate_gui_sources(workspace_root, app_dir, GenerationPolicy::WhenInputsChange)
-}
-
 pub(super) fn check_gui_generated_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    generate_gui_sources(workspace_root, app_dir, GenerationPolicy::Always)?;
+    generate_gui_sources(workspace_root, app_dir)?;
     ensure_generated_files_are_committed(workspace_root)
 }
 
-pub(super) fn ensure_gui_generated_sources_are_committed(workspace_root: &Path) -> Result<()> {
-    ensure_generated_files_are_committed(workspace_root)
-}
-
-fn generate_gui_sources(
-    workspace_root: &Path,
-    app_dir: &Path,
-    policy: GenerationPolicy,
-) -> Result<()> {
-    if matches!(policy, GenerationPolicy::WhenInputsChange)
-        && generated_sources_are_current(workspace_root, app_dir)?
-    {
-        println!("GUI codegen inputs unchanged; reusing canonical generated sources.");
-        return Ok(());
-    }
-
+fn generate_gui_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
     ensure_flutter_dependencies(workspace_root, app_dir)?;
     run_flutter(workspace_root, app_dir, &["gen-l10n"], DemoMode::Native)?;
     ensure_frb_codegen_version()?;
     run_frb_codegen(workspace_root, app_dir)?;
     run_build_runner(app_dir)?;
-    normalize_generated_dart_files(&app_dir.join("lib"))?;
-    run_tool("dart", &["format", "lib"], app_dir)?;
-    run_tool("cargo", &["fmt", "--all"], workspace_root)?;
-    write_codegen_fingerprint(workspace_root, app_dir)
+    let generated_dart_files = normalize_generated_dart_files(&app_dir.join("lib"))?;
+    format_generated_dart_files(app_dir, &generated_dart_files)?;
+    format_generated_rust_file(workspace_root, app_dir)
 }
 
 fn run_build_runner(app_dir: &Path) -> Result<()> {
@@ -176,92 +135,22 @@ fn preserve_canonical_lockfile(
     restore_result
 }
 
-fn generated_sources_are_current(workspace_root: &Path, app_dir: &Path) -> Result<bool> {
-    let cached = match fs::read_to_string(codegen_fingerprint_path(app_dir)) {
-        Ok(cached) => cached,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).context("failed to read GUI codegen fingerprint"),
-    };
-    Ok(cached.trim() == gui_codegen_fingerprint(workspace_root)?)
-}
-
-fn write_codegen_fingerprint(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    let fingerprint = gui_codegen_fingerprint(workspace_root)?;
-    let path = codegen_fingerprint_path(app_dir);
-    let parent = path
-        .parent()
-        .context("GUI codegen fingerprint has no parent directory")?;
-    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    fs::write(&path, format!("{fingerprint}\n"))
-        .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn codegen_fingerprint_path(app_dir: &Path) -> PathBuf {
-    app_dir.join(".dart_tool").join(CODEGEN_FINGERPRINT_FILE)
-}
-
-fn gui_codegen_fingerprint(workspace_root: &Path) -> Result<String> {
-    let files = list_codegen_files(workspace_root)?;
-    fingerprint_files(workspace_root, &files)
-}
-
-fn list_codegen_files(workspace_root: &Path) -> Result<Vec<String>> {
-    let mut args = vec![
-        OsString::from("ls-files"),
-        OsString::from("--cached"),
-        OsString::from("--others"),
-        OsString::from("--exclude-standard"),
-        OsString::from("-z"),
-        OsString::from("--"),
-    ];
-    args.extend(CODEGEN_FINGERPRINT_PATHS.iter().map(OsString::from));
-    let output = process::path_command("git", &args)
-        .current_dir(workspace_root)
-        .output()
-        .context("failed to list GUI codegen inputs")?;
-    if !output.status.success() {
-        bail!("git failed while listing GUI codegen inputs");
+fn normalize_generated_dart_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let files = generated_dart_files(root)?;
+    for path in &files {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let normalized = normalize_generated_dart_text(&content);
+        if normalized != content {
+            fs::write(path, normalized)
+                .with_context(|| format!("failed to normalize {}", path.display()))?;
+        }
     }
-    let paths =
-        String::from_utf8(output.stdout).context("GUI codegen input paths must be valid UTF-8")?;
-    let mut files = paths
-        .split('\0')
-        .filter(|path| !path.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    files.sort_unstable();
-    files.dedup();
     Ok(files)
 }
 
-fn fingerprint_files(workspace_root: &Path, files: &[String]) -> Result<String> {
-    let mut hasher = Sha256::new();
-    hasher.update(CODEGEN_FINGERPRINT_VERSION.as_bytes());
-    hasher.update([0]);
-    hasher.update(FRB_CODEGEN_VERSION.as_bytes());
-    hasher.update([0]);
-    for output in GENERATED_OUTPUTS {
-        hasher.update(output.git_pathspec.as_bytes());
-        hasher.update([0]);
-    }
-    for path in files {
-        hasher.update(path.as_bytes());
-        hasher.update([0]);
-        match fs::read(workspace_root.join(path)) {
-            Ok(content) => hasher.update(content),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                hasher.update(b"<missing>")
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to read codegen input {path}"));
-            }
-        }
-        hasher.update([0]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn normalize_generated_dart_files(root: &Path) -> Result<()> {
+fn generated_dart_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
     let mut directories = vec![root.to_path_buf()];
     while let Some(directory) = directories.pop() {
         for entry in fs::read_dir(&directory)
@@ -281,16 +170,39 @@ fn normalize_generated_dart_files(root: &Path) -> Result<()> {
             if !is_generated_dart_path(root, &path) {
                 continue;
             }
-            let content = fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?;
-            let normalized = normalize_generated_dart_text(&content);
-            if normalized != content {
-                fs::write(&path, normalized)
-                    .with_context(|| format!("failed to normalize {}", path.display()))?;
-            }
+            files.push(path);
         }
     }
-    Ok(())
+    files.sort_unstable();
+    Ok(files)
+}
+
+fn format_generated_dart_files(app_dir: &Path, files: &[PathBuf]) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec![OsString::from("format")];
+    for path in files {
+        let relative = path.strip_prefix(app_dir).with_context(|| {
+            format!(
+                "generated Dart file {} is outside {}",
+                path.display(),
+                app_dir.display()
+            )
+        })?;
+        args.push(relative.as_os_str().to_owned());
+    }
+    run_os_tool("dart", &args, app_dir)
+}
+
+fn format_generated_rust_file(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    let generated = app_dir.join("rust").join("src").join("frb_generated.rs");
+    let args = vec![
+        OsString::from("--edition"),
+        OsString::from("2024"),
+        generated.into_os_string(),
+    ];
+    run_os_tool("rustfmt", &args, workspace_root)
 }
 
 fn is_generated_dart_path(root: &Path, path: &Path) -> bool {
@@ -604,33 +516,48 @@ mod tests {
     }
 
     #[test]
-    fn codegen_fingerprint_covers_source_and_generated_content() -> Result<()> {
+    fn generated_formatter_inventory_excludes_handwritten_dart() -> Result<()> {
         let root = std::env::temp_dir().join(format!(
-            "pl-xtask-codegen-fingerprint-{}",
-            std::process::id()
+            "pl-xtask-generated-format-inventory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
         ));
-        fs::create_dir_all(&root)?;
-        fs::write(root.join("source.dart"), "source\n")?;
-        fs::write(root.join("source.g.dart"), "generated\n")?;
-        let files = vec!["source.dart".to_owned(), "source.g.dart".to_owned()];
+        let files = [
+            "models.dart",
+            "models.g.dart",
+            "models.freezed.dart",
+            "src/l10n/studio_l10n.dart",
+            "src/l10n/app_localizations_en.dart",
+            "src/rust/frb_generated.dart",
+        ];
+        for path in files {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().context("fixture has no parent")?)?;
+            fs::write(path, "// fixture\n")?;
+        }
 
-        let original = fingerprint_files(&root, &files)?;
-        fs::write(root.join("source.dart"), "changed source\n")?;
-        assert_ne!(original, fingerprint_files(&root, &files)?);
-        fs::write(root.join("source.dart"), "source\n")?;
-        fs::write(root.join("source.g.dart"), "manual edit\n")?;
-        assert_ne!(original, fingerprint_files(&root, &files)?);
+        let actual = generated_dart_files(&root)?
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .expect("generated fixture must stay below its root")
+                    .to_path_buf()
+            })
+            .collect::<Vec<_>>();
 
+        assert_eq!(
+            actual,
+            vec![
+                PathBuf::from("models.freezed.dart"),
+                PathBuf::from("models.g.dart"),
+                PathBuf::from("src/l10n/app_localizations_en.dart"),
+                PathBuf::from("src/rust/frb_generated.dart"),
+            ]
+        );
         fs::remove_dir_all(root)?;
         Ok(())
-    }
-
-    #[test]
-    fn codegen_fingerprint_inventory_includes_all_generator_boundaries() {
-        assert!(CODEGEN_FINGERPRINT_PATHS.contains(&":(glob)code/pure-studio/**/*.dart"));
-        assert!(CODEGEN_FINGERPRINT_PATHS.contains(&":(glob)code/pure-studio/**/*.arb"));
-        assert!(CODEGEN_FINGERPRINT_PATHS.contains(&":(glob)code/**/src/**/*.rs"));
-        assert!(CODEGEN_FINGERPRINT_PATHS.contains(&"xtask/src/flutter/codegen.rs"));
     }
 
     #[test]

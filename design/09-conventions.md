@@ -129,19 +129,21 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   升级时同步更新 Flutter SDK pin、重新解析 lockfile、运行全部生成器，并迁移上游 breaking API 后
   再提交源码与生成输出。
 - Riverpod、Freezed、Flutter l10n 和 FRB 输出只由 `cargo xtask generate-gui` 管理，
-  不得手工修改。生成流程必须覆盖依赖解析、所有生成器、生成文件规范化和格式化，
+  不得手工修改。生成流程必须覆盖依赖解析、所有生成器、生成文件规范化和仅作用于生成输出的格式化，
   使本地手工改动由生成器恢复为 canonical 内容。生成流程中的依赖解析与 build_runner 都必须
   在返回前恢复已跟踪 lockfile 的 canonical hosted URL，并拒绝生成器改变依赖解析。当前锁定的 build_runner 会始终删除冲突
   输出，不得继续传递已移除的 `--delete-conflicting-outputs` 参数。
-- Git 索引中的文本统一规范化为 LF；编辑器、Rustfmt 和 xtask 生成的 canonical 文本也统一使用 LF。
-  Windows 与 Linux 平台的 Flutter 生成文件必须由 `.gitattributes` 显式固定为 LF，生成流程还必须
-  在格式化前将生成的 Dart 文本从 CRLF 规范化为 LF，避免平台相关的纯换行差异污染工作区。
-- `cargo xtask run-gui` 和 `cargo xtask build-gui` 在运行或构建前自动执行同一生成流程，
-  并以覆盖 Dart、Rust API、生成输出和生成配置的内容指纹跳过无变化的重复生成，确保 GUI
-  产物不会使用过期绑定，同时不拖慢连续运行。需要只检查生成一致性时使用
+- Git 索引中的文本统一规范化为 LF；普通源码和 xtask 生成的 canonical 文本默认也使用 LF。
+  `.gitattributes` 必须把普通文本 checkout 固定为 LF，并只为必须采用 Windows 原生行尾的
+  PowerShell、RC 和 Inno Setup 文件声明 CRLF 例外；`.editorconfig` 必须表达相同例外，不能让
+  编辑器与 Git 的 checkout 契约冲突。生成流程还必须在格式化前将生成的 Dart 文本从 CRLF
+  规范化为 LF，避免平台相关的纯换行差异污染工作区。
+- `cargo xtask run-gui` 和普通 `cargo xtask build-gui` 只运行或构建当前源码，不执行生成器，
+  不格式化、改写或清理任何已跟踪源码。修改 Riverpod、Freezed、Flutter l10n 或 FRB 输入后，
+  开发者必须显式运行 `cargo xtask generate-gui`。需要验证生成一致性时使用
   `cargo xtask check-gui-generated`；该命令重新生成后同时检查已跟踪差异和未跟踪输出。
-- CI 或发布流程直接构建 GUI 时使用 `cargo xtask build-gui --check-generated`，在同一次自动
-  刷新后拒绝未提交的生成差异，避免先检查再构建造成重复生成。
+- CI 或发布流程直接构建 GUI 时使用 `cargo xtask build-gui --check-generated`，在构建前显式
+  重新生成并拒绝未提交的生成差异；普通本地构建不承担该检查，也不得产生源码工作区噪声。
 - `cargo xtask verify-gui` 必须复用 `check-gui-generated`，PR、默认分支和正式发布 CI
   只调用 xtask 入口，不在 workflow 中复制生成器命令。生成后存在 Git 差异时检查必须失败，
   并提示提交生成器产生的结果，而不是指导开发者手工修补生成文件。
@@ -151,7 +153,9 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   环境执行；AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
   可通过（已跟踪的 pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
 - xtask 中的生成输出规则是 Git 一致性检查和生成文件规范化的共同事实来源。新增生成器或
-  输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。
+  输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。全仓
+  `cargo fmt` 和 `dart format` 只作为只读门禁运行；可写格式化只能作用于明确的生成输出，
+  禁止重新写入无关手写源码。
 
 ## 9.10 测试分层与放置
 

@@ -54,6 +54,23 @@ enum DistCleanMode {
     KeepExisting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeneratedSourcesPolicy {
+    UseCurrent,
+    RegenerateAndCheck,
+}
+
+impl GeneratedSourcesPolicy {
+    fn prepare(self, workspace_root: &Path, app_dir: &Path) -> Result<()> {
+        match self {
+            Self::UseCurrent => Ok(()),
+            Self::RegenerateAndCheck => {
+                codegen::check_gui_generated_sources(workspace_root, app_dir)
+            }
+        }
+    }
+}
+
 impl DesktopTarget {
     fn current() -> Result<Self> {
         if cfg!(target_os = "windows") {
@@ -111,7 +128,7 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::studio_app_dir(&workspace_root);
     print_context(&workspace_root, &app_dir);
-    codegen::check_gui_generated_sources(&workspace_root, &app_dir)?;
+    GeneratedSourcesPolicy::RegenerateAndCheck.prepare(&workspace_root, &app_dir)?;
     run_tool("cargo", &["fmt", "--all", "--check"], &workspace_root)?;
     run_tool(
         "dart",
@@ -184,7 +201,8 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
-    codegen::refresh_gui_generated_sources(&workspace_root, &app_dir)?;
+    ensure_flutter_dependencies(&workspace_root, &app_dir)?;
+    GeneratedSourcesPolicy::UseCurrent.prepare(&workspace_root, &app_dir)?;
 
     let demo_mode = if options.demo {
         DemoMode::Demo
@@ -262,10 +280,8 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         bail!("release version does not match pubspec.yaml version {app_version}");
     }
     print_context(&workspace_root, &app_dir);
-    codegen::refresh_gui_generated_sources(&workspace_root, &app_dir)?;
-    if options.check_generated {
-        codegen::ensure_gui_generated_sources_are_committed(&workspace_root)?;
-    }
+    ensure_flutter_dependencies(&workspace_root, &app_dir)?;
+    generated_sources_policy(options.check_generated).prepare(&workspace_root, &app_dir)?;
 
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     let args = build_gui_args(target, &version_define, options.demo);
@@ -302,6 +318,14 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         &dist_dir,
         clean_mode,
     )
+}
+
+fn generated_sources_policy(check_generated: bool) -> GeneratedSourcesPolicy {
+    if check_generated {
+        GeneratedSourcesPolicy::RegenerateAndCheck
+    } else {
+        GeneratedSourcesPolicy::UseCurrent
+    }
 }
 
 fn build_gui_args(target: DesktopTarget, version_define: &str, demo: bool) -> Vec<&str> {
@@ -597,6 +621,18 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::ffi::OsStr;
+
+    #[test]
+    fn ordinary_gui_build_uses_current_generated_sources() {
+        assert_eq!(
+            generated_sources_policy(false),
+            GeneratedSourcesPolicy::UseCurrent
+        );
+        assert_eq!(
+            generated_sources_policy(true),
+            GeneratedSourcesPolicy::RegenerateAndCheck
+        );
+    }
 
     #[test]
     fn demo_mode_adds_dart_define_once() {
