@@ -233,6 +233,8 @@
   "timelineToolGroupSummaryRunningWithIssues": "{count} 个工具，{runningCount} 个运行中，{issueCount} 个需要注意",
   "timelinePlanFallback": "计划",
   "timelineSkillActivated": "已激活 Skill · {name}",
+  "timelineSkillAgentActivated": "代理激活 Skill · {name}",
+  "timelineSkillUserActivated": "用户激活 Skill · {name}",
   "timelineAgentFallback": "Agent",
   "timelineToolCompleted": "{name} 已完成",
   "timelineToolFailed": "{name} 失败",

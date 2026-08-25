@@ -1,6 +1,6 @@
 # Pure Studio Flutter
 
-Windows-first Flutter desktop client for Pure Studio.
+Windows and Linux Flutter desktop client for Pure Studio.
 
 ## Stack
 
@@ -11,6 +11,13 @@ Windows-first Flutter desktop client for Pure Studio.
 - `pl-studio-bridge` Rust crate in `rust/`
 
 ## Commands
+
+On Linux, install the GTK runner dependency before the first native build.
+Headless integration runs also require Xvfb:
+
+```bash
+sudo apt-get install -y libgtk-3-dev xvfb
+```
 
 ```powershell
 # Run from repository root. xtask invokes Flutter with
@@ -32,8 +39,12 @@ cargo xtask build-gui --check-generated # CI/release: regenerate and reject unst
 cargo xtask run-gui --driver
 cargo xtask run-gui --demo --driver # deterministic demo data
 
-# Windows GUI run/build must use xtask so CMake receives the prebuilt Rust
-# bridge artifact. cargo flutter/dart are general passthrough commands only.
+# Windows/Linux GUI run/build must use xtask so the runner receives the
+# prebuilt Rust bridge artifact. cargo flutter/dart are passthrough commands.
+
+# Run the deterministic integration smoke on the current desktop OS. Linux
+# automatically uses xvfb-run when DISPLAY/WAYLAND_DISPLAY are unavailable.
+cargo xtask verify-gui --integration
 ```
 
 Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
@@ -42,7 +53,7 @@ Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
 会快照当前输出并检查重新生成前后是否一致，不要求输出已提交；CI/发布构建使用
 `build-gui --check-generated`。
 完整检查仍使用 `cargo xtask verify-gui`。xtask 会校验 codegen
-版本，并在 Windows 上统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
+版本，并统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
 
 `tool/task_driver_harness.ps1` uses a separate `GuiStartupTimeoutSeconds`
 (30 minutes by default) for the first Rust/Flutter build. Plan, Task, and stall

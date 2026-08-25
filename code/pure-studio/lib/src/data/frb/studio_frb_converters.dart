@@ -1169,6 +1169,31 @@ SkillsStateSnapshot _skillsStateFromFrb(
     catalogRevision: data.catalogRevision.toInt(),
     skills: data.skills.map((skill) => skill.name).toList(),
     warnings: data.warnings,
+    complete: data.complete,
+    summaries: data.skills
+        .map(
+          (skill) => SkillSummaryView(
+            name: skill.name,
+            description: skill.description,
+            category: skill.category,
+            platforms: skill.platforms,
+            source: skill.source,
+            providerId: skill.providerId,
+            modelInvocable: skill.invocation.modelInvocable,
+            userInvocable: skill.invocation.userInvocable,
+            resourceBase: skill.resourceBase.when(
+              directory: (path) =>
+                  SkillResourceBaseView(SkillResourceBaseKind.directory, path),
+              url: (url) =>
+                  SkillResourceBaseView(SkillResourceBaseKind.url, url),
+              opaque: (description) => SkillResourceBaseView(
+                SkillResourceBaseKind.opaque,
+                description,
+              ),
+            ),
+          ),
+        )
+        .toList(),
   );
   return SkillsStateSnapshot.fromState(
     projectId: snapshot.projectId,

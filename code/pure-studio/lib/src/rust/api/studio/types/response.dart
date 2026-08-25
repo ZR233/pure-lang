@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -538,12 +538,14 @@ class BridgeSkillsStateData {
   final BigInt catalogRevision;
   final List<SkillSummaryDto> skills;
   final List<String> warnings;
+  final bool complete;
 
   const BridgeSkillsStateData({
     required this.configFingerprint,
     required this.catalogRevision,
     required this.skills,
     required this.warnings,
+    required this.complete,
   });
 
   @override
@@ -551,7 +553,8 @@ class BridgeSkillsStateData {
       configFingerprint.hashCode ^
       catalogRevision.hashCode ^
       skills.hashCode ^
-      warnings.hashCode;
+      warnings.hashCode ^
+      complete.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -561,7 +564,8 @@ class BridgeSkillsStateData {
           configFingerprint == other.configFingerprint &&
           catalogRevision == other.catalogRevision &&
           skills == other.skills &&
-          warnings == other.warnings;
+          warnings == other.warnings &&
+          complete == other.complete;
 }
 
 class BridgeSkillsStateSnapshot {
@@ -909,20 +913,84 @@ class ProviderUsageDto {
           state == other.state;
 }
 
-class SkillSummaryDto {
-  final String name;
+class SkillInvocationPolicyDto {
+  final bool modelInvocable;
+  final bool userInvocable;
 
-  const SkillSummaryDto({required this.name});
+  const SkillInvocationPolicyDto({
+    required this.modelInvocable,
+    required this.userInvocable,
+  });
 
   @override
-  int get hashCode => name.hashCode;
+  int get hashCode => modelInvocable.hashCode ^ userInvocable.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SkillInvocationPolicyDto &&
+          runtimeType == other.runtimeType &&
+          modelInvocable == other.modelInvocable &&
+          userInvocable == other.userInvocable;
+}
+
+@freezed
+sealed class SkillResourceBaseDto with _$SkillResourceBaseDto {
+  const SkillResourceBaseDto._();
+
+  const factory SkillResourceBaseDto.directory({required String path}) =
+      SkillResourceBaseDto_Directory;
+  const factory SkillResourceBaseDto.url({required String url}) =
+      SkillResourceBaseDto_Url;
+  const factory SkillResourceBaseDto.opaque({required String description}) =
+      SkillResourceBaseDto_Opaque;
+}
+
+class SkillSummaryDto {
+  final String name;
+  final String description;
+  final String? category;
+  final List<String> platforms;
+  final String source;
+  final String providerId;
+  final SkillInvocationPolicyDto invocation;
+  final SkillResourceBaseDto resourceBase;
+
+  const SkillSummaryDto({
+    required this.name,
+    required this.description,
+    this.category,
+    required this.platforms,
+    required this.source,
+    required this.providerId,
+    required this.invocation,
+    required this.resourceBase,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      description.hashCode ^
+      category.hashCode ^
+      platforms.hashCode ^
+      source.hashCode ^
+      providerId.hashCode ^
+      invocation.hashCode ^
+      resourceBase.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is SkillSummaryDto &&
           runtimeType == other.runtimeType &&
-          name == other.name;
+          name == other.name &&
+          description == other.description &&
+          category == other.category &&
+          platforms == other.platforms &&
+          source == other.source &&
+          providerId == other.providerId &&
+          invocation == other.invocation &&
+          resourceBase == other.resourceBase;
 }
 
 class StartNewThreadResponse {

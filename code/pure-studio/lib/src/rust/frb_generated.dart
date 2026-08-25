@@ -3284,6 +3284,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeSkillActivationCause
+  dco_decode_box_autoadd_bridge_skill_activation_cause(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_skill_activation_cause(raw);
+  }
+
+  @protected
+  BridgeSkillResourceBase dco_decode_box_autoadd_bridge_skill_resource_base(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_skill_resource_base(raw);
+  }
+
+  @protected
   BridgeSkillsStateData dco_decode_box_autoadd_bridge_skills_state_data(
     dynamic raw,
   ) {
@@ -5930,6 +5945,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeSkillActivationCause dco_decode_bridge_skill_activation_cause(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgeSkillActivationCause_Tool(
+          toolCallId: dco_decode_String(raw[1]),
+        );
+      case 1:
+        return BridgeSkillActivationCause_UserGesture(
+          invocationId: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  BridgeSkillResourceBase dco_decode_bridge_skill_resource_base(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgeSkillResourceBase_Directory(
+          path: dco_decode_String(raw[1]),
+        );
+      case 1:
+        return BridgeSkillResourceBase_Url(url: dco_decode_String(raw[1]));
+      case 2:
+        return BridgeSkillResourceBase_Opaque(
+          description: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   BridgeSkillsResourceState dco_decode_bridge_skills_resource_state(
     dynamic raw,
   ) {
@@ -5998,13 +6051,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeSkillsStateData dco_decode_bridge_skills_state_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeSkillsStateData(
       configFingerprint: dco_decode_String(arr[0]),
       catalogRevision: dco_decode_u_64(arr[1]),
       skills: dco_decode_list_skill_summary_dto(arr[2]),
       warnings: dco_decode_list_String(arr[3]),
+      complete: dco_decode_bool(arr[4]),
     );
   }
 
@@ -7231,9 +7285,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return BridgeThreadItemState_Skill(
           name: dco_decode_String(raw[1]),
           source: dco_decode_String(raw[2]),
-          path: dco_decode_String(raw[3]),
-          toolCallId: dco_decode_String(raw[4]),
-          activatedAt: dco_decode_i_64(raw[5]),
+          providerId: dco_decode_String(raw[3]),
+          resourceBase: dco_decode_box_autoadd_bridge_skill_resource_base(
+            raw[4],
+          ),
+          cause: dco_decode_box_autoadd_bridge_skill_activation_cause(raw[5]),
+          activatedAt: dco_decode_i_64(raw[6]),
         );
       case 8:
         return BridgeThreadItemState_File(
@@ -9136,12 +9193,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SkillInvocationPolicyDto dco_decode_skill_invocation_policy_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return SkillInvocationPolicyDto(
+      modelInvocable: dco_decode_bool(arr[0]),
+      userInvocable: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  SkillResourceBaseDto dco_decode_skill_resource_base_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return SkillResourceBaseDto_Directory(path: dco_decode_String(raw[1]));
+      case 1:
+        return SkillResourceBaseDto_Url(url: dco_decode_String(raw[1]));
+      case 2:
+        return SkillResourceBaseDto_Opaque(
+          description: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return SkillSummaryDto(name: dco_decode_String(arr[0]));
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return SkillSummaryDto(
+      name: dco_decode_String(arr[0]),
+      description: dco_decode_String(arr[1]),
+      category: dco_decode_opt_String(arr[2]),
+      platforms: dco_decode_list_String(arr[3]),
+      source: dco_decode_String(arr[4]),
+      providerId: dco_decode_String(arr[5]),
+      invocation: dco_decode_skill_invocation_policy_dto(arr[6]),
+      resourceBase: dco_decode_skill_resource_base_dto(arr[7]),
+    );
   }
 
   @protected
@@ -9977,6 +10072,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_settings_state_data(deserializer));
+  }
+
+  @protected
+  BridgeSkillActivationCause
+  sse_decode_box_autoadd_bridge_skill_activation_cause(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_skill_activation_cause(deserializer));
+  }
+
+  @protected
+  BridgeSkillResourceBase sse_decode_box_autoadd_bridge_skill_resource_base(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_skill_resource_base(deserializer));
   }
 
   @protected
@@ -13261,6 +13373,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeSkillActivationCause sse_decode_bridge_skill_activation_cause(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_toolCallId = sse_decode_String(deserializer);
+        return BridgeSkillActivationCause_Tool(toolCallId: var_toolCallId);
+      case 1:
+        var var_invocationId = sse_decode_String(deserializer);
+        return BridgeSkillActivationCause_UserGesture(
+          invocationId: var_invocationId,
+        );
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  BridgeSkillResourceBase sse_decode_bridge_skill_resource_base(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_path = sse_decode_String(deserializer);
+        return BridgeSkillResourceBase_Directory(path: var_path);
+      case 1:
+        var var_url = sse_decode_String(deserializer);
+        return BridgeSkillResourceBase_Url(url: var_url);
+      case 2:
+        var var_description = sse_decode_String(deserializer);
+        return BridgeSkillResourceBase_Opaque(description: var_description);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
   BridgeSkillsResourceState sse_decode_bridge_skills_resource_state(
     SseDeserializer deserializer,
   ) {
@@ -13371,11 +13526,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_catalogRevision = sse_decode_u_64(deserializer);
     var var_skills = sse_decode_list_skill_summary_dto(deserializer);
     var var_warnings = sse_decode_list_String(deserializer);
+    var var_complete = sse_decode_bool(deserializer);
     return BridgeSkillsStateData(
       configFingerprint: var_configFingerprint,
       catalogRevision: var_catalogRevision,
       skills: var_skills,
       warnings: var_warnings,
+      complete: var_complete,
     );
   }
 
@@ -15029,14 +15186,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 7:
         var var_name = sse_decode_String(deserializer);
         var var_source = sse_decode_String(deserializer);
-        var var_path = sse_decode_String(deserializer);
-        var var_toolCallId = sse_decode_String(deserializer);
+        var var_providerId = sse_decode_String(deserializer);
+        var var_resourceBase =
+            sse_decode_box_autoadd_bridge_skill_resource_base(deserializer);
+        var var_cause = sse_decode_box_autoadd_bridge_skill_activation_cause(
+          deserializer,
+        );
         var var_activatedAt = sse_decode_i_64(deserializer);
         return BridgeThreadItemState_Skill(
           name: var_name,
           source: var_source,
-          path: var_path,
-          toolCallId: var_toolCallId,
+          providerId: var_providerId,
+          resourceBase: var_resourceBase,
+          cause: var_cause,
           activatedAt: var_activatedAt,
         );
       case 8:
@@ -17613,10 +17775,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SkillInvocationPolicyDto sse_decode_skill_invocation_policy_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_modelInvocable = sse_decode_bool(deserializer);
+    var var_userInvocable = sse_decode_bool(deserializer);
+    return SkillInvocationPolicyDto(
+      modelInvocable: var_modelInvocable,
+      userInvocable: var_userInvocable,
+    );
+  }
+
+  @protected
+  SkillResourceBaseDto sse_decode_skill_resource_base_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_path = sse_decode_String(deserializer);
+        return SkillResourceBaseDto_Directory(path: var_path);
+      case 1:
+        var var_url = sse_decode_String(deserializer);
+        return SkillResourceBaseDto_Url(url: var_url);
+      case 2:
+        var var_description = sse_decode_String(deserializer);
+        return SkillResourceBaseDto_Opaque(description: var_description);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
   SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_name = sse_decode_String(deserializer);
-    return SkillSummaryDto(name: var_name);
+    var var_description = sse_decode_String(deserializer);
+    var var_category = sse_decode_opt_String(deserializer);
+    var var_platforms = sse_decode_list_String(deserializer);
+    var var_source = sse_decode_String(deserializer);
+    var var_providerId = sse_decode_String(deserializer);
+    var var_invocation = sse_decode_skill_invocation_policy_dto(deserializer);
+    var var_resourceBase = sse_decode_skill_resource_base_dto(deserializer);
+    return SkillSummaryDto(
+      name: var_name,
+      description: var_description,
+      category: var_category,
+      platforms: var_platforms,
+      source: var_source,
+      providerId: var_providerId,
+      invocation: var_invocation,
+      resourceBase: var_resourceBase,
+    );
   }
 
   @protected
@@ -18554,6 +18767,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_settings_state_data(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_skill_activation_cause(
+    BridgeSkillActivationCause self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_skill_activation_cause(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_skill_resource_base(
+    BridgeSkillResourceBase self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_skill_resource_base(self, serializer);
   }
 
   @protected
@@ -21307,6 +21538,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_skill_activation_cause(
+    BridgeSkillActivationCause self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgeSkillActivationCause_Tool(toolCallId: final toolCallId):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(toolCallId, serializer);
+      case BridgeSkillActivationCause_UserGesture(
+        invocationId: final invocationId,
+      ):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(invocationId, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_bridge_skill_resource_base(
+    BridgeSkillResourceBase self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgeSkillResourceBase_Directory(path: final path):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(path, serializer);
+      case BridgeSkillResourceBase_Url(url: final url):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(url, serializer);
+      case BridgeSkillResourceBase_Opaque(description: final description):
+        sse_encode_i_32(2, serializer);
+        sse_encode_String(description, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_bridge_skills_resource_state(
     BridgeSkillsResourceState self,
     SseSerializer serializer,
@@ -21385,6 +21653,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.catalogRevision, serializer);
     sse_encode_list_skill_summary_dto(self.skills, serializer);
     sse_encode_list_String(self.warnings, serializer);
+    sse_encode_bool(self.complete, serializer);
   }
 
   @protected
@@ -22640,15 +22909,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case BridgeThreadItemState_Skill(
         name: final name,
         source: final source,
-        path: final path,
-        toolCallId: final toolCallId,
+        providerId: final providerId,
+        resourceBase: final resourceBase,
+        cause: final cause,
         activatedAt: final activatedAt,
       ):
         sse_encode_i_32(7, serializer);
         sse_encode_String(name, serializer);
         sse_encode_String(source, serializer);
-        sse_encode_String(path, serializer);
-        sse_encode_String(toolCallId, serializer);
+        sse_encode_String(providerId, serializer);
+        sse_encode_box_autoadd_bridge_skill_resource_base(
+          resourceBase,
+          serializer,
+        );
+        sse_encode_box_autoadd_bridge_skill_activation_cause(cause, serializer);
         sse_encode_i_64(activatedAt, serializer);
       case BridgeThreadItemState_File(
         path: final path,
@@ -24810,12 +25084,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_skill_invocation_policy_dto(
+    SkillInvocationPolicyDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.modelInvocable, serializer);
+    sse_encode_bool(self.userInvocable, serializer);
+  }
+
+  @protected
+  void sse_encode_skill_resource_base_dto(
+    SkillResourceBaseDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case SkillResourceBaseDto_Directory(path: final path):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(path, serializer);
+      case SkillResourceBaseDto_Url(url: final url):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(url, serializer);
+      case SkillResourceBaseDto_Opaque(description: final description):
+        sse_encode_i_32(2, serializer);
+        sse_encode_String(description, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_skill_summary_dto(
     SkillSummaryDto self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.name, serializer);
+    sse_encode_String(self.description, serializer);
+    sse_encode_opt_String(self.category, serializer);
+    sse_encode_list_String(self.platforms, serializer);
+    sse_encode_String(self.source, serializer);
+    sse_encode_String(self.providerId, serializer);
+    sse_encode_skill_invocation_policy_dto(self.invocation, serializer);
+    sse_encode_skill_resource_base_dto(self.resourceBase, serializer);
   }
 
   @protected

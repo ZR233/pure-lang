@@ -102,7 +102,18 @@ fn generate_gui_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
 
 fn run_build_runner(app_dir: &Path) -> Result<()> {
     let lock_path = app_dir.join("pubspec.lock");
-    preserve_canonical_lockfile(&lock_path, || run_tool("dart", BUILD_RUNNER_ARGS, app_dir))
+    preserve_canonical_lockfile(&lock_path, || {
+        match std::env::var("PUB_HOSTED_URL") {
+            Ok(hosted_url) => {
+                pubspec_lock::rewrite_hosted_urls(&lock_path, &hosted_url)?;
+            }
+            Err(std::env::VarError::NotPresent) => {}
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("PUB_HOSTED_URL must contain valid Unicode")
+            }
+        }
+        run_tool("dart", BUILD_RUNNER_ARGS, app_dir)
+    })
 }
 
 fn preserve_canonical_lockfile(

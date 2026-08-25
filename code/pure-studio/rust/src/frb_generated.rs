@@ -5880,6 +5880,50 @@ impl SseDecode for crate::api::studio::types::event::BridgeShutdownProgress {
     }
 }
 
+impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_toolCallId = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::Tool{tool_call_id: var_toolCallId};
+            }
+            1 => {
+                let mut var_invocationId = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::UserGesture{invocation_id: var_invocationId};
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_path = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Directory{path: var_path};
+            }
+            1 => {
+                let mut var_url = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Url{url: var_url};
+            }
+            2 => {
+                let mut var_description = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Opaque{description: var_description};
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::BridgeSkillsResourceState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6011,11 +6055,13 @@ impl SseDecode for crate::api::studio::types::response::BridgeSkillsStateData {
         let mut var_skills =
             <Vec<crate::api::studio::types::response::SkillSummaryDto>>::sse_decode(deserializer);
         let mut var_warnings = <Vec<String>>::sse_decode(deserializer);
+        let mut var_complete = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::response::BridgeSkillsStateData {
             config_fingerprint: var_configFingerprint,
             catalog_revision: var_catalogRevision,
             skills: var_skills,
             warnings: var_warnings,
+            complete: var_complete,
         };
     }
 }
@@ -7869,10 +7915,11 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadI
             7 => {
                 let mut var_name = <String>::sse_decode(deserializer);
                 let mut var_source = <String>::sse_decode(deserializer);
-                let mut var_path = <String>::sse_decode(deserializer);
-                let mut var_toolCallId = <String>::sse_decode(deserializer);
+                let mut var_providerId = <String>::sse_decode(deserializer);
+                let mut var_resourceBase = <crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase>::sse_decode(deserializer);
+                let mut var_cause = <crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause>::sse_decode(deserializer);
                 let mut var_activatedAt = <i64>::sse_decode(deserializer);
-                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name: var_name, source: var_source, path: var_path, tool_call_id: var_toolCallId, activated_at: var_activatedAt};
+                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name: var_name, source: var_source, provider_id: var_providerId, resource_base: var_resourceBase, cause: var_cause, activated_at: var_activatedAt};
             }
             8 => {
                 let mut var_path = <String>::sse_decode(deserializer);
@@ -10659,11 +10706,73 @@ impl SseDecode for crate::api::studio::types::runtime::RuntimeSnapshot {
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::SkillInvocationPolicyDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_modelInvocable = <bool>::sse_decode(deserializer);
+        let mut var_userInvocable = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::response::SkillInvocationPolicyDto {
+            model_invocable: var_modelInvocable,
+            user_invocable: var_userInvocable,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::SkillResourceBaseDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_path = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::response::SkillResourceBaseDto::Directory {
+                    path: var_path,
+                };
+            }
+            1 => {
+                let mut var_url = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::response::SkillResourceBaseDto::Url {
+                    url: var_url,
+                };
+            }
+            2 => {
+                let mut var_description = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::response::SkillResourceBaseDto::Opaque {
+                    description: var_description,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::SkillSummaryDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_name = <String>::sse_decode(deserializer);
-        return crate::api::studio::types::response::SkillSummaryDto { name: var_name };
+        let mut var_description = <String>::sse_decode(deserializer);
+        let mut var_category = <Option<String>>::sse_decode(deserializer);
+        let mut var_platforms = <Vec<String>>::sse_decode(deserializer);
+        let mut var_source = <String>::sse_decode(deserializer);
+        let mut var_providerId = <String>::sse_decode(deserializer);
+        let mut var_invocation =
+            <crate::api::studio::types::response::SkillInvocationPolicyDto>::sse_decode(
+                deserializer,
+            );
+        let mut var_resourceBase =
+            <crate::api::studio::types::response::SkillResourceBaseDto>::sse_decode(deserializer);
+        return crate::api::studio::types::response::SkillSummaryDto {
+            name: var_name,
+            description: var_description,
+            category: var_category,
+            platforms: var_platforms,
+            source: var_source,
+            provider_id: var_providerId,
+            invocation: var_invocation,
+            resource_base: var_resourceBase,
+        };
     }
 }
 
@@ -14537,6 +14646,62 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::event::BridgeS
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::Tool{tool_call_id} => { [0.into_dart(),
+tool_call_id.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::UserGesture{invocation_id} => { [1.into_dart(),
+invocation_id.into_into_dart().into_dart()].into_dart() }
+ _ => { unimplemented!(""); }}
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause,
+    > for crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Directory{path} => { [0.into_dart(),
+path.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Url{url} => { [1.into_dart(),
+url.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Opaque{description} => { [2.into_dart(),
+description.into_into_dart().into_dart()].into_dart() }
+ _ => { unimplemented!(""); }}
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase,
+    > for crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::response::BridgeSkillsResourceState
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -14645,6 +14810,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Brid
             self.catalog_revision.into_into_dart().into_dart(),
             self.skills.into_into_dart().into_dart(),
             self.warnings.into_into_dart().into_dart(),
+            self.complete.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -16630,11 +16796,12 @@ state.into_into_dart().into_dart()].into_dart() }
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Plan{content,lifecycle} => { [6.into_dart(),
 content.into_into_dart().into_dart(),
 lifecycle.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,path,tool_call_id,activated_at} => { [7.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { [7.into_dart(),
 name.into_into_dart().into_dart(),
 source.into_into_dart().into_dart(),
-path.into_into_dart().into_dart(),
-tool_call_id.into_into_dart().into_dart(),
+provider_id.into_into_dart().into_dart(),
+resource_base.into_into_dart().into_dart(),
+cause.into_into_dart().into_dart(),
 activated_at.into_into_dart().into_dart()].into_dart() }
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { [8.into_dart(),
 path.into_into_dart().into_dart(),
@@ -18883,9 +19050,73 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Runti
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::SkillInvocationPolicyDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.model_invocable.into_into_dart().into_dart(),
+            self.user_invocable.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::SkillInvocationPolicyDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::SkillInvocationPolicyDto>
+    for crate::api::studio::types::response::SkillInvocationPolicyDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::SkillInvocationPolicyDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::SkillResourceBaseDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::studio::types::response::SkillResourceBaseDto::Directory { path } => {
+                [0.into_dart(), path.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::response::SkillResourceBaseDto::Url { url } => {
+                [1.into_dart(), url.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::response::SkillResourceBaseDto::Opaque { description } => {
+                [2.into_dart(), description.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::SkillResourceBaseDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::SkillResourceBaseDto>
+    for crate::api::studio::types::response::SkillResourceBaseDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::SkillResourceBaseDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::SkillSummaryDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [self.name.into_into_dart().into_dart()].into_dart()
+        [
+            self.name.into_into_dart().into_dart(),
+            self.description.into_into_dart().into_dart(),
+            self.category.into_into_dart().into_dart(),
+            self.platforms.into_into_dart().into_dart(),
+            self.source.into_into_dart().into_dart(),
+            self.provider_id.into_into_dart().into_dart(),
+            self.invocation.into_into_dart().into_dart(),
+            self.resource_base.into_into_dart().into_dart(),
+        ]
+        .into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -21618,6 +21849,30 @@ impl SseEncode for crate::api::studio::types::event::BridgeShutdownProgress {
     }
 }
 
+impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::Tool{tool_call_id} => { <i32>::sse_encode(0, serializer); <String>::sse_encode(tool_call_id, serializer);
+ }
+crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause::UserGesture{invocation_id} => { <i32>::sse_encode(1, serializer); <String>::sse_encode(invocation_id, serializer);
+ }
+ _ => { unimplemented!(""); }}
+    }
+}
+
+impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Directory{path} => { <i32>::sse_encode(0, serializer); <String>::sse_encode(path, serializer);
+ }
+crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Url{url} => { <i32>::sse_encode(1, serializer); <String>::sse_encode(url, serializer);
+ }
+crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase::Opaque{description} => { <i32>::sse_encode(2, serializer); <String>::sse_encode(description, serializer);
+ }
+ _ => { unimplemented!(""); }}
+    }
+}
+
 impl SseEncode for crate::api::studio::types::response::BridgeSkillsResourceState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -21727,6 +21982,7 @@ impl SseEncode for crate::api::studio::types::response::BridgeSkillsStateData {
             serializer,
         );
         <Vec<String>>::sse_encode(self.warnings, serializer);
+        <bool>::sse_encode(self.complete, serializer);
     }
 }
 
@@ -23138,10 +23394,11 @@ crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Plan{content,lifecycle} => { <i32>::sse_encode(6, serializer); <String>::sse_encode(content, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_encode(lifecycle, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,path,tool_call_id,activated_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(name, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(name, serializer);
 <String>::sse_encode(source, serializer);
-<String>::sse_encode(path, serializer);
-<String>::sse_encode(tool_call_id, serializer);
+<String>::sse_encode(provider_id, serializer);
+<crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase>::sse_encode(resource_base, serializer);
+<crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause>::sse_encode(cause, serializer);
 <i64>::sse_encode(activated_at, serializer);
  }
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { <i32>::sse_encode(8, serializer); <String>::sse_encode(path, serializer);
@@ -25214,10 +25471,54 @@ impl SseEncode for crate::api::studio::types::runtime::RuntimeSnapshot {
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::SkillInvocationPolicyDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.model_invocable, serializer);
+        <bool>::sse_encode(self.user_invocable, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::SkillResourceBaseDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::studio::types::response::SkillResourceBaseDto::Directory { path } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(path, serializer);
+            }
+            crate::api::studio::types::response::SkillResourceBaseDto::Url { url } => {
+                <i32>::sse_encode(1, serializer);
+                <String>::sse_encode(url, serializer);
+            }
+            crate::api::studio::types::response::SkillResourceBaseDto::Opaque { description } => {
+                <i32>::sse_encode(2, serializer);
+                <String>::sse_encode(description, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseEncode for crate::api::studio::types::response::SkillSummaryDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.name, serializer);
+        <String>::sse_encode(self.description, serializer);
+        <Option<String>>::sse_encode(self.category, serializer);
+        <Vec<String>>::sse_encode(self.platforms, serializer);
+        <String>::sse_encode(self.source, serializer);
+        <String>::sse_encode(self.provider_id, serializer);
+        <crate::api::studio::types::response::SkillInvocationPolicyDto>::sse_encode(
+            self.invocation,
+            serializer,
+        );
+        <crate::api::studio::types::response::SkillResourceBaseDto>::sse_encode(
+            self.resource_base,
+            serializer,
+        );
     }
 }
 

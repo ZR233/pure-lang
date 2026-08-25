@@ -342,7 +342,8 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 
 `[skills]` 控制本地 skills 系统：
 
-- `enabled`：是否启用 skills 发现、prompt 注入和工具注册，默认 `true`。
+- `enabled`：是否启用 skills 目录、prompt 注入、工具注册和用户 `/name` 手势，默认 `true`；关闭时
+  Studio 仍可保留已发布 catalog 供设置页只读展示。
 - `auto_learn`：是否在 Studio 主 turn 结束后启动后台 reviewer 自动沉淀项目 skill，默认 `true`。
 - `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `skills`。
 - `user_dir`：用户级只读 skills 目录，默认 `~/.pure/skills`。
@@ -351,7 +352,14 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 - `disabled`：禁用的 skill 名称列表，默认空。
 - `auto_learn_min_tool_calls`：触发自学习 review 的最少工具调用数，默认 `5`。
 
-加载优先级固定为：项目 skills > 用户 skills > 系统 skills > external dirs。同名 skill 只暴露最高优先级来源。自学习和 `skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录、系统目录或外部目录。
+除可配置的 `user_dir` 外，运行时还固定发现 Agents 兼容用户目录：Linux
+`$HOME/.agents/skills`、Windows `%USERPROFILE%\.agents\skills`。该兼容目录不新增配置字段，
+与 `user_dir` 一样是只读 `User` 来源。加载优先级固定为：项目 skills > `user_dir` >
+`.agents/skills` > 系统 skills > external dirs；同名 skill 只暴露最高优先级来源。自学习和
+`skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录、系统目录或外部目录。
+
+Skill frontmatter 的 `disable-model-invocation` 默认 `false`，`user-invocable` 默认 `true`。无效类型
+使该 skill 失败关闭并产生发现 warning；这两个字段不进入 `StudioConfig` schema。
 
 Studio 系统 skills 来自编译进 `pl-studio-runtime` 的预置资源，并在每次 Studio Runtime 启动时
 全量重建到 `<studio_home>/studio/skills/.system/`。系统目录固定属于 Studio 数据，不从

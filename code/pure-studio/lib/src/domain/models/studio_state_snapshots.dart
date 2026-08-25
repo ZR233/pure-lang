@@ -5,6 +5,7 @@ import 'runtime_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'thread_directory_models.dart';
+import 'thread_models.dart';
 
 sealed class ObservedResource<T> {
   const ObservedResource();
@@ -383,11 +384,38 @@ class SkillsStateData {
     required this.catalogRevision,
     required this.skills,
     required this.warnings,
+    this.summaries = const [],
+    this.complete = true,
   });
   final String configFingerprint;
   final int catalogRevision;
   final List<String> skills;
   final List<String> warnings;
+  final List<SkillSummaryView> summaries;
+  final bool complete;
+}
+
+class SkillSummaryView {
+  const SkillSummaryView({
+    required this.name,
+    required this.description,
+    required this.source,
+    required this.providerId,
+    required this.modelInvocable,
+    required this.userInvocable,
+    required this.resourceBase,
+    this.category,
+    this.platforms = const [],
+  });
+  final String name;
+  final String description;
+  final String? category;
+  final List<String> platforms;
+  final String source;
+  final String providerId;
+  final bool modelInvocable;
+  final bool userInvocable;
+  final SkillResourceBaseView resourceBase;
 }
 
 class SkillsStateSnapshot extends ObservedStateSnapshot<SkillsStateData> {

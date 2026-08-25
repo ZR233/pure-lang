@@ -516,7 +516,7 @@ async fn retry_persistence(State(state): State<AppState>) -> Result<impl IntoRes
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/runtime/projects/{project_id}/skills", operation_id = "skills.read", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
+#[utoipa::path(get, path = "/api/v1/runtime/projects/{project_id}/skills", operation_id = "skills.read", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200, body = crate::skills_schema::SkillsStateSnapshotSchema)))]
 async fn read_skills(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
@@ -524,7 +524,7 @@ async fn read_skills(
     Ok(Json(state.runtime.read_skills_state(&project_id).await))
 }
 
-#[utoipa::path(post, path = "/api/v1/runtime/projects/{project_id}/skills/discover", operation_id = "skills.discover", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
+#[utoipa::path(post, path = "/api/v1/runtime/projects/{project_id}/skills/discover", operation_id = "skills.discover", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200, body = crate::skills_schema::SkillsStateSnapshotSchema)))]
 async fn discover_skills(
     State(state): State<AppState>,
     Path(project_id): Path<String>,

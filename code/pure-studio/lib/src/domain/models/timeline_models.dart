@@ -23,15 +23,17 @@ class TimelineSkillActivation {
   const TimelineSkillActivation({
     required this.name,
     required this.source,
-    required this.path,
-    required this.toolCallId,
+    required this.providerId,
+    required this.resourceBase,
+    required this.cause,
     required this.activatedAt,
   });
 
   final String name;
   final String source;
-  final String path;
-  final String toolCallId;
+  final String providerId;
+  final SkillResourceBaseView resourceBase;
+  final SkillActivationCauseView cause;
   final DateTime activatedAt;
 }
 

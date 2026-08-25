@@ -1,4 +1,5 @@
 mod catalog;
+mod provider;
 mod scanning;
 mod util;
 
@@ -10,6 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::config::SkillsConfig;
 
 pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
+pub use provider::{
+    FileSystemSkillProvider, FrozenSkillCatalog, SkillCandidate, SkillDefinition,
+    SkillInvocationPolicy, SkillLoadInvocation, SkillProvider, SkillProviderId,
+    SkillProviderInvalidator, SkillProviderObservation, SkillProviderRegistration,
+    SkillProviderRequest, SkillRegistry, SkillResourceBase, SkillSummary, SkillUserInvocationLoad,
+    discover_local_skills, local_skill_registry,
+};
 pub use scanning::{
     list_support_files, project_skill_dir_for_create, read_skill_file, support_file_path,
     validate_skill_document,
@@ -47,7 +55,11 @@ pub struct SkillMetadata {
     pub category: Option<String>,
     pub platforms: Vec<String>,
     pub source: SkillSourceKind,
+    #[serde(skip)]
     pub path: PathBuf,
+    pub provider_id: SkillProviderId,
+    pub invocation: SkillInvocationPolicy,
+    pub resource_base: SkillResourceBase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,6 +75,46 @@ pub struct SkillCatalog {
     pub project_dir: PathBuf,
     pub skills: Vec<SkillMetadata>,
     pub warnings: Vec<String>,
+    #[serde(default = "default_complete")]
+    pub complete: bool,
+}
+
+/// Serializable Provider-neutral catalog projection for UI and HTTP consumers.
+pub type SkillCatalogSnapshot = SkillCatalog;
+
+impl From<SkillMetadata> for SkillSummary {
+    fn from(metadata: SkillMetadata) -> Self {
+        Self {
+            name: metadata.name,
+            description: metadata.description,
+            category: metadata.category,
+            platforms: metadata.platforms,
+            source: metadata.source,
+            provider_id: metadata.provider_id,
+            invocation: metadata.invocation,
+            resource_base: metadata.resource_base,
+        }
+    }
+}
+
+impl From<SkillSummary> for SkillMetadata {
+    fn from(summary: SkillSummary) -> Self {
+        let path = match &summary.resource_base {
+            SkillResourceBase::Directory { path } => path.clone(),
+            SkillResourceBase::Url { .. } | SkillResourceBase::Opaque { .. } => PathBuf::new(),
+        };
+        Self {
+            name: summary.name,
+            description: summary.description,
+            category: summary.category,
+            platforms: summary.platforms,
+            source: summary.source,
+            path,
+            provider_id: summary.provider_id,
+            invocation: summary.invocation,
+            resource_base: summary.resource_base,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,19 +138,25 @@ struct SkillFrontmatter {
     category: Option<String>,
     #[serde(default)]
     platforms: Vec<String>,
+    #[serde(default)]
+    disable_model_invocation: bool,
+    #[serde(default = "default_user_invocable")]
+    user_invocable: bool,
 }
 
 #[derive(Debug, Clone)]
-struct SkillCandidate {
-    metadata: SkillMetadata,
-    priority: u8,
+pub(super) struct SkillSource {
+    pub(super) root: PathBuf,
+    pub(super) kind: SkillSourceKind,
+    pub(super) priority: u8,
 }
 
-#[derive(Debug, Clone)]
-struct SkillSource {
-    root: PathBuf,
-    kind: SkillSourceKind,
-    priority: u8,
+const fn default_user_invocable() -> bool {
+    true
+}
+
+const fn default_complete() -> bool {
+    true
 }
 
 impl SkillUsage {

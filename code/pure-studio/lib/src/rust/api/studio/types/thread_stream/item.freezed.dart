@@ -13,6 +13,662 @@ part of 'item.dart';
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
+mixin _$BridgeSkillActivationCause {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillActivationCause);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeSkillActivationCause()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeSkillActivationCauseCopyWith<$Res>  {
+$BridgeSkillActivationCauseCopyWith(BridgeSkillActivationCause _, $Res Function(BridgeSkillActivationCause) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeSkillActivationCause].
+extension BridgeSkillActivationCausePatterns on BridgeSkillActivationCause {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeSkillActivationCause_Tool value)?  tool,TResult Function( BridgeSkillActivationCause_UserGesture value)?  userGesture,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool() when tool != null:
+return tool(_that);case BridgeSkillActivationCause_UserGesture() when userGesture != null:
+return userGesture(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeSkillActivationCause_Tool value)  tool,required TResult Function( BridgeSkillActivationCause_UserGesture value)  userGesture,}){
+final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool():
+return tool(_that);case BridgeSkillActivationCause_UserGesture():
+return userGesture(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeSkillActivationCause_Tool value)?  tool,TResult? Function( BridgeSkillActivationCause_UserGesture value)?  userGesture,}){
+final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool() when tool != null:
+return tool(_that);case BridgeSkillActivationCause_UserGesture() when userGesture != null:
+return userGesture(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String toolCallId)?  tool,TResult Function( String invocationId)?  userGesture,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool() when tool != null:
+return tool(_that.toolCallId);case BridgeSkillActivationCause_UserGesture() when userGesture != null:
+return userGesture(_that.invocationId);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String toolCallId)  tool,required TResult Function( String invocationId)  userGesture,}) {final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool():
+return tool(_that.toolCallId);case BridgeSkillActivationCause_UserGesture():
+return userGesture(_that.invocationId);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String toolCallId)?  tool,TResult? Function( String invocationId)?  userGesture,}) {final _that = this;
+switch (_that) {
+case BridgeSkillActivationCause_Tool() when tool != null:
+return tool(_that.toolCallId);case BridgeSkillActivationCause_UserGesture() when userGesture != null:
+return userGesture(_that.invocationId);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeSkillActivationCause_Tool extends BridgeSkillActivationCause {
+  const BridgeSkillActivationCause_Tool({required this.toolCallId}): super._();
+
+
+ final  String toolCallId;
+
+/// Create a copy of BridgeSkillActivationCause
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeSkillActivationCause_ToolCopyWith<BridgeSkillActivationCause_Tool> get copyWith => _$BridgeSkillActivationCause_ToolCopyWithImpl<BridgeSkillActivationCause_Tool>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillActivationCause_Tool&&(identical(other.toolCallId, toolCallId) || other.toolCallId == toolCallId));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,toolCallId);
+
+@override
+String toString() {
+  return 'BridgeSkillActivationCause.tool(toolCallId: $toolCallId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeSkillActivationCause_ToolCopyWith<$Res> implements $BridgeSkillActivationCauseCopyWith<$Res> {
+  factory $BridgeSkillActivationCause_ToolCopyWith(BridgeSkillActivationCause_Tool value, $Res Function(BridgeSkillActivationCause_Tool) _then) = _$BridgeSkillActivationCause_ToolCopyWithImpl;
+@useResult
+$Res call({
+ String toolCallId
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeSkillActivationCause_ToolCopyWithImpl<$Res>
+    implements $BridgeSkillActivationCause_ToolCopyWith<$Res> {
+  _$BridgeSkillActivationCause_ToolCopyWithImpl(this._self, this._then);
+
+  final BridgeSkillActivationCause_Tool _self;
+  final $Res Function(BridgeSkillActivationCause_Tool) _then;
+
+/// Create a copy of BridgeSkillActivationCause
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? toolCallId = null,}) {
+  return _then(BridgeSkillActivationCause_Tool(
+toolCallId: null == toolCallId ? _self.toolCallId : toolCallId // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeSkillActivationCause_UserGesture extends BridgeSkillActivationCause {
+  const BridgeSkillActivationCause_UserGesture({required this.invocationId}): super._();
+
+
+ final  String invocationId;
+
+/// Create a copy of BridgeSkillActivationCause
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeSkillActivationCause_UserGestureCopyWith<BridgeSkillActivationCause_UserGesture> get copyWith => _$BridgeSkillActivationCause_UserGestureCopyWithImpl<BridgeSkillActivationCause_UserGesture>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillActivationCause_UserGesture&&(identical(other.invocationId, invocationId) || other.invocationId == invocationId));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,invocationId);
+
+@override
+String toString() {
+  return 'BridgeSkillActivationCause.userGesture(invocationId: $invocationId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeSkillActivationCause_UserGestureCopyWith<$Res> implements $BridgeSkillActivationCauseCopyWith<$Res> {
+  factory $BridgeSkillActivationCause_UserGestureCopyWith(BridgeSkillActivationCause_UserGesture value, $Res Function(BridgeSkillActivationCause_UserGesture) _then) = _$BridgeSkillActivationCause_UserGestureCopyWithImpl;
+@useResult
+$Res call({
+ String invocationId
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeSkillActivationCause_UserGestureCopyWithImpl<$Res>
+    implements $BridgeSkillActivationCause_UserGestureCopyWith<$Res> {
+  _$BridgeSkillActivationCause_UserGestureCopyWithImpl(this._self, this._then);
+
+  final BridgeSkillActivationCause_UserGesture _self;
+  final $Res Function(BridgeSkillActivationCause_UserGesture) _then;
+
+/// Create a copy of BridgeSkillActivationCause
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? invocationId = null,}) {
+  return _then(BridgeSkillActivationCause_UserGesture(
+invocationId: null == invocationId ? _self.invocationId : invocationId // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+mixin _$BridgeSkillResourceBase {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillResourceBase);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'BridgeSkillResourceBase()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeSkillResourceBaseCopyWith<$Res>  {
+$BridgeSkillResourceBaseCopyWith(BridgeSkillResourceBase _, $Res Function(BridgeSkillResourceBase) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeSkillResourceBase].
+extension BridgeSkillResourceBasePatterns on BridgeSkillResourceBase {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeSkillResourceBase_Directory value)?  directory,TResult Function( BridgeSkillResourceBase_Url value)?  url,TResult Function( BridgeSkillResourceBase_Opaque value)?  opaque,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory() when directory != null:
+return directory(_that);case BridgeSkillResourceBase_Url() when url != null:
+return url(_that);case BridgeSkillResourceBase_Opaque() when opaque != null:
+return opaque(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeSkillResourceBase_Directory value)  directory,required TResult Function( BridgeSkillResourceBase_Url value)  url,required TResult Function( BridgeSkillResourceBase_Opaque value)  opaque,}){
+final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory():
+return directory(_that);case BridgeSkillResourceBase_Url():
+return url(_that);case BridgeSkillResourceBase_Opaque():
+return opaque(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeSkillResourceBase_Directory value)?  directory,TResult? Function( BridgeSkillResourceBase_Url value)?  url,TResult? Function( BridgeSkillResourceBase_Opaque value)?  opaque,}){
+final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory() when directory != null:
+return directory(_that);case BridgeSkillResourceBase_Url() when url != null:
+return url(_that);case BridgeSkillResourceBase_Opaque() when opaque != null:
+return opaque(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String path)?  directory,TResult Function( String url)?  url,TResult Function( String description)?  opaque,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory() when directory != null:
+return directory(_that.path);case BridgeSkillResourceBase_Url() when url != null:
+return url(_that.url);case BridgeSkillResourceBase_Opaque() when opaque != null:
+return opaque(_that.description);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String path)  directory,required TResult Function( String url)  url,required TResult Function( String description)  opaque,}) {final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory():
+return directory(_that.path);case BridgeSkillResourceBase_Url():
+return url(_that.url);case BridgeSkillResourceBase_Opaque():
+return opaque(_that.description);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String path)?  directory,TResult? Function( String url)?  url,TResult? Function( String description)?  opaque,}) {final _that = this;
+switch (_that) {
+case BridgeSkillResourceBase_Directory() when directory != null:
+return directory(_that.path);case BridgeSkillResourceBase_Url() when url != null:
+return url(_that.url);case BridgeSkillResourceBase_Opaque() when opaque != null:
+return opaque(_that.description);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeSkillResourceBase_Directory extends BridgeSkillResourceBase {
+  const BridgeSkillResourceBase_Directory({required this.path}): super._();
+
+
+ final  String path;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeSkillResourceBase_DirectoryCopyWith<BridgeSkillResourceBase_Directory> get copyWith => _$BridgeSkillResourceBase_DirectoryCopyWithImpl<BridgeSkillResourceBase_Directory>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillResourceBase_Directory&&(identical(other.path, path) || other.path == path));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,path);
+
+@override
+String toString() {
+  return 'BridgeSkillResourceBase.directory(path: $path)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeSkillResourceBase_DirectoryCopyWith<$Res> implements $BridgeSkillResourceBaseCopyWith<$Res> {
+  factory $BridgeSkillResourceBase_DirectoryCopyWith(BridgeSkillResourceBase_Directory value, $Res Function(BridgeSkillResourceBase_Directory) _then) = _$BridgeSkillResourceBase_DirectoryCopyWithImpl;
+@useResult
+$Res call({
+ String path
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeSkillResourceBase_DirectoryCopyWithImpl<$Res>
+    implements $BridgeSkillResourceBase_DirectoryCopyWith<$Res> {
+  _$BridgeSkillResourceBase_DirectoryCopyWithImpl(this._self, this._then);
+
+  final BridgeSkillResourceBase_Directory _self;
+  final $Res Function(BridgeSkillResourceBase_Directory) _then;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? path = null,}) {
+  return _then(BridgeSkillResourceBase_Directory(
+path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeSkillResourceBase_Url extends BridgeSkillResourceBase {
+  const BridgeSkillResourceBase_Url({required this.url}): super._();
+
+
+ final  String url;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeSkillResourceBase_UrlCopyWith<BridgeSkillResourceBase_Url> get copyWith => _$BridgeSkillResourceBase_UrlCopyWithImpl<BridgeSkillResourceBase_Url>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillResourceBase_Url&&(identical(other.url, url) || other.url == url));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,url);
+
+@override
+String toString() {
+  return 'BridgeSkillResourceBase.url(url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeSkillResourceBase_UrlCopyWith<$Res> implements $BridgeSkillResourceBaseCopyWith<$Res> {
+  factory $BridgeSkillResourceBase_UrlCopyWith(BridgeSkillResourceBase_Url value, $Res Function(BridgeSkillResourceBase_Url) _then) = _$BridgeSkillResourceBase_UrlCopyWithImpl;
+@useResult
+$Res call({
+ String url
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeSkillResourceBase_UrlCopyWithImpl<$Res>
+    implements $BridgeSkillResourceBase_UrlCopyWith<$Res> {
+  _$BridgeSkillResourceBase_UrlCopyWithImpl(this._self, this._then);
+
+  final BridgeSkillResourceBase_Url _self;
+  final $Res Function(BridgeSkillResourceBase_Url) _then;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? url = null,}) {
+  return _then(BridgeSkillResourceBase_Url(
+url: null == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeSkillResourceBase_Opaque extends BridgeSkillResourceBase {
+  const BridgeSkillResourceBase_Opaque({required this.description}): super._();
+
+
+ final  String description;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeSkillResourceBase_OpaqueCopyWith<BridgeSkillResourceBase_Opaque> get copyWith => _$BridgeSkillResourceBase_OpaqueCopyWithImpl<BridgeSkillResourceBase_Opaque>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSkillResourceBase_Opaque&&(identical(other.description, description) || other.description == description));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,description);
+
+@override
+String toString() {
+  return 'BridgeSkillResourceBase.opaque(description: $description)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeSkillResourceBase_OpaqueCopyWith<$Res> implements $BridgeSkillResourceBaseCopyWith<$Res> {
+  factory $BridgeSkillResourceBase_OpaqueCopyWith(BridgeSkillResourceBase_Opaque value, $Res Function(BridgeSkillResourceBase_Opaque) _then) = _$BridgeSkillResourceBase_OpaqueCopyWithImpl;
+@useResult
+$Res call({
+ String description
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeSkillResourceBase_OpaqueCopyWithImpl<$Res>
+    implements $BridgeSkillResourceBase_OpaqueCopyWith<$Res> {
+  _$BridgeSkillResourceBase_OpaqueCopyWithImpl(this._self, this._then);
+
+  final BridgeSkillResourceBase_Opaque _self;
+  final $Res Function(BridgeSkillResourceBase_Opaque) _then;
+
+/// Create a copy of BridgeSkillResourceBase
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? description = null,}) {
+  return _then(BridgeSkillResourceBase_Opaque(
+description: null == description ? _self.description : description // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$BridgeThreadAgentState {
 
 
@@ -2093,7 +2749,7 @@ return contextCompaction(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult Function( BridgeTurnState state)?  turn,TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult Function( String content,  BridgeThreadContentLifecycle lifecycle)?  plan,TResult Function( String name,  String source,  String path,  String toolCallId,  PlatformInt64 activatedAt)?  skill,TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult Function( BridgeTurnState state)?  turn,TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult Function( String content,  BridgeThreadContentLifecycle lifecycle)?  plan,TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeThreadItemState_Text() when text != null:
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking() when thinking != null:
@@ -2103,7 +2759,7 @@ return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn() when 
 return turn(_that.state);case BridgeThreadItemState_Inference() when inference != null:
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Plan() when plan != null:
 return plan(_that.content,_that.lifecycle);case BridgeThreadItemState_Skill() when skill != null:
-return skill(_that.name,_that.source,_that.path,_that.toolCallId,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
+return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction() when contextCompaction != null:
 return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt);case _:
   return orElse();
@@ -2123,7 +2779,7 @@ return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt)
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)  text,required TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)  thinking,required TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)  tool,required TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)  agent,required TResult Function( BridgeTurnState state)  turn,required TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)  inference,required TResult Function( String content,  BridgeThreadContentLifecycle lifecycle)  plan,required TResult Function( String name,  String source,  String path,  String toolCallId,  PlatformInt64 activatedAt)  skill,required TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)  file,required TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)  contextCompaction,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)  text,required TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)  thinking,required TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)  tool,required TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)  agent,required TResult Function( BridgeTurnState state)  turn,required TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)  inference,required TResult Function( String content,  BridgeThreadContentLifecycle lifecycle)  plan,required TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)  skill,required TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)  file,required TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)  contextCompaction,}) {final _that = this;
 switch (_that) {
 case BridgeThreadItemState_Text():
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking():
@@ -2133,7 +2789,7 @@ return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn():
 return turn(_that.state);case BridgeThreadItemState_Inference():
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Plan():
 return plan(_that.content,_that.lifecycle);case BridgeThreadItemState_Skill():
-return skill(_that.name,_that.source,_that.path,_that.toolCallId,_that.activatedAt);case BridgeThreadItemState_File():
+return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File():
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction():
 return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt);}
 }
@@ -2149,7 +2805,7 @@ return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt)
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult? Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult? Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult? Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult? Function( BridgeTurnState state)?  turn,TResult? Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult? Function( String content,  BridgeThreadContentLifecycle lifecycle)?  plan,TResult? Function( String name,  String source,  String path,  String toolCallId,  PlatformInt64 activatedAt)?  skill,TResult? Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult? Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult? Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult? Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult? Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult? Function( BridgeTurnState state)?  turn,TResult? Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult? Function( String content,  BridgeThreadContentLifecycle lifecycle)?  plan,TResult? Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult? Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult? Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,}) {final _that = this;
 switch (_that) {
 case BridgeThreadItemState_Text() when text != null:
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking() when thinking != null:
@@ -2159,7 +2815,7 @@ return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn() when 
 return turn(_that.state);case BridgeThreadItemState_Inference() when inference != null:
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Plan() when plan != null:
 return plan(_that.content,_that.lifecycle);case BridgeThreadItemState_Skill() when skill != null:
-return skill(_that.name,_that.source,_that.path,_that.toolCallId,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
+return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction() when contextCompaction != null:
 return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt);case _:
   return null;
@@ -2736,13 +3392,14 @@ $BridgeThreadContentLifecycleCopyWith<$Res> get lifecycle {
 
 
 class BridgeThreadItemState_Skill extends BridgeThreadItemState {
-  const BridgeThreadItemState_Skill({required this.name, required this.source, required this.path, required this.toolCallId, required this.activatedAt}): super._();
+  const BridgeThreadItemState_Skill({required this.name, required this.source, required this.providerId, required this.resourceBase, required this.cause, required this.activatedAt}): super._();
 
 
  final  String name;
  final  String source;
- final  String path;
- final  String toolCallId;
+ final  String providerId;
+ final  BridgeSkillResourceBase resourceBase;
+ final  BridgeSkillActivationCause cause;
  final  PlatformInt64 activatedAt;
 
 /// Create a copy of BridgeThreadItemState
@@ -2755,16 +3412,16 @@ $BridgeThreadItemState_SkillCopyWith<BridgeThreadItemState_Skill> get copyWith =
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadItemState_Skill&&(identical(other.name, name) || other.name == name)&&(identical(other.source, source) || other.source == source)&&(identical(other.path, path) || other.path == path)&&(identical(other.toolCallId, toolCallId) || other.toolCallId == toolCallId)&&(identical(other.activatedAt, activatedAt) || other.activatedAt == activatedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadItemState_Skill&&(identical(other.name, name) || other.name == name)&&(identical(other.source, source) || other.source == source)&&(identical(other.providerId, providerId) || other.providerId == providerId)&&(identical(other.resourceBase, resourceBase) || other.resourceBase == resourceBase)&&(identical(other.cause, cause) || other.cause == cause)&&(identical(other.activatedAt, activatedAt) || other.activatedAt == activatedAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,name,source,path,toolCallId,activatedAt);
+int get hashCode => Object.hash(runtimeType,name,source,providerId,resourceBase,cause,activatedAt);
 
 @override
 String toString() {
-  return 'BridgeThreadItemState.skill(name: $name, source: $source, path: $path, toolCallId: $toolCallId, activatedAt: $activatedAt)';
+  return 'BridgeThreadItemState.skill(name: $name, source: $source, providerId: $providerId, resourceBase: $resourceBase, cause: $cause, activatedAt: $activatedAt)';
 }
 
 
@@ -2775,11 +3432,11 @@ abstract mixin class $BridgeThreadItemState_SkillCopyWith<$Res> implements $Brid
   factory $BridgeThreadItemState_SkillCopyWith(BridgeThreadItemState_Skill value, $Res Function(BridgeThreadItemState_Skill) _then) = _$BridgeThreadItemState_SkillCopyWithImpl;
 @useResult
 $Res call({
- String name, String source, String path, String toolCallId, PlatformInt64 activatedAt
+ String name, String source, String providerId, BridgeSkillResourceBase resourceBase, BridgeSkillActivationCause cause, PlatformInt64 activatedAt
 });
 
 
-
+$BridgeSkillResourceBaseCopyWith<$Res> get resourceBase;$BridgeSkillActivationCauseCopyWith<$Res> get cause;
 
 }
 /// @nodoc
@@ -2792,18 +3449,37 @@ class _$BridgeThreadItemState_SkillCopyWithImpl<$Res>
 
 /// Create a copy of BridgeThreadItemState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? name = null,Object? source = null,Object? path = null,Object? toolCallId = null,Object? activatedAt = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? name = null,Object? source = null,Object? providerId = null,Object? resourceBase = null,Object? cause = null,Object? activatedAt = null,}) {
   return _then(BridgeThreadItemState_Skill(
 name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,source: null == source ? _self.source : source // ignore: cast_nullable_to_non_nullable
-as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
-as String,toolCallId: null == toolCallId ? _self.toolCallId : toolCallId // ignore: cast_nullable_to_non_nullable
-as String,activatedAt: null == activatedAt ? _self.activatedAt : activatedAt // ignore: cast_nullable_to_non_nullable
+as String,providerId: null == providerId ? _self.providerId : providerId // ignore: cast_nullable_to_non_nullable
+as String,resourceBase: null == resourceBase ? _self.resourceBase : resourceBase // ignore: cast_nullable_to_non_nullable
+as BridgeSkillResourceBase,cause: null == cause ? _self.cause : cause // ignore: cast_nullable_to_non_nullable
+as BridgeSkillActivationCause,activatedAt: null == activatedAt ? _self.activatedAt : activatedAt // ignore: cast_nullable_to_non_nullable
 as PlatformInt64,
   ));
 }
 
+/// Create a copy of BridgeThreadItemState
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeSkillResourceBaseCopyWith<$Res> get resourceBase {
 
+  return $BridgeSkillResourceBaseCopyWith<$Res>(_self.resourceBase, (value) {
+    return _then(_self.copyWith(resourceBase: value));
+  });
+}/// Create a copy of BridgeThreadItemState
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BridgeSkillActivationCauseCopyWith<$Res> get cause {
+
+  return $BridgeSkillActivationCauseCopyWith<$Res>(_self.cause, (value) {
+    return _then(_self.copyWith(cause: value));
+  });
+}
 }
 
 /// @nodoc

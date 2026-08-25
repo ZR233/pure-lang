@@ -107,7 +107,16 @@ JSON/ARB 属性行只有在 patch 的 old/new 两侧保持不变时才属于保�
 
 工具调用历史必须保留调用种类。`function_call` 的历史回放写回 `function_call_output`；custom/freeform 工具写回 `custom_tool_call_output`。不得只保存 JSON arguments 后在下一轮统一当作 function tool 回放。
 
-Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skill_view` 是只读工具；`skill_manage` 是写入工具，但只能修改当前项目的 `<workspace_root>/skills/`，不能修改用户级、系统或外部只读 skills。subagent 通过同一默认工具注册入口继承 skills 能力。
+Skills 工具同样挂在 `pl-core` 默认工具集中。核心拥有动态 `SkillProvider`、进程级
+`SkillRegistry`、Provider 注册 guard/invalidator、发现完整性与不可序列化的 `FrozenSkillCatalog`；
+宿主只负责注册来源并投影可序列化 `SkillCatalogSnapshot`。Provider 的异步 `list`、`load` 和
+`read_resource` 显式接收 workspace、配置与取消令牌，locator 对核心消费者不透明。当前默认只注册
+本地文件系统 Provider，接口为未来远程或运行时来源预留。
+
+`skills_list` 和 `skill_view` 是只读工具；`skill_view` 明确使用 `ToolCachePolicy::Never`。
+`skill_manage` 是写入工具，但只能修改当前项目的 `<workspace_root>/skills/`，不能修改用户级、系统
+或外部只读 skills；成功写入使对应 Provider 失效。subagent 通过同一默认工具注册入口继承 skills
+能力，并与父 agent 一样在新 Turn 前发现、在 Turn 内冻结。
 
 协作工具通过 `spawn_agent`、`report_progress`、`send_message`、`interrupt_agent`、
 `list_agents`、`wait_agents`、`read_agent_session` 和 `close_agent` 暴露，并只持有非泛型

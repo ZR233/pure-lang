@@ -81,9 +81,10 @@ fn activation_from_output(output: &ToolOutput) -> &SkillActivation {
 #[serde(rename_all = "camelCase")]
 struct SkillViewOutputSnapshot {
     success: bool,
-    skill: SkillMetadata,
+    skill: crate::skill::SkillSummary,
     file_path: String,
-    support_files: Vec<crate::skill::SkillFile>,
+    resource_base: crate::skill::SkillResourceBase,
+    resource_hint: String,
     content: String,
 }
 
@@ -94,6 +95,7 @@ fn create_writes_project_skill() {
         project_dir: workspace.join("skills"),
         skills: Vec::new(),
         warnings: Vec::new(),
+        complete: true,
     };
     let input = CreateSkillInput {
         target: SkillTargetInput {
@@ -176,6 +178,15 @@ fn skill_manage_schema_is_a_provider_object_union() {
 }
 
 #[test]
+fn skill_view_is_never_cached() {
+    let tool = SkillViewTool::new(SkillsConfig::default());
+    assert_eq!(
+        tool.cache_policy(&json!({"name": "demo"})),
+        ToolCachePolicy::Never
+    );
+}
+
+#[test]
 fn patch_accepts_json_escaped_markdown_old_string() {
     let workspace = temp_dir("patch-escaped-old-string");
     let skill_dir = workspace.join("skills/local-flow");
@@ -194,8 +205,14 @@ fn patch_accepts_json_escaped_markdown_old_string() {
             platforms: Vec::new(),
             source: SkillSourceKind::Project,
             path: skill_dir.clone(),
+            provider_id: crate::skill::SkillProviderId::new("local-filesystem").unwrap(),
+            invocation: crate::skill::SkillInvocationPolicy::default(),
+            resource_base: crate::skill::SkillResourceBase::Directory {
+                path: skill_dir.clone(),
+            },
         }],
         warnings: Vec::new(),
+        complete: true,
     };
     let input = PatchSkillInput {
         target: SkillTargetInput {
@@ -224,8 +241,14 @@ fn rejects_readonly_skill_patch() {
             platforms: Vec::new(),
             source: SkillSourceKind::System,
             path: PathBuf::from("user/shared"),
+            provider_id: crate::skill::SkillProviderId::new("local-filesystem").unwrap(),
+            invocation: crate::skill::SkillInvocationPolicy::default(),
+            resource_base: crate::skill::SkillResourceBase::Directory {
+                path: PathBuf::from("user/shared"),
+            },
         }],
         warnings: Vec::new(),
+        complete: true,
     };
 
     let error = writable_project_skill("skill_manage", &catalog, "shared")
@@ -261,8 +284,12 @@ async fn skill_view_success_emits_skill_activation() {
     assert_eq!(activation.name, "local-flow");
     assert_eq!(activation.source, "project");
     assert_eq!(activation.turn_id, "turn-1");
-    assert_eq!(activation.tool_call_id, "call-1");
-    assert!(activation.path.ends_with("local-flow"));
+    assert_eq!(activation.item_identity(), "call-1");
+    assert!(
+        activation
+            .directory_path()
+            .is_some_and(|path| path.ends_with("local-flow"))
+    );
     fs::remove_dir_all(workspace).unwrap();
 }
 
@@ -323,7 +350,7 @@ async fn skill_view_support_file_success_activates_parent_skill() {
 }
 
 #[tokio::test]
-async fn skill_view_main_file_alias_reads_skill_and_lists_support_files() {
+async fn skill_view_main_file_alias_returns_resource_base_without_enumerating_files() {
     let workspace = temp_dir("view-main-alias");
     write_project_skill(&workspace, "local-flow");
     let tool = SkillViewTool::new(SkillsConfig {
@@ -349,7 +376,11 @@ async fn skill_view_main_file_alias_reads_skill_and_lists_support_files() {
     assert!(result.success);
     assert_eq!(result.skill.name, "local-flow");
     assert_eq!(result.file_path, "SKILL.md");
-    assert_eq!(result.support_files[0].path, "references/example.md");
+    assert!(matches!(
+        result.resource_base,
+        crate::skill::SkillResourceBase::Directory { .. }
+    ));
+    assert!(result.resource_hint.contains("filePath"));
     assert!(result.content.contains("# local-flow"));
     fs::remove_dir_all(workspace).unwrap();
 }

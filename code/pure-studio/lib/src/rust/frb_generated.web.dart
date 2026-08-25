@@ -388,6 +388,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeSkillActivationCause
+  dco_decode_box_autoadd_bridge_skill_activation_cause(dynamic raw);
+
+  @protected
+  BridgeSkillResourceBase dco_decode_box_autoadd_bridge_skill_resource_base(
+    dynamic raw,
+  );
+
+  @protected
   BridgeSkillsStateData dco_decode_box_autoadd_bridge_skills_state_data(
     dynamic raw,
   );
@@ -1134,6 +1143,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeShutdownProgress dco_decode_bridge_shutdown_progress(dynamic raw);
+
+  @protected
+  BridgeSkillActivationCause dco_decode_bridge_skill_activation_cause(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSkillResourceBase dco_decode_bridge_skill_resource_base(dynamic raw);
 
   @protected
   BridgeSkillsResourceState dco_decode_bridge_skills_resource_state(
@@ -1957,6 +1974,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSnapshot dco_decode_runtime_snapshot(dynamic raw);
 
   @protected
+  SkillInvocationPolicyDto dco_decode_skill_invocation_policy_dto(dynamic raw);
+
+  @protected
+  SkillResourceBaseDto dco_decode_skill_resource_base_dto(dynamic raw);
+
+  @protected
   SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw);
 
   @protected
@@ -2415,6 +2438,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeSettingsStateData sse_decode_box_autoadd_bridge_settings_state_data(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillActivationCause
+  sse_decode_box_autoadd_bridge_skill_activation_cause(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillResourceBase sse_decode_box_autoadd_bridge_skill_resource_base(
     SseDeserializer deserializer,
   );
 
@@ -3361,6 +3395,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeShutdownProgress sse_decode_bridge_shutdown_progress(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillActivationCause sse_decode_bridge_skill_activation_cause(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillResourceBase sse_decode_bridge_skill_resource_base(
     SseDeserializer deserializer,
   );
 
@@ -4380,6 +4424,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSnapshot sse_decode_runtime_snapshot(SseDeserializer deserializer);
 
   @protected
+  SkillInvocationPolicyDto sse_decode_skill_invocation_policy_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SkillResourceBaseDto sse_decode_skill_resource_base_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer);
 
   @protected
@@ -4905,6 +4959,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_settings_state_data(
     BridgeSettingsStateData self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_skill_activation_cause(
+    BridgeSkillActivationCause self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_skill_resource_base(
+    BridgeSkillResourceBase self,
     SseSerializer serializer,
   );
 
@@ -6030,6 +6096,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_shutdown_progress(
     BridgeShutdownProgress self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_skill_activation_cause(
+    BridgeSkillActivationCause self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_skill_resource_base(
+    BridgeSkillResourceBase self,
     SseSerializer serializer,
   );
 
@@ -7269,6 +7347,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_runtime_snapshot(
     RuntimeSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_skill_invocation_policy_dto(
+    SkillInvocationPolicyDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_skill_resource_base_dto(
+    SkillResourceBaseDto self,
     SseSerializer serializer,
   );
 

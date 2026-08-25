@@ -50,8 +50,9 @@ pub enum BridgeThreadItemState {
     Skill {
         name: String,
         source: String,
-        path: String,
-        tool_call_id: String,
+        provider_id: String,
+        resource_base: BridgeSkillResourceBase,
+        cause: BridgeSkillActivationCause,
         activated_at: i64,
     },
     File {
@@ -64,6 +65,19 @@ pub enum BridgeThreadItemState {
         after_tokens: u64,
         compacted_at: i64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeSkillResourceBase {
+    Directory { path: String },
+    Url { url: String },
+    Opaque { description: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeSkillActivationCause {
+    Tool { tool_call_id: String },
+    UserGesture { invocation_id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

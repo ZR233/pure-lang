@@ -64,7 +64,7 @@ impl InstructionAssembler {
                 snapshot.push_developer(block.source.clone(), &block.content);
             }
         }
-        if let Some(skills) = request.skills {
+        if let Some(skills) = request.skills.filter(|skills| skills.enabled) {
             let prompt = request
                 .skill_catalog
                 .map(crate::skill::build_skills_prompt_from_catalog)

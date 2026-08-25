@@ -39,8 +39,16 @@ pub struct SkillFrontmatter {
     pub category: Option<String>,
     #[serde(default)]
     pub platforms: Vec<String>,
+    #[serde(default, rename = "disable-model-invocation")]
+    pub disable_model_invocation: bool,
+    #[serde(default = "default_user_invocable", rename = "user-invocable")]
+    pub user_invocable: bool,
     #[serde(default)]
     pub metadata: SkillFrontmatterMetadata,
+}
+
+const fn default_user_invocable() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,10 +240,30 @@ mod tests {
                 description: "Do thing".to_string(),
                 category: None,
                 platforms: vec!["mac".to_string()],
+                disable_model_invocation: false,
+                user_invocable: true,
                 metadata: SkillFrontmatterMetadata::default(),
             }
         );
         assert_eq!(document.body, "Body");
+    }
+
+    #[test]
+    fn invocation_policy_defaults_and_invalid_types_fail_closed() {
+        let defaults =
+            parse_skill_frontmatter("---\nname: demo\ndescription: Demo\n---\nBody\n").unwrap();
+        assert!(!defaults.disable_model_invocation);
+        assert!(defaults.user_invocable);
+
+        let error = parse_skill_frontmatter(
+            "---\nname: demo\ndescription: Demo\nuser-invocable: sometimes\n---\nBody\n",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("failed to parse skill frontmatter")
+        );
     }
 
     #[test]

@@ -210,11 +210,15 @@ Flutter LSP 页的页面进入和“刷新”只调用 read；probe、typed repa
 
 ## 20.8 Skills、Usage、Updater 与 Recovery
 
-`SkillCatalogRuntime` 按 Project 持有 `SkillsStateSnapshot`，并持有 `StudioPaths` 给出的显式系统
-目录。read 不访问文件系统，discover 才扫描 project/user/system/external；系统目录不从
-`skills.user_dir` 推导，system Skills 只在 runtime 启动时全量重建。TurnFactory 冻结 catalog
-revision，`skills_list`/`skill_view` 使用该 catalog；`skill_manage` 用冻结 catalog 校验，写入成功后
-owner 为未来 Turn 重建，当前 Turn 保留旧 revision。
+`SkillCatalogRuntime` 按 Project 持有 last-good `SkillCatalogSnapshot`、完整性状态与 Provider warning，
+并持有 `StudioPaths` 给出的显式系统目录和进程级 `SkillRegistry`。read 不访问文件系统；显式
+discover 与每个新代理 Turn 的准备都扫描 project/configured-user/agents-user/system/external；
+Agents 用户来源按 Linux `$HOME/.agents/skills`、Windows `%USERPROFILE%\.agents\skills` 解析；系统目录不从
+`skills.user_dir` 推导，system Skills 只在 runtime 启动时全量重建。完整结果只在内容变化时推进
+catalog revision；不完整结果保留已有 last-good 并发布 Degraded，首次不完整则为该 Turn 提供空
+catalog 而不阻止普通任务。TurnFactory 冻结 winner、Provider locator 和 revision，
+`skills_list`/`skill_view` 使用该 catalog；`skill_manage` 用冻结 catalog 校验，写入成功后失效注册表，
+下一 Turn 强制重建，当前 Turn 保留旧 revision。
 
 Provider Usage 和 Updater 都使用 last-known owner。read 只读缓存，check 才访问网络；失败保留旧
 payload并标 stale。provider config 变化标 stale，删除 provider 时 authoritative 删除。

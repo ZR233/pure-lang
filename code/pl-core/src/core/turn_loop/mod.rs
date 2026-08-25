@@ -86,6 +86,11 @@ pub(super) async fn run_turn_with_trace(
         request.prompt.clone(),
         request.trace_attachments.clone(),
     );
+    for activation in &request.skill_activations {
+        recorder.record_trace_only(pl_trace::TraceEventKind::SkillActivated {
+            activation: activation.clone(),
+        });
+    }
     if let Some(prompt_cache_key) = options.prompt_cache_key.clone() {
         session.set_prompt_cache_key(prompt_cache_key);
     }

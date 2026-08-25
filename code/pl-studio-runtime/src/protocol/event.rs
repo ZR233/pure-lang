@@ -176,7 +176,7 @@ impl From<SkillsStateSnapshot> for StudioSkillsStateSnapshot {
             state: value.state.map(|data| StudioSkillsStateData {
                 config_fingerprint: data.config_fingerprint,
                 catalog_revision: data.catalog_revision,
-                catalog: data.catalog.as_ref().clone(),
+                catalog: data.catalog.snapshot().clone(),
             }),
         }
     }

@@ -23,8 +23,9 @@ pub use error::{PureError, Result};
 pub use event::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetLimitSnapshot, BudgetUsage, ErrorSeverity,
     OutputStream, PipelineStage, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
-    TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    SkillActivationCause, SkillActivationResourceBase, TodoItem, TodoListSnapshot, TodoStatus,
+    TokenUsageSnapshot, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
+    UserQuestionOption,
 };
 pub use interaction::*;
 pub use labeled::{LabeledEnum, UnknownLabelError};

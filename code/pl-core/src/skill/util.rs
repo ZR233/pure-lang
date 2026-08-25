@@ -73,6 +73,14 @@ pub(super) fn user_home_dir() -> Result<PathBuf> {
         .ok_or_else(|| PureError::ConfigError("could not resolve user home directory".to_string()))
 }
 
+pub(super) fn agents_user_skills_dir() -> Result<PathBuf> {
+    Ok(agents_user_skills_dir_from_home(&user_home_dir()?))
+}
+
+fn agents_user_skills_dir_from_home(home: &Path) -> PathBuf {
+    home.join(".agents").join("skills")
+}
+
 pub(super) fn platform_matches(platforms: &[String]) -> bool {
     platforms.is_empty()
         || platforms
@@ -141,4 +149,23 @@ pub(super) fn validate_usage_write(project_dir: &Path, skill_dir: &Path) -> Resu
     validate_path_for_write(project_dir, &usage_path)
         .map_err(|error| PureError::ConfigError(error.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agents_skills_directory_is_relative_to_the_platform_user_home() {
+        let home = if cfg!(windows) {
+            Path::new(r"C:\Users\fixture")
+        } else {
+            Path::new("/home/fixture")
+        };
+
+        assert_eq!(
+            agents_user_skills_dir_from_home(home),
+            home.join(".agents").join("skills")
+        );
+    }
 }

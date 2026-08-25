@@ -3,6 +3,7 @@
 mod error;
 mod routes;
 mod security;
+mod skills_schema;
 mod sse;
 
 use std::net::SocketAddr;
@@ -254,6 +255,22 @@ mod tests {
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
         assert!(dangling.is_empty(), "dangling refs: {dangling:?}");
+    }
+
+    #[test]
+    fn skills_openapi_exposes_provider_policy_and_resource_schema() {
+        let value = serde_json::to_value(openapi_document()).unwrap();
+        let response = &value["paths"]["/api/v1/runtime/projects/{project_id}/skills"]["get"]["responses"]
+            ["200"]["content"]["application/json"]["schema"];
+
+        assert_eq!(
+            response["$ref"],
+            "#/components/schemas/SkillsStateSnapshotSchema"
+        );
+        let summary = &value["components"]["schemas"]["SkillSummarySchema"];
+        assert!(summary["properties"].get("providerId").is_some());
+        assert!(summary["properties"].get("invocation").is_some());
+        assert!(summary["properties"].get("resourceBase").is_some());
     }
 
     #[tokio::test]

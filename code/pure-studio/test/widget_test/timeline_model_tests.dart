@@ -186,8 +186,15 @@ void registerTimelineModelTests() {
         skill: TimelineSkillActivation(
           name: 'pdf',
           source: 'system',
-          path: '/skills/pdf',
-          toolCallId: 'tool-1',
+          providerId: 'local-filesystem',
+          resourceBase: const SkillResourceBaseView(
+            SkillResourceBaseKind.directory,
+            '/skills/pdf',
+          ),
+          cause: const SkillActivationCauseView(
+            SkillActivationCauseKind.tool,
+            'tool-1',
+          ),
           activatedAt: _fixtureDate(1),
         ),
       ),
@@ -200,8 +207,15 @@ void registerTimelineModelTests() {
         skill: TimelineSkillActivation(
           name: 'pdf',
           source: 'system',
-          path: '/skills/pdf',
-          toolCallId: 'tool-2',
+          providerId: 'local-filesystem',
+          resourceBase: const SkillResourceBaseView(
+            SkillResourceBaseKind.directory,
+            '/skills/pdf',
+          ),
+          cause: const SkillActivationCauseView(
+            SkillActivationCauseKind.tool,
+            'tool-2',
+          ),
           activatedAt: _fixtureDate(2),
         ),
       ),
@@ -212,10 +226,7 @@ void registerTimelineModelTests() {
       TimelineRowType.skillActivation,
       TimelineRowType.skillActivation,
     ]);
-    expect(rows.map((row) => row.part!.skill!.toolCallId), [
-      'tool-1',
-      'tool-2',
-    ]);
+    expect(rows.map((row) => row.part!.skill!.cause.id), ['tool-1', 'tool-2']);
   });
 
   testWidgets('Skill Item renders a compact localized activation row', (
@@ -230,8 +241,15 @@ void registerTimelineModelTests() {
       skill: TimelineSkillActivation(
         name: 'pdf',
         source: 'system',
-        path: '/skills/pdf',
-        toolCallId: 'tool-1',
+        providerId: 'local-filesystem',
+        resourceBase: const SkillResourceBaseView(
+          SkillResourceBaseKind.directory,
+          '/skills/pdf',
+        ),
+        cause: const SkillActivationCauseView(
+          SkillActivationCauseKind.tool,
+          'tool-1',
+        ),
         activatedAt: _fixtureDate(1),
       ),
     );
@@ -245,7 +263,40 @@ void registerTimelineModelTests() {
       find.byKey(StudioDriverKeys.timelineSkillActivation('skill-1')),
       findsOneWidget,
     );
-    expect(find.text('Activated skill · pdf'), findsOneWidget);
+    expect(find.text('Agent activated skill · pdf'), findsOneWidget);
     expect(find.text('system'), findsOneWidget);
+  });
+
+  testWidgets('user gesture Skill Item uses distinct localized copy', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'skill-user-1',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      kind: ThreadItemKind.skill,
+      skill: TimelineSkillActivation(
+        name: 'doc',
+        source: 'user',
+        providerId: 'local-filesystem',
+        resourceBase: const SkillResourceBaseView(
+          SkillResourceBaseKind.directory,
+          '/skills/doc',
+        ),
+        cause: const SkillActivationCauseView(
+          SkillActivationCauseKind.userGesture,
+          'user-skill-0',
+        ),
+        activatedAt: _fixtureDate(1),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: [item]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('User activated skill · doc'), findsOneWidget);
   });
 }

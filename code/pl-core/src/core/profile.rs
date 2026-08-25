@@ -98,7 +98,7 @@ pub struct TurnEngineBuilder {
     effort: Option<ReasoningEffort>,
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
-    skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
+    skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     shared_tool_registry: Option<std::sync::Arc<crate::tool::ToolRegistry>>,
     runtime_profile: CoreRuntimeProfile,
@@ -132,7 +132,7 @@ impl TurnEngineBuilder {
 
     pub fn with_skill_catalog(
         mut self,
-        catalog: std::sync::Arc<crate::skill::SkillCatalog>,
+        catalog: std::sync::Arc<crate::skill::FrozenSkillCatalog>,
     ) -> Self {
         self.skill_catalog = Some(catalog);
         self

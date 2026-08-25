@@ -7,7 +7,10 @@ use std::sync::Arc;
 use crate::studio::ids::unix_seconds;
 use anyhow::{Context, Error, Result};
 use pl_core::config::SkillsConfig;
-use pl_core::skill::SkillCatalog;
+use pl_core::skill::{
+    FileSystemSkillProvider, FrozenSkillCatalog, SkillCatalog, SkillProviderRegistration,
+    SkillProviderRequest, SkillRegistry,
+};
 use pl_protocol::{
     ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
 };
@@ -22,6 +25,8 @@ pub struct SkillCatalogRuntime {
     states: Arc<RwLock<BTreeMap<String, SkillsStateSnapshot>>>,
     events: Option<crate::ProductEventBus>,
     system_skills_dir: Option<Arc<PathBuf>>,
+    registry: SkillRegistry,
+    _provider_registration: Option<Arc<SkillProviderRegistration>>,
 }
 
 /// 某 Project 已发布且可被未来 Turn 冻结的 catalog。
@@ -35,26 +40,26 @@ pub struct SkillsStateSnapshot {
 pub struct SkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
-    pub catalog: Arc<SkillCatalog>,
+    pub catalog: Arc<FrozenSkillCatalog>,
 }
 
 impl SkillsStateSnapshot {
-    pub(in crate::studio) fn catalog_or_empty(&self) -> Arc<SkillCatalog> {
-        self.state
-            .value()
-            .map(|data| data.catalog.clone())
-            .unwrap_or_else(empty_catalog)
+    pub(in crate::studio) fn catalog_for_turn(&self) -> Option<Arc<FrozenSkillCatalog>> {
+        self.state.value().map(|data| data.catalog.clone())
     }
 }
 
 impl SkillCatalogRuntime {
     /// Creates the Studio catalog owner with its product-owned system Skills directory.
     pub fn new(events: crate::ProductEventBus, system_skills_dir: PathBuf) -> Self {
+        let (registry, provider_registration) = local_registry();
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: Some(events),
             system_skills_dir: Some(Arc::new(system_skills_dir)),
+            registry,
+            _provider_registration: provider_registration,
         }
     }
 
@@ -90,6 +95,22 @@ impl SkillCatalogRuntime {
         workspace_root: &Path,
         config: &SkillsConfig,
     ) -> Result<SkillsStateSnapshot> {
+        self.discover_with_cancellation(
+            project_id,
+            workspace_root,
+            config,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn discover_with_cancellation(
+        &self,
+        project_id: &str,
+        workspace_root: &Path,
+        config: &SkillsConfig,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<SkillsStateSnapshot> {
         let _command = self.command_lock.lock().await;
         let fingerprint = skills_fingerprint(config)?;
         let previous = self.read(project_id).await;
@@ -116,12 +137,16 @@ impl SkillCatalogRuntime {
             .system_skills_dir
             .as_ref()
             .map(|path| path.as_ref().clone());
-        let discovered = tokio::task::spawn_blocking(move || {
-            SkillCatalog::discover(&workspace_root, &config, system_skills_dir.as_deref())
-        })
-        .await
-        .map_err(|error| anyhow::anyhow!("Skills discovery task failed: {error}"))
-        .and_then(|catalog| catalog.map_err(Error::from));
+        let discovered = self
+            .registry
+            .discover(SkillProviderRequest {
+                workspace_root,
+                config,
+                system_dir: system_skills_dir,
+                cancellation,
+            })
+            .await
+            .map_err(Error::from);
         let catalog = match discovered {
             Ok(catalog) => catalog,
             Err(error) => {
@@ -147,10 +172,33 @@ impl SkillCatalogRuntime {
             }
         };
         let checked_at = unix_seconds();
-        let catalog_revision = previous
-            .state
-            .value()
-            .map_or(1, |data| data.catalog_revision.saturating_add(1));
+        if !catalog.snapshot().complete {
+            let failed = SkillsStateSnapshot {
+                project_id: project_id.to_string(),
+                state: running
+                    .state
+                    .decide(ObservedResourceCommand::Fail {
+                        expected_revision: running.state.revision(),
+                        failed_at: checked_at,
+                        error: StateError {
+                            code: "skillsDiscoveryIncomplete".to_string(),
+                            message: catalog.snapshot().warnings.join("; "),
+                            retryable: true,
+                        },
+                    })
+                    .map_err(|transition| anyhow::anyhow!(transition.to_string()))?
+                    .next_state,
+            };
+            self.publish(project_id, failed.clone()).await;
+            return Ok(failed);
+        }
+        let catalog_revision = previous.state.value().map_or(1, |data| {
+            if catalog_content_eq(data.catalog.snapshot(), catalog.snapshot()) {
+                data.catalog_revision
+            } else {
+                data.catalog_revision.saturating_add(1)
+            }
+        });
         let snapshot = SkillsStateSnapshot {
             project_id: project_id.to_string(),
             state: running
@@ -214,11 +262,14 @@ impl SkillCatalogRuntime {
 
 impl Default for SkillCatalogRuntime {
     fn default() -> Self {
+        let (registry, provider_registration) = local_registry();
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: None,
             system_skills_dir: None,
+            registry,
+            _provider_registration: provider_registration,
         }
     }
 }
@@ -230,12 +281,18 @@ fn empty_snapshot(project_id: &str) -> SkillsStateSnapshot {
     }
 }
 
-fn empty_catalog() -> Arc<SkillCatalog> {
-    Arc::new(SkillCatalog {
-        project_dir: PathBuf::new(),
-        skills: Vec::new(),
-        warnings: Vec::new(),
-    })
+fn local_registry() -> (SkillRegistry, Option<Arc<SkillProviderRegistration>>) {
+    let registry = SkillRegistry::new();
+    let registration = registry
+        .register(Arc::new(FileSystemSkillProvider::new()))
+        .map(Arc::new)
+        .map_err(|error| tracing::error!(%error, "failed to register filesystem Skill provider"))
+        .ok();
+    (registry, registration)
+}
+
+fn catalog_content_eq(left: &SkillCatalog, right: &SkillCatalog) -> bool {
+    left.project_dir == right.project_dir && left.skills == right.skills
 }
 
 pub(super) fn skills_fingerprint(config: &SkillsConfig) -> Result<String> {
@@ -276,5 +333,84 @@ mod tests {
         assert_eq!(failed.state.revision(), previous.state.revision() + 2);
         assert_eq!(failed.state.kind(), ObservedResourceKind::Failed);
         assert_eq!(failed.state.value(), None);
+    }
+
+    #[tokio::test]
+    async fn every_discovery_rescans_but_unchanged_content_keeps_catalog_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let skill_dir = root.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: demo\ndescription: First\n---\nFirst body\n",
+        )
+        .unwrap();
+        let runtime = SkillCatalogRuntime::default();
+        let config = SkillsConfig::default();
+
+        let first = runtime
+            .discover("project", root.path(), &config)
+            .await
+            .unwrap();
+        let second = runtime
+            .discover("project", root.path(), &config)
+            .await
+            .unwrap();
+        assert_eq!(
+            first.state.value().unwrap().catalog_revision,
+            second.state.value().unwrap().catalog_revision
+        );
+
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: demo\ndescription: Second\n---\nSecond body\n",
+        )
+        .unwrap();
+        let third = runtime
+            .discover("project", root.path(), &config)
+            .await
+            .unwrap();
+        assert_eq!(
+            third.state.value().unwrap().catalog_revision,
+            second.state.value().unwrap().catalog_revision + 1
+        );
+        assert_eq!(
+            third.state.value().unwrap().catalog.snapshot().skills[0].description,
+            "Second"
+        );
+    }
+
+    #[tokio::test]
+    async fn globally_disabled_skills_are_still_discovered_for_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let skill_dir = root.path().join("skills/demo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: demo\ndescription: Demo\n---\nBody\n",
+        )
+        .unwrap();
+        let runtime = SkillCatalogRuntime::default();
+        let config = SkillsConfig {
+            enabled: false,
+            ..SkillsConfig::default()
+        };
+
+        let snapshot = runtime
+            .discover("project", root.path(), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            snapshot
+                .state
+                .value()
+                .unwrap()
+                .catalog
+                .snapshot()
+                .skills
+                .len(),
+            1
+        );
     }
 }

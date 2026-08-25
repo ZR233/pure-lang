@@ -52,6 +52,7 @@ cargo test --workspace
 cargo xtask verify-gui
 ```
 
-GUI 行为变更在上述确定性门禁之外执行 `cargo xtask verify-gui --integration`；Windows GUI 构建
-按需执行 `cargo xtask build-gui --check-generated`。`live-tests` 依赖外部服务和有效凭据，只能按
+GUI 行为变更在上述确定性门禁之外执行 `cargo xtask verify-gui --integration`；Windows/Linux
+GUI 构建按需执行 `cargo xtask build-gui --check-generated`。Linux headless 环境由 xtask 通过
+Xvfb 承载 integration test。`live-tests` 依赖外部服务和有效凭据，只能按
 crate 显式 opt-in，不进入默认 workspace 门禁。

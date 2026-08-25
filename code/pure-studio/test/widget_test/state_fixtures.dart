@@ -510,8 +510,16 @@ ThreadItemView _threadItemFixture({
       ThreadItemKind.skill => ThreadSkillItemStateView(
         name: skill?.name ?? text,
         source: skill?.source ?? 'system',
-        path: skill?.path ?? '',
-        toolCallId: skill?.toolCallId ?? 'skill-view',
+        providerId: skill?.providerId ?? 'local-filesystem',
+        resourceBase:
+            skill?.resourceBase ??
+            const SkillResourceBaseView(SkillResourceBaseKind.directory, ''),
+        cause:
+            skill?.cause ??
+            const SkillActivationCauseView(
+              SkillActivationCauseKind.tool,
+              'skill-view',
+            ),
         activatedAt: skill?.activatedAt ?? terminalAt,
       ),
       ThreadItemKind.agent ||

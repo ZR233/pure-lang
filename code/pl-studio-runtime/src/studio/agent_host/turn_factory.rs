@@ -116,8 +116,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .ok_or_else(|| turn_error("selected Studio project not found"))?,
         };
         let config = self.config_runtime.read()?.config;
-        let skills = self.skills.read(&thread_record.project_id).await;
-        let skill_catalog = skills.catalog_or_empty();
         let mode = thread_record.mode;
         let is_root = context.snapshot.identity.parent_id.is_none();
         // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
@@ -158,6 +156,26 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .await
             .map_err(anyhow_error)?;
         let workspace_root = workspace.root().to_path_buf();
+        let skills = self
+            .skills
+            .discover_with_cancellation(
+                &thread_record.project_id,
+                &workspace_root,
+                &config.skills,
+                context.cancellation_token.clone(),
+            )
+            .await
+            .map_err(anyhow_error)?;
+        let skill_catalog = skills.catalog_for_turn();
+        let mut turn_skills_config = config.skills.clone();
+        if skill_catalog.is_none() {
+            turn_skills_config.enabled = false;
+        }
+        let skill_catalog = skill_catalog.unwrap_or_else(|| {
+            Arc::new(pl_core::skill::FrozenSkillCatalog::empty(
+                workspace_root.join(&config.skills.project_dir),
+            ))
+        });
         let workspace_instructions = load_workspace_instruction_documents(
             &workspace_root,
             &workspace_root,
@@ -232,6 +250,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None
         };
         let input_message = context.input.payload.message.clone();
+        let user_skill_load = if turn_skills_config.enabled {
+            skill_catalog
+                .load_user_invocations(
+                    &input_message,
+                    context.turn_id.as_str(),
+                    context.cancellation_token.clone(),
+                )
+                .await
+                .map_err(anyhow_error)?
+        } else {
+            pl_core::skill::SkillUserInvocationLoad::default()
+        };
         let model_role = match root_role {
             Some(role) => role.id(),
             None => context.snapshot.identity.role.clone(),
@@ -240,7 +270,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
         let mut builder = TurnEngineBuilder::from_route(&route)?
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
-            .with_skills_config(config.skills.clone())
+            .with_skills_config(turn_skills_config.clone())
             .with_skill_catalog(skill_catalog.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
         if config.runtime.tool_capabilities.mcp {
@@ -341,7 +371,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .iter()
             .map(crate::studio::store::attachment::trace_attachment)
             .collect();
-        let instruction_snapshot = instruction_snapshot(StudioInstructionContext {
+        let mut instruction_snapshot = instruction_snapshot(StudioInstructionContext {
             config: &config,
             model: &route.model,
             mode,
@@ -349,7 +379,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             is_root,
             workspace_root: &workspace_root,
             workspace_instructions: &workspace_instructions,
-            skill_catalog: &skill_catalog,
+            skill_catalog: skill_catalog.snapshot(),
+            skills_config: &turn_skills_config,
             subagent_constraint: context
                 .input
                 .payload
@@ -357,12 +388,16 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
         })?;
+        if let Some(instruction) = &user_skill_load.instruction {
+            instruction_snapshot.push_skill_invocation(instruction);
+        }
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
             .with_user_content(user_content)
             .with_materialized_attachments(materialized)
             .with_trace_attachments(trace_attachments)
+            .with_skill_activations(user_skill_load.activations)
             .with_workspace_instructions(workspace_instructions)
             .with_instruction_snapshot(instruction_snapshot);
         #[cfg(debug_assertions)]
@@ -517,13 +552,14 @@ struct StudioInstructionContext<'a> {
     workspace_root: &'a Path,
     workspace_instructions: &'a str,
     skill_catalog: &'a pl_core::skill::SkillCatalog,
+    skills_config: &'a pl_core::config::SkillsConfig,
     subagent_constraint: Option<&'a str>,
 }
 
 fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<InstructionSnapshot> {
     InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&context.config.instructions),
-        skills: Some(&context.config.skills),
+        skills: Some(context.skills_config),
         skill_catalog: Some(context.skill_catalog),
         execution_profile: Some(ExecutionInstructionProfile {
             label: context.mode.label(),

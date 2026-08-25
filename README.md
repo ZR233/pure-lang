@@ -163,6 +163,12 @@ cargo test --workspace
 
 ### Flutter 开发
 
+Linux 首次构建需要 GTK runner 依赖；无图形会话的 integration smoke 额外需要 Xvfb：
+
+```bash
+sudo apt-get install -y libgtk-3-dev xvfb
+```
+
 ```powershell
 # 从仓库根目录执行一般 Flutter/Dart 命令，参数原样透传
 cargo flutter analyze
@@ -171,6 +177,9 @@ cargo dart format lib
 
 # 从仓库根目录解析依赖、静态分析并运行非视觉测试
 cargo xtask verify-gui
+
+# 在当前 Windows/Linux 桌面目标运行 integration smoke；Linux headless 自动使用 Xvfb
+cargo xtask verify-gui --integration
 
 # 从仓库根目录运行 GUI
 cargo xtask run-gui

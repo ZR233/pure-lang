@@ -197,16 +197,44 @@ pub(crate) fn bridge_skills_state(state: StudioSkillsStateSnapshot) -> BridgeSki
             |data| BridgeSkillsStateData {
                 config_fingerprint: data.config_fingerprint,
                 catalog_revision: data.catalog_revision,
-                skills: data
-                    .catalog
-                    .skills
-                    .into_iter()
-                    .map(|skill| SkillSummaryDto { name: skill.name })
-                    .collect(),
+                skills: data.catalog.skills.into_iter().map(skill_summary).collect(),
                 warnings: data.catalog.warnings,
+                complete: data.catalog.complete,
             },
             BridgeSkillsResourceState
         ),
+    }
+}
+
+fn skill_summary(skill: pl_core::skill::SkillMetadata) -> SkillSummaryDto {
+    SkillSummaryDto {
+        name: skill.name,
+        description: skill.description,
+        category: skill.category,
+        platforms: skill.platforms,
+        source: match skill.source {
+            pl_core::skill::SkillSourceKind::Project => "project",
+            pl_core::skill::SkillSourceKind::User => "user",
+            pl_core::skill::SkillSourceKind::System => "system",
+            pl_core::skill::SkillSourceKind::External => "external",
+        }
+        .to_string(),
+        provider_id: skill.provider_id.as_str().to_string(),
+        invocation: SkillInvocationPolicyDto {
+            model_invocable: skill.invocation.model_invocable,
+            user_invocable: skill.invocation.user_invocable,
+        },
+        resource_base: match skill.resource_base {
+            pl_core::skill::SkillResourceBase::Directory { path } => {
+                SkillResourceBaseDto::Directory {
+                    path: path.to_string_lossy().to_string(),
+                }
+            }
+            pl_core::skill::SkillResourceBase::Url { url } => SkillResourceBaseDto::Url { url },
+            pl_core::skill::SkillResourceBase::Opaque { description } => {
+                SkillResourceBaseDto::Opaque { description }
+            }
+        },
     }
 }
 

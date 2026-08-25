@@ -1,4 +1,5 @@
 use pl_protocol::MessageContent;
+use pl_protocol::SkillActivation;
 use pl_trace::TraceAttachment;
 
 use crate::instruction::InstructionSnapshot;
@@ -16,6 +17,7 @@ pub struct TurnRequest {
     pub budget: TurnBudget,
     pub materialized_attachments: Vec<crate::MaterializedAttachment>,
     pub trace_attachments: Vec<TraceAttachment>,
+    pub skill_activations: Vec<SkillActivation>,
 }
 
 impl TurnRequest {
@@ -30,6 +32,7 @@ impl TurnRequest {
             budget: TurnBudget::default(),
             materialized_attachments: Vec::new(),
             trace_attachments: Vec::new(),
+            skill_activations: Vec::new(),
         }
     }
 
@@ -53,6 +56,11 @@ impl TurnRequest {
 
     pub fn with_trace_attachments(mut self, attachments: Vec<TraceAttachment>) -> Self {
         self.trace_attachments = attachments;
+        self
+    }
+
+    pub fn with_skill_activations(mut self, activations: Vec<SkillActivation>) -> Self {
+        self.skill_activations = activations;
         self
     }
 

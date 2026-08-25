@@ -395,8 +395,32 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
             BridgeThreadItemState::Skill {
                 name: activation.name.clone(),
                 source: activation.source.clone(),
-                path: activation.path.clone(),
-                tool_call_id: activation.tool_call_id.clone(),
+                provider_id: activation.provider_id.clone(),
+                resource_base: match &activation.resource_base {
+                    pl_protocol::SkillActivationResourceBase::Directory { path } => {
+                        BridgeSkillResourceBase::Directory { path: path.clone() }
+                    }
+                    pl_protocol::SkillActivationResourceBase::Url { url } => {
+                        BridgeSkillResourceBase::Url { url: url.clone() }
+                    }
+                    pl_protocol::SkillActivationResourceBase::Opaque { description } => {
+                        BridgeSkillResourceBase::Opaque {
+                            description: description.clone(),
+                        }
+                    }
+                },
+                cause: match &activation.cause {
+                    pl_protocol::SkillActivationCause::Tool { tool_call_id } => {
+                        BridgeSkillActivationCause::Tool {
+                            tool_call_id: tool_call_id.clone(),
+                        }
+                    }
+                    pl_protocol::SkillActivationCause::UserGesture { invocation_id } => {
+                        BridgeSkillActivationCause::UserGesture {
+                            invocation_id: invocation_id.clone(),
+                        }
+                    }
+                },
                 activated_at: activation.activated_at,
             }
         }
@@ -756,9 +780,14 @@ mod tests {
             SkillActivation {
                 name: "pdf".to_string(),
                 source: "system".to_string(),
-                path: "/skills/pdf".to_string(),
+                provider_id: "local-filesystem".to_string(),
+                resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                    path: "/skills/pdf".to_string(),
+                },
                 turn_id: "turn-1".to_string(),
-                tool_call_id: "tool-1".to_string(),
+                cause: pl_protocol::SkillActivationCause::Tool {
+                    tool_call_id: "tool-1".to_string(),
+                },
                 activated_at: 7,
             },
         ))))
@@ -770,7 +799,7 @@ mod tests {
             BridgeThreadItemState::Skill {
                 name,
                 source,
-                tool_call_id,
+                cause: BridgeSkillActivationCause::Tool { tool_call_id },
                 activated_at: 7,
                 ..
             } if name == "pdf" && source == "system" && tool_call_id == "tool-1"

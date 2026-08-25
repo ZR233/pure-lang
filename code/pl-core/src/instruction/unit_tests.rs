@@ -376,6 +376,43 @@ fn built_in_base_requires_doc_first_and_final_review() {
 }
 
 #[test]
+fn disabled_skills_do_not_inject_a_frozen_catalog() {
+    let dir = temp_dir("skills-disabled");
+    fs::create_dir_all(&dir).unwrap();
+    let skills = crate::config::SkillsConfig {
+        enabled: false,
+        ..crate::config::SkillsConfig::default()
+    };
+    let catalog = crate::skill::SkillCatalog {
+        project_dir: dir.join("skills"),
+        skills: Vec::new(),
+        warnings: Vec::new(),
+        complete: true,
+    };
+
+    let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: None,
+        skills: Some(&skills),
+        skill_catalog: Some(&catalog),
+        execution_profile: None,
+        model: &ModelInfo::fallback("test-model"),
+        workspace_root: &dir,
+        current_dir: &dir,
+        workspace_instructions: None,
+        subagent_constraint: None,
+    })
+    .unwrap();
+
+    assert!(
+        snapshot
+            .developer
+            .iter()
+            .all(|block| block.source.kind != InstructionSourceKind::Skills)
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn force_dispatch_is_added_to_clone_only() {
     let snapshot = InstructionSnapshot {
         base: InstructionBlock {

@@ -373,6 +373,7 @@ pub struct BridgeSkillsStateData {
     pub catalog_revision: u64,
     pub skills: Vec<SkillSummaryDto>,
     pub warnings: Vec<String>,
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -547,4 +548,26 @@ pub struct SkillsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SkillSummaryDto {
     pub name: String,
+    pub description: String,
+    pub category: Option<String>,
+    pub platforms: Vec<String>,
+    pub source: String,
+    pub provider_id: String,
+    pub invocation: SkillInvocationPolicyDto,
+    pub resource_base: SkillResourceBaseDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInvocationPolicyDto {
+    pub model_invocable: bool,
+    pub user_invocable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum SkillResourceBaseDto {
+    Directory { path: String },
+    Url { url: String },
+    Opaque { description: String },
 }

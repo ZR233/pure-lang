@@ -59,7 +59,7 @@ pub(crate) struct ToolOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
 pub(crate) struct VerifyGuiOptions {
-    /// Run the Windows Flutter integration test through flutter drive.
+    /// Run the current Windows/Linux Flutter integration test through flutter drive.
     #[arg(long)]
     pub(crate) integration: bool,
 }

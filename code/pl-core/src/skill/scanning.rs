@@ -7,8 +7,8 @@ use crate::path_safety::{metadata_if_real, real_directory_entries, validate_exis
 
 use super::util::category_path;
 use super::{
-    ALLOWED_SUPPORT_DIRS, SKILL_FILE_NAME, SkillFile, SkillFrontmatter, SkillMetadata,
-    SkillSourceKind,
+    ALLOWED_SUPPORT_DIRS, SKILL_FILE_NAME, SkillFile, SkillFrontmatter, SkillInvocationPolicy,
+    SkillMetadata, SkillProviderId, SkillResourceBase, SkillSourceKind,
 };
 
 pub fn list_support_files(skill_dir: &Path) -> Result<Vec<SkillFile>> {
@@ -127,6 +127,14 @@ pub fn validate_skill_document(
         platforms: pl_skill_core::normalized_platforms(frontmatter.platforms),
         source: SkillSourceKind::Project,
         path: PathBuf::new(),
+        provider_id: SkillProviderId::new("local-filesystem")?,
+        invocation: SkillInvocationPolicy {
+            model_invocable: !frontmatter.disable_model_invocation,
+            user_invocable: frontmatter.user_invocable,
+        },
+        resource_base: SkillResourceBase::Directory {
+            path: PathBuf::new(),
+        },
     })
 }
 
@@ -168,6 +176,9 @@ pub(super) fn metadata_from_file(
     }
     metadata.source = source;
     metadata.path = skill_dir.to_path_buf();
+    metadata.resource_base = SkillResourceBase::Directory {
+        path: metadata.path.clone(),
+    };
     Ok(metadata)
 }
 
@@ -178,18 +189,39 @@ pub(super) fn parse_frontmatter(content: &str) -> Result<SkillFrontmatter> {
             description: frontmatter.description,
             category: frontmatter.category,
             platforms: frontmatter.platforms,
+            disable_model_invocation: frontmatter.disable_model_invocation,
+            user_invocable: frontmatter.user_invocable,
         })
         .map_err(skill_core_error)
 }
 
-pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
+pub(super) struct SkillFileScan {
+    pub files: Vec<PathBuf>,
+    pub complete: bool,
+    pub warnings: Vec<String>,
+}
+
+pub(super) fn scan_skill_files(root: &Path) -> SkillFileScan {
     let mut files = Vec::new();
-    if !metadata_if_real(root)
-        .ok()
-        .flatten()
-        .is_some_and(|metadata| metadata.is_dir())
-    {
-        return files;
+    let root_metadata = match metadata_if_real(root) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return SkillFileScan {
+                files,
+                complete: false,
+                warnings: vec![format!(
+                    "failed to inspect skill root {}: {error}",
+                    root.display()
+                )],
+            };
+        }
+    };
+    if !root_metadata.is_some_and(|metadata| metadata.is_dir()) {
+        return SkillFileScan {
+            files,
+            complete: true,
+            warnings: Vec::new(),
+        };
     }
     let mut builder = ignore::WalkBuilder::new(root);
     builder
@@ -206,44 +238,77 @@ pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
                     .is_some_and(|name| name == SKILL_FILE_NAME)
                 || !should_skip_dir(entry.path())
         });
-    for entry in builder.build().filter_map(std::result::Result::ok) {
+    let mut complete = true;
+    let mut warnings = Vec::new();
+    for entry in builder.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                complete = false;
+                warnings.push(format!(
+                    "failed to scan skill root {}: {error}",
+                    root.display()
+                ));
+                continue;
+            }
+        };
         if entry.depth() == 0 || entry.file_name() != SKILL_FILE_NAME {
             continue;
         }
         let path = entry.into_path();
-        if metadata_if_real(&path)
-            .ok()
-            .flatten()
-            .is_some_and(|metadata| metadata.is_file())
-        {
-            files.push(path);
+        match metadata_if_real(&path) {
+            Ok(Some(metadata)) if metadata.is_file() => files.push(path),
+            Ok(_) => {}
+            Err(error) => {
+                complete = false;
+                warnings.push(format!(
+                    "failed to inspect skill file {}: {error}",
+                    path.display()
+                ));
+            }
         }
     }
     files.sort();
     files.dedup();
-    files.retain(|skill_file| {
-        skill_file
-            .parent()
-            .and_then(|directory| directory.parent())
-            .map(|mut ancestor| {
-                while ancestor.starts_with(root) && ancestor != root {
-                    if metadata_if_real(&ancestor.join(SKILL_FILE_NAME))
-                        .ok()
-                        .flatten()
-                        .is_some_and(|metadata| metadata.is_file())
-                    {
-                        return false;
-                    }
-                    let Some(parent) = ancestor.parent() else {
+    let mut top_level_skills = Vec::new();
+    for skill_file in files {
+        let mut nested = false;
+        if let Some(mut ancestor) = skill_file.parent().and_then(|directory| directory.parent()) {
+            while ancestor.starts_with(root) && ancestor != root {
+                let ancestor_skill = ancestor.join(SKILL_FILE_NAME);
+                match metadata_if_real(&ancestor_skill) {
+                    Ok(Some(metadata)) if metadata.is_file() => {
+                        nested = true;
                         break;
-                    };
-                    ancestor = parent;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        complete = false;
+                        warnings.push(format!(
+                            "failed to inspect ancestor skill file {}: {error}",
+                            ancestor_skill.display()
+                        ));
+                    }
                 }
-                true
-            })
-            .unwrap_or(true)
-    });
-    files
+                let Some(parent) = ancestor.parent() else {
+                    break;
+                };
+                ancestor = parent;
+            }
+        }
+        if !nested {
+            top_level_skills.push(skill_file);
+        }
+    }
+    SkillFileScan {
+        files: top_level_skills,
+        complete,
+        warnings,
+    }
+}
+
+pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
+    scan_skill_files(root).files
 }
 
 fn should_skip_dir(path: &Path) -> bool {

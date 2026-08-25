@@ -150,8 +150,8 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   并提示先运行生成入口并审查结果，而不是指导开发者手工修补生成文件或强制提交。
 - CI 质量门禁（PR Quality Gate）只运行确定性检查：Rust fmt/clippy/test、
   `cargo xtask verify-gui`、Conventional PR 标题和发布配置校验。Flutter Driver
-  smoke、任务流 harness 与 live 模型验收不在 CI 中运行，交付前在本地 Windows
-  环境执行；AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
+  smoke、任务流 harness 与 live 模型验收不在 CI 中运行，交付前在本地 Windows/Linux
+  环境执行；Linux headless 环境通过 xtask 自动选择 Xvfb。AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
   可通过（已跟踪的 pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
 - xtask 中的生成输出规则是重生成稳定性检查和生成文件规范化的共同事实来源。新增生成器或
   输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。全仓

@@ -70,7 +70,7 @@ pub struct TurnEngine {
     runtime: ModelRuntime,
     effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
-    skill_catalog: Option<std::sync::Arc<crate::skill::SkillCatalog>>,
+    skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace: Option<crate::tool::AgentWorkspace>,
     workspace_instructions: Option<String>,
@@ -443,7 +443,10 @@ impl TurnEngine {
                 let assembly_request = InstructionAssemblyRequest {
                     instructions: None,
                     skills: self.skills.as_ref(),
-                    skill_catalog: self.skill_catalog.as_deref(),
+                    skill_catalog: self
+                        .skill_catalog
+                        .as_deref()
+                        .map(|catalog| catalog.snapshot()),
                     execution_profile: None,
                     model: &model_info,
                     workspace_root: &workspace_root,

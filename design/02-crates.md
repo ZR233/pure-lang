@@ -171,16 +171,21 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
   --output-dir <path> [--target-dir <path>]`
 
 `cargo flutter` 与 `cargo dart` 是仓库级透传入口：它们把后续参数原样交给对应工具，
-并把工作目录固定为 `code/pure-studio`。Windows GUI 构建和运行仍使用专用 xtask 命令，
+并把工作目录固定为 `code/pure-studio`。Windows/Linux GUI 构建和运行仍使用专用 xtask 命令，
 不通过通用透传入口执行。
 
-Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
+Windows/Linux 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
 2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，
 并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库
 但禁止手改。`generate-gui` 是唯一主动更新已跟踪 GUI 生成文件的入口；普通
 `run-gui`/`build-gui` 不执行生成器或可写格式化，`check-gui-generated`、
 `verify-gui` 与显式 `build-gui --check-generated` 才重新生成并验证 canonical 输出；验证以
 重新生成前后的内容稳定性为准，不要求生成文件相对 `HEAD` 无差异或已经提交。
+
+`verify-gui --integration` 在当前 Windows 或 Linux 桌面目标执行同一套 demo Driver smoke。
+Linux 存在 `DISPLAY`/`WAYLAND_DISPLAY` 时使用当前图形会话；无图形会话时由 xtask 使用
+`xvfb-run` 启动隔离的 X11 server，并强制软件渲染。headless Linux 缺少 Xvfb 时必须在启动
+Flutter 前失败并给出安装依赖提示，不能静默跳过 integration。
 
 ## 2.10 数据版本
 

@@ -78,6 +78,7 @@ pub enum InstructionSourceKind {
     ProfileUser,
     ProjectDoc,
     WorkspaceFallback,
+    SkillInvocation,
 }
 
 impl InstructionSnapshot {
@@ -87,6 +88,14 @@ impl InstructionSnapshot {
 
     pub(super) fn push_user(&mut self, source: InstructionSource, content: &str) {
         push_non_empty(&mut self.user, source, content);
+    }
+
+    /// Adds a host-prepared direct Skill invocation as a user instruction block.
+    pub fn push_skill_invocation(&mut self, content: &str) {
+        self.push_user(
+            InstructionSource::new(InstructionSourceKind::SkillInvocation, "skill invocation"),
+            content,
+        );
     }
 }
 
@@ -99,6 +108,7 @@ impl InstructionSourceKind {
                 | Self::Skills
                 | Self::SubagentConstraint
                 | Self::SubagentForce
+                | Self::SkillInvocation
         )
     }
 }

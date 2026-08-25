@@ -346,9 +346,14 @@ mod tests {
         SkillActivation {
             name: "pdf".to_string(),
             source: "system".to_string(),
-            path: "/skills/pdf".to_string(),
+            provider_id: "local-filesystem".to_string(),
+            resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                path: "/skills/pdf".to_string(),
+            },
             turn_id: "turn-1".to_string(),
-            tool_call_id: "tool-1".to_string(),
+            cause: pl_protocol::SkillActivationCause::Tool {
+                tool_call_id: "tool-1".to_string(),
+            },
             activated_at: 7,
         }
     }

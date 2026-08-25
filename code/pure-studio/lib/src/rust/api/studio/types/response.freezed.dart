@@ -8592,4 +8592,368 @@ as BridgeStoppedResource,
 
 }
 
+/// @nodoc
+mixin _$SkillResourceBaseDto {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SkillResourceBaseDto);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'SkillResourceBaseDto()';
+}
+
+
+}
+
+/// @nodoc
+class $SkillResourceBaseDtoCopyWith<$Res>  {
+$SkillResourceBaseDtoCopyWith(SkillResourceBaseDto _, $Res Function(SkillResourceBaseDto) __);
+}
+
+
+/// Adds pattern-matching-related methods to [SkillResourceBaseDto].
+extension SkillResourceBaseDtoPatterns on SkillResourceBaseDto {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( SkillResourceBaseDto_Directory value)?  directory,TResult Function( SkillResourceBaseDto_Url value)?  url,TResult Function( SkillResourceBaseDto_Opaque value)?  opaque,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory() when directory != null:
+return directory(_that);case SkillResourceBaseDto_Url() when url != null:
+return url(_that);case SkillResourceBaseDto_Opaque() when opaque != null:
+return opaque(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( SkillResourceBaseDto_Directory value)  directory,required TResult Function( SkillResourceBaseDto_Url value)  url,required TResult Function( SkillResourceBaseDto_Opaque value)  opaque,}){
+final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory():
+return directory(_that);case SkillResourceBaseDto_Url():
+return url(_that);case SkillResourceBaseDto_Opaque():
+return opaque(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( SkillResourceBaseDto_Directory value)?  directory,TResult? Function( SkillResourceBaseDto_Url value)?  url,TResult? Function( SkillResourceBaseDto_Opaque value)?  opaque,}){
+final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory() when directory != null:
+return directory(_that);case SkillResourceBaseDto_Url() when url != null:
+return url(_that);case SkillResourceBaseDto_Opaque() when opaque != null:
+return opaque(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String path)?  directory,TResult Function( String url)?  url,TResult Function( String description)?  opaque,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory() when directory != null:
+return directory(_that.path);case SkillResourceBaseDto_Url() when url != null:
+return url(_that.url);case SkillResourceBaseDto_Opaque() when opaque != null:
+return opaque(_that.description);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String path)  directory,required TResult Function( String url)  url,required TResult Function( String description)  opaque,}) {final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory():
+return directory(_that.path);case SkillResourceBaseDto_Url():
+return url(_that.url);case SkillResourceBaseDto_Opaque():
+return opaque(_that.description);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String path)?  directory,TResult? Function( String url)?  url,TResult? Function( String description)?  opaque,}) {final _that = this;
+switch (_that) {
+case SkillResourceBaseDto_Directory() when directory != null:
+return directory(_that.path);case SkillResourceBaseDto_Url() when url != null:
+return url(_that.url);case SkillResourceBaseDto_Opaque() when opaque != null:
+return opaque(_that.description);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class SkillResourceBaseDto_Directory extends SkillResourceBaseDto {
+  const SkillResourceBaseDto_Directory({required this.path}): super._();
+
+
+ final  String path;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SkillResourceBaseDto_DirectoryCopyWith<SkillResourceBaseDto_Directory> get copyWith => _$SkillResourceBaseDto_DirectoryCopyWithImpl<SkillResourceBaseDto_Directory>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SkillResourceBaseDto_Directory&&(identical(other.path, path) || other.path == path));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,path);
+
+@override
+String toString() {
+  return 'SkillResourceBaseDto.directory(path: $path)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SkillResourceBaseDto_DirectoryCopyWith<$Res> implements $SkillResourceBaseDtoCopyWith<$Res> {
+  factory $SkillResourceBaseDto_DirectoryCopyWith(SkillResourceBaseDto_Directory value, $Res Function(SkillResourceBaseDto_Directory) _then) = _$SkillResourceBaseDto_DirectoryCopyWithImpl;
+@useResult
+$Res call({
+ String path
+});
+
+
+
+
+}
+/// @nodoc
+class _$SkillResourceBaseDto_DirectoryCopyWithImpl<$Res>
+    implements $SkillResourceBaseDto_DirectoryCopyWith<$Res> {
+  _$SkillResourceBaseDto_DirectoryCopyWithImpl(this._self, this._then);
+
+  final SkillResourceBaseDto_Directory _self;
+  final $Res Function(SkillResourceBaseDto_Directory) _then;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? path = null,}) {
+  return _then(SkillResourceBaseDto_Directory(
+path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class SkillResourceBaseDto_Url extends SkillResourceBaseDto {
+  const SkillResourceBaseDto_Url({required this.url}): super._();
+
+
+ final  String url;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SkillResourceBaseDto_UrlCopyWith<SkillResourceBaseDto_Url> get copyWith => _$SkillResourceBaseDto_UrlCopyWithImpl<SkillResourceBaseDto_Url>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SkillResourceBaseDto_Url&&(identical(other.url, url) || other.url == url));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,url);
+
+@override
+String toString() {
+  return 'SkillResourceBaseDto.url(url: $url)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SkillResourceBaseDto_UrlCopyWith<$Res> implements $SkillResourceBaseDtoCopyWith<$Res> {
+  factory $SkillResourceBaseDto_UrlCopyWith(SkillResourceBaseDto_Url value, $Res Function(SkillResourceBaseDto_Url) _then) = _$SkillResourceBaseDto_UrlCopyWithImpl;
+@useResult
+$Res call({
+ String url
+});
+
+
+
+
+}
+/// @nodoc
+class _$SkillResourceBaseDto_UrlCopyWithImpl<$Res>
+    implements $SkillResourceBaseDto_UrlCopyWith<$Res> {
+  _$SkillResourceBaseDto_UrlCopyWithImpl(this._self, this._then);
+
+  final SkillResourceBaseDto_Url _self;
+  final $Res Function(SkillResourceBaseDto_Url) _then;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? url = null,}) {
+  return _then(SkillResourceBaseDto_Url(
+url: null == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class SkillResourceBaseDto_Opaque extends SkillResourceBaseDto {
+  const SkillResourceBaseDto_Opaque({required this.description}): super._();
+
+
+ final  String description;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SkillResourceBaseDto_OpaqueCopyWith<SkillResourceBaseDto_Opaque> get copyWith => _$SkillResourceBaseDto_OpaqueCopyWithImpl<SkillResourceBaseDto_Opaque>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SkillResourceBaseDto_Opaque&&(identical(other.description, description) || other.description == description));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,description);
+
+@override
+String toString() {
+  return 'SkillResourceBaseDto.opaque(description: $description)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SkillResourceBaseDto_OpaqueCopyWith<$Res> implements $SkillResourceBaseDtoCopyWith<$Res> {
+  factory $SkillResourceBaseDto_OpaqueCopyWith(SkillResourceBaseDto_Opaque value, $Res Function(SkillResourceBaseDto_Opaque) _then) = _$SkillResourceBaseDto_OpaqueCopyWithImpl;
+@useResult
+$Res call({
+ String description
+});
+
+
+
+
+}
+/// @nodoc
+class _$SkillResourceBaseDto_OpaqueCopyWithImpl<$Res>
+    implements $SkillResourceBaseDto_OpaqueCopyWith<$Res> {
+  _$SkillResourceBaseDto_OpaqueCopyWithImpl(this._self, this._then);
+
+  final SkillResourceBaseDto_Opaque _self;
+  final $Res Function(SkillResourceBaseDto_Opaque) _then;
+
+/// Create a copy of SkillResourceBaseDto
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? description = null,}) {
+  return _then(SkillResourceBaseDto_Opaque(
+description: null == description ? _self.description : description // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
 // dart format on

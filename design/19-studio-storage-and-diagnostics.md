@@ -7,6 +7,10 @@ Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v13；测试和�
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
 
+Skill Provider 与用户手势不增加数据库表，数据库 schema 仍为 v13。Thread wire schema v6 的 Skill
+Item 保存 typed resource base 与 `Tool | UserGesture` 激活来源；读取旧 `path + toolCallId` JSON 时在
+协议边界兼容映射，不重建或清除现有 Thread。
+
 打开、检查、删除或重建 SQLite 之前，`StudioRuntime` 必须取得 Studio home 下
 `runtime.lock` 的跨进程独占 OS 文件锁。锁文件只记录 PID、宿主类型和启动时间供诊断，占用
 状态只以 OS 锁为准；文件内容不是 lease。所有 runtime clone 共享同一 lock owner，完整

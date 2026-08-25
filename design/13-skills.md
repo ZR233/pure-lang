@@ -2,9 +2,12 @@
 
 ## 13.1 目标
 
-Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。系统默认只把自学习产物写入当前项目，避免把项目经验污染到用户全局配置。
+Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。`pl-core` 提供与来源无关的
+Provider、注册表、发现观测和 Turn 级冻结 catalog；Studio 只拥有进程级 Provider 注册表、项目
+catalog 投影与系统资源目录。系统默认只把自学习产物写入当前项目，避免把项目经验污染到用户
+全局配置。
 
-首版只实现本地闭环：
+当前只实现本地文件系统 Provider 闭环：
 
 - 发现本地 skills。
 - 向模型注入简短索引。
@@ -12,18 +15,25 @@ Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。
 - 通过工具创建、修补和删除项目级 skill。
 - 每轮结束后由后台 reviewer 自动沉淀可复用经验。
 
-首版不实现在线 Hub、安装市场、GUI 管理页或用户级自动写入。
+当前不实现远程 Provider、在线 Hub、安装市场、文件 watcher、项目级 `.agents/skills`、平铺
+`<name>.md` 或用户级自动写入。
 
 ## 13.2 目录和优先级
 
 运行时按以下优先级发现 skills：
 
 1. 项目目录：`<workspace_root>/skills/`
-2. 用户目录：`~/.pure/skills/`
-3. Studio 系统目录：`<studio_home>/studio/skills/.system/`
-4. 配置里的外部目录：`[skills].external_dirs`
+2. 配置用户目录：`[skills].user_dir`，默认 `~/.pure/skills/`
+3. Agents 兼容用户目录：Linux `$HOME/.agents/skills/`、Windows `%USERPROFILE%\.agents\skills\`
+4. Studio 系统目录：`<studio_home>/studio/skills/.system/`
+5. 配置里的外部目录：`[skills].external_dirs`
 
-同名 skill 只保留最高优先级来源。项目目录是唯一写入目标；用户目录、系统目录和外部目录仅参与只读发现。若模型尝试修改来自用户目录、系统目录或外部目录的 skill，工具必须拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
+这些目录由默认文件系统 Provider 映射为带不透明 locator 的候选。Provider 可以并行发现，重名
+winner 依次按来源 rank、Provider 注册顺序和 Provider 本地顺序确定。同名 skill 只保留最高
+优先级来源；显式配置的用户目录优先于 Agents 兼容目录，两者都标记为
+`User` 来源。若两者解析为同一路径，只扫描一次。项目目录是唯一写入目标；用户目录、系统目录
+和外部目录仅参与只读发现。若模型尝试修改来自用户目录、系统目录或外部目录的 skill，工具必须
+拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
 
 `[skills].project_dir` 是相对工作区根目录的路径，默认 `skills`。解析后必须位于 `workspace_root` 内。
 
@@ -71,7 +81,10 @@ platforms: ["windows", "linux", "macos"]
 ...
 ```
 
-`name` 和 `description` 必填。`category` 和 `platforms` 可选。`platforms` 缺失表示所有平台可用。
+`name` 和 `description` 必填。`category`、`platforms`、`disable-model-invocation` 与
+`user-invocable` 可选；后两者分别默认 `false` 和 `true`，在核心模型中投影为正向
+`model_invocable` / `user_invocable`。调用策略字段类型无效时整个 skill 失败关闭并产生 warning。
+`platforms` 缺失表示所有平台可用。
 
 支持文件只允许放在以下目录：
 
@@ -86,37 +99,59 @@ platforms: ["windows", "linux", "macos"]
 
 默认工具集中新增：
 
-- `skills_list(category?)`：列出启用 skill 的简短索引。
-- `skill_view(name, filePath?)`：读取完整 `SKILL.md` 或支持文件；Simple 模式同时记录项目 skill 使用统计，Task 模式只读且不更新统计。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取主文档；只有真正的支持文件路径才必须位于 `references/`、`templates/`、`scripts/` 或 `assets/` 下。
+- `skills_list(category?)`：列出启用且允许模型调用的 skill 简短索引。
+- `skill_view(name, filePath?)`：通过冻结 candidate 的 Provider 读取完整 `SKILL.md` 或支持文件；Simple 模式同时记录项目 skill 使用统计，Task 模式只读且不更新统计。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取主文档；只有真正的支持文件路径才必须位于 `references/`、`templates/`、`scripts/` 或 `assets/` 下。
 - `skill_manage(action, ...)`：管理项目目录中的 skill。
 
 `skill_manage` 支持 `create`、`patch`、`edit`、`delete`、`writeFile`、`removeFile`。所有写入都只作用于 `<workspace_root>/<project_dir>/`。写入动作进入现有工具审批流程。`patch.oldString` 首先按 `SKILL.md` 原文字面量匹配；若完全匹配失败，运行时只允许把看起来像 JSON string fragment 的模型输出交给 `serde_json` 解码一层，再按同一匹配数量规则替换，避免因为 JSON/Markdown 二次转义噪声导致可恢复 patch 失败。运行时不维护额外的手写转义替换表。
 
+`skill_view` 永不进入通用只读工具缓存。每次调用都重新通过 Provider 加载正文，并重新校验名称和
+模型调用策略；candidate 的身份或权限已经变化时拒绝陈旧结果并使 Provider 失效。主文档响应只
+返回资源基底和按需读取说明，不递归枚举资源；支持文件由胜出 Provider 的 `read_resource` 实现。
+本合同不限制主文档或支持文件大小。
+
 ## 13.5 Prompt 和 Subagent
 
-当 `[skills].enabled = true` 时，核心 turn 在 base instructions 与项目记忆之间注入 skills 索引和使用规则。任务明显匹配某个 skill 时，模型必须先调用 `skill_view(name)` 读取完整内容。
+当 `[skills].enabled = true` 时，核心 turn 在 base instructions 与项目记忆之间注入允许模型调用的
+skills 索引和使用规则。索引只包含空白规范化后的名称和 description，不包含路径、rank、Provider
+locator 或正文。任务明显匹配某个 skill 时，模型必须先调用 `skill_view(name)` 读取完整内容。
+`enabled = false` 同时关闭目录、工具和用户 `/name` 手势，工具不可见时不得注入调用指引。
 
 `register_default_tools` 是 root agent 和 subagent 的共同工具入口，因此 subagent 与父 agent 使用同一项目 skills 上下文和同一加载优先级。
 
 系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
 
-Studio 状态栏的 Skills 只展示当前 Thread 已激活的 skills。激活定义为该 Thread 中
-`skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未
-`skill_view` 的 skill 不计入。每次成功读取都由后端记录为 `SkillActivated` runtime fact，
+Studio 状态栏的 Skills 只展示当前 Thread 已激活的 skills。激活定义为该 Thread 中成功的
+`skill_view`，或直接用户输入中按空白边界精确匹配 `/name` 且该 skill 允许用户调用。用户手势按
+首次出现顺序去重，保留原始用户文本，并把与工具加载共用的规范 `<skill_content>` 包装作为 Turn
+级 user instruction 注入，同时明确提示模型无需再调用 `skill_view`。未知名称、路径、分数和用户
+调用已禁用的名称继续作为普通文本；已确认可调用 skill 的加载失败则终止 Turn 准备。
+
+每次成功加载都由后端记录为 `SkillActivated` runtime fact，来源是带不变量的
+`Tool { tool_call_id }` 或 `UserGesture { invocation_id }`，
 并投影为独立、终态的 durable Skill Timeline Item；重复读取同一 skill 仍保留多条激活
-Item。`ThreadRuntimeSnapshot.activeSkills` 按 Skill Item 的首次出现顺序去重，并在冷恢复时
+Item，同一 Turn 同名用户手势只产生一次。Item ID 分别由 Turn ID 与 tool call ID、Turn ID 与用户
+invocation ID 确定。`ThreadRuntimeSnapshot.activeSkills` 按 Skill Item 的首次出现顺序去重，并在冷恢复时
 由持久化 Item 重建，不另设平行 activation 表。前端只消费 typed Skill Item 和 runtime
 snapshot，不解析工具输出 JSON。
 
-Studio 设置页的 Skills 标签页展示 `SkillCatalogRuntime` 已发布的项目 catalog。进入标签页只读取
-缓存，不访问文件系统；`discoverSkills(projectId)` 或 Project 激活 command 才按
-project/user/system/external 规则扫描并整体发布新 revision。该列表不调用 `skill_view`，不改变
-会话 active skills，也不写入使用统计。
+Studio 设置页的 Skills 标签页展示 `SkillCatalogRuntime` 已发布的完整项目 catalog，包括调用策略、
+Provider、warning 和完整性。进入标签页只读缓存，不访问文件系统；显式
+`discoverSkills(projectId)` 强制扫描。每个新代理 Turn 的准备阶段也强制扫描一次；完整 catalog
+内容不变时不增加公开 revision。该列表不调用 `skill_view`，不改变会话 active skills，也不写入
+使用统计。
 
-TurnFactory 获取并冻结当前 catalog revision。`SkillCatalog` 的系统来源必须由 Studio 显式传入，
-不得从 `[skills].user_dir` 推导；非 Studio 调用不传系统目录。`skills_list` 与 `skill_view` 只使用冻结 catalog，
-不会在每次工具调用重新 discover；`skill_manage` 也以冻结 catalog 校验目标，写入成功后通知 owner
-为未来 Turn 重建 catalog，当前 Turn 仍保持原 revision。system Skills 只在
+注册表发现返回 `SkillProviderObservation { candidates, complete, warnings }`。确认缺失的目录是完整
+空结果；单个格式错误产生 warning 并跳过；意外 I/O、Provider 暂时失败或发现期间代次连续变化
+产生不完整观测。代次在发现期间变化时重试一次，再次变化则发布不完整观测。已有完整 catalog 时
+不完整结果保留 last-good 并发布 Degraded；首次发现失败时该 Turn 不注入目录、不注册 Skill 工具，
+但普通任务仍可执行。
+
+TurnFactory 在每个新代理 Turn 扫描后冻结 winner、Provider locator 和 revision。`SkillCatalog` 的
+系统来源必须由 Studio 显式传入，不得从 `[skills].user_dir` 推导；非 Studio 调用不传系统目录。
+`skills_list` 与 `skill_view` 只使用冻结 catalog，不会在同一 Turn 的模型工具迭代中重新 discover；
+`skill_manage` 也以冻结 catalog 校验目标，写入成功后使注册表失效，新结果只在下一 Turn 生效。
+system Skills 只在
 `startStudioRuntime` 全量刷新，不在 Project discover 时刷新，也不设置隐式 filesystem watcher。
 
 ## 13.6 自学习

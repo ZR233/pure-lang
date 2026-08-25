@@ -319,6 +319,18 @@
       "name": {"type": "String"}
     }
   },
+  "timelineSkillAgentActivated": "Agent activated skill · {name}",
+  "@timelineSkillAgentActivated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "timelineSkillUserActivated": "User activated skill · {name}",
+  "@timelineSkillUserActivated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
   "timelineAgentFallback": "Agent",
   "timelineToolCompleted": "{name} completed",
   "@timelineToolCompleted": {

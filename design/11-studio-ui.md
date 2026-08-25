@@ -127,7 +127,8 @@ overlay并以完整 payload 为准。
 Timeline row key 使用 `threadId + itemId` 或稳定工具组首 Item identity。未知 Item union 变体
 是协议错误；已知但内部不可见的变体由 Rust bridge 过滤。
 
-每个 Skill Item 投影为独立紧凑行，显示激活文案、skill 名称与来源；同一 skill 的重复激活
+每个 Skill Item 投影为独立紧凑行，显示区分“代理激活”与“用户激活”的本地化文案、skill 名称、
+来源与 Provider；同一 skill 的重复代理激活
 不合并。Skill 行与普通 Item 一样参与 ordinal 排序、历史分页、rollback 样式和新事件滚动，
 不从 tool output JSON 临时推导。
 
@@ -160,7 +161,8 @@ context/total token、缓存命中、未命中、写入、reasoning token、infe
 缓存节省和部分未定价提示。读数只来自 canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐
 inference 或计费副本。费用行固定展示，不随数据缺失隐藏。
 
-Skills 摘要显示 `ThreadRuntimeSnapshot.activeSkills` 的去重数量；当前 Thread 的 capability
+Skills 摘要显示 `ThreadRuntimeSnapshot.activeSkills` 的去重数量；代理工具与用户手势激活共同参与
+该列表的首次出现顺序去重。当前 Thread 的 capability
 详情以完整列表展示全部名称，不截断，超出高度时在详情内部滚动并保持键盘与语义化访问。
 顶部 agent directory 只负责切换与目录状态，不复制该列表，也不新增独立 agent 详情面板。
 

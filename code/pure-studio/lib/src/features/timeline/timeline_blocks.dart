@@ -300,13 +300,19 @@ class _SkillActivationPart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = context.l10n.timelineSkillActivated(activation.name);
+    final label = switch (activation.cause.kind) {
+      SkillActivationCauseKind.tool => context.l10n.timelineSkillAgentActivated(
+        activation.name,
+      ),
+      SkillActivationCauseKind.userGesture =>
+        context.l10n.timelineSkillUserActivated(activation.name),
+    };
     return Semantics(
       container: true,
       label: label,
       value: activation.source,
       child: Tooltip(
-        message: activation.path,
+        message: activation.resourceBase.value,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: StudioColors.claySoft.withValues(alpha: 0.6),

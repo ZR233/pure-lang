@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use pl_protocol::{PureError, SkillActivation};
+use pl_protocol::{PureError, SkillActivation, SkillActivationCause, SkillActivationResourceBase};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +40,7 @@ pub struct SkillManageTool {
 #[derive(Debug, Clone)]
 enum SkillCatalogSource {
     Config(SkillsConfig),
-    Frozen(Arc<SkillCatalog>),
+    Frozen(Arc<FrozenSkillCatalog>),
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -152,18 +152,24 @@ enum ReplaceMode {
 struct SkillsListOutput<'a> {
     success: bool,
     count: usize,
-    project_dir: &'a Path,
-    skills: Vec<&'a SkillMetadata>,
-    warnings: Vec<String>,
+    skills: Vec<SkillModelSummary<'a>>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SkillViewOutput<'a> {
+struct SkillModelSummary<'a> {
+    name: &'a str,
+    description: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillViewOutput {
     success: bool,
-    skill: &'a SkillMetadata,
+    skill: SkillSummary,
     file_path: String,
-    support_files: Vec<crate::skill::SkillFile>,
+    resource_base: SkillResourceBase,
+    resource_hint: String,
     content: String,
 }
 
@@ -215,7 +221,7 @@ impl SkillsListTool {
         }
     }
 
-    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
         }
@@ -229,7 +235,7 @@ impl SkillViewTool {
         }
     }
 
-    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
         }
@@ -243,7 +249,7 @@ impl SkillManageTool {
         }
     }
 
-    pub fn from_catalog(catalog: Arc<SkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
         }
@@ -283,10 +289,12 @@ impl Tool for SkillsListTool {
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         async move {
             let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name())?;
-            let skills = catalog
+            let catalog = catalog_for(&self.source, &context, self.name()).await?;
+            let snapshot = catalog.snapshot();
+            let skills = snapshot
                 .skills
                 .iter()
+                .filter(|skill| skill.invocation.model_invocable)
                 .filter(|skill| {
                     input.category.as_deref().is_none_or(|category| {
                         skill
@@ -295,13 +303,15 @@ impl Tool for SkillsListTool {
                             .is_some_and(|value| value.eq_ignore_ascii_case(category))
                     })
                 })
+                .map(|skill| SkillModelSummary {
+                    name: &skill.name,
+                    description: &skill.description,
+                })
                 .collect::<Vec<_>>();
             json_output(SkillsListOutput {
                 success: true,
                 count: skills.len(),
-                project_dir: &catalog.project_dir,
                 skills,
-                warnings: catalog.warnings.clone(),
             })
         }
         .boxed()
@@ -331,7 +341,7 @@ impl Tool for SkillViewTool {
     }
 
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::UntilWorkspaceMutation
+        ToolCachePolicy::Never
     }
 
     fn execute<'a>(
@@ -343,34 +353,73 @@ impl Tool for SkillViewTool {
             let turn_id = input.session_id.clone();
             let tool_id = input.tool_id.clone();
             let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name())?;
+            let catalog = catalog_for(&self.source, &context, self.name()).await?;
             let skill = catalog.find(&input.target.name).ok_or_else(|| {
                 let name = &input.target.name;
                 tool_error(self.name(), format!("skill not found: {name}"))
-            })?;
-            let read = read_skill_file(skill, input.file_path.as_deref())
+            })?.clone();
+            if !skill.invocation.model_invocable {
+                return Err(tool_error(
+                    self.name(),
+                    format!("skill is not model-invocable: {}", skill.name),
+                ));
+            }
+            let cancellation = context
+                .options
+                .cancellation_token
+                .clone()
+                .unwrap_or_default();
+            let definition = catalog
+                .load(
+                    &input.target.name,
+                    SkillLoadInvocation::Model,
+                    cancellation.clone(),
+                )
+                .await
                 .map_err(|error| tool_error(self.name(), error))?;
-            bump_project_view(&catalog.project_dir, skill)
-                .map_err(|error| tool_error(self.name(), error))?;
-            let support_files = if read.is_main {
-                list_support_files(&skill.path).map_err(|error| tool_error(self.name(), error))?
-            } else {
-                Vec::new()
+            let requested_resource = input
+                .file_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !is_main_skill_path(path));
+            let (file_path, content) = match requested_resource {
+                Some(file_path) => (
+                    file_path.to_string(),
+                    catalog
+                        .read_resource(
+                            &input.target.name,
+                            file_path,
+                            SkillLoadInvocation::Model,
+                            cancellation,
+                        )
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?,
+                ),
+                None => (SKILL_FILE_NAME.to_string(), definition.content),
             };
+            bump_project_view(&catalog.snapshot().project_dir, &skill)
+                .map_err(|error| tool_error(self.name(), error))?;
             let activation = skill_activation(skill, &turn_id, &tool_id);
             json_output_with_events(
                 SkillViewOutput {
                     success: true,
-                    skill,
-                    file_path: read.file_path,
-                    support_files,
-                    content: read.content,
+                    skill: definition.summary.clone(),
+                    file_path,
+                    resource_base: definition.summary.resource_base,
+                    resource_hint: "Pass filePath under references/, templates/, scripts/, or assets/ to read one resource on demand.".to_string(),
+                    content,
                 },
                 vec![ToolRuntimeEvent::SkillActivated { activation }],
             )
         }
         .boxed()
     }
+}
+
+fn is_main_skill_path(path: &str) -> bool {
+    let normalized = path.trim().replace('\\', "/");
+    let normalized = normalized.trim_start_matches("./");
+    normalized.is_empty() || normalized == "." || normalized.eq_ignore_ascii_case(SKILL_FILE_NAME)
 }
 
 impl Tool for SkillManageTool {
@@ -399,35 +448,53 @@ impl Tool for SkillManageTool {
         async move {
             context.ensure_workspace_writable()?;
             let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name())?;
-            match input {
-                SkillManageInput::Create(input) => create_skill(self.name(), &catalog, input),
-                SkillManageInput::Patch(input) => patch_skill(self.name(), &catalog, input),
-                SkillManageInput::Edit(input) => edit_skill(self.name(), &catalog, input),
-                SkillManageInput::Delete(input) => delete_skill(self.name(), &catalog, input),
+            let catalog = catalog_for(&self.source, &context, self.name()).await?;
+            let result = match input {
+                SkillManageInput::Create(input) => {
+                    create_skill(self.name(), catalog.snapshot(), input)
+                }
+                SkillManageInput::Patch(input) => {
+                    patch_skill(self.name(), catalog.snapshot(), input)
+                }
+                SkillManageInput::Edit(input) => edit_skill(self.name(), catalog.snapshot(), input),
+                SkillManageInput::Delete(input) => {
+                    delete_skill(self.name(), catalog.snapshot(), input)
+                }
                 SkillManageInput::WriteFile(input) => {
-                    write_support_file(self.name(), &catalog, input)
+                    write_support_file(self.name(), catalog.snapshot(), input)
                 }
                 SkillManageInput::RemoveFile(input) => {
-                    remove_support_file(self.name(), &catalog, input)
+                    remove_support_file(self.name(), catalog.snapshot(), input)
                 }
+            };
+            if result.is_ok() {
+                catalog.invalidate();
             }
+            result
         }
         .boxed()
     }
 }
 
-fn catalog_for(
+async fn catalog_for(
     source: &SkillCatalogSource,
     context: &ToolContext,
     tool_name: &str,
-) -> Result<Arc<SkillCatalog>, PureError> {
+) -> Result<Arc<FrozenSkillCatalog>, PureError> {
     match source {
-        SkillCatalogSource::Config(config) => {
-            SkillCatalog::discover(context.workspace.root(), config, None)
-                .map(Arc::new)
-                .map_err(|error| tool_error(tool_name, error))
-        }
+        SkillCatalogSource::Config(config) => discover_local_skills(
+            context.workspace.root(),
+            config,
+            None,
+            context
+                .options
+                .cancellation_token
+                .clone()
+                .unwrap_or_default(),
+        )
+        .await
+        .map(Arc::new)
+        .map_err(|error| tool_error(tool_name, error)),
         SkillCatalogSource::Frozen(catalog) => Ok(catalog.clone()),
     }
 }
@@ -459,13 +526,24 @@ fn json_output_with_events(
     })
 }
 
-fn skill_activation(skill: &SkillMetadata, turn_id: &str, tool_call_id: &str) -> SkillActivation {
+fn skill_activation(skill: SkillMetadata, turn_id: &str, tool_call_id: &str) -> SkillActivation {
     SkillActivation {
         name: skill.name.clone(),
         source: skill_source_label(skill.source).to_string(),
-        path: skill.path.to_string_lossy().to_string(),
+        provider_id: skill.provider_id.as_str().to_string(),
+        resource_base: match skill.resource_base {
+            SkillResourceBase::Directory { path } => SkillActivationResourceBase::Directory {
+                path: path.to_string_lossy().to_string(),
+            },
+            SkillResourceBase::Url { url } => SkillActivationResourceBase::Url { url },
+            SkillResourceBase::Opaque { description } => {
+                SkillActivationResourceBase::Opaque { description }
+            }
+        },
         turn_id: turn_id.to_string(),
-        tool_call_id: tool_call_id.to_string(),
+        cause: SkillActivationCause::Tool {
+            tool_call_id: tool_call_id.to_string(),
+        },
         activated_at: unix_seconds(),
     }
 }

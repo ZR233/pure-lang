@@ -758,6 +758,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String timelineSkillAgentActivated(String name) {
+    return '代理激活 Skill · $name';
+  }
+
+  @override
+  String timelineSkillUserActivated(String name) {
+    return '用户激活 Skill · $name';
+  }
+
+  @override
   String get timelineAgentFallback => 'Agent';
 
   @override
@@ -2385,6 +2395,16 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String timelineSkillActivated(String name) {
     return '已激活 Skill · $name';
+  }
+
+  @override
+  String timelineSkillAgentActivated(String name) {
+    return '代理激活 Skill · $name';
+  }
+
+  @override
+  String timelineSkillUserActivated(String name) {
+    return '用户激活 Skill · $name';
   }
 
   @override

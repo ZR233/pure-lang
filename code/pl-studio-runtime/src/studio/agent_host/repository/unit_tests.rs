@@ -138,9 +138,14 @@ fn skill_item(
             pl_protocol::SkillActivation {
                 name: name.to_string(),
                 source: "system".to_string(),
-                path: format!("/skills/{name}"),
+                provider_id: "local-filesystem".to_string(),
+                resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                    path: format!("/skills/{name}"),
+                },
                 turn_id: "turn-1".to_string(),
-                tool_call_id: tool_call_id.to_string(),
+                cause: pl_protocol::SkillActivationCause::Tool {
+                    tool_call_id: tool_call_id.to_string(),
+                },
                 activated_at,
             },
         )),

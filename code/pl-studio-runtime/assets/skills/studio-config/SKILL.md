@@ -36,7 +36,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[models.providers.<id>]` — provider endpoint, preset, credential reference, model catalog.
 - `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `reviewer`. All four must resolve.
 - `[runtime]` — `permission_mode` (`request-approval` | `auto-review` | `full-access`), tool capabilities, active skills and MCP servers.
-- `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills.
+- `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. In addition to configured `user_dir`, Pure always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
 - `[ui]` — `follow_system_theme`, `follow_active_turn`, `compact_timeline`.

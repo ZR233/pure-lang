@@ -173,16 +173,34 @@ final class ThreadSkillItemStateView extends ThreadItemStateView {
   const ThreadSkillItemStateView({
     required this.name,
     required this.source,
-    required this.path,
-    required this.toolCallId,
+    required this.providerId,
+    required this.resourceBase,
+    required this.cause,
     required this.activatedAt,
   });
 
   final String name;
   final String source;
-  final String path;
-  final String toolCallId;
+  final String providerId;
+  final SkillResourceBaseView resourceBase;
+  final SkillActivationCauseView cause;
   final DateTime activatedAt;
+}
+
+enum SkillResourceBaseKind { directory, url, opaque }
+
+class SkillResourceBaseView {
+  const SkillResourceBaseView(this.kind, this.value);
+  final SkillResourceBaseKind kind;
+  final String value;
+}
+
+enum SkillActivationCauseKind { tool, userGesture }
+
+class SkillActivationCauseView {
+  const SkillActivationCauseView(this.kind, this.id);
+  final SkillActivationCauseKind kind;
+  final String id;
 }
 
 class ThreadToolInvocationView {

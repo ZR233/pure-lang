@@ -10,7 +10,30 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'item.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+@freezed
+sealed class BridgeSkillActivationCause with _$BridgeSkillActivationCause {
+  const BridgeSkillActivationCause._();
+
+  const factory BridgeSkillActivationCause.tool({required String toolCallId}) =
+      BridgeSkillActivationCause_Tool;
+  const factory BridgeSkillActivationCause.userGesture({
+    required String invocationId,
+  }) = BridgeSkillActivationCause_UserGesture;
+}
+
+@freezed
+sealed class BridgeSkillResourceBase with _$BridgeSkillResourceBase {
+  const BridgeSkillResourceBase._();
+
+  const factory BridgeSkillResourceBase.directory({required String path}) =
+      BridgeSkillResourceBase_Directory;
+  const factory BridgeSkillResourceBase.url({required String url}) =
+      BridgeSkillResourceBase_Url;
+  const factory BridgeSkillResourceBase.opaque({required String description}) =
+      BridgeSkillResourceBase_Opaque;
+}
 
 class BridgeThreadAgentIdentity {
   final String id;
@@ -289,8 +312,9 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
   const factory BridgeThreadItemState.skill({
     required String name,
     required String source,
-    required String path,
-    required String toolCallId,
+    required String providerId,
+    required BridgeSkillResourceBase resourceBase,
+    required BridgeSkillActivationCause cause,
     required PlatformInt64 activatedAt,
   }) = BridgeThreadItemState_Skill;
   const factory BridgeThreadItemState.file({

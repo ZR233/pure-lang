@@ -161,25 +161,105 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
         &workspace_root,
     )?;
     if options.integration {
-        if !cfg!(target_os = "windows") {
-            bail!("verify-gui --integration currently requires Windows");
-        }
-        run_flutter(
-            &workspace_root,
-            &app_dir,
-            &[
-                "drive",
-                "--driver",
-                "test_driver/integration_test.dart",
-                "--target",
-                "integration_test/studio_smoke_test.dart",
-                "-d",
-                "windows",
-            ],
-            DemoMode::Demo,
-        )?;
+        run_gui_integration(&workspace_root, &app_dir, DesktopTarget::current()?)?;
     }
     Ok(())
+}
+
+fn run_gui_integration(workspace_root: &Path, app_dir: &Path, target: DesktopTarget) -> Result<()> {
+    let args = integration_drive_args(target)?;
+    if matches!(target, DesktopTarget::Linux) && !linux_graphical_session_available() {
+        return run_linux_headless_flutter(workspace_root, app_dir, &args);
+    }
+    run_flutter(workspace_root, app_dir, &args, DemoMode::Demo)
+}
+
+fn integration_drive_args(target: DesktopTarget) -> Result<Vec<&'static str>> {
+    let device = match target {
+        DesktopTarget::Windows => "windows",
+        DesktopTarget::Linux => "linux",
+        DesktopTarget::Macos => {
+            bail!("verify-gui --integration currently supports Windows and Linux")
+        }
+    };
+    Ok(vec![
+        "drive",
+        "--driver",
+        "test_driver/integration_test.dart",
+        "--target",
+        "integration_test/studio_smoke_test.dart",
+        "-d",
+        device,
+        "--no-pub",
+    ])
+}
+
+fn linux_graphical_session_available() -> bool {
+    graphical_session_available(
+        std::env::var_os("DISPLAY").as_deref(),
+        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+    )
+}
+
+fn graphical_session_available(
+    display: Option<&std::ffi::OsStr>,
+    wayland: Option<&std::ffi::OsStr>,
+) -> bool {
+    [display, wayland]
+        .into_iter()
+        .flatten()
+        .any(|value| !value.is_empty())
+}
+
+fn run_linux_headless_flutter(workspace_root: &Path, app_dir: &Path, args: &[&str]) -> Result<()> {
+    ensure_linux_headless_dependencies(program_exists_on_path("xvfb-run"))?;
+    let flutter_args = flutter_args(args, DemoMode::Demo);
+    let mut xvfb_args = vec![
+        OsString::from("-a"),
+        OsString::from("--server-args=-screen 0 1440x900x24 -nolisten tcp -noreset"),
+        OsString::from("flutter"),
+    ];
+    xvfb_args.extend(flutter_args);
+    let display = process::display_command("xvfb-run", &xvfb_args);
+    let mut command = process::path_command("xvfb-run", &xvfb_args);
+    command.current_dir(app_dir);
+    configure_flutter_environment(
+        &mut command,
+        FlutterInvocation {
+            demo_mode: DemoMode::Demo,
+            process_mode: FlutterProcessMode::Batch,
+            bridge_artifacts: None,
+            log_level: None,
+        },
+    );
+    command.env("GDK_BACKEND", "x11");
+    command.env("LIBGL_ALWAYS_SOFTWARE", "1");
+    process::run_checked(&mut command, &display).with_context(|| {
+        format!(
+            "headless Linux Flutter integration; workspace root: {}, Studio app dir: {}",
+            workspace_root.display(),
+            app_dir.display()
+        )
+    })
+}
+
+fn ensure_linux_headless_dependencies(xvfb_run_available: bool) -> Result<()> {
+    if !xvfb_run_available {
+        bail!(
+            "headless Linux Flutter integration requires xvfb-run; install it with 'sudo apt-get install -y xvfb'"
+        );
+    }
+    Ok(())
+}
+
+fn program_exists_on_path(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .map(|directory| directory.join(program))
+                .any(|candidate| candidate.is_file())
+        })
+        .unwrap_or(false)
 }
 
 fn run_tool(program: &'static str, args: &[&str], cwd: &Path) -> Result<()> {
@@ -682,6 +762,50 @@ mod tests {
             run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Disabled,),
             vec!["run", "-d", "windows", version_define, "--no-pub"]
         );
+    }
+
+    #[test]
+    fn integration_drive_targets_the_current_windows_or_linux_desktop() -> Result<()> {
+        let expected_prefix = [
+            "drive",
+            "--driver",
+            "test_driver/integration_test.dart",
+            "--target",
+            "integration_test/studio_smoke_test.dart",
+            "-d",
+        ];
+        let windows = integration_drive_args(DesktopTarget::Windows)?;
+        let linux = integration_drive_args(DesktopTarget::Linux)?;
+
+        assert_eq!(&windows[..expected_prefix.len()], expected_prefix);
+        assert_eq!(windows[expected_prefix.len()], "windows");
+        assert_eq!(&linux[..expected_prefix.len()], expected_prefix);
+        assert_eq!(linux[expected_prefix.len()], "linux");
+        assert!(windows.contains(&"--no-pub"));
+        assert!(linux.contains(&"--no-pub"));
+        assert!(integration_drive_args(DesktopTarget::Macos).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn linux_graphical_session_accepts_x11_or_wayland_without_environment_mutation() {
+        assert!(!graphical_session_available(None, None));
+        assert!(!graphical_session_available(Some(OsStr::new("")), None));
+        assert!(graphical_session_available(Some(OsStr::new(":1")), None));
+        assert!(graphical_session_available(
+            None,
+            Some(OsStr::new("wayland-0"))
+        ));
+    }
+
+    #[test]
+    fn headless_linux_requires_xvfb_with_an_actionable_install_hint() -> Result<()> {
+        ensure_linux_headless_dependencies(true)?;
+
+        let error = ensure_linux_headless_dependencies(false)
+            .expect_err("missing xvfb-run must reject headless integration");
+        assert!(error.to_string().contains("sudo apt-get install -y xvfb"));
+        Ok(())
     }
 
     #[test]

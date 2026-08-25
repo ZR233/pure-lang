@@ -275,12 +275,30 @@ ThreadItemStateView _threadItemStateFromFrb(
       content: content,
       lifecycle: _contentLifecycleFromFrb(lifecycle),
     ),
-    skill: (name, source, path, toolCallId, activatedAt) =>
+    skill: (name, source, providerId, resourceBase, cause, activatedAt) =>
         ThreadSkillItemStateView(
           name: name,
           source: source,
-          path: path,
-          toolCallId: toolCallId,
+          providerId: providerId,
+          resourceBase: resourceBase.when(
+            directory: (path) =>
+                SkillResourceBaseView(SkillResourceBaseKind.directory, path),
+            url: (url) => SkillResourceBaseView(SkillResourceBaseKind.url, url),
+            opaque: (description) => SkillResourceBaseView(
+              SkillResourceBaseKind.opaque,
+              description,
+            ),
+          ),
+          cause: cause.when(
+            tool: (toolCallId) => SkillActivationCauseView(
+              SkillActivationCauseKind.tool,
+              toolCallId,
+            ),
+            userGesture: (invocationId) => SkillActivationCauseView(
+              SkillActivationCauseKind.userGesture,
+              invocationId,
+            ),
+          ),
           activatedAt: _dateFromUnix(activatedAt),
         ),
     file: (path, mediaType, completedAt) =>

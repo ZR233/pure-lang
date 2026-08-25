@@ -106,7 +106,8 @@ pub(crate) fn project_trace_events(
                         item: Box::new(ThreadItem::new(
                             format!(
                                 "{}:skill-activation:{}",
-                                activation.turn_id, activation.tool_call_id
+                                activation.turn_id,
+                                activation.item_identity()
                             ),
                             thread_id.to_string(),
                             activation.turn_id.clone(),
@@ -888,12 +889,55 @@ mod tests {
                 activation: SkillActivation {
                     name: name.to_string(),
                     source: "system".to_string(),
-                    path: format!("/skills/{name}"),
+                    provider_id: "local-filesystem".to_string(),
+                    resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                        path: format!("/skills/{name}"),
+                    },
                     turn_id: "turn-1".to_string(),
-                    tool_call_id: tool_call_id.to_string(),
+                    cause: pl_protocol::SkillActivationCause::Tool {
+                        tool_call_id: tool_call_id.to_string(),
+                    },
                     activated_at,
                 },
             },
         }
+    }
+
+    #[test]
+    fn user_gesture_activation_uses_invocation_identity_and_shared_runtime_projection() {
+        let snapshot = snapshot();
+        let trace = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 1,
+            timestamp: 7,
+            kind: TraceEventKind::SkillActivated {
+                activation: SkillActivation {
+                    name: "doc".to_string(),
+                    source: "user".to_string(),
+                    provider_id: "local-filesystem".to_string(),
+                    resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                        path: "/skills/doc".to_string(),
+                    },
+                    turn_id: "turn-1".to_string(),
+                    cause: pl_protocol::SkillActivationCause::UserGesture {
+                        invocation_id: "user-skill-0".to_string(),
+                    },
+                    activated_at: 7,
+                },
+            },
+        };
+
+        let batch = project_trace_events("thread-1", &snapshot, &[trace]);
+
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.id == "turn-1:skill-activation:user-skill-0"
+        ));
+        assert!(matches!(
+            &batch.notifications[1].notification,
+            ThreadNotification::ThreadRuntimeUpdated { runtime }
+                if runtime.active_skills == ["doc"]
+        ));
     }
 }

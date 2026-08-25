@@ -28,6 +28,14 @@ fn write_skill(dir: &Path, name: &str, description: &str) {
     .unwrap();
 }
 
+fn discover_without_agents_home(
+    workspace: &Path,
+    config: &SkillsConfig,
+    system: Option<&Path>,
+) -> SkillCatalog {
+    SkillCatalog::discover_with_agents_user_dir(workspace, config, system, None).unwrap()
+}
+
 #[test]
 fn parses_valid_frontmatter() {
     let content = "---\nname: rust-flow\ndescription: Rust flow\nplatforms: [windows]\n---\nBody";
@@ -69,7 +77,7 @@ fn project_source_shadows_user_and_external() {
         .external_dirs
         .push(external.to_string_lossy().to_string());
 
-    let catalog = SkillCatalog::discover(&workspace, &config, None).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, None);
 
     assert_eq!(catalog.skills.len(), 1);
     assert_eq!(catalog.skills[0].description, "project");
@@ -89,7 +97,7 @@ fn disabled_skills_are_filtered() {
     };
     config.system.enabled = false;
 
-    let catalog = SkillCatalog::discover(&workspace, &config, None).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, None);
 
     assert!(catalog.skills.is_empty());
     fs::remove_dir_all(workspace).unwrap();
@@ -138,6 +146,11 @@ fn usage_update_replaces_existing_file_atomically() {
         platforms: Vec::new(),
         source: SkillSourceKind::Project,
         path: skill_dir.clone(),
+        provider_id: super::SkillProviderId::new("local-filesystem").unwrap(),
+        invocation: super::SkillInvocationPolicy::default(),
+        resource_base: super::SkillResourceBase::Directory {
+            path: skill_dir.clone(),
+        },
     };
 
     bump_project_view(&project, &skill).unwrap();
@@ -163,7 +176,10 @@ fn corrupted_usage_is_observable() {
         category: None,
         platforms: Vec::new(),
         source: SkillSourceKind::Project,
-        path: skill_dir,
+        path: skill_dir.clone(),
+        provider_id: super::SkillProviderId::new("local-filesystem").unwrap(),
+        invocation: super::SkillInvocationPolicy::default(),
+        resource_base: super::SkillResourceBase::Directory { path: skill_dir },
     };
 
     let error = bump_project_view(&project, &skill).unwrap_err().to_string();
@@ -187,6 +203,69 @@ fn support_file_requires_allowed_directory() {
 }
 
 #[test]
+fn agents_user_directory_is_discovered_between_configured_user_and_system() {
+    let workspace = temp_dir("agents-user-workspace");
+    let configured_user = temp_dir("agents-configured-user");
+    let home = temp_dir("agents-home");
+    let agents_user = home.join(".agents").join("skills");
+    let system = temp_dir("agents-system");
+    write_skill(&configured_user.join("shared"), "shared", "configured user");
+    write_skill(&agents_user.join("shared"), "shared", "agents user");
+    write_skill(
+        &agents_user.join("agents-only"),
+        "agents-only",
+        "agents user",
+    );
+    write_skill(&system.join("agents-only"), "agents-only", "system");
+    let config = SkillsConfig {
+        user_dir: configured_user.to_string_lossy().into_owned(),
+        ..SkillsConfig::default()
+    };
+
+    let catalog = SkillCatalog::discover_with_agents_user_dir(
+        &workspace,
+        &config,
+        Some(&system),
+        Some(&agents_user),
+    )
+    .unwrap();
+
+    assert_eq!(
+        catalog.find("shared").unwrap().description,
+        "configured user"
+    );
+    let agents_only = catalog.find("agents-only").unwrap();
+    assert_eq!(agents_only.description, "agents user");
+    assert_eq!(agents_only.source, SkillSourceKind::User);
+    assert_eq!(agents_only.path, agents_user.join("agents-only"));
+    let _ = fs::remove_dir_all(workspace);
+    fs::remove_dir_all(configured_user).unwrap();
+    fs::remove_dir_all(home).unwrap();
+    fs::remove_dir_all(system).unwrap();
+}
+
+#[test]
+fn configured_and_agents_user_same_directory_is_scanned_once() {
+    let workspace = temp_dir("agents-dedup-workspace");
+    let agents_user = temp_dir("agents-dedup-user");
+    let invalid = agents_user.join("invalid");
+    fs::create_dir_all(&invalid).unwrap();
+    fs::write(invalid.join(SKILL_FILE_NAME), "missing frontmatter").unwrap();
+    let config = SkillsConfig {
+        user_dir: agents_user.to_string_lossy().into_owned(),
+        ..SkillsConfig::default()
+    };
+
+    let catalog =
+        SkillCatalog::discover_with_agents_user_dir(&workspace, &config, None, Some(&agents_user))
+            .unwrap();
+
+    assert_eq!(catalog.warnings.len(), 1);
+    let _ = fs::remove_dir_all(workspace);
+    fs::remove_dir_all(agents_user).unwrap();
+}
+
+#[test]
 fn discovers_system_skills_between_user_and_external_priority() {
     let workspace = temp_dir("system-priority-workspace");
     let user = temp_dir("system-priority-user");
@@ -202,7 +281,7 @@ fn discovers_system_skills_between_user_and_external_priority() {
     config
         .external_dirs
         .push(external.to_string_lossy().to_string());
-    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, Some(&system));
 
     let shared = catalog.find("shared").unwrap();
     let creator = catalog.find("skill-creator").unwrap();
@@ -230,7 +309,7 @@ fn project_skill_shadows_system_skill() {
     };
     write_skill(&system.join("skill-creator"), "skill-creator", "system");
 
-    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, Some(&system));
 
     let creator = catalog.find("skill-creator").unwrap();
     assert_eq!(creator.source, SkillSourceKind::Project);
@@ -260,8 +339,8 @@ fn system_directory_is_not_derived_from_user_directory() {
         ..SkillsConfig::default()
     };
 
-    let without_system = SkillCatalog::discover(&workspace, &config, None).unwrap();
-    let with_system = SkillCatalog::discover(&workspace, &config, Some(&explicit_system)).unwrap();
+    let without_system = discover_without_agents_home(&workspace, &config, None);
+    let with_system = discover_without_agents_home(&workspace, &config, Some(&explicit_system));
 
     assert!(without_system.find("legacy").is_none());
     assert!(without_system.find("current").is_none());
@@ -287,7 +366,7 @@ fn system_can_be_disabled() {
     config.system.enabled = false;
     write_skill(&system.join("skill-creator"), "skill-creator", "system");
 
-    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, Some(&system));
 
     assert!(catalog.find("skill-creator").is_none());
     let _ = fs::remove_dir_all(workspace);
@@ -312,7 +391,7 @@ fn disabled_filters_system_skill_by_name() {
         "system",
     );
 
-    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
+    let catalog = discover_without_agents_home(&workspace, &config, Some(&system));
 
     assert!(catalog.find("skill-creator").is_none());
     assert!(catalog.find("subagent-workflow").is_some());

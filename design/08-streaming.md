@@ -87,8 +87,11 @@ shutdown 必须取消 producer、释放 receiver 与 pin。
 
 FRB `readThreadSnapshot` 与 HTTP `GET /api/v1/threads/{threadId}` 机械调用同一个 snapshot
 query，均返回完整 `ThreadSnapshot`，不得让 HTTP route 退化为只返回 Thread directory 元数据。
-Skill 激活使用普通的终态 Skill Item 和 `threadRuntimeUpdated` 通知；首次订阅及重连 snapshot
-必须包含相同的 Skill Item 与 `runtime.activeSkills`。
+Skill 激活使用普通的终态 Skill Item 和 `threadRuntimeUpdated` 通知；激活来源是 typed
+`Tool { toolCallId } | UserGesture { invocationId }`，资源位置是 typed resource base，不允许 transport
+或前端从工具 JSON 推断。Timeline 文案按来源区分代理激活与用户激活。首次订阅及重连 snapshot
+必须包含相同的 Skill Item 与 `runtime.activeSkills`。Thread wire schema 为 v6；旧 v5
+`path + toolCallId` Skill Item 在协议反序列化边界映射为目录资源与 Tool 来源。
 
 Product lag 发送 `stale` 并要求重读 `/api/v1/state`。SSE 不提供 durable replay；收到
 `Last-Event-ID` 时先发送 `stale`。每 15 秒发送 comment heartbeat；heartbeat 不占用领域 sequence，
