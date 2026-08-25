@@ -355,6 +355,12 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 
 系统 skills 来自编译进 `pl-core` 的内置资源，并同步缓存到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
 
+系统内置 `studio-config` skill 是面向 agent 的 Pure Studio 配置指南，覆盖配置文件位置、当前
+schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源文件固定为
+`code/pl-core/src/skill/system_assets/studio-config/SKILL.md`。任何改变配置路径、schema 版本、配置
+段或字段及其默认值、凭据解析优先级、加载/保存/重载语义或最小有效配置的变更，都必须在同一
+变更中同步更新该 skill，并复核 skill、本文档与运行时行为一致。
+
 ## 10.10 配置草稿
 
 通用 provider/model 值对象、preset/catalog 和 endpoint 解析属于 `pl-model`，`pl-core` 只维护动态角色路由并作为宿主 runtime facade 重新导出必要类型；`StudioConfig`、schema、默认角色和配置文件 IO

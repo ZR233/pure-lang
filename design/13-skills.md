@@ -29,7 +29,15 @@ Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。
 
 项目 skills 路径按主机文件边界处理：项目目录、skill 目录、`SKILL.md`、支持文件和使用统计的已有祖先都不能是 symbolic link 或 Windows reparse point。发现和支持文件索引跳过链接入口；`skill_view` 与 `skill_manage` 直接访问链接时拒绝。删除 skill 时，skill 子树内的链接只删除入口，不能递归进入或修改其目标。用户、系统和显式 external source 仍是只读来源，但其内部发现同样不跟随链接。
 
-系统 skills 是编译进 `pl-core` 的内置能力。启动或加载 skills 时，系统将内置资源同步到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户不应手动编辑；若需要覆盖系统 skill，应在项目目录创建同名 skill。
+系统 skills 是编译进 `pl-core` 的内置能力，其 canonical 源码根目录固定为
+`code/pl-core/src/skill/system_assets/`。每个内置 skill 以独立目录保存，主文件仍为
+`SKILL.md`；`pl-core` 通过 `include_dir` 嵌入该目录，并在启动或加载 skills 时将资源同步到
+`~/.pure/skills/.system/`。缓存目录由 Pure 管理，不是源码，用户不应手动编辑；若需要覆盖系统
+skill，应在项目目录创建同名 skill。
+
+Pure Studio 配置指南系统 skill 名为 `studio-config`，其主文件位于
+`code/pl-core/src/skill/system_assets/studio-config/SKILL.md`。配置契约及该 skill 的同步维护要求见
+`10-config.md`。
 
 ## 13.3 Skill 格式
 
