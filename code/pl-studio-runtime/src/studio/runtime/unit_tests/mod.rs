@@ -5,7 +5,10 @@ use crate::config::{
     ConfigPaths, ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole,
 };
 use crate::studio::task_coordinator::CreateTaskRun;
-use crate::{ConfigStore, StudioHostKind, StudioMode, StudioRuntimeOptions, StudioTaskState};
+use crate::{
+    ConfigStore, StudioHostKind, StudioMode, StudioRuntimeOptions, StudioRuntimeStateKind,
+    StudioTaskState,
+};
 
 fn test_config(base_url: String) -> StudioConfig {
     let mut model = ModelInfo::fallback("local-responses");
@@ -41,6 +44,82 @@ fn test_product_config(
             .collect(),
     };
     config
+}
+
+#[tokio::test]
+async fn system_skills_are_rebuilt_and_discovered_from_studio_home_after_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    let user_skills = root.path().join("separate-user-skills");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_config_dir(&home));
+    let mut config = test_config("http://127.0.0.1:9".to_string());
+    config.skills.user_dir = user_skills.to_string_lossy().into_owned();
+    config_store.save(&config).unwrap();
+    let options = StudioRuntimeOptions {
+        studio_home: Some(home.clone()),
+        host: StudioHostKind::Test,
+    };
+    let system_dir = home.join("studio").join("skills").join(".system");
+
+    let first = StudioRuntime::with_options(options.clone()).await.unwrap();
+    first.start_runtime().await.unwrap();
+    assert!(system_dir.join("studio-config").join("SKILL.md").is_file());
+    let catalog = first
+        .skills
+        .discover("project", &workspace, &config.skills)
+        .await
+        .unwrap();
+    assert_eq!(
+        catalog
+            .state
+            .value()
+            .unwrap()
+            .catalog
+            .find("studio-config")
+            .unwrap()
+            .source,
+        pl_core::skill::SkillSourceKind::System
+    );
+    std::fs::write(system_dir.join("stale"), "remove on restart").unwrap();
+    first.shutdown_runtime().await.unwrap();
+    drop(first);
+
+    let reopened = StudioRuntime::with_options(options).await.unwrap();
+    reopened.start_runtime().await.unwrap();
+
+    assert!(!system_dir.join("stale").exists());
+    assert!(system_dir.join("skill-creator").join("SKILL.md").is_file());
+    assert!(!user_skills.join(".system").exists());
+    reopened.shutdown_runtime().await.unwrap();
+}
+
+#[tokio::test]
+async fn unsafe_system_skills_target_prevents_runtime_from_becoming_ready() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let system_dir = home.join("studio").join("skills").join(".system");
+    std::fs::create_dir_all(system_dir.parent().unwrap()).unwrap();
+    std::fs::write(&system_dir, "not a managed directory").unwrap();
+    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(home),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .unwrap();
+
+    let error = format!("{:#}", runtime.start_runtime().await.unwrap_err());
+
+    assert!(error.contains("failed to remove system Skills"));
+    assert_eq!(
+        runtime.runtime_snapshot().await.unwrap().state.kind(),
+        StudioRuntimeStateKind::Failed
+    );
+    assert_eq!(
+        std::fs::read_to_string(system_dir).unwrap(),
+        "not a managed directory"
+    );
 }
 
 #[tokio::test]

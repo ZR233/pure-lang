@@ -85,10 +85,10 @@ impl StudioRuntime {
             self.start_mcp_reconcile_background()
                 .await
                 .map_err(|error| startup_failure("start_mcp_reconcile", error))?;
-            if settings.config.skills.system.enabled {
-                let _ = pl_core::skill::install_system_skills(&settings.config.skills)
-                    .map_err(|error| startup_failure("install_system_skills", error))?;
-            }
+            self.skills
+                .refresh_system_skills(&settings.config.skills)
+                .await
+                .map_err(|error| startup_failure("refresh_system_skills", error))?;
             self.publish_settings_state(settings)
                 .map_err(|error| startup_failure("publish_settings", error))?;
             Ok::<_, anyhow::Error>(report)

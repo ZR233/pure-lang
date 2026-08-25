@@ -88,6 +88,7 @@ owned snapshot。单一所有者的大字段或大 enum 变体使用 `Box` 降�
 
 - 单一 `studio.sqlite` 与 attachment/archive 路径；
 - Project、Thread repository、配置、设置和全局 health；
+- 编译进产品二进制的预置 Skills 资源及其 Studio 数据目录物化生命周期；
 - `TaskService` 及 TaskRun、WorkUnit、Delivery、ReviewRound、MergeRecord、BranchLease；
 - worktree、冲突恢复、安全清理和产品事件。
 

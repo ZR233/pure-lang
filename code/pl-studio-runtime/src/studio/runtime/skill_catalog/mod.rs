@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::studio::ids::unix_seconds;
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use pl_core::config::SkillsConfig;
 use pl_core::skill::SkillCatalog;
 use pl_protocol::{
@@ -13,12 +13,15 @@ use pl_protocol::{
 };
 use tokio::sync::{Mutex, RwLock};
 
+mod system;
+
 /// Project skills catalog 的唯一内存 owner。
 #[derive(Clone)]
 pub struct SkillCatalogRuntime {
     command_lock: Arc<Mutex<()>>,
     states: Arc<RwLock<BTreeMap<String, SkillsStateSnapshot>>>,
     events: Option<crate::ProductEventBus>,
+    system_skills_dir: Option<Arc<PathBuf>>,
 }
 
 /// 某 Project 已发布且可被未来 Turn 冻结的 catalog。
@@ -45,12 +48,29 @@ impl SkillsStateSnapshot {
 }
 
 impl SkillCatalogRuntime {
-    pub fn new(events: crate::ProductEventBus) -> Self {
+    /// Creates the Studio catalog owner with its product-owned system Skills directory.
+    pub fn new(events: crate::ProductEventBus, system_skills_dir: PathBuf) -> Self {
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: Some(events),
+            system_skills_dir: Some(Arc::new(system_skills_dir)),
         }
+    }
+
+    pub(super) async fn refresh_system_skills(&self, config: &SkillsConfig) -> Result<()> {
+        let system_skills_dir = self
+            .system_skills_dir
+            .as_ref()
+            .context("system Skills directory is not configured")?
+            .as_ref()
+            .clone();
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || {
+            system::refresh_system_skills(&system_skills_dir, &config)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("system Skills refresh task failed: {error}"))?
     }
 
     /// 只读缓存；不存在时返回 authoritative empty，不访问文件系统。
@@ -92,11 +112,16 @@ impl SkillCatalogRuntime {
 
         let workspace_root = workspace_root.to_path_buf();
         let config = config.clone();
-        let discovered =
-            tokio::task::spawn_blocking(move || SkillCatalog::discover(&workspace_root, &config))
-                .await
-                .map_err(|error| anyhow::anyhow!("Skills discovery task failed: {error}"))
-                .and_then(|catalog| catalog.map_err(Error::from));
+        let system_skills_dir = self
+            .system_skills_dir
+            .as_ref()
+            .map(|path| path.as_ref().clone());
+        let discovered = tokio::task::spawn_blocking(move || {
+            SkillCatalog::discover(&workspace_root, &config, system_skills_dir.as_deref())
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("Skills discovery task failed: {error}"))
+        .and_then(|catalog| catalog.map_err(Error::from));
         let catalog = match discovered {
             Ok(catalog) => catalog,
             Err(error) => {
@@ -193,6 +218,7 @@ impl Default for SkillCatalogRuntime {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: None,
+            system_skills_dir: None,
         }
     }
 }

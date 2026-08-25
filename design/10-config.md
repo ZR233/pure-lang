@@ -353,11 +353,14 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 
 加载优先级固定为：项目 skills > 用户 skills > 系统 skills > external dirs。同名 skill 只暴露最高优先级来源。自学习和 `skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录、系统目录或外部目录。
 
-系统 skills 来自编译进 `pl-core` 的内置资源，并同步缓存到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
+Studio 系统 skills 来自编译进 `pl-studio-runtime` 的预置资源，并在每次 Studio Runtime 启动时
+全量重建到 `<studio_home>/studio/skills/.system/`。系统目录固定属于 Studio 数据，不从
+`skills.user_dir` 推导；`system.enabled` 只控制该来源是否参与发现，不控制启动刷新。该目录由
+Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
 
 系统内置 `studio-config` skill 是面向 agent 的 Pure Studio 配置指南，覆盖配置文件位置、当前
 schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源文件固定为
-`code/pl-core/src/skill/system_assets/studio-config/SKILL.md`。任何改变配置路径、schema 版本、配置
+`code/pl-studio-runtime/assets/skills/studio-config/SKILL.md`。任何改变配置路径、schema 版本、配置
 段或字段及其默认值、凭据解析优先级、加载/保存/重载语义或最小有效配置的变更，都必须在同一
 变更中同步更新该 skill，并复核 skill、本文档与运行时行为一致。
 

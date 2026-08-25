@@ -1,0 +1,32 @@
+[package]
+name = "rust-embed-impl"
+version = "8.12.0"
+edition = "2018"
+license = "MIT"
+publish = false
+description = "Rust Custom Derive Macro implementation for rust-embed"
+repository = "https://pyrossh.dev/repos/rust-embed"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+rust-embed-utils = "=8.12.0"
+mime_guess = "2.0.4"
+syn = { version = "2", default-features = false, features = [
+    "derive",
+    "parsing",
+    "proc-macro",
+    "printing",
+] }
+quote = "1"
+proc-macro2 = "1"
+walkdir = "2.3.1"
+shellexpand = { version = "3", optional = true }
+
+[features]
+debug-embed = []
+interpolate-folder-path = ["shellexpand"]
+compression = []
+include-exclude = ["rust-embed-utils/include-exclude"]
+deterministic-timestamps = []

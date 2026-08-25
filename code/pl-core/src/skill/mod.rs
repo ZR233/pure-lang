@@ -1,6 +1,5 @@
 mod catalog;
 mod scanning;
-mod system;
 mod util;
 
 use std::path::{Path, PathBuf};
@@ -15,14 +14,21 @@ pub use scanning::{
     list_support_files, project_skill_dir_for_create, read_skill_file, support_file_path,
     validate_skill_document,
 };
-pub use system::install_system_skills;
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 pub const USAGE_FILE_NAME: &str = ".usage.json";
-const SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
-const SYSTEM_MARKER_SALT: &str = "v1";
 const MAX_SKILL_SCAN_DEPTH: usize = 5;
 const ALLOWED_SUPPORT_DIRS: &[&str] = &["references", "templates", "scripts", "assets"];
+
+/// Resolves the configured read-only user Skills directory, including `~` expansion.
+///
+/// # Errors
+///
+/// Returns an error when a home-relative path is configured and the host home
+/// directory cannot be resolved.
+pub fn resolve_user_skills_dir(config: &SkillsConfig) -> Result<PathBuf> {
+    util::expand_home(&config.user_dir)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

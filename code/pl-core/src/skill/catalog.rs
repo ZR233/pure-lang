@@ -4,13 +4,25 @@ use std::path::Path;
 use pl_protocol::Result;
 
 use super::scanning::{find_skill_files, metadata_from_file};
-use super::system::system_skills_dir;
 use super::util::{expand_home, platform_matches};
 use super::{SkillCandidate, SkillCatalog, SkillMetadata, SkillSource, SkillSourceKind};
 use crate::config::SkillsConfig;
 
 impl SkillCatalog {
-    pub fn discover(workspace_root: &Path, config: &SkillsConfig) -> Result<Self> {
+    /// Discovers the effective Skills catalog for one workspace.
+    ///
+    /// Studio passes its product-owned system directory explicitly. Product-neutral
+    /// callers pass `None` and never infer a system directory from `user_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a configured source path cannot be resolved or the
+    /// project Skills directory escapes the workspace.
+    pub fn discover(
+        workspace_root: &Path,
+        config: &SkillsConfig,
+        system_dir: Option<&Path>,
+    ) -> Result<Self> {
         let project_dir = super::project_skills_dir(workspace_root, config)?;
         let mut warnings = Vec::new();
         let mut by_name: BTreeMap<String, SkillCandidate> = BTreeMap::new();
@@ -20,7 +32,7 @@ impl SkillCatalog {
             .map(|name| name.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
 
-        let sources = skill_sources(workspace_root, config, &mut warnings)?;
+        let sources = skill_sources(workspace_root, config, system_dir)?;
         for source in sources {
             if !source.root.exists() {
                 continue;
@@ -75,11 +87,20 @@ impl SkillCatalog {
     }
 }
 
-pub fn build_skills_prompt(workspace_root: &Path, config: &SkillsConfig) -> Result<Option<String>> {
+/// Builds the Skills prompt using an optional, explicitly supplied system source.
+///
+/// # Errors
+///
+/// Returns an error when catalog discovery fails.
+pub fn build_skills_prompt(
+    workspace_root: &Path,
+    config: &SkillsConfig,
+    system_dir: Option<&Path>,
+) -> Result<Option<String>> {
     if !config.enabled {
         return Ok(None);
     }
-    let catalog = SkillCatalog::discover(workspace_root, config)?;
+    let catalog = SkillCatalog::discover(workspace_root, config, system_dir)?;
     Ok(Some(build_skills_prompt_from_catalog(&catalog)))
 }
 
@@ -113,7 +134,7 @@ pub fn build_skills_prompt_from_catalog(catalog: &SkillCatalog) -> String {
 fn skill_sources(
     workspace_root: &Path,
     config: &SkillsConfig,
-    warnings: &mut Vec<String>,
+    system_dir: Option<&Path>,
 ) -> Result<Vec<SkillSource>> {
     let mut sources = Vec::new();
     sources.push(SkillSource {
@@ -122,19 +143,18 @@ fn skill_sources(
         priority: 0,
     });
     sources.push(SkillSource {
-        root: expand_home(&config.user_dir)?,
+        root: super::resolve_user_skills_dir(config)?,
         kind: SkillSourceKind::User,
         priority: 1,
     });
-    if config.system.enabled {
-        match system_skills_dir(config) {
-            Ok(root) => sources.push(SkillSource {
-                root,
-                kind: SkillSourceKind::System,
-                priority: 2,
-            }),
-            Err(error) => warnings.push(format!("failed to resolve system skills: {error}")),
-        }
+    if config.system.enabled
+        && let Some(root) = system_dir
+    {
+        sources.push(SkillSource {
+            root: root.to_path_buf(),
+            kind: SkillSourceKind::System,
+            priority: 2,
+        });
     }
     for external_dir in &config.external_dirs {
         sources.push(SkillSource {

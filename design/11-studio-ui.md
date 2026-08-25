@@ -206,7 +206,7 @@ typed recovery issue：健康内容继续可用，故障项显示错误与安全
 ## 11.8 启动时序
 
 Bridge 只暴露一个 `startStudioRuntime` 启动 command。它完成 SQLite、ConfigRuntime、durable
-recovery、Thread framework/MCP owner 和 system Skills 的明确初始化，随后发布 runtime ready。
+recovery、Thread framework/MCP owner 和 system Skills 固定目录的全量重建，随后发布 runtime ready。
 Flutter 再调用纯查询 `readStudioState`，本地选择健康 Project/root Thread，并通过一次
 `activateProject` 执行该 Project 的 LSP membership/probe 与 Skills discovery。
 

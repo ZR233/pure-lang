@@ -424,7 +424,7 @@ fn catalog_for(
 ) -> Result<Arc<SkillCatalog>, PureError> {
     match source {
         SkillCatalogSource::Config(config) => {
-            SkillCatalog::discover(context.workspace.root(), config)
+            SkillCatalog::discover(context.workspace.root(), config, None)
                 .map(Arc::new)
                 .map_err(|error| tool_error(tool_name, error))
         }

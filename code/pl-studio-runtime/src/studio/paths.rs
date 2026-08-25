@@ -6,6 +6,8 @@ use crate::config::STUDIO_CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
+const SKILLS_DIR_NAME: &str = "skills";
+const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const STUDIO_HOME_ENV: &str = "PURE_STUDIO_HOME";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,13 @@ impl StudioPaths {
 
     pub fn runtime_lock(&self) -> PathBuf {
         self.data_dir.join("runtime.lock")
+    }
+
+    /// Returns the product-owned directory materialized from bundled system Skills.
+    pub fn system_skills_dir(&self) -> PathBuf {
+        self.data_dir
+            .join(SKILLS_DIR_NAME)
+            .join(SYSTEM_SKILLS_DIR_NAME)
     }
 }
 
@@ -131,6 +140,10 @@ mod tests {
         assert_eq!(
             paths.runtime_lock(),
             root.join("studio").join("runtime.lock")
+        );
+        assert_eq!(
+            paths.system_skills_dir(),
+            root.join("studio").join("skills").join(".system")
         );
     }
 }

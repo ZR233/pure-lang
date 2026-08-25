@@ -20,7 +20,7 @@ Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。
 
 1. 项目目录：`<workspace_root>/skills/`
 2. 用户目录：`~/.pure/skills/`
-3. 系统目录：`~/.pure/skills/.system/`
+3. Studio 系统目录：`<studio_home>/studio/skills/.system/`
 4. 配置里的外部目录：`[skills].external_dirs`
 
 同名 skill 只保留最高优先级来源。项目目录是唯一写入目标；用户目录、系统目录和外部目录仅参与只读发现。若模型尝试修改来自用户目录、系统目录或外部目录的 skill，工具必须拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
@@ -29,14 +29,29 @@ Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。
 
 项目 skills 路径按主机文件边界处理：项目目录、skill 目录、`SKILL.md`、支持文件和使用统计的已有祖先都不能是 symbolic link 或 Windows reparse point。发现和支持文件索引跳过链接入口；`skill_view` 与 `skill_manage` 直接访问链接时拒绝。删除 skill 时，skill 子树内的链接只删除入口，不能递归进入或修改其目标。用户、系统和显式 external source 仍是只读来源，但其内部发现同样不跟随链接。
 
-系统 skills 是编译进 `pl-core` 的内置能力，其 canonical 源码根目录固定为
-`code/pl-core/src/skill/system_assets/`。每个内置 skill 以独立目录保存，主文件仍为
-`SKILL.md`；`pl-core` 通过 `include_dir` 嵌入该目录，并在启动或加载 skills 时将资源同步到
-`~/.pure/skills/.system/`。缓存目录由 Pure 管理，不是源码，用户不应手动编辑；若需要覆盖系统
-skill，应在项目目录创建同名 skill。
+Studio 预置 skills 归 `pl-studio-runtime` 所有，其 canonical 源码根目录固定为
+`code/pl-studio-runtime/assets/skills/`。每个预置 skill 以独立目录保存，主文件仍为
+`SKILL.md`；`pl-studio-runtime` 通过启用 zstd 压缩、debug embed 与确定性时间戳的
+`rust-embed` 将资源打进所有构建模式，并在每次 `startStudioRuntime` 把完整资源树重建到
+`<studio_home>/studio/skills/.system/`。缓存目录由 Pure 管理，不是源码，用户不应手动编辑；
+若需要覆盖系统 skill，应在项目目录创建同名 skill。
+
+启动刷新先完整验证嵌入路径与全部 `SKILL.md`，再以不跟随 symbolic link 或 Windows reparse
+point 的方式删除旧目标，在同一父目录写入暂存树并通过 rename 发布。失败时 runtime 不进入
+ready，且不得暴露半成品目录。刷新不使用版本 marker，连续两次启动也必须全量重建；
+`[skills.system].enabled` 只控制系统来源是否参与发现，不控制资源刷新。旧
+`<skills.user_dir>/.system` 只有在包含 Pure 旧 marker 且与新目录不同时才允许清理。
+
+`rust-embed` 的压缩路径会引入 `include-flate`、zstd 与 libflate 相关编译依赖，增加编译时间和
+二进制构建成本；`rust-embed 8.12.0` 上游标记为被动维护且采用 MIT license，其压缩链采用
+permissive license。Studio 接受该成本以换取真正的压缩嵌入。由于 Cargo 会把同版本依赖的
+feature 合并，而现有 `utoipa-swagger-ui` 的绝对生成目录与 compression feature 不兼容，仓库固定
+保留 crates.io 发布包中未经修改的 `rust-embed` 与 `rust-embed-impl` source isolation 副本；副本
+记录上游版本、校验和与许可，不作为可修改的产品源码，也不是 Git submodule。
+PDF、DOCX 运行依赖、Git submodule 与第三方资源许可清单不属于本合同，后续单独选型。
 
 Pure Studio 配置指南系统 skill 名为 `studio-config`，其主文件位于
-`code/pl-core/src/skill/system_assets/studio-config/SKILL.md`。配置契约及该 skill 的同步维护要求见
+`code/pl-studio-runtime/assets/skills/studio-config/SKILL.md`。配置契约及该 skill 的同步维护要求见
 `10-config.md`。
 
 ## 13.3 Skill 格式
@@ -92,10 +107,11 @@ Studio 设置页的 Skills 标签页展示 `SkillCatalogRuntime` 已发布的项
 project/user/system/external 规则扫描并整体发布新 revision。该列表不调用 `skill_view`，不改变
 会话 active skills，也不写入使用统计。
 
-TurnFactory 获取并冻结当前 catalog revision。`skills_list` 与 `skill_view` 只使用冻结 catalog，
+TurnFactory 获取并冻结当前 catalog revision。`SkillCatalog` 的系统来源必须由 Studio 显式传入，
+不得从 `[skills].user_dir` 推导；非 Studio 调用不传系统目录。`skills_list` 与 `skill_view` 只使用冻结 catalog，
 不会在每次工具调用重新 discover；`skill_manage` 也以冻结 catalog 校验目标，写入成功后通知 owner
 为未来 Turn 重建 catalog，当前 Turn 仍保持原 revision。system Skills 只在
-`startStudioRuntime` 安装，不设置隐式 filesystem watcher。
+`startStudioRuntime` 全量刷新，不在 Project discover 时刷新，也不设置隐式 filesystem watcher。
 
 ## 13.6 自学习
 

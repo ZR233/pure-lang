@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pretty_assertions::assert_eq;
 
 use super::scanning::{find_skill_files, support_file_path, validate_skill_document};
-use super::system::install_system_skills;
 use super::{
     MAX_SKILL_SCAN_DEPTH, SKILL_FILE_NAME, SkillCatalog, SkillMetadata, SkillSourceKind,
     SkillsConfig, build_skills_prompt, bump_project_view,
@@ -70,13 +69,13 @@ fn project_source_shadows_user_and_external() {
         .external_dirs
         .push(external.to_string_lossy().to_string());
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, None).unwrap();
 
     assert_eq!(catalog.skills.len(), 1);
     assert_eq!(catalog.skills[0].description, "project");
     assert_eq!(catalog.skills[0].source, SkillSourceKind::Project);
     let _ = fs::remove_dir_all(workspace);
-    fs::remove_dir_all(user).unwrap();
+    let _ = fs::remove_dir_all(user);
     fs::remove_dir_all(external).unwrap();
 }
 
@@ -90,7 +89,7 @@ fn disabled_skills_are_filtered() {
     };
     config.system.enabled = false;
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, None).unwrap();
 
     assert!(catalog.skills.is_empty());
     fs::remove_dir_all(workspace).unwrap();
@@ -188,103 +187,13 @@ fn support_file_requires_allowed_directory() {
 }
 
 #[test]
-fn installs_system_skills_with_marker() {
-    let user = temp_dir("system-install-user");
-    let config = SkillsConfig {
-        user_dir: user.to_string_lossy().to_string(),
-        ..SkillsConfig::default()
-    };
-
-    let system_dir = install_system_skills(&config).unwrap();
-
-    assert!(
-        system_dir
-            .join("skill-creator")
-            .join(SKILL_FILE_NAME)
-            .exists()
-    );
-    assert!(
-        system_dir
-            .join("subagent-workflow")
-            .join(SKILL_FILE_NAME)
-            .exists()
-    );
-    let studio_config_doc = system_dir.join("studio-config").join(SKILL_FILE_NAME);
-    assert!(
-        studio_config_doc.exists(),
-        "installed studio-config skill document must exist"
-    );
-    assert!(system_dir.join(super::SYSTEM_MARKER_FILE_NAME).exists());
-
-    let content = fs::read_to_string(&studio_config_doc)
-        .expect("installed studio-config skill document must be readable");
-    let metadata = validate_skill_document(&content, Some("studio-config"))
-        .expect("installed studio-config skill document must have valid frontmatter");
-
-    assert_eq!(
-        metadata.name, "studio-config",
-        "installed studio-config skill name must match its directory"
-    );
-    assert_eq!(
-        metadata.category.as_deref(),
-        Some("guides"),
-        "installed studio-config skill must keep the guides category"
-    );
-    assert!(
-        content.contains("~/.pure/config.toml"),
-        "installed studio-config skill must document the canonical config path"
-    );
-
-    fs::remove_dir_all(user).unwrap();
-}
-
-#[test]
-fn system_marker_hit_skips_rewrite() {
-    let user = temp_dir("system-marker-user");
-    let config = SkillsConfig {
-        user_dir: user.to_string_lossy().to_string(),
-        ..SkillsConfig::default()
-    };
-    let system_dir = install_system_skills(&config).unwrap();
-    let sentinel = system_dir.join("sentinel.txt");
-    fs::write(&sentinel, "keep").unwrap();
-
-    install_system_skills(&config).unwrap();
-
-    assert_eq!(fs::read_to_string(sentinel).unwrap(), "keep");
-    fs::remove_dir_all(user).unwrap();
-}
-
-#[test]
-fn stale_system_marker_refreshes_cache() {
-    let user = temp_dir("system-refresh-user");
-    let config = SkillsConfig {
-        user_dir: user.to_string_lossy().to_string(),
-        ..SkillsConfig::default()
-    };
-    let system_dir = install_system_skills(&config).unwrap();
-    let stale = system_dir.join("stale.txt");
-    fs::write(&stale, "remove").unwrap();
-    fs::write(system_dir.join(super::SYSTEM_MARKER_FILE_NAME), "stale\n").unwrap();
-
-    install_system_skills(&config).unwrap();
-
-    assert!(!stale.exists());
-    assert!(
-        system_dir
-            .join("skill-creator")
-            .join(SKILL_FILE_NAME)
-            .exists()
-    );
-    fs::remove_dir_all(user).unwrap();
-}
-
-#[test]
 fn discovers_system_skills_between_user_and_external_priority() {
     let workspace = temp_dir("system-priority-workspace");
     let user = temp_dir("system-priority-user");
+    let system = temp_dir("system-priority-system");
     let external = temp_dir("system-priority-external");
     write_skill(&user.join("shared"), "shared", "user");
+    write_skill(&system.join("skill-creator"), "skill-creator", "system");
     write_skill(&external.join("skill-creator"), "skill-creator", "external");
     let mut config = SkillsConfig {
         user_dir: user.to_string_lossy().to_string(),
@@ -293,16 +202,15 @@ fn discovers_system_skills_between_user_and_external_priority() {
     config
         .external_dirs
         .push(external.to_string_lossy().to_string());
-    install_system_skills(&config).unwrap();
-
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
 
     let shared = catalog.find("shared").unwrap();
     let creator = catalog.find("skill-creator").unwrap();
     assert_eq!(shared.source, SkillSourceKind::User);
     assert_eq!(creator.source, SkillSourceKind::System);
     let _ = fs::remove_dir_all(workspace);
-    fs::remove_dir_all(user).unwrap();
+    let _ = fs::remove_dir_all(user);
+    fs::remove_dir_all(system).unwrap();
     fs::remove_dir_all(external).unwrap();
 }
 
@@ -310,6 +218,7 @@ fn discovers_system_skills_between_user_and_external_priority() {
 fn project_skill_shadows_system_skill() {
     let workspace = temp_dir("system-shadow-workspace");
     let user = temp_dir("system-shadow-user");
+    let system = temp_dir("system-shadow-system");
     write_skill(
         &workspace.join("skills").join("skill-creator"),
         "skill-creator",
@@ -319,85 +228,117 @@ fn project_skill_shadows_system_skill() {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
-    install_system_skills(&config).unwrap();
+    write_skill(&system.join("skill-creator"), "skill-creator", "system");
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
 
     let creator = catalog.find("skill-creator").unwrap();
     assert_eq!(creator.source, SkillSourceKind::Project);
     assert_eq!(creator.description, "project override");
     let _ = fs::remove_dir_all(workspace);
-    fs::remove_dir_all(user).unwrap();
+    let _ = fs::remove_dir_all(user);
+    fs::remove_dir_all(system).unwrap();
 }
 
 #[test]
-fn user_root_does_not_scan_system_cache_as_user_scope() {
-    let workspace = temp_dir("system-skip-workspace");
-    let user = temp_dir("system-skip-user");
-    let mut config = SkillsConfig {
+fn system_directory_is_not_derived_from_user_directory() {
+    let workspace = temp_dir("system-independent-workspace");
+    let user = temp_dir("system-independent-user");
+    let explicit_system = temp_dir("system-independent-explicit");
+    write_skill(
+        &user.join(".system").join("legacy"),
+        "legacy",
+        "legacy system",
+    );
+    write_skill(
+        &explicit_system.join("current"),
+        "current",
+        "current system",
+    );
+    let config = SkillsConfig {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
-    install_system_skills(&config).unwrap();
-    config.system.enabled = false;
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let without_system = SkillCatalog::discover(&workspace, &config, None).unwrap();
+    let with_system = SkillCatalog::discover(&workspace, &config, Some(&explicit_system)).unwrap();
 
-    assert!(catalog.find("skill-creator").is_none());
+    assert!(without_system.find("legacy").is_none());
+    assert!(without_system.find("current").is_none());
+    assert!(with_system.find("legacy").is_none());
+    assert_eq!(
+        with_system.find("current").unwrap().source,
+        SkillSourceKind::System
+    );
     let _ = fs::remove_dir_all(workspace);
     fs::remove_dir_all(user).unwrap();
+    fs::remove_dir_all(explicit_system).unwrap();
 }
 
 #[test]
 fn system_can_be_disabled() {
     let workspace = temp_dir("system-disabled-workspace");
     let user = temp_dir("system-disabled-user");
+    let system = temp_dir("system-disabled-system");
     let mut config = SkillsConfig {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
     config.system.enabled = false;
+    write_skill(&system.join("skill-creator"), "skill-creator", "system");
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
 
     assert!(catalog.find("skill-creator").is_none());
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_dir_all(user);
+    fs::remove_dir_all(system).unwrap();
 }
 
 #[test]
 fn disabled_filters_system_skill_by_name() {
     let workspace = temp_dir("system-disabled-name-workspace");
     let user = temp_dir("system-disabled-name-user");
+    let system = temp_dir("system-disabled-name-system");
     let config = SkillsConfig {
         user_dir: user.to_string_lossy().to_string(),
         disabled: vec!["skill-creator".to_string()],
         ..SkillsConfig::default()
     };
-    install_system_skills(&config).unwrap();
+    write_skill(&system.join("skill-creator"), "skill-creator", "system");
+    write_skill(
+        &system.join("subagent-workflow"),
+        "subagent-workflow",
+        "system",
+    );
 
-    let catalog = SkillCatalog::discover(&workspace, &config).unwrap();
+    let catalog = SkillCatalog::discover(&workspace, &config, Some(&system)).unwrap();
 
     assert!(catalog.find("skill-creator").is_none());
     assert!(catalog.find("subagent-workflow").is_some());
     let _ = fs::remove_dir_all(workspace);
-    fs::remove_dir_all(user).unwrap();
+    let _ = fs::remove_dir_all(user);
+    fs::remove_dir_all(system).unwrap();
 }
 
 #[test]
 fn skills_prompt_includes_system_readonly_guidance() {
     let workspace = temp_dir("system-prompt-workspace");
     let user = temp_dir("system-prompt-user");
+    let system = temp_dir("system-prompt-system");
     let config = SkillsConfig {
         user_dir: user.to_string_lossy().to_string(),
         ..SkillsConfig::default()
     };
-    install_system_skills(&config).unwrap();
+    write_skill(&system.join("skill-creator"), "skill-creator", "system");
 
-    let prompt = build_skills_prompt(&workspace, &config).unwrap().unwrap();
+    let prompt = build_skills_prompt(&workspace, &config, Some(&system))
+        .unwrap()
+        .unwrap();
 
     assert!(prompt.contains("skill-creator"));
     assert!(prompt.contains("System/User/External skills 是只读来源"));
     let _ = fs::remove_dir_all(workspace);
-    fs::remove_dir_all(user).unwrap();
+    let _ = fs::remove_dir_all(user);
+    fs::remove_dir_all(system).unwrap();
 }

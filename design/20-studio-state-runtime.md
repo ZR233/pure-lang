@@ -118,8 +118,9 @@ FRB 的 `readStudioState` 与 HTTP 的 `GET /api/v1/state` 都只机械调用该
 Interaction、活动 Task 引用）恢复 ThreadActor、恢复交互并 materialize pending wake，其余 Thread
 在订阅或提交输入时按需恢复；Thread 目录不做启动全量装载，活动热集合由钉住恢复、活动 Task
 root 与运行期 `DirectoryDelta` 构成；初始化 MCP
-owner 并发布 reconcile running；提交后台 MCP reconcile；同步内置 system Skills；发布 runtime
-ready。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
+owner 并发布 reconcile running；提交后台 MCP reconcile；验证并全量重建预置 system Skills 到
+`<studio_home>/studio/skills/.system/`；发布 runtime ready。Skills 刷新失败属于启动失败；无论
+`system.enabled` 是否开启都刷新，开关只影响后续发现。启动只等待 MCP desired state 被 owner 接受，不等待 transport 连接、initialize、`tools/list`
 或 startup timeout；后台结果通过 `McpStateChanged` 发布 ready/failed，MCP 失败不把 Studio runtime
 降级为启动失败。
 
@@ -204,8 +205,9 @@ Flutter LSP 页的页面进入和“刷新”只调用 read；probe、typed repa
 
 ## 20.8 Skills、Usage、Updater 与 Recovery
 
-`SkillCatalogRuntime` 按 Project 持有 `SkillsStateSnapshot`。read 不访问文件系统，discover 才扫描
-project/user/system/external；system Skills 只在 runtime 启动时安装。TurnFactory 冻结 catalog
+`SkillCatalogRuntime` 按 Project 持有 `SkillsStateSnapshot`，并持有 `StudioPaths` 给出的显式系统
+目录。read 不访问文件系统，discover 才扫描 project/user/system/external；系统目录不从
+`skills.user_dir` 推导，system Skills 只在 runtime 启动时全量重建。TurnFactory 冻结 catalog
 revision，`skills_list`/`skill_view` 使用该 catalog；`skill_manage` 用冻结 catalog 校验，写入成功后
 owner 为未来 Turn 重建，当前 Turn 保留旧 revision。
 

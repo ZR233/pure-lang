@@ -71,7 +71,7 @@ impl InstructionAssembler {
                 .map(Some)
                 .map(Ok)
                 .unwrap_or_else(|| {
-                    crate::skill::build_skills_prompt(request.workspace_root, skills)
+                    crate::skill::build_skills_prompt(request.workspace_root, skills, None)
                 });
             match prompt {
                 Ok(Some(skills)) => {

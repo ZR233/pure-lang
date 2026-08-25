@@ -31,6 +31,7 @@ impl StudioRuntime {
     ) -> pl_protocol::studio::StudioResult<Self> {
         let resolved = options.resolve()?;
         let lock_path = resolved.paths.runtime_lock();
+        let system_skills_dir = resolved.paths.system_skills_dir();
         let host = resolved.host;
         let instance_lock =
             tokio::task::spawn_blocking(move || RuntimeLock::acquire(&lock_path, host))
@@ -58,6 +59,7 @@ impl StudioRuntime {
             config_store,
             StudioRuntimeState::new(),
             Some(instance_lock),
+            Some(system_skills_dir),
         )
         .map_err(|error| {
             tracing::error!(error = %error, "failed to initialize Studio runtime");
@@ -76,7 +78,7 @@ impl StudioRuntime {
         config_store: ConfigStore,
         runtime_state: StudioRuntimeState,
     ) -> Result<Self> {
-        Self::with_runtime_state_and_lock(store, config_store, runtime_state, None)
+        Self::with_runtime_state_and_lock(store, config_store, runtime_state, None, None)
     }
 
     fn with_runtime_state_and_lock(
@@ -84,6 +86,7 @@ impl StudioRuntime {
         config_store: ConfigStore,
         runtime_state: StudioRuntimeState,
         instance_lock: Option<RuntimeLock>,
+        system_skills_dir: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
         let interactions = InteractionService::new(store.clone());
@@ -127,7 +130,12 @@ impl StudioRuntime {
             },
             runtime_state,
             recovery: crate::studio::StudioRecoveryRegistry::new(),
-            skills: SkillCatalogRuntime::new(product_events.clone()),
+            skills: match system_skills_dir {
+                Some(system_skills_dir) => {
+                    SkillCatalogRuntime::new(product_events.clone(), system_skills_dir)
+                }
+                None => SkillCatalogRuntime::default(),
+            },
             provider_usage,
             updater,
             activation: Default::default(),
