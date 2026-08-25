@@ -3,6 +3,8 @@ mod exit;
 mod gate;
 pub(crate) use gate::{integrated_review_gate, integrated_review_gate_now};
 pub(crate) mod prompt;
+mod readiness;
+pub(super) use readiness::{CompletionReadinessInput, completion_readiness};
 mod read;
 mod trace;
 
@@ -409,14 +411,6 @@ impl TaskCoordinator {
                         )
                         .await?;
                     let review_records = aggregate.facts.reviews;
-                    let integrated_review_gate = integrated_review_gate(
-                        &run,
-                        &work_units,
-                        &completions,
-                        &merges,
-                        &review_records,
-                    )
-                    .await;
                     let reviews = review_records
                         .iter()
                         .cloned()
@@ -446,19 +440,20 @@ impl TaskCoordinator {
                     let execution_activity = coordinator
                         .model_execution_activity(&run, runtime.as_ref())
                         .await?;
-                    let completion_blockers = completion_blockers(
-                        &run,
-                        &work_units,
-                        &review_records,
-                        &pending_interactions,
-                        todo.as_ref(),
-                        &integrated_review_gate,
-                        &execution_activity,
-                    );
+                    let completion_readiness = completion_readiness(CompletionReadinessInput {
+                        run: &run,
+                        work_units: &work_units,
+                        completions: &completions,
+                        reviews: &review_records,
+                        merges: &merges,
+                        pending_interactions: &pending_interactions,
+                        todo: todo.as_ref(),
+                        execution: &execution_activity,
+                    });
                     let completion_gate = ModelCompletionGate {
-                        available: completion_blockers.is_empty(),
-                        review_gate: integrated_review_gate.clone(),
-                        blockers: completion_blockers.clone(),
+                        available: completion_readiness.is_available(),
+                        review_gate: completion_readiness.review_gate().clone(),
+                        blockers: completion_readiness.blockers().to_vec(),
                     };
                     let available_actions = coordinator
                         .transition_paths(&run, runtime.as_ref())
@@ -770,63 +765,6 @@ impl TaskCoordinator {
         }
         Ok(candidates)
     }
-}
-
-pub(super) fn completion_blockers(
-    run: &TaskRun,
-    work_units: &[WorkUnit],
-    reviews: &[ReviewRoundRecord],
-    pending_interactions: &[pl_protocol::InteractionRequest],
-    todo: Option<&pl_protocol::TodoListSnapshot>,
-    review_gate: &StudioIntegratedReviewGate,
-    execution: &ModelExecutionActivity,
-) -> Vec<String> {
-    let mut blockers = Vec::new();
-    if !matches!(
-        run.kind(),
-        TaskRunStateKind::Working | TaskRunStateKind::Reviewing
-    ) {
-        blockers.push("成功完成要求任务处于 working 或 reviewing".to_string());
-    }
-    for unit in current_work_units(work_units) {
-        if unit.kind() != WorkUnitStateKind::Completed {
-            blockers.push(format!(
-                "当前有效工作单 {} 尚未结算，状态为 {}",
-                unit.id,
-                unit.kind().as_str()
-            ));
-        }
-    }
-    for review in reviews.iter().filter(|review| review.kind().is_active()) {
-        blockers.push(format!("审查轮 {} 尚未结束", review.id));
-    }
-    for interaction in pending_interactions {
-        blockers.push(format!("用户交互 {} 尚未处理", interaction.interaction_id));
-    }
-    if let Some(todo) = todo {
-        for item in todo
-            .items
-            .iter()
-            .filter(|item| item.status != pl_protocol::TodoStatus::Completed)
-        {
-            blockers.push(format!("待办尚未完成：{}", item.step));
-        }
-    }
-    for activity in execution
-        .executor_turns
-        .iter()
-        .chain(&execution.reviewer_turns)
-        .filter(|activity| activity.active_turn_id.is_some() || activity.pending_inputs > 0)
-    {
-        blockers.push(format!(
-            "{} {} 仍有模型执行活动",
-            activity.role, activity.agent_id
-        ));
-    }
-    if let StudioIntegratedReviewGate::Required { reason } = review_gate {
-        blockers.push(format!("综合审查门槛尚未满足：{reason}"));
-    }
-    blockers
 }
 
 pub(super) fn integrated_review_blockers(

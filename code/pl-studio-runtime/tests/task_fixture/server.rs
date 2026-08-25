@@ -116,7 +116,7 @@ impl ScriptedModelServer {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
         let expected = match self.state.mode {
-            ScriptMode::SingleExecutorEquivalent => (21, 12, 3),
+            ScriptMode::SingleExecutorEquivalent => (23, 12, 3),
             ScriptMode::PostMergeImplementation => (26, 12, 7),
         };
         if (progress.planner, progress.executor, progress.reviewer) != expected {
@@ -457,6 +457,34 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             tool_call("status-review-gate", "task_status", serde_json::json!({})),
         ),
         20 if state.mode == ScriptMode::SingleExecutorEquivalent => (
+            "update_todo_list(completed)",
+            tool_call(
+                "complete-planner-todo",
+                "update_todo_list",
+                serde_json::json!({
+                    "explanation": "The reviewed delivery is merged and ready for Task completion.",
+                    "items": [
+                        {
+                            "step": "Complete and review the implementation",
+                            "status": "completed"
+                        },
+                        {
+                            "step": "Merge the approved delivery",
+                            "status": "completed"
+                        }
+                    ]
+                }),
+            ),
+        ),
+        21 if state.mode == ScriptMode::SingleExecutorEquivalent => (
+            "task_status(completed-todo)",
+            tool_call(
+                "status-completed-todo",
+                "task_status",
+                serde_json::json!({}),
+            ),
+        ),
+        22 if state.mode == ScriptMode::SingleExecutorEquivalent => (
             "task_transition(complete)",
             transition_call(
                 state,
@@ -895,6 +923,16 @@ fn validate_request_step(
             .context("single-executor review-gate status returned no tool output")?;
         if !output.contains("\"status\":\"notRequiredSingleExecutorEquivalent\"") {
             bail!("single-executor equivalent merge did not expose the review exemption: {output}");
+        }
+    }
+    if mode == ScriptMode::SingleExecutorEquivalent && role == ScriptRole::Planner && step == 22 {
+        let output = latest_function_call_output(request)
+            .context("completed-todo status returned no tool output")?;
+        if !output.contains("\"completionGate\":{\"available\":true")
+            || !output.contains("\"status\":\"completed\"")
+            || output.contains("待办尚未完成")
+        {
+            bail!("completed todo did not leave the completion gate available: {output}");
         }
     }
     if mode == ScriptMode::PostMergeImplementation

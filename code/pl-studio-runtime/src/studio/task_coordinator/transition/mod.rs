@@ -405,7 +405,6 @@ impl TaskCoordinator {
                 let outcome = input.outcome.context("complete requires outcome")?;
                 let run = match outcome {
                     CompletionOutcomeInput::Succeeded => {
-                        ensure_no_active_task_children(runtime, thread_id).await?;
                         let aggregate = self
                             .task_runtime
                             .aggregate(thread_id)
@@ -416,27 +415,29 @@ impl TaskCoordinator {
                         let completions = aggregate.facts.completions;
                         let merges = aggregate.facts.merges;
                         let reviews = aggregate.facts.reviews;
-                        let gate = super::review::integrated_review_gate(
-                            &current,
-                            &work_units,
-                            &completions,
-                            &merges,
-                            &reviews,
-                        )
-                        .await;
-                        if matches!(gate, StudioIntegratedReviewGate::Required { .. }) {
-                            bail!("success completion gate is not satisfied: {gate:?}");
-                        }
-                        if !self
-                            .store
-                            .list_pending_interactions(thread_id)
-                            .await?
-                            .is_empty()
-                        {
-                            bail!("task root Thread still has pending interactions");
-                        }
-                        if self.store.read_thread_todo(thread_id).await?.is_some() {
-                            bail!("task root Thread still has an unfinished todo");
+                        let pending_interactions =
+                            self.store.list_pending_interactions(thread_id).await?;
+                        let todo = self.store.read_thread_todo(thread_id).await?;
+                        let execution = self
+                            .model_execution_activity(&current, Some(runtime))
+                            .await?;
+                        let readiness = super::review::completion_readiness(
+                            super::review::CompletionReadinessInput {
+                                run: &current,
+                                work_units: &work_units,
+                                completions: &completions,
+                                reviews: &reviews,
+                                merges: &merges,
+                                pending_interactions: &pending_interactions,
+                                todo: todo.as_ref(),
+                                execution: &execution,
+                            },
+                        );
+                        if !readiness.is_available() {
+                            bail!(
+                                "success completion gate is not satisfied: {}",
+                                readiness.blockers().join("; ")
+                            );
                         }
                         self.task_runtime
                             .complete_task(
@@ -446,7 +447,7 @@ impl TaskCoordinator {
                                 TaskOutcome::Succeeded {
                                     summary: summary.to_string(),
                                     completed_at: crate::studio::unix_seconds(),
-                                    review_gate: task_review_gate(&gate)?,
+                                    review_gate: task_review_gate(readiness.review_gate())?,
                                 },
                             )
                             .await?
@@ -542,23 +543,17 @@ impl TaskCoordinator {
         let todo = self.store.read_thread_todo(&run.root_thread_id).await?;
         let issues = aggregate.facts.issues;
         let execution = self.model_execution_activity(run, runtime).await?;
-        let review_gate = super::review::integrated_review_gate(
-            run,
-            &work_units,
-            &completions,
-            &merges,
-            &reviews,
-        )
-        .await;
-        let completion_blockers = super::review::completion_blockers(
-            run,
-            &work_units,
-            &reviews,
-            &pending_interactions,
-            todo.as_ref(),
-            &review_gate,
-            &execution,
-        );
+        let completion_readiness =
+            super::review::completion_readiness(super::review::CompletionReadinessInput {
+                run,
+                work_units: &work_units,
+                completions: &completions,
+                reviews: &reviews,
+                merges: &merges,
+                pending_interactions: &pending_interactions,
+                todo: todo.as_ref(),
+                execution: &execution,
+            });
         let review_blockers =
             super::review::integrated_review_blockers(run, &work_units, &reviews, &merges);
         let cancel_blockers = if reviews.iter().any(|review| {
@@ -583,7 +578,7 @@ impl TaskCoordinator {
                 paths.push(transition_path(
                     action,
                     Some(CompletionOutcomeInput::Succeeded),
-                    completion_blockers.clone(),
+                    completion_readiness.blockers().to_vec(),
                 ));
                 paths.push(transition_path(
                     action,
@@ -916,30 +911,6 @@ fn required<'a>(value: Option<&'a str>, message: &str) -> Result<&'a str> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .context(message.to_string())
-}
-
-async fn ensure_no_active_task_children(
-    runtime: &AgentRuntimeHandle,
-    thread_id: &str,
-) -> Result<()> {
-    let root = crate::studio::agent_host::root_agent_id(thread_id);
-    let active = runtime
-        .list()
-        .await
-        .map_err(anyhow::Error::msg)?
-        .into_iter()
-        .filter(|snapshot| snapshot.identity.parent_id.as_ref() == Some(&root))
-        .filter(|snapshot| matches!(snapshot.identity.role.as_str(), "executor" | "reviewer"))
-        .filter(|snapshot| snapshot.active_turn_id().is_some() || snapshot.pending_inputs > 0)
-        .map(|snapshot| snapshot.identity.id.to_string())
-        .collect::<Vec<_>>();
-    if active.is_empty() {
-        return Ok(());
-    }
-    bail!(
-        "successful completion requires settled executor and reviewer turns: {}",
-        active.join(", ")
-    )
 }
 
 pub(crate) fn available_actions(state: TaskRunStateKind) -> Vec<TransitionAction> {
