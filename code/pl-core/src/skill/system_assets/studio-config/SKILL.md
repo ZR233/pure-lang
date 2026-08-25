@@ -29,7 +29,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - TOML with snake_case keys; only `schema_version = 14` is accepted.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
 - An unparsable, invalid, or old-schema file is not migrated: Studio atomically replaces it with the current default config. Back it up before manual edits.
-- Saving from Settings writes atomically. External edits apply only after an explicit reload from disk in Settings.
+- Saving from Settings writes atomically. External file edits are not picked up automatically; restart Studio after editing config.toml by hand.
 
 ## Common Sections
 
@@ -43,7 +43,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[web_search]` — search mode, context size, allowed domains, location.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
 
-Some sections are omitted when left at defaults (`runtime`, `instructions`, `skills`, `lsp`, `ui`); others are always written — a default save still keeps `[web_search]` with `mode = "cached"`.
+A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `user_dir = "~/.pure/skills"` and `[web_search]` with `mode = "cached"`, so do not delete them assuming they are unused.
 
 ## Credentials
 
@@ -90,4 +90,4 @@ model = "deepseek-v4-flash"
 3. Keep `schema_version` and all four role routes valid.
 4. Reference tokens via `bearer_token_env`; never paste raw tokens.
 5. Add providers from Settings or a preset (`deepseek`, `openai`, `zhipu`, ...) rather than hand-writing catalog metadata.
-6. After external edits, reload Settings from disk and confirm the change took effect.
+6. After external edits, restart Studio and confirm the change took effect.
