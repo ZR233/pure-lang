@@ -209,6 +209,12 @@ fn installs_system_skills_with_marker() {
             .join(SKILL_FILE_NAME)
             .exists()
     );
+    assert!(
+        system_dir
+            .join("studio-config")
+            .join(SKILL_FILE_NAME)
+            .exists()
+    );
     assert!(system_dir.join(super::SYSTEM_MARKER_FILE_NAME).exists());
     fs::remove_dir_all(user).unwrap();
 }
