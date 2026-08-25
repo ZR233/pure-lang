@@ -16,6 +16,7 @@ enum ThreadItemKind {
   agent,
   turn,
   inference,
+  skill,
   file,
   contextCompaction,
 }
@@ -166,6 +167,22 @@ final class ThreadPlanItemStateView extends ThreadItemStateView {
 
   final String content;
   final ThreadContentLifecycleView lifecycle;
+}
+
+final class ThreadSkillItemStateView extends ThreadItemStateView {
+  const ThreadSkillItemStateView({
+    required this.name,
+    required this.source,
+    required this.path,
+    required this.toolCallId,
+    required this.activatedAt,
+  });
+
+  final String name;
+  final String source;
+  final String path;
+  final String toolCallId;
+  final DateTime activatedAt;
 }
 
 class ThreadToolInvocationView {
@@ -471,6 +488,7 @@ class ThreadItemView {
     ThreadTurnItemStateView() => ThreadItemKind.turn,
     ThreadInferenceItemStateView() => ThreadItemKind.inference,
     ThreadPlanItemStateView() => ThreadItemKind.plan,
+    ThreadSkillItemStateView() => ThreadItemKind.skill,
     ThreadFileItemStateView() => ThreadItemKind.file,
     ThreadContextCompactionItemStateView() => ThreadItemKind.contextCompaction,
   };
@@ -495,6 +513,7 @@ class ThreadItemView {
       FailedThreadInferenceView() => 'failed',
       CancelledThreadInferenceView() => 'cancelled',
     },
+    ThreadSkillItemStateView() ||
     ThreadFileItemStateView() ||
     ThreadContextCompactionItemStateView() => 'completed',
   };
@@ -510,7 +529,9 @@ class ThreadItemView {
     ThreadTurnItemStateView(:final state) => state.isTerminal,
     ThreadInferenceItemStateView(:final lifecycle) =>
       lifecycle is! RunningThreadInferenceView,
-    ThreadFileItemStateView() || ThreadContextCompactionItemStateView() => true,
+    ThreadSkillItemStateView() ||
+    ThreadFileItemStateView() ||
+    ThreadContextCompactionItemStateView() => true,
   };
 
   DateTime? get completedAt => switch (state) {
@@ -550,6 +571,7 @@ class ThreadItemView {
       CancelledThreadInferenceView(:final cancelledAt) => cancelledAt,
       RunningThreadInferenceView() => null,
     },
+    ThreadSkillItemStateView(:final activatedAt) => activatedAt,
     ThreadFileItemStateView(:final completedAt) => completedAt,
     ThreadContextCompactionItemStateView(:final compactedAt) => compactedAt,
   };
@@ -571,7 +593,9 @@ class ThreadItemView {
       FailedThreadInferenceView(:final error) => error,
       _ => null,
     },
-    ThreadFileItemStateView() || ThreadContextCompactionItemStateView() => null,
+    ThreadSkillItemStateView() ||
+    ThreadFileItemStateView() ||
+    ThreadContextCompactionItemStateView() => null,
   };
 
   String get text => switch (state) {
@@ -584,6 +608,7 @@ class ThreadItemView {
       FailedThreadAgentView(:final error) => error,
       QueuedThreadAgentView() || RunningThreadAgentView() => '',
     },
+    ThreadSkillItemStateView(:final name) => name,
     _ => '',
   };
 
@@ -617,6 +642,11 @@ class ThreadItemView {
 
   String? get mediaType => switch (state) {
     ThreadFileItemStateView(:final mediaType) => mediaType,
+    _ => null,
+  };
+
+  ThreadSkillItemStateView? get skill => switch (state) {
+    final ThreadSkillItemStateView skill => skill,
     _ => null,
   };
 

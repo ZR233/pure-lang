@@ -11,8 +11,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v12_with_six_state_tasks() {
-    let root = unique_test_root("schema-v12");
+async fn creates_canonical_schema_v13_with_six_state_tasks() {
+    let root = unique_test_root("schema-v13");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -58,6 +58,19 @@ async fn creates_canonical_schema_v12_with_six_state_tasks() {
             "missing {trigger}"
         );
     }
+    let items_schema: String = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+            ["items".into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "sql")
+        .unwrap();
+    assert!(items_schema.contains("'skill'"));
     let submission_columns = table_columns(store.database(), "thread_submissions").await;
     for column in [
         "id",

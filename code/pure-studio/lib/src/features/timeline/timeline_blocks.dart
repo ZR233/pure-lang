@@ -149,7 +149,8 @@ class _TimelineRowBlock extends StatelessWidget {
     final isUser = row.type == TimelineRowType.userMessage;
     final isCompactActivity =
         row.type == TimelineRowType.reasoningSummary ||
-        row.type == TimelineRowType.toolGroup;
+        row.type == TimelineRowType.toolGroup ||
+        row.type == TimelineRowType.skillActivation;
     return Padding(
       padding: EdgeInsets.only(bottom: isCompactActivity ? 12 : 24),
       child: Row(
@@ -280,11 +281,86 @@ class _RowCard extends StatelessWidget {
         key: ValueKey(row.part!.id),
         part: row.part!,
       ),
+      TimelineRowType.skillActivation => _SkillActivationPart(
+        key: StudioDriverKeys.timelineSkillActivation(row.part!.id),
+        activation: row.part!.skill!,
+      ),
       TimelineRowType.agentActivity => _AgentPart(
         key: ValueKey(row.agentEvent!.eventId),
         event: row.agentEvent!,
       ),
     };
+  }
+}
+
+class _SkillActivationPart extends StatelessWidget {
+  const _SkillActivationPart({required this.activation, super.key});
+
+  final TimelineSkillActivation activation;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = context.l10n.timelineSkillActivated(activation.name);
+    return Semantics(
+      container: true,
+      label: label,
+      value: activation.source,
+      child: Tooltip(
+        message: activation.path,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: StudioColors.claySoft.withValues(alpha: 0.6),
+            border: Border.all(color: context.studioLine),
+            borderRadius: BorderRadius.circular(StudioRadii.md),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.extension_outlined,
+                  size: 15,
+                  color: StudioColors.clayDeep,
+                ),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInk,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (activation.source.trim().isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: context.studioPaper2,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        activation.source,
+                        style: context.text.labelSmall?.copyWith(
+                          color: context.studioInkSoft,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

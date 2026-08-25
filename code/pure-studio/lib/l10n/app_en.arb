@@ -313,6 +313,12 @@
     }
   },
   "timelinePlanFallback": "Plan",
+  "timelineSkillActivated": "Activated skill · {name}",
+  "@timelineSkillActivated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
   "timelineAgentFallback": "Agent",
   "timelineToolCompleted": "{name} completed",
   "@timelineToolCompleted": {

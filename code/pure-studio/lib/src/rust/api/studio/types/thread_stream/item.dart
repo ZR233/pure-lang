@@ -286,6 +286,13 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
     required String content,
     required BridgeThreadContentLifecycle lifecycle,
   }) = BridgeThreadItemState_Plan;
+  const factory BridgeThreadItemState.skill({
+    required String name,
+    required String source,
+    required String path,
+    required String toolCallId,
+    required PlatformInt64 activatedAt,
+  }) = BridgeThreadItemState_Skill;
   const factory BridgeThreadItemState.file({
     required String path,
     String? mediaType,

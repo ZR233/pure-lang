@@ -3,6 +3,7 @@
 mod agent;
 mod content;
 mod inference;
+mod skill;
 mod tool;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ use crate::TurnState;
 pub use agent::*;
 pub use content::*;
 pub use inference::*;
+pub use skill::*;
 pub use tool::*;
 
 /// Timeline 的唯一持久条目。`ordinal` 在首次插入时固定。
@@ -106,6 +108,7 @@ impl ThreadItem {
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
             | ThreadItemState::Plan(_)
+            | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
@@ -120,6 +123,7 @@ impl ThreadItem {
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
             | ThreadItemState::Plan(_)
+            | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
@@ -134,6 +138,7 @@ impl ThreadItem {
             | ThreadItemState::Agent(_)
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
+            | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
@@ -148,6 +153,7 @@ impl ThreadItem {
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
             | ThreadItemState::Plan(_)
+            | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
@@ -199,6 +205,7 @@ pub enum ThreadItemState {
     Turn(ThreadTurnItem),
     Inference(ThreadInferenceItem),
     Plan(ThreadPlanItem),
+    Skill(ThreadSkillItem),
     File(ThreadFileItem),
     ContextCompaction(ThreadContextCompactionItem),
 }
@@ -213,6 +220,7 @@ impl ThreadItemState {
             Self::Turn(_) => ThreadItemKind::Turn,
             Self::Inference(_) => ThreadItemKind::Inference,
             Self::Plan(_) => ThreadItemKind::Plan,
+            Self::Skill(_) => ThreadItemKind::Skill,
             Self::File(_) => ThreadItemKind::File,
             Self::ContextCompaction(_) => ThreadItemKind::ContextCompaction,
         }
@@ -227,7 +235,7 @@ impl ThreadItemState {
             Self::Turn(value) => value.state().is_terminal(),
             Self::Inference(value) => value.state().is_terminal(),
             Self::Plan(value) => value.lifecycle().is_terminal(),
-            Self::File(_) | Self::ContextCompaction(_) => true,
+            Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => true,
         }
     }
 
@@ -240,6 +248,7 @@ impl ThreadItemState {
             Self::Turn(value) => value.state().completed_at(),
             Self::Inference(value) => value.state().terminal_at(),
             Self::Plan(value) => value.lifecycle().terminal_at(),
+            Self::Skill(value) => Some(value.activation().activated_at),
             Self::File(value) => Some(value.completed_at()),
             Self::ContextCompaction(value) => Some(value.compacted_at()),
         }
@@ -257,7 +266,7 @@ impl ThreadItemState {
                 .map(|failure| failure.message.as_str()),
             Self::Inference(value) => value.state().failure(),
             Self::Plan(value) => value.lifecycle().failure(),
-            Self::File(_) | Self::ContextCompaction(_) => None,
+            Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => None,
         }
     }
 }
@@ -288,6 +297,7 @@ pub enum ThreadItemKind {
     Turn,
     Inference,
     Plan,
+    Skill,
     File,
     ContextCompaction,
 }

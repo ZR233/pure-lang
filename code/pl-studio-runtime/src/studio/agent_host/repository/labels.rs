@@ -54,6 +54,7 @@ pub(super) fn item_kind_label(state: &ThreadItemState) -> &'static str {
         ThreadItemState::Turn(_) => "turn",
         ThreadItemState::Inference(_) => "inference",
         ThreadItemState::Plan(_) => "plan",
+        ThreadItemState::Skill(_) => "skill",
         ThreadItemState::File(_) => "file",
         ThreadItemState::ContextCompaction(_) => "contextCompaction",
     }

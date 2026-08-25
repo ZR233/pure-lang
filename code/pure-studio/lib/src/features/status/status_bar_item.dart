@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/theme/studio_tokens.dart';
 
@@ -11,6 +12,7 @@ class StatusBarItem extends StatefulWidget {
     this.icon,
     this.trailingIcon,
     this.tooltip,
+    this.semanticsLabel,
     this.detailBuilder,
     this.detailWidth = 300,
     this.enabled = true,
@@ -24,6 +26,7 @@ class StatusBarItem extends StatefulWidget {
   final IconData? icon;
   final IconData? trailingIcon;
   final String? tooltip;
+  final String? semanticsLabel;
   final WidgetBuilder? detailBuilder;
   final double detailWidth;
   final bool enabled;
@@ -133,10 +136,41 @@ class _StatusBarItemState extends State<StatusBarItem> {
             child: content,
           )
         : content;
-    final interactive = Focus(
-      onFocusChange: _handleFocusChange,
-      child: hoverable,
-    );
+    final interactive = widget.interactive && detailBuilder != null
+        ? Semantics(
+            container: true,
+            label: widget.semanticsLabel ?? widget.label,
+            value: widget.label,
+            button: true,
+            focusable: true,
+            onTap: _toggleDetail,
+            child: FocusableActionDetector(
+              onFocusChange: _handleFocusChange,
+              shortcuts: const {
+                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.escape):
+                    _DismissStatusBarDetailIntent(),
+              },
+              actions: {
+                ActivateIntent: CallbackAction<ActivateIntent>(
+                  onInvoke: (_) {
+                    _toggleDetail();
+                    return null;
+                  },
+                ),
+                _DismissStatusBarDetailIntent:
+                    CallbackAction<_DismissStatusBarDetailIntent>(
+                      onInvoke: (_) {
+                        _hideDetail();
+                        return null;
+                      },
+                    ),
+              },
+              child: hoverable,
+            ),
+          )
+        : Focus(onFocusChange: _handleFocusChange, child: hoverable);
     final chip = Padding(
       padding: const EdgeInsets.only(right: 2),
       child: interactive,
@@ -266,4 +300,8 @@ class _StatusBarItemState extends State<StatusBarItem> {
       ),
     );
   }
+}
+
+class _DismissStatusBarDetailIntent extends Intent {
+  const _DismissStatusBarDetailIntent();
 }

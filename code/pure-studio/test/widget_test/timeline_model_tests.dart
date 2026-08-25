@@ -174,4 +174,78 @@ void registerTimelineModelTests() {
 
     expect(rows, isEmpty);
   });
+
+  test('repeated Skill Items remain independent timeline rows', () {
+    final rows = timelineRowsFromThreadItems([
+      _threadItemFixture(
+        id: 'skill-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.skill,
+        skill: TimelineSkillActivation(
+          name: 'pdf',
+          source: 'system',
+          path: '/skills/pdf',
+          toolCallId: 'tool-1',
+          activatedAt: _fixtureDate(1),
+        ),
+      ),
+      _threadItemFixture(
+        id: 'skill-2',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.skill,
+        skill: TimelineSkillActivation(
+          name: 'pdf',
+          source: 'system',
+          path: '/skills/pdf',
+          toolCallId: 'tool-2',
+          activatedAt: _fixtureDate(2),
+        ),
+      ),
+    ]);
+
+    expect(rows, hasLength(2));
+    expect(rows.map((row) => row.type), [
+      TimelineRowType.skillActivation,
+      TimelineRowType.skillActivation,
+    ]);
+    expect(rows.map((row) => row.part!.skill!.toolCallId), [
+      'tool-1',
+      'tool-2',
+    ]);
+  });
+
+  testWidgets('Skill Item renders a compact localized activation row', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'skill-1',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      kind: ThreadItemKind.skill,
+      skill: TimelineSkillActivation(
+        name: 'pdf',
+        source: 'system',
+        path: '/skills/pdf',
+        toolCallId: 'tool-1',
+        activatedAt: _fixtureDate(1),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: [item]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(StudioDriverKeys.timelineSkillActivation('skill-1')),
+      findsOneWidget,
+    );
+    expect(find.text('Activated skill · pdf'), findsOneWidget);
+    expect(find.text('system'), findsOneWidget);
+  });
 }

@@ -47,6 +47,13 @@ pub enum BridgeThreadItemState {
         content: String,
         lifecycle: BridgeThreadContentLifecycle,
     },
+    Skill {
+        name: String,
+        source: String,
+        path: String,
+        tool_call_id: String,
+        activated_at: i64,
+    },
     File {
         path: String,
         media_type: Option<String>,

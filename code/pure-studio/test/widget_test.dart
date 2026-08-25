@@ -17,6 +17,7 @@ import 'package:pure_studio/src/features/interaction/composer_dock.dart';
 import 'package:pure_studio/src/features/interaction/task_recovery_dialog.dart';
 import 'package:pure_studio/src/features/shell/studio_shell.dart';
 import 'package:pure_studio/src/features/status/status_bar_item.dart';
+import 'package:pure_studio/src/features/status/status_detail_popover.dart';
 import 'package:pure_studio/src/features/status/context_usage_readout.dart';
 import 'package:pure_studio/src/features/status/thread_status_bar.dart';
 import 'package:pure_studio/src/features/todo/todo_panel.dart';

@@ -14,8 +14,25 @@ enum TimelineRowType {
   toolGroup,
   reasoningSummary,
   plan,
+  skillActivation,
   agentActivity,
   finalAnswer,
+}
+
+class TimelineSkillActivation {
+  const TimelineSkillActivation({
+    required this.name,
+    required this.source,
+    required this.path,
+    required this.toolCallId,
+    required this.activatedAt,
+  });
+
+  final String name;
+  final String source;
+  final String path;
+  final String toolCallId;
+  final DateTime activatedAt;
 }
 
 class TimelineToolPart {
@@ -281,6 +298,7 @@ class TimelineEntry {
     this.textChannel,
     this.tool,
     this.planContent,
+    this.skill,
     this.contextDisposition = ThreadContextDisposition.active,
   });
 
@@ -304,6 +322,7 @@ class TimelineEntry {
   final TimelineTextChannel? textChannel;
   final TimelineToolPart? tool;
   final String? planContent;
+  final TimelineSkillActivation? skill;
   final ThreadContextDisposition contextDisposition;
 }
 

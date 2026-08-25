@@ -390,6 +390,16 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
             content: value.content().to_string(),
             lifecycle: content_lifecycle(value.lifecycle()),
         },
+        ThreadItemState::Skill(value) => {
+            let activation = value.activation();
+            BridgeThreadItemState::Skill {
+                name: activation.name.clone(),
+                source: activation.source.clone(),
+                path: activation.path.clone(),
+                tool_call_id: activation.tool_call_id.clone(),
+                activated_at: activation.activated_at,
+            }
+        }
         ThreadItemState::File(value) => BridgeThreadItemState::File {
             path: value.path().to_string(),
             media_type: value.media_type().map(str::to_string),
@@ -670,7 +680,9 @@ fn mcp_server(value: McpServerDescriptor) -> BridgeThreadMcpServerDescriptor {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{ThreadContextCompactionItem, ThreadTextItem};
+    use pl_protocol::{
+        SkillActivation, ThreadContextCompactionItem, ThreadSkillItem, ThreadTextItem,
+    };
 
     use super::*;
 
@@ -736,6 +748,33 @@ mod tests {
         let bridged = bridge_thread_snapshot(snapshot).unwrap();
         assert_eq!(bridged.items.len(), 2);
         assert_eq!(bridged.history_cursor, None);
+    }
+
+    #[test]
+    fn skill_item_crosses_the_bridge_as_typed_activation_data() {
+        let bridged = bridge_thread_item(item(ThreadItemState::Skill(ThreadSkillItem::new(
+            SkillActivation {
+                name: "pdf".to_string(),
+                source: "system".to_string(),
+                path: "/skills/pdf".to_string(),
+                turn_id: "turn-1".to_string(),
+                tool_call_id: "tool-1".to_string(),
+                activated_at: 7,
+            },
+        ))))
+        .unwrap()
+        .unwrap();
+
+        assert!(matches!(
+            bridged.state,
+            BridgeThreadItemState::Skill {
+                name,
+                source,
+                tool_call_id,
+                activated_at: 7,
+                ..
+            } if name == "pdf" && source == "system" && tool_call_id == "tool-1"
+        ));
     }
 
     fn window_item(ordinal: u64, turn_id: String) -> ThreadItem {

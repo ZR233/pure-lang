@@ -442,6 +442,42 @@ mod tests {
         runtime.shutdown_runtime().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn thread_read_returns_the_same_authoritative_snapshot_shape_as_sse() {
+        let runtime = test_runtime().await;
+        runtime.start_runtime().await.unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let git = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(workspace.path())
+            .status()
+            .unwrap();
+        assert!(git.success());
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        let thread = runtime
+            .create_thread(&project.id, "Read contract")
+            .await
+            .unwrap();
+        let app = router(AppState::new(runtime.clone(), CancellationToken::new()));
+
+        let response = app
+            .oneshot(request(
+                "GET",
+                &format!("/api/v1/threads/{}", thread.id),
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["schemaVersion"], pl_protocol::THREAD_SCHEMA_VERSION);
+        assert_eq!(body["thread"]["id"], thread.id);
+        assert_eq!(body["items"], serde_json::json!([]));
+        assert!(body.get("revision").is_some());
+        runtime.shutdown_runtime().await.unwrap();
+    }
+
     fn collect_schema_references(
         value: &serde_json::Value,
         references: &mut std::collections::BTreeSet<String>,

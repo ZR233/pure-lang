@@ -77,6 +77,11 @@ repairThreadRuntime(threadId)
 `runtimeAvailability=inactive`，不得让数据库行覆盖活动 owner。订阅是显式激活命令，可从冷基线创建
 actor；纯查询和 transport 重同步不激活、不修复、不投递 wake。
 
+共享 `ReadThread` operation 的 canonical 返回值是完整 `ThreadSnapshot`。FRB export 与 HTTP
+`GET /api/v1/threads/{threadId}` 都调用 `readThreadSnapshot`，不能分别返回 workspace snapshot
+与 directory Thread。`SkillActivated` trace 在同一投影批次提交终态 Skill Item，并在首次
+出现该名称时提交去重的 `runtime.activeSkills`；冷恢复按 Skill Item ordinal 重建该列表。
+
 `listThreadTurns(threadId, cursor, limit)` 是冷热历史查询：未驻留时直接读取 SQLite；驻留时先读取
 ThreadActor 的驻留期 Turn 热窗口与完整 Item timeline，再用 SQLite 补齐更早页面。相同 Turn/Item
 标识一律以内存覆盖，热 cursor 可以直接衔接冷历史，不得为了历史页把数据库快照回写到 actor。

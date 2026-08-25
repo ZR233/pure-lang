@@ -100,7 +100,13 @@ platforms: ["windows", "linux", "macos"]
 
 系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
 
-Studio 状态栏的 Skills 只展示当前会话已激活的 skills。激活定义为该会话中 `skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未 `skill_view` 的 skill 不计入。成功激活由后端记录为 `SkillActivated` runtime fact，并持久化到会话级 skill activation 表；前端只消费 `sessionRuntime.activeSkills` 和实时 `SkillActivated` 后附带的 runtime snapshot，不解析工具输出 JSON。
+Studio 状态栏的 Skills 只展示当前 Thread 已激活的 skills。激活定义为该 Thread 中
+`skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未
+`skill_view` 的 skill 不计入。每次成功读取都由后端记录为 `SkillActivated` runtime fact，
+并投影为独立、终态的 durable Skill Timeline Item；重复读取同一 skill 仍保留多条激活
+Item。`ThreadRuntimeSnapshot.activeSkills` 按 Skill Item 的首次出现顺序去重，并在冷恢复时
+由持久化 Item 重建，不另设平行 activation 表。前端只消费 typed Skill Item 和 runtime
+snapshot，不解析工具输出 JSON。
 
 Studio 设置页的 Skills 标签页展示 `SkillCatalogRuntime` 已发布的项目 catalog。进入标签页只读取
 缓存，不访问文件系统；`discoverSkills(projectId)` 或 Project 激活 command 才按

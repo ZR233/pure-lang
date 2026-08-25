@@ -1438,6 +1438,7 @@ ThreadItemView _messageItem({
       ThreadItemKind.agent ||
       ThreadItemKind.turn ||
       ThreadItemKind.inference ||
+      ThreadItemKind.skill ||
       ThreadItemKind.file ||
       ThreadItemKind.contextCompaction => throw ArgumentError.value(
         kind,

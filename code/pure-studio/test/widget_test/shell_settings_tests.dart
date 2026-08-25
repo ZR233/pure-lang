@@ -526,7 +526,11 @@ void registerShellSettingsTests() {
     await tester.tapAt(Offset(activityRect.left + 8, activityCenter.dy));
     await tester.pumpAndSettle();
     expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
-    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
+    expect(find.text('Skills'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.statusActiveSkill('flutter-ui')),
+      findsOneWidget,
+    );
     expect(find.textContaining('MCP · dart'), findsOneWidget);
     expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
     expect(find.text('SUBAGENTS'), findsNothing);

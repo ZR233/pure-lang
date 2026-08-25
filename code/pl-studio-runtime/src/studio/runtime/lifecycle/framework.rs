@@ -107,12 +107,25 @@ impl StudioRuntime {
             snapshot.thread = self.read_protocol_thread(thread_id).await?;
             return Ok(snapshot);
         }
-        self.persistence_repository()
+        if let Some(snapshot) = self
+            .persistence_repository()
             .await
             .context("Studio persistence writer is unavailable")?
             .read_thread_snapshot(thread_id)
             .await?
-            .context("selected Thread not found")
+        {
+            return Ok(snapshot);
+        }
+        if let Some(thread) = self
+            .agent_facility
+            .product_events
+            .thread_snapshot(thread_id)
+        {
+            let mut snapshot = pl_protocol::ThreadSnapshot::empty(thread_id);
+            snapshot.thread = thread;
+            return Ok(snapshot);
+        }
+        Err(anyhow::anyhow!("selected Thread not found"))
     }
 
     /// 查询路径使用的只读 repository 句柄（共享进程级 writer 的实例）。

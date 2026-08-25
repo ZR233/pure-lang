@@ -7867,12 +7867,20 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadI
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Plan{content: var_content, lifecycle: var_lifecycle};
             }
             7 => {
+                let mut var_name = <String>::sse_decode(deserializer);
+                let mut var_source = <String>::sse_decode(deserializer);
+                let mut var_path = <String>::sse_decode(deserializer);
+                let mut var_toolCallId = <String>::sse_decode(deserializer);
+                let mut var_activatedAt = <i64>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name: var_name, source: var_source, path: var_path, tool_call_id: var_toolCallId, activated_at: var_activatedAt};
+            }
+            8 => {
                 let mut var_path = <String>::sse_decode(deserializer);
                 let mut var_mediaType = <Option<String>>::sse_decode(deserializer);
                 let mut var_completedAt = <i64>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path: var_path, media_type: var_mediaType, completed_at: var_completedAt};
             }
-            8 => {
+            9 => {
                 let mut var_beforeTokens = <u64>::sse_decode(deserializer);
                 let mut var_afterTokens = <u64>::sse_decode(deserializer);
                 let mut var_compactedAt = <i64>::sse_decode(deserializer);
@@ -16622,11 +16630,17 @@ state.into_into_dart().into_dart()].into_dart() }
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Plan{content,lifecycle} => { [6.into_dart(),
 content.into_into_dart().into_dart(),
 lifecycle.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { [7.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,path,tool_call_id,activated_at} => { [7.into_dart(),
+name.into_into_dart().into_dart(),
+source.into_into_dart().into_dart(),
+path.into_into_dart().into_dart(),
+tool_call_id.into_into_dart().into_dart(),
+activated_at.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { [8.into_dart(),
 path.into_into_dart().into_dart(),
 media_type.into_into_dart().into_dart(),
 completed_at.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { [8.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { [9.into_dart(),
 before_tokens.into_into_dart().into_dart(),
 after_tokens.into_into_dart().into_dart(),
 compacted_at.into_into_dart().into_dart()].into_dart() }
@@ -23124,11 +23138,17 @@ crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference
 crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Plan{content,lifecycle} => { <i32>::sse_encode(6, serializer); <String>::sse_encode(content, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_encode(lifecycle, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(path, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,path,tool_call_id,activated_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(name, serializer);
+<String>::sse_encode(source, serializer);
+<String>::sse_encode(path, serializer);
+<String>::sse_encode(tool_call_id, serializer);
+<i64>::sse_encode(activated_at, serializer);
+ }
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { <i32>::sse_encode(8, serializer); <String>::sse_encode(path, serializer);
 <Option<String>>::sse_encode(media_type, serializer);
 <i64>::sse_encode(completed_at, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { <i32>::sse_encode(8, serializer); <u64>::sse_encode(before_tokens, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { <i32>::sse_encode(9, serializer); <u64>::sse_encode(before_tokens, serializer);
 <u64>::sse_encode(after_tokens, serializer);
 <i64>::sse_encode(compacted_at, serializer);
  }

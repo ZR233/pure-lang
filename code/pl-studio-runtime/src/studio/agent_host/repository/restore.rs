@@ -8,7 +8,10 @@ use pl_core::{
     FaultedAgentState, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
     ThreadContextState, ThreadId,
 };
-use pl_protocol::{PureError, ThreadItem, ThreadItemState, ThreadSnapshot, Turn};
+use pl_protocol::{
+    PureError, ThreadItem, ThreadItemState, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot, Turn,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entity::{interaction, item, thread, thread_input, turn};
@@ -275,7 +278,7 @@ impl StudioAgentRepository {
         context: &ThreadContextState,
     ) -> Result<RestoredThreadSnapshot, PureError> {
         let thread_id = model.id.clone();
-        let items = item::Entity::find()
+        let items: Vec<ThreadItem> = item::Entity::find()
             .filter(item::Column::ThreadId.eq(thread_id.clone()))
             .order_by_asc(item::Column::Ordinal)
             .all(self.store.database())
@@ -287,6 +290,23 @@ impl StudioAgentRepository {
             .into_iter()
             .filter(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
             .collect();
+        let active_skills = active_skills_from_items(&items);
+        let latest_activation_at = items
+            .iter()
+            .filter_map(|item| match item.state() {
+                ThreadItemState::Skill(skill) => Some(skill.activation().activated_at),
+                ThreadItemState::Text(_)
+                | ThreadItemState::Thinking(_)
+                | ThreadItemState::Tool(_)
+                | ThreadItemState::Agent(_)
+                | ThreadItemState::Turn(_)
+                | ThreadItemState::Inference(_)
+                | ThreadItemState::Plan(_)
+                | ThreadItemState::File(_)
+                | ThreadItemState::ContextCompaction(_) => None,
+            })
+            .max()
+            .unwrap_or(0);
         let active_turn = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id.clone()))
             .filter(turn::Column::StateKind.is_in(["queued", "running"]))
@@ -309,6 +329,13 @@ impl StudioAgentRepository {
                     .map_err(|error| store_error(error.to_string()))
             })
             .collect::<Result<Vec<_>, PureError>>()?;
+        let mut runtime = runtime_from_context(&thread_id, context);
+        if !active_skills.is_empty() {
+            let runtime = runtime
+                .get_or_insert_with(|| empty_restored_runtime(&thread_id, latest_activation_at));
+            runtime.active_skills = active_skills;
+            runtime.updated_at = runtime.updated_at.max(latest_activation_at);
+        }
         Ok(RestoredThreadSnapshot {
             snapshot: ThreadSnapshot {
                 schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
@@ -317,9 +344,65 @@ impl StudioAgentRepository {
                 active_turn,
                 items,
                 interactions,
-                runtime: runtime_from_context(&thread_id, context),
+                runtime,
             },
         })
+    }
+}
+
+pub(super) fn active_skills_from_items(items: &[ThreadItem]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    items
+        .iter()
+        .filter_map(|item| match item.state() {
+            ThreadItemState::Skill(skill) => Some(skill.activation().name.clone()),
+            ThreadItemState::Text(_)
+            | ThreadItemState::Thinking(_)
+            | ThreadItemState::Tool(_)
+            | ThreadItemState::Agent(_)
+            | ThreadItemState::Turn(_)
+            | ThreadItemState::Inference(_)
+            | ThreadItemState::Plan(_)
+            | ThreadItemState::File(_)
+            | ThreadItemState::ContextCompaction(_) => None,
+        })
+        .filter(|name| seen.insert(name.clone()))
+        .collect()
+}
+
+fn empty_restored_runtime(thread_id: &str, updated_at: i64) -> ThreadRuntimeSnapshot {
+    ThreadRuntimeSnapshot {
+        thread_id: thread_id.to_string(),
+        usage: ThreadRuntimeUsage {
+            model: String::new(),
+            context_window: None,
+            latest_context_tokens: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_prompt_tokens: 0,
+            cache_write_tokens: 0,
+            cache_miss_tokens: 0,
+            reasoning_tokens: 0,
+            inference_count: 0,
+            total_tokens: 0,
+            cache_hit_rate: None,
+            estimated_costs: Vec::new(),
+            estimated_cache_savings: Vec::new(),
+            has_unpriced_usage: false,
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
+            updated_at,
+        },
+        todo: None,
+        active_skills: Vec::new(),
+        active_mcp_servers: Vec::new(),
+        active_lsp_servers: Vec::new(),
+        progress: None,
+        mcp_health: None,
+        tool_registry_revision: None,
+        tool_catalog_hash: None,
+        updated_at,
     }
 }
 

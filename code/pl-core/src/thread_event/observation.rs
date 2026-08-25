@@ -236,7 +236,7 @@ fn runtime_snapshot(
     }
 }
 
-fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
+pub(super) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
@@ -287,4 +287,69 @@ fn unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs() as i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{AgentRuntimeDelta, SkillActivation, TokenUsageSnapshot};
+
+    use super::*;
+
+    #[test]
+    fn skill_agent_event_is_not_a_second_persistent_projection_source() {
+        let event = AgentEvent::SkillActivated {
+            activation: activation(),
+        };
+
+        assert!(observation_from_agent_event(&event).is_none());
+    }
+
+    #[test]
+    fn later_runtime_delta_preserves_active_skills() {
+        let mut current = ThreadSnapshot::empty("thread-1");
+        let mut runtime = empty_runtime("thread-1");
+        runtime.active_skills = vec!["doc".to_string(), "pdf".to_string()];
+        current.runtime = Some(runtime);
+
+        let batch = project_observation(
+            "thread-1",
+            "turn-1",
+            0,
+            &current,
+            TurnObservation::RuntimeDelta(AgentRuntimeDelta {
+                inference_id: "inference-1".to_string(),
+                agent_id: "thread-1".to_string(),
+                path: "thread-1".to_string(),
+                parent_path: None,
+                role: "planner".to_string(),
+                model: "model".to_string(),
+                context_window: Some(100),
+                usage: TokenUsageSnapshot::default(),
+                estimated_costs: Vec::new(),
+                estimated_cache_savings: Vec::new(),
+                has_unpriced_usage: false,
+                prompt_generation: None,
+                prompt_cache_policy: None,
+                prefix_changed_reason: None,
+                updated_at: 8,
+            }),
+        );
+
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ThreadRuntimeUpdated { runtime }
+                if runtime.active_skills == ["doc", "pdf"]
+        ));
+    }
+
+    fn activation() -> SkillActivation {
+        SkillActivation {
+            name: "pdf".to_string(),
+            source: "system".to_string(),
+            path: "/skills/pdf".to_string(),
+            turn_id: "turn-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            activated_at: 7,
+        }
+    }
 }

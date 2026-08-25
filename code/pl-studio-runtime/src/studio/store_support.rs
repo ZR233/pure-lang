@@ -5,7 +5,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 use crate::studio::entity;
 
 /// 唯一支持的 Studio schema 版本；任何其他版本都按不兼容处理并精确重建。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 12;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 13;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_task_run_table(db).await?;
@@ -241,7 +241,7 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             ) STORED NOT NULL CHECK (
                 state_kind IN (
                     'text', 'thinking', 'tool', 'agent', 'turn', 'inference',
-                    'plan', 'file', 'contextCompaction'
+                    'plan', 'skill', 'file', 'contextCompaction'
                 )
             ),
             created_at INTEGER NOT NULL,

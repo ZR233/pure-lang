@@ -753,6 +753,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelinePlanFallback => '计划';
 
   @override
+  String timelineSkillActivated(String name) {
+    return '已激活 Skill · $name';
+  }
+
+  @override
   String get timelineAgentFallback => 'Agent';
 
   @override
@@ -2376,6 +2381,11 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelinePlanFallback => '计划';
+
+  @override
+  String timelineSkillActivated(String name) {
+    return '已激活 Skill · $name';
+  }
 
   @override
   String get timelineAgentFallback => 'Agent';

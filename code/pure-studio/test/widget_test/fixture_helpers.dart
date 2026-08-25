@@ -98,6 +98,7 @@ List<TimelineRow> timelineRowsFromFixtureParts(
           TimelineEntryType.reasoning => ThreadItemKind.reasoning,
           TimelineEntryType.plan => ThreadItemKind.plan,
           TimelineEntryType.tool => ThreadItemKind.toolCall,
+          TimelineEntryType.skill => ThreadItemKind.skill,
           TimelineEntryType.file => ThreadItemKind.file,
         },
         text: part.planContent ?? part.text,
@@ -107,6 +108,7 @@ List<TimelineRow> timelineRowsFromFixtureParts(
         reasoningSummary: part.reasoningSummary,
         reasoningContent: part.reasoningContent,
         tool: part.tool,
+        skill: part.skill,
       ),
     );
   }

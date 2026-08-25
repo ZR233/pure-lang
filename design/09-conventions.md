@@ -141,18 +141,19 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
 - `cargo xtask run-gui` 和普通 `cargo xtask build-gui` 只运行或构建当前源码，不执行生成器，
   不格式化、改写或清理任何已跟踪源码。修改 Riverpod、Freezed、Flutter l10n 或 FRB 输入后，
   开发者必须显式运行 `cargo xtask generate-gui`。需要验证生成一致性时使用
-  `cargo xtask check-gui-generated`；该命令重新生成后同时检查已跟踪差异和未跟踪输出。
+  `cargo xtask check-gui-generated`；该命令先快照当前生成输出，再重新生成并检查前后内容一致。
+  检查只验证生成结果是否稳定，不要求生成输出已提交，也不以 `HEAD` 或 Git 暂存区作为基线。
 - CI 或发布流程直接构建 GUI 时使用 `cargo xtask build-gui --check-generated`，在构建前显式
-  重新生成并拒绝未提交的生成差异；普通本地构建不承担该检查，也不得产生源码工作区噪声。
+  重新生成并拒绝前后不一致的生成输出；普通本地构建不承担该检查，也不得产生源码工作区噪声。
 - `cargo xtask verify-gui` 必须复用 `check-gui-generated`，PR、默认分支和正式发布 CI
-  只调用 xtask 入口，不在 workflow 中复制生成器命令。生成后存在 Git 差异时检查必须失败，
-  并提示提交生成器产生的结果，而不是指导开发者手工修补生成文件。
+  只调用 xtask 入口，不在 workflow 中复制生成器命令。重新生成改变快照内容时检查必须失败，
+  并提示先运行生成入口并审查结果，而不是指导开发者手工修补生成文件或强制提交。
 - CI 质量门禁（PR Quality Gate）只运行确定性检查：Rust fmt/clippy/test、
   `cargo xtask verify-gui`、Conventional PR 标题和发布配置校验。Flutter Driver
   smoke、任务流 harness 与 live 模型验收不在 CI 中运行，交付前在本地 Windows
   环境执行；AGENTS.md 的提交前检查清单与 CI 门禁保持同构，本地通过即代表 CI
   可通过（已跟踪的 pubspec.lock hosted URL 由 xtask 自动规范化，无需手工处理镜像差异）。
-- xtask 中的生成输出规则是 Git 一致性检查和生成文件规范化的共同事实来源。新增生成器或
+- xtask 中的生成输出规则是重生成稳定性检查和生成文件规范化的共同事实来源。新增生成器或
   输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。全仓
   `cargo fmt` 和 `dart format` 只作为只读门禁运行；可写格式化只能作用于明确的生成输出，
   禁止重新写入无关手写源码。

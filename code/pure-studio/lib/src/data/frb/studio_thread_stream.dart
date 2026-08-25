@@ -275,6 +275,14 @@ ThreadItemStateView _threadItemStateFromFrb(
       content: content,
       lifecycle: _contentLifecycleFromFrb(lifecycle),
     ),
+    skill: (name, source, path, toolCallId, activatedAt) =>
+        ThreadSkillItemStateView(
+          name: name,
+          source: source,
+          path: path,
+          toolCallId: toolCallId,
+          activatedAt: _dateFromUnix(activatedAt),
+        ),
     file: (path, mediaType, completedAt) =>
         ThreadFileItemStateView(path, mediaType, _dateFromUnix(completedAt)),
     contextCompaction: (beforeTokens, afterTokens, compactedAt) =>

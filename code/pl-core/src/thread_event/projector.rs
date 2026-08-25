@@ -8,9 +8,10 @@ use pl_protocol::{
     ThreadAgentItem, ThreadAgentState, ThreadAttachment, ThreadContentLifecycle,
     ThreadInferenceItem, ThreadInferenceState, ThreadItem, ThreadItemDelta, ThreadItemDeltaState,
     ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadPlanItem,
-    ThreadSnapshot, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem, ThreadToolFailure,
-    ThreadToolFailureKind, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput, ThreadToolState,
-    ThreadTurnItem, Turn, TurnCancellationCause, TurnCompletion, TurnOutcome, TurnPhase, TurnState,
+    ThreadSkillItem, ThreadSnapshot, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem,
+    ThreadToolFailure, ThreadToolFailureKind, ThreadToolInvocation, ThreadToolItem,
+    ThreadToolOutput, ThreadToolState, ThreadTurnItem, Turn, TurnCancellationCause, TurnCompletion,
+    TurnOutcome, TurnPhase, TurnState,
 };
 use pl_trace::{
     TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartState,
@@ -35,6 +36,10 @@ pub(crate) fn project_trace_events(
 ) -> ThreadProjectionBatch {
     let mut projector = Projector::new(thread_id, current);
     let mut active_turn = current.active_turn.clone();
+    let mut runtime = current
+        .runtime
+        .clone()
+        .unwrap_or_else(|| super::observation::empty_runtime(thread_id));
     for trace in traces {
         match &trace.kind {
             TraceEventKind::TracePartStarted { item } => {
@@ -94,8 +99,37 @@ pub(crate) fn project_trace_events(
                     },
                 );
             }
-            TraceEventKind::SkillActivated { .. } | TraceEventKind::EnabledToolsRecorded { .. } => {
+            TraceEventKind::SkillActivated { activation } => {
+                projector.push(
+                    activation.activated_at,
+                    ThreadNotification::ItemCompleted {
+                        item: Box::new(ThreadItem::new(
+                            format!(
+                                "{}:skill-activation:{}",
+                                activation.turn_id, activation.tool_call_id
+                            ),
+                            thread_id.to_string(),
+                            activation.turn_id.clone(),
+                            0,
+                            0,
+                            activation.activated_at,
+                            activation.activated_at,
+                            ThreadItemState::Skill(ThreadSkillItem::new(activation.clone())),
+                        )),
+                    },
+                );
+                if !runtime.active_skills.contains(&activation.name) {
+                    runtime.active_skills.push(activation.name.clone());
+                    runtime.updated_at = activation.activated_at;
+                    projector.push(
+                        activation.activated_at,
+                        ThreadNotification::ThreadRuntimeUpdated {
+                            runtime: Box::new(runtime.clone()),
+                        },
+                    );
+                }
             }
+            TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }
     projector.finish()
@@ -644,8 +678,8 @@ impl<'a> Projector<'a> {
 mod tests {
     use pl_protocol::{
         InteractionChangedEvent, InteractionCommand, InteractionRequest, InteractionScope,
-        ResolveUserInput, RunningTurnState, THREAD_SCHEMA_VERSION, Thread, ThreadItemState,
-        ThreadSnapshot,
+        ResolveUserInput, RunningTurnState, SkillActivation, THREAD_SCHEMA_VERSION, Thread,
+        ThreadItemState, ThreadSnapshot,
     };
 
     use super::*;
@@ -739,6 +773,51 @@ mod tests {
     }
 
     #[test]
+    fn repeated_skill_activations_keep_items_and_dedupe_runtime_names() {
+        let traces = [
+            skill_trace(1, "tool-1", "pdf", 7),
+            skill_trace(2, "tool-2", "pdf", 8),
+        ];
+
+        let batch = project_trace_events("thread-1", &snapshot(), &traces);
+
+        assert_eq!(batch.notifications.len(), 3);
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.id == "turn-1:skill-activation:tool-1"
+                    && matches!(item.state(), ThreadItemState::Skill(skill)
+                        if skill.activation().name == "pdf")
+        ));
+        assert!(matches!(
+            &batch.notifications[1].notification,
+            ThreadNotification::ThreadRuntimeUpdated { runtime }
+                if runtime.active_skills == ["pdf"]
+        ));
+        assert!(matches!(
+            &batch.notifications[2].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.id == "turn-1:skill-activation:tool-2"
+        ));
+    }
+
+    #[test]
+    fn different_skill_activations_preserve_first_activation_order() {
+        let traces = [
+            skill_trace(1, "tool-1", "doc", 7),
+            skill_trace(2, "tool-2", "pdf", 8),
+        ];
+
+        let batch = project_trace_events("thread-1", &snapshot(), &traces);
+
+        assert!(matches!(
+            &batch.notifications[3].notification,
+            ThreadNotification::ThreadRuntimeUpdated { runtime }
+                if runtime.active_skills == ["doc", "pdf"]
+        ));
+    }
+
+    #[test]
     fn resolved_interaction_trace_does_not_update_unrelated_active_turn() {
         let mut interaction = InteractionRequest::user_input(
             "ask-1",
@@ -797,6 +876,24 @@ mod tests {
             items: Vec::new(),
             interactions: Vec::new(),
             runtime: None,
+        }
+    }
+
+    fn skill_trace(sequence: u64, tool_call_id: &str, name: &str, activated_at: i64) -> TraceEvent {
+        TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence,
+            timestamp: activated_at,
+            kind: TraceEventKind::SkillActivated {
+                activation: SkillActivation {
+                    name: name.to_string(),
+                    source: "system".to_string(),
+                    path: format!("/skills/{name}"),
+                    turn_id: "turn-1".to_string(),
+                    tool_call_id: tool_call_id.to_string(),
+                    activated_at,
+                },
+            },
         }
     }
 }

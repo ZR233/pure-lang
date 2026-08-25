@@ -179,7 +179,8 @@ Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责
 并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库
 但禁止手改。`generate-gui` 是唯一主动更新已跟踪 GUI 生成文件的入口；普通
 `run-gui`/`build-gui` 不执行生成器或可写格式化，`check-gui-generated`、
-`verify-gui` 与显式 `build-gui --check-generated` 才重新生成并验证 canonical 输出。
+`verify-gui` 与显式 `build-gui --check-generated` 才重新生成并验证 canonical 输出；验证以
+重新生成前后的内容稳定性为准，不要求生成文件相对 `HEAD` 无差异或已经提交。
 
 ## 2.10 数据版本
 

@@ -182,6 +182,7 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
                 ? TimelineRowType.commentary
                 : TimelineRowType.finalAnswer,
           ThreadItemKind.plan => TimelineRowType.plan,
+          ThreadItemKind.skill => TimelineRowType.skillActivation,
           ThreadItemKind.reasoning => TimelineRowType.reasoningSummary,
           ThreadItemKind.toolCall => TimelineRowType.toolGroup,
           ThreadItemKind.agent => TimelineRowType.agentActivity,
@@ -218,6 +219,7 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
       ThreadItemKind.agentMessage => TimelineEntryType.text,
       ThreadItemKind.reasoning => TimelineEntryType.reasoning,
       ThreadItemKind.plan => TimelineEntryType.plan,
+      ThreadItemKind.skill => TimelineEntryType.skill,
       ThreadItemKind.toolCall => TimelineEntryType.tool,
       ThreadItemKind.agent => TimelineEntryType.text,
       ThreadItemKind.turn ||
@@ -246,6 +248,16 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
     },
     tool: item.tool,
     planContent: item.kind == ThreadItemKind.plan ? item.text : null,
+    skill: switch (item.skill) {
+      final skill? => TimelineSkillActivation(
+        name: skill.name,
+        source: skill.source,
+        path: skill.path,
+        toolCallId: skill.toolCallId,
+        activatedAt: skill.activatedAt,
+      ),
+      null => null,
+    },
     contextDisposition: item.contextDisposition,
   );
 }
@@ -268,6 +280,10 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     ...part.reasoningSummary,
     ...part.reasoningContent,
     part.planContent,
+    part.skill?.name,
+    part.skill?.source,
+    part.skill?.path,
+    part.skill?.toolCallId,
     part.contextDisposition,
     part.updatedAt?.millisecondsSinceEpoch,
     part.error,

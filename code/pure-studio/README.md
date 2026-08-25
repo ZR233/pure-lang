@@ -23,7 +23,7 @@ cargo xtask run-gui
 cargo xtask build-gui
 cargo xtask generate-gui
 cargo xtask check-gui-generated
-cargo xtask build-gui --check-generated # CI/release: regenerate and reject uncommitted output
+cargo xtask build-gui --check-generated # CI/release: regenerate and reject unstable output
 
 # Run the native app through the dedicated test_driver entrypoint for Dart MCP
 # interaction and GUI acceptance. The driver command owns the resident process
@@ -39,7 +39,8 @@ cargo xtask run-gui --demo --driver # deterministic demo data
 Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
 `cargo xtask generate-gui`，不得手工修改生成文件。普通 `run-gui` 和 `build-gui` 只消费当前
 源码，不执行生成器或可写格式化；修改生成输入后必须先显式生成。`cargo xtask check-gui-generated`
-会重新生成并检查 Git 差异，适合提交前确认；CI/发布构建使用 `build-gui --check-generated`。
+会快照当前输出并检查重新生成前后是否一致，不要求输出已提交；CI/发布构建使用
+`build-gui --check-generated`。
 完整检查仍使用 `cargo xtask verify-gui`。xtask 会校验 codegen
 版本，并在 Windows 上统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
 

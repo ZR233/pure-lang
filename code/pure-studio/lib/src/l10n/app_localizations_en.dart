@@ -784,6 +784,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelinePlanFallback => 'Plan';
 
   @override
+  String timelineSkillActivated(String name) {
+    return 'Activated skill · $name';
+  }
+
+  @override
   String get timelineAgentFallback => 'Agent';
 
   @override

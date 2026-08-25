@@ -132,41 +132,49 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
     final maxLeft = math.max(8.0, overlaySize.width - effectiveWidth - 8);
     final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
     final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
+    final maxDetailHeight = math.max(96.0, targetTopLeft.dy - 24.0);
     final theme = Theme.of(context);
     _entry = OverlayEntry(
       builder: (context) {
         return Theme(
           data: theme,
           child: Positioned.fill(
-            child: IgnorePointer(
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: left,
-                    bottom: bottom,
-                    width: effectiveWidth,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: left,
+                  bottom: bottom,
+                  width: effectiveWidth,
+                  child: MouseRegion(
+                    onEnter: (_) => _cancelHide(),
+                    onExit: (_) => _scheduleHide(),
                     child: Material(
                       color: Colors.transparent,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerLowest,
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: maxDetailHeight),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerLowest,
+                            border: Border.all(
+                              color: theme.colorScheme.outlineVariant,
+                            ),
+                            borderRadius: BorderRadius.circular(StudioRadii.md),
+                            boxShadow: StudioShadows.lifted(
+                              theme.colorScheme.shadow,
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(StudioRadii.md),
-                          boxShadow: StudioShadows.lifted(
-                            theme.colorScheme.shadow,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: SingleChildScrollView(
+                              child: widget.detailBuilder(context),
+                            ),
                           ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: widget.detailBuilder(context),
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -342,6 +350,80 @@ class StatusDetailIconRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class StatusDetailIconList extends StatelessWidget {
+  const StatusDetailIconList({
+    required this.icon,
+    required this.title,
+    required this.items,
+    required this.iconColor,
+    required this.backgroundColor,
+    this.itemKey,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final List<String> items;
+  final Color iconColor;
+  final Color backgroundColor;
+  final Key Function(String item)? itemKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: title,
+      value: items.join(', '),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox.square(
+              dimension: 22,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(icon, size: 13, color: iconColor),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInk,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  for (final item in items)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        '• $item',
+                        key: itemKey?.call(item),
+                        style: context.text.bodySmall?.copyWith(
+                          color: context.studioInk,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

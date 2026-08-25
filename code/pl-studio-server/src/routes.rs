@@ -242,7 +242,7 @@ async fn read_thread(
     Ok(Json(
         state
             .runtime
-            .read_thread(&thread_id)
+            .thread_snapshot(&thread_id)
             .await
             .map_err(ApiError::from)?,
     ))

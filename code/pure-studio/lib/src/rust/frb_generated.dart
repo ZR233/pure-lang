@@ -7228,12 +7228,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           ),
         );
       case 7:
+        return BridgeThreadItemState_Skill(
+          name: dco_decode_String(raw[1]),
+          source: dco_decode_String(raw[2]),
+          path: dco_decode_String(raw[3]),
+          toolCallId: dco_decode_String(raw[4]),
+          activatedAt: dco_decode_i_64(raw[5]),
+        );
+      case 8:
         return BridgeThreadItemState_File(
           path: dco_decode_String(raw[1]),
           mediaType: dco_decode_opt_String(raw[2]),
           completedAt: dco_decode_i_64(raw[3]),
         );
-      case 8:
+      case 9:
         return BridgeThreadItemState_ContextCompaction(
           beforeTokens: dco_decode_u_64(raw[1]),
           afterTokens: dco_decode_u_64(raw[2]),
@@ -15019,6 +15027,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           lifecycle: var_lifecycle,
         );
       case 7:
+        var var_name = sse_decode_String(deserializer);
+        var var_source = sse_decode_String(deserializer);
+        var var_path = sse_decode_String(deserializer);
+        var var_toolCallId = sse_decode_String(deserializer);
+        var var_activatedAt = sse_decode_i_64(deserializer);
+        return BridgeThreadItemState_Skill(
+          name: var_name,
+          source: var_source,
+          path: var_path,
+          toolCallId: var_toolCallId,
+          activatedAt: var_activatedAt,
+        );
+      case 8:
         var var_path = sse_decode_String(deserializer);
         var var_mediaType = sse_decode_opt_String(deserializer);
         var var_completedAt = sse_decode_i_64(deserializer);
@@ -15027,7 +15048,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           mediaType: var_mediaType,
           completedAt: var_completedAt,
         );
-      case 8:
+      case 9:
         var var_beforeTokens = sse_decode_u_64(deserializer);
         var var_afterTokens = sse_decode_u_64(deserializer);
         var var_compactedAt = sse_decode_i_64(deserializer);
@@ -22616,12 +22637,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           lifecycle,
           serializer,
         );
+      case BridgeThreadItemState_Skill(
+        name: final name,
+        source: final source,
+        path: final path,
+        toolCallId: final toolCallId,
+        activatedAt: final activatedAt,
+      ):
+        sse_encode_i_32(7, serializer);
+        sse_encode_String(name, serializer);
+        sse_encode_String(source, serializer);
+        sse_encode_String(path, serializer);
+        sse_encode_String(toolCallId, serializer);
+        sse_encode_i_64(activatedAt, serializer);
       case BridgeThreadItemState_File(
         path: final path,
         mediaType: final mediaType,
         completedAt: final completedAt,
       ):
-        sse_encode_i_32(7, serializer);
+        sse_encode_i_32(8, serializer);
         sse_encode_String(path, serializer);
         sse_encode_opt_String(mediaType, serializer);
         sse_encode_i_64(completedAt, serializer);
@@ -22630,7 +22664,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         afterTokens: final afterTokens,
         compactedAt: final compactedAt,
       ):
-        sse_encode_i_32(8, serializer);
+        sse_encode_i_32(9, serializer);
         sse_encode_u_64(beforeTokens, serializer);
         sse_encode_u_64(afterTokens, serializer);
         sse_encode_i_64(compactedAt, serializer);

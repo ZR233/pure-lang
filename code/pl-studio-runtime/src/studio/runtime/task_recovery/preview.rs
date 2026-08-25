@@ -159,6 +159,7 @@ impl StudioRuntime {
                         | ThreadItemState::Turn(_)
                         | ThreadItemState::Inference(_)
                         | ThreadItemState::Plan(_)
+                        | ThreadItemState::Skill(_)
                         | ThreadItemState::File(_)
                         | ThreadItemState::ContextCompaction(_) => None,
                     })

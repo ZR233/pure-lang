@@ -1463,6 +1463,12 @@ abstract class AppLocalizations {
   /// **'Plan'**
   String get timelinePlanFallback;
 
+  /// No description provided for @timelineSkillActivated.
+  ///
+  /// In en, this message translates to:
+  /// **'Activated skill · {name}'**
+  String timelineSkillActivated(String name);
+
   /// No description provided for @timelineAgentFallback.
   ///
   /// In en, this message translates to:

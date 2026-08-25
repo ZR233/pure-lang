@@ -174,6 +174,76 @@ void registerStatusAccessibilityTests() {
       expect(find.textContaining(r'$0.0025 + ￥0.31'), findsOneWidget);
     });
 
+    testWidgets(
+      'capability detail exposes every active Skill without truncation',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final base = _emptyState();
+        final threadId = base.selectedThreadId!;
+        final workspace = base.workspacesByThread[threadId]!;
+        final skills = [
+          for (var index = 0; index < 40; index++) 'skill-$index',
+        ];
+        final state = base.copyWith(
+          workspacesByThread: {
+            threadId: workspace.copyWith(
+              runtime: workspace.runtime.copyWith(activeSkills: skills),
+            ),
+          },
+        );
+        final api = _FakeStudioApi(state);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [studioApiProvider.overrideWithValue(api)],
+            child: _localizedApp(
+              home: Scaffold(
+                body: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: ThreadStatusBar(
+                    workspace: state.selectedAgentWorkspace!,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final capabilities = find.bySemanticsLabel('Active capabilities');
+        expect(capabilities, findsOneWidget);
+        await tester.tap(capabilities);
+        await tester.pumpAndSettle();
+
+        for (final skill in skills) {
+          expect(
+            find.byKey(StudioDriverKeys.statusActiveSkill(skill)),
+            findsOneWidget,
+          );
+        }
+        final scrollable = find.ancestor(
+          of: find.byType(StatusDetailPanel),
+          matching: find.byType(Scrollable),
+        );
+        expect(scrollable, findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.byKey(StudioDriverKeys.statusActiveSkill(skills.last)),
+          180,
+          scrollable: scrollable,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find
+              .byKey(StudioDriverKeys.statusActiveSkill(skills.last))
+              .hitTestable(),
+          findsOneWidget,
+        );
+      },
+    );
+
     testWidgets('context detail keeps hover behavior and shared radius', (
       tester,
     ) async {

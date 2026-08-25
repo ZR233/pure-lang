@@ -453,6 +453,7 @@ ThreadItemView _threadItemFixture({
   DateTime? completedAt,
   String? error,
   TimelineToolPart? tool,
+  TimelineSkillActivation? skill,
   List<String> reasoningSummary = const [],
   List<String> reasoningContent = const [],
   String? filePath,
@@ -505,6 +506,13 @@ ThreadItemView _threadItemFixture({
         filePath ?? '',
         mediaType,
         terminalAt,
+      ),
+      ThreadItemKind.skill => ThreadSkillItemStateView(
+        name: skill?.name ?? text,
+        source: skill?.source ?? 'system',
+        path: skill?.path ?? '',
+        toolCallId: skill?.toolCallId ?? 'skill-view',
+        activatedAt: skill?.activatedAt ?? terminalAt,
       ),
       ThreadItemKind.agent ||
       ThreadItemKind.turn ||

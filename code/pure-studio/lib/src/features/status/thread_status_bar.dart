@@ -532,6 +532,7 @@ class _StatusReadout extends StatelessWidget {
       tooltip: detailBuilder == null
           ? (tooltip.isEmpty ? label : tooltip)
           : null,
+      semanticsLabel: tooltip.isEmpty ? label : tooltip,
       detailBuilder: detailBuilder,
       detailWidth: detailWidth,
       enableHover: detailBuilder == null,
@@ -552,10 +553,11 @@ class _CapabilityDetail extends StatelessWidget {
       title: context.l10n.statusCapabilitiesTitle,
       children: [
         if (runtime.activeSkills.isNotEmpty)
-          StatusDetailIconRow(
+          StatusDetailIconList(
             icon: Icons.extension_outlined,
             title: context.l10n.statusSkillsSection,
-            detail: runtime.activeSkills.join(', '),
+            items: runtime.activeSkills,
+            itemKey: StudioDriverKeys.statusActiveSkill,
             iconColor: StudioColors.clayDeep,
             backgroundColor: StudioColors.claySoft,
           ),

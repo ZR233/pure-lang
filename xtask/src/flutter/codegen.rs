@@ -1,8 +1,9 @@
 use super::{
     DemoMode, ensure_flutter_dependencies, print_context, run_flutter, run_os_tool, run_tool,
 };
-use crate::{paths, process, pubspec_lock};
+use crate::{paths, pubspec_lock};
 use anyhow::{Context, Result, bail};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,22 +14,10 @@ const FRB_CODEGEN_VERSION: &str = "2.12.0";
 // --delete-conflicting-outputs option is removed and only emits a warning.
 const BUILD_RUNNER_ARGS: &[&str] = &["run", "build_runner", "build"];
 const GENERATED_OUTPUTS: &[GeneratedOutput] = &[
-    GeneratedOutput::dart(
-        ":(glob)code/pure-studio/lib/**/*.g.dart",
-        GeneratedDartPath::FileSuffix(".g.dart"),
-    ),
-    GeneratedOutput::dart(
-        ":(glob)code/pure-studio/lib/**/*.freezed.dart",
-        GeneratedDartPath::FileSuffix(".freezed.dart"),
-    ),
-    GeneratedOutput::dart(
-        ":(glob)code/pure-studio/lib/src/l10n/app_localizations*.dart",
-        GeneratedDartPath::L10n,
-    ),
-    GeneratedOutput::dart(
-        "code/pure-studio/lib/src/rust",
-        GeneratedDartPath::Directory("src/rust"),
-    ),
+    GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".g.dart")),
+    GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".freezed.dart")),
+    GeneratedOutput::dart(GeneratedDartPath::L10n),
+    GeneratedOutput::dart(GeneratedDartPath::Directory("src/rust")),
     GeneratedOutput::other("code/pure-studio/rust/src/frb_generated.rs"),
 ];
 
@@ -41,21 +30,21 @@ enum GeneratedDartPath {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GeneratedOutput {
-    git_pathspec: &'static str,
+    workspace_path: Option<&'static str>,
     dart_path: Option<GeneratedDartPath>,
 }
 
 impl GeneratedOutput {
-    const fn dart(git_pathspec: &'static str, dart_path: GeneratedDartPath) -> Self {
+    const fn dart(dart_path: GeneratedDartPath) -> Self {
         Self {
-            git_pathspec,
+            workspace_path: None,
             dart_path: Some(dart_path),
         }
     }
 
-    const fn other(git_pathspec: &'static str) -> Self {
+    const fn other(workspace_path: &'static str) -> Self {
         Self {
-            git_pathspec,
+            workspace_path: Some(workspace_path),
             dart_path: None,
         }
     }
@@ -94,8 +83,10 @@ pub(super) fn check_gui_generated() -> Result<()> {
 }
 
 pub(super) fn check_gui_generated_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    let before = generated_sources_snapshot(workspace_root, app_dir)?;
     generate_gui_sources(workspace_root, app_dir)?;
-    ensure_generated_files_are_committed(workspace_root)
+    let after = generated_sources_snapshot(workspace_root, app_dir)?;
+    ensure_generated_sources_are_stable(&before, &after)
 }
 
 fn generate_gui_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
@@ -253,47 +244,71 @@ fn ensure_frb_codegen_version() -> Result<()> {
     Ok(())
 }
 
-fn ensure_generated_files_are_committed(workspace_root: &Path) -> Result<()> {
-    let mut diff_args = vec![
-        OsString::from("diff"),
-        OsString::from("--exit-code"),
-        OsString::from("HEAD"),
-    ];
-    diff_args.push(OsString::from("--"));
-    diff_args.extend(
-        GENERATED_OUTPUTS
-            .iter()
-            .map(|output| OsString::from(output.git_pathspec)),
-    );
-    run_os_tool("git", &diff_args, workspace_root).context(
-        "generated GUI sources are not canonical; do not edit generated files manually; commit the output from cargo xtask generate-gui",
-    )?;
+type GeneratedSourcesSnapshot = BTreeMap<PathBuf, Vec<u8>>;
 
-    let mut untracked_args = vec![
-        OsString::from("ls-files"),
-        OsString::from("--others"),
-        OsString::from("--"),
-    ];
-    untracked_args.extend(
-        GENERATED_OUTPUTS
-            .iter()
-            .map(|output| OsString::from(output.git_pathspec)),
-    );
-    let output = process::path_command("git", &untracked_args)
-        .current_dir(workspace_root)
-        .output()
-        .context("failed to inspect untracked generated files")?;
-    if !output.status.success() {
-        bail!("git failed while inspecting untracked generated files");
+fn generated_sources_snapshot(
+    workspace_root: &Path,
+    app_dir: &Path,
+) -> Result<GeneratedSourcesSnapshot> {
+    let mut snapshot = GeneratedSourcesSnapshot::new();
+    for path in generated_dart_files(&app_dir.join("lib"))? {
+        capture_generated_file(workspace_root, &path, &mut snapshot)?;
     }
-    let untracked = String::from_utf8_lossy(&output.stdout);
-    if !untracked.trim().is_empty() {
-        bail!(
-            "generated GUI sources are untracked; do not edit them manually; commit the output from cargo xtask generate-gui:\n{}",
-            untracked.trim()
-        );
+    for workspace_path in GENERATED_OUTPUTS
+        .iter()
+        .filter_map(|output| output.workspace_path)
+    {
+        let path = workspace_root.join(workspace_path);
+        if path
+            .try_exists()
+            .with_context(|| format!("failed to inspect generated source {}", path.display()))?
+        {
+            capture_generated_file(workspace_root, &path, &mut snapshot)?;
+        }
     }
+    Ok(snapshot)
+}
+
+fn capture_generated_file(
+    workspace_root: &Path,
+    path: &Path,
+    snapshot: &mut GeneratedSourcesSnapshot,
+) -> Result<()> {
+    let relative = path.strip_prefix(workspace_root).with_context(|| {
+        format!(
+            "generated source {} is outside workspace {}",
+            path.display(),
+            workspace_root.display()
+        )
+    })?;
+    let content = fs::read(path)
+        .with_context(|| format!("failed to read generated source {}", path.display()))?;
+    snapshot.insert(relative.to_path_buf(), content);
     Ok(())
+}
+
+fn ensure_generated_sources_are_stable(
+    before: &GeneratedSourcesSnapshot,
+    after: &GeneratedSourcesSnapshot,
+) -> Result<()> {
+    let mut changes = Vec::new();
+    for (path, before_content) in before {
+        match after.get(path) {
+            Some(after_content) if before_content == after_content => {}
+            Some(_) => changes.push(format!("modified: {}", path.display())),
+            None => changes.push(format!("removed: {}", path.display())),
+        }
+    }
+    for path in after.keys().filter(|path| !before.contains_key(*path)) {
+        changes.push(format!("added: {}", path.display()));
+    }
+    if changes.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "generated GUI sources changed during canonical regeneration; run cargo xtask generate-gui and review the generated output before retrying:\n{}",
+        changes.join("\n")
+    )
 }
 
 fn run_frb_codegen(workspace_root: &Path, app_dir: &Path) -> Result<()> {
@@ -428,18 +443,15 @@ mod tests {
     }
 
     #[test]
-    fn generated_output_inventory_drives_git_checks_and_normalization() {
+    fn generated_output_inventory_drives_stability_checks_and_normalization() {
         assert_eq!(
-            GENERATED_OUTPUTS
-                .iter()
-                .map(|output| output.git_pathspec)
-                .collect::<Vec<_>>(),
-            vec![
-                ":(glob)code/pure-studio/lib/**/*.g.dart",
-                ":(glob)code/pure-studio/lib/**/*.freezed.dart",
-                ":(glob)code/pure-studio/lib/src/l10n/app_localizations*.dart",
-                "code/pure-studio/lib/src/rust",
-                "code/pure-studio/rust/src/frb_generated.rs",
+            GENERATED_OUTPUTS,
+            &[
+                GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".g.dart")),
+                GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".freezed.dart")),
+                GeneratedOutput::dart(GeneratedDartPath::L10n),
+                GeneratedOutput::dart(GeneratedDartPath::Directory("src/rust")),
+                GeneratedOutput::other("code/pure-studio/rust/src/frb_generated.rs"),
             ]
         );
         assert!(GENERATED_OUTPUTS.iter().any(|output| {
@@ -561,81 +573,38 @@ mod tests {
     }
 
     #[test]
-    fn staged_generated_changes_do_not_pass_committed_check() -> Result<()> {
+    fn uncommitted_generated_sources_pass_when_regeneration_is_stable() -> Result<()> {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "pl-xtask-generated-git-check-{}-{unique}",
+            "pl-xtask-generated-stability-check-{}-{unique}",
             std::process::id()
         ));
-        let generated = root.join("code/pure-studio/lib/model.g.dart");
-        fs::create_dir_all(
-            generated
-                .parent()
-                .context("generated fixture has no parent")?,
-        )?;
-        fs::write(&generated, "// canonical\n")?;
-        run_tool("git", &["init", "--quiet"], &root)?;
-        run_tool("git", &["add", "."], &root)?;
-        run_tool(
-            "git",
-            &[
-                "-c",
-                "user.name=Pure Xtask",
-                "-c",
-                "user.email=xtask@example.invalid",
-                "commit",
-                "--quiet",
-                "-m",
-                "fixture",
-            ],
-            &root,
-        )?;
+        let app_dir = root.join("code/pure-studio");
+        let generated = app_dir.join("lib/model.g.dart");
+        let ignored_generated = app_dir.join("lib/ignored.freezed.dart");
+        let generated_rust = app_dir.join("rust/src/frb_generated.rs");
+        for path in [&generated, &ignored_generated, &generated_rust] {
+            fs::create_dir_all(path.parent().context("generated fixture has no parent")?)?;
+            fs::write(path, "// uncommitted canonical output\n")?;
+        }
 
-        fs::write(&generated, "// staged but not committed\n")?;
-        run_tool("git", &["add", "."], &root)?;
-        let error = ensure_generated_files_are_committed(&root)
-            .expect_err("staged generated changes must still differ from HEAD");
-        assert!(error.to_string().contains("not canonical"));
+        let before = generated_sources_snapshot(&root, &app_dir)?;
+        let unchanged = generated_sources_snapshot(&root, &app_dir)?;
+        ensure_generated_sources_are_stable(&before, &unchanged)?;
 
-        run_tool(
-            "git",
-            &[
-                "-c",
-                "user.name=Pure Xtask",
-                "-c",
-                "user.email=xtask@example.invalid",
-                "commit",
-                "--quiet",
-                "-m",
-                "staged fixture",
-            ],
-            &root,
-        )?;
-        fs::write(root.join(".gitignore"), "ignored.freezed.dart\n")?;
-        run_tool("git", &["add", ".gitignore"], &root)?;
-        run_tool(
-            "git",
-            &[
-                "-c",
-                "user.name=Pure Xtask",
-                "-c",
-                "user.email=xtask@example.invalid",
-                "commit",
-                "--quiet",
-                "-m",
-                "ignore fixture",
-            ],
-            &root,
-        )?;
-        fs::write(
-            root.join("code/pure-studio/lib/ignored.freezed.dart"),
-            "// ignored generated output\n",
-        )?;
-        let error = ensure_generated_files_are_committed(&root)
-            .expect_err("ignored generated outputs must still be reported as untracked");
-        assert!(error.to_string().contains("untracked"));
+        fs::write(&generated, "// regenerated output\n")?;
+        fs::remove_file(&ignored_generated)?;
+        fs::write(app_dir.join("lib/new_model.g.dart"), "// new output\n")?;
+        let changed = generated_sources_snapshot(&root, &app_dir)?;
+        let error = ensure_generated_sources_are_stable(&before, &changed)
+            .expect_err("regeneration changes must fail the stability check");
+        let message = error.to_string();
+        assert!(message.contains("modified: code/pure-studio/lib/model.g.dart"));
+        assert!(message.contains("removed: code/pure-studio/lib/ignored.freezed.dart"));
+        assert!(message.contains("added: code/pure-studio/lib/new_model.g.dart"));
+        assert!(!message.contains("commit"));
 
         fs::remove_dir_all(root)?;
         Ok(())
