@@ -244,7 +244,7 @@ Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/m
 
 `request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
 
-Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。
+Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。`glm-5.3-flash` 复用 `glm-5.3` 的候选值与 wire，并额外声明图片输入。
 
 Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直接校验失败，不支持字段级覆盖。
 完全自定义 provider 用 `Explicit` 保存完整模型列表。角色引用的 model 必须存在于

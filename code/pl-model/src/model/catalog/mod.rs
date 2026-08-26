@@ -32,6 +32,7 @@ const MIMO_DEFAULT_MODEL_SLUGS: &[&str] =
     &["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-5.3",
+    "glm-5.3-flash",
     "glm-5.2",
     "glm-5",
     "glm-5-turbo",
@@ -66,6 +67,7 @@ pub fn default_models() -> Vec<ModelInfo> {
     let mimo_vision = mimo_family(true);
     let zhipu_text = zhipu_text_family();
     let zhipu_glm53 = zhipu_glm53_family();
+    let zhipu_glm53_flash = zhipu_glm53_flash_family();
     let zhipu_glm52 = zhipu_glm52_family();
     let zhipu_vision = zhipu_vision_family();
 
@@ -198,6 +200,16 @@ pub fn default_models() -> Vec<ModelInfo> {
             "glm-5.3",
             "GLM-5.3",
             "Zhipu flagship model for complex coding and agent work with always-on thinking.",
+            1_000_000,
+            1_000_000,
+            Some(128_000),
+            ModelPricing::default(),
+        ),
+        // Zhipu GLM-5.3-Flash（GLM-5.3 同款始终思考 wire 的原生多模态版本，支持图片输入）
+        zhipu_glm53_flash.instantiate(
+            "glm-5.3-flash",
+            "GLM-5.3-Flash",
+            "Zhipu native multimodal coding model with always-on thinking and image input.",
             1_000_000,
             1_000_000,
             Some(128_000),
@@ -477,6 +489,20 @@ fn zhipu_glm53_family() -> ModelFamily {
     ModelFamily {
         id: "zhipu-glm53",
         capabilities: zhipu_capabilities(false),
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![zhipu_glm53_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
+        request_profile: chat_parallel_request_profile(),
+        base_instructions: String::new(),
+    }
+}
+
+/// GLM-5.3-Flash 与 GLM-5.3 共用 effort wire，但官方归类为原生多模态模型。
+fn zhipu_glm53_flash_family() -> ModelFamily {
+    ModelFamily {
+        id: "zhipu-glm53-flash",
+        capabilities: zhipu_capabilities(true),
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_glm53_effort_parameter()],

@@ -471,6 +471,30 @@ fn glm52_chat_body_none_disables_thinking_and_removes_reasoning_effort() {
 }
 
 #[test]
+fn glm53_flash_chat_body_links_thinking_and_sends_image_parts() {
+    let model = bundled_model("glm-5.3-flash");
+    let request = CompletionRequest::builder()
+        .input(context_items(vec![image_message()]))
+        .reasoning(Some(ReasoningConfig {
+            effort: Some("max".to_string()),
+            summary: None,
+        }))
+        .build();
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+    assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+    assert_eq!(
+        body["messages"][0]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,aGVsbG8="
+    );
+    assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
+    assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+    assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+}
+
+#[test]
 fn chat_body_writes_assistant_reasoning_content() {
     let mut request = request_with_effort("high");
     request.input = vec![pl_protocol::ModelContextItem::from(Message {
