@@ -3,7 +3,7 @@ mod input;
 
 use futures::FutureExt;
 use pl_model::{
-    SearchCommands, SearchRequest, SearchSettings, ToolSchema, WebSearchAction, WebSearchConfig,
+    SearchCommands, SearchRequest, SearchSettings, ToolSpec, WebSearchAction, WebSearchConfig,
     WebSearchFilters, WebSearchMode, WebSearchUserLocation,
 };
 use pl_protocol::{MessageRole, PureError};
@@ -14,8 +14,8 @@ use crate::turn::ToolEffect;
 pub(crate) use self::client::WebSearchClient;
 use self::input::parse_commands;
 use super::{
-    BoxFuture, FunctionToolDefinition, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput,
-    ToolRuntimeEvent, run_tool_backend_with_cancellation,
+    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolDirective, ToolExecution, ToolInput,
+    ToolResult, ToolSessionRuntime, TypedTool, run_tool_backend_with_cancellation,
 };
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
@@ -29,6 +29,7 @@ pub struct WebSearchTool {
     model: String,
     settings: SearchSettings,
     max_output_tokens: Option<u64>,
+    session_runtime: ToolSessionRuntime,
 }
 
 impl WebSearchTool {
@@ -37,12 +38,14 @@ impl WebSearchTool {
         model: impl Into<String>,
         config: &WebSearchConfig,
         max_output_tokens: Option<u64>,
+        session_runtime: ToolSessionRuntime,
     ) -> Self {
         Self {
             client,
             model: model.into(),
             settings: SearchSettings::from_config(config),
             max_output_tokens,
+            session_runtime,
         }
     }
 }
@@ -57,8 +60,7 @@ impl Tool for WebSearchTool {
     }
 
     fn input_schema(&self) -> Value {
-        FunctionToolDefinition::<SearchCommands>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<SearchCommands>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -72,20 +74,24 @@ impl Tool for WebSearchTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let commands = parse_commands(input.arguments)?;
             let action = command_action(&commands);
             let request = SearchRequest {
-                id: format!("{}:{}", input.session_id, input.tool_id),
+                id: format!(
+                    "{}:{}",
+                    context.identity().turn_id,
+                    context.identity().item_id
+                ),
                 model: self.model.clone(),
-                input: recent_input(context.parent_session.messages()),
+                input: recent_input(self.session_runtime.parent_session().messages()),
                 commands,
                 settings: self.settings.clone(),
                 max_output_tokens: self.max_output_tokens,
             };
-            let cancellation_token = context.options.cancellation_token.clone();
+            let cancellation_token = context.cancellation_token();
             let response = run_tool_backend_with_cancellation(
                 self.client.search(&request),
                 cancellation_token,
@@ -100,16 +106,16 @@ impl Tool for WebSearchTool {
                 "action": action,
                 "results": response.results,
             });
-            Ok(ToolOutput {
-                description: response.output,
-                truncated: OutputTruncation::empty(),
-                output_file: Default::default(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: vec![ToolRuntimeEvent::OutputArtifacts {
+            Ok(ToolResult::from_runtime_text(
+                response.output,
+                OutputTruncation::empty(),
+                Default::default(),
+                Some(0),
+                false,
+                vec![ToolDirective::OutputArtifacts {
                     artifacts: vec![artifact],
                 }],
-            })
+            ))
         }
         .boxed()
     }
@@ -118,7 +124,7 @@ impl Tool for WebSearchTool {
 /// Responses 原生 hosted `web_search` 的 schema 载体。
 #[derive(Debug, Clone)]
 pub struct HostedWebSearchTool {
-    schema: ToolSchema,
+    schema: ToolSpec,
 }
 
 impl HostedWebSearchTool {
@@ -130,7 +136,7 @@ impl HostedWebSearchTool {
             WebSearchMode::Disabled => return None,
         };
         Some(Self {
-            schema: ToolSchema::WebSearch {
+            schema: ToolSpec::WebSearch {
                 external_web_access,
                 indexed_web_access,
                 filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
@@ -165,11 +171,15 @@ impl Tool for HostedWebSearchTool {
         Some(ToolEffect::Read)
     }
 
+    fn execution(&self) -> ToolExecution {
+        ToolExecution::ProviderHosted
+    }
+
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        _context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async {
             Err(PureError::ToolExecutionFailed {
                 tool: TOOL_WEB_SEARCH.to_string(),
@@ -179,7 +189,7 @@ impl Tool for HostedWebSearchTool {
         .boxed()
     }
 
-    fn to_schema(&self) -> ToolSchema {
+    fn spec(&self) -> ToolSpec {
         self.schema.clone()
     }
 }
@@ -293,11 +303,11 @@ mod tests {
                 ..WebSearchConfig::default()
             })
             .expect("enabled mode");
-            let ToolSchema::WebSearch {
+            let ToolSpec::WebSearch {
                 external_web_access,
                 indexed_web_access,
                 ..
-            } = tool.to_schema()
+            } = tool.spec()
             else {
                 panic!("hosted schema");
             };

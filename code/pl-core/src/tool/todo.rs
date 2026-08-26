@@ -8,15 +8,22 @@ use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
 use super::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
-    deserialize_tool_input,
+    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, TypedTool, deserialize_tool_input,
 };
 use crate::turn::ToolEffect;
 
 pub const TOOL_UPDATE_TODO_LIST: &str = "update_todo_list";
 
-#[derive(Debug, Default)]
-pub struct TodoListTool;
+#[derive(Debug, Clone)]
+pub struct TodoListTool {
+    working_set: crate::TurnWorkingSetHandle,
+}
+
+impl TodoListTool {
+    pub fn new(working_set: crate::TurnWorkingSetHandle) -> Self {
+        Self { working_set }
+    }
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -72,7 +79,7 @@ impl Tool for TodoListTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<TodoListInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<TodoListInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -82,28 +89,27 @@ impl Tool for TodoListTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let args = deserialize_tool_input::<TodoListInput>(self.name(), input.arguments)?;
-            let snapshot = todo_list_snapshot(input.tool_id, args, &context)?;
-            context
-                .working_set
+            let snapshot = todo_list_snapshot(context.identity().item_id.clone(), args, &context)?;
+            self.working_set
                 .apply(crate::TurnWorkingSetChange::ReplaceTodo(snapshot.clone()))?;
             let _ = context
-                .event_tx
+                .events()
                 .send(AgentEvent::TodoListUpdated { snapshot });
             let description = serde_json::to_string(&TodoListResult {
                 status: "updated".to_string(),
             })?;
-            Ok(ToolOutput {
+            Ok(ToolResult::from_runtime_text(
                 description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                Some(0),
+                false,
+                Vec::new(),
+            ))
         }
         .boxed()
     }
@@ -112,7 +118,7 @@ impl Tool for TodoListTool {
 fn todo_list_snapshot(
     call_id: String,
     args: TodoListInput,
-    context: &ToolContext,
+    context: &ToolCallContext,
 ) -> Result<TodoListSnapshot, PureError> {
     if args.items.is_empty() {
         return Err(invalid_todo_list("items must not be empty"));
@@ -134,16 +140,17 @@ fn todo_list_snapshot(
         return Err(invalid_todo_list("at most one item can be inProgress"));
     }
 
-    let active = context.active_subagent.as_ref();
     Ok(TodoListSnapshot {
         call_id,
-        agent_id: active.map(|agent| agent.id.clone()),
+        agent_id: Some(context.identity().agent_id.clone()),
         path: Some(
-            active
-                .and_then(|agent| agent.agent_path.clone())
+            context
+                .identity()
+                .agent_path
+                .clone()
                 .unwrap_or_else(|| "/root".to_string()),
         ),
-        parent_path: active.and_then(|agent| agent.parent_id.clone()),
+        parent_path: context.identity().parent_agent_id.clone(),
         explanation: args
             .explanation
             .map(|value| value.trim().to_string())
@@ -161,49 +168,29 @@ fn invalid_todo_list(message: &str) -> PureError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::tool::{SubagentContext, WorkspaceAccess};
-    use crate::{AgentSession, TurnOptions};
 
-    fn context() -> (ToolContext, tokio::sync::broadcast::Receiver<AgentEvent>) {
+    fn context() -> (
+        ToolCallContext,
+        crate::TurnWorkingSetHandle,
+        tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) {
         let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
-        (
-            ToolContext {
-                event_tx,
-                options: TurnOptions::default(),
-                workspace_access: WorkspaceAccess::WorkspaceOnly,
-                workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-                workspace_instructions: None,
-                instruction_snapshot: None,
-                provider_call_id: None,
-                active_subagent: None,
-                lsp_runtime: None,
-                parent_session: Arc::new(AgentSession::new()),
-                working_set: crate::TurnWorkingSetHandle::default(),
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-            },
-            event_rx,
-        )
+        let working_set = crate::TurnWorkingSetHandle::default();
+        (ToolCallContext::test(event_tx), working_set, event_rx)
     }
 
     fn input(arguments: serde_json::Value) -> ToolInput {
-        ToolInput {
-            arguments,
-            session_id: "session-1".to_string(),
-            tool_id: "call-1".to_string(),
-            revision_base: 0,
-        }
+        ToolInput { arguments }
     }
 
     #[tokio::test]
     async fn emits_root_todo_snapshot() {
-        let (context, mut event_rx) = context();
+        let (context, working_set, mut event_rx) = context();
 
-        let output = TodoListTool
+        let output = TodoListTool::new(working_set)
             .execute(
                 input(serde_json::json!({
                     "explanation": "Plan the pass",
@@ -219,7 +206,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<TodoListResult>(&output.description).unwrap(),
+            serde_json::from_str::<TodoListResult>(&output.canonical_output()).unwrap(),
             TodoListResult {
                 status: "updated".to_string()
             }
@@ -228,7 +215,7 @@ mod tests {
             panic!("expected todo list event");
         };
         assert_eq!(snapshot.call_id, "call-1");
-        assert_eq!(snapshot.agent_id, None);
+        assert_eq!(snapshot.agent_id.as_deref(), Some("agent-1"));
         assert_eq!(snapshot.path.as_deref(), Some("/root"));
         assert_eq!(snapshot.parent_path, None);
         assert_eq!(snapshot.explanation.as_deref(), Some("Plan the pass"));
@@ -238,25 +225,33 @@ mod tests {
 
     #[tokio::test]
     async fn emits_subagent_identity() {
-        let (mut context, mut event_rx) = context();
-        context.active_subagent = Some(SubagentContext {
-            id: "agent-1".to_string(),
-            parent_id: Some("/root".to_string()),
-            agent_path: Some("/root/explorer-1".to_string()),
-            role: "explorer".to_string(),
-            task: "Explore".to_string(),
-            depth: 1,
-        });
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let context = ToolCallContext::new(
+            crate::tool::ToolCallIdentity {
+                call_id: "call-1".to_string(),
+                item_id: "call-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                parent_agent_id: Some("/root".to_string()),
+                agent_path: Some("/root/explorer-1".to_string()),
+                agent_role: "explorer".to_string(),
+                agent_depth: 1,
+                session_id: "session-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                step: 0,
+                revision_base: 0,
+            },
+            event_tx,
+        );
+        let tool = TodoListTool::new(crate::TurnWorkingSetHandle::default());
 
-        TodoListTool
-            .execute(
-                input(serde_json::json!({
-                    "items": [{"step": "Inspect", "status": "pending"}]
-                })),
-                context,
-            )
-            .await
-            .unwrap();
+        tool.execute(
+            input(serde_json::json!({
+                "items": [{"step": "Inspect", "status": "pending"}]
+            })),
+            context,
+        )
+        .await
+        .unwrap();
 
         let AgentEvent::TodoListUpdated { snapshot } = event_rx.recv().await.unwrap() else {
             panic!("expected todo list event");
@@ -285,8 +280,8 @@ mod tests {
             ),
         ];
         for (arguments, message) in cases {
-            let (context, _event_rx) = context();
-            let error = TodoListTool
+            let (context, working_set, _event_rx) = context();
+            let error = TodoListTool::new(working_set)
                 .execute(input(arguments), context)
                 .await
                 .unwrap_err();

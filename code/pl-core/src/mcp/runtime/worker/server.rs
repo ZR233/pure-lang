@@ -12,7 +12,7 @@ use serde_json::Value;
 use super::super::{McpGeneration, McpResetScope, McpRuntimeToolDescriptor, McpToolSafetyHints};
 use super::redaction::McpErrorRedactor;
 use super::tools::{PROBE_TIMEOUT, configured_tool_timeout, serialize_optional};
-use crate::config::{EffectiveMcpServerConfig, McpServerSourceKind};
+use crate::config::{EffectiveMcpServerConfig, McpServerConfig, McpServerSourceKind};
 use crate::mcp::ConnectedMcp;
 use crate::mcp::health::McpAvailabilityKind;
 use crate::mcp::naming::assign_exposed_tool_names;
@@ -60,6 +60,18 @@ pub(super) struct RuntimeServer {
     pub(super) definitions: Vec<Tool>,
     pub(super) tools: Vec<McpRuntimeToolDescriptor>,
     pub(super) request_timeout: Duration,
+    pub(super) config: McpServerConfig,
+    pub(super) tool_effect: Option<ToolEffect>,
+    pub(super) redactor: McpErrorRedactor,
+}
+
+pub(super) struct AvailableRuntimeServer {
+    pub(super) descriptor: McpServerDescriptor,
+    pub(super) fingerprint: u64,
+    pub(super) session: Arc<ConnectedMcp>,
+    pub(super) definitions: Vec<Tool>,
+    pub(super) request_timeout: Duration,
+    pub(super) config: McpServerConfig,
     pub(super) tool_effect: Option<ToolEffect>,
     pub(super) redactor: McpErrorRedactor,
 }
@@ -76,6 +88,7 @@ impl Clone for RuntimeServer {
             definitions: self.definitions.clone(),
             tools: self.tools.clone(),
             request_timeout: self.request_timeout,
+            config: self.config.clone(),
             tool_effect: self.tool_effect,
             redactor: self.redactor.clone(),
         }
@@ -99,32 +112,26 @@ impl RuntimeServer {
             definitions: Vec::new(),
             tools: Vec::new(),
             request_timeout: configured_tool_timeout(config.config.tool_timeout_secs),
+            config: config.config.clone(),
             tool_effect: config.tool_effect,
             redactor: McpErrorRedactor::new(config),
         }
     }
 
-    pub(super) fn available(
-        descriptor: McpServerDescriptor,
-        fingerprint: u64,
-        session: Arc<ConnectedMcp>,
-        definitions: Vec<Tool>,
-        request_timeout: Duration,
-        tool_effect: Option<ToolEffect>,
-        redactor: McpErrorRedactor,
-    ) -> Self {
+    pub(super) fn available(input: AvailableRuntimeServer) -> Self {
         Self {
-            descriptor,
-            fingerprint,
+            descriptor: input.descriptor,
+            fingerprint: input.fingerprint,
             availability: McpAvailabilityKind::Available,
-            message: Some(format!("Available with {} tools", definitions.len())),
+            message: Some(format!("Available with {} tools", input.definitions.len())),
             last_checked_at: Some(unix_seconds()),
-            session: Some(session),
-            definitions,
+            session: Some(input.session),
+            definitions: input.definitions,
             tools: Vec::new(),
-            request_timeout,
-            tool_effect,
-            redactor,
+            request_timeout: input.request_timeout,
+            config: input.config,
+            tool_effect: input.tool_effect,
+            redactor: input.redactor,
         }
     }
 
@@ -132,6 +139,7 @@ impl RuntimeServer {
         descriptor: McpServerDescriptor,
         fingerprint: u64,
         error: String,
+        config: McpServerConfig,
         redactor: McpErrorRedactor,
     ) -> Self {
         Self {
@@ -144,6 +152,7 @@ impl RuntimeServer {
             definitions: Vec::new(),
             tools: Vec::new(),
             request_timeout: PROBE_TIMEOUT,
+            config,
             tool_effect: None,
             redactor,
         }

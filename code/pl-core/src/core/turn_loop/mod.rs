@@ -5,21 +5,16 @@ use std::sync::Arc;
 
 mod attachments;
 mod checkpoint;
-mod client_tool_search;
 mod compaction;
 mod completion;
 pub(super) mod enabled_tools;
 mod inference;
-mod orchestration;
 mod plan;
 mod prompt_cache;
 mod tool_results;
 mod turn_setup;
 
 use attachments::materialize_context_items;
-use client_tool_search::{
-    apply_client_tool_search, collect_client_tool_search, record_client_tool_search_items,
-};
 use compaction::CompactionStep;
 use enabled_tools::record_enabled_tools;
 use plan::record_plan_items;
@@ -28,10 +23,10 @@ use crate::context_assembler::{ContextAssembler, TurnContextSnapshot};
 use crate::context_compaction::ensure_provider_can_consume_session;
 use crate::runtime_usage::{InferenceBillingInput, inference_billing_record, token_usage_snapshot};
 use crate::session::AgentSession;
-use crate::tool::orchestrate_tool_inventory;
+use crate::tool::ModelStepToolContext;
 use crate::trace::TraceRecorder;
 use crate::turn::{BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult};
-use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle};
+use crate::working_set::TurnWorkingSetChange;
 use crate::{PromptCacheInput, prepare_prompt_context};
 
 use super::TurnEngine;
@@ -61,19 +56,8 @@ pub(super) async fn run_turn_with_trace(
         crate::tool::AgentWorkspace::local(super::turn_result::default_workspace_root())
     });
     let workspace_root = workspace.root().to_path_buf();
-    let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
-    let model_capabilities = runtime.effective_model_capabilities();
-    let orchestration_options =
-        orchestration::options(runtime.endpoint(), &model_info, &model_capabilities);
-    let lease = core.acquire_tool_lease()?;
-    let tool_inventory = orchestrate_tool_inventory(
-        lease.entries(),
-        options.execution_policy.as_ref(),
-        orchestration_options,
-    );
-    let tool_schemas = tool_inventory.request_schemas().to_vec();
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
@@ -95,9 +79,9 @@ pub(super) async fn run_turn_with_trace(
         session.set_prompt_cache_key(prompt_cache_key);
     }
     session.push_user_content(request.user_content.clone());
-    let working_set = TurnWorkingSetHandle::from_session(session)?;
+    core.tool_session_runtime.begin_turn(session)?;
+    let working_set = core.tool_session_runtime.working_set();
     let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
-    record_enabled_tools(recorder, &turn_id, &tool_schemas);
     let turn_item = recorder.running_turn_item(&turn_id);
     recorder.start_item(turn_item.clone());
     let mut progress = ProgressEmitter::new(turn_id.clone(), ProgressVerbosity::from_env());
@@ -160,7 +144,18 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
 
-        let iteration_tools = tool_schemas.clone();
+        if let Some(hook) = &core.before_model_step {
+            hook.refresh(ModelStepToolContext {
+                agent_tools: core.agent_tools.clone(),
+                session_id: recorder.session_id().to_string(),
+                turn_id: turn_id.clone(),
+                step: iteration,
+            })
+            .await?;
+        }
+        let tool_plan = core.acquire_tool_plan();
+        let iteration_tools = tool_plan.specs().to_vec();
+        record_enabled_tools(recorder, &turn_id, iteration, &tool_plan);
         let iteration_snapshot = turn_instruction_snapshot.clone();
         let instruction_bundle = iteration_snapshot.to_bundle();
         let model_capabilities = runtime.effective_model_capabilities();
@@ -176,8 +171,6 @@ pub(super) async fn run_turn_with_trace(
                 working_context: Some(turn_context.model_context()),
                 fixed_prefix_section_hashes: instruction_bundle.prefix_section_hashes.clone(),
                 tools: &iteration_tools,
-                tool_catalog_hash: tool_inventory.catalog_fingerprint(),
-                registry_revision: Some(lease.revision().0),
                 tool_choice: "auto",
                 parallel_tool_calls,
                 reasoning: reasoning.as_ref(),
@@ -222,8 +215,6 @@ pub(super) async fn run_turn_with_trace(
             turn_context: &mut turn_context,
             working_set: &working_set,
             iteration_tools: &iteration_tools,
-            tool_inventory: &tool_inventory,
-            lease: &lease,
             parallel_tool_calls,
             reasoning: reasoning.as_ref(),
             prompt_cache_policy,
@@ -274,6 +265,9 @@ pub(super) async fn run_turn_with_trace(
         }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
+        let plan_mode = iteration_tools
+            .iter()
+            .any(|schema| schema.name() == "plan_exit");
         let tool_schema_estimated_tokens =
             crate::tool::estimate_tool_schema_tokens(&iteration_tools);
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
@@ -294,9 +288,7 @@ pub(super) async fn run_turn_with_trace(
             session_id: recorder.session_id().to_string(),
             turn_id: turn_id.clone(),
             inference_id: inference_id.clone(),
-            plan_mode: tool_schemas
-                .iter()
-                .any(|schema| schema.name() == "plan_exit"),
+            plan_mode,
             trace_sequence_base: recorder.current_sequence(),
         });
         let trace_output = invocation.clone();
@@ -403,54 +395,8 @@ pub(super) async fn run_turn_with_trace(
             .is_some_and(|limit| response_prompt_tokens >= limit || response_total_tokens >= limit);
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
-        let mut tool_calls = response.tool_calls;
-        let client_search = collect_client_tool_search(
-            &mut tool_calls,
-            &response.responses_context_items,
-            &tool_inventory,
-            session,
-        )?;
+        let tool_calls = response.tool_calls;
         session.push_responses_context_items(response.responses_context_items);
-        if !client_search.resolution.outputs.is_empty() {
-            if !tool_calls.is_empty() {
-                return Err(pl_protocol::PureError::LlmError(
-                    "provider response protocol error: client tool_search cannot be mixed with ordinary tool calls"
-                        .to_string(),
-                ));
-            }
-            apply_client_tool_search(
-                session,
-                &client_search,
-                &mut budget_tracker,
-                &options,
-                &mut billing.orchestration,
-            );
-            record_client_tool_search_items(recorder, &turn_id, &client_search);
-            if !content.is_empty() {
-                session.push_assistant_response(content.clone(), reasoning_content.clone());
-                last_content = content;
-                last_reasoning_content = reasoning_content;
-            }
-            if response_reached_auto_compact_limit {
-                provider_prompt_tokens_for_compaction = Some(response_total_tokens);
-            }
-            let loaded = client_search.resolution.loaded_tool_count;
-            progress.tool_detail(
-                recorder,
-                format!("工具搜索已加载 {loaded} 个候选 schema，准备继续调用模型。"),
-            );
-            session_message_count = session.len();
-            safe_message_count = session_message_count;
-            inference::record(
-                &options,
-                session,
-                recorder,
-                inference::from_billing(active_subagent.as_ref(), billing),
-            )
-            .await?;
-            iteration = iteration.saturating_add(1);
-            continue;
-        }
 
         total_usage.prompt_tokens += response.usage.prompt_tokens;
         total_usage.completion_tokens += response.usage.completion_tokens;
@@ -536,24 +482,24 @@ pub(super) async fn run_turn_with_trace(
         let count = tool_calls.len();
         progress.tool_detail(recorder, format!("模型请求调用 {count} 个工具。"));
 
+        core.tool_session_runtime
+            .update_parent_session(Arc::new(AgentSession::from_items(
+                materialize_context_items(session.items(), &request.materialized_attachments)?,
+            )));
+        let tool_session_id = recorder.session_id().to_string();
         let tool_batch = match execute_tool_call_batch(
             &tool_calls,
             &mut budget_tracker,
             recorder,
             ToolExecutionContext {
                 core,
-                lease: lease.clone(),
+                tool_plan: tool_plan.clone(),
                 options: &options,
-                session_id: &turn_id,
+                session_id: &tool_session_id,
+                turn_id: &turn_id,
+                step: iteration,
                 workspace: workspace.clone(),
-                workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
-                instruction_snapshot: Some(instruction_snapshot.clone()),
-                parent_session: Arc::new(AgentSession::from_items(materialize_context_items(
-                    session.items(),
-                    &request.materialized_attachments,
-                )?)),
-                working_set: working_set.clone(),
                 tool_cache: tool_cache.clone(),
             },
         )
@@ -612,7 +558,7 @@ pub(super) async fn run_turn_with_trace(
             tool_result.runtime_events.iter().any(|event| {
                 matches!(
                     event,
-                    crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+                    crate::tool::ToolDirective::InteractionRequested { .. }
                 )
             })
         });
@@ -620,27 +566,27 @@ pub(super) async fn run_turn_with_trace(
             tool_result
                 .runtime_events
                 .iter()
-                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn { .. }))
+                .any(|event| matches!(event, crate::tool::ToolDirective::EndTurn { .. }))
         });
         let end_turn_content = tool_results.iter().find_map(|tool_result| {
             tool_result
                 .runtime_events
                 .iter()
                 .find_map(|event| match event {
-                    crate::tool::ToolRuntimeEvent::EndTurn {
+                    crate::tool::ToolDirective::EndTurn {
                         final_content: Some(content),
                     } => Some(content.clone()),
-                    crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-                    | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-                    | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
-                    | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-                    | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
-                    | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-                    | crate::tool::ToolRuntimeEvent::ExecutionFailed
-                    | crate::tool::ToolRuntimeEvent::CacheHit { .. }
-                    | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
-                    | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-                    | crate::tool::ToolRuntimeEvent::EndTurn {
+                    crate::tool::ToolDirective::InteractionRequested { .. }
+                    | crate::tool::ToolDirective::SkillActivated { .. }
+                    | crate::tool::ToolDirective::PlanCompleted { .. }
+                    | crate::tool::ToolDirective::ToolResultRevision { .. }
+                    | crate::tool::ToolDirective::OutputArtifacts { .. }
+                    | crate::tool::ToolDirective::AuditMetadata { .. }
+                    | crate::tool::ToolDirective::ExecutionFailed
+                    | crate::tool::ToolDirective::CacheHit { .. }
+                    | crate::tool::ToolDirective::OutputMetrics { .. }
+                    | crate::tool::ToolDirective::OutputBudget { .. }
+                    | crate::tool::ToolDirective::EndTurn {
                         final_content: None,
                     } => None,
                 })

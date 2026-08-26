@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{AgentRoleId, ToolEffect, ToolVisibilitySet};
+use crate::{AgentRoleId, ToolEffect};
 
 use super::ThreadId;
 
@@ -64,16 +64,14 @@ pub enum TurnFinalizationPolicy {
 /// 宿主为一次 agent turn 编译出的完整执行策略。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentExecutionPolicy {
-    pub visible_tools: ToolVisibilitySet,
     pub allowed_effects: ToolEffectSet,
     pub collaboration: AgentAccessPolicy,
     pub finalization: TurnFinalizationPolicy,
 }
 
 impl AgentExecutionPolicy {
-    /// 判断工具名称和声明 effect 是否同时被策略允许。
-    pub fn allows_tool(&self, name: &str, effect: Option<ToolEffect>) -> bool {
-        self.visible_tools.contains(name)
-            && effect.is_none_or(|effect| self.allowed_effects.contains(effect))
+    /// 判断已注册工具声明的 effect 是否被策略允许。
+    pub fn allows_effect(&self, effect: Option<ToolEffect>) -> bool {
+        effect.is_none_or(|effect| self.allowed_effects.contains(effect))
     }
 }

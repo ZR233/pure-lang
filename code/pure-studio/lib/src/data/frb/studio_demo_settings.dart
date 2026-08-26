@@ -16,7 +16,6 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       hostedWebSearch: true,
       standaloneWebSearch: 'future_search_dialect',
       promptCacheDialect: 'implicit_prefix',
-      responsesToolSearch: false,
       responsesProgrammaticToolCalling: false,
     ),
   ],
@@ -133,7 +132,6 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       standaloneWebSearch:
           provider.standaloneWebSearch ?? template.standaloneWebSearch,
       promptCacheDialect: provider.promptCacheDialect,
-      responsesToolSearch: provider.responsesToolSearch,
       responsesProgrammaticToolCalling:
           provider.responsesProgrammaticToolCalling,
       iconKey: template.iconKey,

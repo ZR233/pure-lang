@@ -12,7 +12,7 @@ fn input<'a>(
     provider: &'a ProviderEndpoint,
     model: &'a str,
     instructions: &'a str,
-    tools: &'a [ToolSchema],
+    tools: &'a [ToolSpec],
     compacted: bool,
 ) -> PromptCacheInput<'a> {
     PromptCacheInput {
@@ -24,8 +24,6 @@ fn input<'a>(
         working_context: None,
         fixed_prefix_section_hashes: BTreeMap::new(),
         tools,
-        tool_catalog_hash: None,
-        registry_revision: None,
         tool_choice: "auto",
         parallel_tool_calls: false,
         reasoning: None,
@@ -124,12 +122,12 @@ fn compaction_creates_a_new_generation() {
 #[test]
 fn tools_are_sorted_by_model_visible_name() {
     let tools = stable_tool_schemas(vec![
-        ToolSchema::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
-        ToolSchema::function("alpha", "", serde_json::json!({})),
+        ToolSpec::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
+        ToolSpec::function("alpha", "", serde_json::json!({})),
     ]);
 
     assert_eq!(
-        tools.iter().map(ToolSchema::name).collect::<Vec<_>>(),
+        tools.iter().map(ToolSpec::name).collect::<Vec<_>>(),
         vec!["alpha", "zeta"]
     );
 }
@@ -138,12 +136,12 @@ fn tools_are_sorted_by_model_visible_name() {
 fn unsorted_tools_do_not_change_the_prompt_generation() {
     let provider = ProviderEndpoint::deepseek(None);
     let first_tools = vec![
-        ToolSchema::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
-        ToolSchema::function("alpha", "", serde_json::json!({})),
+        ToolSpec::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
+        ToolSpec::function("alpha", "", serde_json::json!({})),
     ];
     let second_tools = vec![
-        ToolSchema::function("alpha", "", serde_json::json!({})),
-        ToolSchema::function("zeta", "", serde_json::json!({"a": 1, "b": 2})),
+        ToolSpec::function("alpha", "", serde_json::json!({})),
+        ToolSpec::function("zeta", "", serde_json::json!({"a": 1, "b": 2})),
     ];
     let mut session = AgentSession::new();
     prepare_prompt_context(
@@ -311,7 +309,7 @@ fn fixed_provider_model_and_tool_changes_have_precise_reasons() {
         PromptPrefixChangedReason::ModelChanged
     );
 
-    let changed_tools = vec![ToolSchema::function(
+    let changed_tools = vec![ToolSpec::function(
         "lookup",
         "lookup",
         serde_json::json!({"type": "object"}),
@@ -581,7 +579,7 @@ fn openai_cache_key_is_stable_within_generation_and_rotates_at_boundary() {
 #[test]
 fn recursive_schema_key_order_does_not_change_the_prompt_generation() {
     let provider = ProviderEndpoint::deepseek(None);
-    let first_tools = stable_tool_schemas(vec![ToolSchema::function(
+    let first_tools = stable_tool_schemas(vec![ToolSpec::function(
         "lookup",
         "lookup",
         serde_json::json!({
@@ -592,7 +590,7 @@ fn recursive_schema_key_order_does_not_change_the_prompt_generation() {
             }
         }),
     )]);
-    let second_tools = stable_tool_schemas(vec![ToolSchema::function(
+    let second_tools = stable_tool_schemas(vec![ToolSpec::function(
         "lookup",
         "lookup",
         serde_json::json!({
@@ -641,12 +639,12 @@ fn recursive_schema_key_order_does_not_change_the_prompt_generation() {
 #[test]
 fn tool_schemas_are_canonicalized_and_sorted_across_key_orders() {
     let first = stable_tool_schemas(vec![
-        ToolSchema::function(
+        ToolSpec::function(
             "git_status",
             "status",
             serde_json::json!({"type": "object", "properties": {}}),
         ),
-        ToolSchema::function(
+        ToolSpec::function(
             "git_diff",
             "diff",
             serde_json::json!({
@@ -656,7 +654,7 @@ fn tool_schemas_are_canonicalized_and_sorted_across_key_orders() {
         ),
     ]);
     let second = stable_tool_schemas(vec![
-        ToolSchema::function(
+        ToolSpec::function(
             "git_diff",
             "diff",
             serde_json::json!({
@@ -664,7 +662,7 @@ fn tool_schemas_are_canonicalized_and_sorted_across_key_orders() {
                 "type": "object"
             }),
         ),
-        ToolSchema::function(
+        ToolSpec::function(
             "git_status",
             "status",
             serde_json::json!({"properties": {}, "type": "object"}),

@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::super::TaskCoordinator;
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::turn::ToolEffect;
 
 const DEFAULT_COVERAGE_LIMIT: usize = 50;
@@ -57,14 +57,14 @@ impl TaskCoordinator {
     pub(crate) fn read_review_file_coverage_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<ReadReviewFileCoverageInput>::new(
+        TypedTool::<ReadReviewFileCoverageInput>::new(
             "read_review_file_coverage",
             "按 revision 和分类分页读取 ReviewRound 的冻结文件覆盖及完整拒绝诊断。",
         )
-        .registered(move |input: ReadReviewFileCoverageInput, _| {
+        .handler(move |input: ReadReviewFileCoverageInput, _| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             async move {
@@ -157,7 +157,7 @@ impl TaskCoordinator {
                     total,
                     has_more,
                 };
-                ToolExecutionResult::<serde_json::Value>::json_with_budget(
+                ToolResult::json_with_budget(
                     page,
                     /* max_output_tokens */ 16_000,
                     MAX_COVERAGE_OUTPUT_BYTES,

@@ -11,13 +11,10 @@ use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
 };
-use pl_core::tool::{
-    NamespaceDescriptor, ToolEntry, ToolRegistry, ToolSourceId, ToolSourceMetadata,
-};
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
-    CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
-    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest,
+    BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime,
+    SubagentContext, ToolGroupId, TurnEngineBuilder, TurnOptions, TurnRequest,
     load_workspace_instruction_documents, plan_web_search,
 };
 
@@ -40,8 +37,7 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     product_events: ProductEventBus,
     config_runtime: ConfigRuntime,
     mcp_runtime: McpRuntimeHandle,
-    /// 与 MCP worker 共享的工具注册表；MCP 工具按 generation 发布于此。
-    mcp_shared_tools: std::sync::Arc<ToolRegistry>,
+    tool_manager: pl_core::ToolManager,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionService,
     coordinator: Arc<TaskCoordinator>,
@@ -56,7 +52,7 @@ impl StudioAgentTurnFactory {
         product_events: ProductEventBus,
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
-        mcp_shared_tools: std::sync::Arc<ToolRegistry>,
+        tool_manager: pl_core::ToolManager,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionService,
         coordinator: Arc<TaskCoordinator>,
@@ -68,7 +64,7 @@ impl StudioAgentTurnFactory {
             product_events,
             config_runtime,
             mcp_runtime,
-            mcp_shared_tools,
+            tool_manager,
             lsp_runtime,
             interactions,
             coordinator,
@@ -268,13 +264,56 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         };
         let route = config.models.resolve(&model_role)?;
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
+        let agent_tools = self
+            .resources
+            .tool_set(&context.snapshot.identity.id, &self.tool_manager)
+            .await;
+        let exclusive_web_search =
+            web_search.visibility == pl_core::ToolVisibilityConstraint::Exclusive;
+        let refresh_mcp = config.runtime.tool_capabilities.mcp && !exclusive_web_search;
+        let refresh_lsp = config.runtime.tool_capabilities.lsp && !exclusive_web_search;
         let mut builder = TurnEngineBuilder::from_route(&route)?
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(turn_skills_config.clone())
             .with_skill_catalog(skill_catalog.clone())
-            .with_lsp_runtime(self.lsp_runtime.clone());
-        if config.runtime.tool_capabilities.mcp {
-            builder = builder.with_shared_tool_registry(self.mcp_shared_tools.clone());
+            .with_lsp_runtime(self.lsp_runtime.clone())
+            .with_agent_tool_set(agent_tools.clone());
+        if refresh_mcp || refresh_lsp {
+            let mcp_runtime = self.mcp_runtime.clone();
+            let lsp_runtime = self.lsp_runtime.clone();
+            let refresh_workspace = pl_core::ToolWorkspace::new(workspace.clone())
+                .with_lsp_runtime(Some(lsp_runtime.clone()));
+            let refresh_workspace_root = workspace_root.clone();
+            builder = builder.with_before_model_step(BeforeModelStepHook::new(move |step| {
+                let mcp_runtime = mcp_runtime.clone();
+                let lsp_runtime = lsp_runtime.clone();
+                let refresh_workspace = refresh_workspace.clone();
+                let refresh_workspace_root = refresh_workspace_root.clone();
+                async move {
+                    let mut replacements = Vec::with_capacity(2);
+                    if refresh_mcp {
+                        let lease = mcp_runtime.acquire_turn_lease().await?;
+                        replacements.push((ToolGroupId::new("mcp"), lease.agent_tools()));
+                    }
+                    if refresh_lsp {
+                        let available = !lsp_runtime
+                            .active_server_names_for_workspace(&refresh_workspace_root)
+                            .await
+                            .is_empty();
+                        replacements.push((
+                            ToolGroupId::new("lsp"),
+                            lsp_tool_group(available, lsp_runtime, refresh_workspace),
+                        ));
+                    }
+                    step.agent_tools.install_batch(replacements)
+                }
+            }));
+        }
+        if !refresh_mcp {
+            agent_tools.uninstall(&ToolGroupId::new("mcp"));
+        }
+        if !refresh_lsp {
+            agent_tools.uninstall(&ToolGroupId::new("lsp"));
         }
         let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
             .with_workspace_instructions(workspace_instructions.clone());
@@ -293,18 +332,44 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(subagent) = subagent_context {
             engine = engine.with_subagent_context(subagent);
         }
-        engine.register_profile_tools().await;
+        if exclusive_web_search {
+            for group in ["builtin", "skills", "lsp", "task", "collaboration", "mcp"] {
+                engine.agent_tools().uninstall(&ToolGroupId::new(group));
+            }
+        } else {
+            engine.install_profile_tools().await?;
+        }
 
         web_search.install(&mut engine, &config.web_search)?;
+        if exclusive_web_search {
+            engine
+                .agent_tools()
+                .uninstall(&ToolGroupId::new("programmatic_tool_calling"));
+        } else {
+            pl_core::reconcile_programmatic_tool_calling(engine.agent_tools(), &route)?;
+        }
 
-        if mode == StudioMode::Task {
+        if mode == StudioMode::Simple && !exclusive_web_search {
+            engine.agent_tools().install(
+                ToolGroupId::new("finalization"),
+                vec![Arc::new(pl_core::PlanExitTool)],
+            )?;
+        } else {
+            engine
+                .agent_tools()
+                .uninstall(&ToolGroupId::new("finalization"));
+        }
+
+        if mode == StudioMode::Task && !exclusive_web_search {
             self.coordinator.install_tools(
                 &mut engine,
                 &thread_record.root_thread_id,
                 context.runtime.clone(),
                 &context.snapshot,
                 active_task_run,
-            );
+            )?;
+        } else {
+            engine.agent_tools().uninstall(&ToolGroupId::new("task"));
         }
         let active_mcp_servers = self.mcp_runtime.available_server_names().await;
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
@@ -313,37 +378,29 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .active_server_names_for_workspace(&workspace_root)
             .await;
 
-        let mut policy = studio_execution_policy(
-            &context.snapshot,
-            StudioPolicyContext { mode, task_phase },
-            ToolVisibilitySet::from_tool_names(engine.tool_names()),
-        );
-        policy.visible_tools = web_search.constrain_visibility(policy.visible_tools);
+        let policy =
+            studio_execution_policy(&context.snapshot, StudioPolicyContext { mode, task_phase });
         let collaboration = AgentCollaborationTools::new(
             context.runtime.clone(),
             context.snapshot.identity.id.clone(),
-            policy.collaboration.clone(),
+            pl_core::AgentCollaborationToolConfig {
+                policy: policy.collaboration.clone(),
+                session_runtime: engine.tool_session_runtime(),
+                workspace_root: workspace_root.clone(),
+            },
         );
         // 所有 agent（含 Task planner）共享同一套协作基础能力。send_message 统一
         // 作为 parent→direct-child 调度原语；子代理向主代理的报告改由 durable
         // 阶段提交 + read_agent_submissions 主动查询承载。
-        let collaboration_source = ToolSourceId::collaboration();
-        let collaboration_entries = collaboration
-            .tools()
-            .into_iter()
-            .map(|tool| {
-                ToolEntry::from_arc(
-                    tool,
-                    ToolSourceMetadata::new(collaboration_source.clone()).with_namespace(
-                        NamespaceDescriptor::new(
-                            "agents",
-                            "Subagent discovery, messaging, waiting, and lifecycle tools.",
-                        ),
-                    ),
-                )
-            })
-            .collect::<Vec<_>>();
-        engine.register_source_tools(collaboration_source, collaboration_entries)?;
+        if exclusive_web_search {
+            engine
+                .agent_tools()
+                .uninstall(&ToolGroupId::new("collaboration"));
+        } else {
+            engine
+                .agent_tools()
+                .install(ToolGroupId::new("collaboration"), collaboration.tools())?;
+        }
 
         let attachment_ids = context
             .input
@@ -420,15 +477,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map(|role| role.key().to_string())
             .unwrap_or_else(|| context.snapshot.identity.role.to_string());
         let prompt_scope = format!("{}:{prompt_role}", mode.label());
-        // Turn 冻结工具诊断在本 turn 的 prompt snapshot 重建前不可得；host 读取
-        // session prompt metadata 中该 scope 的当前 slot（即最近一次冻结的
-        // lease 代数与 deferred catalog 指纹）作为 runtime 诊断投影。
-        let tool_diagnostics = context
-            .session
-            .prompt_metadata()
-            .slots
-            .get(&prompt_scope)
-            .map(|prompt| (prompt.registry_revision, prompt.tool_catalog_hash.clone()));
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut options = studio_turn_options(
             TurnOptions::default()
@@ -450,13 +498,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)
             .with_mcp_health(mcp_health)
-            .with_lsp(active_lsp_servers)
-            .with_tool_diagnostics(
-                tool_diagnostics
-                    .as_ref()
-                    .and_then(|(revision, _)| *revision),
-                tool_diagnostics.and_then(|(_, catalog)| catalog),
-            );
+            .with_lsp(active_lsp_servers);
         if let Some(context_window) = route.model.resolved_context_window() {
             session_runtime = session_runtime.with_context_window(context_window);
         }
@@ -638,6 +680,18 @@ fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<Su
     })
 }
 
+fn lsp_tool_group(
+    available: bool,
+    registry: pl_lsp::LspRuntimeRegistry,
+    workspace: pl_core::ToolWorkspace,
+) -> Vec<Arc<dyn pl_core::Tool>> {
+    if available {
+        pl_core::lsp_tools(registry, workspace)
+    } else {
+        Vec::new()
+    }
+}
+
 fn anyhow_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
 }
@@ -681,6 +735,34 @@ mod tests {
                 role.key()
             );
         }
+    }
+
+    #[test]
+    fn lsp_availability_replaces_the_agent_group_without_stale_tools() {
+        let manager = pl_core::ToolManager::new();
+        let tools = manager.agent_tool_set("lsp-switch", pl_core::GlobalToolInheritance::Isolated);
+        let registry = pl_lsp::LspRuntimeRegistry::new();
+        let workspace =
+            pl_core::ToolWorkspace::new(pl_core::AgentWorkspace::local(std::env::temp_dir()));
+
+        tools
+            .install(
+                ToolGroupId::new("lsp"),
+                lsp_tool_group(true, registry.clone(), workspace.clone()),
+            )
+            .expect("publish available LSP tools");
+        assert_eq!(
+            tools.tool_names(),
+            vec!["lsp_capabilities".to_string(), "lsp_query".to_string()]
+        );
+
+        tools
+            .install(
+                ToolGroupId::new("lsp"),
+                lsp_tool_group(false, registry, workspace),
+            )
+            .expect("publish unavailable LSP generation");
+        assert!(tools.tool_names().is_empty());
     }
 
     #[cfg(debug_assertions)]

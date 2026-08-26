@@ -65,10 +65,6 @@ pub struct InferenceOrchestrationMetrics {
     #[serde(default)]
     pub duplicate_suppressed: u64,
     #[serde(default)]
-    pub tool_search_calls: u64,
-    #[serde(default)]
-    pub tool_search_loaded_tools: u64,
-    #[serde(default)]
     pub program_count: u64,
     #[serde(default)]
     pub program_tool_calls: u64,
@@ -120,12 +116,6 @@ impl InferenceOrchestrationMetrics {
         self.duplicate_suppressed = self
             .duplicate_suppressed
             .saturating_add(other.duplicate_suppressed);
-        self.tool_search_calls = self
-            .tool_search_calls
-            .saturating_add(other.tool_search_calls);
-        self.tool_search_loaded_tools = self
-            .tool_search_loaded_tools
-            .saturating_add(other.tool_search_loaded_tools);
         self.program_count = self.program_count.saturating_add(other.program_count);
         self.program_tool_calls = self
             .program_tool_calls

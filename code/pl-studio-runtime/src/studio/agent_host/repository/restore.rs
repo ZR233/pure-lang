@@ -400,8 +400,6 @@ fn empty_restored_runtime(thread_id: &str, updated_at: i64) -> ThreadRuntimeSnap
         active_lsp_servers: Vec::new(),
         progress: None,
         mcp_health: None,
-        tool_registry_revision: None,
-        tool_catalog_hash: None,
         updated_at,
     }
 }

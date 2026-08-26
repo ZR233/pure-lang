@@ -1,9 +1,8 @@
 use super::*;
-use crate::tool::StatPathTool;
 use pretty_assertions::assert_eq;
 
-fn read_output_json(output: &crate::tool::ToolOutput) -> serde_json::Value {
-    serde_json::from_str(&output.description).unwrap()
+fn read_output_json(output: &crate::tool::ToolResult) -> serde_json::Value {
+    serde_json::from_str(&output.canonical_output()).unwrap()
 }
 
 #[tokio::test]
@@ -11,7 +10,7 @@ async fn stat_path_reports_missing_workspace_path_without_tool_failure() {
     let root = unique_temp_dir("stat-missing");
     tokio::fs::create_dir_all(&root).await.unwrap();
 
-    let output = StatPathTool
+    let output = StatPathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({ "path": "design" })),
             context(&root).await,
@@ -31,7 +30,7 @@ async fn stat_path_missing_target_still_rejects_workspace_escape() {
     let root = unique_temp_dir("stat-missing-escape");
     tokio::fs::create_dir_all(&root).await.unwrap();
 
-    let error = StatPathTool
+    let error = StatPathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({ "path": "../missing" })),
             context(&root).await,
@@ -52,7 +51,7 @@ async fn read_file_uses_canonical_paged_json_output() {
         .await
         .unwrap();
 
-    let output = read_file_tool()
+    let output = read_file_tool(&root)
         .execute(
             input(serde_json::json!({
                 "path": "a.txt",
@@ -90,7 +89,7 @@ async fn read_file_rejects_invalid_line_bounds() {
         serde_json::json!({"path": "a.txt", "maxLines": 501}),
     ] {
         assert!(
-            read_file_tool()
+            read_file_tool(&root)
                 .execute(input(arguments), context(&root).await)
                 .await
                 .is_err()
@@ -110,7 +109,7 @@ async fn read_file_missing_path_suggests_workspace_discovery() {
         .await
         .unwrap();
 
-    let error = read_file_tool()
+    let error = read_file_tool(&root)
         .execute(
             input(serde_json::json!({
                 "path": "code/pl-model/src/protocol/openai/request.rs"
@@ -134,16 +133,21 @@ async fn confined_workspace_rejects_escape_even_with_full_access() {
     tokio::fs::create_dir_all(&outside).await.unwrap();
     let outside_file = outside.join("outside.txt");
     tokio::fs::write(&outside_file, "outside").await.unwrap();
-    let mut tool_context = context(&root).await;
-    tool_context.workspace = crate::tool::AgentWorkspace::confined(
-        root.clone(),
-        crate::tool::WorkspaceMutability::ReadWrite,
+    let tool = LocalWorkspaceFileTool::new(
+        WorkspaceFileToolKind::ReadFile,
+        ToolWorkspace::new(crate::tool::AgentWorkspace::confined(
+            root.clone(),
+            crate::tool::WorkspaceMutability::ReadWrite,
+        )),
     );
-    tool_context.options = tool_context
-        .options
-        .with_permission_mode(crate::turn::PermissionMode::FullAccess);
+    let tool_context = context(&root)
+        .await
+        .with_approval(crate::tool::ToolApprovalContext::new(
+            crate::turn::PermissionMode::FullAccess,
+            crate::tool::WorkspaceAccess::ExternalAllowed,
+        ));
 
-    let error = read_file_tool()
+    let error = tool
         .execute(
             input(serde_json::json!({ "path": outside_file })),
             tool_context,
@@ -168,7 +172,7 @@ async fn read_file_pages_large_output_by_lines() {
         .await
         .unwrap();
 
-    let output = read_file_tool()
+    let output = read_file_tool(&root)
         .execute(
             input(serde_json::json!({ "path": "big.txt", "maxLines": 500 })),
             context(&root).await,
@@ -194,7 +198,7 @@ async fn read_and_stat_reject_symbolic_links() {
         .unwrap();
     create_directory_symlink(&outside, &root.join("linked")).unwrap();
 
-    let read_error = read_file_tool()
+    let read_error = read_file_tool(&root)
         .execute(
             input(serde_json::json!({ "path": "linked/real.txt" })),
             context(&root).await,
@@ -204,7 +208,7 @@ async fn read_and_stat_reject_symbolic_links() {
         .to_string();
     assert!(read_error.contains("symbolic link"));
 
-    let stat_error = StatPathTool
+    let stat_error = StatPathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({ "path": "linked/real.txt" })),
             context(&root).await,

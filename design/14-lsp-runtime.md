@@ -83,17 +83,21 @@ Checking/Disabled 只承载说明。active LSP 只包括 Available server，其�
 
 ## 工具能力
 
-LSP 以能力 seam 模式接入工具注册表：workspace 存在可用 server 时，LSP 来源发布两个
-deferred 工具——`lsp_capabilities` 与 `lsp_query`；不再存在按语言命名的
-`lsp_query_{language_id}` 工具。`lsp_capabilities` 由 catalog × workspace 检测 × 运行态动态产出当前 workspace 的
-server、language id、支持的操作与就绪状态；`lsp_query` 接收 `languageId`、operation
+LSP 以能力 seam 模式接入目标 agent 的 `AgentToolSet`：workspace 存在 available server 时，
+原子注册普通 eager 工具 `lsp_capabilities` 与 `lsp_query`；不存在按语言命名的
+`lsp_query_{language_id}`，也不存在 deferred namespace。两个 Tool 在构造时捕获同一个
+`LspRuntimeRegistry`、`AgentWorkspace` 与路径 resolver，不通过通用 `ToolCallContext` 查找 LSP。
+`lsp_capabilities` 由 catalog × workspace 检测 × 运行态动态产出当前 workspace 的 server、
+language id、支持的操作与就绪状态；`lsp_query` 接收 `languageId`、operation
 （definition、references、hover、document/workspace symbol、implementation、call hierarchy、
-diagnostics）与查询参数，运行期按 catalog 路由到对应 server，能力集外的操作被路由层拒绝。父 agent 与 subagent 共用 registry。
+diagnostics）与查询参数，运行期按 catalog 路由到对应 server，能力集外的操作被路由层拒绝。
+父 agent 与 subagent 可以共用 LSP registry owner，但必须分别在自己的工具集中注册 seam；一个
+agent 的工具更新不得改变另一个 agent 已冻结的 `ToolPlan`。
 输入路径先经过 workspace-only 绝对路径解析；位置使用 1-based line/character，内部转换为
 LSP 0-based UTF-16。
 
-查询前 runtime 发送 didOpen/didChange；文件工具写入、move/delete 后通知已启动 client，并发送
-watched-files 通知。Windows verbatim path 在生成 URI 前转回普通 drive/UNC。ContentModified 和
+查询前 runtime 发送 didOpen/didChange；文件 backend 在构造时捕获 registry，写入、move/delete
+后通知已启动 client，并发送 watched-files 通知。Windows verbatim path 在生成 URI 前转回普通 drive/UNC。ContentModified 和
 启动期空结果只做有界重试，不伪造 didChange。
 
 `ThreadRuntimeSnapshot.activeLspServers` 表示当前 Turn 实际冻结的 server；产品级完整状态只通过

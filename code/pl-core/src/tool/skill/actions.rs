@@ -11,14 +11,14 @@ use super::{
     ReplaceMode, SkillActionOutput, SkillDeleteOutput, SkillFileOutput, SkillPatchOutput,
     SkillPathOutput, WriteSkillFileInput, json_output, tool_error,
 };
-use crate::tool::ToolOutput;
+use crate::tool::ToolResult;
 use crate::tool::text_escape::decode_json_escaped_fragment_once;
 
 pub(super) fn create_skill(
     tool: &str,
     catalog: &SkillCatalog,
     input: CreateSkillInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     if catalog.project_skill(&input.target.name).is_some() {
         let name = &input.target.name;
         return Err(tool_error(
@@ -74,7 +74,7 @@ pub(super) fn edit_skill(
     tool: &str,
     catalog: &SkillCatalog,
     input: EditSkillInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let content = input.content;
     let metadata = validate_skill_document(&content, Some(&input.target.name))
@@ -104,7 +104,7 @@ pub(super) fn patch_skill(
     tool: &str,
     catalog: &SkillCatalog,
     input: PatchSkillInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     ensure_project_path(
         &catalog.project_dir,
@@ -180,7 +180,7 @@ pub(super) fn delete_skill(
     tool: &str,
     catalog: &SkillCatalog,
     input: DeleteSkillInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     ensure_project_path(
         &catalog.project_dir,
@@ -204,7 +204,7 @@ pub(super) fn write_support_file(
     tool: &str,
     catalog: &SkillCatalog,
     input: WriteSkillFileInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let file_path = input.file_path;
     let file_content = input.file_content;
@@ -242,7 +242,7 @@ pub(super) fn remove_support_file(
     tool: &str,
     catalog: &SkillCatalog,
     input: RemoveSkillFileInput,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
     let file_path = input.file_path;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;

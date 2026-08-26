@@ -126,7 +126,7 @@ pure-lang/
 | **Thread** | 一个 agent 独占的对话、输入队列与持久历史 |
 | **Turn** | Thread 中一次由明确输入启动的执行 |
 | **Item** | 消息、推理、工具调用、计划等穷尽的 Thread 内容单元 |
-| **Tool** | 可执行工具（Shell、文件操作、Subagent、LSP 查询、用户提问等），通过 `ToolRegistry` 注册；支持 MCP 动态工具扩展 |
+| **Tool** | provider 无关的统一工具抽象；由 `ToolManager` 按 agent 注册并冻结为每个 model step 的 `ToolPlan` |
 | **LSP** | Language Server Protocol 客户端，支持代码智能查询（定义跳转、引用查找等） |
 | **Agent** | 子代理系统，支持分层任务分解与编排 |
 | **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
@@ -149,6 +149,18 @@ pure-lang/
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |
+
+### 在其他应用中注册工具
+
+`pl-core` 的工具 API 是破坏性的新边界，不提供旧 registry 兼容层。宿主创建一个
+`ToolManager`，为每个 agent 持久保存独立 `AgentToolSet`，再把自行实现的 `Tool`、`LocalTool`
+或 `TypedTool` 按稳定 `ToolGroupId` 安装。需要同时更新多个动态来源时使用 `install_batch`；每次
+模型 step 前可通过 `BeforeModelStepHook` 刷新，返回后冻结的 `ToolPlan` 同时约束 provider schema
+和本地执行器。外部应用不得保存第二份 name-to-handler 映射或绕过 plan 直接执行工具。
+
+普通工具名保持平铺，同一 scope 重名会使整批失败；agent-local 工具可覆盖显式继承的 global
+同名工具。MCP 是唯一强制命名空间的来源，公开名为 `mcp__<server>__<raw>`，有损归一化或截断时
+附加稳定 hash。完整迁移映射和缓存契约见 [工具调用运行时](design/13-tool-calling-runtime.md)。
 
 ## 开发
 

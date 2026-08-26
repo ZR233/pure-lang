@@ -1058,7 +1058,6 @@ Map<String, Object?> _providerSettingsCommandJson(
           'hostedWebSearch': provider.hostedWebSearch,
           'standaloneWebSearch': provider.standaloneWebSearch,
           'promptCacheDialect': provider.promptCacheDialect,
-          'responsesToolSearch': provider.responsesToolSearch,
           'responsesProgrammaticToolCalling':
               provider.responsesProgrammaticToolCalling,
           'defaultModel': provider.defaultModel,

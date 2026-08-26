@@ -10,7 +10,7 @@ use super::{
     TaskCommand, TaskCoordinator, TaskFailureKind, TaskOutcome, TaskReviewGate, TaskRun,
     TaskRunStateKind,
 };
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::{AgentRuntimeHandle, StudioIntegratedReviewGate, ToolEffect};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -116,21 +116,20 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<TaskTransitionInput>::new(
+        TypedTool::<TaskTransitionInput>::new(
             "task_transition",
             "Submit one canonical Task state action with an expected record revision and execution generation.",
         )
-        .registered(move |input: TaskTransitionInput, context| {
+        .handler(move |input: TaskTransitionInput, context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             let runtime = runtime.clone();
             async move {
-                let provider_call_id = context
-                    .provider_call_id
-                    .as_deref()
+                let provider_call_id = (!context.identity().call_id.is_empty())
+                    .then_some(context.identity().call_id.as_str())
                     .context("task_transition requires a provider call id")?;
                 let current = coordinator
                     .task_runtime
@@ -877,16 +876,16 @@ fn push_unique_blocker(reasons: &mut Vec<TransitionBlocker>, blocker: Transition
     }
 }
 
-fn transition_result(output: TaskTransitionOutput) -> Result<ToolExecutionResult> {
-    ToolExecutionResult::<serde_json::Value>::json(output).map_err(anyhow::Error::from)
+fn transition_result(output: TaskTransitionOutput) -> Result<ToolResult> {
+    ToolResult::json(output).map_err(anyhow::Error::from)
 }
 
 fn finalize_transition_result(
-    result: ToolExecutionResult,
+    result: ToolResult,
     action: TransitionAction,
     ends_turn: bool,
     summary: Option<String>,
-) -> Result<ToolExecutionResult> {
+) -> Result<ToolResult> {
     if !ends_turn {
         return Ok(result);
     }
@@ -1088,18 +1087,17 @@ mod tests {
     #[test]
     fn accepted_submit_plan_emits_completed_plan_and_ends_turn() {
         let output = finalize_transition_result(
-            ToolExecutionResult::success("{}"),
+            ToolResult::success("{}"),
             TransitionAction::SubmitPlan,
             true,
             Some("# 实施计划\n\n- 修复展示".to_string()),
         )
-        .expect("submitPlan result should be finalized")
-        .into_tool_output();
+        .expect("submitPlan result should be finalized");
 
         assert!(output.ends_turn());
         assert!(output.runtime_events.iter().any(|event| matches!(
             event,
-            pl_core::ToolRuntimeEvent::PlanCompleted { content }
+            pl_core::ToolDirective::PlanCompleted { content }
                 if content == "# 实施计划\n\n- 修复展示"
         )));
     }

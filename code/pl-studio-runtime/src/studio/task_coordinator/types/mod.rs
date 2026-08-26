@@ -9,6 +9,12 @@ use super::{TaskRun, WorkUnit};
 mod merge;
 pub(crate) use merge::*;
 
+#[derive(Debug, Clone)]
+pub(crate) struct TaskToolRuntime {
+    pub(crate) workspace: pl_core::ToolWorkspace,
+    pub(crate) session: pl_core::ToolSessionRuntime,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TaskStopOrigin {

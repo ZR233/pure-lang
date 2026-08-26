@@ -61,7 +61,6 @@ class ProviderCommand {
     required this.hostedWebSearch,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
-    required this.responsesToolSearch,
     required this.responsesProgrammaticToolCalling,
     required this.defaultModel,
     required this.customModels,
@@ -78,7 +77,6 @@ class ProviderCommand {
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
   final String defaultModel;
   final List<ProviderModelCommand> customModels;
@@ -183,7 +181,6 @@ abstract final class ProviderSettingsCommandBuilder {
                 ? null
                 : provider.standaloneWebSearch.trim(),
             promptCacheDialect: provider.promptCacheDialect,
-            responsesToolSearch: provider.responsesToolSearch,
             responsesProgrammaticToolCalling:
                 provider.responsesProgrammaticToolCalling,
             defaultModel: provider.defaultModel,

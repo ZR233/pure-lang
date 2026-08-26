@@ -101,7 +101,7 @@ impl StudioRuntime {
             std::sync::Arc::new(TaskCoordinator::new(store.clone(), task_runtime.clone()));
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
-        let mcp_shared_tools = std::sync::Arc::new(pl_core::ToolRegistry::new());
+        let tool_manager = pl_core::ToolManager::new();
         let mcp_state = McpStateRuntime::new();
         let lsp_state = LspStateRuntime::new(product_events.clone());
         Ok(Self {
@@ -111,9 +111,7 @@ impl StudioRuntime {
             shutdown_progress: ShutdownProgressBus::new(),
             config_runtime,
             external_runtimes: StudioExternalRuntimes {
-                mcp: McpRuntime::new(McpConnector::default(), Some(mcp_shared_tools.clone()))
-                    .handle(),
-                mcp_shared_tools,
+                mcp: McpRuntime::new(McpConnector::default()).handle(),
                 mcp_state,
                 mcp_startup_reconcile: Default::default(),
                 mcp_health_watcher: Default::default(),
@@ -124,6 +122,7 @@ impl StudioRuntime {
             agent_facility: StudioAgentFacility {
                 framework: Default::default(),
                 resources: StudioAgentResources::default(),
+                tool_manager,
                 interactions,
                 persistence: std::sync::Arc::new(tokio::sync::Mutex::new(Some(persistence))),
                 product_events: product_events.clone(),

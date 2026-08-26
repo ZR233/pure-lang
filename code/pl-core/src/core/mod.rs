@@ -1,8 +1,3 @@
-use std::collections::{BTreeMap, HashMap};
-#[cfg(test)]
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use pl_model::{
     CompletionRequest, ModelInvocationContext, ModelRuntime, ReasoningConfig, ReasoningSummary,
 };
@@ -10,7 +5,8 @@ use pl_model::{
 use pl_protocol::ErrorSeverity;
 use pl_protocol::{Message, MessageContent, MessageRole, PureError, Result};
 #[cfg(test)]
-use pl_trace::{AgentEvent, AgentEventSender, TraceEvent};
+use pl_trace::{AgentEvent, TraceEvent};
+use std::collections::HashMap;
 
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
@@ -22,13 +18,12 @@ use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
 use crate::session::AgentSession;
 use crate::tool::{
-    ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
-    NamespaceDescriptor, PublishGuard, SkillManageTool, SkillViewTool, SkillsListTool,
-    SubagentContext, ToolContext, ToolEntry, ToolOrchestrationOptions, ToolRegistry, ToolSourceId,
-    ToolSourceMetadata, TurnToolLease, orchestrate_tool_inventory,
+    AgentToolSet, BeforeModelStepHook, ExecutionBackend, GitCredentialProvider, GitTool,
+    GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillViewTool, SkillsListTool,
+    SubagentContext, Tool, ToolGroupId, ToolPlan, WorkspaceAccess,
 };
 #[cfg(test)]
-use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
+use crate::tool::{LocalWorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool};
 use crate::trace::TraceRecorder;
 #[cfg(test)]
 use crate::turn::BudgetTracker;
@@ -80,14 +75,12 @@ pub struct TurnEngine {
     default_turn_options: TurnOptions,
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
-    /// 引擎本地注册表：builtin/host/skills/lsp/collaboration 等来源发布于此，
-    /// 引擎持有发布 guard。
-    tools: ToolRegistry,
-    /// 共享注册表（如 MCP worker 代际发布）；Turn lease 与本地注册表合并。
-    shared_tools: Option<Arc<ToolRegistry>>,
-    /// 引擎本地各来源当前的完整条目集合；发布 guard 与之一一对应。
-    local_sources: BTreeMap<ToolSourceId, Vec<ToolEntry>>,
-    tool_guards: BTreeMap<ToolSourceId, PublishGuard>,
+    /// 此 agent 持久拥有的工具集合；每个模型 step 都从它冻结新 plan。
+    agent_tools: AgentToolSet,
+    /// 每个模型 step 冻结前由宿主更新工具集合的窗口。
+    before_model_step: Option<BeforeModelStepHook>,
+    /// 仅由需要 session/working-set 的具体工具捕获。
+    tool_session_runtime: crate::tool::ToolSessionRuntime,
 }
 
 impl TurnEngine {
@@ -101,7 +94,7 @@ impl TurnEngine {
         self
     }
 
-    pub async fn register_profile_tools(&mut self) {
+    pub async fn install_profile_tools(&mut self) -> Result<()> {
         match self.tool_profile {
             ToolProfile::LocalWorkspace => {
                 let workspace = self.workspace.clone().unwrap_or_else(|| {
@@ -109,193 +102,177 @@ impl TurnEngine {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
                     )
                 });
-                self.register_agent_workspace_tools(
+                self.install_agent_workspace_tools(
                     workspace,
                     self.workspace_instructions.clone(),
                     self.tool_capabilities.clone(),
                 )
-                .await;
+                .await?;
             }
             ToolProfile::Minimal => {}
         }
-    }
-
-    /// 挂接共享工具注册表（如 MCP）；Turn lease 会与引擎本地注册表合并。
-    pub fn with_shared_tool_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
-        self.shared_tools = Some(registry);
-        self
-    }
-
-    /// 整组发布一个本地来源的工具（替换该来源旧代）。
-    ///
-    /// # Errors
-    ///
-    /// 条目校验失败（名称冲突、空名）时返回 `ConfigError`，旧代保留。
-    pub fn register_source_tools(
-        &mut self,
-        source: ToolSourceId,
-        entries: Vec<ToolEntry>,
-    ) -> Result<()> {
-        let guard = self.tools.publish(source.clone(), entries.clone())?;
-        self.local_sources.insert(source.clone(), entries);
-        self.tool_guards.insert(source, guard);
         Ok(())
-    }
-
-    /// 向一个本地来源追加条目（例如 web_search 加入 builtin 来源）。
-    ///
-    /// # Errors
-    ///
-    /// 追加后条目校验失败时返回 `ConfigError`，旧代保留。
-    pub fn extend_source_tools(
-        &mut self,
-        source: ToolSourceId,
-        entries: Vec<ToolEntry>,
-    ) -> Result<()> {
-        let mut combined = self.local_sources.get(&source).cloned().unwrap_or_default();
-        combined.extend(entries);
-        self.register_source_tools(source, combined)
     }
 
     /// 测试专用：向 host 来源追加单个工具，等价于旧 `register_tool`。
     #[cfg(test)]
     pub(crate) fn register_test_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
-        let source = ToolSourceId::new("host");
-        let entry = ToolEntry::new(tool, ToolSourceMetadata::new(source.clone()));
-        let _ = self.extend_source_tools(source, vec![entry]);
+        let name = tool.name().to_string();
+        let _ = self.agent_tools.install(
+            ToolGroupId::new(format!("test:{name}")),
+            vec![std::sync::Arc::new(tool)],
+        );
     }
 
-    /// 测试装配用：直接挂接共享工具注册表。
-    #[cfg(test)]
-    pub(crate) fn set_shared_tool_registry(&mut self, registry: std::sync::Arc<ToolRegistry>) {
-        self.shared_tools = Some(registry);
-    }
-
-    /// 冻结一次 Turn 的工具 lease：本地与共享注册表快照的合并结果。
-    pub(crate) fn acquire_tool_lease(&self) -> Result<TurnToolLease> {
-        TurnToolLease::merge(
-            self.tools.snapshot(),
-            self.shared_tools
-                .as_ref()
-                .map(|registry| registry.snapshot()),
-        )
+    /// 冻结一次模型 step 的不可变工具 plan。
+    pub(crate) fn acquire_tool_plan(&self) -> ToolPlan {
+        self.agent_tools.freeze()
     }
 
     /// 返回当前 Turn 可见的工具名（本地与共享注册表合并）。
     pub fn tool_names(&self) -> Vec<String> {
-        self.acquire_tool_lease()
-            .map(|lease| lease.names().into_iter().map(str::to_string).collect())
-            .unwrap_or_default()
+        self.agent_tools.tool_names()
+    }
+
+    /// 返回该引擎绑定的持久 per-agent 工具集合。
+    pub fn agent_tools(&self) -> &AgentToolSet {
+        &self.agent_tools
+    }
+
+    /// 返回供 session-aware 工具在构造时捕获的 per-agent runtime。
+    pub fn tool_session_runtime(&self) -> crate::tool::ToolSessionRuntime {
+        self.tool_session_runtime.clone()
+    }
+
+    /// 返回供 workspace-aware 工具在构造时捕获的 agent workspace runtime。
+    pub fn tool_workspace(&self) -> crate::tool::ToolWorkspace {
+        let workspace = self.workspace.clone().unwrap_or_else(|| {
+            crate::tool::AgentWorkspace::local(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )
+        });
+        crate::tool::ToolWorkspace::new(workspace).with_lsp_runtime(self.lsp_runtime.clone())
     }
 
     /// 注册默认工具集合。
     ///
     /// 当前包含 shell、异步 agent 协作工具和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
-    pub async fn register_default_tools(
+    pub async fn install_default_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
-    ) {
+    ) -> Result<()> {
         self.tool_profile = ToolProfile::LocalWorkspace;
-        self.register_tools_with_capabilities(
+        self.install_tools_with_capabilities(
             workspace_root,
             workspace_instructions,
             self.tool_capabilities.clone(),
         )
-        .await;
+        .await
     }
 
     /// 按显式 capability 注册共享工具集合。
-    pub async fn register_tools_with_capabilities(
+    pub async fn install_tools_with_capabilities(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
         capabilities: ToolCapabilityConfig,
-    ) {
-        self.register_agent_workspace_tools(
+    ) -> Result<()> {
+        self.install_agent_workspace_tools(
             crate::tool::AgentWorkspace::local(workspace_root),
             workspace_instructions,
             capabilities,
         )
-        .await;
+        .await
     }
 
-    pub async fn register_agent_workspace_tools(
+    pub async fn install_agent_workspace_tools(
         &mut self,
         workspace: crate::tool::AgentWorkspace,
         workspace_instructions: Option<String>,
         capabilities: ToolCapabilityConfig,
-    ) {
+    ) -> Result<()> {
         self.tool_capabilities = capabilities.clone();
-        ToolSetBuilder::from_capabilities(capabilities)
-            .register_agent_workspace(self, workspace, workspace_instructions)
-            .await;
+        BuiltinToolInstaller::from_capabilities(capabilities)
+            .install_agent_workspace(self, workspace, workspace_instructions)
+            .await
     }
 
     /// 注册 pl-core 提供的通用 git 工具集合（builtin 来源，git 命名空间）。
-    pub fn register_git_tools<B, P>(
+    pub fn install_git_tools<B, P>(
         &mut self,
         config: GitWorkspaceConfig,
         backend: std::sync::Arc<B>,
         credential_provider: std::sync::Arc<P>,
-    ) where
+    ) -> Result<()>
+    where
         B: ExecutionBackend + 'static,
         P: GitCredentialProvider + 'static,
     {
-        let entries = git_tool_entries(config, backend, credential_provider);
-        let _ = self.extend_source_tools(ToolSourceId::builtin(), entries);
+        self.agent_tools.install(
+            ToolGroupId::new("git"),
+            git_tools(config, backend, credential_provider),
+        )
     }
 
-    pub fn register_skill_tools(
+    pub fn install_skill_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
-    ) {
+    ) -> Result<()> {
         let workspace_root = workspace_root.into();
         self.workspace = Some(crate::tool::AgentWorkspace::local(workspace_root.clone()));
         self.workspace_instructions = workspace_instructions;
-        self.register_skill_tools_for_workspace(workspace_root);
+        self.register_skill_tools_for_workspace(workspace_root)
     }
 
-    fn register_skill_tools_for_workspace(&mut self, _workspace_root: std::path::PathBuf) {
+    fn register_skill_tools_for_workspace(
+        &mut self,
+        workspace_root: std::path::PathBuf,
+    ) -> Result<()> {
         let Some(config) = self.skills.clone() else {
-            return;
+            self.agent_tools.uninstall(&ToolGroupId::new("skills"));
+            return Ok(());
         };
         if !config.enabled {
-            return;
+            self.agent_tools.uninstall(&ToolGroupId::new("skills"));
+            return Ok(());
         }
-        let namespace = Some(NamespaceDescriptor::new(
-            "skills",
-            "Skill discovery, reading, and management tools.",
-        ));
-        let metadata = |programmatic: bool| ToolSourceMetadata {
-            source: ToolSourceId::builtin(),
-            namespace: namespace.clone(),
-            programmatic_eligible: programmatic,
-        };
-        let entries = if let Some(catalog) = self.skill_catalog.clone() {
+        let workspace = self
+            .workspace
+            .clone()
+            .unwrap_or_else(|| crate::tool::AgentWorkspace::local(workspace_root));
+        let tool_workspace =
+            crate::tool::ToolWorkspace::new(workspace).with_lsp_runtime(self.lsp_runtime.clone());
+        let tools = if let Some(catalog) = self.skill_catalog.clone() {
             vec![
-                ToolEntry::new(
-                    SkillsListTool::from_catalog(catalog.clone()),
-                    metadata(true),
-                ),
-                ToolEntry::new(SkillViewTool::from_catalog(catalog.clone()), metadata(true)),
-                ToolEntry::new(SkillManageTool::from_catalog(catalog), metadata(false)),
+                std::sync::Arc::new(SkillsListTool::from_catalog(
+                    catalog.clone(),
+                    tool_workspace.clone(),
+                )) as std::sync::Arc<dyn Tool>,
+                std::sync::Arc::new(SkillViewTool::from_catalog(
+                    catalog.clone(),
+                    tool_workspace.clone(),
+                )),
+                std::sync::Arc::new(SkillManageTool::from_catalog(catalog, tool_workspace)),
             ]
         } else {
             vec![
-                ToolEntry::new(SkillsListTool::new(config.clone()), metadata(true)),
-                ToolEntry::new(SkillViewTool::new(config.clone()), metadata(true)),
-                ToolEntry::new(SkillManageTool::new(config), metadata(false)),
+                std::sync::Arc::new(SkillsListTool::new(config.clone(), tool_workspace.clone()))
+                    as std::sync::Arc<dyn Tool>,
+                std::sync::Arc::new(SkillViewTool::new(config.clone(), tool_workspace.clone())),
+                std::sync::Arc::new(SkillManageTool::new(config, tool_workspace)),
             ]
         };
-        let _ = self.extend_source_tools(ToolSourceId::builtin(), entries);
+        self.agent_tools.install(ToolGroupId::new("skills"), tools)
     }
 
     async fn review_tool_call_with_ai(
         &self,
         request: &ToolApprovalRequest,
-        context: &ToolContext,
+        permission_mode: crate::turn::PermissionMode,
+        workspace_access: WorkspaceAccess,
+        workspace_root: &std::path::Path,
     ) -> ToolApprovalDecision {
         let provider = self.runtime.clone();
         let effort = self.effort.clone();
@@ -308,9 +285,9 @@ impl TurnEngine {
             "arguments": &request.arguments,
             "workingDirectory": &request.working_directory,
             "parentAgentId": &request.parent_agent_id,
-            "permissionMode": context.options.permission_mode.label(),
-            "workspaceAccess": format!("{:?}", context.workspace_access),
-            "workspaceRoot": context.workspace.root().display().to_string(),
+            "permissionMode": permission_mode.label(),
+            "workspaceAccess": format!("{workspace_access:?}"),
+            "workspaceRoot": workspace_root.display().to_string(),
             "riskSummary": permission::permission_risk_summary(&request.name),
         });
         let message = Message {
@@ -463,14 +440,7 @@ impl TurnEngine {
             }
         };
         let bundle = snapshot.to_bundle();
-        let lease = self.acquire_tool_lease()?;
-        let tools = orchestrate_tool_inventory(
-            lease.entries(),
-            request.execution_policy.as_ref(),
-            ToolOrchestrationOptions::default(),
-        )
-        .request_schemas()
-        .to_vec();
+        let tools = self.acquire_tool_plan().specs().to_vec();
         let capabilities = self.runtime.effective_model_capabilities();
         let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
         let reasoning = self.effort.as_ref().map(|effort| ReasoningConfig {
@@ -539,39 +509,25 @@ impl TurnEngine {
     }
 }
 
-/// 构造 builtin 来源的 git 工具条目（git 命名空间）。
-fn git_tool_entries<B, P>(
+fn git_tools<B, P>(
     config: GitWorkspaceConfig,
     backend: std::sync::Arc<B>,
     credential_provider: std::sync::Arc<P>,
-) -> Vec<ToolEntry>
+) -> Vec<std::sync::Arc<dyn Tool>>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
 {
-    let namespace = Some(NamespaceDescriptor::new(
-        "git",
-        "Git inspection and repository management tools.",
-    ));
     GitToolKind::all()
         .iter()
         .copied()
         .map(|kind| {
-            let programmatic = matches!(kind.effect(), crate::turn::ToolEffect::Read);
-            let metadata = ToolSourceMetadata {
-                source: ToolSourceId::builtin(),
-                namespace: namespace.clone(),
-                programmatic_eligible: programmatic,
-            };
-            ToolEntry::new(
-                GitTool::new(
-                    kind,
-                    config.clone(),
-                    backend.clone(),
-                    credential_provider.clone(),
-                ),
-                metadata,
-            )
+            std::sync::Arc::new(GitTool::new(
+                kind,
+                config.clone(),
+                backend.clone(),
+                credential_provider.clone(),
+            )) as std::sync::Arc<dyn Tool>
         })
         .collect()
 }

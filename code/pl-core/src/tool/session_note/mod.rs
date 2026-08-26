@@ -3,7 +3,7 @@ mod schema;
 mod search;
 
 use futures::FutureExt;
-use pl_model::ToolSchema;
+use pl_model::ToolSpec;
 use pl_protocol::Result;
 use serde_json::{Value, json};
 
@@ -11,8 +11,7 @@ use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
 };
 use crate::tool::{
-    BoxFuture, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
-    deserialize_tool_input, tool_error,
+    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 
@@ -27,11 +26,12 @@ const MAX_CONTEXT_LINES: usize = 20;
 #[derive(Debug, Clone)]
 pub struct SessionNoteTool {
     kind: SessionNoteToolKind,
+    working_set: crate::TurnWorkingSetHandle,
 }
 
 impl SessionNoteTool {
-    pub const fn new(kind: SessionNoteToolKind) -> Self {
-        Self { kind }
+    pub fn new(kind: SessionNoteToolKind, working_set: crate::TurnWorkingSetHandle) -> Self {
+        Self { kind, working_set }
     }
 }
 
@@ -59,28 +59,28 @@ impl Tool for SessionNoteTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput>> {
+        _context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult>> {
         async move {
             let result = match self.kind {
-                SessionNoteToolKind::Read => read_note(input.arguments, &context)?,
-                SessionNoteToolKind::Search => search_note(input.arguments, &context)?,
-                SessionNoteToolKind::Write => write_note(input.arguments, &context)?,
+                SessionNoteToolKind::Read => read_note(input.arguments, &self.working_set)?,
+                SessionNoteToolKind::Search => search_note(input.arguments, &self.working_set)?,
+                SessionNoteToolKind::Write => write_note(input.arguments, &self.working_set)?,
                 SessionNoteToolKind::ApplyPatch => {
-                    apply_note_patch(input.arguments, &context).await?
+                    apply_note_patch(input.arguments, &self.working_set).await?
                 }
             };
-            ToolExecutionResult::<Value>::json(result).map(ToolExecutionResult::into_tool_output)
+            ToolResult::json(result)
         }
         .boxed()
     }
 
-    fn to_schema(&self) -> ToolSchema {
-        ToolSchema::function(self.name(), self.description(), self.input_schema())
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
 
-fn read_note(arguments: Value, context: &ToolContext) -> Result<Value> {
+fn read_note(arguments: Value, working_set: &crate::TurnWorkingSetHandle) -> Result<Value> {
     let input: ReadInput = deserialize_tool_input(TOOL_READ_SESSION_NOTE, arguments)?;
     let start_line = input.start_line.unwrap_or(1);
     if start_line == 0 {
@@ -93,7 +93,7 @@ fn read_note(arguments: Value, context: &ToolContext) -> Result<Value> {
             format!("maxLines must be between 1 and {MAX_READ_LINES}"),
         ));
     }
-    let note = context.working_set.session_note();
+    let note = working_set.session_note();
     validate_expected_revision(
         TOOL_READ_SESSION_NOTE,
         input.expected_revision,
@@ -126,7 +126,7 @@ fn read_note(arguments: Value, context: &ToolContext) -> Result<Value> {
     }))
 }
 
-fn search_note(arguments: Value, context: &ToolContext) -> Result<Value> {
+fn search_note(arguments: Value, working_set: &crate::TurnWorkingSetHandle) -> Result<Value> {
     let input: SearchInput = deserialize_tool_input(TOOL_SEARCH_SESSION_NOTE, arguments)?;
     let context_lines = input.context_lines.unwrap_or(0);
     if context_lines > MAX_CONTEXT_LINES {
@@ -142,7 +142,7 @@ fn search_note(arguments: Value, context: &ToolContext) -> Result<Value> {
             format!("limit must be between 1 and {MAX_SEARCH_MATCH_LIMIT}"),
         ));
     }
-    let note = context.working_set.session_note();
+    let note = working_set.session_note();
     let result = search::search(
         &note.content,
         search::SearchRequest {
@@ -165,20 +165,22 @@ fn search_note(arguments: Value, context: &ToolContext) -> Result<Value> {
     }))
 }
 
-fn write_note(arguments: Value, context: &ToolContext) -> Result<Value> {
+fn write_note(arguments: Value, working_set: &crate::TurnWorkingSetHandle) -> Result<Value> {
     let input: WriteInput = deserialize_tool_input(TOOL_WRITE_SESSION_NOTE, arguments)?;
     let expected_revision = input.expected_revision();
-    let note = context
-        .working_set
+    let note = working_set
         .replace_session_note(expected_revision, input.content)
         .map_err(|error| tool_error(TOOL_WRITE_SESSION_NOTE, error))?;
     Ok(note_result("written", &note))
 }
 
-async fn apply_note_patch(arguments: Value, context: &ToolContext) -> Result<Value> {
+async fn apply_note_patch(
+    arguments: Value,
+    working_set: &crate::TurnWorkingSetHandle,
+) -> Result<Value> {
     let input: ApplyPatchInput = deserialize_tool_input(TOOL_APPLY_SESSION_NOTE_PATCH, arguments)?;
     let expected_revision = input.expected_revision();
-    let current = context.working_set.session_note();
+    let current = working_set.session_note();
     validate_expected_revision(
         TOOL_APPLY_SESSION_NOTE_PATCH,
         Some(expected_revision),
@@ -189,8 +191,7 @@ async fn apply_note_patch(arguments: Value, context: &ToolContext) -> Result<Val
         &input.patch,
     )
     .await?;
-    let note = context
-        .working_set
+    let note = working_set
         .replace_session_note(expected_revision, staged)
         .map_err(|error| tool_error(TOOL_APPLY_SESSION_NOTE_PATCH, error))?;
     Ok(note_result("patched", &note))
@@ -220,62 +221,57 @@ fn validate_expected_revision(tool: &str, expected: Option<u64>, current: u64) -
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::tool::{Tool, WorkspaceAccess};
-    use crate::{AgentSession, TurnOptions};
+    use crate::tool::Tool;
 
-    fn context() -> ToolContext {
+    #[derive(Clone)]
+    struct TestRuntime {
+        context: ToolCallContext,
+        working_set: crate::TurnWorkingSetHandle,
+    }
+
+    fn runtime() -> TestRuntime {
         let (event_tx, _) = tokio::sync::broadcast::channel(8);
-        ToolContext {
-            event_tx,
-            options: TurnOptions::default(),
-            workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            provider_call_id: None,
-            active_subagent: None,
-            lsp_runtime: None,
-            parent_session: Arc::new(AgentSession::new()),
+        TestRuntime {
+            context: ToolCallContext::test(event_tx),
             working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         }
     }
 
     fn input(arguments: Value) -> ToolInput {
-        ToolInput {
-            arguments,
-            session_id: "session-1".to_string(),
-            tool_id: "call-1".to_string(),
-            revision_base: 0,
-        }
+        ToolInput { arguments }
     }
 
-    async fn execute(kind: SessionNoteToolKind, arguments: Value, context: ToolContext) -> Value {
-        let output = SessionNoteTool::new(kind)
-            .execute(input(arguments), context)
+    async fn execute(kind: SessionNoteToolKind, arguments: Value, runtime: &TestRuntime) -> Value {
+        let output = try_execute(kind, arguments, runtime).await.unwrap();
+        serde_json::from_str(&output.canonical_output()).unwrap()
+    }
+
+    async fn try_execute(
+        kind: SessionNoteToolKind,
+        arguments: Value,
+        runtime: &TestRuntime,
+    ) -> Result<ToolResult> {
+        SessionNoteTool::new(kind, runtime.working_set.clone())
+            .execute(input(arguments), runtime.context.clone())
             .await
-            .unwrap();
-        serde_json::from_str(&output.description).unwrap()
     }
 
     #[tokio::test]
     async fn writes_and_reads_only_the_requested_unicode_lines() {
-        let context = context();
+        let runtime = runtime();
         let written = execute(
             SessionNoteToolKind::Write,
             json!({"content": "一\ntwo\n三\nfour", "expectedRevision": 0}),
-            context.clone(),
+            &runtime,
         )
         .await;
         let read = execute(
             SessionNoteToolKind::Read,
             json!({"startLine": 2, "maxLines": 2, "expectedRevision": 1}),
-            context,
+            &runtime,
         )
         .await;
 
@@ -288,14 +284,14 @@ mod tests {
 
     #[tokio::test]
     async fn searches_with_context_and_rejects_stale_cursor() {
-        let context = context();
+        let runtime = runtime();
         execute(
             SessionNoteToolKind::Write,
             json!({
                 "content": "before\nTODO first\nmiddle\ntodo second\nafter",
                 "expectedRevision": 0
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         let first = execute(
@@ -307,7 +303,7 @@ mod tests {
                 "contextLines": 1,
                 "limit": 1
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         assert_eq!(first["count"], 1);
@@ -318,41 +314,41 @@ mod tests {
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "TODO changed", "expectedRevision": 1}),
-            context.clone(),
+            &runtime,
         )
         .await;
-        let error = SessionNoteTool::new(SessionNoteToolKind::Search)
-            .execute(
-                input(json!({
-                    "query": "todo",
-                    "literal": true,
-                    "caseSensitive": false,
-                    "contextLines": 1,
-                    "limit": 1,
-                    "cursor": cursor
-                })),
-                context,
-            )
-            .await
-            .unwrap_err();
+        let error = try_execute(
+            SessionNoteToolKind::Search,
+            json!({
+                "query": "todo",
+                "literal": true,
+                "caseSensitive": false,
+                "contextLines": 1,
+                "limit": 1,
+                "cursor": cursor
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap_err();
 
         assert!(error.to_string().contains("cursor is stale"));
     }
 
     #[tokio::test]
     async fn search_treats_blank_cursor_as_the_first_page() {
-        let context = context();
+        let runtime = runtime();
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "TODO first\nTODO second", "expectedRevision": 0}),
-            context.clone(),
+            &runtime,
         )
         .await;
 
         let result = execute(
             SessionNoteToolKind::Search,
             json!({"query": "TODO", "literal": true, "limit": 1, "cursor": "  "}),
-            context,
+            &runtime,
         )
         .await;
 
@@ -363,10 +359,14 @@ mod tests {
 
     #[tokio::test]
     async fn search_rejects_page_numbers_with_actionable_cursor_guidance() {
-        let error = SessionNoteTool::new(SessionNoteToolKind::Search)
-            .execute(input(json!({"query": "TODO", "cursor": "0"})), context())
-            .await
-            .unwrap_err();
+        let runtime = runtime();
+        let error = try_execute(
+            SessionNoteToolKind::Search,
+            json!({"query": "TODO", "cursor": "0"}),
+            &runtime,
+        )
+        .await
+        .unwrap_err();
 
         assert!(error.to_string().contains("omit cursor on the first page"));
         assert!(error.to_string().contains("exact nextCursor"));
@@ -401,12 +401,15 @@ mod tests {
 
     #[tokio::test]
     async fn search_rejects_invalid_and_oversized_queries() {
-        let context = context();
+        let runtime = runtime();
         for query in ["(".to_string(), "x".repeat(4097)] {
-            let error = SessionNoteTool::new(SessionNoteToolKind::Search)
-                .execute(input(json!({"query": query})), context.clone())
-                .await
-                .unwrap_err();
+            let error = try_execute(
+                SessionNoteToolKind::Search,
+                json!({"query": query}),
+                &runtime,
+            )
+            .await
+            .unwrap_err();
             assert!(
                 error.to_string().contains("invalid search query")
                     || error.to_string().contains("query exceeds")
@@ -416,40 +419,40 @@ mod tests {
 
     #[tokio::test]
     async fn failed_multi_hunk_patch_does_not_change_the_note() {
-        let context = context();
+        let runtime = runtime();
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "old\n", "expectedRevision": 0}),
-            context.clone(),
+            &runtime,
         )
         .await;
-        let error = SessionNoteTool::new(SessionNoteToolKind::ApplyPatch)
-            .execute(
-                input(json!({
+        let error = try_execute(
+            SessionNoteToolKind::ApplyPatch,
+            json!({
                     "expectedRevision": 1,
                     "patch": "*** Begin Patch\n*** Update File: session-note.md\n@@\n-old\n+new\n*** Update File: other.md\n@@\n-missing\n+value\n*** End Patch"
-                })),
-                context.clone(),
-            )
+                }),
+            &runtime,
+        )
             .await
             .unwrap_err();
 
         assert!(error.to_string().contains("session-note.md"));
-        let note = context.working_set.session_note();
+        let note = runtime.working_set.session_note();
         assert_eq!(note.revision, 1);
         assert_eq!(note.content, "old\n");
     }
 
     #[tokio::test]
     async fn patch_can_create_update_and_clear_the_note() {
-        let context = context();
+        let runtime = runtime();
         let added = execute(
             SessionNoteToolKind::ApplyPatch,
             json!({
                 "expectedRevision": 0,
                 "patch": "*** Begin Patch\n*** Add File: session-note.md\n+first\n*** End Patch"
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         let updated = execute(
@@ -458,7 +461,7 @@ mod tests {
                 "expectedRevision": 1,
                 "patch": "*** Begin Patch\n*** Update File: session-note.md\n@@\n-first\n+second\n*** End Patch"
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         let cleared = execute(
@@ -467,14 +470,14 @@ mod tests {
                 "expectedRevision": 2,
                 "patch": "*** Begin Patch\n*** Delete File: session-note.md\n*** End Patch"
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
 
         assert_eq!(added["revision"], 1);
         assert_eq!(updated["revision"], 2);
         assert_eq!(cleared["revision"], 3);
-        assert_eq!(context.working_set.session_note().content, "");
+        assert_eq!(runtime.working_set.session_note().content, "");
 
         let recreated = execute(
             SessionNoteToolKind::ApplyPatch,
@@ -482,30 +485,30 @@ mod tests {
                 "expectedRevision": 3,
                 "patch": "*** Begin Patch\n*** Add File: session-note.md\n+third\n*** End Patch"
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         assert_eq!(recreated["revision"], 4);
-        assert_eq!(context.working_set.session_note().content, "third\n");
+        assert_eq!(runtime.working_set.session_note().content, "third\n");
     }
 
     #[tokio::test]
     async fn patch_rejects_moves_and_oversized_staged_content_atomically() {
-        let context = context();
+        let runtime = runtime();
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "old\n", "expectedRevision": 0}),
-            context.clone(),
+            &runtime,
         )
         .await;
-        let moved = SessionNoteTool::new(SessionNoteToolKind::ApplyPatch)
-            .execute(
-                input(json!({
+        let moved = try_execute(
+            SessionNoteToolKind::ApplyPatch,
+            json!({
                     "expectedRevision": 1,
                     "patch": "*** Begin Patch\n*** Update File: session-note.md\n*** Move to: moved.md\n@@\n-old\n+new\n*** End Patch"
-                })),
-                context.clone(),
-            )
+                }),
+            &runtime,
+        )
             .await
             .unwrap_err();
         assert!(moved.to_string().contains("do not support moves"));
@@ -514,29 +517,29 @@ mod tests {
         let oversized_patch = format!(
             "*** Begin Patch\n*** Update File: session-note.md\n@@\n-old\n{addition}\n*** End Patch"
         );
-        let oversized = SessionNoteTool::new(SessionNoteToolKind::ApplyPatch)
-            .execute(
-                input(json!({"expectedRevision": 1, "patch": oversized_patch})),
-                context.clone(),
-            )
-            .await
-            .unwrap_err();
+        let oversized = try_execute(
+            SessionNoteToolKind::ApplyPatch,
+            json!({"expectedRevision": 1, "patch": oversized_patch}),
+            &runtime,
+        )
+        .await
+        .unwrap_err();
 
         assert!(oversized.to_string().contains("exceeds"));
-        assert_eq!(context.working_set.session_note().revision, 1);
-        assert_eq!(context.working_set.session_note().content, "old\n");
+        assert_eq!(runtime.working_set.session_note().revision, 1);
+        assert_eq!(runtime.working_set.session_note().content, "old\n");
     }
 
     #[tokio::test]
     async fn rejects_oversized_notes_and_revision_conflicts() {
-        let context = context();
+        let runtime = runtime();
         let boundary = execute(
             SessionNoteToolKind::Write,
             json!({
                 "content": "x".repeat(crate::MAX_SESSION_NOTE_BYTES),
                 "expectedRevision": 0
             }),
-            context.clone(),
+            &runtime,
         )
         .await;
         assert_eq!(boundary["totalBytes"], crate::MAX_SESSION_NOTE_BYTES);
@@ -544,34 +547,34 @@ mod tests {
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "", "expectedRevision": 1}),
-            context.clone(),
+            &runtime,
         )
         .await;
-        let oversized = SessionNoteTool::new(SessionNoteToolKind::Write)
-            .execute(
-                input(json!({
-                    "content": "x".repeat(crate::MAX_SESSION_NOTE_BYTES + 1),
-                    "expectedRevision": 2
-                })),
-                context.clone(),
-            )
-            .await
-            .unwrap_err();
+        let oversized = try_execute(
+            SessionNoteToolKind::Write,
+            json!({
+                "content": "x".repeat(crate::MAX_SESSION_NOTE_BYTES + 1),
+                "expectedRevision": 2
+            }),
+            &runtime,
+        )
+        .await
+        .unwrap_err();
         assert!(oversized.to_string().contains("exceeds"));
 
         execute(
             SessionNoteToolKind::Write,
             json!({"content": "current", "expectedRevision": 2}),
-            context.clone(),
+            &runtime,
         )
         .await;
-        let conflict = SessionNoteTool::new(SessionNoteToolKind::Write)
-            .execute(
-                input(json!({"content": "stale", "expectedRevision": 2})),
-                context,
-            )
-            .await
-            .unwrap_err();
+        let conflict = try_execute(
+            SessionNoteToolKind::Write,
+            json!({"content": "stale", "expectedRevision": 2}),
+            &runtime,
+        )
+        .await
+        .unwrap_err();
         assert!(conflict.to_string().contains("revision mismatch"));
     }
 }

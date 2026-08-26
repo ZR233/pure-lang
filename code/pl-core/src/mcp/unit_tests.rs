@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pretty_assertions::assert_eq;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
-use rmcp::service::RequestContext;
+use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::{ClientLifecycleMode, ClientServiceExt, ErrorData as McpError, RoleServer, ServiceExt};
 use serde_json::{Map, Value, json};
 
@@ -21,15 +21,14 @@ pub(crate) struct McpTestHarness {
 }
 
 impl McpTestHarness {
-    /// 发布一个带只读 annotation 的 MCP server 到共享注册表并挂接到 engine。
+    /// 把带只读 annotation 的 MCP server 工具安装到该 agent 的工具集合。
     pub(crate) async fn install_read_tool(core: &mut crate::TurnEngine) -> Self {
         let closed = Arc::new(AtomicBool::new(false));
         let connector = McpConnector::testing([(
             "docs".to_string(),
             test_connection(vec![test_tool("lookup")], closed.clone()).await,
         )]);
-        let shared = Arc::new(ToolRegistry::new());
-        let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
+        let runtime = McpRuntime::new(connector).handle();
         runtime
             .reconcile(BTreeMap::from([(
                 "docs".to_string(),
@@ -37,7 +36,10 @@ impl McpTestHarness {
             )]))
             .await
             .expect("reconcile test MCP runtime");
-        core.set_shared_tool_registry(shared);
+        let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+        core.agent_tools()
+            .install(ToolGroupId::new("mcp"), lease.agent_tools())
+            .expect("install MCP tools");
         Self { runtime, closed }
     }
 
@@ -50,6 +52,81 @@ impl McpTestHarness {
 #[derive(Debug, Clone)]
 struct TestServer {
     tools: Vec<rmcp::model::Tool>,
+}
+
+#[derive(Debug, Clone)]
+struct MutableToolServer {
+    tools: Arc<std::sync::RwLock<Vec<rmcp::model::Tool>>>,
+    fail_list: Arc<AtomicBool>,
+    list_calls: Arc<AtomicUsize>,
+    tool_changes: Arc<tokio::sync::Notify>,
+}
+
+impl ServerHandler for MutableToolServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_protocol_version(ProtocolVersion::V_2026_07_28)
+        .with_server_info(Implementation::new("pl-mutable-test-mcp", "1.0.0"))
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = std::result::Result<ListToolsResult, McpError>> + Send + '_ {
+        self.list_calls.fetch_add(1, Ordering::SeqCst);
+        let fail = self.fail_list.load(Ordering::SeqCst);
+        let tools = self
+            .tools
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        async move {
+            if fail {
+                Err(McpError::internal_error(
+                    "injected tools/list failure",
+                    None,
+                ))
+            } else {
+                Ok(ListToolsResult {
+                    tools,
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(requested.supported_by(&self.get_info().capabilities))
+    }
+
+    fn listen(
+        &self,
+        context: SubscriptionContext,
+    ) -> impl Future<Output = std::result::Result<(), McpError>> + Send + '_ {
+        let tool_changes = self.tool_changes.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    () = tool_changes.notified() => {
+                        if context.sink().notify_tool_list_changed().await.is_err() {
+                            break;
+                        }
+                    }
+                    () = context.cancelled() => break,
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 #[expect(
@@ -197,11 +274,13 @@ async fn test_connection(tools: Vec<rmcp::model::Tool>, closed: Arc<AtomicBool>)
         let _ = service.waiting().await;
         closed.store(true, Ordering::SeqCst);
     });
-    let client = ClientInfo::new(
-        ClientCapabilities::default(),
-        Implementation::new("pl-test-client", "1.0.0"),
+    let client = super::connector::McpClientHandler::without_notifications(
+        ClientInfo::new(
+            ClientCapabilities::default(),
+            Implementation::new("pl-test-client", "1.0.0"),
+        )
+        .with_protocol_version(ProtocolVersion::V_2026_07_28),
     )
-    .with_protocol_version(ProtocolVersion::V_2026_07_28)
     .serve_with_lifecycle(
         client_transport,
         ClientLifecycleMode::Discover {
@@ -213,17 +292,75 @@ async fn test_connection(tools: Vec<rmcp::model::Tool>, closed: Arc<AtomicBool>)
     ConnectedMcp::from_running(client).await
 }
 
-async fn shared_runtime(
+async fn mutable_test_connection(
+    tools: Vec<rmcp::model::Tool>,
+    closed: Arc<AtomicBool>,
+) -> (
+    ConnectedMcp,
+    Arc<tokio::sync::Notify>,
+    Arc<std::sync::RwLock<Vec<rmcp::model::Tool>>>,
+    Arc<AtomicBool>,
+    Arc<AtomicUsize>,
+) {
+    let (client_transport, server_transport) = tokio::io::duplex(64 * 1024);
+    let tools = Arc::new(std::sync::RwLock::new(tools));
+    let fail_list = Arc::new(AtomicBool::new(false));
+    let list_calls = Arc::new(AtomicUsize::new(0));
+    let tool_changes = Arc::new(tokio::sync::Notify::new());
+    let server = MutableToolServer {
+        tools: tools.clone(),
+        fail_list: fail_list.clone(),
+        list_calls: list_calls.clone(),
+        tool_changes: tool_changes.clone(),
+    };
+    tokio::spawn(async move {
+        let service = server
+            .serve(server_transport)
+            .await
+            .expect("serve mutable MCP server");
+        let _ = service.waiting().await;
+        closed.store(true, Ordering::SeqCst);
+    });
+    let client = super::connector::McpClientHandler::without_notifications(
+        ClientInfo::new(
+            ClientCapabilities::default(),
+            Implementation::new("pl-test-client", "1.0.0"),
+        )
+        .with_protocol_version(ProtocolVersion::V_2026_07_28),
+    )
+    .serve_with_lifecycle(
+        client_transport,
+        ClientLifecycleMode::Discover {
+            preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+        },
+    )
+    .await
+    .expect("discover mutable MCP server");
+    let connection = ConnectedMcp::from_running(client).await;
+    assert!(
+        connection.has_tool_subscription().await,
+        "modern list_changed server must establish a subscription"
+    );
+    (connection, tool_changes, tools, fail_list, list_calls)
+}
+
+struct InstalledMcp {
+    manager: ToolManager,
+    plan: ToolPlan,
+    runtime: super::McpRuntimeHandle,
+    closed: Arc<AtomicBool>,
+}
+
+async fn installed_runtime(
     tools: Vec<rmcp::model::Tool>,
     effect: Option<ToolEffect>,
-) -> (Arc<ToolRegistry>, super::McpRuntimeHandle, Arc<AtomicBool>) {
+) -> InstalledMcp {
     let closed = Arc::new(AtomicBool::new(false));
     let connector = McpConnector::testing([(
         "docs".to_string(),
         test_connection(tools, closed.clone()).await,
     )]);
-    let shared = Arc::new(ToolRegistry::new());
-    let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
+    let runtime = McpRuntime::new(connector).handle();
     runtime
         .reconcile(BTreeMap::from([(
             "docs".to_string(),
@@ -231,26 +368,32 @@ async fn shared_runtime(
         )]))
         .await
         .expect("reconcile test MCP runtime");
-    (shared, runtime, closed)
+    let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+    let manager = ToolManager::new();
+    let tools = manager.agent_tool_set("mcp-test", GlobalToolInheritance::Isolated);
+    tools
+        .install(ToolGroupId::new("mcp"), lease.agent_tools())
+        .expect("install MCP tools");
+    let plan = tools.freeze();
+    InstalledMcp {
+        manager,
+        plan,
+        runtime,
+        closed,
+    }
 }
 
 #[tokio::test]
-async fn shared_registry_publishes_tools_with_metadata_and_audit_pipeline() {
-    let (shared, runtime, closed) = shared_runtime(vec![test_tool("lookup")], None).await;
+async fn manager_plan_exposes_mcp_tools_and_audit_pipeline() {
+    let installed = installed_runtime(vec![test_tool("lookup")], None).await;
 
-    let snapshot = shared.snapshot();
-    let entry = snapshot
-        .entry("mcp__docs__lookup")
+    let binding = installed
+        .plan
+        .binding("mcp__docs__lookup")
         .expect("published MCP tool");
-    assert_eq!(entry.metadata().source, ToolSourceId::mcp());
-    let namespace = entry.metadata().namespace.as_ref().expect("namespace");
-    assert_eq!(namespace.name, "mcp_docs");
-    assert!(namespace.description.contains("docs"));
-    // 无显式配置时 readOnlyHint=true 推导 Read；推导出的 Read 工具可 programmatic。
-    assert_eq!(entry.tool().effect(), Some(ToolEffect::Read));
-    assert!(entry.metadata().programmatic_eligible);
-
-    let tool = entry.tool();
+    // 无显式配置时 readOnlyHint=true 推导 Read。
+    let tool = binding.tool();
+    assert_eq!(tool.effect(), Some(ToolEffect::Read));
     assert!(tool.supports_parallel_tool_calls());
     assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
     assert_eq!(
@@ -268,31 +411,37 @@ async fn shared_registry_publishes_tools_with_metadata_and_audit_pipeline() {
     assert!(display.icons.is_some());
     assert!(display.metadata.is_some());
     assert!(matches!(
-        tool.to_schema(),
-        pl_model::ToolSchema::Function {
+        tool.spec(),
+        pl_protocol::ToolSpec::Function {
             output_schema: Some(_),
             ..
         }
     ));
 
-    let output = tool
-        .execute(tool_input(json!({ "query": "meaning" })), test_context())
+    let output = installed
+        .manager
+        .execute(
+            &installed.plan,
+            "mcp__docs__lookup",
+            tool_input(json!({ "query": "meaning" })),
+            test_context(),
+        )
         .await
         .expect("execute MCP tool");
-    assert!(output.description.contains("\"answer\":42"));
+    assert!(output.canonical_output().contains("\"answer\":42"));
     let audit = audit_metadata(&output.runtime_events);
     assert_eq!(audit["result"]["structuredContent"]["answer"], 42);
     assert_eq!(audit["result"]["_meta"]["auditId"], "audit-1");
     assert_eq!(audit["result"]["resultType"], "complete");
 
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
+    installed.runtime.shutdown().await;
+    wait_for_closed(&installed.closed).await;
 }
 
 #[tokio::test]
 async fn untrusted_annotations_keep_conservative_defaults() {
     // 无显式配置且只有 destructiveHint：不映射写 effect，保持 None（保守）。
-    let (shared, runtime, closed) = shared_runtime(
+    let installed = installed_runtime(
         vec![annotated_tool(
             "destructive",
             ToolAnnotations::new().destructive(true),
@@ -301,72 +450,72 @@ async fn untrusted_annotations_keep_conservative_defaults() {
     )
     .await;
 
-    let snapshot = shared.snapshot();
-    let entry = snapshot
-        .entry("mcp__docs__destructive")
+    let binding = installed
+        .plan
+        .binding("mcp__docs__destructive")
         .expect("published MCP tool");
-    assert_eq!(entry.tool().effect(), None);
-    assert!(!entry.metadata().programmatic_eligible);
-    assert!(!entry.tool().supports_parallel_tool_calls());
-    assert_eq!(
-        entry.tool().runtime_lock_policy(),
-        ToolRuntimeLockPolicy::Exclusive
-    );
+    let tool = binding.tool();
+    assert_eq!(tool.effect(), None);
+    assert!(!tool.supports_parallel_tool_calls());
+    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Exclusive);
 
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
+    installed.runtime.shutdown().await;
+    wait_for_closed(&installed.closed).await;
 }
 
 #[tokio::test]
 async fn explicit_server_effect_overrides_remote_hints() {
     // 无 annotation 的工具 + 显式配置 Read：优先配置。
-    let (shared, runtime, closed) =
-        shared_runtime(vec![plain_tool("configured")], Some(ToolEffect::Read)).await;
+    let installed = installed_runtime(vec![plain_tool("configured")], Some(ToolEffect::Read)).await;
 
-    let snapshot = shared.snapshot();
-    let entry = snapshot
-        .entry("mcp__docs__configured")
+    let binding = installed
+        .plan
+        .binding("mcp__docs__configured")
         .expect("published MCP tool");
-    assert_eq!(entry.tool().effect(), Some(ToolEffect::Read));
-    assert!(entry.metadata().programmatic_eligible);
+    assert_eq!(binding.tool().effect(), Some(ToolEffect::Read));
 
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
+    installed.runtime.shutdown().await;
+    wait_for_closed(&installed.closed).await;
 }
 
 #[tokio::test]
 async fn mcp_error_result_keeps_structured_audit_and_failed_terminal_marker() {
-    let (shared, runtime, closed) = shared_runtime(vec![test_tool("fail")], None).await;
+    let installed = installed_runtime(vec![test_tool("fail")], None).await;
 
-    let snapshot = shared.snapshot();
-    let output = snapshot
-        .entry("mcp__docs__fail")
-        .expect("published MCP tool")
-        .tool()
-        .execute(tool_input(json!({})), test_context())
+    let output = installed
+        .manager
+        .execute(
+            &installed.plan,
+            "mcp__docs__fail",
+            tool_input(json!({})),
+            test_context(),
+        )
         .await
         .expect("typed MCP error remains an auditable output");
-    assert!(output.description.starts_with("Tool execution error: "));
+    assert!(
+        output
+            .canonical_output()
+            .starts_with("Tool execution error: ")
+    );
     assert!(
         output
             .runtime_events
-            .contains(&ToolRuntimeEvent::ExecutionFailed)
+            .contains(&ToolDirective::ExecutionFailed)
     );
     assert_eq!(
         audit_metadata(&output.runtime_events)["result"]["structuredContent"]["code"],
         "TEST_FAILURE"
     );
 
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
+    installed.runtime.shutdown().await;
+    wait_for_closed(&installed.closed).await;
 }
 
 #[tokio::test]
 async fn resource_facades_are_published_and_use_rmcp_typed_resource_api() {
-    let (shared, runtime, closed) = shared_runtime(vec![test_tool("lookup")], None).await;
+    let installed = installed_runtime(vec![test_tool("lookup")], None).await;
 
-    let snapshot = shared.snapshot();
-    let names = snapshot.names();
+    let names = installed.plan.names().collect::<Vec<_>>();
     for facade in [
         "list_mcp_resources",
         "list_mcp_resource_templates",
@@ -374,29 +523,25 @@ async fn resource_facades_are_published_and_use_rmcp_typed_resource_api() {
     ] {
         assert!(names.contains(&facade), "missing {facade} in {names:?}");
     }
-    let facade = snapshot
-        .entry("read_mcp_resource")
-        .expect("resource façade");
-    assert!(facade.metadata().namespace.is_none());
-    assert!(facade.metadata().programmatic_eligible);
-
-    let output = facade
-        .tool()
+    let output = installed
+        .manager
         .execute(
+            &installed.plan,
+            "read_mcp_resource",
             tool_input(json!({ "server": "docs", "uri": "mcp://docs/one" })),
             test_context(),
         )
         .await
         .expect("read resource");
-    let value: Value = serde_json::from_str(&output.description).expect("resource JSON");
+    let value: Value = serde_json::from_str(&output.canonical_output()).expect("resource JSON");
     assert_eq!(value["contents"][0]["text"], "resource body");
 
-    runtime.shutdown().await;
-    wait_for_closed(&closed).await;
+    installed.runtime.shutdown().await;
+    wait_for_closed(&installed.closed).await;
 }
 
 #[tokio::test]
-async fn generation_replacement_republishes_the_shared_registry() {
+async fn generation_replacement_changes_new_leases_without_mutating_old_ones() {
     let first_closed = Arc::new(AtomicBool::new(false));
     let second_closed = Arc::new(AtomicBool::new(false));
     let connector = McpConnector::testing([
@@ -409,28 +554,101 @@ async fn generation_replacement_republishes_the_shared_registry() {
             test_connection(vec![test_tool("second")], second_closed.clone()).await,
         ),
     ]);
-    let shared = Arc::new(ToolRegistry::new());
-    let runtime = McpRuntime::new(connector, Some(shared.clone())).handle();
+    let runtime = McpRuntime::new(connector).handle();
     let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
     runtime.reconcile(servers.clone()).await.expect("first");
 
-    let first = shared.snapshot();
-    assert!(first.entry("mcp__docs__first").is_some());
-    assert!(first.entry("mcp__docs__second").is_none());
-    let revision_after_first = first.revision.0;
+    let first = runtime.acquire_turn_lease().await.expect("first lease");
+    assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
 
     runtime
         .reset(McpResetScope::All, servers)
         .await
         .expect("second");
-    let second = shared.snapshot();
-    assert!(second.entry("mcp__docs__second").is_some());
-    assert!(second.entry("mcp__docs__first").is_none());
-    assert!(second.revision.0 > revision_after_first);
+    let second = runtime.acquire_turn_lease().await.expect("second lease");
+    assert_eq!(second.tools()[0].exposed_name, "mcp__docs__second");
+    assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
+    assert!(second.generation() > first.generation());
 
+    drop(first);
+    drop(second);
     runtime.shutdown().await;
     wait_for_closed(&first_closed).await;
     wait_for_closed(&second_closed).await;
+}
+
+#[tokio::test]
+async fn tool_list_changed_atomically_publishes_the_next_generation() {
+    let closed = Arc::new(AtomicBool::new(false));
+    let (connection, tool_changes, tools, _fail_list, _list_calls) =
+        mutable_test_connection(vec![test_tool("first")], closed.clone()).await;
+    let connector = McpConnector::testing([("docs".to_string(), connection)]);
+    let runtime = McpRuntime::new(connector).handle();
+    runtime
+        .reconcile(BTreeMap::from([(
+            "docs".to_string(),
+            config("docs", Some(ToolEffect::Read)),
+        )]))
+        .await
+        .expect("initial MCP generation");
+    let first = runtime.acquire_turn_lease().await.expect("first lease");
+    assert_eq!(first.tools()[0].raw_name, "first");
+
+    *tools
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = vec![test_tool("second")];
+    let mut updates = runtime.subscribe();
+    tool_changes.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), updates.recv())
+        .await
+        .expect("MCP refresh update timeout")
+        .expect("MCP refresh update");
+
+    let second = runtime.acquire_turn_lease().await.expect("second lease");
+    assert!(second.generation() > first.generation());
+    assert_eq!(second.tools()[0].raw_name, "second");
+    assert_eq!(first.tools()[0].raw_name, "first");
+
+    drop(first);
+    drop(second);
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
+}
+
+#[tokio::test]
+async fn failed_tool_list_changed_refresh_preserves_the_current_generation() {
+    let closed = Arc::new(AtomicBool::new(false));
+    let (connection, tool_changes, _tools, fail_list, list_calls) =
+        mutable_test_connection(vec![test_tool("stable")], closed.clone()).await;
+    let connector = McpConnector::testing([("docs".to_string(), connection)]);
+    let runtime = McpRuntime::new(connector).handle();
+    runtime
+        .reconcile(BTreeMap::from([(
+            "docs".to_string(),
+            config("docs", Some(ToolEffect::Read)),
+        )]))
+        .await
+        .expect("initial MCP generation");
+    let first = runtime.acquire_turn_lease().await.expect("stable lease");
+    let calls_before_refresh = list_calls.load(Ordering::SeqCst);
+    fail_list.store(true, Ordering::SeqCst);
+    tool_changes.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while list_calls.load(Ordering::SeqCst) == calls_before_refresh {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("failing MCP refresh timeout");
+
+    let current = runtime.acquire_turn_lease().await.expect("current lease");
+    assert_eq!(current.generation(), first.generation());
+    assert_eq!(current.tools()[0].raw_name, "stable");
+
+    drop(first);
+    drop(current);
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
 }
 
 #[tokio::test]
@@ -447,7 +665,7 @@ async fn retired_generation_closes_only_after_last_lease_releases() {
             test_connection(vec![test_tool("second")], second_closed.clone()).await,
         ),
     ]);
-    let runtime = McpRuntime::new(connector, None).handle();
+    let runtime = McpRuntime::new(connector).handle();
     let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
     runtime.reconcile(servers.clone()).await.expect("first");
     let first = runtime.acquire_turn_lease().await.expect("first lease");
@@ -492,37 +710,19 @@ fn json_object(value: Value) -> Map<String, Value> {
 }
 
 fn tool_input(arguments: Value) -> ToolInput {
-    ToolInput {
-        arguments,
-        session_id: "session".to_string(),
-        tool_id: "tool".to_string(),
-        revision_base: 0,
-    }
+    ToolInput { arguments }
 }
 
-fn test_context() -> ToolContext {
+fn test_context() -> ToolCallContext {
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
-    ToolContext {
-        event_tx,
-        options: crate::TurnOptions::default(),
-        workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace: AgentWorkspace::local(std::env::temp_dir()),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: Arc::new(crate::AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
+    ToolCallContext::test(event_tx)
 }
 
-fn audit_metadata(events: &[ToolRuntimeEvent]) -> &Value {
+fn audit_metadata(events: &[ToolDirective]) -> &Value {
     events
         .iter()
         .find_map(|event| match event {
-            ToolRuntimeEvent::AuditMetadata { metadata } => Some(metadata),
+            ToolDirective::AuditMetadata { metadata } => Some(metadata),
             _ => None,
         })
         .expect("MCP audit metadata")

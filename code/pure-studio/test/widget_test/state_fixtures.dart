@@ -27,7 +27,6 @@ const _testProviderCatalog = ProviderCatalogView(
       hostedWebSearch: true,
       standaloneWebSearch: 'open_ai_search_api',
       promptCacheDialect: 'open_ai_prompt_cache_key',
-      responsesToolSearch: true,
       responsesProgrammaticToolCalling: true,
     ),
     ProviderPresetView(

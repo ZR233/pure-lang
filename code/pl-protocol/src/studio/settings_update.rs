@@ -95,7 +95,6 @@ pub struct ProviderSettingsUpdate {
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
-    pub responses_tool_search: bool,
     pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelUpdate>,

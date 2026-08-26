@@ -293,7 +293,6 @@ fn settings_view(
                     .dialect
                     .as_str()
                     .to_string(),
-                responses_tool_search: service_capabilities.responses_tools.tool_search,
                 responses_programmatic_tool_calling: service_capabilities
                     .responses_tools
                     .programmatic_tool_calling,
@@ -606,7 +605,6 @@ fn provider_edit(
                     .map_err(|_| invalid_settings_argument("Unsupported prompt cache dialect"))?,
             },
             responses_tools: ResponsesHostedToolCapabilities {
-                tool_search: input.responses_tool_search,
                 programmatic_tool_calling: input.responses_programmatic_tool_calling,
             },
         }),

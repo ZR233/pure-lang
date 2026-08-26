@@ -1,7 +1,7 @@
 use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
 use serde::Serialize;
 
-use crate::completion::{CompletionRequest, ToolSchema};
+use crate::completion::{CompletionRequest, ToolSpec};
 use crate::model::info::{MaxTokensField, ModelInfo};
 
 use super::body::ToolFormatBody;
@@ -221,9 +221,9 @@ enum ChatTool {
 }
 
 impl ChatTool {
-    fn from_schema(tool: &ToolSchema) -> Result<Self> {
+    fn from_schema(tool: &ToolSpec) -> Result<Self> {
         let tool = match tool {
-            ToolSchema::Function {
+            ToolSpec::Function {
                 name,
                 description,
                 input_schema,
@@ -235,7 +235,7 @@ impl ChatTool {
                     parameters: input_schema.clone(),
                 },
             },
-            ToolSchema::Custom {
+            ToolSpec::Custom {
                 name,
                 description,
                 format,
@@ -247,7 +247,7 @@ impl ChatTool {
                     format: ToolFormatBody::from(format),
                 },
             },
-            ToolSchema::ProgrammaticToolCalling | ToolSchema::WebSearch { .. } => {
+            ToolSpec::ProgrammaticToolCalling | ToolSpec::WebSearch { .. } => {
                 return Err(protocol_error(
                     "Responses-only tools cannot be consumed by Chat Completions",
                 ));

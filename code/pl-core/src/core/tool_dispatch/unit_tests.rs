@@ -94,7 +94,7 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
     let mut record = completed_record("exec");
     record
         .runtime_events
-        .push(crate::tool::ToolRuntimeEvent::OutputArtifacts {
+        .push(crate::tool::ToolDirective::OutputArtifacts {
             artifacts: vec![serde_json::json!({
                 "id": "artifact-1",
                 "stream": "stdout",
@@ -102,7 +102,7 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
         });
     record
         .runtime_events
-        .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+        .push(crate::tool::ToolDirective::OutputMetrics {
             raw_bytes: 20_000,
             model_visible_bytes: 12_000,
             artifact_bytes: 8_000,
@@ -110,7 +110,7 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
         });
     record
         .runtime_events
-        .push(crate::tool::ToolRuntimeEvent::AuditMetadata {
+        .push(crate::tool::ToolDirective::AuditMetadata {
             metadata: serde_json::json!({
                 "kind": "mcpCallToolResult",
                 "result": { "structuredContent": { "answer": 42 } },
@@ -118,7 +118,7 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
         });
     record
         .runtime_events
-        .push(crate::tool::ToolRuntimeEvent::CacheHit {
+        .push(crate::tool::ToolDirective::CacheHit {
             reused_from_call_id: "earlier".to_string(),
             result_hash: "hash".to_string(),
             total_bytes: 20_000,

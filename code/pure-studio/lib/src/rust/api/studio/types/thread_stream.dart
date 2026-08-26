@@ -421,8 +421,6 @@ class BridgeThreadRuntimeSnapshot {
   final List<String> activeLspServers;
   final String? progress;
   final BridgeThreadMcpHealthSnapshot? mcpHealth;
-  final BigInt? toolRegistryRevision;
-  final String? toolCatalogHash;
   final PlatformInt64 updatedAt;
 
   const BridgeThreadRuntimeSnapshot({
@@ -434,8 +432,6 @@ class BridgeThreadRuntimeSnapshot {
     required this.activeLspServers,
     this.progress,
     this.mcpHealth,
-    this.toolRegistryRevision,
-    this.toolCatalogHash,
     required this.updatedAt,
   });
 
@@ -449,8 +445,6 @@ class BridgeThreadRuntimeSnapshot {
       activeLspServers.hashCode ^
       progress.hashCode ^
       mcpHealth.hashCode ^
-      toolRegistryRevision.hashCode ^
-      toolCatalogHash.hashCode ^
       updatedAt.hashCode;
 
   @override
@@ -466,8 +460,6 @@ class BridgeThreadRuntimeSnapshot {
           activeLspServers == other.activeLspServers &&
           progress == other.progress &&
           mcpHealth == other.mcpHealth &&
-          toolRegistryRevision == other.toolRegistryRevision &&
-          toolCatalogHash == other.toolCatalogHash &&
           updatedAt == other.updatedAt;
 }
 

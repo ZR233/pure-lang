@@ -375,7 +375,15 @@ mod tests {
             second.state.value().unwrap().catalog_revision + 1
         );
         assert_eq!(
-            third.state.value().unwrap().catalog.snapshot().skills[0].description,
+            third
+                .state
+                .value()
+                .unwrap()
+                .catalog
+                .snapshot()
+                .find("demo")
+                .expect("project Skill remains discoverable")
+                .description,
             "Second"
         );
     }
@@ -401,16 +409,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            snapshot
-                .state
-                .value()
-                .unwrap()
-                .catalog
-                .snapshot()
-                .skills
-                .len(),
-            1
-        );
+        let skill = snapshot
+            .state
+            .value()
+            .unwrap()
+            .catalog
+            .snapshot()
+            .find("demo")
+            .expect("global disable must not hide the project Skill from settings");
+        assert_eq!(skill.source, pl_core::skill::SkillSourceKind::Project);
     }
 }

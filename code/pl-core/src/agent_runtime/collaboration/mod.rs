@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::tool::{BoxFuture, ToolBudgetTiming};
-use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
+use crate::{
+    AgentRoleId, Tool, ToolCallContext, ToolEffect, ToolInput, ToolResult, ToolSessionRuntime,
+};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
 const TOOL_REPORT_PROGRESS: &str = "report_progress";
@@ -43,14 +45,29 @@ pub struct AgentCollaborationTools {
     runtime: AgentRuntimeHandle,
     caller: ThreadId,
     policy: AgentAccessPolicy,
+    session_runtime: ToolSessionRuntime,
+    workspace_root: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentCollaborationToolConfig {
+    pub policy: AgentAccessPolicy,
+    pub session_runtime: ToolSessionRuntime,
+    pub workspace_root: std::path::PathBuf,
 }
 
 impl AgentCollaborationTools {
-    pub fn new(runtime: AgentRuntimeHandle, caller: ThreadId, policy: AgentAccessPolicy) -> Self {
+    pub fn new(
+        runtime: AgentRuntimeHandle,
+        caller: ThreadId,
+        config: AgentCollaborationToolConfig,
+    ) -> Self {
         Self {
             runtime,
             caller,
-            policy,
+            policy: config.policy,
+            session_runtime: config.session_runtime,
+            workspace_root: config.workspace_root,
         }
     }
 
@@ -60,14 +77,31 @@ impl AgentCollaborationTools {
     /// parent→direct-child 调度，子代理向主代理的报告改由 durable 阶段提交
     /// 与 read_agent_submissions 查询承载。
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
+        let controller = !self.policy.spawn_roles.is_empty()
+            || !matches!(self.policy.list_targets, AgentTargetSelector::None)
+            || !matches!(self.policy.message_targets, AgentTargetSelector::None)
+            || !matches!(self.policy.close_targets, AgentTargetSelector::None);
         CollaborationToolKind::ALL
             .into_iter()
+            .filter(|kind| match kind {
+                CollaborationToolKind::ReportProgress => !controller,
+                CollaborationToolKind::Spawn
+                | CollaborationToolKind::SendMessage
+                | CollaborationToolKind::Interrupt
+                | CollaborationToolKind::List
+                | CollaborationToolKind::Wait
+                | CollaborationToolKind::ReadSession
+                | CollaborationToolKind::ReadSubmissions
+                | CollaborationToolKind::Close => controller,
+            })
             .map(|kind| {
                 Arc::new(CollaborationTool {
                     kind,
                     runtime: self.runtime.clone(),
                     caller: self.caller.clone(),
                     policy: self.policy.clone(),
+                    session_runtime: self.session_runtime.clone(),
+                    workspace_root: self.workspace_root.clone(),
                 }) as Arc<dyn Tool>
             })
             .collect()
@@ -161,6 +195,8 @@ struct CollaborationTool {
     runtime: AgentRuntimeHandle,
     caller: ThreadId,
     policy: AgentAccessPolicy,
+    session_runtime: ToolSessionRuntime,
+    workspace_root: std::path::PathBuf,
 }
 
 impl Tool for CollaborationTool {
@@ -216,8 +252,8 @@ impl Tool for CollaborationTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             match self.kind {
                 CollaborationToolKind::Spawn => self.spawn(input, context).await,
@@ -236,7 +272,11 @@ impl Tool for CollaborationTool {
 }
 
 impl CollaborationTool {
-    async fn spawn(&self, input: ToolInput, context: ToolContext) -> Result<ToolOutput, PureError> {
+    async fn spawn(
+        &self,
+        input: ToolInput,
+        context: ToolCallContext,
+    ) -> Result<ToolResult, PureError> {
         let args: SpawnArgs = parse_input(TOOL_SPAWN_AGENT, input.arguments)?;
         let role = AgentRoleId::new(args.role)
             .map_err(|error| tool_error(TOOL_SPAWN_AGENT, error.to_string()))?;
@@ -249,7 +289,7 @@ impl CollaborationTool {
         let thread_id = ThreadId::generate();
         let session = ThreadContextState {
             metadata: serde_json::Value::Null,
-            session: fork_session(&context.parent_session, args.fork_turns)?,
+            session: fork_session(&self.session_runtime.parent_session(), args.fork_turns)?,
             usage: pl_model::TokenUsage::default(),
             billing_by_turn: std::collections::BTreeMap::new(),
             last_context_tokens: None,
@@ -268,11 +308,11 @@ impl CollaborationTool {
         };
         metadata.insert(
             "requestingToolCallId".to_string(),
-            Value::String(input.tool_id),
+            Value::String(context.identity().item_id.clone()),
         );
         metadata.insert(
             "workspaceRoot".to_string(),
-            Value::String(context.workspace.root().to_string_lossy().to_string()),
+            Value::String(self.workspace_root.to_string_lossy().to_string()),
         );
         let result = self
             .runtime
@@ -294,7 +334,7 @@ impl CollaborationTool {
         }))
     }
 
-    async fn report_progress(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn report_progress(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: ProgressArgs = parse_input(TOOL_REPORT_PROGRESS, input.arguments)?;
         let checkpoint = self
             .runtime
@@ -310,7 +350,7 @@ impl CollaborationTool {
         json_output(json!(checkpoint))
     }
 
-    async fn send_message(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn send_message(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: SendMessageArgs = parse_input(TOOL_SEND_MESSAGE, input.arguments)?;
         let target = parse_agent_id(TOOL_SEND_MESSAGE, args.target)?;
         // 单一消息插入原语：仅允许父代理向其直接子代理插入调度消息。
@@ -343,7 +383,7 @@ impl CollaborationTool {
         json_output(json!({ "target": target, "turnId": turn_id }))
     }
 
-    async fn interrupt(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn interrupt(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: TargetArgs = parse_input(TOOL_INTERRUPT_AGENT, input.arguments)?;
         let target = parse_agent_id(TOOL_INTERRUPT_AGENT, args.target)?;
         if target == self.caller {
@@ -378,7 +418,7 @@ impl CollaborationTool {
         }))
     }
 
-    async fn list(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn list(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let _: EmptyArgs = parse_input(TOOL_LIST_AGENTS, input.arguments)?;
         let snapshots = self
             .runtime
@@ -393,7 +433,11 @@ impl CollaborationTool {
         json_output(json!({ "agents": agents }))
     }
 
-    async fn wait(&self, input: ToolInput, context: ToolContext) -> Result<ToolOutput, PureError> {
+    async fn wait(
+        &self,
+        input: ToolInput,
+        context: ToolCallContext,
+    ) -> Result<ToolResult, PureError> {
         let args: WaitArgs = parse_input(TOOL_WAIT_AGENTS, input.arguments)?;
         let snapshots = self
             .runtime
@@ -434,7 +478,7 @@ impl CollaborationTool {
         }
 
         let wait = self.runtime.wait_agents(targets);
-        let result = match context.options.cancellation_token.clone() {
+        let result = match context.cancellation_token() {
             Some(token) => {
                 tokio::select! {
                     result = wait => result,
@@ -457,7 +501,7 @@ impl CollaborationTool {
         json_output(json!({ "reason": result.reason, "messages": messages }))
     }
 
-    async fn read_session(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn read_session(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: TargetArgs = parse_input(TOOL_READ_AGENT_SESSION, input.arguments)?;
         let target = parse_agent_id(TOOL_READ_AGENT_SESSION, args.target)?;
         self.authorize(&self.policy.list_targets, &target).await?;
@@ -483,7 +527,7 @@ impl CollaborationTool {
         json_output(json!(digest))
     }
 
-    async fn read_submissions(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn read_submissions(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: SubmissionsArgs = parse_input(TOOL_READ_AGENT_SUBMISSIONS, input.arguments)?;
         let target = parse_agent_id(TOOL_READ_AGENT_SUBMISSIONS, args.target)?;
         self.authorize(&self.policy.list_targets, &target).await?;
@@ -500,7 +544,7 @@ impl CollaborationTool {
         json_output_with_budget(json!(page), MAX_SUBMISSION_OUTPUT_BYTES)
     }
 
-    async fn close(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
+    async fn close(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: TargetArgs = parse_input(TOOL_CLOSE_AGENT, input.arguments)?;
         let target = parse_agent_id(TOOL_CLOSE_AGENT, args.target)?;
         if target == self.caller {

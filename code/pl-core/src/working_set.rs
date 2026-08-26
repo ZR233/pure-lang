@@ -90,6 +90,20 @@ impl TurnWorkingSetHandle {
         Ok(handle)
     }
 
+    pub(crate) fn reset_from_session(&self, session: &AgentSession) -> Result<(), PureError> {
+        let replacement = Self::from_session(session)?;
+        let next = replacement
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        *self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+        Ok(())
+    }
+
     pub fn apply(&self, change: TurnWorkingSetChange) -> Result<(), PureError> {
         let mut state = self
             .inner

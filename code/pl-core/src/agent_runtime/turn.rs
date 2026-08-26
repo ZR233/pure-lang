@@ -226,10 +226,6 @@ pub struct PreparedSessionRuntime {
     pub active_lsp_servers: Vec<String>,
     pub agent_count: u32,
     pub mcp_health: Option<McpHealthSnapshot>,
-    /// 本 Turn 工具 lease 冻结的注册表全局发布代数；仅诊断，不参与缓存轮换。
-    pub tool_registry_revision: Option<u64>,
-    /// 本 Turn 工具 lease 冻结的 deferred Tool Search catalog 指纹；仅诊断。
-    pub tool_catalog_hash: Option<String>,
 }
 
 impl PreparedSessionRuntime {
@@ -242,8 +238,6 @@ impl PreparedSessionRuntime {
             active_lsp_servers: Vec::new(),
             agent_count: 1,
             mcp_health: None,
-            tool_registry_revision: None,
-            tool_catalog_hash: None,
         }
     }
 
@@ -269,20 +263,6 @@ impl PreparedSessionRuntime {
 
     pub fn with_agent_count(mut self, agent_count: u32) -> Self {
         self.agent_count = agent_count.max(1);
-        self
-    }
-
-    /// 声明本 Turn 工具 lease 冻结的注册表代数与 deferred catalog 指纹。
-    ///
-    /// 两个值只作诊断投影，与 prompt cache 快照中的同名字段是独立事实层；host
-    /// 通常从最近一次冻结的 prompt snapshot 读取并透传。
-    pub fn with_tool_diagnostics(
-        mut self,
-        registry_revision: Option<u64>,
-        catalog_hash: Option<String>,
-    ) -> Self {
-        self.tool_registry_revision = registry_revision;
-        self.tool_catalog_hash = catalog_hash;
         self
     }
 
@@ -341,8 +321,6 @@ impl PreparedSessionRuntime {
                 .as_ref()
                 .and_then(|value| value.progress.clone()),
             mcp_health: self.mcp_health.clone(),
-            tool_registry_revision: self.tool_registry_revision,
-            tool_catalog_hash: self.tool_catalog_hash.clone(),
             updated_at,
         }
     }
@@ -525,16 +503,13 @@ mod tests {
             todo: None,
             progress: None,
             mcp_health: None,
-            tool_registry_revision: Some(3),
-            tool_catalog_hash: Some("stale-catalog".to_string()),
             updated_at: 1,
         });
         let prepared = PreparedSessionRuntime::new("new-model")
             .with_context_window(128_000)
             .with_mcp_servers(vec!["search".to_string()])
             .with_lsp(vec!["rust-analyzer".to_string()])
-            .with_agent_count(2)
-            .with_tool_diagnostics(Some(9), Some("catalog-v9".to_string()));
+            .with_agent_count(2);
 
         let merged = prepared.merge_with(&ThreadId::new("session").unwrap(), &current, 9);
 
@@ -544,8 +519,6 @@ mod tests {
         assert_eq!(merged.active_skills, vec!["review".to_string()]);
         assert_eq!(merged.active_mcp_servers, vec!["search".to_string()]);
         assert_eq!(merged.active_lsp_servers, vec!["rust-analyzer".to_string()]);
-        assert_eq!(merged.tool_registry_revision, Some(9));
-        assert_eq!(merged.tool_catalog_hash.as_deref(), Some("catalog-v9"));
         assert_eq!(merged.updated_at, 9);
     }
 }

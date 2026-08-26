@@ -43,9 +43,8 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
-    SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet, TurnEngine,
-    TurnEngineBuilder, shared_tool_names, shared_tool_schemas,
+    BuiltinToolInstaller, CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
+    ToolProfile, TurnEngine, TurnEngineBuilder,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
@@ -77,7 +76,7 @@ pub use pl_model::{
     OpenAiCompactionMode, PromptCacheDialect, PromptCacheProviderCapabilities,
     ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
     ReasoningConfig, ReasoningInterleaved, ReasoningInterleavedField, ReasoningSummary,
-    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolSchema,
+    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolSpec,
     ToolWirePolicy, TruncationMode, WebSearchConfig, WebSearchContextSize, WebSearchFilters,
     WebSearchMode, WebSearchProviderCapabilities, WebSearchUserLocation,
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,

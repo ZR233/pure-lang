@@ -235,8 +235,6 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub active_lsp_servers: Vec<String>,
     pub progress: Option<String>,
     pub mcp_health: Option<BridgeThreadMcpHealthSnapshot>,
-    pub tool_registry_revision: Option<u64>,
-    pub tool_catalog_hash: Option<String>,
     pub updated_at: i64,
 }
 

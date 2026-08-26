@@ -37,7 +37,6 @@ pub(crate) fn bridge_settings(
                 hosted_web_search: provider.hosted_web_search,
                 standalone_web_search: provider.standalone_web_search,
                 prompt_cache_dialect: provider.prompt_cache_dialect,
-                responses_tool_search: provider.responses_tool_search,
                 responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,
                 default_model: provider.default_model,
                 models: provider
@@ -182,7 +181,6 @@ pub(crate) fn provider_settings_request(
                 hosted_web_search: provider.hosted_web_search,
                 standalone_web_search: provider.standalone_web_search,
                 prompt_cache_dialect: provider.prompt_cache_dialect,
-                responses_tool_search: provider.responses_tool_search,
                 responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,
                 default_model: provider.default_model,
                 custom_models: provider

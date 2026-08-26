@@ -12,7 +12,7 @@ use super::command::process_manager::*;
 use super::command::{CommandBackend, LocalCommandBackend};
 use super::truncation::{OutputTruncation, TruncationStrategy};
 use super::{
-    FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input,
 };
 use crate::time::unix_seconds;
@@ -36,6 +36,7 @@ where
     truncation: TruncationStrategy,
     default_timeout: Duration,
     process_manager: CommandProcessManager<B>,
+    workspace: ToolWorkspace,
 }
 
 /// 向 `exec` 启动的后台命令写入 stdin 或轮询输出。
@@ -105,11 +106,12 @@ impl<B> ExecTool<B>
 where
     B: CommandBackend,
 {
-    pub fn new(backend: Arc<B>) -> Self {
+    pub fn new(backend: Arc<B>, workspace: ToolWorkspace) -> Self {
         Self {
             truncation: TruncationStrategy::default(),
             default_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             process_manager: CommandProcessManager::new(backend),
+            workspace,
         }
     }
 
@@ -163,7 +165,10 @@ impl CommandOutputObserver for ToolResultOutputObserver {
     }
 }
 
-pub(crate) fn command_tool_pair<B>(backend: Arc<B>) -> (ExecTool<B>, WriteStdinTool<B>)
+pub(crate) fn command_tool_pair<B>(
+    backend: Arc<B>,
+    workspace: ToolWorkspace,
+) -> (ExecTool<B>, WriteStdinTool<B>)
 where
     B: CommandBackend,
 {
@@ -173,18 +178,20 @@ where
             truncation: TruncationStrategy::default(),
             default_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             process_manager: manager.clone(),
+            workspace,
         },
         WriteStdinTool::new(manager),
     )
 }
 
 pub(crate) fn local_command_tool_pair(
-    workspace_root: PathBuf,
+    workspace: ToolWorkspace,
 ) -> (
     ExecTool<LocalCommandBackend>,
     WriteStdinTool<LocalCommandBackend>,
 ) {
-    command_tool_pair(Arc::new(LocalCommandBackend::new(workspace_root)))
+    let backend = Arc::new(LocalCommandBackend::new(workspace.root().to_path_buf()));
+    command_tool_pair(backend, workspace)
 }
 
 impl<B> WriteStdinTool<B>
@@ -209,7 +216,7 @@ where
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<ExecInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<ExecInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -219,8 +226,8 @@ where
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let exec_input: ExecInput = deserialize_tool_input(self.name(), input.arguments)?;
             let timeout = exec_input
@@ -228,36 +235,33 @@ where
                 .map(Duration::from_secs)
                 .unwrap_or(self.default_timeout);
             let observer = Arc::new(ToolResultOutputObserver {
-                event_tx: context.event_tx.downgrade(),
-                turn_id: input.session_id.clone(),
-                item_id: input.tool_id.clone(),
-                revision_base: input.revision_base,
+                event_tx: context.events().downgrade(),
+                turn_id: context.identity().turn_id.clone(),
+                item_id: context.identity().item_id.clone(),
+                revision_base: context.identity().revision_base,
             });
-            let call_id = context
-                .provider_call_id
-                .clone()
-                .unwrap_or_else(|| input.tool_id.clone());
+            let call_id = context.identity().call_id.clone();
             let snapshot = self
                 .process_manager
                 .start(CommandStartRequest {
                     command: exec_input.command,
                     cwd: exec_input.cwd,
-                    allow_workspace_escape: context.allows_workspace_escape(),
+                    allow_workspace_escape: self.workspace.allows_workspace_escape(&context),
                     timeout,
                     yield_time: yield_duration(exec_input.yield_time_ms),
                     max_output_chars: max_output_chars(
                         exec_input.max_output_chars,
                         self.default_max_output_chars(),
                     ),
-                    session_id: input.session_id,
-                    tool_id: input.tool_id,
+                    session_id: context.identity().session_id.clone(),
+                    tool_id: context.identity().item_id.clone(),
                     call_id,
-                    cancellation_token: context.options.cancellation_token.clone(),
+                    cancellation_token: context.cancellation_token(),
                     output_observer: Some(observer),
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
+            tool_output_from_snapshot(snapshot, self.name(), context.identity().revision_base)
         }
         .boxed()
     }
@@ -276,8 +280,7 @@ where
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<WriteStdinInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<WriteStdinInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -287,8 +290,8 @@ where
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
-    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let stdin_input: WriteStdinInput =
                 deserialize_tool_input(self.name(), input.arguments)?;
@@ -313,7 +316,7 @@ where
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
+            tool_output_from_snapshot(snapshot, self.name(), context.identity().revision_base)
         }
         .boxed()
     }
@@ -345,7 +348,7 @@ fn tool_output_from_snapshot(
     snapshot: CommandOutputSnapshot,
     tool: &str,
     revision_base: u64,
-) -> Result<ToolOutput, PureError> {
+) -> Result<ToolResult, PureError> {
     let capture_file = snapshot.capture_file.clone();
     let exit_code = snapshot.state.exit_code();
     let timed_out = snapshot.state.is_timed_out();
@@ -363,25 +366,25 @@ fn tool_output_from_snapshot(
             tool: tool.to_string(),
             error: format!("failed to serialize command output: {error}"),
         })?;
-    let mut runtime_events = vec![ToolRuntimeEvent::ToolResultRevision {
+    let mut runtime_events = vec![ToolDirective::ToolResultRevision {
         revision: revision_base.saturating_add(snapshot.output_revision),
     }];
     if !snapshot.output_artifacts.is_empty() {
-        runtime_events.push(ToolRuntimeEvent::OutputArtifacts {
+        runtime_events.push(ToolDirective::OutputArtifacts {
             artifacts: snapshot.output_artifacts,
         });
     }
-    Ok(ToolOutput {
+    Ok(ToolResult::from_runtime_text(
         description,
-        truncated: OutputTruncation {
+        OutputTruncation {
             stdout: snapshot.stdout,
             stderr: snapshot.stderr,
         },
-        output_file: capture_file,
+        capture_file,
         exit_code,
         timed_out,
         runtime_events,
-    })
+    ))
 }
 
 #[cfg(test)]

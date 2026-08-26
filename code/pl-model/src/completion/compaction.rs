@@ -1,8 +1,8 @@
 //! Provider 远程上下文压缩请求与响应。
 
-use crate::completion::tool_schema::ToolSchema;
 use crate::completion::usage::{ReasoningConfig, TokenUsage};
 use pl_protocol::ModelContextItem;
+use pl_protocol::ToolSpec;
 use serde::{Deserialize, Serialize};
 
 /// OpenAI provider 的上下文压缩协议选择。
@@ -26,7 +26,7 @@ pub struct ModelCompactionRequest {
     pub mode: OpenAiCompactionMode,
     pub instructions: String,
     pub input: Vec<ModelContextItem>,
-    pub tools: Vec<ToolSchema>,
+    pub tools: Vec<ToolSpec>,
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ReasoningConfig>,
     pub prompt_cache_key: Option<String>,

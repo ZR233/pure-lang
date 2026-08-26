@@ -219,7 +219,6 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
             hostedWebSearch: false,
             standaloneWebSearch: '',
             promptCacheDialect: 'none',
-            responsesToolSearch: false,
             responsesProgrammaticToolCalling: false,
             iconKey: null,
           ),

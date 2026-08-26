@@ -9,6 +9,7 @@ mod state;
 
 use std::sync::{Arc, Mutex};
 
+pub(crate) use execution::ToolCacheExecutionRequest;
 use state::TurnToolCache;
 
 /// 工具结果在一次 turn 内的复用策略。

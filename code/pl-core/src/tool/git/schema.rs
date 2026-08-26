@@ -1,9 +1,9 @@
-use pl_model::ToolSchema;
+use pl_model::ToolSpec;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::tool::FunctionToolDefinition;
+use crate::tool::TypedTool;
 use crate::tool::cache::ToolCachePolicy;
 use crate::turn::ToolEffect;
 
@@ -110,39 +110,32 @@ impl GitToolKind {
     pub fn input_schema(self) -> Value {
         match self {
             Self::Status | Self::WorkspaceInfo => {
-                FunctionToolDefinition::<GitEmptyInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<GitEmptyInput>::new(self.name(), self.description()).input_schema()
             }
             Self::Diff => {
-                FunctionToolDefinition::<GitDiffInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<GitDiffInput>::new(self.name(), self.description()).input_schema()
             }
             Self::Branch => {
-                FunctionToolDefinition::<GitBranchInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<GitBranchInput>::new(self.name(), self.description()).input_schema()
             }
             Self::Fetch => {
-                FunctionToolDefinition::<GitFetchInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<GitFetchInput>::new(self.name(), self.description()).input_schema()
             }
             Self::Commit => {
-                FunctionToolDefinition::<GitCommitInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<GitCommitInput>::new(self.name(), self.description()).input_schema()
             }
             Self::Push => {
-                FunctionToolDefinition::<GitPushInput>::new(self.name(), self.description())
+                TypedTool::<GitPushInput>::new(self.name(), self.description()).input_schema()
+            }
+            Self::SyncDefaultBranch => {
+                TypedTool::<GitSyncDefaultBranchInput>::new(self.name(), self.description())
                     .input_schema()
             }
-            Self::SyncDefaultBranch => FunctionToolDefinition::<GitSyncDefaultBranchInput>::new(
-                self.name(),
-                self.description(),
-            )
-            .input_schema(),
         }
     }
 
-    pub fn to_schema(self) -> ToolSchema {
-        ToolSchema::function(self.name(), self.description(), self.input_schema())
+    pub fn to_spec(self) -> ToolSpec {
+        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
 

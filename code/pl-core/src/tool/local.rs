@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use pl_model::ToolSchema;
-use pl_protocol::{InteractionRequest, PureError, SkillActivation};
+use pl_protocol::{InteractionRequest, PureError, SkillActivation, ToolSpec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -14,7 +13,7 @@ use crate::turn::ToolEffect;
 
 use super::cache::ToolCachePolicy;
 use super::contract::*;
-use super::{Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
+use super::{Tool, ToolCallContext, ToolInput, ToolResult, ToolRuntimeLockPolicy};
 
 type CachePolicyResolver = Arc<dyn Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync>;
 type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send + Sync>;
@@ -22,15 +21,15 @@ type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send +
 /// 静态 function tool 的 typed definition。
 ///
 /// `Input` 是参数反序列化和模型可见 JSON Schema 的唯一事实源。定义最终生成普通
-/// [`RegisteredTool`]，因此继续使用统一 registry、权限、审批、缓存和事件链。
+/// [`LocalTool`]，因此继续使用统一 registry、权限、审批、缓存和事件链。
 #[derive(Debug, Clone)]
-pub struct FunctionToolDefinition<Input> {
+pub struct TypedTool<Input> {
     name: String,
     description: String,
     marker: PhantomData<fn() -> Input>,
 }
 
-impl<Input> FunctionToolDefinition<Input>
+impl<Input> TypedTool<Input>
 where
     Input: JsonSchema,
 {
@@ -47,21 +46,18 @@ where
     }
 }
 
-impl<Input> FunctionToolDefinition<Input>
+impl<Input> TypedTool<Input>
 where
     Input: DeserializeOwned + JsonSchema + Send + 'static,
 {
-    pub fn registered<F, Fut, Artifact, Error>(self, handler: F) -> RegisteredTool
+    pub fn handler<F, Fut, Error>(self, handler: F) -> LocalTool
     where
-        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
-            + Send
-            + 'static,
-        Artifact: Serialize + Send + 'static,
+        F: Fn(Input, ToolCallContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolResult, Error>> + Send + 'static,
         Error: fmt::Display + Send + 'static,
     {
         let tool_name = self.name.clone();
-        RegisteredTool::new(
+        LocalTool::new(
             self.name,
             self.description,
             typed_tool_input_schema::<Input>(),
@@ -74,7 +70,6 @@ where
                         async move {
                             future
                                 .await
-                                .map(ToolExecutionResult::into_tool_output)
                                 .map_err(|error| PureError::ToolExecutionFailed {
                                     tool: tool_name,
                                     error: error.to_string(),
@@ -103,7 +98,7 @@ pub struct ToolDisplayMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
-pub enum ToolRuntimeEvent {
+pub enum ToolDirective {
     /// 持久化一个由当前 Turn 发起、需要宿主后续处理的交互。
     InteractionRequested {
         interaction: Box<InteractionRequest>,
@@ -158,24 +153,25 @@ pub enum ToolRuntimeEvent {
 /// handler 只负责业务副作用，工具生命周期、trace、权限和 tool result history
 /// 仍由 pl-core 统一处理。
 #[derive(Clone)]
-pub struct RegisteredTool {
+pub struct LocalTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
     output_schema: Option<serde_json::Value>,
     display_metadata: Option<ToolDisplayMetadata>,
     supports_parallel_tool_calls: bool,
+    supports_programmatic_calls: bool,
     runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
     effect: Option<ToolEffect>,
     cache_policy: ToolCachePolicy,
     cache_policy_resolver: Option<CachePolicyResolver>,
     cache_invalidation_resolver: Option<CacheInvalidationResolver>,
-    handler: Arc<RegisteredToolHandler>,
+    handler: Arc<LocalToolHandler>,
 }
 
-impl fmt::Debug for RegisteredTool {
+impl fmt::Debug for LocalTool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RegisteredTool")
+        f.debug_struct("LocalTool")
             .field("name", &self.name)
             .field(
                 "supports_parallel_tool_calls",
@@ -186,7 +182,7 @@ impl fmt::Debug for RegisteredTool {
     }
 }
 
-impl RegisteredTool {
+impl LocalTool {
     pub fn new<F, Fut>(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -194,8 +190,8 @@ impl RegisteredTool {
         handler: F,
     ) -> Self
     where
-        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<ToolOutput, PureError>> + Send + 'static,
+        F: Fn(ToolInput, ToolCallContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ToolResult, PureError>> + Send + 'static,
     {
         let name = name.into();
         let tool_name = name.clone();
@@ -206,18 +202,14 @@ impl RegisteredTool {
             output_schema: None,
             display_metadata: None,
             supports_parallel_tool_calls: false,
+            supports_programmatic_calls: false,
             runtime_lock_policy: None,
             effect: None,
             cache_policy: ToolCachePolicy::Never,
             cache_policy_resolver: None,
             cache_invalidation_resolver: None,
             handler: Arc::new(move |input, context| {
-                if context
-                    .options
-                    .cancellation_token
-                    .as_ref()
-                    .is_some_and(|token| token.is_cancelled())
-                {
+                if context.is_cancelled() {
                     let tool = tool_name.clone();
                     return async move {
                         Err(PureError::ToolExecutionFailed {
@@ -234,6 +226,14 @@ impl RegisteredTool {
 
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
+        self
+    }
+
+    /// 显式允许 provider-hosted program 调用该工具。
+    ///
+    /// 注册时仍会强制校验工具 effect 为 `Read`。
+    pub fn with_programmatic_calls(mut self) -> Self {
+        self.supports_programmatic_calls = true;
         self
     }
 
@@ -286,7 +286,7 @@ impl RegisteredTool {
     }
 }
 
-impl Tool for RegisteredTool {
+impl Tool for LocalTool {
     fn name(&self) -> &str {
         &self.name
     }
@@ -305,6 +305,10 @@ impl Tool for RegisteredTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         self.supports_parallel_tool_calls
+    }
+
+    fn supports_programmatic_calls(&self) -> bool {
+        self.supports_programmatic_calls
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -336,13 +340,13 @@ impl Tool for RegisteredTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         (self.handler)(input, context)
     }
 
-    fn to_schema(&self) -> ToolSchema {
-        ToolSchema::Function {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::Function {
             name: self.name.clone(),
             description: self.description.clone(),
             input_schema: self.input_schema.clone(),

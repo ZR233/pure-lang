@@ -4,14 +4,14 @@ use pl_protocol::{PureError, Result};
 use rmcp::model::CallToolResult;
 use serde_json::Value;
 
-use crate::tool::{OutputTruncation, ToolOutput, ToolRuntimeEvent};
+use crate::tool::{OutputTruncation, ToolDirective, ToolResult};
 
 /// 把 rmcp typed result 转成统一工具输出，同时保留完整审计 payload。
 pub(super) fn call_tool_result_to_output(
     server_id: &str,
     raw_tool_name: &str,
     result: CallToolResult,
-) -> Result<ToolOutput> {
+) -> Result<ToolResult> {
     let content = result
         .content
         .iter()
@@ -40,18 +40,18 @@ pub(super) fn call_tool_result_to_output(
     } else {
         model_content
     };
-    let mut runtime_events = vec![ToolRuntimeEvent::AuditMetadata { metadata: audit }];
+    let mut runtime_events = vec![ToolDirective::AuditMetadata { metadata: audit }];
     if is_error {
-        runtime_events.push(ToolRuntimeEvent::ExecutionFailed);
+        runtime_events.push(ToolDirective::ExecutionFailed);
     }
-    Ok(ToolOutput {
+    Ok(ToolResult::from_runtime_text(
         description,
-        truncated: OutputTruncation::empty(),
-        output_file: PathBuf::new(),
-        exit_code: is_error.then_some(1),
-        timed_out: false,
+        OutputTruncation::empty(),
+        PathBuf::new(),
+        Some(if is_error { 1 } else { 0 }),
+        false,
         runtime_events,
-    })
+    ))
 }
 
 fn format_mcp_content(content: &[Value]) -> String {

@@ -154,6 +154,10 @@ command 以归档 delta 移除尚未使用的空 Thread。SQLite 写入失败则
 提交的热事实并暂停后续新工作。测试/Driver fixture 可以使用隔离的内部 seed 入口显式创建
 Thread。
 
+Task mode 的首个 Turn 必须直接使用该 command 已提交的 canonical root Thread 热记录创建
+Task 聚合，不得为了取得 `projectId` 立即回读 SQLite；write-behind 尚未落盘是正常状态，不能
+把它误报为 `task root Thread not found` 或回滚已接受的目录事实。
+
 ## 20.5 Settings 与 desired/live
 
 `ConfigRuntime` 是 Settings 唯一 owner。启动时读取并校验 `config.toml`；此后
@@ -186,7 +190,7 @@ server 失败仍作为 unavailable 应用 desired generation。
 
 reset 不复用目标 server，范围外 server 继续复用。单 server 只构造该 server 的候选；All 构造
 全候选。reset 成功后原子切换；失败保留当前 live generation 并发布 failed/stale。旧 generation
-在最后一个引用（活动 TurnToolLease 或进行中调用）释放后关闭。shutdown 是不可恢复终止态，
+在最后一个引用（活动 `ToolPlan` 或进行中调用）释放后关闭。shutdown 是不可恢复终止态，
 取消候选、拒绝新 lease，并关闭全部连接；之后只允许读取 stopped snapshot。
 
 UI 的“刷新”只读状态，“重新连接”调用单 server reset，“全部重置”经确认调用 All；Settings

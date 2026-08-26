@@ -126,8 +126,6 @@ pub struct ModelRequestProfile {
     #[serde(default, skip_serializing_if = "is_false")]
     pub chat_parallel_tool_calls: bool,
     #[serde(default, skip_serializing_if = "is_false")]
-    pub responses_tool_search: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
     pub responses_programmatic_tool_calling: bool,
     #[serde(default, skip_serializing_if = "MaxTokensField::is_default")]
     pub max_tokens_field: MaxTokensField,
@@ -142,7 +140,6 @@ impl ModelRequestProfile {
             && self.headers.is_empty()
             && self.body.is_empty()
             && !self.chat_parallel_tool_calls
-            && !self.responses_tool_search
             && !self.responses_programmatic_tool_calling
             && self.max_tokens_field.is_default()
             && self.responses_max_tokens_field.is_default()

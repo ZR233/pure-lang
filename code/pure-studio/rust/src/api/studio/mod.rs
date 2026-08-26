@@ -155,7 +155,6 @@ mod tests {
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
                     preset.service_capabilities.web_search.standalone.as_deref(),
-                    preset.service_capabilities.responses_tool_search,
                     preset
                         .service_capabilities
                         .responses_programmatic_tool_calling,
@@ -167,7 +166,6 @@ mod tests {
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
                     preset.service_capabilities.web_search.standalone.as_deref(),
-                    preset.service_capabilities.responses_tool_search,
                     preset
                         .service_capabilities
                         .responses_programmatic_tool_calling,

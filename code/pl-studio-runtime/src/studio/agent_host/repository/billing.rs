@@ -145,8 +145,6 @@ pub(super) fn runtime_from_context(
         active_lsp_servers: Vec::new(),
         progress: None,
         mcp_health: None,
-        tool_registry_revision: None,
-        tool_catalog_hash: None,
         updated_at: latest.recorded_at,
     })
 }

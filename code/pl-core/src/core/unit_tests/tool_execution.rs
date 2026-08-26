@@ -14,7 +14,7 @@ impl Tool for ProviderCallIdEchoTool {
     }
 
     fn description(&self) -> &str {
-        "Returns the stable provider call identity from ToolContext"
+        "Returns the stable provider call identity from ToolCallContext"
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -32,25 +32,15 @@ impl Tool for ProviderCallIdEchoTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        context: ToolContext,
+        context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
-        async move {
-            Ok(ToolOutput {
-                description: context.provider_call_id.unwrap_or_default(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
-        }
-        .boxed()
+        async move { Ok(ToolResult::success(context.identity().call_id.clone())) }.boxed()
     }
 }
 
@@ -118,10 +108,10 @@ impl Tool for FailingApplyPatchTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
@@ -167,28 +157,23 @@ impl Tool for CountingSpawnAgentTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
             let execution = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
-            Ok(ToolOutput {
-                description: serde_json::json!({
+            Ok(ToolResult::success(
+                serde_json::json!({
                     "agentId": format!("agent-{execution}"),
                     "message": input.arguments["message"],
                 })
                 .to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            ))
         }
         .boxed()
     }
@@ -222,28 +207,23 @@ impl Tool for CountingExecTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
-            Ok(ToolOutput {
-                description: serde_json::json!({
+            Ok(ToolResult::success(
+                serde_json::json!({
                     "status": "completed",
                     "command": input.arguments["command"],
                 })
                 .to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            ))
         }
         .boxed()
     }
@@ -280,28 +260,23 @@ impl Tool for CountingCacheableTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
-            Ok(ToolOutput {
-                description: serde_json::json!({
+            Ok(ToolResult::success(
+                serde_json::json!({
                     "path": input.arguments["path"],
                     "content": "x".repeat(8_192),
                 })
                 .to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            ))
         }
         .boxed()
     }
@@ -342,17 +317,17 @@ impl Tool for BatchFailingReadTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        context: ToolContext,
+        context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
-            if context.provider_call_id.as_deref() == Some("read-call-1") {
+            if context.identity().call_id == "read-call-1" {
                 self.first_started.notify_one();
                 self.release_first.notified().await;
             }
@@ -393,28 +368,18 @@ impl Tool for BatchEpochProcessTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
             self.first_started.notified().await;
-            context
-                .tool_cache
-                .record_effect(Some(crate::ToolEffect::Process), true);
             self.release_first.notify_one();
-            Ok(ToolOutput {
-                description: "epoch advanced".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::success("epoch advanced"))
         }
         .boxed()
     }
@@ -448,24 +413,17 @@ impl Tool for BudgetPausedWaitTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-            Ok(ToolOutput {
-                description: "progress".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::success("progress"))
         }
         .boxed()
     }
@@ -524,15 +482,13 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -590,15 +546,13 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -657,15 +611,13 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -696,15 +648,13 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -749,15 +699,13 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -781,20 +729,13 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
 async fn tool_batch_reports_parallel_candidates_and_critical_path() {
     let mut core = test_turn_engine();
     core.register_test_tool(
-        crate::tool::RegisteredTool::new(
+        crate::tool::LocalTool::new(
             "parallel_metric_read",
             "Test-only parallel metric tool",
             serde_json::json!({"type": "object"}),
             |_input, _context| async move {
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                Ok(ToolOutput {
-                    description: "ok".to_string(),
-                    truncated: OutputTruncation::empty(),
-                    output_file: PathBuf::new(),
-                    exit_code: Some(0),
-                    timed_out: false,
-                    runtime_events: Vec::new(),
-                })
+                Ok(ToolResult::success("ok"))
             },
         )
         .with_parallel_tool_calls()
@@ -825,15 +766,13 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -877,16 +816,14 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         &mut denied_recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default()
                 .with_execution_policy(crate::AgentExecutionPolicy::default()),
             session_id: "turn-mcp-denied",
+            turn_id: "turn-mcp-denied",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -898,7 +835,6 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
     let callback_approvals = approvals.clone();
     let options = TurnOptions::default()
         .with_execution_policy(crate::AgentExecutionPolicy {
-            visible_tools: crate::ToolVisibilitySet::from_tool_names(["mcp__docs__lookup"]),
             allowed_effects: crate::ToolEffectSet::from_effects([crate::ToolEffect::Read]),
             ..Default::default()
         })
@@ -924,15 +860,13 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &options,
             session_id: "turn-mcp",
+            turn_id: "turn-mcp",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -980,20 +914,13 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
 #[tokio::test]
 async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
     let mut core = test_turn_engine();
-    core.register_test_tool(crate::tool::RegisteredTool::new(
+    core.register_test_tool(crate::tool::LocalTool::new(
         "exclusive_metric_read",
         "Test-only exclusive metric tool",
         serde_json::json!({"type": "object"}),
         |_input, _context| async move {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            Ok(ToolOutput {
-                description: "ok".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::success("ok"))
         },
     ));
     let calls = [
@@ -1020,15 +947,13 @@ async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1077,15 +1002,13 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1126,15 +1049,13 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1165,15 +1086,13 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1208,15 +1127,13 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1247,15 +1164,13 @@ async fn chat_tool_call_replays_item_id_as_call_id() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1296,7 +1211,10 @@ async fn tool_execution_reuses_streamed_trace_part() {
         .await
         .unwrap();
     let mut core = test_turn_engine();
-    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(
+        WorkspaceFileToolKind::ReadFile,
+        crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(workspace_root.clone())),
+    ));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",
@@ -1322,15 +1240,13 @@ async fn tool_execution_reuses_streamed_trace_part() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1396,7 +1312,10 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         .await
         .unwrap();
     let mut core = test_turn_engine();
-    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(
+        WorkspaceFileToolKind::ReadFile,
+        crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(workspace_root.clone())),
+    ));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",
@@ -1422,15 +1341,13 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -1516,15 +1433,13 @@ async fn tool_runtime_deltas_use_trace_part_id() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )

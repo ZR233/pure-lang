@@ -334,9 +334,6 @@ class ProviderEditor extends StatelessWidget {
                           standaloneWebSearch: source == 'preset_defaults'
                               ? preset?.standaloneWebSearch ?? ''
                               : item.standaloneWebSearch,
-                          responsesToolSearch: source == 'preset_defaults'
-                              ? preset?.responsesToolSearch ?? false
-                              : item.responsesToolSearch,
                           responsesProgrammaticToolCalling:
                               source == 'preset_defaults'
                               ? preset?.responsesProgrammaticToolCalling ??
@@ -390,26 +387,6 @@ class ProviderEditor extends StatelessWidget {
                           ),
                   ),
                   DropdownButtonFormField<bool>(
-                    initialValue: provider.responsesToolSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Responses Tool Search',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: false, child: Text('Disabled')),
-                      DropdownMenuItem(value: true, child: Text('Enabled')),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onUpdate(
-                                (item) =>
-                                    item.copyWith(responsesToolSearch: value),
-                              );
-                            }
-                          },
-                  ),
-                  DropdownButtonFormField<bool>(
                     initialValue: provider.responsesProgrammaticToolCalling,
                     decoration: const InputDecoration(
                       labelText: 'Programmatic Tool Calling',
@@ -436,10 +413,6 @@ class ProviderEditor extends StatelessWidget {
               SettingsReadonlyField(
                 label: 'Hosted Web Search',
                 value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
-              ),
-              SettingsReadonlyField(
-                label: 'Responses Tool Search',
-                value: provider.responsesToolSearch ? 'Enabled' : 'Disabled',
               ),
               SettingsReadonlyField(
                 label: 'Programmatic Tool Calling',

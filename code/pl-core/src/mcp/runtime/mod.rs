@@ -10,10 +10,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::config::EffectiveMcpServerConfig;
 use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{
-    NamespaceDescriptor, RegisteredTool, ToolDisplayMetadata, ToolRuntimeLockPolicy,
-};
-use crate::tool::{ToolEntry, ToolRegistry, ToolSourceId, ToolSourceMetadata};
+use crate::tool::{LocalTool, Tool, ToolDisplayMetadata, ToolRuntimeLockPolicy};
 use crate::turn::ToolEffect;
 
 use super::connector::McpConnector;
@@ -80,22 +77,20 @@ impl fmt::Debug for McpRuntime {
 impl McpRuntime {
     /// 启动一个由薄 connector 驱动的 MCP worker。
     ///
-    /// `shared_registry` 存在时，worker 在每个 generation 激活或 server 可用性
-    /// 变化后把当前代工具整组发布到共享注册表（来源 `mcp`）。
-    pub fn new(connector: McpConnector, shared_registry: Option<Arc<ToolRegistry>>) -> Self {
+    /// 模型可见工具由 agent 的 step 刷新窗口从固定 generation lease 获取，
+    /// 再原子安装到该 agent 自己的工具集。
+    pub fn new(connector: McpConnector) -> Self {
         let (commands, receiver) = mpsc::unbounded_channel();
         let (updates, _) = broadcast::channel(64);
+        let notification_commands = commands.clone();
+        let connector = connector.with_tool_list_changed(move |server_id| {
+            let _ = notification_commands.send(RuntimeCommand::ToolListChanged { server_id });
+        });
         let handle = McpRuntimeHandle {
             commands: commands.clone(),
             updates: updates.clone(),
         };
-        tokio::spawn(worker::run(
-            connector,
-            receiver,
-            commands,
-            updates,
-            shared_registry,
-        ));
+        tokio::spawn(worker::run(connector, receiver, commands, updates));
         Self { handle }
     }
 
@@ -282,38 +277,21 @@ impl McpTurnLease {
             .await
     }
 
-    /// 构造该 lease 的全部注册表条目：工具（按 server 命名空间）+ resource façade。
-    pub(super) fn registry_entries(&self) -> Vec<ToolEntry> {
-        let source = ToolSourceId::mcp();
-        let mut entries = Vec::with_capacity(self.tools.len() + ResourceToolKind::all().len());
+    /// 构造该 lease 的全部统一工具：MCP server 工具 + resource façade。
+    pub fn agent_tools(&self) -> Vec<Arc<dyn Tool>> {
+        let mut tools = Vec::with_capacity(self.tools.len() + ResourceToolKind::all().len());
         for descriptor in self.tools.iter() {
-            entries.push(ToolEntry::from_arc(
-                Arc::from(Box::new(self.registered_tool(descriptor.clone()))
-                    as Box<dyn crate::tool::Tool>),
-                ToolSourceMetadata {
-                    source: source.clone(),
-                    namespace: Some(mcp_namespace_descriptor(&descriptor.server_id)),
-                    programmatic_eligible: descriptor.effect == Some(ToolEffect::Read),
-                },
-            ));
+            tools.push(Arc::new(self.registered_tool(descriptor.clone())) as Arc<dyn Tool>);
         }
         if !self.server_ids.is_empty() {
             for kind in ResourceToolKind::all() {
-                entries.push(ToolEntry::from_arc(
-                    Arc::from(Box::new(self.registered_resource_tool(*kind))
-                        as Box<dyn crate::tool::Tool>),
-                    ToolSourceMetadata {
-                        source: source.clone(),
-                        namespace: None,
-                        programmatic_eligible: true,
-                    },
-                ));
+                tools.push(Arc::new(self.registered_resource_tool(*kind)) as Arc<dyn Tool>);
             }
         }
-        entries
+        tools
     }
 
-    fn registered_tool(&self, descriptor: McpRuntimeToolDescriptor) -> RegisteredTool {
+    fn registered_tool(&self, descriptor: McpRuntimeToolDescriptor) -> LocalTool {
         let lease = self.clone();
         let server_id = descriptor.server_id.clone();
         let raw_name = descriptor.raw_name.clone();
@@ -324,7 +302,7 @@ impl McpTurnLease {
         };
         let handler_server_id = server_id.clone();
         let handler_raw_name = raw_name.clone();
-        let mut tool = RegisteredTool::new(
+        let mut tool = LocalTool::new(
             descriptor.exposed_name,
             descriptor.description,
             descriptor.input_schema,
@@ -348,6 +326,7 @@ impl McpTurnLease {
             tool = tool.with_effect(effect);
             if effect == ToolEffect::Read {
                 tool = tool
+                    .with_programmatic_calls()
                     .with_parallel_tool_calls()
                     .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
             }
@@ -355,9 +334,9 @@ impl McpTurnLease {
         tool
     }
 
-    fn registered_resource_tool(&self, kind: ResourceToolKind) -> RegisteredTool {
+    fn registered_resource_tool(&self, kind: ResourceToolKind) -> LocalTool {
         let lease = self.clone();
-        RegisteredTool::new(
+        LocalTool::new(
             kind.name(),
             kind.description(),
             kind.input_schema(),
@@ -370,14 +349,12 @@ impl McpTurnLease {
                         .handle
                         .resource_query(lease.generation, server_id, operation)
                         .await?;
-                    Ok(
-                        crate::tool::ToolExecutionResult::<serde_json::Value>::json(value)?
-                            .into_tool_output(),
-                    )
+                    crate::tool::ToolResult::json(value)
                 }
             },
         )
         .with_effect(ToolEffect::Read)
+        .with_programmatic_calls()
         .with_parallel_tool_calls()
         .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared)
         .with_cache_policy(ToolCachePolicy::Never)
@@ -465,6 +442,9 @@ pub(super) enum RuntimeCommand {
         generation: McpGeneration,
         server_id: String,
         error: String,
+    },
+    ToolListChanged {
+        server_id: String,
     },
     Shutdown {
         reply: oneshot::Sender<()>,
@@ -582,28 +562,6 @@ fn parse_resource_arguments<T: for<'de> Deserialize<'de>>(
         tool: kind.name().to_string(),
         error: format!("invalid input: {error}"),
     })
-}
-
-/// MCP server 命名空间描述：`mcp_<归一化 server id>`。
-fn mcp_namespace_descriptor(server_id: &str) -> NamespaceDescriptor {
-    NamespaceDescriptor::new(
-        format!("mcp_{}", mcp_namespace_component(server_id)),
-        format!("Dynamically registered tools from MCP server `{server_id}`."),
-    )
-}
-
-/// server id 的有损归一化：仅保留字母数字、`_` 与 `-`，其余替换为 `_`。
-fn mcp_namespace_component(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn runtime_stopped(error: oneshot::error::RecvError) -> PureError {

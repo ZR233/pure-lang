@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::super::{
     ReviewDesignReference, ReviewFinding, ReviewScope, ReviewVerdict, TaskCoordinator,
 };
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::turn::ToolEffect;
 
 const DEFAULT_FINDING_OFFSET: usize = 0;
@@ -49,14 +49,14 @@ impl TaskCoordinator {
     pub(crate) fn read_review_round_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<ReadReviewRoundInput>::new(
+        TypedTool::<ReadReviewRoundInput>::new(
             "read_review_round",
             "Read the full findings (including recommendations) of one review round, paginated and not truncated.",
         )
-        .registered(move |input: ReadReviewRoundInput, _| {
+        .handler(move |input: ReadReviewRoundInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 async move {
@@ -104,7 +104,7 @@ impl TaskCoordinator {
                         total,
                         has_more,
                     };
-                    ToolExecutionResult::<serde_json::Value>::json_with_budget(
+                    ToolResult::json_with_budget(
                         detail,
                         /* max_output_tokens */ 16_000,
                         MAX_REVIEW_ROUND_OUTPUT_BYTES,

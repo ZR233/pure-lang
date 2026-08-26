@@ -1611,14 +1611,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineWebSearchResults => '结果链接';
 
   @override
-  String get timelineToolSearchTitle => '工具搜索';
-
-  @override
-  String timelineToolSearchLoadedTools(int count) {
-    return '已加载 $count 个工具';
-  }
-
-  @override
   String get timelineLspQueryTitle => 'LSP 查询';
 
   @override
@@ -3249,14 +3241,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineWebSearchResults => '结果链接';
-
-  @override
-  String get timelineToolSearchTitle => '工具搜索';
-
-  @override
-  String timelineToolSearchLoadedTools(int count) {
-    return '已加载 $count 个工具';
-  }
 
   @override
   String get timelineLspQueryTitle => 'LSP 查询';

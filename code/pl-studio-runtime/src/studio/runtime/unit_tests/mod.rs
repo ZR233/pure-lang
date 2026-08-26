@@ -166,6 +166,45 @@ async fn start_new_thread_accepts_first_prompt_before_publishing_thread() {
 }
 
 #[tokio::test]
+async fn start_new_task_thread_uses_hot_root_before_write_behind_persists_it() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    let database = root.path().join("studio.sqlite");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let store = StudioStore::open(&database).await.unwrap();
+    let runtime = StudioRuntime::new(store, config_store).unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+
+    let response = runtime
+        .start_new_thread(StudioStartNewThreadRequest {
+            project_id: project.id.clone(),
+            title: "First task prompt".to_string(),
+            prompt: "Create notes.txt with the requested marker.".to_string(),
+            attachment_ids: Vec::new(),
+            mode: StudioMode::Task,
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .expect("Task creation must consume the canonical hot root Thread");
+
+    assert_eq!(response.thread.project_id, project.id);
+    assert_eq!(response.thread.mode, StudioMode::Task);
+    let task = runtime
+        .thread_task_view(&response.thread.id)
+        .await
+        .unwrap()
+        .expect("accepted Task must own a hot aggregate");
+    assert!(matches!(task.state, StudioTaskState::Planning(_)));
+
+    runtime.shutdown_runtime().await.unwrap();
+}
+
+#[tokio::test]
 async fn task_hot_record_is_committed_before_runtime_readiness_is_checked() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("home");

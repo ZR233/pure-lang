@@ -12,11 +12,10 @@ use tokio::sync::RwLock;
 
 use crate::ToolCompletion;
 use crate::permission::{PermissionDecision, decide_tool_permission};
-use crate::session::AgentSession;
-use crate::tool::cache::{ToolCachePolicy, TurnToolCacheHandle};
+use crate::tool::cache::{ToolCacheExecutionRequest, ToolCachePolicy, TurnToolCacheHandle};
 use crate::tool::{
-    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
-    ToolRuntimeLockPolicy, TurnToolLease, WorkspaceAccess,
+    AgentWorkspace, SubagentContext, ToolApprovalContext, ToolBudgetTiming, ToolCallContext,
+    ToolCallIdentity, ToolDirective, ToolInput, ToolPlan, ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -47,7 +46,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) outcome: ToolExecutionOutcome,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
-    pub(super) runtime_events: Vec<ToolRuntimeEvent>,
+    pub(super) runtime_events: Vec<ToolDirective>,
     pub(super) execution_millis: u64,
 }
 
@@ -89,11 +88,8 @@ pub(super) struct ToolExecutionBatch {
 #[derive(Debug, Clone)]
 pub(super) struct ToolInvocation {
     pub(super) name: String,
-    pub(super) runtime_tool_call_id: String,
-    pub(super) provider_item_id: String,
-    pub(super) call_id: String,
     pub(super) payload: ToolPayload,
-    pub(super) context: ToolContext,
+    pub(super) context: ToolCallContext,
 }
 
 #[derive(Debug, Clone)]
@@ -111,15 +107,13 @@ pub(super) enum ToolExecutionError {
 pub(super) struct ToolExecutionContext<'a> {
     pub(super) core: &'a TurnEngine,
     /// 本 Turn 冻结的工具 lease；调度只使用 lease 条目。
-    pub(super) lease: TurnToolLease,
+    pub(super) tool_plan: ToolPlan,
     pub(super) options: &'a TurnOptions,
     pub(super) session_id: &'a str,
+    pub(super) turn_id: &'a str,
+    pub(super) step: u32,
     pub(super) workspace: AgentWorkspace,
-    pub(super) workspace_instructions: Option<String>,
-    pub(super) instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub(super) active_subagent: Option<SubagentContext>,
-    pub(super) parent_session: Arc<AgentSession>,
-    pub(super) working_set: crate::TurnWorkingSetHandle,
     pub(super) tool_cache: TurnToolCacheHandle,
 }
 
@@ -145,9 +139,9 @@ pub(super) async fn execute_tool_call_batch(
     let mut scheduled_exact_once_calls = HashMap::<(String, String), String>::new();
     let runtime_lock = Arc::new(RwLock::new(()));
     let tool_cache_snapshot = context.tool_cache.snapshot();
-    let sid = &context.session_id;
+    let sid = &context.turn_id;
     let mut progress = ProgressEmitter::new_scoped(
-        context.session_id.to_string(),
+        context.turn_id.to_string(),
         format!("{sid}:tool-progress"),
         ProgressVerbosity::from_env(),
     );
@@ -162,7 +156,7 @@ pub(super) async fn execute_tool_call_batch(
                 "tool call missing tool name".to_string(),
             ));
         }
-        let trace_part_id = tool_trace_part_id(context.session_id, tool_call);
+        let trace_part_id = tool_trace_part_id(context.turn_id, tool_call);
         let mut item = recorder
             .latest_tool_trace_part(
                 &trace_part_id,
@@ -171,7 +165,7 @@ pub(super) async fn execute_tool_call_batch(
             )
             .unwrap_or_else(|| {
                 let item = recorder.tool_item(
-                    context.session_id,
+                    context.turn_id,
                     &trace_part_id,
                     tool_call.name.clone(),
                     tool_call.payload_text(),
@@ -214,13 +208,13 @@ pub(super) async fn execute_tool_call_batch(
             continue;
         }
 
-        let registered_tool = context.lease.entry(&tool_call.name);
+        let registered_tool = context.tool_plan.binding(&tool_call.name);
         let effect = registered_tool.and_then(|entry| entry.tool().effect());
         let allowed = context
             .options
             .execution_policy
             .as_ref()
-            .is_none_or(|policy| policy.allows_tool(&tool_call.name, effect));
+            .is_none_or(|policy| policy.allows_effect(effect));
         if !allowed {
             let name = &tool_call.name;
             let message = format!("Tool disabled by execution policy: {name}");
@@ -241,8 +235,8 @@ pub(super) async fn execute_tool_call_batch(
             });
             continue;
         }
-        let Some(tool) = registered_tool else {
-            let available: Vec<&str> = context.lease.names();
+        let Some(binding) = registered_tool else {
+            let available = context.tool_plan.names().collect::<Vec<_>>();
             tracing::warn!(
                 tool = %tool_call.name,
                 available = ?available,
@@ -267,7 +261,8 @@ pub(super) async fn execute_tool_call_batch(
             continue;
         };
 
-        let tool = tool.tool();
+        let executor_generation = binding.generation();
+        let tool = binding.tool();
         let supports_parallel = tool.supports_parallel_tool_calls()
             && matches!(
                 context.options.tool_execution_mode,
@@ -283,21 +278,7 @@ pub(super) async fn execute_tool_call_batch(
         };
         let parallel_candidate = matches!(runtime_lock_policy, ToolRuntimeLockPolicy::None)
             || matches!(runtime_lock_policy, ToolRuntimeLockPolicy::Shared) && supports_parallel;
-        let tool_context = ToolContext {
-            event_tx: recorder.sender().clone(),
-            options: context.options.clone(),
-            workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace: context.workspace.clone(),
-            workspace_instructions: context.workspace_instructions.clone(),
-            instruction_snapshot: context.instruction_snapshot.clone(),
-            provider_call_id: Some(tool_call.call_id.clone()),
-            active_subagent: context.active_subagent.clone(),
-            lsp_runtime: context.core.lsp_runtime.clone(),
-            parent_session: context.parent_session.clone(),
-            working_set: context.working_set.clone(),
-            tool_cache: context.tool_cache.clone(),
-        };
-        let mut approval_request = approval_request(tool_call, &tool_context);
+        let mut approval_request = approval_request(tool_call, context.active_subagent.as_ref());
         approval_request.id = trace_part_id.clone();
         let requested_access = requested_workspace_access(tool_call, context.workspace.root());
         let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
@@ -313,12 +294,9 @@ pub(super) async fn execute_tool_call_batch(
                     emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("工具 `{name}` 正在等待授权。"));
-                    let decision = request_user_approval(
-                        context.options,
-                        &approval_request,
-                        context.session_id,
-                    )
-                    .await;
+                    let decision =
+                        request_user_approval(context.options, &approval_request, context.turn_id)
+                            .await;
                     if matches!(decision, ToolApprovalDecision::Approved) {
                         execution_workspace_access = workspace_access;
                     }
@@ -329,11 +307,14 @@ pub(super) async fn execute_tool_call_batch(
                     emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::AwaitingApproval);
                     let name = &tool_call.name;
                     progress.tool_detail(recorder, format!("正在审查工具 `{name}`。"));
-                    let mut review_context = tool_context.clone();
-                    review_context.workspace_access = workspace_access;
                     let decision = context
                         .core
-                        .review_tool_call_with_ai(&approval_request, &review_context)
+                        .review_tool_call_with_ai(
+                            &approval_request,
+                            context.options.permission_mode,
+                            workspace_access,
+                            context.workspace.root(),
+                        )
                         .await;
                     if matches!(decision, ToolApprovalDecision::Approved) {
                         execution_workspace_access = workspace_access;
@@ -362,25 +343,43 @@ pub(super) async fn execute_tool_call_batch(
 
         match decision {
             ToolApprovalDecision::Approved => {
-                let mut tool_context = tool_context;
-                tool_context.workspace_access = execution_workspace_access;
+                let active = context.active_subagent.as_ref();
+                let identity = ToolCallIdentity {
+                    call_id: tool_call.call_id.clone(),
+                    item_id: trace_part_id.clone(),
+                    agent_id: active
+                        .map(|agent| agent.id.clone())
+                        .unwrap_or_else(|| context.session_id.to_string()),
+                    parent_agent_id: active.and_then(|agent| agent.parent_id.clone()),
+                    agent_path: active.and_then(|agent| agent.agent_path.clone()),
+                    agent_role: active
+                        .map_or_else(|| "root".to_string(), |agent| agent.role.clone()),
+                    agent_depth: active.map_or(0, |agent| agent.depth),
+                    session_id: context.session_id.to_string(),
+                    turn_id: context.turn_id.to_string(),
+                    step: context.step,
+                    revision_base: item.revision(),
+                };
+                let approval = ToolApprovalContext::new(
+                    context.options.permission_mode,
+                    execution_workspace_access,
+                )
+                .with_interaction(
+                    context.options.interaction_callback.clone(),
+                    context.options.user_input_mode,
+                );
+                let tool_context = ToolCallContext::new(identity, recorder.sender().clone())
+                    .with_cancellation(context.options.cancellation_token.clone())
+                    .with_approval(approval);
                 if awaited_approval {
                     emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
                 }
                 emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Running);
                 progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
-                let invocation =
-                    ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
-                let _runtime_identity = (
-                    invocation.provider_item_id.as_str(),
-                    invocation.call_id.as_str(),
-                );
+                let invocation = ToolInvocation::from_tool_call(tool_call, tool_context);
                 let _display_arguments = invocation.payload.arguments_for_display();
                 let tool_input = ToolInput {
                     arguments: invocation.payload.arguments_for_tool(),
-                    session_id: context.session_id.to_string(),
-                    tool_id: invocation.runtime_tool_call_id.clone(),
-                    revision_base: item.revision(),
                 };
                 let cache_policy = tool.cache_policy(&tool_input.arguments);
                 let invalidates_cache = tool.invalidates_cache(&tool_input.arguments);
@@ -393,6 +392,8 @@ pub(super) async fn execute_tool_call_batch(
                 let cache_arguments = tool_input.arguments.clone();
                 let cache_workspace_root = context.workspace.root().to_path_buf();
                 let cache_call_id = tool_call.call_id.clone();
+                let tool_manager = context.core.agent_tools.manager().clone();
+                let tool_plan = context.tool_plan.clone();
                 let tool_effect = effect;
                 let budget_timing = tool.budget_timing();
                 let suppress_exact_arguments = cache_policy != ToolCachePolicy::Never;
@@ -446,12 +447,22 @@ pub(super) async fn execute_tool_call_batch(
                     future: async move {
                         let execute = || {
                             cache_snapshot.execute_or_reuse(
-                                &tool_name,
-                                &cache_arguments,
-                                &cache_workspace_root,
-                                cache_policy,
-                                cache_call_id,
-                                || tool.execute(tool_input, tool_context),
+                                ToolCacheExecutionRequest {
+                                    tool_name: &tool_name,
+                                    arguments: &cache_arguments,
+                                    workspace_root: &cache_workspace_root,
+                                    policy: cache_policy,
+                                    call_id: cache_call_id,
+                                    executor_generation,
+                                },
+                                || {
+                                    tool_manager.execute(
+                                        &tool_plan,
+                                        &tool_name,
+                                        tool_input,
+                                        tool_context,
+                                    )
+                                },
                             )
                         };
                         let (result, execution_elapsed) = match runtime_lock_policy {
@@ -543,16 +554,9 @@ fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::ToolCall) -> String {
 }
 
 impl ToolInvocation {
-    fn from_tool_call(
-        tool_call: &pl_model::ToolCall,
-        runtime_tool_call_id: String,
-        context: ToolContext,
-    ) -> Self {
+    fn from_tool_call(tool_call: &pl_model::ToolCall, context: ToolCallContext) -> Self {
         Self {
             name: tool_call.name.clone(),
-            runtime_tool_call_id,
-            provider_item_id: tool_call.id.clone(),
-            call_id: tool_call.call_id.clone(),
             payload: ToolPayload::from_tool_call_payload(&tool_call.payload),
             context,
         }
@@ -706,7 +710,7 @@ fn tool_execution_batch(
     let tool_cache_hits = records
         .iter()
         .flat_map(|record| &record.runtime_events)
-        .filter(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }))
+        .filter(|event| matches!(event, ToolDirective::CacheHit { .. }))
         .count() as u64;
     let tool_batch_elapsed_millis = batch_started_at.elapsed().as_millis() as u64;
     ToolExecutionBatch {

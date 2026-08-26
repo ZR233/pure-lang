@@ -14,7 +14,7 @@ use crate::turn::ToolEffect;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{
-    FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input, tool_error,
 };
 
@@ -25,16 +25,19 @@ use actions::*;
 #[derive(Debug, Clone)]
 pub struct SkillsListTool {
     source: SkillCatalogSource,
+    workspace: ToolWorkspace,
 }
 
 #[derive(Debug, Clone)]
 pub struct SkillViewTool {
     source: SkillCatalogSource,
+    workspace: ToolWorkspace,
 }
 
 #[derive(Debug, Clone)]
 pub struct SkillManageTool {
     source: SkillCatalogSource,
+    workspace: ToolWorkspace,
 }
 
 #[derive(Debug, Clone)]
@@ -215,43 +218,49 @@ struct SkillFileOutput<'a> {
 }
 
 impl SkillsListTool {
-    pub fn new(config: SkillsConfig) -> Self {
+    pub fn new(config: SkillsConfig, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Config(config),
+            workspace,
         }
     }
 
-    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
+            workspace,
         }
     }
 }
 
 impl SkillViewTool {
-    pub fn new(config: SkillsConfig) -> Self {
+    pub fn new(config: SkillsConfig, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Config(config),
+            workspace,
         }
     }
 
-    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
+            workspace,
         }
     }
 }
 
 impl SkillManageTool {
-    pub fn new(config: SkillsConfig) -> Self {
+    pub fn new(config: SkillsConfig, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Config(config),
+            workspace,
         }
     }
 
-    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>) -> Self {
+    pub fn from_catalog(catalog: Arc<FrozenSkillCatalog>, workspace: ToolWorkspace) -> Self {
         Self {
             source: SkillCatalogSource::Frozen(catalog),
+            workspace,
         }
     }
 }
@@ -266,11 +275,14 @@ impl Tool for SkillsListTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<SkillsListInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<SkillsListInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn supports_programmatic_calls(&self) -> bool {
         true
     }
 
@@ -285,11 +297,12 @@ impl Tool for SkillsListTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name()).await?;
+            let catalog =
+                catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
             let snapshot = catalog.snapshot();
             let skills = snapshot
                 .skills
@@ -328,11 +341,14 @@ impl Tool for SkillViewTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<SkillViewInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<SkillViewInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn supports_programmatic_calls(&self) -> bool {
         true
     }
 
@@ -347,13 +363,19 @@ impl Tool for SkillViewTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            let turn_id = input.session_id.clone();
-            let tool_id = input.tool_id.clone();
+            let turn_id = context.identity().turn_id.clone();
+            let tool_id = context.identity().item_id.clone();
             let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name()).await?;
+            let catalog = catalog_for(
+                &self.source,
+                self.workspace.root(),
+                &context,
+                self.name(),
+            )
+            .await?;
             let skill = catalog.find(&input.target.name).ok_or_else(|| {
                 let name = &input.target.name;
                 tool_error(self.name(), format!("skill not found: {name}"))
@@ -364,11 +386,7 @@ impl Tool for SkillViewTool {
                     format!("skill is not model-invocable: {}", skill.name),
                 ));
             }
-            let cancellation = context
-                .options
-                .cancellation_token
-                .clone()
-                .unwrap_or_default();
+            let cancellation = context.cancellation_token().unwrap_or_default();
             let definition = catalog
                 .load(
                     &input.target.name,
@@ -409,7 +427,7 @@ impl Tool for SkillViewTool {
                     resource_hint: "Pass filePath under references/, templates/, scripts/, or assets/ to read one resource on demand.".to_string(),
                     content,
                 },
-                vec![ToolRuntimeEvent::SkillActivated { activation }],
+                vec![ToolDirective::SkillActivated { activation }],
             )
         }
         .boxed()
@@ -432,8 +450,7 @@ impl Tool for SkillManageTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<SkillManageInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<SkillManageInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -443,12 +460,13 @@ impl Tool for SkillManageTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
+            self.workspace.ensure_workspace_writable()?;
             let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(&self.source, &context, self.name()).await?;
+            let catalog =
+                catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
             let result = match input {
                 SkillManageInput::Create(input) => {
                     create_skill(self.name(), catalog.snapshot(), input)
@@ -478,19 +496,16 @@ impl Tool for SkillManageTool {
 
 async fn catalog_for(
     source: &SkillCatalogSource,
-    context: &ToolContext,
+    workspace_root: &Path,
+    context: &ToolCallContext,
     tool_name: &str,
 ) -> Result<Arc<FrozenSkillCatalog>, PureError> {
     match source {
         SkillCatalogSource::Config(config) => discover_local_skills(
-            context.workspace.root(),
+            workspace_root,
             config,
             None,
-            context
-                .options
-                .cancellation_token
-                .clone()
-                .unwrap_or_default(),
+            context.cancellation_token().unwrap_or_default(),
         )
         .await
         .map(Arc::new)
@@ -499,31 +514,31 @@ async fn catalog_for(
     }
 }
 
-fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
+fn json_output(value: impl Serialize) -> Result<ToolResult, PureError> {
     json_output_with_events(value, Vec::new())
 }
 
 fn json_output_with_events(
     value: impl Serialize,
-    runtime_events: Vec<ToolRuntimeEvent>,
-) -> Result<ToolOutput, PureError> {
+    runtime_events: Vec<ToolDirective>,
+) -> Result<ToolResult, PureError> {
     let description = serde_json::to_string_pretty(&value)?;
     let stdout = TruncatedOutput {
         original_length: description.len(),
         content: description,
         was_truncated: false,
     };
-    Ok(ToolOutput {
-        description: stdout.content.clone(),
-        truncated: OutputTruncation {
+    Ok(ToolResult::from_runtime_text(
+        stdout.content.clone(),
+        OutputTruncation {
             stdout,
             stderr: TruncatedOutput::empty(),
         },
-        output_file: PathBuf::new(),
-        exit_code: Some(0),
-        timed_out: false,
+        PathBuf::new(),
+        Some(0),
+        false,
         runtime_events,
-    })
+    ))
 }
 
 fn skill_activation(skill: SkillMetadata, turn_id: &str, tool_call_id: &str) -> SkillActivation {

@@ -110,6 +110,7 @@ async fn connect_server(
     fingerprint: u64,
 ) -> RuntimeServer {
     let descriptor = server_descriptor(&config);
+    let server_config = config.config.clone();
     let redactor = McpErrorRedactor::new(&config);
     let startup_timeout = configured_startup_timeout(config.config.startup_timeout_secs);
     let request_timeout = configured_tool_timeout(config.config.tool_timeout_secs);
@@ -128,6 +129,7 @@ async fn connect_server(
                 descriptor,
                 fingerprint,
                 redactor.redact(error.to_string()),
+                server_config,
                 redactor,
             );
         }
@@ -139,24 +141,26 @@ async fn connect_server(
                     "MCP health check timed out after {} seconds",
                     startup_timeout.as_secs()
                 ),
+                server_config,
                 redactor,
             );
         }
     };
     match tokio::time::timeout(startup_timeout, session.list_tools()).await {
-        Ok(Ok(tools)) => RuntimeServer::available(
+        Ok(Ok(tools)) => RuntimeServer::available(super::server::AvailableRuntimeServer {
             descriptor,
             fingerprint,
             session,
-            filter_tool_definitions(tools, &config.config),
+            definitions: filter_tool_definitions(tools, &config.config),
             request_timeout,
-            config.tool_effect,
+            config: server_config,
+            tool_effect: config.tool_effect,
             redactor,
-        ),
+        }),
         Ok(Err(error)) => {
             session.close().await;
             let message = redactor.redact(error.to_string());
-            RuntimeServer::unavailable(descriptor, fingerprint, message, redactor)
+            RuntimeServer::unavailable(descriptor, fingerprint, message, server_config, redactor)
         }
         Err(_) => {
             session.close().await;
@@ -167,6 +171,7 @@ async fn connect_server(
                     "MCP tool discovery timed out after {} seconds",
                     startup_timeout.as_secs()
                 ),
+                server_config,
                 redactor,
             )
         }

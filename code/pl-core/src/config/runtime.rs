@@ -83,7 +83,7 @@ impl ToolCapabilityConfig {
 
     /// 只注册 git workspace 工具时使用的共享能力预设。
     ///
-    /// 产品层可用该预设通过 `ToolSetBuilder` 执行 git 工具，而不必在宿主项目里
+    /// 产品层可用该预设通过 `BuiltinToolInstaller` 执行 git 工具，而不必在宿主项目里
     /// 复制一份共享工具能力矩阵。
     pub fn git_workspace() -> Self {
         Self {

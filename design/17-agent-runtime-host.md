@@ -4,11 +4,12 @@
 
 ```text
 ThreadManager
-  ├─ ThreadDirectory watch
+  ├─ ThreadDirectory watch + ToolManager
   └─ ThreadHandle → ThreadActor → RunningTurn → TurnEngine
 ```
 
-ThreadManager 管理 registry、容量和 spawn/close。ThreadHandle 查表后把 start、steer、interrupt、
+ThreadManager 管理 agent registry、`ToolManager`、容量和 spawn/close。每个驻留 Thread/agent 持有
+一个持久 `AgentToolSet`，并显式决定是否继承 global 工具。ThreadHandle 查表后把 start、steer、interrupt、
 snapshot 和 progress 命令直接发给目标 ThreadActor。只有 spawn/close 修改全局目录。
 
 ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像、活动 RunningTurn、取消
@@ -72,7 +73,8 @@ pl-core 只保留三个窄端口：
   `awaitDurable(threadId, revision)`；端口不提供按线程的无目标 flush，全局排空只属于宿主关机
   流程。实现侧 repository 与 TaskRuntime 共享同一个进程级 writer 实例，恢复出的耐久基线必须
   seed 进该共享实例，不构造只读用的第二 writer。
-- `TurnFactory`：准备 TurnEngine、request、instructions、tools 与 execution policy。
+- `TurnFactory`：准备 TurnEngine、request、instructions、持久 `AgentToolSet` 与 execution policy；
+  不为每个 Turn 建立临时工具注册表。
 - `ChildLifecycle`：为 child Thread 准备/释放产品外部资源；Task 实现可以拒绝不安全的 close。
 
 通知由 pl-core 在内存 state 更新后直接发布，不经过额外 durable projection 或 replay journal；
@@ -99,6 +101,13 @@ durable owner 解析 workspace：root/explorer 绑定 Project，executor 绑定 
 Delivery reviewer 绑定目标 Completion worktree，Integrated reviewer 绑定 TaskRun 主 workspace。
 child owner、Git identity 或路径无法精确解析时必须 fail closed；禁止因为进程内资源表缺失而
 回退 Project root。进程内 lifecycle resource 只保存 handle/lease，不是 workspace 事实源。
+
+RunningTurn 在每个 provider 请求前调用一次宿主 `before_model_step` 刷新端口。端口获得 agent
+identity、turn/step identity、当前 route 与目标 `AgentToolSet` 的事务窗口，只能原子替换本 agent
+的 registration group；失败时在发请求前终止该 step，不能留下部分工具。窗口关闭后 core 冻结
+`ToolPlan`，同一次请求、transport retry 和其返回的 tool calls 全部使用该 plan。Task phase、
+collaboration caller、MCP generation、LSP availability 或宿主自定义能力的变化从下一 model step
+可见，不重写在途请求。
 
 ## 17.3 取消与恢复
 

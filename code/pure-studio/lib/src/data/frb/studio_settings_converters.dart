@@ -34,7 +34,6 @@ ProviderSettingsView _providerSettingsFromFrb(
     hostedWebSearch: value.hostedWebSearch,
     standaloneWebSearch: value.standaloneWebSearch ?? '',
     promptCacheDialect: value.promptCacheDialect,
-    responsesToolSearch: value.responsesToolSearch,
     responsesProgrammaticToolCalling: value.responsesProgrammaticToolCalling,
   );
 }

@@ -1,7 +1,7 @@
 use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
 use serde::Serialize;
 
-use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary, ToolSchema};
+use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary, ToolSpec};
 
 use super::body::ToolFormatBody;
 use super::content::{data_url, message_content_text};
@@ -277,10 +277,10 @@ enum ResponsesTool {
     },
 }
 
-impl From<&ToolSchema> for ResponsesTool {
-    fn from(tool: &ToolSchema) -> Self {
+impl From<&ToolSpec> for ResponsesTool {
+    fn from(tool: &ToolSpec) -> Self {
         match tool {
-            ToolSchema::Function {
+            ToolSpec::Function {
                 name,
                 description,
                 input_schema,
@@ -293,7 +293,7 @@ impl From<&ToolSchema> for ResponsesTool {
                 allowed_callers: allowed_callers.clone(),
                 output_schema: output_schema.clone(),
             },
-            ToolSchema::Custom {
+            ToolSpec::Custom {
                 name,
                 description,
                 format,
@@ -306,8 +306,8 @@ impl From<&ToolSchema> for ResponsesTool {
                 allowed_callers: allowed_callers.clone(),
                 output_schema: output_schema.clone(),
             },
-            ToolSchema::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
-            ToolSchema::WebSearch {
+            ToolSpec::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
+            ToolSpec::WebSearch {
                 external_web_access,
                 indexed_web_access,
                 filters,

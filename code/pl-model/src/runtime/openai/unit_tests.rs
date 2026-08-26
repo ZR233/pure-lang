@@ -8,7 +8,7 @@ use pl_protocol::{
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload, ToolSchema};
+use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload, ToolSpec};
 use crate::model::info::{MaxTokensField, ResponsesMaxTokensField};
 
 fn text_message(role: MessageRole, content: &str) -> Message {
@@ -602,7 +602,7 @@ fn responses_parse_response_reads_cached_input_tokens() {
 #[test]
 fn responses_body_writes_custom_grammar_tool() {
     let mut request = request_with_effort("xhigh");
-    request.tools = vec![ToolSchema::custom_grammar(
+    request.tools = vec![ToolSpec::custom_grammar(
         "apply_patch",
         "edit files",
         "lark",
@@ -627,7 +627,7 @@ fn responses_body_writes_custom_grammar_tool() {
 fn responses_body_writes_programmatic_tool_callers() {
     let model = bundled_model("gpt-5.6-sol");
     let mut request = request_with_effort("xhigh");
-    let read_file = ToolSchema::function(
+    let read_file = ToolSpec::function(
         "read_file",
         "read a file",
         serde_json::json!({"type": "object"}),
@@ -636,7 +636,7 @@ fn responses_body_writes_programmatic_tool_callers() {
         "type": "object",
         "additionalProperties": true
     }));
-    request.tools = vec![read_file, ToolSchema::ProgrammaticToolCalling];
+    request.tools = vec![read_file, ToolSpec::ProgrammaticToolCalling];
 
     let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
@@ -708,12 +708,6 @@ fn responses_parse_response_preserves_orchestration_items_and_caller() {
             "id": "resp-1",
             "model": "gpt-5.6-sol",
             "output": [
-                {"type": "tool_search_call", "id": "search-1"},
-                {
-                    "type": "tool_search_output",
-                    "id": "search-output-1",
-                    "tools": [{"namespace": "git", "tools": [{"name": "git_status"}]}]
-                },
                 {"type": "program", "id": "program-1"},
                 {
                     "type": "function_call",
@@ -728,9 +722,7 @@ fn responses_parse_response_preserves_orchestration_items_and_caller() {
         }))
         .unwrap();
 
-    assert_eq!(response.responses_context_items.len(), 3);
-    assert_eq!(response.orchestration.tool_search_calls, 1);
-    assert_eq!(response.orchestration.tool_search_loaded_tools, 1);
+    assert_eq!(response.responses_context_items.len(), 1);
     assert_eq!(response.orchestration.program_count, 1);
     assert_eq!(response.orchestration.program_tool_calls, 1);
     assert_eq!(
@@ -769,7 +761,7 @@ fn responses_parse_response_preserves_unknown_native_items_for_stateless_replay(
 #[test]
 fn responses_body_writes_current_hosted_web_search_shape() {
     let mut request = request_with_effort("xhigh");
-    request.tools = vec![ToolSchema::WebSearch {
+    request.tools = vec![ToolSpec::WebSearch {
         external_web_access: true,
         indexed_web_access: Some(true),
         filters: Some(crate::WebSearchFilters {
@@ -803,7 +795,7 @@ fn responses_body_writes_current_hosted_web_search_shape() {
 #[test]
 fn chat_body_writes_custom_grammar_tool() {
     let mut request = request_with_effort("xhigh");
-    request.tools = vec![ToolSchema::custom_grammar(
+    request.tools = vec![ToolSpec::custom_grammar(
         "apply_patch",
         "edit files",
         "lark",
@@ -822,7 +814,7 @@ fn chat_body_writes_custom_grammar_tool() {
 #[test]
 fn provider_compatible_turns_custom_apply_patch_into_function_fallback() {
     let mut request = request_with_effort("high");
-    request.tools = vec![ToolSchema::custom_grammar(
+    request.tools = vec![ToolSpec::custom_grammar(
         "apply_patch",
         "edit files",
         "lark",
@@ -1287,53 +1279,6 @@ fn chat_history_with_item_id_call_id_replays_on_both_endpoints() {
         chat_body["messages"][1]["tool_call_id"],
         serde_json::json!("fc_1")
     );
-}
-
-#[test]
-fn responses_replay_preserves_tool_search_items_verbatim() {
-    let tool_search_call = serde_json::json!({
-        "type": "tool_search_call",
-        "call_id": "call-1",
-        "execution": "client",
-        "arguments": {"query": "git status", "limit": 4},
-    });
-    let tool_search_output = serde_json::json!({
-        "type": "tool_search_output",
-        "call_id": "call-1",
-        "status": "completed",
-        "execution": "client",
-        "tools": [{
-            "type": "namespace",
-            "name": "git",
-            "description": "Git tools",
-            "tools": [{
-                "type": "function",
-                "name": "git_status",
-                "parameters": {"type": "object"},
-                "defer_loading": true,
-            }],
-        }],
-    });
-    let mut request = request_with_effort("xhigh");
-    request.input = vec![
-        ModelContextItem::Responses {
-            item: ResponsesContextItem {
-                kind: ResponsesContextItemKind::ToolSearchCall,
-                value: tool_search_call.clone(),
-            },
-        },
-        ModelContextItem::Responses {
-            item: ResponsesContextItem {
-                kind: ResponsesContextItemKind::ToolSearchOutput,
-                value: tool_search_output.clone(),
-            },
-        },
-    ];
-
-    let body = OpenAiProtocol::responses().build_request_body(&request);
-
-    assert_eq!(body["input"][0], tool_search_call);
-    assert_eq!(body["input"][1], tool_search_output);
 }
 
 #[test]

@@ -123,7 +123,6 @@ class ProviderSettingsView {
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
-    this.responsesToolSearch = false,
     this.responsesProgrammaticToolCalling = false,
     this.iconKey,
   });
@@ -150,7 +149,6 @@ class ProviderSettingsView {
   final bool hostedWebSearch;
   final String standaloneWebSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
   final String? iconKey;
 
@@ -194,7 +192,6 @@ class ProviderSettingsView {
     bool? hostedWebSearch,
     String? standaloneWebSearch,
     String? promptCacheDialect,
-    bool? responsesToolSearch,
     bool? responsesProgrammaticToolCalling,
     Object? iconKey = _providerSettingsUnset,
   }) {
@@ -221,7 +218,6 @@ class ProviderSettingsView {
       hostedWebSearch: hostedWebSearch ?? this.hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch ?? this.standaloneWebSearch,
       promptCacheDialect: promptCacheDialect ?? this.promptCacheDialect,
-      responsesToolSearch: responsesToolSearch ?? this.responsesToolSearch,
       responsesProgrammaticToolCalling:
           responsesProgrammaticToolCalling ??
           this.responsesProgrammaticToolCalling,
@@ -278,7 +274,6 @@ class ProviderPresetView {
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
-    this.responsesToolSearch = false,
     this.responsesProgrammaticToolCalling = false,
     this.iconKey,
   });
@@ -294,7 +289,6 @@ class ProviderPresetView {
   final bool hostedWebSearch;
   final String standaloneWebSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
   final String? iconKey;
 
@@ -325,7 +319,6 @@ class ProviderPresetView {
       hostedWebSearch: hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch,
       promptCacheDialect: promptCacheDialect,
-      responsesToolSearch: responsesToolSearch,
       responsesProgrammaticToolCalling: responsesProgrammaticToolCalling,
       iconKey: iconKey,
     );

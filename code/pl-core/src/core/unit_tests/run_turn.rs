@@ -287,8 +287,9 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
 #[tokio::test]
 async fn enabled_tools_snapshot_remains_internal_trace_event() {
     let mut core = test_turn_engine();
-    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
-        .await;
+    core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+        .await
+        .expect("install default tools");
     let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
     let event = enabled_tools_event(&events);
 
@@ -298,7 +299,7 @@ async fn enabled_tools_snapshot_remains_internal_trace_event() {
 
 #[tokio::test]
 async fn custom_openai_endpoint_omits_responses_hosted_tools_by_default() {
-    let request = capture_default_tools_request(false).await;
+    let request = capture_default_tools_request().await;
     let tool_types = request["tools"]
         .as_array()
         .unwrap()
@@ -311,114 +312,263 @@ async fn custom_openai_endpoint_omits_responses_hosted_tools_by_default() {
 }
 
 #[tokio::test]
-async fn custom_openai_endpoint_sends_client_tool_search_when_explicitly_enabled() {
-    let request = capture_default_tools_request(true).await;
-    let tools = request["tools"].as_array().unwrap();
-    let tool_search = tools
-        .iter()
-        .find(|tool| tool["name"].as_str() == Some("tool_search"))
-        .expect("client tool_search function tool");
-    assert_eq!(tool_search["type"], "function");
-    // schema 固定：query 必填、limit 可选。
-    assert!(
-        tool_search["parameters"]["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("query"))
-    );
-    let tool_types = tools
-        .iter()
-        .filter_map(|tool| tool["type"].as_str())
-        .collect::<Vec<_>>();
-    assert!(tool_types.contains(&"programmatic_tool_calling"));
-}
-
-#[tokio::test]
-async fn client_tool_search_call_records_tool_item_with_structured_summary() {
-    let search_sse = concat!(
-        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_search\",\"call_id\":\"call_search_1\",\"name\":\"tool_search\"}}\n\n",
-        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_search\",\"call_id\":\"call_search_1\",\"name\":\"tool_search\",\"arguments\":\"{\\\"query\\\":\\\"git status\\\",\\\"limit\\\":4}\"}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_search\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
-        "data: [DONE]\n\n"
-    )
-    .to_string();
-    let (base_url, _bodies, handle) =
-        serve_sse_sequence(vec![search_sse, final_sse("search-done", "loaded")]).await;
+async fn before_model_step_adds_replaces_and_removes_tools_for_the_next_step() {
+    let responses = vec![
+        tool_call_sse("alpha", "step_alpha"),
+        tool_call_sse("beta", "step_beta"),
+        final_sse("dynamic-complete", "done"),
+    ];
+    let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    endpoint.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
-        tool_search: true,
-        programmatic_tool_calling: false,
-    };
-    let mut model = pl_model::default_models()
-        .into_iter()
-        .find(|model| model.slug == "gpt-5.6-sol")
-        .unwrap();
-    model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
-    let mut core = test_turn_engine_builder(endpoint, model).build();
-    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
-        .await;
-    // git_status 进入 git 命名空间，随 client tool_search 延迟加载。
-    let probe = crate::tool::ToolEntry::new(
-        HostedToolProbe,
-        crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin()).with_namespace(
-            crate::tool::NamespaceDescriptor::new("git", "Git inspection tools."),
-        ),
-    );
-    let _ = core.extend_source_tools(crate::tool::ToolSourceId::new("host"), vec![probe]);
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    let other_agent = manager.agent_tool_set("other", GlobalToolInheritance::Isolated);
+    let hook = BeforeModelStepHook::new(|context| async move {
+        let group = ToolGroupId::new("dynamic-step");
+        match context.step {
+            0 => context
+                .agent_tools
+                .install(group, vec![step_tool("step_alpha", "alpha")])?,
+            1 => context
+                .agent_tools
+                .install(group, vec![step_tool("step_beta", "beta")])?,
+            2 => {
+                context.agent_tools.uninstall(&group);
+            }
+            _ => {}
+        }
+        Ok(())
+    });
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools)
+        .with_before_model_step(hook)
+        .build();
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
-    let mut recorder = TraceRecorder::new("session-tool-search".to_string(), event_tx, 0);
+    let mut recorder = TraceRecorder::new("session-dynamic-tools".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("inspect git".to_string())
+            TurnRequest::new("exercise dynamic tools".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
         )
         .await
-        .unwrap();
-    handle.await.unwrap();
+        .expect("dynamic tool turn");
+    handle.await.expect("fixture provider");
 
     assert!(result.is_completed());
-    let tool_item = result
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(request_tool_names(&bodies[0]), vec!["step_alpha"]);
+    assert_eq!(request_tool_names(&bodies[1]), vec!["step_beta"]);
+    assert!(request_tool_names(&bodies[2]).is_empty());
+    assert!(other_agent.freeze().specs().is_empty());
+}
+
+#[tokio::test]
+async fn model_transport_retry_reuses_the_same_frozen_tool_plan() {
+    let success = final_sse("retry-plan", "retry ok");
+    let (base_url, bodies, handle) = serve_http_sequence(vec![
+        TestHttpResponse {
+            status: 500,
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {"message": "temporary provider failure", "type": "server_error"}
+            })
+            .to_string(),
+        },
+        TestHttpResponse::sse(success),
+    ])
+    .await;
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    let refreshes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hook_refreshes = refreshes.clone();
+    let hook = BeforeModelStepHook::new(move |context| {
+        let hook_refreshes = hook_refreshes.clone();
+        async move {
+            hook_refreshes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            context.agent_tools.install(
+                ToolGroupId::new("retry"),
+                vec![step_tool("retry_visible", "retry")],
+            )
+        }
+    });
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools)
+        .with_before_model_step(hook)
+        .build();
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-retry-plan".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("retry once".to_string())
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .expect("retry succeeds");
+    handle.await.expect("fixture provider");
+
+    assert!(result.is_completed());
+    assert_eq!(refreshes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], bodies[1]);
+}
+
+#[tokio::test]
+async fn randomized_registration_order_keeps_full_provider_request_bytes_identical() {
+    let responses = (0..4)
+        .map(|index| final_sse(&format!("wire-{index}"), "ok"))
+        .collect();
+    let (base_url, raw_requests, handle) = serve_sse_sequence_with_raw_requests(responses).await;
+    let permutations = [
+        vec![("zeta", "z"), ("alpha", "a"), ("middle", "m")],
+        vec![("middle", "m"), ("zeta", "z"), ("alpha", "a")],
+        vec![("alpha", "a"), ("middle", "m"), ("zeta", "z")],
+        vec![("zeta", "z"), ("middle", "m"), ("alpha", "a")],
+    ];
+
+    for permutation in permutations {
+        let mut endpoint = ProviderEndpoint::openai(Some(base_url.clone()));
+        endpoint.bearer_token = Some("test-token".to_string());
+        let manager = ToolManager::new();
+        let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+        agent_tools
+            .install(
+                ToolGroupId::new("wire"),
+                permutation
+                    .into_iter()
+                    .map(|(name, output)| step_tool(name, output))
+                    .collect(),
+            )
+            .expect("install randomized tools");
+        let core = test_turn_engine_builder(endpoint, local_responses_model())
+            .with_agent_tool_set(agent_tools)
+            .build();
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("wire-session".to_string(), event_tx, 0);
+        let mut session = AgentSession::new();
+        core.run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("stable request".to_string()),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .expect("stable request turn");
+    }
+    handle.await.expect("fixture provider");
+
+    let requests = raw_requests.lock().unwrap();
+    assert_eq!(requests.len(), 4);
+    for request in requests.iter().skip(1) {
+        assert_eq!(request, &requests[0]);
+    }
+}
+
+#[tokio::test]
+async fn each_step_trace_pairs_tool_fingerprint_with_reported_provider_cache_usage() {
+    let sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_cache_trace\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_cache_trace\",\"delta\":\"ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_cache_trace\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cache_trace\",\"usage\":{\"input_tokens\":100,\"output_tokens\":2,\"total_tokens\":102,\"input_tokens_details\":{\"cached_tokens\":40,\"cache_write_tokens\":15}}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, handle) = serve_sse_once(sse).await;
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    agent_tools
+        .install(
+            ToolGroupId::new("trace"),
+            vec![step_tool("trace_visible", "ok")],
+        )
+        .expect("install trace tool");
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools)
+        .build();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let mut recorder = TraceRecorder::new("cache-trace-session".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("trace cache usage".to_string()),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .expect("cache trace turn");
+    handle.await.expect("fixture provider");
+
+    let enabled = result
         .trace_events
         .iter()
-        .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Tool => {
-                Some(item)
-            }
+        .find_map(|event| match &event.kind {
+            TraceEventKind::EnabledToolsRecorded { event } => Some(event),
             _ => None,
         })
-        .find(|item| {
-            item.tool()
-                .is_some_and(|tool| tool.invocation().name() == "tool_search")
-        })
-        .expect("tool_search tool trace part");
-    let tool = tool_item.tool().unwrap();
-    assert_eq!(tool.invocation().call_id(), Some("call_search_1"));
-    assert!(tool.invocation().arguments().contains("git status"));
-    let summary: serde_json::Value =
-        serde_json::from_str(tool.terminal_output().expect("tool search output").result())
-            .expect("tool_search item result is structured JSON");
-    assert_eq!(summary["type"], "tool_search");
-    assert_eq!(summary["query"], "git status");
-    assert_eq!(summary["loadedToolCount"], 1);
-    assert_eq!(summary["tools"][0]["namespace"], "git");
-    assert_eq!(summary["tools"][0]["name"], "git_status");
-    // canonical context 仍由配对的 tool_search_call/output Responses 项承载。
-    let context_kinds = session
-        .items()
+        .expect("enabled tools trace");
+    assert_eq!(enabled.step, 0);
+    assert_eq!(enabled.tools, vec!["trace_visible"]);
+    assert!(!enabled.wire_fingerprint.is_empty());
+    let usage = result
+        .trace_events
         .iter()
-        .filter_map(|item| match item {
-            pl_protocol::ModelContextItem::Responses { item } => Some(item.kind),
+        .find_map(|event| match &event.kind {
+            TraceEventKind::TracePartCompleted { item } => match item.state() {
+                pl_trace::TracePartState::Inference(inference) => inference.state().usage(),
+                _ => None,
+            },
             _ => None,
         })
-        .collect::<Vec<_>>();
-    assert!(context_kinds.contains(&pl_protocol::ResponsesContextItemKind::ToolSearchCall));
-    assert!(context_kinds.contains(&pl_protocol::ResponsesContextItemKind::ToolSearchOutput));
+        .expect("completed inference usage");
+    assert_eq!(usage.cached_prompt_tokens, 40);
+    assert_eq!(usage.cache_write_tokens, 15);
+}
+
+#[tokio::test]
+async fn before_model_step_failure_stops_before_provider_io() {
+    let mut endpoint = ProviderEndpoint::openai(Some("http://127.0.0.1:1".to_string()));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let hook = BeforeModelStepHook::new(|_context| async {
+        Err(PureError::ConfigError(
+            "injected tool refresh conflict".to_string(),
+        ))
+    });
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_before_model_step(hook)
+        .build();
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-refresh-error".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let error = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("must not reach provider".to_string()),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .expect_err("refresh failure must abort the step");
+
+    assert!(error.to_string().contains("injected tool refresh conflict"));
 }
 
 #[tokio::test]
@@ -725,7 +875,8 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     endpoint.bearer_token = Some("test-token".to_string());
     let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
     core.register_test_tool(HistoryMarkerTool);
-    core.register_test_tool(ParentHistoryProbeTool);
+    let session_runtime = core.tool_session_runtime();
+    core.register_test_tool(ParentHistoryProbeTool { session_runtime });
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-history".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -884,40 +1035,21 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     assert_eq!(receipt.artifacts[0].get("payload"), None);
 }
 
-async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json::Value {
+async fn capture_default_tools_request() -> serde_json::Value {
     let (base_url, bodies, handle) =
         serve_sse_sequence(vec![final_sse("hosted-tools", "ok")]).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    if enable_hosted_tools {
-        endpoint.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
-            tool_search: true,
-            programmatic_tool_calling: true,
-        };
-    }
     let mut model = pl_model::default_models()
         .into_iter()
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
     model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
     let mut core = test_turn_engine_builder(endpoint, model).build();
-    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
-        .await;
-    // HostedToolProbe 命名为 git_status；启用检索时归入 git 命名空间进入延迟 catalog。
-    let probe = crate::tool::ToolEntry::new(
-        HostedToolProbe,
-        if enable_hosted_tools {
-            crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin())
-                .with_namespace(crate::tool::NamespaceDescriptor::new(
-                    "git",
-                    "Git inspection tools.",
-                ))
-                .programmatic()
-        } else {
-            crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin())
-        },
-    );
-    let _ = core.extend_source_tools(crate::tool::ToolSourceId::new("host"), vec![probe]);
+    core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+        .await
+        .expect("install default tools");
+    core.register_test_tool(HostedToolProbe);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-hosted-tools".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -942,6 +1074,31 @@ fn local_responses_model() -> pl_model::ModelInfo {
     let mut model = pl_model::ModelInfo::fallback("local-responses");
     model.transport = pl_model::ModelTransportProfile::responses_http();
     model
+}
+
+fn step_tool(name: &'static str, output: &'static str) -> std::sync::Arc<dyn Tool> {
+    std::sync::Arc::new(
+        LocalTool::new(
+            name,
+            name,
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+            }),
+            move |_input, _context| async move { Ok(ToolResult::success(output)) },
+        )
+        .with_effect(crate::ToolEffect::Read),
+    )
+}
+
+fn request_tool_names(body: &serde_json::Value) -> Vec<&str> {
+    body["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| tool.get("name").and_then(serde_json::Value::as_str))
+        .collect()
 }
 
 #[derive(Debug)]
@@ -980,25 +1137,15 @@ impl Tool for HostedToolProbe {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
-        async {
-            Ok(ToolOutput {
-                description: "clean".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
-        }
-        .boxed()
+        async { Ok(ToolResult::success("clean")) }.boxed()
     }
 }
 
@@ -1026,28 +1173,25 @@ impl Tool for LargeArtifactTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async {
-            Ok(ToolOutput {
-                description: "large artifact ready".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: vec![crate::tool::ToolRuntimeEvent::OutputArtifacts {
+            let mut result = ToolResult::success("large artifact ready");
+            result
+                .runtime_events
+                .push(crate::tool::ToolDirective::OutputArtifacts {
                     artifacts: vec![serde_json::json!({
                         "kind": "largeArtifact",
                         "payload": "x".repeat(64 * 1024),
                     })],
-                }],
-            })
+                });
+            Ok(result)
         }
         .boxed()
     }
@@ -1077,20 +1221,17 @@ impl Tool for EndTurnContentTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async {
-            Ok(
-                crate::tool::ToolExecutionResult::<serde_json::Value>::success("completed")
-                    .ending_turn_with_content("TASK_E2E_DONE")
-                    .into_tool_output(),
-            )
+            Ok(crate::tool::ToolResult::success("completed")
+                .ending_turn_with_content("TASK_E2E_DONE"))
         }
         .boxed()
     }
@@ -1120,30 +1261,22 @@ impl Tool for HistoryMarkerTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
-        async {
-            Ok(ToolOutput {
-                description: "history marker".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
-        }
-        .boxed()
+        async { Ok(ToolResult::success("history marker")) }.boxed()
     }
 }
 
 #[derive(Debug)]
-struct ParentHistoryProbeTool;
+struct ParentHistoryProbeTool {
+    session_runtime: crate::tool::ToolSessionRuntime,
+}
 
 impl Tool for ParentHistoryProbeTool {
     fn name(&self) -> &str {
@@ -1169,34 +1302,27 @@ impl Tool for ParentHistoryProbeTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async move {
-            let marker_visible = context.parent_session.messages().iter().any(|message| {
+            let parent_session = self.session_runtime.parent_session();
+            let marker_visible = parent_session.messages().iter().any(|message| {
                 message
                     .tool_result
                     .as_ref()
                     .is_some_and(|record| record.name == "history_marker")
             });
-            Ok(ToolOutput {
-                description: if marker_visible {
-                    "history marker visible"
-                } else {
-                    "history marker missing"
-                }
-                .to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::success(if marker_visible {
+                "history marker visible"
+            } else {
+                "history marker missing"
+            }))
         }
         .boxed()
     }

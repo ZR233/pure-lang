@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::{EffectivePromptCachePolicy, ProviderEndpoint, ReasoningConfig, ToolSchema};
+use pl_model::{EffectivePromptCachePolicy, ProviderEndpoint, ReasoningConfig, ToolSpec};
 use pl_protocol::{
     Message, ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
 };
@@ -17,11 +17,7 @@ pub(crate) struct PromptCacheInput<'a> {
     pub working_context: Option<&'a ModelContextSnapshot>,
     pub fixed_prefix_section_hashes: BTreeMap<String, String>,
     /// 实际发送的 eager 工具 schema（`WirePrefixFingerprint` 语义）。
-    pub tools: &'a [ToolSchema],
-    /// 延迟加载 Tool Search catalog 的哈希；仅诊断，不参与轮换比较。
-    pub tool_catalog_hash: Option<String>,
-    /// 工具注册表全局 revision；仅诊断，不参与轮换比较。
-    pub registry_revision: Option<u64>,
+    pub tools: &'a [ToolSpec],
     pub tool_choice: &'a str,
     pub parallel_tool_calls: bool,
     pub reasoning: Option<&'a ReasoningConfig>,
@@ -41,7 +37,7 @@ struct PromptHashes<'a> {
 }
 
 /// 以稳定名称和 canonical JSON 顺序冻结一次 Turn 的模型可见工具集合。
-pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
+pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSpec>) -> Vec<ToolSpec> {
     for tool in &mut tools {
         canonicalize_tool_schema(tool);
     }
@@ -49,9 +45,9 @@ pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema>
     tools
 }
 
-fn canonicalize_tool_schema(tool: &mut ToolSchema) {
+fn canonicalize_tool_schema(tool: &mut ToolSpec) {
     match tool {
-        ToolSchema::Function {
+        ToolSpec::Function {
             input_schema,
             output_schema,
             ..
@@ -61,16 +57,16 @@ fn canonicalize_tool_schema(tool: &mut ToolSchema) {
                 canonicalize_json(output_schema);
             }
         }
-        ToolSchema::Custom { output_schema, .. } => {
+        ToolSpec::Custom { output_schema, .. } => {
             if let Some(output_schema) = output_schema {
                 canonicalize_json(output_schema);
             }
         }
-        ToolSchema::ProgrammaticToolCalling | ToolSchema::WebSearch { .. } => {}
+        ToolSpec::ProgrammaticToolCalling | ToolSpec::WebSearch { .. } => {}
     }
 }
 
-fn sort_tool_schemas(tools: &mut [ToolSchema]) {
+fn sort_tool_schemas(tools: &mut [ToolSpec]) {
     tools.sort_by(|left, right| {
         left.name().cmp(right.name()).then_with(|| {
             canonical_schema(left)
@@ -143,8 +139,6 @@ pub(crate) fn prepare_prompt_context(
         fixed_prefix_section_hashes: input.fixed_prefix_section_hashes.clone(),
         request_properties_hash,
         tool_schema_hash,
-        tool_catalog_hash: input.tool_catalog_hash.clone(),
-        registry_revision: input.registry_revision,
         context_hash,
         prompt_cache_policy: input.prompt_cache_policy.label().to_string(),
         prefix_changed_reason: reason,
@@ -294,7 +288,7 @@ fn request_properties_hash(
     });
     Ok(canonical_json_hash(&value))
 }
-fn canonical_schema(schema: &ToolSchema) -> Result<String, serde_json::Error> {
+fn canonical_schema(schema: &ToolSpec) -> Result<String, serde_json::Error> {
     serde_json::to_value(schema).map(|value| canonical_json_hash(&value))
 }
 

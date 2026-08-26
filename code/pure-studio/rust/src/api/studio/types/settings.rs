@@ -23,7 +23,6 @@ pub struct ProviderInput {
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
-    pub responses_tool_search: bool,
     pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
@@ -191,7 +190,6 @@ pub struct BridgeProviderSettingsDto {
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
-    pub responses_tool_search: bool,
     pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
     pub models: Vec<BridgeProviderModelSettingsDto>,
@@ -323,7 +321,6 @@ pub struct BridgeProviderPresetDescriptor {
 pub struct BridgeProviderServiceCapabilitiesDescriptor {
     pub web_search: BridgeWebSearchProviderCapabilitiesDescriptor,
     pub prompt_cache_dialect: String,
-    pub responses_tool_search: bool,
     pub responses_programmatic_tool_calling: bool,
 }
 
@@ -423,7 +420,6 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                             standalone: preset.service_capabilities.web_search.standalone,
                         },
                         prompt_cache_dialect: preset.service_capabilities.prompt_cache_dialect,
-                        responses_tool_search: preset.service_capabilities.responses_tool_search,
                         responses_programmatic_tool_calling: preset
                             .service_capabilities
                             .responses_programmatic_tool_calling,

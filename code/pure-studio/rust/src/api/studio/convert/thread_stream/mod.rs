@@ -549,8 +549,6 @@ fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot
         active_lsp_servers: value.active_lsp_servers,
         progress: value.progress,
         mcp_health: value.mcp_health.map(mcp_health),
-        tool_registry_revision: value.tool_registry_revision,
-        tool_catalog_hash: value.tool_catalog_hash,
         updated_at: value.updated_at,
     }
 }

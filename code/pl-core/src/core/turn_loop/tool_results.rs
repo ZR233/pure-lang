@@ -34,7 +34,7 @@ pub(super) fn apply_batch_budget(
         let visible_bytes = projected_result.len() as u64;
         let mut metrics_updated = false;
         for event in &mut tool_result.runtime_events {
-            if let crate::tool::ToolRuntimeEvent::OutputMetrics {
+            if let crate::tool::ToolDirective::OutputMetrics {
                 model_visible_bytes,
                 ..
             } = event
@@ -47,7 +47,7 @@ pub(super) fn apply_batch_budget(
         if !metrics_updated {
             tool_result
                 .runtime_events
-                .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+                .push(crate::tool::ToolDirective::OutputMetrics {
                     raw_bytes: original_result.len() as u64,
                     model_visible_bytes: visible_bytes,
                     artifact_bytes: 0,
@@ -90,57 +90,55 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         .runtime_events
         .iter()
         .filter_map(|event| match event {
-            crate::tool::ToolRuntimeEvent::OutputArtifacts { artifacts } => {
-                Some(artifacts.as_slice())
-            }
-            crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-            | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-            | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
-            | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-            | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-            | crate::tool::ToolRuntimeEvent::ExecutionFailed
-            | crate::tool::ToolRuntimeEvent::CacheHit { .. }
-            | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
-            | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-            | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
+            crate::tool::ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
+            crate::tool::ToolDirective::InteractionRequested { .. }
+            | crate::tool::ToolDirective::SkillActivated { .. }
+            | crate::tool::ToolDirective::PlanCompleted { .. }
+            | crate::tool::ToolDirective::ToolResultRevision { .. }
+            | crate::tool::ToolDirective::AuditMetadata { .. }
+            | crate::tool::ToolDirective::ExecutionFailed
+            | crate::tool::ToolDirective::CacheHit { .. }
+            | crate::tool::ToolDirective::OutputMetrics { .. }
+            | crate::tool::ToolDirective::OutputBudget { .. }
+            | crate::tool::ToolDirective::EndTurn { .. } => None,
         })
         .flatten()
         .map(compact_artifact_reference)
         .collect::<Vec<_>>();
     let cache_hit = result.runtime_events.iter().find_map(|event| match event {
-        crate::tool::ToolRuntimeEvent::CacheHit {
+        crate::tool::ToolDirective::CacheHit {
             reused_from_call_id,
             result_hash,
             total_bytes,
         } => Some((reused_from_call_id, result_hash, *total_bytes)),
-        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-        | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
-        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
-        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-        | crate::tool::ToolRuntimeEvent::ExecutionFailed
-        | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
-        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
+        crate::tool::ToolDirective::InteractionRequested { .. }
+        | crate::tool::ToolDirective::SkillActivated { .. }
+        | crate::tool::ToolDirective::PlanCompleted { .. }
+        | crate::tool::ToolDirective::ToolResultRevision { .. }
+        | crate::tool::ToolDirective::OutputArtifacts { .. }
+        | crate::tool::ToolDirective::AuditMetadata { .. }
+        | crate::tool::ToolDirective::ExecutionFailed
+        | crate::tool::ToolDirective::OutputMetrics { .. }
+        | crate::tool::ToolDirective::OutputBudget { .. }
+        | crate::tool::ToolDirective::EndTurn { .. } => None,
     });
     let metrics = result.runtime_events.iter().find_map(|event| match event {
-        crate::tool::ToolRuntimeEvent::OutputMetrics {
+        crate::tool::ToolDirective::OutputMetrics {
             raw_bytes,
             model_visible_bytes,
             artifact_bytes: _,
             result_hash,
         } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
-        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
-        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
-        | crate::tool::ToolRuntimeEvent::PlanCompleted { .. }
-        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
-        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
-        | crate::tool::ToolRuntimeEvent::AuditMetadata { .. }
-        | crate::tool::ToolRuntimeEvent::ExecutionFailed
-        | crate::tool::ToolRuntimeEvent::CacheHit { .. }
-        | crate::tool::ToolRuntimeEvent::OutputBudget { .. }
-        | crate::tool::ToolRuntimeEvent::EndTurn { .. } => None,
+        crate::tool::ToolDirective::InteractionRequested { .. }
+        | crate::tool::ToolDirective::SkillActivated { .. }
+        | crate::tool::ToolDirective::PlanCompleted { .. }
+        | crate::tool::ToolDirective::ToolResultRevision { .. }
+        | crate::tool::ToolDirective::OutputArtifacts { .. }
+        | crate::tool::ToolDirective::AuditMetadata { .. }
+        | crate::tool::ToolDirective::ExecutionFailed
+        | crate::tool::ToolDirective::CacheHit { .. }
+        | crate::tool::ToolDirective::OutputBudget { .. }
+        | crate::tool::ToolDirective::EndTurn { .. } => None,
     });
     ToolResultReceipt {
         call_id: result.call_id.clone(),
@@ -285,7 +283,7 @@ mod tests {
         let mut result = tool_result("mcp", r#"{"answer":42}"#.to_string());
         result
             .runtime_events
-            .push(crate::tool::ToolRuntimeEvent::AuditMetadata {
+            .push(crate::tool::ToolDirective::AuditMetadata {
                 metadata: serde_json::json!({
                     "kind": "mcpCallToolResult",
                     "result": { "structuredContent": { "answer": 42 } },
@@ -305,7 +303,7 @@ mod tests {
         ];
         results[0]
             .runtime_events
-            .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+            .push(crate::tool::ToolDirective::OutputMetrics {
                 raw_bytes: 5_000,
                 model_visible_bytes: first_result.len() as u64,
                 artifact_bytes: 7,

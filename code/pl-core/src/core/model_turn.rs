@@ -1,6 +1,6 @@
 use pl_model::{
     CompletionRequest, CompletionResponse, ModelInvocationContext, ModelRuntime, ReasoningConfig,
-    ReasoningSummary, ToolSchema,
+    ReasoningSummary, ToolSpec,
 };
 use pl_protocol::{PureError, Result};
 use tokio_util::sync::CancellationToken;
@@ -16,7 +16,7 @@ use crate::{AgentSession, ResolvedModelRoute};
 #[derive(Debug, Clone, Default)]
 pub struct ModelTurnRequest {
     instructions: Option<String>,
-    tools: Vec<ToolSchema>,
+    tools: Vec<ToolSpec>,
     parallel_tool_calls: bool,
     max_tokens: Option<u64>,
     reasoning: Option<ReasoningConfig>,
@@ -48,7 +48,7 @@ impl ModelTurnRequest {
         self
     }
 
-    pub fn with_tools(mut self, tools: Vec<ToolSchema>) -> Self {
+    pub fn with_tools(mut self, tools: Vec<ToolSpec>) -> Self {
         self.tools = tools;
         self
     }

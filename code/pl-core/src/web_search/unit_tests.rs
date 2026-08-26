@@ -123,14 +123,6 @@ fn hosted_path_is_exclusive_when_function_tools_are_unavailable() {
 
     assert_eq!(plan.resolution.path, Some(WebSearchPath::Hosted));
     assert_eq!(plan.visibility, ToolVisibilityConstraint::Exclusive);
-    assert_eq!(
-        plan.constrain_visibility(crate::ToolVisibilitySet::from_tool_names([
-            "spawn_agent",
-            "read_file",
-        ]))
-        .into_names(),
-        std::collections::BTreeSet::from([crate::tool::TOOL_WEB_SEARCH.to_string()])
-    );
 }
 
 #[test]

@@ -14,7 +14,8 @@ use serde_json::Value;
 
 use super::cache::ToolCachePolicy;
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, deserialize_tool_input,
+    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolInput, ToolResult,
+    deserialize_tool_input,
 };
 use crate::turn::ToolEffect;
 
@@ -103,6 +104,10 @@ where
         Some(self.kind.effect())
     }
 
+    fn supports_programmatic_calls(&self) -> bool {
+        self.kind.effect() == ToolEffect::Read
+    }
+
     fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
         self.kind.cache_policy()
     }
@@ -110,8 +115,8 @@ where
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        _context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let outcome = match self.kind {
                 GitToolKind::Status => {
@@ -131,14 +136,14 @@ where
                     self.run_sync_default_branch(input.arguments).await
                 }
             }?;
-            Ok(ToolOutput {
-                description: outcome.description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: outcome.exit_code,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::from_runtime_text(
+                outcome.description,
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                outcome.exit_code,
+                false,
+                Vec::new(),
+            ))
         }
         .boxed()
     }

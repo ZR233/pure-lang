@@ -27,7 +27,7 @@ impl StudioRuntime {
             self.store.clone(),
             self.config_runtime.clone(),
             self.external_runtimes.mcp.clone(),
-            self.external_runtimes.mcp_shared_tools.clone(),
+            self.agent_facility.tool_manager.clone(),
             self.external_runtimes.lsp.clone(),
             self.agent_facility.interactions.clone(),
             self.task_coordinator.clone(),

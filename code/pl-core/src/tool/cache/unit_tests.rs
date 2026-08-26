@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -6,21 +6,32 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::PureError;
-use crate::tool::{OutputTruncation, ToolOutput};
+use crate::tool::ToolResult;
 use crate::turn::ToolEffect;
 
-fn output(description: &str) -> ToolOutput {
-    ToolOutput {
-        description: description.to_string(),
-        truncated: OutputTruncation::empty(),
-        output_file: PathBuf::new(),
-        exit_code: Some(0),
-        timed_out: false,
-        runtime_events: Vec::new(),
+fn output(description: &str) -> ToolResult {
+    ToolResult::success(description)
+}
+
+fn cache_request<'a>(
+    tool_name: &'a str,
+    arguments: &'a serde_json::Value,
+    workspace_root: &'a Path,
+    policy: ToolCachePolicy,
+    call_id: impl Into<String>,
+    executor_generation: u64,
+) -> ToolCacheExecutionRequest<'a> {
+    ToolCacheExecutionRequest {
+        tool_name,
+        arguments,
+        workspace_root,
+        policy,
+        call_id: call_id.into(),
+        executor_generation,
     }
 }
 
-fn read_file_output(start_line: u64, end_line: u64, next_start_line: Option<u64>) -> ToolOutput {
+fn read_file_output(start_line: u64, end_line: u64, next_start_line: Option<u64>) -> ToolResult {
     output(
         &serde_json::json!({
             "path": "src/lib.rs",
@@ -127,11 +138,14 @@ async fn concurrent_identical_reads_execute_once() {
             cache
                 .snapshot()
                 .execute_or_reuse(
-                    "read_file",
-                    &serde_json::json!({"path": "src/lib.rs", "startLine": 1}),
-                    Path::new("/workspace/repo"),
-                    ToolCachePolicy::UntilWorkspaceMutation,
-                    format!("call-{call}"),
+                    cache_request(
+                        "read_file",
+                        &serde_json::json!({"path": "src/lib.rs", "startLine": 1}),
+                        Path::new("/workspace/repo"),
+                        ToolCachePolicy::UntilWorkspaceMutation,
+                        format!("call-{call}"),
+                        0,
+                    ),
                     || async move {
                         executions.fetch_add(1, Ordering::SeqCst);
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -152,10 +166,42 @@ async fn concurrent_identical_reads_execute_once() {
     assert_eq!(
         outputs
             .iter()
-            .filter(|output| output.description.contains("\"cacheHit\":true"))
+            .filter(|output| output.model_output().contains("\"cacheHit\":true"))
             .count(),
         3
     );
+}
+
+#[tokio::test]
+async fn executor_generation_is_part_of_the_execution_cache_key() {
+    let cache = TurnToolCacheHandle::default();
+    let snapshot = cache.snapshot();
+    let executions = Arc::new(AtomicUsize::new(0));
+    let arguments = serde_json::json!({"query": "stable"});
+    let root = Path::new("/workspace/repo");
+
+    for generation in [7, 8, 7] {
+        let executions = executions.clone();
+        snapshot
+            .execute_or_reuse(
+                cache_request(
+                    "lookup",
+                    &arguments,
+                    root,
+                    ToolCachePolicy::WithinTurn,
+                    format!("call-{generation}"),
+                    generation,
+                ),
+                || async move {
+                    executions.fetch_add(1, Ordering::SeqCst);
+                    Ok(output(&format!("generation-{generation}")))
+                },
+            )
+            .await
+            .expect("cacheable lookup");
+    }
+
+    assert_eq!(executions.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
@@ -180,11 +226,14 @@ async fn provider_response_snapshot_keeps_failure_key_stable_while_epoch_advance
         tokio::spawn(async move {
             snapshot
                 .execute_or_reuse(
-                    "read_file",
-                    &arguments,
-                    root,
-                    ToolCachePolicy::UntilWorkspaceMutation,
-                    "first".to_string(),
+                    cache_request(
+                        "read_file",
+                        &arguments,
+                        root,
+                        ToolCachePolicy::UntilWorkspaceMutation,
+                        "first",
+                        0,
+                    ),
                     || async move {
                         executions.fetch_add(1, Ordering::SeqCst);
                         first_started.notify_one();
@@ -209,11 +258,14 @@ async fn provider_response_snapshot_keeps_failure_key_stable_while_epoch_advance
         tokio::spawn(async move {
             snapshot
                 .execute_or_reuse(
-                    "read_file",
-                    &arguments,
-                    root,
-                    ToolCachePolicy::UntilWorkspaceMutation,
-                    "second".to_string(),
+                    cache_request(
+                        "read_file",
+                        &arguments,
+                        root,
+                        ToolCachePolicy::UntilWorkspaceMutation,
+                        "second",
+                        0,
+                    ),
                     || async move {
                         executions.fetch_add(1, Ordering::SeqCst);
                         Err(PureError::ToolExecutionFailed {
@@ -246,11 +298,14 @@ async fn provider_response_snapshot_keeps_failure_key_stable_while_epoch_advance
     let third_error = cache
         .snapshot()
         .execute_or_reuse(
-            "read_file",
-            &arguments,
-            root,
-            ToolCachePolicy::UntilWorkspaceMutation,
-            "third".to_string(),
+            cache_request(
+                "read_file",
+                &arguments,
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+                "third",
+                0,
+            ),
             || async move {
                 executions_after_batch.fetch_add(1, Ordering::SeqCst);
                 Err(PureError::ToolExecutionFailed {
@@ -275,15 +330,18 @@ async fn covered_read_file_range_returns_compact_receipt_without_reexecution() {
     cache
         .snapshot()
         .execute_or_reuse(
-            "read_file",
-            &serde_json::json!({
-                "path": "src/lib.rs",
-                "startLine": 1,
-                "maxLines": 430,
-            }),
-            root,
-            ToolCachePolicy::UntilWorkspaceMutation,
-            "first".to_string(),
+            cache_request(
+                "read_file",
+                &serde_json::json!({
+                    "path": "src/lib.rs",
+                    "startLine": 1,
+                    "maxLines": 430,
+                }),
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+                "first",
+                0,
+            ),
             || async move {
                 first_executions.fetch_add(1, Ordering::SeqCst);
                 Ok(read_file_output(1, 430, Some(431)))
@@ -296,15 +354,18 @@ async fn covered_read_file_range_returns_compact_receipt_without_reexecution() {
     let covered = cache
         .snapshot()
         .execute_or_reuse(
-            "read_file",
-            &serde_json::json!({
-                "path": "src/lib.rs",
-                "startLine": 100,
-                "maxLines": 200,
-            }),
-            root,
-            ToolCachePolicy::UntilWorkspaceMutation,
-            "covered".to_string(),
+            cache_request(
+                "read_file",
+                &serde_json::json!({
+                    "path": "src/lib.rs",
+                    "startLine": 100,
+                    "maxLines": 200,
+                }),
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+                "covered",
+                0,
+            ),
             || async move {
                 covered_executions.fetch_add(1, Ordering::SeqCst);
                 Ok(read_file_output(100, 299, Some(300)))
@@ -313,10 +374,10 @@ async fn covered_read_file_range_returns_compact_receipt_without_reexecution() {
         .await
         .expect("covered read is reused");
     assert_eq!(executions.load(Ordering::SeqCst), 1);
-    assert!(covered.description.contains("\"cacheHit\":true"));
+    assert!(covered.model_output().contains("\"cacheHit\":true"));
     assert!(
         covered
-            .description
+            .model_output()
             .contains("\"reuseKind\":\"coveredReadRange\"")
     );
 
@@ -324,15 +385,18 @@ async fn covered_read_file_range_returns_compact_receipt_without_reexecution() {
     cache
         .snapshot()
         .execute_or_reuse(
-            "read_file",
-            &serde_json::json!({
-                "path": "src/lib.rs",
-                "startLine": 300,
-                "maxLines": 200,
-            }),
-            root,
-            ToolCachePolicy::UntilWorkspaceMutation,
-            "expanded".to_string(),
+            cache_request(
+                "read_file",
+                &serde_json::json!({
+                    "path": "src/lib.rs",
+                    "startLine": 300,
+                    "maxLines": 200,
+                }),
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+                "expanded",
+                0,
+            ),
             || async move {
                 expanded_executions.fetch_add(1, Ordering::SeqCst);
                 Ok(read_file_output(300, 499, Some(500)))
@@ -355,11 +419,14 @@ async fn deterministic_read_failure_is_reused_until_any_workspace_mutation_attem
         let error = cache
             .snapshot()
             .execute_or_reuse(
-                "read_file",
-                &arguments,
-                root,
-                ToolCachePolicy::UntilWorkspaceMutation,
-                call_id.to_string(),
+                cache_request(
+                    "read_file",
+                    &arguments,
+                    root,
+                    ToolCachePolicy::UntilWorkspaceMutation,
+                    call_id,
+                    0,
+                ),
                 || async move {
                     executions.fetch_add(1, Ordering::SeqCst);
                     Err(PureError::ToolExecutionFailed {
@@ -382,11 +449,14 @@ async fn deterministic_read_failure_is_reused_until_any_workspace_mutation_attem
     let _ = cache
         .snapshot()
         .execute_or_reuse(
-            "read_file",
-            &arguments,
-            root,
-            ToolCachePolicy::UntilWorkspaceMutation,
-            "third".to_string(),
+            cache_request(
+                "read_file",
+                &arguments,
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+                "third",
+                0,
+            ),
             || async move {
                 executions_after_mutation.fetch_add(1, Ordering::SeqCst);
                 Err(PureError::ToolExecutionFailed {

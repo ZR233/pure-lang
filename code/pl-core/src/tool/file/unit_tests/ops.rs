@@ -5,8 +5,9 @@ use pretty_assertions::assert_eq;
 async fn write_file_waits_for_workspace_write_lock() {
     let root = unique_temp_dir("write-lock-tool");
     let context = context(&root).await;
-    let guard = context.workspace_write_lock().await;
-    let tool = WriteFileTool;
+    let workspace = tool_workspace(&root);
+    let guard = workspace.write_lock().await;
+    let tool = WriteFileTool::new(workspace);
     let write_context = context.clone();
     let write_task = tokio::spawn(async move {
         tool.execute(
@@ -46,7 +47,7 @@ async fn delete_path_modes_are_explicit() {
     tokio::fs::write(root.join("tree/nested/file.txt"), "file")
         .await
         .unwrap();
-    let tool = DeletePathTool;
+    let tool = DeletePathTool::new(tool_workspace(&root));
 
     tool.execute(
         input(serde_json::json!({ "path": "file.txt", "mode": "file" })),
@@ -83,8 +84,8 @@ async fn copy_and_move_collision_modes_are_explicit() {
     tokio::fs::write(root.join("target.txt"), "old")
         .await
         .unwrap();
-    let copy = CopyPathTool;
-    let move_tool = MovePathTool;
+    let copy = CopyPathTool::new(tool_workspace(&root));
+    let move_tool = MovePathTool::new(tool_workspace(&root));
 
     let fail = copy
         .execute(
@@ -145,7 +146,7 @@ async fn copy_and_move_collision_modes_are_explicit() {
 async fn list_files_returns_empty_for_missing_workspace_directory() {
     let root = unique_temp_dir("list-missing-directory");
     tokio::fs::create_dir_all(&root).await.unwrap();
-    let tool = list_files_tool();
+    let tool = list_files_tool(&root);
 
     let output = tool
         .execute(
@@ -158,7 +159,7 @@ async fn list_files_returns_empty_for_missing_workspace_directory() {
         .await
         .unwrap();
 
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.canonical_output()).unwrap();
     assert_eq!(value["files"], serde_json::json!([]));
     assert_eq!(value["count"], serde_json::json!(0));
     assert_eq!(value["nextCursor"], serde_json::Value::Null);
@@ -172,7 +173,7 @@ async fn list_files_empty_fields_use_workspace_defaults_without_listing_root() {
     tokio::fs::write(root.join("README.md"), "workspace\n")
         .await
         .unwrap();
-    let tool = list_files_tool();
+    let tool = list_files_tool(&root);
 
     let output = tool
         .execute(
@@ -187,7 +188,7 @@ async fn list_files_empty_fields_use_workspace_defaults_without_listing_root() {
         .await
         .unwrap();
 
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.canonical_output()).unwrap();
     assert_eq!(value["path"], serde_json::json!("."));
     assert_eq!(value["glob"], serde_json::json!("*"));
     assert_eq!(value["files"], serde_json::json!(["README.md", "src/"]));
@@ -209,7 +210,7 @@ async fn list_files_directory_glob_matches_entries_relative_to_path() {
     tokio::fs::create_dir_all(root.join("code/pl-model"))
         .await
         .unwrap();
-    let tool = list_files_tool();
+    let tool = list_files_tool(&root);
 
     let output = tool
         .execute(
@@ -224,7 +225,7 @@ async fn list_files_directory_glob_matches_entries_relative_to_path() {
         .await
         .unwrap();
 
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.canonical_output()).unwrap();
     let files = value["files"].as_array().unwrap();
     assert!(files.contains(&serde_json::json!("code/pl-core/")));
     assert!(files.contains(&serde_json::json!("code/pl-model/")));
@@ -243,7 +244,7 @@ async fn list_files_globstar_matches_files_directly_under_prefix() {
     tokio::fs::write(root.join("design/nested/report.md"), "# Report\n")
         .await
         .unwrap();
-    let tool = list_files_tool();
+    let tool = list_files_tool(&root);
 
     let output = tool
         .execute(
@@ -256,45 +257,11 @@ async fn list_files_globstar_matches_files_directly_under_prefix() {
         .await
         .unwrap();
 
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.canonical_output()).unwrap();
     assert_eq!(
         value["files"],
         serde_json::json!(["design/nested/report.md", "design/overview.md"])
     );
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn list_cursor_is_bound_to_workspace_epoch() {
-    let root = unique_temp_dir("list-cursor-epoch");
-    tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("a.txt"), "a").await.unwrap();
-    tokio::fs::write(root.join("b.txt"), "b").await.unwrap();
-    let tool = list_files_tool();
-    let context = context(&root).await;
-    let first = tool
-        .execute(
-            input(serde_json::json!({"path": ".", "limit": 1})),
-            context.clone(),
-        )
-        .await
-        .unwrap();
-    let first: serde_json::Value = serde_json::from_str(&first.description).unwrap();
-    let cursor = first["nextCursor"].as_str().unwrap().to_string();
-    assert_eq!(first["workspaceEpoch"], 0);
-
-    context
-        .tool_cache
-        .record_effect(Some(crate::ToolEffect::WorkspaceWrite), true);
-    let error = tool
-        .execute(
-            input(serde_json::json!({"path": ".", "limit": 1, "cursor": cursor})),
-            context,
-        )
-        .await
-        .expect_err("old cursor must not page a mutated workspace");
-
-    assert!(error.to_string().contains("cursor does not belong"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -306,7 +273,7 @@ async fn list_treats_empty_cursor_as_first_page() {
         .await
         .unwrap();
 
-    let listed = list_files_tool()
+    let listed = list_files_tool(&root)
         .execute(
             input(serde_json::json!({
                 "path": "",
@@ -317,7 +284,7 @@ async fn list_treats_empty_cursor_as_first_page() {
         )
         .await
         .expect("list first page");
-    let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&listed.canonical_output()).unwrap();
 
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["cursorReset"], false);
@@ -332,7 +299,7 @@ async fn malformed_cursor_is_explicitly_reset_to_first_page() {
         .await
         .unwrap();
 
-    let output = list_files_tool()
+    let output = list_files_tool(&root)
         .execute(
             input(serde_json::json!({
                 "path": "",
@@ -343,7 +310,7 @@ async fn malformed_cursor_is_explicitly_reset_to_first_page() {
         )
         .await
         .expect("reset malformed cursor");
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.canonical_output()).unwrap();
 
     assert_eq!(value["count"], 1);
     assert_eq!(value["cursorReset"], true);
@@ -364,7 +331,7 @@ async fn list_skips_symbolic_link_directories() {
         .unwrap();
     create_directory_symlink(&outside, &root.join("linked")).unwrap();
 
-    let listed = list_files_tool()
+    let listed = list_files_tool(&root)
         .execute(
             input(serde_json::json!({
                 "glob": "**/*.txt",
@@ -375,7 +342,7 @@ async fn list_skips_symbolic_link_directories() {
         )
         .await
         .expect("list should skip symbolic link directories");
-    let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&listed.canonical_output()).unwrap();
 
     assert_eq!(listed["files"], serde_json::json!(["visible.txt"]));
     remove_directory_symlink(&root.join("linked")).unwrap();
@@ -397,7 +364,7 @@ async fn modifying_tools_reject_link_ancestors() {
         .unwrap();
     create_directory_symlink(&outside, &root.join("linked")).unwrap();
 
-    let write = WriteFileTool
+    let write = WriteFileTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "path": "linked/new.txt",
@@ -407,13 +374,13 @@ async fn modifying_tools_reject_link_ancestors() {
             context(&root).await,
         )
         .await;
-    let create = super::super::CreateDirectoryTool
+    let create = super::super::CreateDirectoryTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({ "path": "linked/new-directory" })),
             context(&root).await,
         )
         .await;
-    let patch = apply_patch_tool()
+    let patch = apply_patch_tool(&root)
         .execute(
             input(serde_json::json!({
                 "input": "*** Begin Patch\n*** Add File: linked/patched.txt\n+blocked\n*** End Patch\n"
@@ -421,7 +388,7 @@ async fn modifying_tools_reject_link_ancestors() {
             context(&root).await,
         )
         .await;
-    let copy_source = CopyPathTool
+    let copy_source = CopyPathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "from": "linked/source.txt",
@@ -431,7 +398,7 @@ async fn modifying_tools_reject_link_ancestors() {
             context(&root).await,
         )
         .await;
-    let copy_target = CopyPathTool
+    let copy_target = CopyPathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "from": "source.txt",
@@ -441,7 +408,7 @@ async fn modifying_tools_reject_link_ancestors() {
             context(&root).await,
         )
         .await;
-    let move_target = MovePathTool
+    let move_target = MovePathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "from": "source.txt",
@@ -451,7 +418,7 @@ async fn modifying_tools_reject_link_ancestors() {
             context(&root).await,
         )
         .await;
-    let delete = DeletePathTool
+    let delete = DeletePathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "path": "linked/source.txt",
@@ -503,7 +470,7 @@ async fn recursive_delete_unlinks_child_without_touching_target() {
         .unwrap();
     create_directory_symlink(&outside, &root.join("tree/linked")).unwrap();
 
-    DeletePathTool
+    DeletePathTool::new(tool_workspace(&root))
         .execute(
             input(serde_json::json!({
                 "path": "tree",

@@ -386,8 +386,6 @@ fn context_recovery_starts_a_new_prompt_generation_and_drops_cache_continuation(
                 fixed_prefix_section_hashes: Default::default(),
                 request_properties_hash: "request".to_string(),
                 tool_schema_hash: "tools".to_string(),
-                tool_catalog_hash: None,
-                registry_revision: None,
                 context_hash: "context".to_string(),
                 prompt_cache_policy: "session".to_string(),
                 prefix_changed_reason: PromptPrefixChangedReason::Initial,

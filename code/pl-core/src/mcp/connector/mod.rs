@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use pl_protocol::{PureError, Result};
 use reqwest::header::{HeaderName, HeaderValue};
+use rmcp::handler::client::ClientHandler;
 use rmcp::model::*;
-use rmcp::service::{ClientInitializeError, Peer, RunningService};
+use rmcp::service::{ClientInitializeError, NotificationContext, Peer, RunningService};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{ClientCacheConfig, ClientLifecycleMode, ClientServiceExt, RoleClient};
 use tokio::process::Command;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::{EffectiveMcpServerConfig, McpServerTransport};
 
@@ -40,10 +44,22 @@ pub struct McpConnectRequest {
 ///
 /// Connector 只把 PL 的有效配置投影为 rmcp transport 并启动 client service；
 /// reconcile、generation、健康和权限不属于该边界。
-#[derive(Debug, Clone, Default)]
+type ToolListChangedSink = Arc<dyn Fn(String) + Send + Sync>;
+
+#[derive(Clone, Default)]
 pub struct McpConnector {
+    tool_list_changed: Option<ToolListChangedSink>,
     #[cfg(test)]
     test_connections: Option<TestConnections>,
+}
+
+impl fmt::Debug for McpConnector {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("McpConnector")
+            .field("tool_list_changed", &self.tool_list_changed.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl McpConnector {
@@ -51,19 +67,35 @@ impl McpConnector {
     pub async fn connect(&self, request: McpConnectRequest) -> Result<ConnectedMcp> {
         #[cfg(test)]
         if let Some(connections) = &self.test_connections {
-            return connections
+            let connection = connections
                 .lock()
                 .expect("MCP test connections lock")
                 .get_mut(&request.server_id)
                 .and_then(std::collections::VecDeque::pop_front)
                 .ok_or_else(|| {
                     connection_config_error(&request.server_id, "no queued MCP test connection")
-                });
+                })?;
+            connection
+                .set_tool_list_changed(request.server_id.clone(), self.tool_list_changed.clone())
+                .await;
+            return Ok(connection);
         }
         match request.server.config.transport {
-            McpServerTransport::Stdio => connect_stdio(request).await,
-            McpServerTransport::StreamableHttp => connect_http(request).await,
+            McpServerTransport::Stdio => {
+                connect_stdio(request, self.tool_list_changed.clone()).await
+            }
+            McpServerTransport::StreamableHttp => {
+                connect_http(request, self.tool_list_changed.clone()).await
+            }
         }
+    }
+
+    pub(crate) fn with_tool_list_changed(
+        mut self,
+        handler: impl Fn(String) + Send + Sync + 'static,
+    ) -> Self {
+        self.tool_list_changed = Some(Arc::new(handler));
+        self
     }
 
     #[cfg(test)]
@@ -77,7 +109,61 @@ impl McpConnector {
                 .push_back(connection);
         }
         Self {
+            tool_list_changed: None,
             test_connections: Some(std::sync::Arc::new(std::sync::Mutex::new(by_server))),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct McpClientHandler {
+    info: ClientInfo,
+    server_id: Arc<std::sync::RwLock<String>>,
+    tool_list_changed: Arc<std::sync::RwLock<Option<ToolListChangedSink>>>,
+}
+
+impl McpClientHandler {
+    fn new(
+        info: ClientInfo,
+        server_id: String,
+        tool_list_changed: Option<ToolListChangedSink>,
+    ) -> Self {
+        Self {
+            info,
+            server_id: Arc::new(std::sync::RwLock::new(server_id)),
+            tool_list_changed: Arc::new(std::sync::RwLock::new(tool_list_changed)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn without_notifications(info: ClientInfo) -> Self {
+        Self::new(info, String::new(), None)
+    }
+}
+
+impl ClientHandler for McpClientHandler {
+    fn get_info(&self) -> ClientInfo {
+        self.info.clone()
+    }
+
+    fn on_tool_list_changed(
+        &self,
+        _context: NotificationContext<RoleClient>,
+    ) -> impl Future<Output = ()> + Send + '_ {
+        let server_id = self
+            .server_id
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let handler = self
+            .tool_list_changed
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        async move {
+            if let Some(handler) = handler {
+                handler(server_id);
+            }
         }
     }
 }
@@ -88,7 +174,8 @@ impl McpConnector {
 /// lease 释放后通过 [`Self::close`] 显式关闭。
 pub struct ConnectedMcp {
     peer: Peer<RoleClient>,
-    owner: RwLock<Option<RunningService<RoleClient, ClientInfo>>>,
+    owner: RwLock<Option<RunningService<RoleClient, McpClientHandler>>>,
+    tool_subscription: RwLock<Option<ToolListSubscription>>,
 }
 
 impl fmt::Debug for ConnectedMcp {
@@ -101,16 +188,43 @@ impl fmt::Debug for ConnectedMcp {
 }
 
 impl ConnectedMcp {
-    pub(super) async fn from_running(service: RunningService<RoleClient, ClientInfo>) -> Self {
+    pub(super) async fn from_running(
+        service: RunningService<RoleClient, McpClientHandler>,
+    ) -> Self {
         let peer = service.peer().clone();
         peer.set_response_cache_config(
             ClientCacheConfig::default().with_serve_stale_on_error(false),
         )
         .await;
+        let tool_subscription = start_tool_list_subscription(&service).await;
         Self {
             peer,
             owner: RwLock::new(Some(service)),
+            tool_subscription: RwLock::new(tool_subscription),
         }
+    }
+
+    #[cfg(test)]
+    async fn set_tool_list_changed(&self, server_id: String, handler: Option<ToolListChangedSink>) {
+        let owner = self.owner.read().await;
+        let Some(service) = owner.as_ref() else {
+            return;
+        };
+        *service
+            .service()
+            .server_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = server_id;
+        *service
+            .service()
+            .tool_list_changed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = handler;
+    }
+
+    #[cfg(test)]
+    pub(super) async fn has_tool_subscription(&self) -> bool {
+        self.tool_subscription.read().await.is_some()
     }
 
     /// 返回可克隆的 typed rmcp peer。
@@ -179,6 +293,10 @@ impl ConnectedMcp {
 
     /// 幂等、限时关闭 rmcp service 及其 transport owner。
     pub async fn close(&self) {
+        if let Some(subscription) = self.tool_subscription.write().await.take() {
+            subscription.cancel.cancel();
+            let _ = tokio::time::timeout(CLOSE_TIMEOUT, subscription.task).await;
+        }
         let mut owner = self.owner.write().await;
         let Some(mut service) = owner.take() else {
             return;
@@ -193,8 +311,9 @@ impl ConnectedMcp {
     async fn running_service(
         &self,
         operation: &str,
-    ) -> Result<tokio::sync::RwLockReadGuard<'_, Option<RunningService<RoleClient, ClientInfo>>>>
-    {
+    ) -> Result<
+        tokio::sync::RwLockReadGuard<'_, Option<RunningService<RoleClient, McpClientHandler>>>,
+    > {
         let owner = self.owner.read().await;
         if owner.is_none() {
             return Err(PureError::ToolExecutionFailed {
@@ -206,7 +325,77 @@ impl ConnectedMcp {
     }
 }
 
-async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
+struct ToolListSubscription {
+    cancel: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+}
+
+async fn start_tool_list_subscription(
+    service: &RunningService<RoleClient, McpClientHandler>,
+) -> Option<ToolListSubscription> {
+    let peer_info = service.peer().peer_info()?;
+    let supports_list_changed = peer_info
+        .capabilities
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.list_changed)
+        == Some(true);
+    if peer_info.protocol_version != ProtocolVersion::V_2026_07_28 || !supports_list_changed {
+        return None;
+    }
+    let mut subscription = match service
+        .peer()
+        .listen(SubscriptionFilter::builder().tools_list_changed().build())
+        .await
+    {
+        Ok(subscription) => subscription,
+        Err(error) => {
+            tracing::warn!(%error, "failed to subscribe to MCP tools/list_changed");
+            return None;
+        }
+    };
+    let server_id = service.service().server_id.clone();
+    let handler = service.service().tool_list_changed.clone();
+    let cancel = CancellationToken::new();
+    let task_cancel = cancel.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                () = task_cancel.cancelled() => {
+                    let _ = subscription.cancel().await;
+                    break;
+                }
+                notification = subscription.next() => match notification {
+                    Ok(Some(_notification)) => {
+                        let callback = handler
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .clone();
+                        if let Some(callback) = callback {
+                            callback(
+                                server_id
+                                    .read()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .clone(),
+                            );
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::warn!(%error, "MCP tools/list_changed subscription ended");
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    Some(ToolListSubscription { cancel, task })
+}
+
+async fn connect_stdio(
+    request: McpConnectRequest,
+    tool_list_changed: Option<ToolListChangedSink>,
+) -> Result<ConnectedMcp> {
     let config = &request.server.config;
     let command_name = config
         .command
@@ -243,9 +432,13 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
             )
         })?;
     let stderr = stderr.map(|stderr| StderrCapture::spawn(stderr, &config.env));
-    let service = match client_info(ProtocolVersion::V_2026_07_28)
-        .serve_with_lifecycle(transport, discovery_lifecycle())
-        .await
+    let service = match client_handler(
+        &request.server_id,
+        ProtocolVersion::V_2026_07_28,
+        tool_list_changed,
+    )
+    .serve_with_lifecycle(transport, discovery_lifecycle())
+    .await
     {
         Ok(service) => service,
         Err(error) => {
@@ -260,7 +453,10 @@ async fn connect_stdio(request: McpConnectRequest) -> Result<ConnectedMcp> {
     Ok(ConnectedMcp::from_running(service).await)
 }
 
-async fn connect_http(request: McpConnectRequest) -> Result<ConnectedMcp> {
+async fn connect_http(
+    request: McpConnectRequest,
+    tool_list_changed: Option<ToolListChangedSink>,
+) -> Result<ConnectedMcp> {
     let config = &request.server.config;
     let uri = config.url.as_deref().ok_or_else(|| {
         connection_config_error(&request.server_id, "streamable HTTP url is required")
@@ -283,9 +479,13 @@ async fn connect_http(request: McpConnectRequest) -> Result<ConnectedMcp> {
         transport_config = transport_config.auth_header(token);
     }
     let transport = StreamableHttpClientTransport::from_config(transport_config.clone());
-    let service = match client_info(ProtocolVersion::V_2026_07_28)
-        .serve_with_lifecycle(transport, discovery_lifecycle())
-        .await
+    let service = match client_handler(
+        &request.server_id,
+        ProtocolVersion::V_2026_07_28,
+        tool_list_changed.clone(),
+    )
+    .serve_with_lifecycle(transport, discovery_lifecycle())
+    .await
     {
         Ok(service) => service,
         Err(discovery_error) if should_retry_http_with_initialize(&discovery_error) => {
@@ -293,7 +493,11 @@ async fn connect_http(request: McpConnectRequest) -> Result<ConnectedMcp> {
             // METHOD_NOT_FOUND error 因而表现为关闭 discover response。失败的 worker
             // 不可复用，必须用一个全新的 transport 走标准 initialize。
             let transport = StreamableHttpClientTransport::from_config(transport_config);
-            client_info(ProtocolVersion::V_2025_11_25)
+            client_handler(
+                &request.server_id,
+                ProtocolVersion::V_2025_11_25,
+                tool_list_changed,
+            )
                 .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
                 .await
                 .map_err(|initialize_error| {
@@ -323,6 +527,18 @@ fn client_info(protocol_version: ProtocolVersion) -> ClientInfo {
         Implementation::new("pure-lang", env!("CARGO_PKG_VERSION")),
     )
     .with_protocol_version(protocol_version)
+}
+
+fn client_handler(
+    server_id: &str,
+    protocol_version: ProtocolVersion,
+    tool_list_changed: Option<ToolListChangedSink>,
+) -> McpClientHandler {
+    McpClientHandler::new(
+        client_info(protocol_version),
+        server_id.to_string(),
+        tool_list_changed,
+    )
 }
 
 fn discovery_lifecycle() -> ClientLifecycleMode {

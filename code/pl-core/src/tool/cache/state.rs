@@ -9,7 +9,7 @@ use super::failure::ToolFailureEnvelopeV1;
 use super::key::cache_key;
 use super::read_file::{ReadFileRequest, read_file_request};
 use super::{ToolCachePolicy, TurnToolCacheHandle, TurnToolCacheSnapshot};
-use crate::tool::ToolOutput;
+use crate::tool::ToolResult;
 use crate::turn::ToolEffect;
 
 #[derive(Debug, Default)]
@@ -21,7 +21,7 @@ pub(super) struct TurnToolCache {
 }
 
 pub(super) enum CacheAcquisition {
-    Hit(ToolOutput),
+    Hit(ToolResult),
     Failed(ToolFailureEnvelopeV1),
     Reserved(ToolCacheReservation),
     Wait(tokio::sync::oneshot::Receiver<()>),
@@ -48,6 +48,7 @@ impl TurnToolCacheHandle {
         workspace_root: &Path,
         policy: ToolCachePolicy,
         workspace_epoch: u64,
+        executor_generation: u64,
     ) -> CacheAcquisition {
         let mut state = self
             .inner
@@ -59,6 +60,7 @@ impl TurnToolCacheHandle {
             workspace_root,
             policy,
             workspace_epoch,
+            executor_generation,
         );
         if let Some(entry) = state.entries.get(&key) {
             return CacheAcquisition::Hit(compact_cache_hit(entry, CacheReuseKind::Exact));
@@ -69,6 +71,7 @@ impl TurnToolCacheHandle {
             workspace_root,
             policy,
             workspace_epoch,
+            executor_generation,
         );
         if let Some(entry) = read_file_request.as_ref().and_then(|request| {
             state.entries.values().find(|entry| {
@@ -106,7 +109,7 @@ impl TurnToolCacheHandle {
         arguments: &Value,
         workspace_root: &Path,
         policy: ToolCachePolicy,
-    ) -> Option<ToolOutput> {
+    ) -> Option<ToolResult> {
         if policy == ToolCachePolicy::Never {
             return None;
         }
@@ -120,6 +123,7 @@ impl TurnToolCacheHandle {
             workspace_root,
             policy,
             state.workspace_epoch,
+            0,
         );
         state
             .entries
@@ -135,7 +139,7 @@ impl TurnToolCacheHandle {
         workspace_root: &Path,
         policy: ToolCachePolicy,
         call_id: String,
-        output: &ToolOutput,
+        output: &ToolResult,
     ) {
         if policy == ToolCachePolicy::Never {
             return;
@@ -150,6 +154,7 @@ impl TurnToolCacheHandle {
             workspace_root,
             policy,
             state.workspace_epoch,
+            0,
         );
         let read_file_request = read_file_request(
             tool_name,
@@ -157,6 +162,7 @@ impl TurnToolCacheHandle {
             workspace_root,
             policy,
             state.workspace_epoch,
+            0,
         );
         state.entries.insert(
             key,
@@ -199,7 +205,7 @@ impl TurnToolCacheHandle {
 }
 
 impl ToolCacheReservation {
-    pub(super) fn store(mut self, tool_name: &str, call_id: String, output: &ToolOutput) {
+    pub(super) fn store(mut self, tool_name: &str, call_id: String, output: &ToolResult) {
         let key = self.key.take().expect("active cache reservation");
         let entry = cache_entry(tool_name, call_id, output, self.read_file_request.as_ref());
         let waiters = {

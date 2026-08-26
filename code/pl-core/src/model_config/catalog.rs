@@ -296,7 +296,6 @@ pub fn provider_service_capabilities_descriptor(
                 .map(|dialect| dialect.as_str().to_string()),
         },
         prompt_cache_dialect: capabilities.prompt_cache.dialect.as_str().to_string(),
-        responses_tool_search: capabilities.responses_tools.tool_search,
         responses_programmatic_tool_calling: capabilities.responses_tools.programmatic_tool_calling,
     }
 }

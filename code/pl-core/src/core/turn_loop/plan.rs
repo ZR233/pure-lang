@@ -11,7 +11,7 @@ pub(super) fn record_plan_items(
             continue;
         }
         for event in &tool_result.runtime_events {
-            if let crate::tool::ToolRuntimeEvent::PlanCompleted { content } = event {
+            if let crate::tool::ToolDirective::PlanCompleted { content } = event {
                 let item_id = format!("{turn_id}-plan");
                 recorder.complete_plan_item(turn_id, &item_id, content.clone());
             }
@@ -28,7 +28,7 @@ mod tests {
 
     fn tool_result(
         outcome: ToolExecutionOutcome,
-        runtime_events: Vec<crate::tool::ToolRuntimeEvent>,
+        runtime_events: Vec<crate::tool::ToolDirective>,
     ) -> ToolExecutionRecord {
         ToolExecutionRecord {
             id: "tool-1".to_string(),
@@ -52,7 +52,7 @@ mod tests {
         let mut recorder = TraceRecorder::new("thread-1".to_string(), event_tx, 0);
         let results = [tool_result(
             ToolExecutionOutcome::Succeeded,
-            vec![crate::tool::ToolRuntimeEvent::PlanCompleted {
+            vec![crate::tool::ToolDirective::PlanCompleted {
                 content: "# 计划\n\n- 实现修复".to_string(),
             }],
         )];
@@ -74,7 +74,7 @@ mod tests {
         let mut recorder = TraceRecorder::new("thread-1".to_string(), event_tx, 0);
         let results = [tool_result(
             ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution),
-            vec![crate::tool::ToolRuntimeEvent::PlanCompleted {
+            vec![crate::tool::ToolDirective::PlanCompleted {
                 content: "should not be recorded".to_string(),
             }],
         )];

@@ -1,6 +1,5 @@
 use pl_model::{
-    ModelRuntime, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage,
-    ToolSchema,
+    ModelRuntime, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage, ToolSpec,
 };
 use pl_protocol::{Message, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
@@ -258,7 +257,7 @@ pub(crate) struct ContextCompactionRequest<'a> {
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
     pub working_context_tail: Option<Message>,
-    pub tools: &'a [ToolSchema],
+    pub tools: &'a [ToolSpec],
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ReasoningConfig>,
     pub prompt_cache_key: Option<String>,
@@ -505,7 +504,7 @@ fn estimate_context_request_tokens(
     request_messages: &[Message],
     session_items: &[ModelContextItem],
     working_context_tail: Option<&Message>,
-    tools: &[ToolSchema],
+    tools: &[ToolSpec],
 ) -> u64 {
     estimate_text_tokens(instructions)
         + request_messages

@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use super::super::{
     AgentReview, ReviewDesignReference, ReviewExitDiagnostics, ReviewExitViolation,
     ReviewFileCoverage, ReviewFileReview, ReviewFinding, ReviewInvalidPath, ReviewRoundRecord,
-    ReviewVerdict, TaskCoordinator, TaskPlannerWakeRequest, TaskPlannerWakeSource,
+    ReviewVerdict, TaskCoordinator, TaskPlannerWakeRequest, TaskPlannerWakeSource, TaskToolRuntime,
 };
 use super::trace::inspect_review_trace;
 use crate::AgentRuntimeHandle;
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::turn::ToolEffect;
 
 const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
@@ -110,27 +110,29 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: Option<AgentRuntimeHandle>,
-    ) -> RegisteredTool {
+        tool_runtime: TaskToolRuntime,
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<ReviewExitInput>::new(
+        let workspace = tool_runtime.workspace;
+        let session_runtime = tool_runtime.session;
+        TypedTool::<ReviewExitInput>::new(
             "review_exit",
             "提交只读审查结论和每个 changed file 的覆盖声明；门禁失败会返回完整分类诊断并允许同一 Turn 重试。",
         )
-        .registered(move |input: ReviewExitInput, context| {
+        .handler(move |input: ReviewExitInput, context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             let runtime = runtime.clone();
+            let workspace = workspace.clone();
+            let session_runtime = session_runtime.clone();
             async move {
                 let root_agent_id = crate::studio::agent_host::root_agent_id(&thread_id);
-                let reviewer = context
-                    .active_subagent
-                    .as_ref()
-                    .filter(|agent| {
-                        agent.role == "reviewer"
-                            && agent.depth == 1
-                            && agent.parent_id.as_deref() == Some(root_agent_id.as_str())
-                    })
+                let identity = context.identity();
+                let reviewer_id = (identity.agent_role == "reviewer"
+                    && identity.agent_depth == 1
+                    && identity.parent_agent_id.as_deref() == Some(root_agent_id.as_str()))
+                .then_some(identity.agent_id.as_str())
                     .context("review_exit requires the harness-owned depth-1 reviewer")?;
                 let aggregate = coordinator
                     .task_runtime
@@ -142,7 +144,7 @@ impl TaskCoordinator {
                     .facts
                     .reviews
                     .into_iter()
-                    .find(|round| round.reviewer_thread_id() == Some(reviewer.id.as_str()))
+                    .find(|round| round.reviewer_thread_id() == Some(reviewer_id))
                     .context("reviewer has no canonical ReviewRound")?;
                 ensure!(
                     round.task_run_id == run.id && round.verdict() == ReviewVerdict::Pending,
@@ -152,11 +154,10 @@ impl TaskCoordinator {
                     .file_reviews
                     .as_ref()
                     .context("pending review has no frozen file coverage snapshot")?;
-                let design_required =
-                    super::prompt::has_design_docs(context.workspace.root())?;
+                let design_required = super::prompt::has_design_docs(workspace.root())?;
                 let trace = inspect_review_trace(
-                    &context.parent_session,
-                    context.workspace.root(),
+                    &session_runtime.parent_session(),
+                    workspace.root(),
                     design_required,
                 )
                 .await?;
@@ -177,13 +178,13 @@ impl TaskCoordinator {
                         .task_runtime
                         .record_review_rejection(
                             &thread_id,
-                            &reviewer.id,
+                            reviewer_id,
                             validation.file_reviews,
                         )
                         .await?;
                     let outcome = rejected_outcome(&round)?;
                     let output = serde_json::to_string(&outcome)?;
-                    return Ok::<_, anyhow::Error>(ToolExecutionResult::<serde_json::Value>::failure(
+                    return Ok::<_, anyhow::Error>(ToolResult::failure(
                         output,
                     ));
                 }
@@ -192,7 +193,7 @@ impl TaskCoordinator {
                     .task_runtime
                     .complete_task_review(
                         &thread_id,
-                        &reviewer.id,
+                        reviewer_id,
                         validation.review,
                         validation.file_reviews,
                     )
@@ -227,7 +228,7 @@ impl TaskCoordinator {
                 };
                 let output = serde_json::to_string(&outcome)?;
                 Ok::<_, anyhow::Error>(
-                    ToolExecutionResult::<serde_json::Value>::success(output).ending_turn(),
+                    ToolResult::success(output).ending_turn(),
                 )
             }
         })

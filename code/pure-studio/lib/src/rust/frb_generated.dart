@@ -5378,15 +5378,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_bridge_provider_service_capabilities_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeProviderServiceCapabilitiesDescriptor(
       webSearch: dco_decode_bridge_web_search_provider_capabilities_descriptor(
         arr[0],
       ),
       promptCacheDialect: dco_decode_String(arr[1]),
-      responsesToolSearch: dco_decode_bool(arr[2]),
-      responsesProgrammaticToolCalling: dco_decode_bool(arr[3]),
+      responsesProgrammaticToolCalling: dco_decode_bool(arr[2]),
     );
   }
 
@@ -5396,8 +5395,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 15)
-      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeProviderSettingsDto(
       id: dco_decode_String(arr[0]),
       templateKind: dco_decode_String(arr[1]),
@@ -5408,12 +5407,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hostedWebSearch: dco_decode_bool(arr[6]),
       standaloneWebSearch: dco_decode_opt_String(arr[7]),
       promptCacheDialect: dco_decode_String(arr[8]),
-      responsesToolSearch: dco_decode_bool(arr[9]),
-      responsesProgrammaticToolCalling: dco_decode_bool(arr[10]),
-      defaultModel: dco_decode_String(arr[11]),
-      models: dco_decode_list_bridge_provider_model_settings_dto(arr[12]),
-      customModels: dco_decode_list_bridge_provider_model_settings_dto(arr[13]),
-      catalogId: dco_decode_opt_String(arr[14]),
+      responsesProgrammaticToolCalling: dco_decode_bool(arr[9]),
+      defaultModel: dco_decode_String(arr[10]),
+      models: dco_decode_list_bridge_provider_model_settings_dto(arr[11]),
+      customModels: dco_decode_list_bridge_provider_model_settings_dto(arr[12]),
+      catalogId: dco_decode_opt_String(arr[13]),
     );
   }
 
@@ -7437,8 +7435,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeThreadRuntimeSnapshot(
       threadId: dco_decode_String(arr[0]),
       usage: dco_decode_bridge_thread_runtime_usage(arr[1]),
@@ -7450,9 +7448,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mcpHealth: dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
         arr[7],
       ),
-      toolRegistryRevision: dco_decode_opt_box_autoadd_u_64(arr[8]),
-      toolCatalogHash: dco_decode_opt_String(arr[9]),
-      updatedAt: dco_decode_i_64(arr[10]),
+      updatedAt: dco_decode_i_64(arr[8]),
     );
   }
 
@@ -9069,8 +9065,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProviderInput dco_decode_provider_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 15)
-      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return ProviderInput(
       id: dco_decode_String(arr[0]),
       originalId: dco_decode_opt_String(arr[1]),
@@ -9082,12 +9078,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hostedWebSearch: dco_decode_bool(arr[7]),
       standaloneWebSearch: dco_decode_opt_String(arr[8]),
       promptCacheDialect: dco_decode_String(arr[9]),
-      responsesToolSearch: dco_decode_bool(arr[10]),
-      responsesProgrammaticToolCalling: dco_decode_bool(arr[11]),
-      defaultModel: dco_decode_String(arr[12]),
-      customModels: dco_decode_list_provider_model_input(arr[13]),
+      responsesProgrammaticToolCalling: dco_decode_bool(arr[10]),
+      defaultModel: dco_decode_String(arr[11]),
+      customModels: dco_decode_list_provider_model_input(arr[12]),
       modelConnectionModes: dco_decode_list_provider_model_connection_input(
-        arr[14],
+        arr[13],
       ),
     );
   }
@@ -12648,12 +12643,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           deserializer,
         );
     var var_promptCacheDialect = sse_decode_String(deserializer);
-    var var_responsesToolSearch = sse_decode_bool(deserializer);
     var var_responsesProgrammaticToolCalling = sse_decode_bool(deserializer);
     return BridgeProviderServiceCapabilitiesDescriptor(
       webSearch: var_webSearch,
       promptCacheDialect: var_promptCacheDialect,
-      responsesToolSearch: var_responsesToolSearch,
       responsesProgrammaticToolCalling: var_responsesProgrammaticToolCalling,
     );
   }
@@ -12672,7 +12665,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_hostedWebSearch = sse_decode_bool(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
     var var_promptCacheDialect = sse_decode_String(deserializer);
-    var var_responsesToolSearch = sse_decode_bool(deserializer);
     var var_responsesProgrammaticToolCalling = sse_decode_bool(deserializer);
     var var_defaultModel = sse_decode_String(deserializer);
     var var_models = sse_decode_list_bridge_provider_model_settings_dto(
@@ -12692,7 +12684,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hostedWebSearch: var_hostedWebSearch,
       standaloneWebSearch: var_standaloneWebSearch,
       promptCacheDialect: var_promptCacheDialect,
-      responsesToolSearch: var_responsesToolSearch,
       responsesProgrammaticToolCalling: var_responsesProgrammaticToolCalling,
       defaultModel: var_defaultModel,
       models: var_models,
@@ -15377,10 +15368,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
           deserializer,
         );
-    var var_toolRegistryRevision = sse_decode_opt_box_autoadd_u_64(
-      deserializer,
-    );
-    var var_toolCatalogHash = sse_decode_opt_String(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     return BridgeThreadRuntimeSnapshot(
       threadId: var_threadId,
@@ -15391,8 +15378,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       activeLspServers: var_activeLspServers,
       progress: var_progress,
       mcpHealth: var_mcpHealth,
-      toolRegistryRevision: var_toolRegistryRevision,
-      toolCatalogHash: var_toolCatalogHash,
       updatedAt: var_updatedAt,
     );
   }
@@ -17635,7 +17620,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_hostedWebSearch = sse_decode_bool(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
     var var_promptCacheDialect = sse_decode_String(deserializer);
-    var var_responsesToolSearch = sse_decode_bool(deserializer);
     var var_responsesProgrammaticToolCalling = sse_decode_bool(deserializer);
     var var_defaultModel = sse_decode_String(deserializer);
     var var_customModels = sse_decode_list_provider_model_input(deserializer);
@@ -17652,7 +17636,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hostedWebSearch: var_hostedWebSearch,
       standaloneWebSearch: var_standaloneWebSearch,
       promptCacheDialect: var_promptCacheDialect,
-      responsesToolSearch: var_responsesToolSearch,
       responsesProgrammaticToolCalling: var_responsesProgrammaticToolCalling,
       defaultModel: var_defaultModel,
       customModels: var_customModels,
@@ -20984,7 +20967,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_String(self.promptCacheDialect, serializer);
-    sse_encode_bool(self.responsesToolSearch, serializer);
     sse_encode_bool(self.responsesProgrammaticToolCalling, serializer);
   }
 
@@ -21003,7 +20985,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.hostedWebSearch, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
     sse_encode_String(self.promptCacheDialect, serializer);
-    sse_encode_bool(self.responsesToolSearch, serializer);
     sse_encode_bool(self.responsesProgrammaticToolCalling, serializer);
     sse_encode_String(self.defaultModel, serializer);
     sse_encode_list_bridge_provider_model_settings_dto(self.models, serializer);
@@ -23072,8 +23053,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.mcpHealth,
       serializer,
     );
-    sse_encode_opt_box_autoadd_u_64(self.toolRegistryRevision, serializer);
-    sse_encode_opt_String(self.toolCatalogHash, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
   }
 
@@ -24988,7 +24967,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.hostedWebSearch, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
     sse_encode_String(self.promptCacheDialect, serializer);
-    sse_encode_bool(self.responsesToolSearch, serializer);
     sse_encode_bool(self.responsesProgrammaticToolCalling, serializer);
     sse_encode_String(self.defaultModel, serializer);
     sse_encode_list_provider_model_input(self.customModels, serializer);

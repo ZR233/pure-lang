@@ -2,10 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::completion::tool_schema::ToolSchema;
+use crate::completion::tool_schema::provider_compatible_tool;
 use crate::completion::usage::ReasoningConfig;
 use crate::{ModelCapabilities, ModelModality};
-use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError};
+use pl_protocol::{
+    ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolSpec,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,7 +16,7 @@ pub struct CompletionRequest {
     pub instructions: Option<String>,
     pub input: Vec<ModelContextItem>,
     #[serde(default)]
-    pub tools: Vec<ToolSchema>,
+    pub tools: Vec<ToolSpec>,
     #[serde(default = "default_tool_choice")]
     pub tool_choice: String,
     #[serde(default)]
@@ -54,7 +56,7 @@ impl CompletionRequestBuilder {
         self
     }
 
-    pub fn tools(mut self, tools: Vec<ToolSchema>) -> Self {
+    pub fn tools(mut self, tools: Vec<ToolSpec>) -> Self {
         self.request.tools = tools;
         self
     }
@@ -114,7 +116,7 @@ impl CompletionRequest {
         self.tools = self
             .tools
             .into_iter()
-            .map(|tool| tool.provider_compatible(supports_custom_tools))
+            .map(|tool| provider_compatible_tool(tool, supports_custom_tools))
             .collect();
         self
     }
@@ -170,7 +172,7 @@ impl CompletionRequest {
                 model
             )));
         }
-        if self.tools.iter().any(ToolSchema::is_web_search) && !capabilities.supports_web_search() {
+        if self.tools.iter().any(ToolSpec::is_web_search) && !capabilities.supports_web_search() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support hosted web search",
                 model
@@ -179,7 +181,7 @@ impl CompletionRequest {
         if self
             .tools
             .iter()
-            .any(ToolSchema::is_programmatic_tool_calling)
+            .any(ToolSpec::is_programmatic_tool_calling)
             && !capabilities.supports_programmatic_tool_calling()
         {
             return Err(PureError::ConfigError(format!(
@@ -187,7 +189,7 @@ impl CompletionRequest {
                 model
             )));
         }
-        if self.tools.iter().any(ToolSchema::is_custom)
+        if self.tools.iter().any(ToolSpec::is_custom)
             && (!capabilities.supports_custom_tools() || !capabilities.supports_freeform_tools())
         {
             return Err(PureError::ConfigError(format!(
@@ -350,6 +352,21 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "configuration error: model model does not support reasoning"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_unsupported_provider_hosted_tool() {
+        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        request.tools = vec![ToolSpec::ProgrammaticToolCalling];
+
+        let error = request
+            .validate_against("model", &text_capabilities())
+            .expect_err("unsupported hosted tool must fail before provider I/O");
+
+        assert_eq!(
+            error.to_string(),
+            "configuration error: model model does not support programmatic tool calling"
         );
     }
 }

@@ -694,29 +694,6 @@ fn stream_orchestration_metrics(
     context_items: &[ResponsesContextItem],
     tool_calls: &[ToolCall],
 ) -> InferenceOrchestrationMetrics {
-    let tool_search_calls = context_items
-        .iter()
-        .filter(|item| item.kind == ResponsesContextItemKind::ToolSearchCall)
-        .count() as u64;
-    let tool_search_loaded_tools = context_items
-        .iter()
-        .filter(|item| item.kind == ResponsesContextItemKind::ToolSearchOutput)
-        .filter_map(|item| {
-            item.value
-                .get("tools")
-                .and_then(serde_json::Value::as_array)
-        })
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    tool.get("tools")
-                        .and_then(serde_json::Value::as_array)
-                        .map_or(1, |nested| nested.len() as u64)
-                })
-                .sum::<u64>()
-        })
-        .sum();
     let program_count = context_items
         .iter()
         .filter(|item| item.kind == ResponsesContextItemKind::Program)
@@ -728,8 +705,6 @@ fn stream_orchestration_metrics(
 
     InferenceOrchestrationMetrics {
         tool_calls: tool_calls.len() as u64,
-        tool_search_calls,
-        tool_search_loaded_tools,
         program_count,
         program_tool_calls,
         transport_attempts: 1,

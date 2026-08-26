@@ -13,9 +13,9 @@ pub use completion::{
     ReasoningSummary, ScreenshotOperation, SearchAllowedCaller, SearchCommands, SearchQuery,
     SearchRequest, SearchResponse, SearchResponseLength, SearchSettings, SportsFunction,
     SportsLeague, SportsOperation, SportsToolName, TimeOperation, TokenUsage, ToolCall,
-    ToolCallPayload, ToolCallerMode, ToolFormat, ToolSchema, WeatherOperation, WebSearchAction,
-    WebSearchConfig, WebSearchContextSize, WebSearchFilters, WebSearchLocation, WebSearchMode,
-    WebSearchUserLocation, WebSearchUserLocationType,
+    ToolCallPayload, WeatherOperation, WebSearchAction, WebSearchConfig, WebSearchContextSize,
+    WebSearchFilters, WebSearchLocation, WebSearchMode, WebSearchUserLocation,
+    WebSearchUserLocationType,
 };
 pub use model::{
     MaxTokensField, MissingCandidatePolicy, ModelCapabilities, ModelFamily, ModelInfo,
@@ -26,7 +26,7 @@ pub use model::{
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
     openai_default_model_slugs, wire_assignments_from_value, zhipu_default_model_slugs,
 };
-pub use pl_protocol::ToolCallKind;
+pub use pl_protocol::{ToolCallKind, ToolCallerMode, ToolFormat, ToolSpec};
 pub use provider::{
     ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
     PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderEndpoint,

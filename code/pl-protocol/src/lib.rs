@@ -12,6 +12,7 @@ mod provider_catalog;
 pub mod studio;
 mod thread;
 mod thread_item;
+mod tool;
 mod turn;
 mod turn_failure;
 
@@ -63,6 +64,10 @@ pub use thread::{
     ThreadTurnPage,
 };
 pub use thread_item::*;
+pub use tool::{
+    ToolCallerMode, ToolFormat, ToolSpec, WebSearchContextSize, WebSearchFilters,
+    WebSearchUserLocation, WebSearchUserLocationType,
+};
 pub use turn::{
     BudgetLimitedTurnOutcome, BudgetLimitedTurnState, CancelledTurnOutcome, CancelledTurnState,
     CompletedTurnOutcome, CompletedTurnState, FailedTurnOutcome, FailedTurnState, QueuedTurnState,

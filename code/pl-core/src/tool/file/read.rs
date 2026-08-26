@@ -6,13 +6,21 @@ use pl_protocol::PureError;
 use super::helpers::*;
 use super::input::PathInput;
 use crate::tool::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 
-#[derive(Debug)]
-pub struct StatPathTool;
+#[derive(Debug, Clone)]
+pub struct StatPathTool {
+    workspace: ToolWorkspace,
+}
+
+impl StatPathTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
 
 impl Tool for StatPathTool {
     fn name(&self) -> &str {
@@ -24,7 +32,7 @@ impl Tool for StatPathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<PathInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<PathInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -42,11 +50,11 @@ impl Tool for StatPathTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_existing_or_parent(&input.path).await?;
             let metadata = match tokio::fs::metadata(&path).await {
                 Ok(metadata) => metadata,

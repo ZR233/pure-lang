@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{TaskCoordinator, TaskRun, TaskStopOrigin, TaskStopReason};
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::{AgentRuntimeHandle, AgentState, ToolEffect};
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -29,14 +29,14 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<StopTaskInput>::new(
+        TypedTool::<StopTaskInput>::new(
             "task_stop",
             "Persist a stop event, advance the execution generation, and interrupt active model turns without changing the Task state.",
         )
-        .registered(move |input: StopTaskInput, _context| {
+        .handler(move |input: StopTaskInput, _context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             let runtime = runtime.clone();
@@ -52,8 +52,8 @@ impl TaskCoordinator {
                         reason,
                     )
                     .await?;
-                ToolExecutionResult::<serde_json::Value>::json(output)
-                    .map(ToolExecutionResult::ending_turn)
+                ToolResult::json(output)
+                    .map(ToolResult::ending_turn)
                     .map_err(anyhow::Error::from)
             }
         })

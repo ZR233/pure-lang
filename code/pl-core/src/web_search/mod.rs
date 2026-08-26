@@ -8,7 +8,6 @@ use pl_model::{
 };
 use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
-use crate::ToolVisibilitySet;
 use crate::TurnEngine;
 use crate::model_config::{AgentModelConfig, ProviderConfig, ProviderId, ResolvedModelRoute};
 use crate::tool::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchClient, WebSearchTool};
@@ -91,7 +90,7 @@ impl WebSearchPlan {
     ///
     /// backend 缺失或 builtin 来源发布校验失败时返回错误。
     pub fn install(&self, core: &mut TurnEngine, config: &WebSearchConfig) -> Result<()> {
-        let entry = match self.resolution.path {
+        let tool = match self.resolution.path {
             Some(WebSearchPath::Standalone) => {
                 let backend = self.backend.as_ref().ok_or_else(|| {
                     PureError::ConfigError(
@@ -106,8 +105,9 @@ impl WebSearchPlan {
                             backend.model.clone(),
                             config,
                             backend.max_output_tokens,
+                            core.tool_session_runtime(),
                         );
-                        builtin_eager_entry(tool)
+                        std::sync::Arc::new(tool) as std::sync::Arc<dyn crate::tool::Tool>
                     }
                 }
             }
@@ -117,32 +117,21 @@ impl WebSearchPlan {
                         "hosted web search requires an enabled effective mode".to_string(),
                     )
                 })?;
-                builtin_eager_entry(tool)
+                std::sync::Arc::new(tool) as std::sync::Arc<dyn crate::tool::Tool>
             }
-            None => return Ok(()),
+            None => {
+                core.agent_tools()
+                    .uninstall(&crate::tool::ToolGroupId::new("web_search"));
+                return Ok(());
+            }
         };
-        core.extend_source_tools(crate::tool::ToolSourceId::builtin(), vec![entry])
+        core.agent_tools()
+            .install(crate::tool::ToolGroupId::new("web_search"), vec![tool])
     }
 
     /// 返回 exclusive 路径唯一允许的工具名。
     pub fn exclusive_tool_name(&self) -> Option<&'static str> {
         (self.visibility == ToolVisibilityConstraint::Exclusive).then_some(TOOL_WEB_SEARCH)
-    }
-
-    /// 在产品角色 policy 完成编译后应用最终工具约束。
-    ///
-    /// 必须最后调用，避免产品随后追加协作或 finalizer 工具而破坏 hosted Web Search
-    /// 的 exclusive schema；additive 与 unavailable 路径保持产品原有工具集合。
-    pub fn constrain_visibility(&self, tools: ToolVisibilitySet) -> ToolVisibilitySet {
-        match self.visibility {
-            ToolVisibilityConstraint::Exclusive => {
-                ToolVisibilitySet::from_tool_names([TOOL_WEB_SEARCH])
-            }
-            ToolVisibilityConstraint::Additive if self.resolution.path.is_some() => {
-                tools.with_tool_names([TOOL_WEB_SEARCH])
-            }
-            ToolVisibilityConstraint::Additive | ToolVisibilityConstraint::Unavailable => tools,
-        }
     }
 }
 
@@ -352,14 +341,6 @@ fn path_label(path: WebSearchPath) -> &'static str {
         WebSearchPath::Standalone => "standalone",
         WebSearchPath::Hosted => "hosted",
     }
-}
-
-/// builtin 来源的 eager 工具条目。
-fn builtin_eager_entry(tool: impl crate::tool::Tool + 'static) -> crate::tool::ToolEntry {
-    crate::tool::ToolEntry::new(
-        tool,
-        crate::tool::ToolSourceMetadata::new(crate::tool::ToolSourceId::builtin()),
-    )
 }
 
 #[cfg(test)]

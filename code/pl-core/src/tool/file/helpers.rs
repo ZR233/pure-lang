@@ -2,32 +2,35 @@ use std::path::{Path, PathBuf};
 
 use super::path::WorkspacePaths;
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput};
-use crate::tool::{ToolContext, ToolOutput, tool_error};
+use crate::tool::{ToolCallContext, ToolResult, ToolWorkspace, tool_error};
 use pl_protocol::PureError;
 
-pub(super) fn text_output(description: String) -> ToolOutput {
+pub(super) fn text_output(description: String) -> ToolResult {
     let stdout = TruncatedOutput {
         original_length: description.len(),
         content: description,
         was_truncated: false,
     };
-    ToolOutput {
-        description: stdout.content.clone(),
-        truncated: OutputTruncation {
+    ToolResult::from_runtime_text(
+        stdout.content.clone(),
+        OutputTruncation {
             stdout,
             stderr: TruncatedOutput::empty(),
         },
-        output_file: PathBuf::new(),
-        exit_code: Some(0),
-        timed_out: false,
-        runtime_events: Vec::new(),
-    }
+        PathBuf::new(),
+        Some(0),
+        false,
+        Vec::new(),
+    )
 }
 
-pub(super) async fn workspace(context: &ToolContext) -> Result<WorkspacePaths, PureError> {
+pub(super) async fn workspace(
+    runtime: &ToolWorkspace,
+    context: &ToolCallContext,
+) -> Result<WorkspacePaths, PureError> {
     WorkspacePaths::new(
-        context.workspace.root().to_path_buf(),
-        context.allows_workspace_escape(),
+        runtime.root().to_path_buf(),
+        runtime.allows_workspace_escape(context),
     )
     .await
 }

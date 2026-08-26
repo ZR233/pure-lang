@@ -1,6 +1,6 @@
 use super::*;
 use crate::completion::{
-    ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, ToolSchema,
+    ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, ToolSpec,
 };
 use crate::default_models;
 use futures::{SinkExt, StreamExt};
@@ -147,7 +147,7 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
             tool_result: None,
             metadata: HashMap::new(),
         })],
-        tools: vec![ToolSchema::function(
+        tools: vec![ToolSpec::function(
             "read_file",
             "Read a file",
             serde_json::json!({"type": "object", "properties": {}}),

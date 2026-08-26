@@ -35,8 +35,6 @@ pub struct ProviderServiceCapabilitiesDescriptor {
     #[serde(default)]
     pub prompt_cache_dialect: String,
     #[serde(default)]
-    pub responses_tool_search: bool,
-    #[serde(default)]
     pub responses_programmatic_tool_calling: bool,
 }
 

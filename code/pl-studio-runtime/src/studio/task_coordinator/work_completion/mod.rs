@@ -11,14 +11,11 @@ use serde::Deserialize;
 
 use super::spawn::{TaskExecutorBlueprint, verification_result_map};
 use super::{
-    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRun,
+    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, TaskRun, TaskToolRuntime,
     WorkUnitStateKind,
 };
 use crate::agent::worktree::git_compatible_path;
-use crate::tool::{
-    FunctionToolDefinition, NamespaceDescriptor, RegisteredTool, SubagentContext, ToolEntry,
-    ToolExecutionResult, ToolSourceId, ToolSourceMetadata,
-};
+use crate::tool::{LocalTool, SubagentContext, Tool, ToolGroupId, ToolResult, TypedTool};
 use crate::turn::ToolEffect;
 use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
 
@@ -110,102 +107,89 @@ impl TaskCoordinator {
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
         active_task_run: Option<&TaskRun>,
-    ) {
+    ) -> crate::Result<()> {
         if active_task_run.is_none() {
-            return;
+            core.agent_tools().uninstall(&ToolGroupId::new("task"));
+            return Ok(());
         }
-        // Task 协调工具统一发布到 task 来源（task 命名空间，延迟加载）。
-        let source = ToolSourceId::task();
-        let metadata = || {
-            ToolSourceMetadata::new(source.clone()).with_namespace(NamespaceDescriptor::new(
-                "task",
-                "Task coordination, review, delivery, and completion tools.",
-            ))
+        let tool_runtime = TaskToolRuntime {
+            workspace: core.tool_workspace(),
+            session: core.tool_session_runtime(),
         };
-        let mut entries = Vec::new();
+        let mut tools = Vec::<Arc<dyn Tool>>::new();
         if snapshot.identity.parent_id.is_none() {
             // planner 复用框架统一的 send_message（parent→direct-child）调度子代理；
             // 不再注册 Task 专用 send_message。
-            entries.push(ToolEntry::new(
+            tools.push(Arc::new(
                 self.task_spawn_executor_tool(thread_id, runtime.clone()),
-                metadata(),
             ));
-            entries.push(ToolEntry::new(
+            tools.push(Arc::new(
                 self.task_transition_tool(thread_id, runtime.clone()),
-                metadata(),
             ));
-            entries.push(ToolEntry::new(
+            tools.push(Arc::new(
                 self.task_record_merge_tool(thread_id, runtime.clone()),
-                metadata(),
             ));
-            entries.push(ToolEntry::new(
+            tools.push(Arc::new(
                 self.task_request_delivery_review_tool(thread_id, runtime.clone()),
-                metadata(),
             ));
-            entries.push(ToolEntry::new(
+            tools.push(Arc::new(
                 self.task_status_tool(thread_id, Some(runtime.clone())),
-                metadata(),
             ));
-            entries.push(ToolEntry::new(
-                self.read_work_unit_handoff_tool(thread_id),
-                metadata(),
-            ));
-            entries.push(ToolEntry::new(
-                self.read_review_round_tool(thread_id),
-                metadata(),
-            ));
-            entries.push(ToolEntry::new(
-                self.read_review_file_coverage_tool(thread_id),
-                metadata(),
-            ));
-            entries.push(ToolEntry::new(
-                self.task_stop_tool(thread_id, runtime.clone()),
-                metadata(),
-            ));
+            tools.push(Arc::new(self.read_work_unit_handoff_tool(thread_id)));
+            tools.push(Arc::new(self.read_review_round_tool(thread_id)));
+            tools.push(Arc::new(self.read_review_file_coverage_tool(thread_id)));
+            tools.push(Arc::new(self.task_stop_tool(thread_id, runtime.clone())));
         } else {
             match snapshot.identity.role.as_str() {
                 "executor" => {
-                    entries.push(ToolEntry::new(
-                        self.report_completion_tool(runtime),
-                        metadata(),
+                    tools.push(Arc::new(
+                        self.report_completion_tool(runtime, tool_runtime.workspace.clone()),
                     ));
                 }
                 "reviewer" => {
-                    entries.push(ToolEntry::new(
-                        self.read_review_file_coverage_tool(thread_id),
-                        metadata(),
-                    ));
-                    entries.push(ToolEntry::new(
-                        self.review_exit_tool(thread_id, Some(runtime)),
-                        metadata(),
-                    ));
+                    tools.push(Arc::new(self.read_review_file_coverage_tool(thread_id)));
+                    tools.push(Arc::new(self.review_exit_tool(
+                        thread_id,
+                        Some(runtime),
+                        tool_runtime,
+                    )));
                 }
                 "explorer" | "planner" => {}
                 _ => {}
             }
         }
-        let _ = core.register_source_tools(source, entries);
+        core.agent_tools().install(ToolGroupId::new("task"), tools)
     }
 
     pub(crate) fn report_completion_tool(
         self: &Arc<Self>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+        workspace: pl_core::ToolWorkspace,
+    ) -> LocalTool {
         let coordinator = self.clone();
-        FunctionToolDefinition::<CompletionResultInput>::new(
+        TypedTool::<CompletionResultInput>::new(
             "report_completion",
             "Report caller-declared executor delivery facts with changedFiles and verificationResults, then end the current turn for delivery review.",
         )
-        .registered(move |result: CompletionResultInput, context| {
+        .handler(move |result: CompletionResultInput, context| {
                 let coordinator = coordinator.clone();
                 let runtime = runtime.clone();
+                let workspace = workspace.clone();
                 async move {
-                    let subagent = context
-                        .active_subagent
-                        .as_ref()
-                        .context("report_completion requires an active executor")?;
+                    let identity = context.identity();
+                    let subagent = SubagentContext {
+                        id: identity.agent_id.clone(),
+                        parent_id: identity.parent_agent_id.clone(),
+                        agent_path: identity.agent_path.clone(),
+                        role: identity.agent_role.clone(),
+                        task: String::new(),
+                        depth: identity.agent_depth,
+                    };
+                    if subagent.parent_id.is_none() {
+                        bail!("report_completion requires an active executor");
+                    }
                     let completion = coordinator
-                        .report_completion(subagent, context.workspace.root(), result)
+                        .report_completion(&subagent, workspace.root(), result)
                         .await?;
                     if let Err(error) = runtime
                         .report_progress(
@@ -228,11 +212,11 @@ impl TaskCoordinator {
                             "completion was committed but its directory progress projection failed"
                         );
                     }
-                    let mut output =
-                        ToolExecutionResult::<serde_json::Value>::json(completion)
-                            .map_err(anyhow::Error::from)?;
-                    output.ends_turn = true;
-                    Ok::<_, anyhow::Error>(output)
+                    Ok::<_, anyhow::Error>(
+                        ToolResult::json(completion)
+                            .map_err(anyhow::Error::from)?
+                            .ending_turn(),
+                    )
                 }
             })
         .with_effect(ToolEffect::BranchControl)
@@ -450,8 +434,7 @@ mod tests {
     #[test]
     fn completion_input_schema_is_a_flat_object() {
         let schema =
-            FunctionToolDefinition::<CompletionResultInput>::new("report_completion", "test")
-                .input_schema();
+            TypedTool::<CompletionResultInput>::new("report_completion", "test").input_schema();
         assert_eq!(schema["type"], "object");
         assert!(schema.get("oneOf").is_none());
         let properties = schema["properties"].as_object().expect("input properties");

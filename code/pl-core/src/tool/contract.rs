@@ -1,22 +1,21 @@
 use std::fmt;
 use std::sync::Arc;
 
-use pl_model::ToolSchema;
-use pl_protocol::PureError;
+use pl_protocol::{PureError, ToolSpec};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 use crate::turn::ToolEffect;
 
 use super::cache::ToolCachePolicy;
-use super::{ToolContext, ToolDisplayMetadata, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
+use super::{ToolCallContext, ToolDisplayMetadata, ToolInput, ToolResult, ToolRuntimeLockPolicy};
 
 /// 便捷类型别名：boxed future（来自 `futures` crate 的 `BoxFuture`）。
 /// `tool/mod.rs` 以 `pub use futures::future::BoxFuture` 对外暴露同名入口。
 type BoxFuture<'a, T> = futures::future::BoxFuture<'a, T>;
-pub(super) type RegisteredToolFuture = BoxFuture<'static, Result<ToolOutput, PureError>>;
-pub(super) type RegisteredToolHandler =
-    dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
+pub(super) type LocalToolFuture = BoxFuture<'static, Result<ToolResult, PureError>>;
+pub(super) type LocalToolHandler =
+    dyn Fn(ToolInput, ToolCallContext) -> LocalToolFuture + Send + Sync;
 
 /// 工具执行区间如何计入 turn 的活跃 wall-clock 预算。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +24,16 @@ pub enum ToolBudgetTiming {
     Count,
     /// 仅当该工具是批次中唯一成功调度的调用时暂停活跃预算。
     PauseWhenOnlyScheduledTool,
+}
+
+/// 工具调用由哪一侧执行。
+///
+/// `Local` 工具由 [`crate::ToolManager`] 在冻结的 [`crate::ToolPlan`] 中回查执行器；
+/// `ProviderHosted` 只把定义发送给 provider，不允许落入本地 dispatch。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecution {
+    Local,
+    ProviderHosted,
 }
 
 /// 从静态 Rust 输入类型生成严格的 function tool 输入 schema。
@@ -176,7 +185,8 @@ where
 /// 工具执行抽象（dyn-compatible）。
 ///
 /// `execute` 返回 `BoxFuture` 以支持 trait object。
-/// `ToolContext` 提供事件转发、审批策略和当前 subagent 运行边界。
+/// `ToolCallContext` 只提供调用身份、取消、事件出口与调用级审批/交互能力；workspace、
+/// LSP、产品 session 等稳定依赖由具体工具在构造时捕获。
 /// 具体实现中可用 `async move { ... }.boxed()` 包裹异步逻辑。
 pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
@@ -189,6 +199,13 @@ pub trait Tool: fmt::Debug + Send + Sync {
         None
     }
     fn supports_parallel_tool_calls(&self) -> bool {
+        false
+    }
+    /// 声明该本地工具可由 provider-hosted programmatic coordinator 调用。
+    ///
+    /// manager 只接受同时声明 `Read` effect 的工具；第三方 annotation、名称和
+    /// provider capability 都不能隐式提升这一资格。
+    fn supports_programmatic_calls(&self) -> bool {
         false
     }
     /// 返回该工具执行时间的 turn 活跃预算计时策略。
@@ -212,14 +229,22 @@ pub trait Tool: fmt::Debug + Send + Sync {
         }
     }
 
+    /// 返回工具的执行所有权。
+    fn execution(&self) -> ToolExecution {
+        ToolExecution::Local
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>>;
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>>;
 
-    fn to_schema(&self) -> ToolSchema {
-        ToolSchema::function(self.name(), self.description(), self.input_schema())
+    /// 返回 provider 无关、模型可见的不可变定义。
+    ///
+    /// manager 在注册时冻结该值；后续模型 step 与调用调度都只消费冻结结果。
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
 
@@ -247,6 +272,10 @@ where
         (**self).supports_parallel_tool_calls()
     }
 
+    fn supports_programmatic_calls(&self) -> bool {
+        (**self).supports_programmatic_calls()
+    }
+
     fn budget_timing(&self) -> ToolBudgetTiming {
         (**self).budget_timing()
     }
@@ -267,11 +296,19 @@ where
         (**self).runtime_lock_policy()
     }
 
+    fn execution(&self) -> ToolExecution {
+        (**self).execution()
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         (**self).execute(input, context)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        (**self).spec()
     }
 }

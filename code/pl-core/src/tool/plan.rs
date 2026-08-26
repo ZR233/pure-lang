@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
 use super::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    BoxFuture, Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, TypedTool,
     deserialize_tool_input,
 };
 use crate::turn::ToolEffect;
@@ -40,7 +40,7 @@ impl Tool for PlanExitTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<PlanExitInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<PlanExitInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -50,8 +50,8 @@ impl Tool for PlanExitTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        _context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let args = deserialize_tool_input::<PlanExitInput>(self.name(), input.arguments)?;
             if args.content.trim().is_empty() {
@@ -65,54 +65,34 @@ impl Tool for PlanExitTool {
                 status: "submitted".to_string(),
                 message: "Plan submitted for user confirmation. Return a brief final acknowledgement and stop.".to_string(),
             })?;
-            Ok(ToolOutput {
+            Ok(ToolResult::from_runtime_text(
                 description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: vec![ToolRuntimeEvent::PlanCompleted {
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                Some(0),
+                false,
+                vec![ToolDirective::PlanCompleted {
                     content: args.content.trim().to_string(),
                 }],
-            })
+            ))
         }.boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::tool::WorkspaceAccess;
-    use crate::{AgentSession, TurnOptions};
 
-    fn context() -> ToolContext {
+    fn context() -> ToolCallContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        ToolContext {
-            event_tx,
-            options: TurnOptions::default(),
-            workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            provider_call_id: None,
-            active_subagent: None,
-            lsp_runtime: None,
-            parent_session: Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-        }
+        ToolCallContext::test(event_tx)
     }
 
     fn input(content: &str) -> ToolInput {
         ToolInput {
             arguments: serde_json::json!({ "content": content }),
-            session_id: "session-1".to_string(),
-            tool_id: "call-1".to_string(),
-            revision_base: 0,
         }
     }
 
@@ -124,7 +104,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<PlanExitResult>(&output.description).unwrap(),
+            serde_json::from_str::<PlanExitResult>(&output.canonical_output()).unwrap(),
             PlanExitResult {
                 status: "submitted".to_string(),
                 message: "Plan submitted for user confirmation. Return a brief final acknowledgement and stop.".to_string(),
@@ -132,7 +112,7 @@ mod tests {
         );
         assert_eq!(
             output.runtime_events,
-            vec![ToolRuntimeEvent::PlanCompleted {
+            vec![ToolDirective::PlanCompleted {
                 content: "# Plan\n\n- Do it".to_string(),
             }]
         );

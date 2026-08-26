@@ -21,7 +21,6 @@ ProviderCatalogView providerCatalogFromFrb(
           standaloneWebSearch:
               preset.serviceCapabilities.webSearch.standalone ?? '',
           promptCacheDialect: preset.serviceCapabilities.promptCacheDialect,
-          responsesToolSearch: preset.serviceCapabilities.responsesToolSearch,
           responsesProgrammaticToolCalling:
               preset.serviceCapabilities.responsesProgrammaticToolCalling,
           iconKey: preset.iconKey,

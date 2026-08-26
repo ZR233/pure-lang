@@ -17,10 +17,10 @@ mod visible_text;
 mod web_search;
 
 pub use compaction::*;
+pub use pl_protocol::{ToolFormat, ToolSpec};
 pub use request::*;
 pub use response::*;
 pub use tool_call::*;
-pub use tool_schema::*;
 pub use usage::*;
 pub use web_search::{
     ClickOperation, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType, FinanceOperation,

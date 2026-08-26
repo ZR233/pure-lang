@@ -25,7 +25,10 @@ async fn request_approval_allows_external_path_after_user_approval() {
         .await
         .unwrap();
     let mut core = test_turn_engine();
-    core.register_test_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
+    core.register_test_tool(LocalWorkspaceFileTool::new(
+        WorkspaceFileToolKind::ReadFile,
+        crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(workspace_root.clone())),
+    ));
     let tool_call = ToolCall::function(
         "call-1",
         "read_file",
@@ -62,15 +65,13 @@ async fn request_approval_allows_external_path_after_user_approval() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &options,
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -102,7 +103,9 @@ async fn request_approval_allows_external_path_after_user_approval() {
 async fn workspace_tool_without_approval_skips_approved_trace_phase() {
     let workspace = tempfile::tempdir().unwrap();
     let mut core = test_turn_engine();
-    core.register_test_tool(WriteFileTool);
+    core.register_test_tool(WriteFileTool::new(crate::tool::ToolWorkspace::new(
+        crate::tool::AgentWorkspace::local(workspace.path().to_path_buf()),
+    )));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "write_file",
@@ -123,15 +126,13 @@ async fn workspace_tool_without_approval_skips_approved_trace_phase() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(workspace.path().to_path_buf()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -170,15 +171,13 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &TurnOptions::default(),
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -204,7 +203,8 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
 #[tokio::test]
 async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result() {
     let mut core = test_turn_engine();
-    core.register_test_tool(WriteFileTool);
+    let tool_workspace = core.tool_workspace();
+    core.register_test_tool(WriteFileTool::new(tool_workspace));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "write_file",
@@ -223,15 +223,13 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &options,
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -305,15 +303,13 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            lease: core.acquire_tool_lease().unwrap(),
+            tool_plan: core.acquire_tool_plan(),
             options: &options,
             session_id: "turn-1",
+            turn_id: "turn-1",
+            step: 0,
             workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
             active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
             tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
         },
     )
@@ -364,8 +360,7 @@ fn approval_request_extracts_working_directory() {
         "call-1",
     );
 
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let request = approval_request(&call, &test_tool_context(event_tx));
+    let request = approval_request(&call, None);
 
     assert_eq!(request.working_directory.as_deref(), Some("C:/work"));
 }
@@ -378,18 +373,16 @@ fn approval_request_marks_parent_agent() {
         serde_json::json!({"command": "pwd"}),
         "call-1",
     );
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let mut context = test_tool_context(event_tx);
-    context.active_subagent = Some(SubagentContext {
+    let active_subagent = SubagentContext {
         id: "subagent-1".to_string(),
         parent_id: None,
         agent_path: None,
         role: "executor".to_string(),
         task: "inspect".to_string(),
         depth: 1,
-    });
+    };
 
-    let request = approval_request(&call, &context);
+    let request = approval_request(&call, Some(&active_subagent));
 
     assert_eq!(request.parent_agent_id.as_deref(), Some("subagent-1"));
 }

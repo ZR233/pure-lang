@@ -39,15 +39,14 @@ transport，启动 `RunningService`，并返回同时持有 `Peer` 和唯一关�
 PL 拥有配置 fingerprint、跨 server 增量 reconcile、模型可见命名、健康状态、可信 effect 与
 generation；rmcp 拥有协议发现、分页、typed request/result、response cache、MRTR、取消、
 OAuth、SSE 和连接关闭。MCP runtime 在连接 generation 激活时把该代工具与 resource façade
-一次性 publish 到统一工具注册表，turn 通过 `TurnToolLease` 冻结发布结果，配置更新不得改变
-正在执行 turn 的工具集合或连接 owner。MCP 工具与 resource façade 都是普通注册表工具，
-不为 MCP 保留独立 backend 或 dispatch 体系。
+一次性原子发布到目标 `AgentToolSet`；模型 step 通过 `ToolPlan` 冻结发布结果，配置更新或
+`tools/list_changed` 不得改变正在执行的 plan 或连接 owner。MCP 工具与 resource façade 都是
+普通 manager 工具，不为 MCP 保留独立 backend 或 dispatch 体系。
 
 rmcp 只位于 MCP 协议与连接边界，不作为 PL 内建工具或产品工具的 authoring framework。
-静态 function tool 使用 PL 自有的 `FunctionToolDefinition<Input>`：输入由 Rust struct/enum、
-Serde 与 Schemars 共同定义，生成的 `RegisteredTool` 仍进入统一 registry，并继续使用 PL 的
-effect、权限、审批、并行、缓存、trace、Timeline 与历史机制。不得用 rmcp `ToolRouter` 或
-`#[tool]` 为静态工具建立第二套注册和执行链。
+全部本地工具实现 PL 唯一的 `Tool` 接口；typed helper 由 Rust struct/enum、Serde 与 Schemars
+共同生成严格 schema，但产物仍是普通 `Tool`，进入同一个 `ToolManager`、`AgentToolSet`、
+`ToolPlan` 与 dispatch。不得用 rmcp `ToolRouter`、`#[tool]` 或产品 wrapper 建立第二套注册链。
 
 ## 5.2 核心流程扩展
 
@@ -76,7 +75,9 @@ flutter_rust_bridge。桌面端状态和配置均由 `pl-studio-runtime` 持久�
 
 ## 5.4 执行能力扩展
 
-命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
+命令执行、文件编辑、工具系统和沙箱能力必须以普通 `Tool` 接入目标 agent 的工具集，并通过权限
+模型和事件流暴露给核心流程。外部 `pl-core` 宿主可以实现自己的 `Tool`、选择是否继承 global，
+并在 `before_model_step` 刷新窗口原子注册或撤销能力；core 不要求 Studio 专用 backend。
 
 桌面端允许注册 `exec`、完整 agent 协作工具和文件工具。每个 turn 都携带 typed
 `AgentWorkspace { root, boundary, mutability }`；文件、命令 cwd、Git、LSP 与项目 skills

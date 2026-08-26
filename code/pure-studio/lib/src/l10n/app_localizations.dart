@@ -3023,18 +3023,6 @@ abstract class AppLocalizations {
   /// **'Result links'**
   String get timelineWebSearchResults;
 
-  /// No description provided for @timelineToolSearchTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Tool search'**
-  String get timelineToolSearchTitle;
-
-  /// No description provided for @timelineToolSearchLoadedTools.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} loaded tools'**
-  String timelineToolSearchLoadedTools(int count);
-
   /// No description provided for @timelineLspQueryTitle.
   ///
   /// In en, this message translates to:

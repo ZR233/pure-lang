@@ -2,22 +2,11 @@ use std::collections::BTreeSet;
 
 use pl_core::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentRoleId, AgentSnapshot, AgentTargetSelector,
-    ToolEffect, ToolEffectSet, ToolVisibilitySet, TurnFinalizationPolicy,
+    ToolEffect, ToolEffectSet, TurnFinalizationPolicy,
 };
 
 use crate::StudioMode;
 use crate::studio::task_coordinator::TaskRunStateKind;
-
-const COLLABORATION_CONTROL_TOOLS: [&str; 7] = [
-    "spawn_agent",
-    "send_message",
-    "interrupt_agent",
-    "list_agents",
-    "wait_agents",
-    "read_agent_session",
-    "close_agent",
-];
-const PLAN_EXIT_TOOL: [&str; 1] = ["plan_exit"];
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StudioPolicyContext {
@@ -28,7 +17,6 @@ pub(super) struct StudioPolicyContext {
 pub(super) fn studio_execution_policy(
     snapshot: &AgentSnapshot,
     context: StudioPolicyContext,
-    mut visible_tools: ToolVisibilitySet,
 ) -> AgentExecutionPolicy {
     let is_root = snapshot.identity.parent_id.is_none();
     let collaboration = if is_root {
@@ -41,18 +29,7 @@ pub(super) fn studio_execution_policy(
     } else {
         AgentAccessPolicy::default()
     };
-    if is_root {
-        visible_tools.extend_tool_names(COLLABORATION_CONTROL_TOOLS);
-    } else {
-        visible_tools = without_tools(visible_tools, &COLLABORATION_CONTROL_TOOLS);
-        visible_tools.extend_tool_names(["report_progress"]);
-    }
-    if context.mode == StudioMode::Task {
-        visible_tools = without_tools(visible_tools, &PLAN_EXIT_TOOL);
-    }
-
     AgentExecutionPolicy {
-        visible_tools,
         allowed_effects: ToolEffectSet::from_effects(allowed_effects(snapshot)),
         collaboration,
         finalization: finalization(snapshot, context),
@@ -67,15 +44,6 @@ fn spawn_roles(mode: StudioMode) -> BTreeSet<AgentRoleId> {
         .iter()
         .map(|role| AgentRoleId::new(*role).expect("Studio built-in role must be valid"))
         .collect()
-}
-
-fn without_tools(visible_tools: ToolVisibilitySet, denied: &[&str]) -> ToolVisibilitySet {
-    ToolVisibilitySet::from_tool_names(
-        visible_tools
-            .into_names()
-            .into_iter()
-            .filter(|name| !denied.contains(&name.as_str())),
-    )
 }
 
 fn allowed_effects(snapshot: &AgentSnapshot) -> Vec<ToolEffect> {
@@ -144,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn task_state_never_removes_ordinary_workspace_tools() {
+    fn task_state_keeps_ordinary_workspace_effects_enabled() {
         let root = snapshot("planner", true);
         for state in [
             TaskRunStateKind::Planning,
@@ -160,26 +128,16 @@ mod tests {
                     mode: StudioMode::Task,
                     task_phase: Some(state),
                 },
-                ToolVisibilitySet::from_tool_names([
-                    "exec",
-                    "apply_patch",
-                    "git_commit",
-                    "plan_exit",
-                ]),
             );
+            assert!(policy.allows_effect(Some(ToolEffect::Process)), "{state:?}");
             assert!(
-                policy.allows_tool("exec", Some(ToolEffect::Process)),
+                policy.allows_effect(Some(ToolEffect::WorkspaceWrite)),
                 "{state:?}"
             );
             assert!(
-                policy.allows_tool("apply_patch", Some(ToolEffect::WorkspaceWrite)),
+                policy.allows_effect(Some(ToolEffect::BranchControl)),
                 "{state:?}"
             );
-            assert!(
-                policy.allows_tool("git_commit", Some(ToolEffect::BranchControl)),
-                "{state:?}"
-            );
-            assert!(!policy.visible_tools.contains("plan_exit"), "{state:?}");
         }
     }
 
@@ -196,7 +154,6 @@ mod tests {
                     mode: StudioMode::Task,
                     task_phase: Some(state),
                 },
-                ToolVisibilitySet::default(),
             );
             assert_eq!(policy.finalization, required_tool("task_transition"));
         }

@@ -6,14 +6,14 @@ use pl_protocol::{
     ToolApprovalResolutionPayload,
 };
 
-use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
+use crate::tool::{PathAccess, SubagentContext, ToolPathPolicy, WorkspaceAccess};
 use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 
 use crate::time::unix_seconds;
 
 pub(super) fn approval_request(
     tool_call: &pl_model::ToolCall,
-    context: &ToolContext,
+    active_subagent: Option<&SubagentContext>,
 ) -> ToolApprovalRequest {
     let arguments = tool_call.arguments_for_display();
     let tool_arguments = tool_call.arguments_for_tool();
@@ -24,10 +24,7 @@ pub(super) fn approval_request(
         name: tool_call.name.clone(),
         arguments,
         working_directory,
-        parent_agent_id: context
-            .active_subagent
-            .as_ref()
-            .map(|subagent| subagent.id.clone()),
+        parent_agent_id: active_subagent.map(|subagent| subagent.id.clone()),
     }
 }
 

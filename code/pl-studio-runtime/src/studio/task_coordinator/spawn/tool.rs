@@ -14,7 +14,7 @@ use super::{
 use crate::studio::task_coordinator::{
     AllocateExecutor, TaskCoordinator, TaskRun, TaskRunStateKind, WorkUnitStateKind,
 };
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
     TurnId,
@@ -94,14 +94,14 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let thread_id = thread_id.into();
         let coordinator = Arc::clone(self);
-        FunctionToolDefinition::<TaskSpawnExecutorInput>::new(
+        TypedTool::<TaskSpawnExecutorInput>::new(
             "task_spawn_executor",
             "Spawn one Task executor from a concrete, self-contained implementation blueprint.",
         )
-        .registered(move |arguments: TaskSpawnExecutorInput, context| {
+        .handler(move |arguments: TaskSpawnExecutorInput, context| {
             let runtime = runtime.clone();
             let thread_id = thread_id.clone();
             let coordinator = Arc::clone(&coordinator);
@@ -162,13 +162,14 @@ impl TaskCoordinator {
                         ));
                     }
                 };
-                let Some(call_id) = context.provider_call_id.as_deref().map(str::to_string) else {
+                let call_id = context.identity().call_id.clone();
+                if call_id.is_empty() {
                     return spawn_rejection(input_rejection(
                         "missing_provider_call_id",
                         "task_spawn_executor requires a provider call id".to_string(),
                         current_phase,
                     ));
-                };
+                }
                 let (requested_thread_id, _) = match executor_runtime_ids(&thread_id, &call_id) {
                     Ok(ids) => ids,
                     Err(error) => {
@@ -407,8 +408,8 @@ fn spawn_output(
     scope_hints: Vec<String>,
     blueprint_fingerprint: String,
     reused: bool,
-) -> Result<ToolExecutionResult<serde_json::Value>> {
-    ToolExecutionResult::<serde_json::Value>::json(TaskSpawnExecutorOutput {
+) -> Result<ToolResult> {
+    ToolResult::json(TaskSpawnExecutorOutput {
         status: "spawned",
         agent_id: child_thread_id.to_string(),
         thread_id: child_thread_id.to_string(),
@@ -420,10 +421,8 @@ fn spawn_output(
     .map_err(anyhow::Error::from)
 }
 
-fn spawn_failure(failure: TaskSpawnFailure) -> Result<ToolExecutionResult<serde_json::Value>> {
-    Ok(ToolExecutionResult::<serde_json::Value>::failure(
-        serde_json::to_string(&failure)?,
-    ))
+fn spawn_failure(failure: TaskSpawnFailure) -> Result<ToolResult> {
+    Ok(ToolResult::failure(serde_json::to_string(&failure)?))
 }
 
 fn input_rejection(
@@ -505,12 +504,8 @@ fn missing_persisted_failure(
     })
 }
 
-fn spawn_rejection(
-    rejection: TaskSpawnExecutorRejection,
-) -> Result<ToolExecutionResult<serde_json::Value>> {
-    Ok(ToolExecutionResult::<serde_json::Value>::failure(
-        serde_json::to_string(&rejection)?,
-    ))
+fn spawn_rejection(rejection: TaskSpawnExecutorRejection) -> Result<ToolResult> {
+    Ok(ToolResult::failure(serde_json::to_string(&rejection)?))
 }
 
 fn executor_constraint(scope_hints: &[String]) -> Result<String> {
@@ -558,11 +553,9 @@ mod tests {
 
     #[test]
     fn task_spawn_executor_schema_inlines_structured_contract_objects() {
-        let schema = FunctionToolDefinition::<TaskSpawnExecutorInput>::new(
-            "task_spawn_executor",
-            "test contract",
-        )
-        .input_schema();
+        let schema =
+            TypedTool::<TaskSpawnExecutorInput>::new("task_spawn_executor", "test contract")
+                .input_schema();
         let properties = schema["properties"]
             .as_object()
             .expect("task_spawn_executor properties");

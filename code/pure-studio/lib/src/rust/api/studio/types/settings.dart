@@ -527,13 +527,11 @@ class BridgeProviderPresetDescriptor {
 class BridgeProviderServiceCapabilitiesDescriptor {
   final BridgeWebSearchProviderCapabilitiesDescriptor webSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
 
   const BridgeProviderServiceCapabilitiesDescriptor({
     required this.webSearch,
     required this.promptCacheDialect,
-    required this.responsesToolSearch,
     required this.responsesProgrammaticToolCalling,
   });
 
@@ -541,7 +539,6 @@ class BridgeProviderServiceCapabilitiesDescriptor {
   int get hashCode =>
       webSearch.hashCode ^
       promptCacheDialect.hashCode ^
-      responsesToolSearch.hashCode ^
       responsesProgrammaticToolCalling.hashCode;
 
   @override
@@ -551,7 +548,6 @@ class BridgeProviderServiceCapabilitiesDescriptor {
           runtimeType == other.runtimeType &&
           webSearch == other.webSearch &&
           promptCacheDialect == other.promptCacheDialect &&
-          responsesToolSearch == other.responsesToolSearch &&
           responsesProgrammaticToolCalling ==
               other.responsesProgrammaticToolCalling;
 }
@@ -567,7 +563,6 @@ class BridgeProviderSettingsDto {
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
   final String defaultModel;
   final List<BridgeProviderModelSettingsDto> models;
@@ -584,7 +579,6 @@ class BridgeProviderSettingsDto {
     required this.hostedWebSearch,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
-    required this.responsesToolSearch,
     required this.responsesProgrammaticToolCalling,
     required this.defaultModel,
     required this.models,
@@ -603,7 +597,6 @@ class BridgeProviderSettingsDto {
       hostedWebSearch.hashCode ^
       standaloneWebSearch.hashCode ^
       promptCacheDialect.hashCode ^
-      responsesToolSearch.hashCode ^
       responsesProgrammaticToolCalling.hashCode ^
       defaultModel.hashCode ^
       models.hashCode ^
@@ -624,7 +617,6 @@ class BridgeProviderSettingsDto {
           hostedWebSearch == other.hostedWebSearch &&
           standaloneWebSearch == other.standaloneWebSearch &&
           promptCacheDialect == other.promptCacheDialect &&
-          responsesToolSearch == other.responsesToolSearch &&
           responsesProgrammaticToolCalling ==
               other.responsesProgrammaticToolCalling &&
           defaultModel == other.defaultModel &&
@@ -982,7 +974,6 @@ class ProviderInput {
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
-  final bool responsesToolSearch;
   final bool responsesProgrammaticToolCalling;
   final String defaultModel;
   final List<ProviderModelInput> customModels;
@@ -999,7 +990,6 @@ class ProviderInput {
     required this.hostedWebSearch,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
-    required this.responsesToolSearch,
     required this.responsesProgrammaticToolCalling,
     required this.defaultModel,
     required this.customModels,
@@ -1018,7 +1008,6 @@ class ProviderInput {
       hostedWebSearch.hashCode ^
       standaloneWebSearch.hashCode ^
       promptCacheDialect.hashCode ^
-      responsesToolSearch.hashCode ^
       responsesProgrammaticToolCalling.hashCode ^
       defaultModel.hashCode ^
       customModels.hashCode ^
@@ -1039,7 +1028,6 @@ class ProviderInput {
           hostedWebSearch == other.hostedWebSearch &&
           standaloneWebSearch == other.standaloneWebSearch &&
           promptCacheDialect == other.promptCacheDialect &&
-          responsesToolSearch == other.responsesToolSearch &&
           responsesProgrammaticToolCalling ==
               other.responsesProgrammaticToolCalling &&
           defaultModel == other.defaultModel &&

@@ -207,7 +207,7 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
 }
 
 #[test]
-fn custom_openai_endpoint_requires_explicit_responses_hosted_tool_capabilities() {
+fn custom_openai_endpoint_requires_explicit_programmatic_tool_capability() {
     let preset = builtin_provider_catalog()
         .presets
         .into_iter()
@@ -218,7 +218,6 @@ fn custom_openai_endpoint_requires_explicit_responses_hosted_tool_capabilities()
     provider.base_url = "https://responses-proxy.example/v1".to_string();
 
     let default_capabilities = provider.service_capabilities().unwrap();
-    assert!(!default_capabilities.responses_tools.tool_search);
     assert!(
         !default_capabilities
             .responses_tools
@@ -227,7 +226,6 @@ fn custom_openai_endpoint_requires_explicit_responses_hosted_tool_capabilities()
 
     provider.capabilities = ProviderCapabilitySelection::Explicit(official_capabilities);
     let explicit_capabilities = provider.service_capabilities().unwrap();
-    assert!(explicit_capabilities.responses_tools.tool_search);
     assert!(
         explicit_capabilities
             .responses_tools

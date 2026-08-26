@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use pl_protocol::Result;
 
 use crate::path_safety::{metadata_if_real_async, real_directory_entries_async};
-use crate::tool::ToolContext;
 use crate::tool::file::path::{WorkspacePaths, matches_pattern};
+use crate::tool::{ToolCallContext, ToolWorkspace};
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileListResult,
@@ -27,13 +27,13 @@ impl LocalWorkspaceFileBackend {
         })
     }
 
-    pub async fn from_context(context: &ToolContext) -> Result<Self> {
+    pub async fn for_call(workspace: &ToolWorkspace, context: &ToolCallContext) -> Result<Self> {
         let mut backend = Self::new(
-            context.workspace.root().to_path_buf(),
-            context.allows_workspace_escape(),
+            workspace.root().to_path_buf(),
+            workspace.allows_workspace_escape(context),
         )
         .await?;
-        backend.lsp_runtime = context.lsp_runtime.clone();
+        backend.lsp_runtime = workspace.lsp_runtime();
         Ok(backend)
     }
 

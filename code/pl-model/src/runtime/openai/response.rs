@@ -261,20 +261,6 @@ fn responses_orchestration_metrics(
     output: &[serde_json::Value],
     tool_calls: &[ToolCall],
 ) -> InferenceOrchestrationMetrics {
-    let tool_search_calls = output
-        .iter()
-        .filter(|item| {
-            item.get("type").and_then(serde_json::Value::as_str) == Some("tool_search_call")
-        })
-        .count() as u64;
-    let tool_search_loaded_tools = output
-        .iter()
-        .filter(|item| {
-            item.get("type").and_then(serde_json::Value::as_str) == Some("tool_search_output")
-        })
-        .filter_map(|item| item.get("tools").and_then(serde_json::Value::as_array))
-        .map(|tools| tools.iter().map(loaded_tool_count).sum::<u64>())
-        .sum();
     let program_count = output
         .iter()
         .filter(|item| item.get("type").and_then(serde_json::Value::as_str) == Some("program"))
@@ -285,19 +271,11 @@ fn responses_orchestration_metrics(
         .count() as u64;
     InferenceOrchestrationMetrics {
         tool_calls: tool_calls.len() as u64,
-        tool_search_calls,
-        tool_search_loaded_tools,
         program_count,
         program_tool_calls,
         transport_attempts: 1,
         ..InferenceOrchestrationMetrics::default()
     }
-}
-
-fn loaded_tool_count(tool: &serde_json::Value) -> u64 {
-    tool.get("tools")
-        .and_then(serde_json::Value::as_array)
-        .map_or(1, |tools| tools.len() as u64)
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1,6 +1,6 @@
 use pl_model::{
     ModelCompactionRequest, ModelRuntime, OpenAiCompactionMode, ReasoningConfig, TokenUsage,
-    ToolSchema,
+    ToolSpec,
 };
 use pl_protocol::{
     ContentPart, Message, MessageContent, MessageRole, ModelContextItem, PureError, Result,
@@ -20,7 +20,7 @@ pub(super) struct RemoteCompactionRequest<'a> {
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
     pub working_context_tail: Option<Message>,
-    pub tools: &'a [ToolSchema],
+    pub tools: &'a [ToolSpec],
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ReasoningConfig>,
     pub prompt_cache_key: Option<String>,

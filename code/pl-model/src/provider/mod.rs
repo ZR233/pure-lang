@@ -63,8 +63,6 @@ pub struct ProviderServiceCapabilities {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponsesHostedToolCapabilities {
     #[serde(default)]
-    pub tool_search: bool,
-    #[serde(default)]
     pub programmatic_tool_calling: bool,
 }
 
@@ -146,7 +144,6 @@ impl ProviderServiceCapabilities {
                 dialect: PromptCacheDialect::OpenAiPromptCacheKey,
             },
             responses_tools: ResponsesHostedToolCapabilities {
-                tool_search: true,
                 programmatic_tool_calling: true,
             },
         }
@@ -358,7 +355,11 @@ mod tests {
         assert_eq!(info.name, "OpenAI");
         assert_eq!(info.base_url, "https://api.openai.com/v1");
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::NativeCustomTools);
-        assert!(info.service_capabilities.responses_tools.tool_search);
+        assert!(
+            info.service_capabilities
+                .responses_tools
+                .programmatic_tool_calling
+        );
     }
 
     #[test]

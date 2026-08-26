@@ -10,13 +10,14 @@ pub(super) fn cache_key(
     workspace_root: &Path,
     policy: ToolCachePolicy,
     workspace_epoch: u64,
+    executor_generation: u64,
 ) -> String {
     let canonical_arguments = crate::working_set::canonical_json_string(arguments);
     let repository_view = repository_view(arguments);
     let epoch = effective_epoch(policy, repository_view, workspace_epoch);
     crate::working_set::canonical_content_hash(
         format!(
-            "{tool_name}\0{}\0{}\0{repository_view:?}\0{epoch}",
+            "{tool_name}\0{executor_generation}\0{}\0{}\0{repository_view:?}\0{epoch}",
             workspace_root.display(),
             canonical_arguments
         )

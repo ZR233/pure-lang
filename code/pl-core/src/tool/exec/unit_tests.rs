@@ -3,12 +3,9 @@ use crate::{CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest};
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn tool_input(command: &str, session_id: &str, tool_id: &str) -> ToolInput {
+fn tool_input(command: &str, _session_id: &str, _tool_id: &str) -> ToolInput {
     ToolInput {
         arguments: serde_json::json!({ "command": command }),
-        session_id: session_id.to_string(),
-        tool_id: tool_id.to_string(),
-        revision_base: 0,
     }
 }
 
@@ -31,19 +28,36 @@ fn test_backend() -> Arc<LocalCommandBackend> {
     Arc::new(LocalCommandBackend::new(root))
 }
 
+fn tool_workspace(root: &std::path::Path) -> ToolWorkspace {
+    ToolWorkspace::new(crate::tool::AgentWorkspace::local(root.to_path_buf()))
+}
+
 fn test_tool() -> TestExecTool {
-    ExecTool::new(test_backend())
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    ExecTool::new(
+        Arc::new(LocalCommandBackend::new(root.clone())),
+        tool_workspace(&root),
+    )
 }
 
 fn test_tool_with_root() -> (TestExecTool, PathBuf) {
     let root = test_root();
     std::fs::create_dir_all(&root).unwrap();
-    let tool = ExecTool::new(Arc::new(LocalCommandBackend::new(root.clone())));
+    let tool = ExecTool::new(
+        Arc::new(LocalCommandBackend::new(root.clone())),
+        tool_workspace(&root),
+    );
     (tool, root)
 }
 
 fn shared_tools() -> (TestExecTool, TestWriteStdinTool) {
-    command_tool_pair(test_backend())
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    command_tool_pair(
+        Arc::new(LocalCommandBackend::new(root.clone())),
+        tool_workspace(&root),
+    )
 }
 
 #[test]
@@ -177,30 +191,30 @@ impl CommandBackend for HostedContractBackend {
     }
 }
 
-fn command_json(output: &ToolOutput) -> CommandJsonOutput {
-    serde_json::from_str(&output.description).unwrap()
+fn command_json(output: &ToolResult) -> CommandJsonOutput {
+    serde_json::from_str(&output.canonical_output()).unwrap()
 }
 
-fn test_context() -> ToolContext {
+fn test_context() -> ToolCallContext {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     test_context_with_sender(event_tx)
 }
 
-fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext {
-    ToolContext {
+fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolCallContext {
+    ToolCallContext::test(event_tx)
+}
+
+fn test_context_with_revision(
+    event_tx: pl_trace::AgentEventSender,
+    revision_base: u64,
+) -> ToolCallContext {
+    ToolCallContext::new(
+        crate::tool::ToolCallIdentity {
+            revision_base,
+            ..crate::tool::ToolCallIdentity::default()
+        },
         event_tx,
-        options: crate::turn::TurnOptions::default(),
-        workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: std::sync::Arc::new(crate::AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
+    )
 }
 
 fn sleep_then_echo_command() -> &'static str {
@@ -292,7 +306,7 @@ async fn injected_backend_keeps_the_exec_result_contract() {
         local: LocalCommandBackend::new(root.clone()),
         publish_count: AtomicUsize::new(0),
     });
-    let tool = ExecTool::new(backend.clone());
+    let tool = ExecTool::new(backend.clone(), tool_workspace(&root));
 
     let output = tool
         .execute(
@@ -319,7 +333,7 @@ async fn injected_backend_keeps_the_exec_result_contract() {
     );
     assert!(output.runtime_events.iter().any(|event| matches!(
         event,
-        ToolRuntimeEvent::OutputArtifacts { artifacts }
+        ToolDirective::OutputArtifacts { artifacts }
             if artifacts == &result.output_artifacts
     )));
     assert!(result.stdout.contains("hosted"));
@@ -331,10 +345,9 @@ async fn injected_backend_keeps_the_exec_result_contract() {
 async fn streams_tool_result_delta_for_command_output() {
     let tool = test_tool();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
-    let mut input = tool_input("echo streaming", "stream-session", "stream-tool");
-    input.revision_base = 5;
+    let input = tool_input("echo streaming", "stream-session", "stream-tool");
     let output = tool
-        .execute(input, test_context_with_sender(event_tx))
+        .execute(input, test_context_with_revision(event_tx, 5))
         .await
         .unwrap();
 
@@ -344,7 +357,7 @@ async fn streams_tool_result_delta_for_command_output() {
     assert!(revision > 5);
     assert!(output.runtime_events.iter().any(|event| matches!(
         event,
-        ToolRuntimeEvent::ToolResultRevision {
+        ToolDirective::ToolResultRevision {
             revision: output_revision
         } if *output_revision >= revision
     )));
@@ -372,7 +385,7 @@ async fn streams_tool_result_delta_for_stderr_output() {
     assert!(streamed.contains("err"));
     assert!(output.runtime_events.iter().any(|event| matches!(
         event,
-        ToolRuntimeEvent::ToolResultRevision {
+        ToolDirective::ToolResultRevision {
             revision: output_revision
         } if *output_revision >= revision
     )));
@@ -441,9 +454,6 @@ async fn rejects_working_directory_outside_workspace() {
                     "command": "echo no",
                     "cwd": ".."
                 }),
-                session_id: "cwd-session".to_string(),
-                tool_id: "escape-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -465,9 +475,6 @@ async fn relative_working_directory_resolves_from_workspace_root() {
                     "command": "echo marker > cwd-check.txt",
                     "cwd": "subdir",
                 }),
-                session_id: "cwd-session".to_string(),
-                tool_id: "relative-cwd".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -483,9 +490,10 @@ async fn relative_working_directory_resolves_from_workspace_root() {
 async fn full_access_allows_working_directory_outside_workspace() {
     let (tool, root) = test_tool_with_root();
     let outside = root.parent().unwrap().to_path_buf();
-    let mut context = test_context();
-    context.options = crate::turn::TurnOptions::default()
-        .with_permission_mode(crate::turn::PermissionMode::FullAccess);
+    let context = test_context().with_approval(crate::tool::ToolApprovalContext::new(
+        crate::turn::PermissionMode::FullAccess,
+        crate::tool::WorkspaceAccess::ExternalAllowed,
+    ));
     let output = tool
         .execute(
             ToolInput {
@@ -493,9 +501,6 @@ async fn full_access_allows_working_directory_outside_workspace() {
                     "command": "echo yes",
                     "cwd": outside,
                 }),
-                session_id: "cwd-session".to_string(),
-                tool_id: "full-access-cwd".to_string(),
-                revision_base: 0,
             },
             context,
         )
@@ -510,15 +515,19 @@ async fn full_access_allows_working_directory_outside_workspace() {
 #[tokio::test]
 #[ignore = "requires ripgrep on the host"]
 async fn exec_allows_search_read_and_write_in_read_only_workspace() {
-    let (tool, root) = test_tool_with_root();
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    let tool = ExecTool::new(
+        Arc::new(LocalCommandBackend::new(root.clone())),
+        ToolWorkspace::new(crate::tool::AgentWorkspace::confined(
+            root.clone(),
+            crate::tool::WorkspaceMutability::ReadOnly,
+        )),
+    );
     tokio::fs::write(root.join("read-only-source.txt"), "read-only fixture\n")
         .await
         .unwrap();
-    let mut context = test_context();
-    context.workspace = crate::tool::AgentWorkspace::confined(
-        root.clone(),
-        crate::tool::WorkspaceMutability::ReadOnly,
-    );
+    let context = test_context();
 
     let search = tool
         .execute(
@@ -586,11 +595,18 @@ async fn full_output_saved_to_file() {
 #[tokio::test]
 async fn output_file_path_follows_convention() {
     let tool = test_tool();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolCallContext::new(
+        crate::tool::ToolCallIdentity {
+            session_id: "my-session".to_string(),
+            item_id: "my-tool".to_string(),
+            call_id: "my-call".to_string(),
+            ..crate::tool::ToolCallIdentity::default()
+        },
+        event_tx,
+    );
     let output = tool
-        .execute(
-            tool_input("echo ok", "my-session", "my-tool"),
-            test_context(),
-        )
+        .execute(tool_input("echo ok", "my-session", "my-tool"), context)
         .await
         .unwrap();
 
@@ -611,9 +627,6 @@ async fn long_command_returns_process_id_then_can_be_polled() {
                     "command": sleep_then_echo_command(),
                     "yieldTimeMs": 250,
                 }),
-                session_id: "long-session".to_string(),
-                tool_id: "long-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -637,9 +650,6 @@ async fn long_command_returns_process_id_then_can_be_polled() {
                         "chars": "",
                         "yieldTimeMs": 1500,
                     }),
-                    session_id: "long-session".to_string(),
-                    tool_id: "poll-tool".to_string(),
-                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -675,9 +685,6 @@ async fn write_stdin_sends_input_to_running_process() {
                     "command": stdin_echo_command(),
                     "yieldTimeMs": 250,
                 }),
-                session_id: "stdin-session".to_string(),
-                tool_id: "stdin-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -701,9 +708,6 @@ async fn write_stdin_sends_input_to_running_process() {
                         "chars": if attempt == 0 { "hello\n" } else { "" },
                         "yieldTimeMs": 3000,
                     }),
-                    session_id: "stdin-session".to_string(),
-                    tool_id: format!("stdin-write-{attempt}"),
-                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -741,9 +745,6 @@ async fn timeout_terminates_background_process() {
                     "timeoutSeconds": 1,
                     "yieldTimeMs": 3000,
                 }),
-                session_id: "timeout-session".to_string(),
-                tool_id: "timeout-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -751,7 +752,7 @@ async fn timeout_terminates_background_process() {
         .unwrap();
     let mut result = command_json(&output);
     let mut timed_out = output.timed_out || result.state.is_timed_out();
-    for attempt in 0..8 {
+    for _attempt in 0..8 {
         if matches!(
             result.state.final_result(),
             Some(CommandProcessFinalResult::TimedOut)
@@ -768,9 +769,6 @@ async fn timeout_terminates_background_process() {
                         "processId": process_id,
                         "yieldTimeMs": 1000,
                     }),
-                    session_id: "timeout-session".to_string(),
-                    tool_id: format!("timeout-poll-{attempt}"),
-                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -803,9 +801,6 @@ async fn process_limit_returns_recoverable_error() {
                     "command": sleep_then_echo_command(),
                     "yieldTimeMs": 250,
                 }),
-                session_id: "limit-session".to_string(),
-                tool_id: "first-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -820,9 +815,6 @@ async fn process_limit_returns_recoverable_error() {
                     "command": sleep_then_echo_command(),
                     "yieldTimeMs": 250,
                 }),
-                session_id: "limit-session".to_string(),
-                tool_id: "second-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -837,9 +829,6 @@ async fn process_limit_returns_recoverable_error() {
                     "processId": process_id,
                     "yieldTimeMs": 3000,
                 }),
-                session_id: "limit-session".to_string(),
-                tool_id: "cleanup-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -853,9 +842,6 @@ async fn write_stdin_unknown_process_is_recoverable_error() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({ "processId": "missing" }),
-                session_id: "missing-session".to_string(),
-                tool_id: "missing-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -879,9 +865,6 @@ async fn large_output_is_truncated_in_json_and_saved_to_file() {
                     "command": large_output_command(),
                     "maxOutputChars": 100,
                 }),
-                session_id: "large-session".to_string(),
-                tool_id: "large-tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )

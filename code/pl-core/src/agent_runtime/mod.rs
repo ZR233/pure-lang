@@ -12,7 +12,7 @@ mod runtime;
 mod state;
 mod turn;
 
-pub use collaboration::AgentCollaborationTools;
+pub use collaboration::{AgentCollaborationToolConfig, AgentCollaborationTools};
 pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{

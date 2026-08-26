@@ -77,6 +77,11 @@ path = "tests/trace_live.rs"
 required-features = ["live-tests"]
 
 [[test]]
+name = "prompt_cache_live"
+path = "tests/prompt_cache_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
 name = "mcp_transports_live"
 path = "tests/mcp_transports_live.rs"
 required-features = ["live-tests"]

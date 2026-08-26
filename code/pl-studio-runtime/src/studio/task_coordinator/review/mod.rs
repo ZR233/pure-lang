@@ -24,7 +24,7 @@ use super::{
     WorkCompletionStatus, WorkUnit, WorkUnitState, WorkUnitStateKind, current_work_units,
 };
 use crate::agent::worktree::git_compatible_path;
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, StudioIntegratedReviewGate,
     ThreadContextState, ThreadId, ToolEffect,
@@ -285,20 +285,20 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<RequestDeliveryReviewInput>::new(
+        TypedTool::<RequestDeliveryReviewInput>::new(
             "task_request_delivery_review",
             "Start one fresh read-only reviewer for the latest completion of an executor.",
         )
-        .registered(move |input: RequestDeliveryReviewInput, context| {
+        .handler(move |input: RequestDeliveryReviewInput, context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             let runtime = runtime.clone();
             async move {
                 let call_id = provider_call_id(
-                    context.provider_call_id.as_deref(),
+                    Some(context.identity().call_id.as_str()),
                     "task_request_delivery_review",
                 )?;
                 let round = coordinator
@@ -308,8 +308,8 @@ impl TaskCoordinator {
                 let output = coordinator
                     .spawn_reviewer(&thread_id, round, &call_id, &runtime)
                     .await?;
-                ToolExecutionResult::<serde_json::Value>::json(output)
-                    .map(ToolExecutionResult::ending_turn)
+                ToolResult::json(output)
+                    .map(ToolResult::ending_turn)
                     .map_err(anyhow::Error::from)
             }
         })
@@ -380,14 +380,14 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: Option<AgentRuntimeHandle>,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<TaskStatusInput>::new(
+        TypedTool::<TaskStatusInput>::new(
             "task_status",
             "Read the canonical in-memory Task state, merge candidates, completions, reviews, merges, and findings.",
         )
-        .registered(move |_: TaskStatusInput, _| {
+        .handler(move |_: TaskStatusInput, _| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
@@ -487,7 +487,7 @@ impl TaskCoordinator {
                     };
                     // task_status 是只读概览；放宽预算保证中小任务一次读全，超大任务
                     // 的 findings 明细由 read_review_round 分页补充。
-                    ToolExecutionResult::<serde_json::Value>::json_with_budget(
+                    ToolResult::json_with_budget(
                         output,
                         /* max_output_tokens */ 12_000,
                         /* max_output_bytes */ 48 * 1024,
@@ -501,14 +501,14 @@ impl TaskCoordinator {
     pub(crate) fn read_work_unit_handoff_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<ReadWorkUnitHandoffInput>::new(
+        TypedTool::<ReadWorkUnitHandoffInput>::new(
             "read_work_unit_handoff",
             "Read the complete durable implementation blueprint for one Task work unit.",
         )
-        .registered(move |input: ReadWorkUnitHandoffInput, _| {
+        .handler(move |input: ReadWorkUnitHandoffInput, _| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             async move {
@@ -531,12 +531,7 @@ impl TaskCoordinator {
                 if work_unit.task_run_id != run.id {
                     bail!("workUnitId does not belong to the active Task")
                 }
-                ToolExecutionResult::<serde_json::Value>::json_with_budget(
-                    handoff,
-                    8_000,
-                    32 * 1024,
-                )
-                .map_err(anyhow::Error::from)
+                ToolResult::json_with_budget(handoff, 8_000, 32 * 1024).map_err(anyhow::Error::from)
             }
         })
         .with_effect(ToolEffect::Read)

@@ -1,12 +1,9 @@
 use std::fs;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
 use super::*;
-use crate::session::AgentSession;
-use crate::turn::TurnOptions;
 
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
@@ -20,22 +17,15 @@ fn skill_content(name: &str, description: &str) -> String {
     format!("---\nname: {name}\ndescription: {description}\n---\n# {name}\n")
 }
 
-fn tool_context(workspace_root: PathBuf) -> ToolContext {
+fn tool_context(_workspace_root: PathBuf) -> ToolCallContext {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    ToolContext {
-        event_tx,
-        options: TurnOptions::default(),
-        workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
-        workspace: crate::tool::AgentWorkspace::local(workspace_root),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: Arc::new(AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
+    ToolCallContext::test(event_tx)
+}
+
+fn tool_workspace(workspace_root: &Path) -> ToolWorkspace {
+    ToolWorkspace::new(crate::tool::AgentWorkspace::local(
+        workspace_root.to_path_buf(),
+    ))
 }
 
 fn write_project_skill(workspace: &Path, name: &str) {
@@ -69,9 +59,8 @@ fn remove_directory_link(link: &Path) {
     fs::remove_dir(link).unwrap();
 }
 
-fn activation_from_output(output: &ToolOutput) -> &SkillActivation {
-    let Some(ToolRuntimeEvent::SkillActivated { activation }) = output.runtime_events.first()
-    else {
+fn activation_from_output(output: &ToolResult) -> &SkillActivation {
+    let Some(ToolDirective::SkillActivated { activation }) = output.runtime_events.first() else {
         panic!("expected skill activation")
     };
     activation
@@ -147,7 +136,7 @@ fn skill_inputs_and_outputs_flatten_shared_fields() {
 
 #[test]
 fn skill_manage_schema_is_a_provider_object_union() {
-    let tool = SkillManageTool::new(SkillsConfig::default());
+    let tool = SkillManageTool::new(SkillsConfig::default(), tool_workspace(Path::new(".")));
     let schema = tool.input_schema();
 
     assert_eq!(schema["type"], "object");
@@ -179,7 +168,7 @@ fn skill_manage_schema_is_a_provider_object_union() {
 
 #[test]
 fn skill_view_is_never_cached() {
-    let tool = SkillViewTool::new(SkillsConfig::default());
+    let tool = SkillViewTool::new(SkillsConfig::default(), tool_workspace(Path::new(".")));
     assert_eq!(
         tool.cache_policy(&json!({"name": "demo"})),
         ToolCachePolicy::Never
@@ -262,18 +251,18 @@ fn rejects_readonly_skill_patch() {
 async fn skill_view_success_emits_skill_activation() {
     let workspace = temp_dir("view-activation");
     write_project_skill(&workspace, "local-flow");
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let output = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "local-flow"}),
-                session_id: "turn-1".to_string(),
-                tool_id: "call-1".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -298,18 +287,18 @@ async fn skill_view_records_project_usage_independent_of_product_mode() {
     let workspace = temp_dir("view-task-readonly");
     write_project_skill(&workspace, "local-flow");
     let usage_path = workspace.join("skills/local-flow/.usage.json");
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let output = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "local-flow"}),
-                session_id: "turn-task".to_string(),
-                tool_id: "call-task".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -325,18 +314,18 @@ async fn skill_view_records_project_usage_independent_of_product_mode() {
 async fn skill_view_support_file_success_activates_parent_skill() {
     let workspace = temp_dir("view-support-activation");
     write_project_skill(&workspace, "local-flow");
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let output = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "local-flow", "filePath": "references/example.md"}),
-                session_id: "turn-1".to_string(),
-                tool_id: "call-1".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -353,24 +342,25 @@ async fn skill_view_support_file_success_activates_parent_skill() {
 async fn skill_view_main_file_alias_returns_resource_base_without_enumerating_files() {
     let workspace = temp_dir("view-main-alias");
     write_project_skill(&workspace, "local-flow");
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let output = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "local-flow", "filePath": "SKILL.md"}),
-                session_id: "turn-1".to_string(),
-                tool_id: "call-1".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
         .await
         .unwrap();
-    let result = serde_json::from_str::<SkillViewOutputSnapshot>(&output.description).unwrap();
+    let result =
+        serde_json::from_str::<SkillViewOutputSnapshot>(&output.canonical_output()).unwrap();
 
     assert_eq!(activation_from_output(&output).name, "local-flow");
     assert!(result.success);
@@ -388,18 +378,18 @@ async fn skill_view_main_file_alias_returns_resource_base_without_enumerating_fi
 #[tokio::test]
 async fn skill_view_failure_does_not_emit_activation() {
     let workspace = temp_dir("view-failure");
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let error = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "missing"}),
-                session_id: "turn-1".to_string(),
-                tool_id: "call-1".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -420,18 +410,18 @@ async fn skill_discovery_skips_linked_skill_directories() {
         &outside.join("skills/linked-flow"),
         &workspace.join("skills/linked-flow"),
     );
-    let tool = SkillViewTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillViewTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let error = tool
         .execute(
             ToolInput {
                 arguments: json!({"name": "linked-flow"}),
-                session_id: "turn-linked".to_string(),
-                tool_id: "call-linked".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -453,10 +443,13 @@ async fn skill_manage_rejects_linked_support_directory() {
     fs::remove_dir_all(workspace.join("skills/local-flow/references")).unwrap();
     fs::create_dir_all(&outside).unwrap();
     create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
-    let tool = SkillManageTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillManageTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     let error = tool
         .execute(
@@ -467,9 +460,6 @@ async fn skill_manage_rejects_linked_support_directory() {
                     "filePath": "references/new.md",
                     "fileContent": "blocked"
                 }),
-                session_id: "turn-linked".to_string(),
-                tool_id: "call-linked".to_string(),
-                revision_base: 0,
             },
             tool_context(workspace.clone()),
         )
@@ -493,10 +483,13 @@ async fn skill_delete_unlinks_support_directory_without_touching_target() {
     fs::create_dir_all(&outside).unwrap();
     fs::write(outside.join("kept.md"), "kept").unwrap();
     create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
-    let tool = SkillManageTool::new(SkillsConfig {
-        project_dir: "skills".to_string(),
-        ..SkillsConfig::default()
-    });
+    let tool = SkillManageTool::new(
+        SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        },
+        tool_workspace(&workspace),
+    );
 
     tool.execute(
         ToolInput {
@@ -504,9 +497,6 @@ async fn skill_delete_unlinks_support_directory_without_touching_target() {
                 "action": "delete",
                 "name": "local-flow"
             }),
-            session_id: "turn-linked".to_string(),
-            tool_id: "call-linked".to_string(),
-            revision_base: 0,
         },
         tool_context(workspace.clone()),
     )

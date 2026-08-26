@@ -153,8 +153,6 @@ pub struct StudioRuntime {
 #[derive(Clone)]
 struct StudioExternalRuntimes {
     mcp: McpRuntimeHandle,
-    /// MCP worker 与全部 Turn engine 共享的工具注册表。
-    mcp_shared_tools: std::sync::Arc<pl_core::ToolRegistry>,
     mcp_state: mcp_health::McpStateRuntime,
     mcp_startup_reconcile: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -167,6 +165,7 @@ struct StudioExternalRuntimes {
 struct StudioAgentFacility {
     framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     resources: StudioAgentResources,
+    tool_manager: pl_core::ToolManager,
     interactions: InteractionService,
     product_events: ProductEventBus,
     /// agent framework 的 write-behind writer 句柄；framework 被 take 后关机仍能排空。

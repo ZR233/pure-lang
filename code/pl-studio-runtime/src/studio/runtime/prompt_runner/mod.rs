@@ -103,7 +103,7 @@ impl StudioRuntime {
                 .find(|project| project.id == thread_record.project_id)
                 .context("Task project not found in the in-memory directory")?;
             self.task_coordinator
-                .start_task(&thread_id, &prompt, &project.path)
+                .start_task(&thread_record, &prompt, &project.path)
                 .await?;
         }
         self.ensure_prompt_runtime_ready().await?;

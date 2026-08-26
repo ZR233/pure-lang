@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use crate::tool::{LocalWorkspaceFileTool, Tool, ToolContext, ToolInput, WorkspaceFileToolKind};
-use crate::turn::TurnOptions;
+use crate::tool::{
+    AgentWorkspace, LocalWorkspaceFileTool, StatPathTool, Tool, ToolCallContext, ToolInput,
+    ToolWorkspace, WorkspaceFileToolKind,
+};
 
 use super::write::WriteFileTool;
 use super::{CopyPathTool, DeletePathTool, MovePathTool};
@@ -15,44 +17,30 @@ fn unique_temp_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pure-lang-{name}-{id}"))
 }
 
-async fn context(root: &Path) -> ToolContext {
+async fn context(root: &Path) -> ToolCallContext {
     tokio::fs::create_dir_all(root).await.unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    ToolContext {
-        event_tx,
-        options: TurnOptions::default(),
-        workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace: crate::tool::AgentWorkspace::local(root.to_path_buf()),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: std::sync::Arc::new(crate::AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
+    ToolCallContext::test(event_tx)
+}
+
+fn tool_workspace(root: &Path) -> ToolWorkspace {
+    ToolWorkspace::new(AgentWorkspace::local(root.to_path_buf()))
 }
 
 fn input(arguments: serde_json::Value) -> ToolInput {
-    ToolInput {
-        arguments,
-        session_id: "session".to_string(),
-        tool_id: "tool".to_string(),
-        revision_base: 0,
-    }
+    ToolInput { arguments }
 }
 
-fn read_file_tool() -> LocalWorkspaceFileTool {
-    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile)
+fn read_file_tool(root: &Path) -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile, tool_workspace(root))
 }
 
-fn list_files_tool() -> LocalWorkspaceFileTool {
-    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ListFiles)
+fn list_files_tool(root: &Path) -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ListFiles, tool_workspace(root))
 }
 
-fn apply_patch_tool() -> LocalWorkspaceFileTool {
-    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ApplyPatch)
+fn apply_patch_tool(root: &Path) -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ApplyPatch, tool_workspace(root))
 }
 
 #[cfg(unix)]

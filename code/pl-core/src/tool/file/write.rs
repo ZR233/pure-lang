@@ -7,25 +7,65 @@ use super::helpers::*;
 use super::input::*;
 use crate::path_safety::remove_dir_all_no_follow_async;
 use crate::tool::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput,
+    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input, tool_error,
 };
 use crate::turn::ToolEffect;
 
-#[derive(Debug)]
-pub struct WriteFileTool;
+#[derive(Debug, Clone)]
+pub struct WriteFileTool {
+    workspace: ToolWorkspace,
+}
 
-#[derive(Debug)]
-pub struct CreateDirectoryTool;
+#[derive(Debug, Clone)]
+pub struct CreateDirectoryTool {
+    workspace: ToolWorkspace,
+}
 
-#[derive(Debug)]
-pub struct DeletePathTool;
+#[derive(Debug, Clone)]
+pub struct DeletePathTool {
+    workspace: ToolWorkspace,
+}
 
-#[derive(Debug)]
-pub struct CopyPathTool;
+#[derive(Debug, Clone)]
+pub struct CopyPathTool {
+    workspace: ToolWorkspace,
+}
 
-#[derive(Debug)]
-pub struct MovePathTool;
+#[derive(Debug, Clone)]
+pub struct MovePathTool {
+    workspace: ToolWorkspace,
+}
+
+impl WriteFileTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
+
+impl CreateDirectoryTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
+
+impl DeletePathTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
+
+impl CopyPathTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
+
+impl MovePathTool {
+    pub fn new(workspace: ToolWorkspace) -> Self {
+        Self { workspace }
+    }
+}
 
 impl Tool for WriteFileTool {
     fn name(&self) -> &str {
@@ -37,8 +77,7 @@ impl Tool for WriteFileTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<WriteFileInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<WriteFileInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -48,13 +87,13 @@ impl Tool for WriteFileTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
-            let _write_guard = context.workspace_write_lock().await;
+            self.workspace.ensure_workspace_writable()?;
+            let _write_guard = self.workspace.write_lock().await;
             let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
@@ -82,7 +121,7 @@ impl Tool for WriteFileTool {
                         .await?;
                 }
             }
-            sync_lsp_changed(&context, &path).await;
+            self.workspace.notify_changed(&path).await;
             Ok(text_output(format!(
                 "Wrote {}",
                 paths.display_relative(&path)
@@ -102,7 +141,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<PathInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<PathInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -112,13 +151,13 @@ impl Tool for CreateDirectoryTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
-            let _write_guard = context.workspace_write_lock().await;
+            self.workspace.ensure_workspace_writable()?;
+            let _write_guard = self.workspace.write_lock().await;
             let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             tokio::fs::create_dir_all(&path).await?;
             Ok(text_output(format!(
@@ -140,8 +179,7 @@ impl Tool for DeletePathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<DeletePathInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<DeletePathInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -151,13 +189,13 @@ impl Tool for DeletePathTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
-            let _write_guard = context.workspace_write_lock().await;
+            self.workspace.ensure_workspace_writable()?;
+            let _write_guard = self.workspace.write_lock().await;
             let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_existing(&input.path).await?;
             let metadata = tokio::fs::metadata(&path).await?;
             match (metadata.is_dir(), input.delete_mode()) {
@@ -181,7 +219,7 @@ impl Tool for DeletePathTool {
                         .map_err(|error| tool_error(self.name(), error))?;
                 }
             }
-            sync_lsp_deleted(&context, &path).await;
+            self.workspace.notify_deleted(&path).await;
             Ok(text_output(format!(
                 "Deleted {}",
                 paths.display_relative(&path)
@@ -201,7 +239,7 @@ impl Tool for CopyPathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -211,13 +249,13 @@ impl Tool for CopyPathTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
-            let _write_guard = context.workspace_write_lock().await;
+            self.workspace.ensure_workspace_writable()?;
+            let _write_guard = self.workspace.write_lock().await;
             let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
             ensure_overwrite(
@@ -230,7 +268,7 @@ impl Tool for CopyPathTool {
                 tokio::fs::create_dir_all(parent).await?;
             }
             tokio::fs::copy(&from, &to).await?;
-            sync_lsp_changed(&context, &to).await;
+            self.workspace.notify_changed(&to).await;
             Ok(text_output(format!(
                 "Copied {} to {}",
                 paths.display_relative(&from),
@@ -251,7 +289,7 @@ impl Tool for MovePathTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -261,13 +299,13 @@ impl Tool for MovePathTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
-            context.ensure_workspace_writable()?;
-            let _write_guard = context.workspace_write_lock().await;
+            self.workspace.ensure_workspace_writable()?;
+            let _write_guard = self.workspace.write_lock().await;
             let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let paths = workspace(&context).await?;
+            let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
             ensure_overwrite(
@@ -280,8 +318,8 @@ impl Tool for MovePathTool {
                 tokio::fs::create_dir_all(parent).await?;
             }
             tokio::fs::rename(&from, &to).await?;
-            sync_lsp_deleted(&context, &from).await;
-            sync_lsp_changed(&context, &to).await;
+            self.workspace.notify_deleted(&from).await;
+            self.workspace.notify_changed(&to).await;
             Ok(text_output(format!(
                 "Moved {} to {}",
                 paths.display_relative(&from),
@@ -289,17 +327,5 @@ impl Tool for MovePathTool {
             )))
         }
         .boxed()
-    }
-}
-
-async fn sync_lsp_changed(context: &ToolContext, path: &std::path::Path) {
-    if let Some(registry) = &context.lsp_runtime {
-        registry.notify_file_changed(path).await;
-    }
-}
-
-async fn sync_lsp_deleted(context: &ToolContext, path: &std::path::Path) {
-    if let Some(registry) = &context.lsp_runtime {
-        registry.notify_file_deleted(path).await;
     }
 }

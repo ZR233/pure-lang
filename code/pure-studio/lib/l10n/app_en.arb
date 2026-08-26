@@ -712,13 +712,6 @@
   "timelineWebSearchOpening": "Opening a web page",
   "timelineWebSearchFinding": "Finding text on a page",
   "timelineWebSearchResults": "Result links",
-  "timelineToolSearchTitle": "Tool search",
-  "timelineToolSearchLoadedTools": "{count} loaded tools",
-  "@timelineToolSearchLoadedTools": {
-    "placeholders": {
-      "count": { "type": "int" }
-    }
-  },
   "timelineLspQueryTitle": "LSP query",
   "timelineLspQueryTitleWithDetail": "LSP query · {detail}",
   "@timelineLspQueryTitleWithDetail": {

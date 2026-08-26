@@ -7,40 +7,36 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{
-    BoxFuture, FunctionToolDefinition, OutputTruncation, Tool, ToolContext, ToolEntry, ToolInput,
-    ToolOutput, ToolPathPolicy, ToolSourceId, ToolSourceMetadata, deserialize_tool_input,
+    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolInput, ToolPathPolicy, ToolResult,
+    ToolWorkspace, TypedTool, deserialize_tool_input,
 };
 
-/// lsp seam 来源的命名空间描述。
-pub fn lsp_namespace() -> Option<super::NamespaceDescriptor> {
-    Some(super::NamespaceDescriptor::new(
-        "lsp",
-        "Language server semantic queries (definition/references/hover/symbols/...).",
-    ))
-}
-
 /// 构造 lsp 来源的 seam 工具条目（`lsp_capabilities` + `lsp_query`）。
-pub fn lsp_tool_entries(registry: LspRuntimeRegistry) -> Vec<ToolEntry> {
-    let source = ToolSourceId::lsp();
-    let metadata = || ToolSourceMetadata {
-        source: source.clone(),
-        namespace: lsp_namespace(),
-        programmatic_eligible: true,
-    };
+pub fn lsp_tools(
+    registry: LspRuntimeRegistry,
+    workspace: ToolWorkspace,
+) -> Vec<std::sync::Arc<dyn Tool>> {
     vec![
-        ToolEntry::new(LspCapabilitiesTool::new(registry.clone()), metadata()),
-        ToolEntry::new(LspQueryTool::new(registry), metadata()),
+        std::sync::Arc::new(LspCapabilitiesTool::new(
+            registry.clone(),
+            workspace.clone(),
+        )),
+        std::sync::Arc::new(LspQueryTool::new(registry, workspace)),
     ]
 }
 
 #[derive(Debug, Clone)]
 pub struct LspCapabilitiesTool {
     registry: LspRuntimeRegistry,
+    workspace: ToolWorkspace,
 }
 
 impl LspCapabilitiesTool {
-    pub fn new(registry: LspRuntimeRegistry) -> Self {
-        Self { registry }
+    pub fn new(registry: LspRuntimeRegistry, workspace: ToolWorkspace) -> Self {
+        Self {
+            registry,
+            workspace,
+        }
     }
 }
 
@@ -58,11 +54,14 @@ impl Tool for LspCapabilitiesTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<LspCapabilitiesInput>::new(self.name(), self.description())
-            .input_schema()
+        TypedTool::<LspCapabilitiesInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn supports_programmatic_calls(&self) -> bool {
         true
     }
 
@@ -73,13 +72,13 @@ impl Tool for LspCapabilitiesTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        _context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             deserialize_tool_input::<LspCapabilitiesInput>(self.name(), input.arguments)?;
             let capabilities = self
                 .registry
-                .capabilities_for_workspace(context.workspace.root())
+                .capabilities_for_workspace(self.workspace.root())
                 .await;
             let description = serde_json::to_string_pretty(&capabilities).map_err(|error| {
                 PureError::ToolExecutionFailed {
@@ -87,14 +86,14 @@ impl Tool for LspCapabilitiesTool {
                     error: format!("failed to serialize LSP capabilities: {error}"),
                 }
             })?;
-            Ok(ToolOutput {
+            Ok(ToolResult::from_runtime_text(
                 description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                Some(0),
+                false,
+                Vec::new(),
+            ))
         }
         .boxed()
     }
@@ -125,11 +124,15 @@ struct LspQueryInput {
 #[derive(Debug, Clone)]
 pub struct LspQueryTool {
     registry: LspRuntimeRegistry,
+    workspace: ToolWorkspace,
 }
 
 impl LspQueryTool {
-    pub fn new(registry: LspRuntimeRegistry) -> Self {
-        Self { registry }
+    pub fn new(registry: LspRuntimeRegistry, workspace: ToolWorkspace) -> Self {
+        Self {
+            registry,
+            workspace,
+        }
     }
 }
 
@@ -143,10 +146,14 @@ impl Tool for LspQueryTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<LspQueryInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<LspQueryInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn supports_programmatic_calls(&self) -> bool {
         true
     }
 
@@ -157,8 +164,8 @@ impl Tool for LspQueryTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let parsed: LspQueryInput =
                 deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?;
@@ -171,10 +178,10 @@ impl Tool for LspQueryTool {
                 max_results: parsed.max_results,
                 language_id: Some(parsed.language_id.clone()),
             };
-            let query = resolve_query_path(query, &context, self.name())?;
+            let query = resolve_query_path(query, &self.workspace, &context, self.name())?;
             let result = self
                 .registry
-                .query_in_workspace(context.workspace.root(), query)
+                .query_in_workspace(self.workspace.root(), query)
                 .await
                 .map_err(|error| unknown_language_error(self.name(), &parsed.language_id, error))?;
             let description = serde_json::to_string_pretty(&result).map_err(|error| {
@@ -183,14 +190,14 @@ impl Tool for LspQueryTool {
                     error: format!("failed to serialize LSP result: {error}"),
                 }
             })?;
-            Ok(ToolOutput {
+            Ok(ToolResult::from_runtime_text(
                 description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                Some(0),
+                false,
+                Vec::new(),
+            ))
         }
         .boxed()
     }
@@ -212,15 +219,16 @@ fn unknown_language_error(
 
 fn resolve_query_path(
     mut query: LspQuery,
-    context: &ToolContext,
+    workspace: &ToolWorkspace,
+    context: &ToolCallContext,
     tool_name: &str,
 ) -> Result<LspQuery, PureError> {
     let Some(path) = query.file_path.take() else {
         return Ok(query);
     };
     let policy = ToolPathPolicy::new(
-        context.workspace.root().to_path_buf(),
-        context.allows_workspace_escape(),
+        workspace.root().to_path_buf(),
+        workspace.allows_workspace_escape(context),
         tool_name,
     )?;
     let original = path.display().to_string();
@@ -235,52 +243,34 @@ fn resolve_query_path(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::turn::TurnOptions;
+    use crate::tool::ToolApprovalContext;
 
     fn test_context(
-        workspace_root: PathBuf,
+        _workspace_root: PathBuf,
         workspace_access: crate::tool::WorkspaceAccess,
-    ) -> ToolContext {
+    ) -> ToolCallContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        ToolContext {
-            event_tx,
-            options: TurnOptions::default(),
+        ToolCallContext::test(event_tx).with_approval(ToolApprovalContext::new(
+            crate::turn::PermissionMode::RequestApproval,
             workspace_access,
-            workspace: crate::tool::AgentWorkspace::local(workspace_root),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            provider_call_id: None,
-            active_subagent: None,
-            lsp_runtime: None,
-            parent_session: Arc::new(crate::session::AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-        }
+        ))
+    }
+
+    fn workspace(root: PathBuf) -> ToolWorkspace {
+        ToolWorkspace::new(crate::tool::AgentWorkspace::local(root))
     }
 
     #[test]
-    fn lsp_seam_entries_expose_capabilities_and_query_only() {
-        let entries = lsp_tool_entries(LspRuntimeRegistry::new());
+    fn lsp_tools_expose_capabilities_and_query_only() {
+        let tools = lsp_tools(LspRuntimeRegistry::new(), workspace(std::env::temp_dir()));
 
-        let names = entries.iter().map(ToolEntry::name).collect::<Vec<_>>();
+        let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
         assert_eq!(names, vec!["lsp_capabilities", "lsp_query"]);
-        for entry in &entries {
-            assert_eq!(entry.metadata().source, ToolSourceId::lsp());
-            assert_eq!(
-                entry
-                    .metadata()
-                    .namespace
-                    .as_ref()
-                    .map(|ns| ns.name.as_str()),
-                Some("lsp")
-            );
-            assert!(entry.metadata().programmatic_eligible);
-            assert_eq!(entry.tool().effect(), Some(crate::turn::ToolEffect::Read));
+        for tool in &tools {
+            assert_eq!(tool.effect(), Some(crate::turn::ToolEffect::Read));
         }
         // catalog 中不得出现按语言命名的 lsp_query_{lang} 形态。
         assert!(!names.iter().any(|name| name.starts_with("lsp_query_")));
@@ -288,7 +278,8 @@ mod tests {
 
     #[test]
     fn lsp_query_input_requires_language_id_and_keeps_typed_fields() {
-        let schema = LspQueryTool::new(LspRuntimeRegistry::new()).input_schema();
+        let schema = LspQueryTool::new(LspRuntimeRegistry::new(), workspace(std::env::temp_dir()))
+            .input_schema();
 
         assert!(schema["properties"].get("languageId").is_some());
         assert!(schema["properties"].get("operation").is_some());
@@ -309,7 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn lsp_query_routes_by_language_id_with_recoverable_error() {
-        let tool = LspQueryTool::new(LspRuntimeRegistry::new());
+        let tool = LspQueryTool::new(LspRuntimeRegistry::new(), workspace(std::env::temp_dir()));
         let context = test_context(
             std::env::temp_dir(),
             crate::tool::WorkspaceAccess::WorkspaceOnly,
@@ -319,9 +310,6 @@ mod tests {
                 "languageId": "kotlin",
                 "operation": "diagnostics",
             }),
-            session_id: "session-1".to_string(),
-            tool_id: "tool-1".to_string(),
-            revision_base: 0,
         };
 
         let error = tool.execute(input, context).await.unwrap_err();
@@ -386,7 +374,7 @@ mod tests {
         };
         let context = test_context(root.clone(), crate::tool::WorkspaceAccess::WorkspaceOnly);
 
-        let result = resolve_query_path(query, &context, "lsp_query");
+        let result = resolve_query_path(query, &workspace(root.clone()), &context, "lsp_query");
 
         assert!(result.is_err());
         let _ = std::fs::remove_dir_all(root);
@@ -416,7 +404,8 @@ mod tests {
         };
         let context = test_context(root.clone(), crate::tool::WorkspaceAccess::WorkspaceOnly);
 
-        let resolved = resolve_query_path(query, &context, "lsp_query").unwrap();
+        let resolved =
+            resolve_query_path(query, &workspace(root.clone()), &context, "lsp_query").unwrap();
 
         assert_eq!(
             resolved.file_path,

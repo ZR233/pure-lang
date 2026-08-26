@@ -7,33 +7,39 @@ use super::failure::deterministic_failure;
 use super::state::CacheAcquisition;
 use super::{ToolCachePolicy, TurnToolCacheSnapshot};
 use crate::Result;
-use crate::tool::ToolOutput;
+use crate::tool::ToolResult;
+
+pub(crate) struct ToolCacheExecutionRequest<'a> {
+    pub(crate) tool_name: &'a str,
+    pub(crate) arguments: &'a Value,
+    pub(crate) workspace_root: &'a Path,
+    pub(crate) policy: ToolCachePolicy,
+    pub(crate) call_id: String,
+    pub(crate) executor_generation: u64,
+}
 
 impl TurnToolCacheSnapshot {
     pub(crate) async fn execute_or_reuse<F, Fut>(
         &self,
-        tool_name: &str,
-        arguments: &Value,
-        workspace_root: &Path,
-        policy: ToolCachePolicy,
-        call_id: String,
+        request: ToolCacheExecutionRequest<'_>,
         execute: F,
-    ) -> Result<ToolOutput>
+    ) -> Result<ToolResult>
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<ToolOutput>>,
+        Fut: Future<Output = Result<ToolResult>>,
     {
-        if policy == ToolCachePolicy::Never {
+        if request.policy == ToolCachePolicy::Never {
             return execute().await;
         }
         let mut execute = Some(execute);
         loop {
             match self.cache.acquire(
-                tool_name,
-                arguments,
-                workspace_root,
-                policy,
+                request.tool_name,
+                request.arguments,
+                request.workspace_root,
+                request.policy,
                 self.workspace_epoch,
+                request.executor_generation,
             ) {
                 CacheAcquisition::Hit(output) => return Ok(output),
                 CacheAcquisition::Failed(failure) => {
@@ -55,9 +61,10 @@ impl TurnToolCacheSnapshot {
                     )
                     .await;
                     match &result {
-                        Ok(output) => reservation.store(tool_name, call_id, output),
+                        Ok(output) => reservation.store(request.tool_name, request.call_id, output),
                         Err(error) => {
-                            if let Some(failure) = deterministic_failure(tool_name, call_id, error)
+                            if let Some(failure) =
+                                deterministic_failure(request.tool_name, request.call_id, error)
                             {
                                 reservation.store_failure(failure);
                             }

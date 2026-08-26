@@ -74,7 +74,10 @@ pub struct TraceEvent {
 #[serde(rename_all = "camelCase")]
 pub struct EnabledToolsEvent {
     pub turn_id: String,
+    pub step: u32,
     pub tools: Vec<String>,
+    pub wire_fingerprint: String,
+    pub execution_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

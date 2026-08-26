@@ -1,6 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use pl_protocol::{
+    WebSearchContextSize, WebSearchFilters, WebSearchUserLocation, WebSearchUserLocationType,
+};
+
 /// Web 搜索访问模式。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -16,15 +20,6 @@ impl WebSearchMode {
     pub fn is_disabled(self) -> bool {
         self == Self::Disabled
     }
-}
-
-/// Hosted 与独立搜索共用的上下文规模。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WebSearchContextSize {
-    Low,
-    Medium,
-    High,
 }
 
 /// Web 搜索使用的近似位置。
@@ -68,27 +63,6 @@ impl WebSearchConfig {
     }
 }
 
-/// Responses hosted web search 的域名过滤器。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WebSearchFilters {
-    pub allowed_domains: Vec<String>,
-}
-
-/// Responses hosted web search 的近似位置 wire 值。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WebSearchUserLocation {
-    #[serde(rename = "type")]
-    pub kind: WebSearchUserLocationType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub country: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub region: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub city: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timezone: Option<String>,
-}
-
 impl From<&WebSearchLocation> for WebSearchUserLocation {
     fn from(location: &WebSearchLocation) -> Self {
         Self {
@@ -99,12 +73,6 @@ impl From<&WebSearchLocation> for WebSearchUserLocation {
             timezone: location.timezone.clone(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WebSearchUserLocationType {
-    Approximate,
 }
 
 /// Provider-neutral Web Search 活动。

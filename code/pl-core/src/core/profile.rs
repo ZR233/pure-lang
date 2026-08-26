@@ -100,7 +100,8 @@ pub struct TurnEngineBuilder {
     skills: Option<SkillsConfig>,
     skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
-    shared_tool_registry: Option<std::sync::Arc<crate::tool::ToolRegistry>>,
+    agent_tools: Option<crate::tool::AgentToolSet>,
+    before_model_step: Option<crate::tool::BeforeModelStepHook>,
     runtime_profile: CoreRuntimeProfile,
 }
 
@@ -115,7 +116,8 @@ impl TurnEngineBuilder {
             skills: None,
             skill_catalog: None,
             lsp_runtime: None,
-            shared_tool_registry: None,
+            agent_tools: None,
+            before_model_step: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
         })
     }
@@ -143,12 +145,15 @@ impl TurnEngineBuilder {
         self
     }
 
-    /// 挂接共享工具注册表（如 MCP worker 的代际发布）。
-    pub fn with_shared_tool_registry(
-        mut self,
-        registry: std::sync::Arc<crate::tool::ToolRegistry>,
-    ) -> Self {
-        self.shared_tool_registry = Some(registry);
+    /// 绑定宿主持久拥有的 per-agent 工具集合。
+    pub fn with_agent_tool_set(mut self, tools: crate::tool::AgentToolSet) -> Self {
+        self.agent_tools = Some(tools);
+        self
+    }
+
+    /// 安装每个模型 step 冻结工具 plan 前执行的刷新窗口。
+    pub fn with_before_model_step(mut self, hook: crate::tool::BeforeModelStepHook) -> Self {
+        self.before_model_step = Some(hook);
         self
     }
 
@@ -166,13 +171,18 @@ impl TurnEngineBuilder {
             default_turn_options,
             context_compaction,
         } = self.runtime_profile;
+        let agent_tools = self.agent_tools.unwrap_or_else(|| {
+            crate::tool::ToolManager::new()
+                .agent_tool_set("standalone", crate::tool::GlobalToolInheritance::Isolated)
+        });
         TurnEngine {
             runtime: self.runtime,
             effort: self.effort,
             skills: self.skills,
             skill_catalog: self.skill_catalog,
             lsp_runtime: self.lsp_runtime,
-            shared_tools: self.shared_tool_registry,
+            agent_tools,
+            before_model_step: self.before_model_step,
             workspace,
             workspace_instructions,
             instruction_profile,
@@ -181,9 +191,7 @@ impl TurnEngineBuilder {
             default_turn_options,
             context_compaction,
             active_subagent: None,
-            tools: crate::tool::ToolRegistry::new(),
-            local_sources: Default::default(),
-            tool_guards: Default::default(),
+            tool_session_runtime: crate::tool::ToolSessionRuntime::default(),
         }
     }
 }

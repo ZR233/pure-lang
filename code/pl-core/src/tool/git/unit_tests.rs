@@ -9,7 +9,7 @@ use pl_protocol::PureError;
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::tool::{Tool, ToolContext, ToolInput};
+use crate::tool::{Tool, ToolCallContext, ToolInput};
 
 #[derive(Debug, Clone)]
 struct DisplayGitError(&'static str);
@@ -129,22 +129,9 @@ fn ok(stdout: &str) -> ExecutionOutput {
     }
 }
 
-fn test_context() -> ToolContext {
+fn test_context() -> ToolCallContext {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    ToolContext {
-        event_tx,
-        options: crate::turn::TurnOptions::default(),
-        workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: Arc::new(crate::AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
+    ToolCallContext::test(event_tx)
 }
 
 #[test]
@@ -169,9 +156,6 @@ async fn git_status_returns_json_output() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({}),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -179,7 +163,7 @@ async fn git_status_returns_json_output() {
         .unwrap();
 
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&output.canonical_output()).unwrap(),
         serde_json::json!({
             "status": 0,
             "stdout": "secret-token fetched",
@@ -204,9 +188,6 @@ async fn git_fetch_uses_provider_token_and_redacts_output() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({"remote": "origin", "prune": true}),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -214,7 +195,7 @@ async fn git_fetch_uses_provider_token_and_redacts_output() {
         .unwrap();
 
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&output.canonical_output()).unwrap(),
         serde_json::json!({
             "status": 0,
             "stdout": "[redacted] fetched",
@@ -252,9 +233,6 @@ async fn git_push_rejects_unsafe_branch_before_backend_runs() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({"branch": "../escape"}),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -275,9 +253,6 @@ async fn git_tool_maps_backend_display_error_to_current_tool() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({}),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -301,9 +276,6 @@ async fn git_tool_maps_credential_display_error_to_current_tool() {
         .execute(
             ToolInput {
                 arguments: serde_json::json!({ "remote": "origin" }),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
@@ -343,18 +315,15 @@ async fn git_sync_default_branch_preserves_dirty_workspace_with_provider_token()
         .execute(
             ToolInput {
                 arguments: serde_json::json!({ "preserveChanges": true }),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
             },
             test_context(),
         )
         .await
         .expect("sync default branch");
 
-    assert!(!output.description.contains("secret-token"));
+    assert!(!output.canonical_output().contains("secret-token"));
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&output.canonical_output()).unwrap(),
         serde_json::json!({
             "clone": "/workspace/repo",
             "worktree": "/workspace/repo",

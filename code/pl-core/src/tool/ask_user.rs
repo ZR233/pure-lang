@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use super::truncation::OutputTruncation;
 use super::{
-    BoxFuture, FunctionToolDefinition, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
+    BoxFuture, Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, TypedTool,
     deserialize_tool_input,
 };
 use crate::turn::UserInputMode;
@@ -89,7 +89,7 @@ impl Tool for AskUserTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        FunctionToolDefinition::<AskUserInput>::new(self.name(), self.description()).input_schema()
+        TypedTool::<AskUserInput>::new(self.name(), self.description()).input_schema()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -99,8 +99,8 @@ impl Tool for AskUserTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        context: ToolCallContext,
+    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let args = deserialize_tool_input::<AskUserInput>(self.name(), input.arguments)?;
             let questions = args
@@ -109,22 +109,26 @@ impl Tool for AskUserTool {
                 .map(UserQuestion::from)
                 .collect::<Vec<_>>();
             validate_questions(&questions)?;
-            let request_id = namespaced_request_id(&input.session_id, &input.tool_id);
+            let request_id = namespaced_request_id(
+                &context.identity().turn_id,
+                &context.identity().item_id,
+            );
             let request = UserInputRequest {
                 request_id,
-                tool_id: input.tool_id,
+                tool_id: context.identity().item_id.clone(),
                 questions,
             };
-            let interaction = user_input_interaction(&input.session_id, &request, &context);
-            let (response, runtime_events) = match context.options.user_input_mode {
+            let interaction =
+                user_input_interaction(&context.identity().turn_id, &request, &context);
+            let (response, runtime_events) = match context.approval().user_input_mode() {
                 UserInputMode::AwaitResponse => {
-                    let Some(callback) = context.options.interaction_callback.clone() else {
+                    let Some(callback) = context.approval().interaction_callback() else {
                         return Err(PureError::ToolExecutionFailed {
                             tool: self.name().to_string(),
                             error: "interaction runtime is not configured".to_string(),
                         });
                     };
-                    let resolution = match context.options.cancellation_token.clone() {
+                    let resolution = match context.cancellation_token() {
                         Some(token) => {
                             tokio::select! {
                                 resolution = callback(interaction.clone()) => resolution,
@@ -149,10 +153,10 @@ impl Tool for AskUserTool {
                 UserInputMode::EmitAndEndTurn => (
                     UserInputResponse::default(),
                     vec![
-                        ToolRuntimeEvent::InteractionRequested {
+                        ToolDirective::InteractionRequested {
                             interaction: Box::new(interaction),
                         },
-                        ToolRuntimeEvent::EndTurn {
+                        ToolDirective::EndTurn {
                             final_content: None,
                         },
                     ],
@@ -164,14 +168,14 @@ impl Tool for AskUserTool {
                     error: format!("failed to serialize response: {error}"),
                 }
             })?;
-            Ok(ToolOutput {
+            Ok(ToolResult::from_runtime_text(
                 description,
-                truncated: OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
+                OutputTruncation::empty(),
+                PathBuf::new(),
+                Some(0),
+                false,
                 runtime_events,
-            })
+            ))
         }
         .boxed()
     }
@@ -220,7 +224,7 @@ fn namespaced_request_id(session_id: &str, tool_id: &str) -> String {
 fn user_input_interaction(
     turn_id: &str,
     request: &UserInputRequest,
-    context: &ToolContext,
+    context: &ToolCallContext,
 ) -> InteractionRequest {
     let now = unix_seconds();
     InteractionRequest::user_input(
@@ -230,10 +234,7 @@ fn user_input_interaction(
             turn_id: turn_id.to_string(),
             item_id: Some(request.tool_id.clone()),
             tool_id: Some(request.tool_id.clone()),
-            agent_path: context
-                .active_subagent
-                .as_ref()
-                .and_then(|subagent| subagent.agent_path.clone()),
+            agent_path: context.identity().agent_path.clone(),
         },
         request.questions.clone(),
         now,
@@ -251,24 +252,16 @@ mod tests {
 
     use super::*;
     use crate::TurnOptions;
-    use crate::tool::WorkspaceAccess;
+    use crate::tool::{ToolApprovalContext, WorkspaceAccess};
 
-    fn context(options: TurnOptions) -> ToolContext {
+    fn context(options: TurnOptions) -> ToolCallContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        ToolContext {
-            event_tx,
-            options,
-            workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            provider_call_id: None,
-            active_subagent: None,
-            lsp_runtime: None,
-            parent_session: Arc::new(crate::AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-        }
+        let approval =
+            ToolApprovalContext::new(options.permission_mode, WorkspaceAccess::WorkspaceOnly)
+                .with_interaction(options.interaction_callback, options.user_input_mode);
+        ToolCallContext::test(event_tx)
+            .with_cancellation(options.cancellation_token)
+            .with_approval(approval)
     }
 
     fn tool_input() -> ToolInput {
@@ -284,9 +277,6 @@ mod tests {
                     }]
                 }]
             }),
-            session_id: "session-1".to_string(),
-            tool_id: "call-1".to_string(),
-            revision_base: 0,
         }
     }
 
@@ -318,7 +308,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
+            serde_json::from_str::<UserInputResponse>(&output.canonical_output()).unwrap(),
             UserInputResponse {
                 answers: HashMap::from([(
                     "mode".to_string(),
@@ -329,7 +319,7 @@ mod tests {
             }
         );
         let interaction = seen_interaction.lock().unwrap().clone().unwrap();
-        assert_eq!(interaction.interaction_id, "session-1-call-1");
+        assert_eq!(interaction.interaction_id, "turn-1-call-1");
         assert_eq!(interaction.kind(), pl_protocol::InteractionKind::UserInput);
         assert_eq!(
             interaction.status(),
@@ -339,10 +329,10 @@ mod tests {
             interaction.scope,
             InteractionScope {
                 thread_id: String::new(),
-                turn_id: "session-1".to_string(),
+                turn_id: "turn-1".to_string(),
                 item_id: Some("call-1".to_string()),
                 tool_id: Some("call-1".to_string()),
-                agent_path: None,
+                agent_path: Some("/root".to_string()),
             }
         );
         let pl_protocol::InteractionContent::UserInput(user_input) = interaction.content else {
@@ -391,7 +381,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
+            serde_json::from_str::<UserInputResponse>(&output.canonical_output()).unwrap(),
             UserInputResponse::default()
         );
     }
@@ -410,20 +400,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
+            serde_json::from_str::<UserInputResponse>(&output.canonical_output()).unwrap(),
             UserInputResponse::default()
         );
         assert_eq!(output.runtime_events.len(), 2);
-        let crate::tool::ToolRuntimeEvent::InteractionRequested { interaction } =
+        let crate::tool::ToolDirective::InteractionRequested { interaction } =
             &output.runtime_events[0]
         else {
             panic!("first runtime event must persist the interaction");
         };
-        assert_eq!(interaction.interaction_id, "session-1-call-1");
+        assert_eq!(interaction.interaction_id, "turn-1-call-1");
         assert_eq!(interaction.kind(), pl_protocol::InteractionKind::UserInput);
         assert_eq!(
             output.runtime_events[1],
-            crate::tool::ToolRuntimeEvent::EndTurn {
+            crate::tool::ToolDirective::EndTurn {
                 final_content: None,
             }
         );

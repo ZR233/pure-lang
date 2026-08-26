@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::ToolCachePolicy;
 use super::key::{effective_epoch, repository_view};
-use crate::tool::ToolOutput;
+use crate::tool::ToolResult;
 
 #[derive(Debug, Clone)]
 pub(super) struct ReadFileRequest {
@@ -22,8 +22,8 @@ pub(super) struct ReadFileRange {
 }
 
 impl ReadFileRange {
-    pub(super) fn from_output(request: &ReadFileRequest, output: &ToolOutput) -> Option<Self> {
-        let value = serde_json::from_str::<Value>(&output.description).ok()?;
+    pub(super) fn from_output(request: &ReadFileRequest, output: &ToolResult) -> Option<Self> {
+        let value = serde_json::from_str::<Value>(&output.canonical_output()).ok()?;
         let start_line = value.get("startLine")?.as_u64()?;
         let end_line = value.get("endLine")?.as_u64()?;
         if start_line != request.start_line || end_line < start_line {
@@ -51,6 +51,7 @@ pub(super) fn read_file_request(
     workspace_root: &Path,
     policy: ToolCachePolicy,
     workspace_epoch: u64,
+    executor_generation: u64,
 ) -> Option<ReadFileRequest> {
     if tool_name != "read_file" {
         return None;
@@ -76,7 +77,7 @@ pub(super) fn read_file_request(
     });
     let identity = crate::working_set::canonical_content_hash(
         format!(
-            "read_file\0{}\0{}\0{repository_view:?}\0{epoch}",
+            "read_file\0{executor_generation}\0{}\0{}\0{repository_view:?}\0{epoch}",
             workspace_root.display(),
             crate::working_set::canonical_json_string(&identity_arguments),
         )

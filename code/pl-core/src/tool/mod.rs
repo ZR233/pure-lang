@@ -7,23 +7,21 @@ mod contract;
 mod exec;
 mod file;
 mod git;
-mod lease;
+mod local;
 mod lsp;
+mod manager;
 mod model_output;
-mod orchestration;
 pub mod output_format;
 mod path_policy;
 mod plan;
-mod registered;
-mod registry;
+mod programmatic;
 mod session_note;
 mod shell;
 mod skill;
-mod source;
 mod text_document;
 mod text_escape;
 mod todo;
-mod tool_output;
+mod tool_result;
 mod truncation;
 mod web_search;
 mod workspace_file;
@@ -37,23 +35,33 @@ pub use exec::*;
 pub use file::*;
 pub use futures::future::BoxFuture;
 pub use git::*;
-pub use lease::*;
+pub use local::*;
 pub use lsp::*;
+pub use manager::*;
 pub use model_output::*;
-pub use orchestration::*;
 pub use path_policy::*;
 pub use plan::*;
-pub use registered::*;
-pub use registry::*;
+pub use programmatic::*;
 pub use session_note::*;
 pub use shell::*;
 pub use skill::*;
-pub use source::*;
 pub use todo::*;
-pub use tool_output::*;
+pub use tool_result::*;
 pub use truncation::*;
 pub use web_search::*;
 pub use workspace_file::*;
+
+pub(crate) fn estimate_tool_schema_tokens(schemas: &[pl_protocol::ToolSpec]) -> u64 {
+    let bytes = serde_json::to_vec(schemas).map_or(0, |value| value.len() as u64);
+    bytes.saturating_add(3) / 4
+}
+
+pub(crate) fn estimate_tool_result_tokens<'a>(results: impl IntoIterator<Item = &'a str>) -> u64 {
+    let bytes = results.into_iter().fold(0_u64, |total, result| {
+        total.saturating_add(result.len() as u64)
+    });
+    bytes.saturating_add(3) / 4
+}
 
 pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> pl_protocol::PureError {
     pl_protocol::PureError::ToolExecutionFailed {
@@ -65,58 +73,46 @@ pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> pl_protoc
 #[cfg(test)]
 mod tests {
     use std::fmt;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     use super::*;
-    use crate::turn::TurnOptions;
     use pl_protocol::PureError;
     use pretty_assertions::assert_eq;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
     #[test]
-    fn tool_output_projects_execution_result_for_product_adapters() {
+    fn tool_result_keeps_canonical_content_and_typed_directives() {
         #[derive(Debug, Deserialize, PartialEq, Eq)]
         struct ArtifactRecord {
             id: String,
         }
 
-        let output = ToolOutput {
-            description: "model output".to_string(),
-            truncated: OutputTruncation::empty(),
-            output_file: PathBuf::new(),
-            exit_code: Some(1),
-            timed_out: false,
-            runtime_events: vec![
-                ToolRuntimeEvent::OutputArtifacts {
-                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
-                },
-                ToolRuntimeEvent::EndTurn {
-                    final_content: Some("final answer".to_string()),
-                },
-            ],
-        };
+        let mut output = ToolResult::failure("model output");
+        output.runtime_events.extend([
+            ToolDirective::OutputArtifacts {
+                artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+            },
+            ToolDirective::EndTurn {
+                final_content: Some("final answer".to_string()),
+            },
+        ]);
 
+        assert!(!output.success);
+        assert_eq!(output.canonical_output(), "model output");
+        assert_eq!(output.model_output(), "model output");
+        assert!(output.ends_turn());
+        assert_eq!(output.end_turn_content(), Some("final answer"));
         assert_eq!(
-            output.to_execution_result::<ArtifactRecord>(),
-            ToolExecutionResult {
-                success: false,
-                output: "model output".to_string(),
-                model_output: "model output".to_string(),
-                ends_turn: true,
-                end_turn_content: Some("final answer".to_string()),
-                completed_plan_content: None,
-                output_artifacts: vec![ArtifactRecord {
-                    id: "artifact-1".to_string(),
-                }],
-                output_bytes_budget: None,
-            }
+            output.output_artifacts_as::<ArtifactRecord>(),
+            vec![ArtifactRecord {
+                id: "artifact-1".to_string(),
+            }]
         );
     }
 
     #[test]
-    fn typed_function_tool_definition_flattens_components_and_rejects_unknown_fields() {
+    fn typed_tool_flattens_components_and_rejects_unknown_fields() {
         #[derive(Debug, Deserialize, JsonSchema)]
         struct EmptyInput {}
 
@@ -135,8 +131,7 @@ mod tests {
             pagination: PaginationInput,
         }
 
-        let definition =
-            FunctionToolDefinition::<SearchInput>::new("search_product", "Search product records.");
+        let definition = TypedTool::<SearchInput>::new("search_product", "Search product records.");
         let input_schema = definition.input_schema();
 
         assert_eq!(input_schema["type"], "object");
@@ -174,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_function_tool_definition_normalizes_tagged_object_unions() {
+    fn typed_tool_normalizes_tagged_object_unions() {
         #[derive(Debug, Deserialize, JsonSchema, PartialEq, Eq)]
         #[serde(deny_unknown_fields)]
         struct CreateInput {
@@ -222,10 +217,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registered_tool_honors_cancelled_context() {
+    async fn local_tool_honors_cancelled_context() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let tool_calls = calls.clone();
-        let tool = RegisteredTool::new(
+        let tool = LocalTool::new(
             "product_tool",
             "Product tool",
             serde_json::json!({ "type": "object" }),
@@ -233,13 +228,7 @@ mod tests {
                 let tool_calls = tool_calls.clone();
                 async move {
                     tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Ok(ToolOutput::from_model_output(
-                        ToolOutputModelOutputRequest {
-                            model_output: "ran".to_string(),
-                            success: true,
-                            ends_turn: false,
-                        },
-                    ))
+                    Ok(ToolResult::success("ran"))
                 }
             },
         );
@@ -250,24 +239,8 @@ mod tests {
             .execute(
                 ToolInput {
                     arguments: serde_json::json!({}),
-                    session_id: "session".to_string(),
-                    tool_id: "tool-call".to_string(),
-                    revision_base: 0,
                 },
-                ToolContext {
-                    event_tx,
-                    options: TurnOptions::default().with_cancellation(token),
-                    workspace_access: WorkspaceAccess::WorkspaceOnly,
-                    workspace: AgentWorkspace::local(PathBuf::new()),
-                    workspace_instructions: None,
-                    instruction_snapshot: None,
-                    provider_call_id: None,
-                    active_subagent: None,
-                    lsp_runtime: None,
-                    parent_session: Arc::new(crate::session::AgentSession::new()),
-                    working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-                },
+                ToolCallContext::test(event_tx).with_cancellation(Some(token)),
             )
             .await;
 
@@ -293,33 +266,16 @@ mod tests {
             }
         }
 
-        let tool = FunctionToolDefinition::<EmptyInput>::new("product_tool", "Product tool")
-            .registered(|_input, _context| async move {
-                Err::<ToolExecutionResult<serde_json::Value>, DisplayError>(DisplayError("boom"))
-            });
+        let tool = TypedTool::<EmptyInput>::new("product_tool", "Product tool").handler(
+            |_input, _context| async move { Err::<ToolResult, DisplayError>(DisplayError("boom")) },
+        );
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let result = tool
             .execute(
                 ToolInput {
                     arguments: serde_json::json!({}),
-                    session_id: "session".to_string(),
-                    tool_id: "tool-call".to_string(),
-                    revision_base: 0,
                 },
-                ToolContext {
-                    event_tx,
-                    options: TurnOptions::default(),
-                    workspace_access: WorkspaceAccess::WorkspaceOnly,
-                    workspace: AgentWorkspace::local(PathBuf::new()),
-                    workspace_instructions: None,
-                    instruction_snapshot: None,
-                    provider_call_id: None,
-                    active_subagent: None,
-                    lsp_runtime: None,
-                    parent_session: Arc::new(crate::session::AgentSession::new()),
-                    working_set: crate::TurnWorkingSetHandle::default(),
-                    tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-                },
+                ToolCallContext::test(event_tx),
             )
             .await;
 
@@ -453,24 +409,10 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&root).await.unwrap();
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let context = ToolContext {
-            event_tx,
-            options: TurnOptions::default(),
-            workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace: AgentWorkspace::local(root.clone()),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            provider_call_id: None,
-            active_subagent: None,
-            lsp_runtime: None,
-            parent_session: Arc::new(crate::session::AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-        };
-        let first_guard = context.workspace_write_lock().await;
-        let second_context = context.clone();
-        let second = tokio::spawn(async move { second_context.workspace_write_lock().await });
+        let workspace = ToolWorkspace::new(AgentWorkspace::local(root.clone()));
+        let first_guard = workspace.write_lock().await;
+        let second_workspace = workspace.clone();
+        let second = tokio::spawn(async move { second_workspace.write_lock().await });
         tokio::task::yield_now().await;
 
         assert!(!second.is_finished());

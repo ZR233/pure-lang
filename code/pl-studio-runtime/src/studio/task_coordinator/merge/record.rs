@@ -11,7 +11,7 @@ use crate::studio::task_coordinator::{
     MergeMethod, MergeRecord, RecordTaskMerge, TaskCoordinator, TaskMergeScope, TaskRunStateKind,
     WorkCompletionRecord, WorkUnit,
 };
-use crate::tool::{FunctionToolDefinition, RegisteredTool, ToolExecutionResult};
+use crate::tool::{LocalTool, ToolResult, TypedTool};
 use crate::{AgentRuntimeHandle, ToolEffect};
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -37,25 +37,25 @@ impl TaskCoordinator {
         self: &Arc<Self>,
         thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
-    ) -> RegisteredTool {
+    ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        FunctionToolDefinition::<TaskRecordMergeInput>::new(
+        TypedTool::<TaskRecordMergeInput>::new(
             "task_record_merge",
             "Record integration facts declared by the current Task planner.",
         )
-        .registered(move |input: TaskRecordMergeInput, context| {
+        .handler(move |input: TaskRecordMergeInput, context| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
             let runtime = runtime.clone();
             async move {
-                if context.active_subagent.is_some() {
+                if context.identity().parent_agent_id.is_some() {
                     bail!("task_record_merge may only be called by the Task planner");
                 }
                 let record = coordinator
                     .record_planner_merge(&thread_id, input, Some(&runtime))
                     .await?;
-                ToolExecutionResult::<serde_json::Value>::json(record).map_err(anyhow::Error::from)
+                ToolResult::json(record).map_err(anyhow::Error::from)
             }
         })
         .with_effect(ToolEffect::BranchControl)

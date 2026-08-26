@@ -19,6 +19,7 @@ pub(super) struct StudioAgentResource {
 #[derive(Clone, Default)]
 pub(in crate::studio) struct StudioAgentResources {
     entries: Arc<RwLock<BTreeMap<ThreadId, StudioAgentResource>>>,
+    tool_sets: Arc<RwLock<BTreeMap<ThreadId, pl_core::AgentToolSet>>>,
     cleanup_takeovers: Arc<RwLock<BTreeSet<String>>>,
 }
 
@@ -32,7 +33,21 @@ impl StudioAgentResources {
     }
 
     pub(super) async fn remove(&self, id: &ThreadId) -> Option<StudioAgentResource> {
+        self.tool_sets.write().await.remove(id);
         self.entries.write().await.remove(id)
+    }
+
+    pub(super) async fn tool_set(
+        &self,
+        id: &ThreadId,
+        manager: &pl_core::ToolManager,
+    ) -> pl_core::AgentToolSet {
+        let mut sets = self.tool_sets.write().await;
+        sets.entry(id.clone())
+            .or_insert_with(|| {
+                manager.agent_tool_set(id.to_string(), pl_core::GlobalToolInheritance::Isolated)
+            })
+            .clone()
     }
 
     pub(in crate::studio) async fn begin_cleanup_takeover(
@@ -53,6 +68,8 @@ impl StudioAgentResources {
             .is_some_and(|resource| takeovers.contains(&resource.request.root_thread_id));
         if !preserve {
             entries.remove(id);
+            drop(entries);
+            self.tool_sets.write().await.remove(id);
         }
     }
 
@@ -70,6 +87,11 @@ impl StudioAgentResources {
                 .collect::<Vec<_>>();
             for agent_id in &removed {
                 entries.remove(agent_id);
+            }
+            drop(entries);
+            let mut tool_sets = self.tool_sets.write().await;
+            for agent_id in &removed {
+                tool_sets.remove(agent_id);
             }
         }
         for thread_id in root_thread_ids {

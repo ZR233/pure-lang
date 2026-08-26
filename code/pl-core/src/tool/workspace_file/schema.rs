@@ -1,7 +1,7 @@
-use pl_model::ToolSchema;
+use pl_model::ToolSpec;
 use serde_json::Value;
 
-use crate::tool::FunctionToolDefinition;
+use crate::tool::TypedTool;
 use crate::tool::cache::ToolCachePolicy;
 use crate::turn::ToolEffect;
 
@@ -65,16 +65,13 @@ impl WorkspaceFileToolKind {
     pub fn input_schema(self) -> Value {
         match self {
             Self::ReadFile => {
-                FunctionToolDefinition::<ReadFileInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<ReadFileInput>::new(self.name(), self.description()).input_schema()
             }
             Self::ListFiles => {
-                FunctionToolDefinition::<ListFilesInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<ListFilesInput>::new(self.name(), self.description()).input_schema()
             }
             Self::ApplyPatch => {
-                FunctionToolDefinition::<ApplyPatchInput>::new(self.name(), self.description())
-                    .input_schema()
+                TypedTool::<ApplyPatchInput>::new(self.name(), self.description()).input_schema()
             }
         }
     }
@@ -90,7 +87,7 @@ impl WorkspaceFileToolKind {
         }
     }
 
-    pub fn to_schema(self) -> ToolSchema {
-        ToolSchema::function(self.name(), self.description(), self.input_schema())
+    pub fn to_spec(self) -> ToolSpec {
+        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }

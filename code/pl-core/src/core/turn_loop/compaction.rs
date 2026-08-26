@@ -1,4 +1,4 @@
-use pl_model::{EffectivePromptCachePolicy, ModelRuntime, ReasoningConfig, ToolSchema};
+use pl_model::{EffectivePromptCachePolicy, ModelRuntime, ReasoningConfig, ToolSpec};
 use pl_protocol::Result;
 
 use crate::context_assembler::{AssembledModelContext, ContextAssembler, TurnContextSnapshot};
@@ -10,7 +10,7 @@ use crate::instruction::InstructionBundle;
 use crate::runtime_usage::{InferenceBillingInput, inference_billing_record};
 use crate::session::AgentSession;
 use crate::time::unix_seconds;
-use crate::tool::{SubagentContext, ToolInventory, TurnToolLease};
+use crate::tool::SubagentContext;
 use crate::trace::TraceRecorder;
 use crate::turn::{TurnOptions, TurnResult};
 use crate::working_set::TurnWorkingSetHandle;
@@ -41,9 +41,7 @@ pub(super) struct CompactionStep<'a> {
     pub(super) assembled_context: &'a mut AssembledModelContext,
     pub(super) turn_context: &'a mut TurnContextSnapshot,
     pub(super) working_set: &'a TurnWorkingSetHandle,
-    pub(super) iteration_tools: &'a [ToolSchema],
-    pub(super) tool_inventory: &'a ToolInventory,
-    pub(super) lease: &'a TurnToolLease,
+    pub(super) iteration_tools: &'a [ToolSpec],
     pub(super) parallel_tool_calls: bool,
     pub(super) reasoning: Option<&'a ReasoningConfig>,
     pub(super) prompt_cache_policy: EffectivePromptCachePolicy,
@@ -80,8 +78,6 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
         turn_context,
         working_set,
         iteration_tools,
-        tool_inventory,
-        lease,
         parallel_tool_calls,
         reasoning,
         prompt_cache_policy,
@@ -177,8 +173,6 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                             .prefix_section_hashes
                             .clone(),
                         tools: iteration_tools,
-                        tool_catalog_hash: tool_inventory.catalog_fingerprint(),
-                        registry_revision: Some(lease.revision().0),
                         tool_choice: "auto",
                         parallel_tool_calls,
                         reasoning,

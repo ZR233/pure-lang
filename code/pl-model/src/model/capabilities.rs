@@ -43,7 +43,6 @@ impl ModelCapabilities {
                 parallel_tool_calls: false,
                 custom_tools: false,
                 freeform_tools: false,
-                tool_search: false,
                 programmatic_tool_calling: false,
             },
             interleaved: None,
@@ -81,10 +80,6 @@ impl ModelCapabilities {
 
     pub fn supports_freeform_tools(&self) -> bool {
         self.tools.freeform_tools
-    }
-
-    pub fn supports_tool_search(&self) -> bool {
-        self.tools.tool_search
     }
 
     pub fn supports_programmatic_tool_calling(&self) -> bool {
@@ -135,8 +130,6 @@ pub struct ToolCapabilities {
     pub custom_tools: bool,
     #[serde(default)]
     pub freeform_tools: bool,
-    #[serde(default)]
-    pub tool_search: bool,
     #[serde(default)]
     pub programmatic_tool_calling: bool,
 }

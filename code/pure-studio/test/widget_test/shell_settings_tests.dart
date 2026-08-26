@@ -1515,7 +1515,6 @@ void registerShellSettingsTests() {
                 capabilitySource: 'preset_defaults',
                 hostedWebSearch: false,
                 promptCacheDialect: 'implicit_prefix',
-                responsesToolSearch: false,
                 responsesProgrammaticToolCalling: false,
                 defaultModel: 'deepseek-v4-flash',
                 customModels: [],
@@ -1539,7 +1538,6 @@ void registerShellSettingsTests() {
       capabilitySource: 'preset_defaults',
       hostedWebSearch: false,
       promptCacheDialect: 'none',
-      responsesToolSearch: false,
       responsesProgrammaticToolCalling: false,
       defaultModel: 'gpt-5.6-sol',
       models: [],
@@ -1554,7 +1552,6 @@ void registerShellSettingsTests() {
 
     expect(resolved.hostedWebSearch, isFalse);
     expect(resolved.promptCacheDialect, 'none');
-    expect(resolved.responsesToolSearch, isFalse);
     expect(resolved.responsesProgrammaticToolCalling, isFalse);
     expect(resolved.credentialEnv, 'OPENAI_API_KEY');
   });

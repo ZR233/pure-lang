@@ -167,7 +167,6 @@ impl RuntimeWorker {
                 }
             }
         }
-        self.publish_current_generation();
         self.emit_update();
     }
 }

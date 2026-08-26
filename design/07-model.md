@@ -50,6 +50,7 @@ pl-core
 - `Message`
 - `PureError`
 - `Result`
+- `ToolSpec`
 - `pl_trace::AgentEventSender`
 
 provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenite` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
@@ -61,7 +62,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 - 基础能力：`streaming`、`temperature`、`reasoning`、`web_search`。
 - 输入/输出模态：`input`、`output`，取值为 `text`、`image`、`audio`、`video`、`pdf`。
 - 工具能力：`function_calling`、`parallel_tool_calls`、`custom_tools`、`freeform_tools`、
-  `tool_search`、`programmatic_tool_calling`。
+  `programmatic_tool_calling`。
 - 推理交错字段：`interleaved.field`，当前支持 `reasoning`、`reasoning_content`、`reasoning_details`。
 
 `pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
@@ -71,7 +72,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
 Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为唯一的动态 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；不再保留未被 wire 消费的通用 `options` 袋。其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力、Responses profile 和官方 OpenAI Responses endpoint；OpenAI preset 覆盖自定义 `base_url` 后必须退回 eager/direct 工具，不能仅凭 OpenAI catalog 把 hosted tool type 发送给兼容代理。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`chat_parallel_tool_calls`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为唯一的动态 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；不再保留未被 wire 消费的通用 `options` 袋。其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段。Programmatic Tool Calling 同时要求模型能力、Responses profile 和 endpoint 服务能力；不满足时不向该 agent 注册 hosted tool。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
 ## 7.4 Provider 与 runtime
 
@@ -141,27 +142,24 @@ OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto`
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
-Responses Tool Search 使用客户端执行：初始请求只携带 eager 工具与一个 schema 固定的
-`tool_search` 函数工具，deferred 工具不出现在请求前缀。模型调用 `tool_search` 后，运行时在
-Turn 冻结的 catalog 上确定性检索，并以 Responses 原生 `tool_search_call` / `tool_search_output`
-item 把加载的工具定义写入 canonical context，其后的 function call 直接执行。这些 item 与
-programmatic program 一样必须进入 canonical context，并在 HTTP 重放、WebSocket 增量与恢复后
-完整重建；Chat Completions 不支持该机制时，全部可见工具恢复 eager function schema。
-hosted `tool_search` wire 类型不再发送。
+`CompletionRequest.tools` 使用 `pl_protocol::ToolSpec`，它是 provider-neutral 的唯一 wire 事实。
+每个 model step 携带当前 `ToolPlan` 的完整可见工具列表；客户端 Tool Search、deferred catalog、
+tool references 和 hosted `tool_search` wire 已删除。OpenAI adapter 只把 frozen specs 转为
+Responses/Chat typed body，不自行发现、过滤或注入 agent 工具。
 
 Programmatic Tool Calling 通过 hosted `programmatic_tool_calling` 与工具的 `allowed_callers` 声明。
 首期只允许稳定本地读工具、LSP 查询和 effect 被可信配置明确标为 Read 的 MCP；命令、文件写入、
 Git mutation、审批/交互和 agent-control 始终只能 direct 调用。结构化 eligible 工具必须携带
 `output_schema`。嵌套 function/custom call 的 `caller` 在结果回传时原样保留。由于 runtime 固定
-`store: false`，session 必须按 provider 顺序持久化 reasoning、tool search、program、嵌套 call、
+`store: false`，session 必须按 provider 顺序持久化 reasoning、program、嵌套 call、
 call output 与 program output，并在 HTTP 重放、WebSocket full replay 和恢复后完整重建；Chat
 Completions 遇到这些 Responses 原生 item必须显式拒绝，不能降级成普通 assistant/tool message。
 
 Responses hosted tools 属于 endpoint 服务能力，不由 URL 字符串在运行时猜测。官方 OpenAI preset
-的 canonical `base_url` 默认声明 `tool_search` 和 `programmatic_tool_calling`；preset 实例覆盖为
-自定义 `base_url` 时默认关闭两项能力，自定义 provider 也默认关闭。只有用户在 provider 服务能力
-中显式开启后才发送对应 hosted tool type。核心编排必须同时检查模型能力、模型 request profile
-和 endpoint 服务能力，任一缺失都回退到 eager function schema。该边界保证 OpenAI-compatible
+的 canonical `base_url` 可以声明 `programmatic_tool_calling`；preset 实例覆盖为自定义 `base_url`
+时默认关闭，自定义 provider 也默认关闭。只有 manager 在当前 agent scope 中注册了对应
+`ProviderHosted` Tool，provider adapter 才发送 hosted tool type。核心编排必须同时检查模型能力、
+模型 request profile 和 endpoint 服务能力，任一缺失都拒绝冻结该 hosted Tool。该边界保证 OpenAI-compatible
 Responses endpoint 不会因未支持的 `programmatic_tool_calling` 返回 400。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
@@ -313,8 +311,10 @@ pub struct ModelPricing {
 
 核心层按 prompt generation 组装请求，唯一顺序是：模型基础指令、平台与全局配置、模式与
 角色、Skill、Workspace/项目文档组成的固定 instructions 与 prelude，随后是 durable model
-transcript，最后附加至多一条本 Turn 冻结的 working-context message。同一 generation 内，model、
-instructions、tools、tool choice、reasoning、输出 schema 和 service tier 不得变化；
+transcript，最后附加至多一条本 Turn 冻结的 working-context message。model、instructions、
+tool choice、reasoning、输出 schema 和 service tier 在同一 generation 内不得变化；工具由每个
+model step 冻结的 `ToolPlan` 提供，列表不变时必须序列化为 byte-identical 前缀，列表变化时形成
+新的 request header；
 transcript 只包含 user、assistant、tool result 与 provider compaction checkpoint。pinned sections、
 Evidence Ledger、session note 和 prompt generation 状态属于可替换 `AgentWorkingState`，不得作为
 append-only `ModelContextItem` 写入 transcript。
@@ -334,18 +334,15 @@ provider prompt cache。
 
 每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、wire 工具前缀、provider、
 model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具与
-缓存的关系由三类指纹表达：`RegistryRevision`（发布代数，仅诊断）、`ToolCatalogFingerprint`
-（Turn 冻结的 deferred catalog 哈希，不参与轮换）与 `WirePrefixFingerprint`（实际发送的
-eager schema canonical 哈希，唯一触发 `ToolSchemaChanged` 的工具信号）。工具按模型可见名称
-排序，JSON Schema 递归使用确定性字段顺序。Turn lease 在 Turn 内冻结，
-不能为了复用缓存跨 Thread、worktree、Task policy 或权限边界共享。
+缓存的关系只由 `ToolPlan::wire_fingerprint` 表达：它是实际发送的完整 `ToolSpec` 列表 canonical
+哈希。工具按模型可见名称排序，JSON Schema 递归使用确定性字段顺序；registry revision、group
+identity、注册顺序和 executor generation 不参与 wire。plan 只在单次 model step/retry 内冻结，
+不能为了复用缓存跨 Thread、worktree 或 agent 工具集共享。
 
-DeepSeek 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。
-内建 OpenAI Responses HTTP/WS 使用 `OpenAiPromptCacheKey` policy：core 用
-`ThreadId + prompt scope + generation` 的不可逆 hash 派生稳定 key，同一 generation 复用，
-generation 变化立即切换。手工 key override 优先于自动 key。当前实现跟随 Codex，仅发送 key，
-不发送显式 breakpoint；自定义兼容 endpoint 只有显式声明能力才可启用。cache key 只是路由
-提示，不能代替请求前缀相等。
+DeepSeek 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。工具层不
+生成、轮换或参与 provider cache key；宿主显式提供的 session-stable key 仍可由支持的模型调用
+透传，但不得由 tool revision 或 wire fingerprint 派生。cache key 只是路由提示，不能代替请求
+前缀相等。
 
 provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 及以后模型的
 `cache_write_tokens` 按当次价格快照计费；目录未给出显式写入价时，只有有效策略为
@@ -353,11 +350,12 @@ provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 �
 不得仅凭模型名推断。旧模型或未声明写入能力的 provider 不得制造写入 token。DeepSeek
 继续按命中/未命中输入分类计费。
 
-缓存诊断只记录 generation、固定前缀/wire 工具前缀/working context 的 hash 与三类工具指纹、
+缓存诊断只记录 generation、固定前缀/wire 工具前缀/working context 的 hash、ToolPlan wire
+fingerprint、
 token 数和变化原因；不得记录 prompt、工具参数或结果、header、凭据和配置正文。
 
-提示词诊断同时记录 eager 与 deferred schema 的估算 token、Tool Search 实际加载 schema 数、
-Programmatic program 数与嵌套调用数。Responses transport 记录 continuation attempted/used/invalid、
+提示词诊断记录完整 tool schema 的估算 token、Programmatic program 数与嵌套调用数。Responses
+transport 记录 continuation attempted/used/invalid、
 full replay retry 和 HTTP fallback 的稳定原因；compaction 记录替换前后估算 token。这些计数附着于
 对应 inference 或 Turn，不能以无法关联的独立日志代替，也不得记录 program 正文。
 
@@ -365,4 +363,4 @@ full replay retry 和 HTTP fallback 的稳定原因；compaction 记录替换前
 
 Web 搜索只把 `ProviderConfig.preset = "openai"` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
 
-Responses 原生搜索通过 `ToolSchema::WebSearch` 表达，并只允许在当前 turn 自身使用上述 OpenAI preset、Responses wire、有效凭据且模型声明 `capabilities.web_search` 时注入。跨 provider 搜索只能走普通函数工具，由该工具使用另一个已解析的 OpenAI provider 调用 `/alpha/search`；不得把 hosted tool 注入非 OpenAI provider 请求。
+Responses 原生搜索通过 `ToolSpec::WebSearch` 表达，并只允许在当前 agent 的 step 刷新窗口确认上述 OpenAI preset、Responses wire、有效凭据且模型声明 `capabilities.web_search` 后注册。跨 provider 搜索只能走普通函数工具，由该工具使用另一个已解析的 OpenAI provider 调用 `/alpha/search`；provider adapter 不得自行把 hosted tool 注入请求。

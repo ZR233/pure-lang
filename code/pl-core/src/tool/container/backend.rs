@@ -88,7 +88,7 @@ pub trait ContainerBackend: fmt::Debug + Send + Sync {
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
-/// 空容器后端，仅作为 `ToolSetBuilder` 的默认类型占位。
+/// 空容器后端，仅作为 `BuiltinToolInstaller` 的默认类型占位。
 #[derive(Debug, Clone, Default)]
 pub struct NoContainerBackend;
 

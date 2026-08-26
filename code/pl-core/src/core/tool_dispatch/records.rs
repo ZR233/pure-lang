@@ -7,7 +7,7 @@ use pl_trace::{
 };
 
 use crate::tool::model_visible_tool_output;
-use crate::tool::{ToolOutput, ToolRuntimeEvent};
+use crate::tool::{ToolDirective, ToolResult};
 
 use super::display::display_result_for_tool;
 use super::unix_seconds;
@@ -20,7 +20,7 @@ pub(super) struct ToolOutputEnvelope {
     pub(super) full_output_file: Option<PathBuf>,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
-    pub(super) runtime_events: Vec<ToolRuntimeEvent>,
+    pub(super) runtime_events: Vec<ToolDirective>,
 }
 
 pub(super) fn emit_tool_snapshot(
@@ -76,14 +76,14 @@ pub(super) fn finalize_tool_item(
     if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {
             match event {
-                ToolRuntimeEvent::InteractionRequested { interaction } => {
+                ToolDirective::InteractionRequested { interaction } => {
                     recorder.broadcast(AgentEvent::InteractionChanged {
                         event: pl_protocol::InteractionChangedEvent {
                             interaction: interaction.as_ref().clone(),
                         },
                     });
                 }
-                ToolRuntimeEvent::SkillActivated { activation } => {
+                ToolDirective::SkillActivated { activation } => {
                     recorder.record_trace_only(TraceEventKind::SkillActivated {
                         activation: activation.clone(),
                     });
@@ -91,15 +91,15 @@ pub(super) fn finalize_tool_item(
                         activation: activation.clone(),
                     });
                 }
-                ToolRuntimeEvent::PlanCompleted { .. } => {}
-                ToolRuntimeEvent::ToolResultRevision { .. } => {}
-                ToolRuntimeEvent::OutputArtifacts { .. } => {}
-                ToolRuntimeEvent::AuditMetadata { .. } => {}
-                ToolRuntimeEvent::ExecutionFailed => {}
-                ToolRuntimeEvent::CacheHit { .. } => {}
-                ToolRuntimeEvent::OutputMetrics { .. } => {}
-                ToolRuntimeEvent::OutputBudget { .. } => {}
-                ToolRuntimeEvent::EndTurn { .. } => {}
+                ToolDirective::PlanCompleted { .. } => {}
+                ToolDirective::ToolResultRevision { .. } => {}
+                ToolDirective::OutputArtifacts { .. } => {}
+                ToolDirective::AuditMetadata { .. } => {}
+                ToolDirective::ExecutionFailed => {}
+                ToolDirective::CacheHit { .. } => {}
+                ToolDirective::OutputMetrics { .. } => {}
+                ToolDirective::OutputBudget { .. } => {}
+                ToolDirective::EndTurn { .. } => {}
             }
         }
     }
@@ -133,43 +133,44 @@ pub(super) async fn ready_tool_execution_record(
 pub(super) fn tool_execution_record(
     tool_call: pl_model::ToolCall,
     tool_name: String,
-    result: std::result::Result<ToolOutput, PureError>,
+    result: std::result::Result<ToolResult, PureError>,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
     let (envelope, outcome) = match result {
         Ok(output) => {
             let timed_out = output.timed_out;
+            let canonical_output = output.canonical_output();
             let execution_failed = output
                 .runtime_events
                 .iter()
-                .any(|event| matches!(event, ToolRuntimeEvent::ExecutionFailed));
+                .any(|event| matches!(event, ToolDirective::ExecutionFailed));
             let budget_bytes = output.runtime_events.iter().find_map(|event| match event {
-                ToolRuntimeEvent::OutputBudget { max_bytes } => Some(*max_bytes),
+                ToolDirective::OutputBudget { max_bytes } => Some(*max_bytes),
                 _ => None,
             });
             let model_visible_text = match budget_bytes {
                 Some(max_bytes) => crate::tool::model_visible_tool_output_with_budget(
-                    &output.description,
+                    output.model_output(),
                     max_bytes / crate::tool::TOKEN_ESTIMATE_BYTES,
                     max_bytes,
                 ),
-                None => model_visible_tool_output(&output.description),
+                None => model_visible_tool_output(output.model_output()),
             };
             let mut runtime_events = output.runtime_events;
             if !runtime_events
                 .iter()
-                .any(|event| matches!(event, ToolRuntimeEvent::OutputMetrics { .. }))
+                .any(|event| matches!(event, ToolDirective::OutputMetrics { .. }))
             {
-                runtime_events.push(ToolRuntimeEvent::OutputMetrics {
-                    raw_bytes: output.description.len() as u64,
+                runtime_events.push(ToolDirective::OutputMetrics {
+                    raw_bytes: canonical_output.len() as u64,
                     model_visible_bytes: model_visible_text.len() as u64,
                     artifact_bytes: 0,
-                    result_hash: crate::canonical_content_hash(output.description.as_bytes()),
+                    result_hash: crate::canonical_content_hash(canonical_output.as_bytes()),
                 });
             }
             (
                 ToolOutputEnvelope {
                     model_visible_text,
-                    display_text: output.description,
+                    display_text: canonical_output,
                     full_output_file: (!output.output_file.as_os_str().is_empty())
                         .then_some(output.output_file),
                     exit_code: output.exit_code,
@@ -213,22 +214,22 @@ fn tool_execution_record_from_envelope(
     let (raw_bytes, model_visible_bytes, artifact_bytes) = runtime_events
         .iter()
         .find_map(|event| match event {
-            ToolRuntimeEvent::OutputMetrics {
+            ToolDirective::OutputMetrics {
                 raw_bytes,
                 model_visible_bytes,
                 artifact_bytes,
                 result_hash: _,
             } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
-            ToolRuntimeEvent::InteractionRequested { .. }
-            | ToolRuntimeEvent::SkillActivated { .. }
-            | ToolRuntimeEvent::PlanCompleted { .. }
-            | ToolRuntimeEvent::ToolResultRevision { .. }
-            | ToolRuntimeEvent::OutputArtifacts { .. }
-            | ToolRuntimeEvent::AuditMetadata { .. }
-            | ToolRuntimeEvent::ExecutionFailed
-            | ToolRuntimeEvent::CacheHit { .. }
-            | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn { .. } => None,
+            ToolDirective::InteractionRequested { .. }
+            | ToolDirective::SkillActivated { .. }
+            | ToolDirective::PlanCompleted { .. }
+            | ToolDirective::ToolResultRevision { .. }
+            | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::AuditMetadata { .. }
+            | ToolDirective::ExecutionFailed
+            | ToolDirective::CacheHit { .. }
+            | ToolDirective::OutputBudget { .. }
+            | ToolDirective::EndTurn { .. } => None,
         })
         .unwrap_or((
             model_visible_text.len() as u64,
@@ -237,7 +238,7 @@ fn tool_execution_record_from_envelope(
         ));
     let cache_hit = runtime_events
         .iter()
-        .any(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }));
+        .any(|event| matches!(event, ToolDirective::CacheHit { .. }));
     tracing::trace!(
         target: "pl_core::tool_metrics",
         tool = %tool_name,
@@ -264,52 +265,52 @@ fn tool_execution_record_from_envelope(
     }
 }
 
-fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Value> {
+fn output_artifacts(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
     runtime_events
         .iter()
         .filter_map(|event| match event {
-            ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
-            ToolRuntimeEvent::InteractionRequested { .. }
-            | ToolRuntimeEvent::SkillActivated { .. }
-            | ToolRuntimeEvent::PlanCompleted { .. }
-            | ToolRuntimeEvent::ToolResultRevision { .. }
-            | ToolRuntimeEvent::AuditMetadata { .. }
-            | ToolRuntimeEvent::CacheHit { .. }
-            | ToolRuntimeEvent::OutputMetrics { .. }
-            | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::ExecutionFailed
-            | ToolRuntimeEvent::EndTurn { .. } => None,
+            ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
+            ToolDirective::InteractionRequested { .. }
+            | ToolDirective::SkillActivated { .. }
+            | ToolDirective::PlanCompleted { .. }
+            | ToolDirective::ToolResultRevision { .. }
+            | ToolDirective::AuditMetadata { .. }
+            | ToolDirective::CacheHit { .. }
+            | ToolDirective::OutputMetrics { .. }
+            | ToolDirective::OutputBudget { .. }
+            | ToolDirective::ExecutionFailed
+            | ToolDirective::EndTurn { .. } => None,
         })
         .flatten()
         .cloned()
         .collect()
 }
 
-fn audit_metadata(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Value> {
+fn audit_metadata(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
     runtime_events
         .iter()
         .filter_map(|event| match event {
-            ToolRuntimeEvent::AuditMetadata { metadata } => Some(metadata.clone()),
-            ToolRuntimeEvent::InteractionRequested { .. }
-            | ToolRuntimeEvent::SkillActivated { .. }
-            | ToolRuntimeEvent::PlanCompleted { .. }
-            | ToolRuntimeEvent::ToolResultRevision { .. }
-            | ToolRuntimeEvent::OutputArtifacts { .. }
-            | ToolRuntimeEvent::ExecutionFailed
-            | ToolRuntimeEvent::CacheHit { .. }
-            | ToolRuntimeEvent::OutputMetrics { .. }
-            | ToolRuntimeEvent::OutputBudget { .. }
-            | ToolRuntimeEvent::EndTurn { .. } => None,
+            ToolDirective::AuditMetadata { metadata } => Some(metadata.clone()),
+            ToolDirective::InteractionRequested { .. }
+            | ToolDirective::SkillActivated { .. }
+            | ToolDirective::PlanCompleted { .. }
+            | ToolDirective::ToolResultRevision { .. }
+            | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::ExecutionFailed
+            | ToolDirective::CacheHit { .. }
+            | ToolDirective::OutputMetrics { .. }
+            | ToolDirective::OutputBudget { .. }
+            | ToolDirective::EndTurn { .. } => None,
         })
         .collect()
 }
 
-fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::TraceToolOutputMetrics> {
+fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToolOutputMetrics> {
     let cache_hit = runtime_events
         .iter()
-        .any(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }));
+        .any(|event| matches!(event, ToolDirective::CacheHit { .. }));
     runtime_events.iter().find_map(|event| match event {
-        ToolRuntimeEvent::OutputMetrics {
+        ToolDirective::OutputMetrics {
             raw_bytes,
             model_visible_bytes,
             artifact_bytes,
@@ -321,16 +322,16 @@ fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::Trace
             result_hash: result_hash.clone(),
             cache_hit,
         }),
-        ToolRuntimeEvent::InteractionRequested { .. }
-        | ToolRuntimeEvent::SkillActivated { .. }
-        | ToolRuntimeEvent::PlanCompleted { .. }
-        | ToolRuntimeEvent::ToolResultRevision { .. }
-        | ToolRuntimeEvent::OutputArtifacts { .. }
-        | ToolRuntimeEvent::AuditMetadata { .. }
-        | ToolRuntimeEvent::ExecutionFailed
-        | ToolRuntimeEvent::CacheHit { .. }
-        | ToolRuntimeEvent::OutputBudget { .. }
-        | ToolRuntimeEvent::EndTurn { .. } => None,
+        ToolDirective::InteractionRequested { .. }
+        | ToolDirective::SkillActivated { .. }
+        | ToolDirective::PlanCompleted { .. }
+        | ToolDirective::ToolResultRevision { .. }
+        | ToolDirective::OutputArtifacts { .. }
+        | ToolDirective::AuditMetadata { .. }
+        | ToolDirective::ExecutionFailed
+        | ToolDirective::CacheHit { .. }
+        | ToolDirective::OutputBudget { .. }
+        | ToolDirective::EndTurn { .. } => None,
     })
 }
 

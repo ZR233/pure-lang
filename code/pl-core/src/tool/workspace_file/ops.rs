@@ -3,7 +3,6 @@ use pl_protocol::{PureError, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
 use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
@@ -53,8 +52,6 @@ pub async fn execute_workspace_file_tool<B>(
     backend: &B,
     name: &str,
     arguments: Value,
-    _cancellation_token: Option<CancellationToken>,
-    workspace_epoch: u64,
 ) -> Result<Option<WorkspaceFileToolExecution>>
 where
     B: WorkspaceFileBackend,
@@ -64,7 +61,7 @@ where
     };
     let value = match kind {
         WorkspaceFileToolKind::ReadFile => read_file(backend, arguments).await?,
-        WorkspaceFileToolKind::ListFiles => list_files(backend, arguments, workspace_epoch).await?,
+        WorkspaceFileToolKind::ListFiles => list_files(backend, arguments).await?,
         WorkspaceFileToolKind::ApplyPatch => apply_patch(backend, arguments).await?,
     };
     Ok(Some(WorkspaceFileToolExecution::json(value)?))
@@ -211,7 +208,7 @@ pub(super) struct ListFilesInput {
     include_dirs: Option<bool>,
 }
 
-async fn list_files<B>(backend: &B, arguments: Value, workspace_epoch: u64) -> Result<Value>
+async fn list_files<B>(backend: &B, arguments: Value) -> Result<Value>
 where
     B: WorkspaceFileBackend,
 {
@@ -234,7 +231,6 @@ where
         "cwd": input.working_directory.cwd,
         "glob": glob,
         "includeDirs": include_dirs,
-        "workspaceEpoch": workspace_epoch,
     }));
     let cursor = decode_cursor(
         input.pagination.cursor.as_deref(),
@@ -266,7 +262,6 @@ where
         "nextCursor": next_cursor,
         "cursorReset": cursor.reset,
         "resultHash": result_hash,
-        "workspaceEpoch": workspace_epoch,
     }))
 }
 

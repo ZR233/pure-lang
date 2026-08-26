@@ -1,7 +1,9 @@
 use super::tool_dispatch::ToolExecutionOutcome;
 use super::*;
 use crate::ContextCompactionTrigger;
-use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
+use crate::tool::{
+    GlobalToolInheritance, LocalTool, Tool, ToolCallContext, ToolInput, ToolManager, ToolResult,
+};
 use crate::turn::PermissionMode;
 use futures::FutureExt;
 use pl_model::{ModelInfo, OpenAiCompactionMode, ProviderEndpoint, ToolCall};
@@ -33,23 +35,6 @@ fn test_turn_engine() -> TurnEngine {
         ModelInfo::fallback("deepseek-v4-flash"),
     )
     .build()
-}
-
-fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
-    ToolContext {
-        event_tx,
-        options: TurnOptions::default(),
-        workspace_access: WorkspaceAccess::WorkspaceOnly,
-        workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: std::sync::Arc::new(AgentSession::new()),
-        working_set: crate::TurnWorkingSetHandle::default(),
-        tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
-    }
 }
 
 fn terminal_tool_event_count(events: &[TraceEvent]) -> usize {
@@ -250,6 +235,22 @@ async fn serve_sse_sequence(
     serve_http_sequence(sse_bodies.into_iter().map(TestHttpResponse::sse).collect()).await
 }
 
+async fn serve_sse_sequence_with_raw_requests(
+    sse_bodies: Vec<String>,
+) -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let raw_requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (base_url, _json_bodies, handle) = serve_http_sequence_capturing(
+        sse_bodies.into_iter().map(TestHttpResponse::sse).collect(),
+        Some(raw_requests.clone()),
+    )
+    .await;
+    (base_url, raw_requests, handle)
+}
+
 struct TestHttpResponse {
     status: u16,
     content_type: &'static str,
@@ -268,6 +269,17 @@ impl TestHttpResponse {
 
 async fn serve_http_sequence(
     responses: Vec<TestHttpResponse>,
+) -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    serve_http_sequence_capturing(responses, None).await
+}
+
+async fn serve_http_sequence_capturing(
+    responses: Vec<TestHttpResponse>,
+    raw_requests: Option<std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>>,
 ) -> (
     String,
     std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
@@ -307,6 +319,9 @@ async fn serve_http_sequence(
                 buffer.extend_from_slice(&temp[..n]);
             }
             let body = &buffer[header_end + 4..header_end + 4 + content_length];
+            if let Some(raw_requests) = &raw_requests {
+                raw_requests.lock().unwrap().push(body.to_vec());
+            }
             captured
                 .lock()
                 .unwrap()
@@ -352,17 +367,11 @@ fn record_enabled_tools_for_core(
     session_id: &str,
     turn_id: &str,
 ) -> Vec<TraceEvent> {
-    let tool_schemas = crate::tool::orchestrate_tool_inventory(
-        core.acquire_tool_lease().unwrap().entries(),
-        None,
-        crate::tool::ToolOrchestrationOptions::default(),
-    )
-    .request_schemas()
-    .to_vec();
+    let tool_plan = core.acquire_tool_plan();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
 
-    super::turn_loop::enabled_tools::record_enabled_tools(&mut recorder, turn_id, &tool_schemas);
+    super::turn_loop::enabled_tools::record_enabled_tools(&mut recorder, turn_id, 0, &tool_plan);
 
     recorder.drain()
 }
@@ -413,24 +422,17 @@ impl Tool for SleepingTool {
     fn execute<'a>(
         &'a self,
         _input: ToolInput,
-        _context: ToolContext,
+        _context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
     > {
         async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            Ok(ToolOutput {
-                description: "done".to_string(),
-                truncated: crate::tool::OutputTruncation::empty(),
-                output_file: PathBuf::new(),
-                exit_code: None,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(ToolResult::success("done"))
         }
         .boxed()
     }
@@ -462,11 +464,11 @@ impl Tool for DeltaEchoTool {
 
     fn execute<'a>(
         &'a self,
-        input: ToolInput,
-        context: ToolContext,
+        _input: ToolInput,
+        context: ToolCallContext,
     ) -> std::pin::Pin<
         Box<
-            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
                 + Send
                 + 'a,
         >,
@@ -474,25 +476,18 @@ impl Tool for DeltaEchoTool {
         async move {
             let now = crate::time::unix_seconds();
             let event = pl_trace::TracePartDeltaEvent {
-                turn_id: input.session_id.clone(),
-                item_id: input.tool_id.clone(),
+                turn_id: context.identity().turn_id.clone(),
+                item_id: context.identity().item_id.clone(),
                 started_sequence: 0,
-                revision: input.revision_base.saturating_add(1),
+                revision: context.identity().revision_base.saturating_add(1),
                 created_at: now,
                 updated_at: now,
                 delta: pl_trace::TraceDelta::ToolResult {
                     delta: "runtime delta".to_string(),
                 },
             };
-            let _ = context.event_tx.send(AgentEvent::TracePartDelta { event });
-            Ok(ToolOutput {
-                description: "delta complete".to_string(),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            let _ = context.events().send(AgentEvent::TracePartDelta { event });
+            Ok(ToolResult::success("delta complete"))
         }
         .boxed()
     }

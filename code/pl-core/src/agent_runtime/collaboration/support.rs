@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use super::super::{AgentAccessPolicy, AgentSnapshot, AgentTargetSelector, ThreadId};
 use super::{ForkTurns, TOOL_SPAWN_AGENT};
 use crate::tool::tool_error;
-use crate::{AgentSession, AgentSessionForkPolicy, ToolOutput};
+use crate::{AgentSession, AgentSessionForkPolicy, ToolResult};
 
 pub(super) fn fork_session(
     parent: &AgentSession,
@@ -289,17 +289,9 @@ pub(super) fn parse_agent_id(tool: &str, value: String) -> Result<ThreadId, Pure
     ThreadId::new(value).map_err(|error| tool_error(tool, error.to_string()))
 }
 
-pub(super) fn json_output(value: Value) -> Result<ToolOutput, PureError> {
-    let description = serde_json::to_string(&value)
-        .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))?;
-    Ok(ToolOutput {
-        description,
-        truncated: crate::OutputTruncation::empty(),
-        output_file: std::path::PathBuf::new(),
-        exit_code: None,
-        timed_out: false,
-        runtime_events: Vec::new(),
-    })
+pub(super) fn json_output(value: Value) -> Result<ToolResult, PureError> {
+    ToolResult::json(value)
+        .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))
 }
 
 /// 与 [`json_output`] 相同，但声明更大的模型可见输出硬字节上限。
@@ -309,15 +301,11 @@ pub(super) fn json_output(value: Value) -> Result<ToolOutput, PureError> {
 pub(super) fn json_output_with_budget(
     value: Value,
     max_bytes: usize,
-) -> Result<ToolOutput, PureError> {
-    let description = serde_json::to_string(&value)
-        .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))?;
-    Ok(ToolOutput {
-        description,
-        truncated: crate::OutputTruncation::empty(),
-        output_file: std::path::PathBuf::new(),
-        exit_code: None,
-        timed_out: false,
-        runtime_events: vec![crate::tool::ToolRuntimeEvent::OutputBudget { max_bytes }],
-    })
+) -> Result<ToolResult, PureError> {
+    ToolResult::json_with_budget(
+        value,
+        max_bytes / crate::tool::TOKEN_ESTIMATE_BYTES,
+        max_bytes,
+    )
+    .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))
 }

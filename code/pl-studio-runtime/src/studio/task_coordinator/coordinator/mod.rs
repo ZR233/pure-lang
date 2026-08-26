@@ -6,9 +6,9 @@ use anyhow::{Context, Result, bail};
 use tokio::sync::MutexGuard;
 
 use super::{CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskWorktreeOwnerSnapshot};
-use crate::studio::TaskRuntime;
 use crate::studio::runtime_state::StudioRecoveryIssue;
 use crate::studio::store::StudioStore;
+use crate::studio::{TaskRuntime, ThreadKind, ThreadRecord};
 use crate::{AgentRuntimeHandle, AgentState};
 
 mod recovery;
@@ -141,7 +141,7 @@ impl TaskCoordinator {
 
     pub(crate) async fn start_task(
         &self,
-        root_thread_id: &str,
+        root_thread: &ThreadRecord,
         request: &str,
         repository: impl AsRef<Path>,
     ) -> Result<TaskRun> {
@@ -149,16 +149,16 @@ impl TaskCoordinator {
         if request.trim().is_empty() {
             bail!("task request must not be empty");
         }
-        let root_thread = self
-            .store
-            .read_thread(root_thread_id)
-            .await?
-            .context("task root Thread not found")?;
+        if root_thread.mode != crate::StudioMode::Task
+            || root_thread.thread_kind != ThreadKind::Root
+        {
+            bail!("task coordinator requires a task mode root Thread");
+        }
         let run = self
             .task_runtime
             .create_task(CreateTaskRun {
-                project_id: root_thread.project_id,
-                root_thread_id: root_thread_id.to_string(),
+                project_id: root_thread.project_id.clone(),
+                root_thread_id: root_thread.id.clone(),
                 request: request.trim().to_string(),
                 workspace_root: repository.as_ref().to_string_lossy().to_string(),
             })

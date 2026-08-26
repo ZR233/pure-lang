@@ -10,14 +10,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use pl_protocol::{McpAvailabilityDescriptor, McpHealthSnapshot, PureError, Result};
+use rmcp::model::Tool;
 use tokio::sync::{Notify, broadcast, mpsc};
 
-use super::{LeaseSnapshot, McpGeneration, McpResetScope, McpTurnLease, RuntimeCommand};
+use super::{LeaseSnapshot, McpGeneration, McpResetScope, RuntimeCommand};
 use crate::config::EffectiveMcpServerConfig;
 use crate::mcp::McpConnector;
 use crate::mcp::health::{McpAvailabilityKind, McpAvailabilitySnapshot};
-use crate::tool::{PublishGuard, ToolRegistry, ToolSourceId};
 
 mod dispatch;
 mod reconcile;
@@ -28,7 +29,10 @@ mod tools;
 use reconcile::{
     ActivePreparation, PendingReconcile, await_preparation, prepare_generation, reject_reconciles,
 };
-use server::{RuntimeGeneration, reset_failed, server_fingerprint, unique_sessions};
+use server::{
+    RuntimeGeneration, assign_tool_descriptors, reset_failed, server_fingerprint, unique_sessions,
+};
+use tools::{configured_startup_timeout, filter_tool_definitions};
 
 /// `AcquireLease` 等待进行中 MCP preparation 完成的有界上限。
 ///
@@ -42,9 +46,8 @@ pub(super) async fn run(
     receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
     commands: mpsc::UnboundedSender<RuntimeCommand>,
     updates: broadcast::Sender<()>,
-    shared_registry: Option<Arc<ToolRegistry>>,
 ) {
-    RuntimeWorker::new(connector, receiver, commands, updates, shared_registry)
+    RuntimeWorker::new(connector, receiver, commands, updates)
         .run()
         .await;
 }
@@ -59,11 +62,26 @@ struct RuntimeWorker {
     next_generation: u64,
     /// preparation 完成信号，用于 `AcquireLease` 的有界等待。
     preparation_notify: Arc<Notify>,
-    /// 共享工具注册表；generation 激活或 server 可用性变化后整组发布。
-    shared_registry: Option<Arc<ToolRegistry>>,
-    /// 当前发布的 master lease：钉扎 generation，条目 handler 持有它的 clone。
-    published_lease: Option<McpTurnLease>,
-    publish_guard: Option<PublishGuard>,
+}
+
+struct ActiveToolRefresh {
+    future: BoxFuture<'static, ToolRefreshCandidate>,
+}
+
+struct ToolRefreshCandidate {
+    observed_generation: McpGeneration,
+    server_id: String,
+    session: Arc<crate::mcp::ConnectedMcp>,
+    definitions: std::result::Result<Vec<Tool>, String>,
+}
+
+async fn await_tool_refresh(refresh: &mut Option<ActiveToolRefresh>) -> ToolRefreshCandidate {
+    refresh
+        .as_mut()
+        .expect("guarded MCP tool refresh must exist")
+        .future
+        .as_mut()
+        .await
 }
 
 impl RuntimeWorker {
@@ -72,7 +90,6 @@ impl RuntimeWorker {
         receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
         commands: mpsc::UnboundedSender<RuntimeCommand>,
         updates: broadcast::Sender<()>,
-        shared_registry: Option<Arc<ToolRegistry>>,
     ) -> Self {
         let current = McpGeneration(0);
         Self {
@@ -86,20 +103,21 @@ impl RuntimeWorker {
             current,
             next_generation: 1,
             preparation_notify: Arc::new(Notify::new()),
-            shared_registry,
-            published_lease: None,
-            publish_guard: None,
         }
     }
 
     async fn run(mut self) {
         let mut pending = VecDeque::new();
         let mut preparation = None;
+        let mut pending_tool_refreshes = BTreeSet::new();
+        let mut tool_refresh = None;
         loop {
-            if preparation.is_none()
-                && let Some(request) = pending.pop_front()
-            {
-                preparation = Some(self.start_preparation(request));
+            if preparation.is_none() && tool_refresh.is_none() {
+                if let Some(request) = pending.pop_front() {
+                    preparation = Some(self.start_preparation(request));
+                } else if let Some(server_id) = pending_tool_refreshes.pop_first() {
+                    tool_refresh = self.start_tool_refresh(server_id);
+                }
             }
             tokio::select! {
                 generation = await_preparation(&mut preparation), if preparation.is_some() => {
@@ -120,6 +138,11 @@ impl RuntimeWorker {
                     };
                     self.preparation_notify.notify_waiters();
                     let _ = active.reply.send(result);
+                }
+                candidate = await_tool_refresh(&mut tool_refresh), if tool_refresh.is_some() => {
+                    tool_refresh = None;
+                    self.apply_tool_refresh(candidate, &mut pending_tool_refreshes).await;
+                    self.preparation_notify.notify_waiters();
                 }
                 command = self.receiver.recv() => {
                     let Some(command) = command else {
@@ -153,7 +176,11 @@ impl RuntimeWorker {
                     });
                 }
                 RuntimeCommand::AcquireLease { reply } => {
-                    if preparation.is_some() || !pending.is_empty() {
+                    if preparation.is_some()
+                        || tool_refresh.is_some()
+                        || !pending.is_empty()
+                        || !pending_tool_refreshes.is_empty()
+                    {
                         let notify = self.preparation_notify.clone();
                         let commands = self.commands.clone();
                         tokio::spawn(async move {
@@ -199,6 +226,9 @@ impl RuntimeWorker {
                     server_id,
                     error,
                 } => self.mark_unavailable(generation, &server_id, error),
+                RuntimeCommand::ToolListChanged { server_id } => {
+                    pending_tool_refreshes.insert(server_id);
+                }
                 RuntimeCommand::Shutdown { reply } => {
                     reject_reconciles(preparation.take(), &mut pending);
                     self.shutdown().await;
@@ -236,6 +266,89 @@ impl RuntimeWorker {
         }
     }
 
+    fn start_tool_refresh(&self, server_id: String) -> Option<ActiveToolRefresh> {
+        let generation = self.current;
+        let server = self.current_generation().servers.get(&server_id)?;
+        if server.availability != McpAvailabilityKind::Available {
+            return None;
+        }
+        let session = server.session.clone()?;
+        let timeout = configured_startup_timeout(server.config.startup_timeout_secs);
+        let config = server.config.clone();
+        let redactor = server.redactor.clone();
+        Some(ActiveToolRefresh {
+            future: async move {
+                let definitions = match tokio::time::timeout(timeout, session.list_tools()).await {
+                    Ok(Ok(tools)) => Ok(filter_tool_definitions(tools, &config)),
+                    Ok(Err(error)) => Err(redactor.redact(error.to_string())),
+                    Err(_) => Err(format!(
+                        "MCP tool refresh timed out after {} seconds",
+                        timeout.as_secs()
+                    )),
+                };
+                ToolRefreshCandidate {
+                    observed_generation: generation,
+                    server_id,
+                    session,
+                    definitions,
+                }
+            }
+            .boxed(),
+        })
+    }
+
+    async fn apply_tool_refresh(
+        &mut self,
+        candidate: ToolRefreshCandidate,
+        pending: &mut BTreeSet<String>,
+    ) {
+        if candidate.observed_generation != self.current {
+            if self
+                .current_generation()
+                .servers
+                .contains_key(&candidate.server_id)
+            {
+                pending.insert(candidate.server_id);
+            }
+            return;
+        }
+        let Some(current_server) = self.current_generation().servers.get(&candidate.server_id)
+        else {
+            return;
+        };
+        if current_server.availability != McpAvailabilityKind::Available
+            || current_server
+                .session
+                .as_ref()
+                .is_none_or(|session| !Arc::ptr_eq(session, &candidate.session))
+        {
+            return;
+        }
+        let definitions = match candidate.definitions {
+            Ok(definitions) => definitions,
+            Err(error) => {
+                tracing::warn!(
+                    server_id = %candidate.server_id,
+                    %error,
+                    "MCP tools/list_changed refresh failed; preserving the current generation"
+                );
+                return;
+            }
+        };
+        let generation_id = McpGeneration(self.next_generation);
+        self.next_generation += 1;
+        let mut next = RuntimeGeneration::empty(generation_id);
+        next.servers = self.current_generation().servers.clone();
+        let Some(server) = next.servers.get_mut(&candidate.server_id) else {
+            return;
+        };
+        server.message = Some(format!("Available with {} tools", definitions.len()));
+        server.last_checked_at = Some(crate::time::unix_seconds());
+        server.definitions = definitions;
+        assign_tool_descriptors(&mut next.servers);
+        self.activate_generation(next).await;
+    }
+
     fn configuration_matches(&self, servers: &BTreeMap<String, EffectiveMcpServerConfig>) -> bool {
         let current = self.current_generation();
         current.servers.len() == servers.len()
@@ -254,7 +367,6 @@ impl RuntimeWorker {
         }
         self.current = next.id;
         self.generations.insert(next.id, next);
-        self.publish_current_generation();
         self.cleanup_retired().await;
         self.emit_update();
     }
@@ -321,49 +433,6 @@ impl RuntimeWorker {
             tools,
             server_ids,
         })
-    }
-
-    /// 把当前 generation 的全部工具与 resource façade 整组发布到共享注册表。
-    ///
-    /// 发布持有 master lease：旧 Turn 持有旧代条目时 generation 不会被回收；
-    /// 新一代发布后旧 master lease drop，旧 generation 等最后一个引用释放。
-    fn publish_current_generation(&mut self) {
-        let Some(registry) = self.shared_registry.clone() else {
-            return;
-        };
-        let snapshot = match self.acquire_lease() {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                tracing::warn!(target: "pl_core::mcp", error = %error, "failed to freeze MCP lease for publication");
-                return;
-            }
-        };
-        let lease = McpTurnLease {
-            generation: snapshot.generation,
-            tools: Arc::new(snapshot.tools),
-            server_ids: Arc::new(snapshot.server_ids),
-            guard: Arc::new(super::McpLeaseGuard {
-                generation: snapshot.generation,
-                handle: self.handle_clone(),
-            }),
-        };
-        let entries = lease.registry_entries();
-        match registry.publish(ToolSourceId::mcp(), entries) {
-            Ok(guard) => {
-                self.published_lease = Some(lease);
-                self.publish_guard = Some(guard);
-            }
-            Err(error) => {
-                tracing::warn!(target: "pl_core::mcp", error = %error, "failed to publish MCP tools to shared registry");
-            }
-        }
-    }
-
-    fn handle_clone(&self) -> super::McpRuntimeHandle {
-        super::McpRuntimeHandle {
-            commands: self.commands.clone(),
-            updates: self.updates.clone(),
-        }
     }
 
     async fn release_lease(&mut self, generation: McpGeneration) {
@@ -441,8 +510,6 @@ impl RuntimeWorker {
     }
 
     async fn shutdown(&mut self) {
-        self.published_lease = None;
-        self.publish_guard = None;
         let generations = std::mem::take(&mut self.generations);
         let mut sessions = Vec::new();
         let mut seen = BTreeSet::new();

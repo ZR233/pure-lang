@@ -133,8 +133,6 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
         &local,
         crate::tool::WorkspaceFileToolKind::ReadFile.name(),
         input.clone(),
-        None,
-        0,
     )
     .await
     .unwrap()
@@ -143,8 +141,6 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
         &container,
         crate::tool::WorkspaceFileToolKind::ReadFile.name(),
         input,
-        None,
-        0,
     )
     .await
     .unwrap()
@@ -179,8 +175,6 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
         &local,
         crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input.clone(),
-        None,
-        0,
     )
     .await
     .unwrap()
@@ -189,8 +183,6 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
         &container,
         crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input,
-        None,
-        0,
     )
     .await
     .unwrap()
