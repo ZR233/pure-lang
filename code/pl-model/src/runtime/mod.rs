@@ -240,7 +240,33 @@ impl ModelRuntime {
                 }
                 Err(error) => error,
             };
-            if !retry_allowed || !error.is_transient_model_transport() {
+            if !retry_allowed {
+                if transport == OpenAiTransport::ResponsesWebSocket
+                    && error.is_transient_model_transport()
+                {
+                    let connection_key = self.connection_fingerprint();
+                    let activated = context
+                        .session
+                        .activate_responses_http_fallback(connection_key)
+                        .await;
+                    let (provider_code, http_status) =
+                        error.transient_model_metadata().unwrap_or((None, None));
+                    tracing::warn!(
+                        provider = %self.endpoint.name,
+                        from_transport = transport.label(),
+                        fallback_transport = OpenAiTransport::Http.label(),
+                        fallback_reason = "partialStreamFailure",
+                        fallback_scope = "nextTurn",
+                        fallback_activated = activated,
+                        provider_code,
+                        http_status,
+                        error_bytes = error.to_string().len(),
+                        "Responses WebSocket 已产生事件后失败，当前请求不重放，后续请求切换到 HTTP"
+                    );
+                }
+                return Err(error);
+            }
+            if !error.is_transient_model_transport() {
                 return Err(error);
             }
 

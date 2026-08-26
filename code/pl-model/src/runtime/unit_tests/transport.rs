@@ -380,7 +380,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
 }
 
 #[tokio::test]
-async fn responses_websocket_does_not_replay_after_the_stream_starts() {
+async fn responses_websocket_partial_failure_falls_back_only_for_the_next_turn() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -407,10 +407,17 @@ async fn responses_websocket_does_not_replay_after_the_stream_starts() {
                 .unwrap();
         }
         writer
-            .send(WebSocketMessage::Close(Some(CloseFrame {
-                code: CloseCode::Error,
-                reason: "upstream websocket proxy failed".into(),
-            })))
+            .send(WebSocketMessage::Text(
+                serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "code": "server_error",
+                        "message": "upstream websocket proxy failed"
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
             .await
             .unwrap();
         drop(writer);
@@ -429,15 +436,17 @@ async fn responses_websocket_does_not_replay_after_the_stream_starts() {
     let mut model = responses_websocket_model("local-responses");
     model.context_window = Some(128_000);
     let provider = ModelRuntime::new(info, model).unwrap();
+    let session = ModelSession::default();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
     let request = minimal_request("local-responses");
-    let context = invocation(event_tx).with_trace(CompletionTraceContext {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
-    });
+    let context =
+        ModelInvocationContext::new(session.clone(), event_tx).with_trace(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        });
 
     let error = provider
         .complete(request, context)
@@ -448,6 +457,10 @@ async fn responses_websocket_does_not_replay_after_the_stream_starts() {
 
     assert!(error.is_transient_model_transport());
     assert_eq!(initial["type"], "response.create");
+    assert!(
+        session.uses_responses_http_fallback(provider.connection_fingerprint()),
+        "a partial WebSocket failure must move only the next turn to HTTP"
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         AgentEvent::TracePartFailed { item }

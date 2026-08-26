@@ -127,7 +127,7 @@ endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 持有的 `ModelSession`：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
-WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放请求。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因与来源连接模式。
+WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放当前请求；若该失败仍是瞬态 WS 故障，则必须熔断当前 session 的 WS，使宿主显式创建的下一 Turn 使用 Responses HTTP 完整历史继续，而不能再次连接同一不稳定 WS 路径。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因、作用范围与来源连接模式。
 
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
@@ -138,7 +138,8 @@ OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto`
 内部克隆请求并只对 Responses WebSocket 帧设置 `previous_response_id`。断线、取消、未完整消费、配置变化或无效 continuation
 都会关闭旧连接；只有首个 canonical 流事件前的瞬态失败可在新 WS 上用完整历史重试一次。该重试
 仍失败时，同一 session 从当前请求开始切换到 Responses HTTP，不再创建新的 WS full replay；已经
-产出事件的请求不得切换 transport 后重放。Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
+产出事件的请求不得切换 transport 后重放，但瞬态 WS 失败仍会把 session 的后续 Turn 熔断到 HTTP。
+Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
