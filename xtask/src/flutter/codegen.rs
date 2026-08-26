@@ -306,12 +306,12 @@ fn ensure_generated_sources_are_stable(
     for (path, before_content) in before {
         match after.get(path) {
             Some(after_content) if before_content == after_content => {}
-            Some(_) => changes.push(format!("modified: {}", path.display())),
-            None => changes.push(format!("removed: {}", path.display())),
+            Some(_) => changes.push(format!("modified: {}", canonical_workspace_path(path))),
+            None => changes.push(format!("removed: {}", canonical_workspace_path(path))),
         }
     }
     for path in after.keys().filter(|path| !before.contains_key(*path)) {
-        changes.push(format!("added: {}", path.display()));
+        changes.push(format!("added: {}", canonical_workspace_path(path)));
     }
     if changes.is_empty() {
         return Ok(());
@@ -320,6 +320,13 @@ fn ensure_generated_sources_are_stable(
         "generated GUI sources changed during canonical regeneration; run cargo xtask generate-gui and review the generated output before retrying:\n{}",
         changes.join("\n")
     )
+}
+
+fn canonical_workspace_path(path: &Path) -> String {
+    path.iter()
+        .map(|component| component.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn run_frb_codegen(workspace_root: &Path, app_dir: &Path) -> Result<()> {
