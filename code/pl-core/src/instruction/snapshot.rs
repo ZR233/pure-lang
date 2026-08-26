@@ -111,6 +111,14 @@ impl InstructionSnapshot {
                 ],
             ),
         );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "turnSkills",
+            MessageRole::User,
+            "# Turn Skill Instructions",
+            select_blocks(&self.user, &[InstructionSourceKind::SkillInvocation]),
+        );
         InstructionBundle {
             instructions: self.base.content.clone(),
             prelude_messages,
@@ -149,7 +157,12 @@ impl InstructionSnapshot {
                 .filter(|block| !block.source.kind.is_turn_overlay())
                 .cloned()
                 .collect(),
-            user: self.user.clone(),
+            user: self
+                .user
+                .iter()
+                .filter(|block| !block.source.kind.is_turn_overlay())
+                .cloned()
+                .collect(),
         }
     }
 }

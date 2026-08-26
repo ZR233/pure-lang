@@ -428,7 +428,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .iter()
             .map(crate::studio::store::attachment::trace_attachment)
             .collect();
-        let mut instruction_snapshot = instruction_snapshot(StudioInstructionContext {
+        let instruction_snapshot = instruction_snapshot(StudioInstructionContext {
             config: &config,
             model: &route.model,
             mode,
@@ -445,9 +445,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
         })?;
-        if let Some(instruction) = &user_skill_load.instruction {
-            instruction_snapshot.push_skill_invocation(instruction);
-        }
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
@@ -457,6 +454,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_skill_activations(user_skill_load.activations)
             .with_workspace_instructions(workspace_instructions)
             .with_instruction_snapshot(instruction_snapshot);
+        if let Some(instruction) = user_skill_load.instruction {
+            request = request.with_skill_invocation_instruction(instruction);
+        }
         #[cfg(debug_assertions)]
         if let Some(fixture) = task_driver_budget
             && mode == StudioMode::Task

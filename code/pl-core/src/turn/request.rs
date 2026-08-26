@@ -18,6 +18,7 @@ pub struct TurnRequest {
     pub materialized_attachments: Vec<crate::MaterializedAttachment>,
     pub trace_attachments: Vec<TraceAttachment>,
     pub skill_activations: Vec<SkillActivation>,
+    pub skill_invocation_instruction: Option<String>,
 }
 
 impl TurnRequest {
@@ -33,6 +34,7 @@ impl TurnRequest {
             materialized_attachments: Vec::new(),
             trace_attachments: Vec::new(),
             skill_activations: Vec::new(),
+            skill_invocation_instruction: None,
         }
     }
 
@@ -61,6 +63,15 @@ impl TurnRequest {
 
     pub fn with_skill_activations(mut self, activations: Vec<SkillActivation>) -> Self {
         self.skill_activations = activations;
+        self
+    }
+
+    /// 设置仅对本 Turn 生效的 Skill 用户指令。
+    ///
+    /// 该指令进入本 Turn 的 instruction bundle，但不会写入 Thread transcript，
+    /// 因而不会在后续 Turn 中累积。
+    pub fn with_skill_invocation_instruction(mut self, instruction: impl Into<String>) -> Self {
+        self.skill_invocation_instruction = Some(instruction.into());
         self
     }
 

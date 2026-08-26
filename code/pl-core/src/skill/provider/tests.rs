@@ -194,6 +194,35 @@ async fn explicit_directories_are_frozen_by_the_shared_provider_kernel() {
 }
 
 #[tokio::test]
+async fn explicit_directories_obey_shared_system_policy() {
+    let source = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    write_skill(source.path(), "system-review", "", "review body");
+    let provider = FileSystemSkillProvider::from_directories(
+        "mai-system",
+        vec![SkillDirectorySource::new(
+            source.path().join("skills"),
+            SkillSourceKind::System,
+        )],
+    )
+    .unwrap();
+    let registry = SkillRegistry::new();
+    let _guard = registry.register(Arc::new(provider)).unwrap();
+
+    let mut disabled_system = request(workspace.path());
+    disabled_system.config.system.enabled = false;
+    assert!(
+        registry
+            .discover(disabled_system)
+            .await
+            .unwrap()
+            .snapshot()
+            .skills
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn invalid_provider_candidates_are_warned_and_excluded() {
     let root = tempfile::tempdir().unwrap();
     let registry = SkillRegistry::new();

@@ -311,6 +311,31 @@ fn bundle_orders_fixed_layers_from_global_to_workspace() {
 }
 
 #[test]
+fn direct_skill_invocation_is_a_transient_user_instruction_group() {
+    let mut snapshot = InstructionSnapshot {
+        base: InstructionBlock {
+            source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
+            content: "base".to_string(),
+        },
+        developer: Vec::new(),
+        user: Vec::new(),
+    };
+    snapshot.push_skill_invocation("follow the review skill");
+
+    let bundle = snapshot.to_bundle();
+
+    assert_eq!(bundle.prelude_messages.len(), 1);
+    assert_eq!(bundle.prelude_messages[0].role, MessageRole::User);
+    assert!(matches!(
+        &bundle.prelude_messages[0].content,
+        MessageContent::Text(text)
+            if text.starts_with("# Turn Skill Instructions")
+                && text.contains("follow the review skill")
+    ));
+    assert!(bundle.prefix_section_hashes.contains_key("turnSkills"));
+}
+
+#[test]
 fn config_base_override_replaces_model_base() {
     let dir = temp_dir("base-override");
     fs::create_dir_all(&dir).unwrap();

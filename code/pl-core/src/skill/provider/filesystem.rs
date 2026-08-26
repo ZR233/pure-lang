@@ -12,7 +12,7 @@ use super::{
 };
 use crate::skill::scanning::{metadata_from_file, scan_skill_files};
 use crate::skill::util::platform_matches;
-use crate::skill::{SkillMetadata, SkillResourceBase, SkillSummary};
+use crate::skill::{SkillMetadata, SkillResourceBase, SkillSourceKind, SkillSummary};
 
 const FILESYSTEM_PROVIDER_ID: &str = "local-filesystem";
 
@@ -216,6 +216,9 @@ fn list_local_skills(
     let mut observation = SkillProviderObservation::empty();
     let mut local_order = 0;
     for (root, source_kind, rank) in sources {
+        if source_kind == SkillSourceKind::System && !request.config.system.enabled {
+            continue;
+        }
         if request.cancellation.is_cancelled() {
             return Err(cancelled_error());
         }

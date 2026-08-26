@@ -90,8 +90,8 @@ impl InstructionSnapshot {
         push_non_empty(&mut self.user, source, content);
     }
 
-    /// Adds a host-prepared direct Skill invocation as a user instruction block.
-    pub fn push_skill_invocation(&mut self, content: &str) {
+    /// 添加由 TurnRequest 提供的直接 Skill 调用用户指令块。
+    pub(crate) fn push_skill_invocation(&mut self, content: &str) {
         self.push_user(
             InstructionSource::new(InstructionSourceKind::SkillInvocation, "skill invocation"),
             content,
