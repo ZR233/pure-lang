@@ -55,8 +55,6 @@ fn stream_accumulator_projects_raw_reasoning_into_thinking_trace() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator

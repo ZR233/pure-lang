@@ -2,14 +2,56 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn text_delta_is_published_before_stream_completion() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let mut accumulator = StreamCompletionAccumulator::with_trace_sink(
+        Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+        }),
+        Some(sink.clone()),
+    );
+
+    accumulator
+        .apply(
+            ModelStreamEvent::text_started(
+                "assistant".to_string(),
+                pl_trace::TraceTextChannel::Final,
+            ),
+            &event_tx,
+        )
+        .unwrap();
+    accumulator
+        .apply(final_delta("assistant", "a"), &event_tx)
+        .unwrap();
+
+    let events = sink.events();
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartStarted { item }
+            if item.kind() == TracePartKind::Text
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartDelta { event }
+            if matches!(&event.delta, TraceDelta::Text { delta, .. } if delta == "a")
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartCompleted { item }
+            if item.kind() == TracePartKind::Text
+    )));
+}
+
+#[test]
 fn stream_accumulator_returns_content_and_reasoning_content() {
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 
@@ -90,8 +132,6 @@ fn stream_accumulator_streams_commentary_without_content() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 
@@ -134,8 +174,6 @@ fn stream_accumulator_projects_tagged_raw_reasoning_without_visible_text() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: true,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 
@@ -184,8 +222,6 @@ fn stream_accumulator_splits_repeated_tagged_commentary_and_final_blocks() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 
@@ -260,8 +296,6 @@ fn stream_accumulator_projects_untagged_reasoning_without_visible_text() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: true,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -303,8 +337,6 @@ fn stream_accumulator_treats_untagged_display_text_as_final() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -333,8 +365,6 @@ fn stream_accumulator_uses_authoritative_completed_text_for_response_content() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -373,8 +403,6 @@ fn stream_accumulator_creates_part_for_authoritative_completion_without_delta() 
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -415,8 +443,6 @@ fn stream_accumulator_does_not_extract_proposed_plan_item() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inf-1".to_string(),
-        plan_mode: true,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 

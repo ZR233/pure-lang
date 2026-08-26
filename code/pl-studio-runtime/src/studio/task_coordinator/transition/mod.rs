@@ -244,6 +244,11 @@ impl TaskCoordinator {
                 }
             }
         })
+        .with_input_trace_projection(pl_trace::ToolInputTraceProjection::conditional_plan_markdown(
+            "summary",
+            "action",
+            "submitPlan",
+        ))
         .with_effect(ToolEffect::BranchControl)
     }
 

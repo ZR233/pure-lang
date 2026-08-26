@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
-use pl_protocol::PureError;
-use pl_trace::{AgentEvent, TracePartDeltaEvent};
+use pl_protocol::{OutputStream, PureError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +14,6 @@ use super::{
     Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input,
 };
-use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
 
 pub const TOOL_EXEC: &str = "exec";
@@ -139,29 +137,21 @@ where
 }
 
 struct ToolResultOutputObserver {
-    event_tx: tokio::sync::broadcast::WeakSender<AgentEvent>,
-    turn_id: String,
-    item_id: String,
+    emitter: super::ToolOutputDeltaEmitter,
     revision_base: u64,
 }
 
 impl CommandOutputObserver for ToolResultOutputObserver {
     fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64) {
-        let mut delta = String::from_utf8_lossy(chunk).to_string();
-        if matches!(stream, CommandOutputStream::Stderr) {
-            delta = format!("[stderr] {delta}");
-        }
-        let now = unix_seconds();
-        let event = TracePartDeltaEvent::running_tool_result(
-            self.turn_id.clone(),
-            self.item_id.clone(),
+        let stream = match stream {
+            CommandOutputStream::Stdout => OutputStream::Stdout,
+            CommandOutputStream::Stderr => OutputStream::Stderr,
+        };
+        let _ = self.emitter.emit_at(
+            stream,
+            String::from_utf8_lossy(chunk),
             self.revision_base.saturating_add(revision),
-            now,
-            delta,
         );
-        if let Some(event_tx) = self.event_tx.upgrade() {
-            let _ = event_tx.send(AgentEvent::TracePartDelta { event });
-        }
     }
 }
 
@@ -235,9 +225,7 @@ where
                 .map(Duration::from_secs)
                 .unwrap_or(self.default_timeout);
             let observer = Arc::new(ToolResultOutputObserver {
-                event_tx: context.events().downgrade(),
-                turn_id: context.identity().turn_id.clone(),
-                item_id: context.identity().item_id.clone(),
+                emitter: context.output_delta_emitter(),
                 revision_base: context.identity().revision_base,
             });
             let call_id = context.identity().call_id.clone();
@@ -260,6 +248,13 @@ where
                     output_observer: Some(observer),
                 })
                 .await?;
+
+            if let Some(error) = context.take_output_delta_error() {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: error.to_string(),
+                });
+            }
 
             tool_output_from_snapshot(snapshot, self.name(), context.identity().revision_base)
         }

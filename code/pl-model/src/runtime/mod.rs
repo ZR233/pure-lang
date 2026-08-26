@@ -8,7 +8,7 @@ use async_openai::config::Config;
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::{PureError, Result};
-use pl_trace::{AgentEventSender, TraceEvent};
+use pl_trace::{AgentEventSender, TraceEventSink};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use secrecy::SecretString;
 
@@ -36,8 +36,6 @@ use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::runtime::transport_policy::{
     OPENAI_HTTP_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
 };
-pub(crate) type ModelTraceEventBuffer = Arc<std::sync::Mutex<Vec<TraceEvent>>>;
-
 /// 单次模型调用的运行期上下文。
 ///
 /// 连接 continuation 属于 [`ModelSession`]；trace、事件输出和 prompt cache key
@@ -47,8 +45,10 @@ pub struct ModelInvocationContext {
     session: ModelSession,
     event_tx: AgentEventSender,
     trace: Option<CompletionTraceContext>,
+    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    cancellation: Option<tokio_util::sync::CancellationToken>,
+    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     prompt_cache_key: Option<String>,
-    trace_events: ModelTraceEventBuffer,
 }
 
 impl ModelInvocationContext {
@@ -57,31 +57,42 @@ impl ModelInvocationContext {
             session,
             event_tx,
             trace: None,
+            trace_sink: None,
+            cancellation: None,
+            input_trace_projections: Arc::new(HashMap::new()),
             prompt_cache_key: None,
-            trace_events: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
-    pub fn with_trace(mut self, trace: CompletionTraceContext) -> Self {
+    pub fn with_trace(
+        mut self,
+        trace: CompletionTraceContext,
+        sink: Arc<dyn TraceEventSink>,
+    ) -> Self {
         self.trace = Some(trace);
+        self.trace_sink = Some(sink);
+        self
+    }
+
+    pub fn with_cancellation(
+        mut self,
+        cancellation: Option<tokio_util::sync::CancellationToken>,
+    ) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
+    pub fn with_input_trace_projections(
+        mut self,
+        projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
+    ) -> Self {
+        self.input_trace_projections = projections;
         self
     }
 
     pub fn with_prompt_cache_key(mut self, prompt_cache_key: Option<String>) -> Self {
         self.prompt_cache_key = prompt_cache_key;
         self
-    }
-
-    /// 取出本次 invocation 已投影的 trace 事件。
-    pub fn take_trace_events(&self) -> Vec<TraceEvent> {
-        self.trace_events
-            .lock()
-            .map(|mut events| std::mem::take(&mut *events))
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn trace_event_buffer(&self) -> ModelTraceEventBuffer {
-        Arc::clone(&self.trace_events)
     }
 }
 
@@ -171,6 +182,7 @@ impl ModelRuntime {
 
         loop {
             let transport = self.active_transport(&context.session);
+            let trace_checkpoint = context.trace_sink.as_ref().map(|sink| sink.next_sequence());
             let max_retries = transport.max_retries();
             let attempt_request = request.clone();
             let mut trace = original_trace.clone();
@@ -209,12 +221,17 @@ impl ModelRuntime {
                         tracked_stream,
                         &context.event_tx,
                         trace,
-                        context.trace_event_buffer(),
+                        context.trace_sink.clone(),
+                        context.cancellation.clone(),
+                        Arc::clone(&context.input_trace_projections),
                     )
                     .await;
                     // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。
                     // 该门控对全部 transport 一致；事件一旦出现即禁止重放，避免重复输出。
-                    let retry_allowed = !stream_started.load(Ordering::Acquire);
+                    let retry_allowed = context.trace_sink.as_ref().map_or_else(
+                        || !stream_started.load(Ordering::Acquire),
+                        |sink| Some(sink.next_sequence()) == trace_checkpoint,
+                    );
                     (result, retry_allowed)
                 }
                 Err(error) => (Err(error), true),

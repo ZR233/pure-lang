@@ -75,7 +75,8 @@ repairThreadRuntime(threadId)
 
 查询优先从已注册 ThreadActor 的 canonical snapshot 读取；actor 不存在时只读 SQLite 冷基线并返回
 `runtimeAvailability=inactive`，不得让数据库行覆盖活动 owner。订阅是显式激活命令，可从冷基线创建
-actor；纯查询和 transport 重同步不激活、不修复、不投递 wake。
+actor；纯查询不激活、不修复、不投递 wake。transport 重同步对驻留 Thread 只重新订阅同一 actor；
+只有目标尚未驻留时才由订阅命令完成一次冷激活，之后不得再次读取 SQLite 合并首帧。
 
 共享 `ReadThread` operation 的 canonical 返回值是完整 `ThreadSnapshot`。FRB export 与 HTTP
 `GET /api/v1/threads/{threadId}` 都调用 `readThreadSnapshot`，不能分别返回 workspace snapshot
@@ -250,8 +251,9 @@ Degraded、Recovering、Blocked 是全局新工作准入门禁，不是 Task 或
 
 每个 owner 使用串行 command mailbox。同 fingerprint/scope 的 pending command 合并；新的 desired
 revision 使旧结果失效；reset、shutdown 与 reconcile 在生命周期锁上串行，但状态锁内不得等待
-网络、进程退出或长 IO。先替换 owner snapshot，再发布事件。Flutter 不用迟到 command response
-覆盖更高 event revision。
+网络、进程退出或长 IO。先替换 owner snapshot，再发布事件，最后把同一 revision 的冷存储事实
+追加到 write-behind 队列。enqueue 或 SQLite 失败只改变 PersistenceState 与新工作门禁，不能回滚
+或覆盖已发布的内存事实。Flutter 不用迟到 command response 覆盖更高 event revision。
 
 副作用探针覆盖 SQLite mutation、actor registration、durable wake、process spawn、Skills scan、
 Usage network、Updater fetch、MCP connector 与 LSP probe。所有 read 连续调用必须保持计数为零；

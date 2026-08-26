@@ -21,6 +21,7 @@ pub enum TurnFailureCategory {
     ProviderCapacity,
     Tool,
     Validation,
+    Protocol,
     Internal,
 }
 

@@ -65,7 +65,7 @@ fn pure_error(error: &PureError) -> StudioError {
             "Studio received invalid configuration",
             false,
         ),
-        PureError::SerdeJson(_) => StudioError::new(
+        PureError::SerdeJson(_) | PureError::Protocol(_) => StudioError::new(
             StudioErrorCode::Protocol,
             "Studio received incompatible protocol data",
             false,

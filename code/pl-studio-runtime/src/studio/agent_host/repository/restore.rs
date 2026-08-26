@@ -199,7 +199,7 @@ impl StudioAgentRepository {
     ) -> Result<Vec<StudioSessionRecoveryFailure>, PureError> {
         let mut failures = Vec::new();
         for model in models {
-            match audit_session_snapshot(&self.store, &model.id).await {
+            match self.audit_thread_recovery_payloads(&model.id).await {
                 Ok(()) => {}
                 Err(SessionSnapshotAuditError::Fatal(error)) => return Err(error),
                 Err(SessionSnapshotAuditError::Corrupt(error)) => {
@@ -213,6 +213,25 @@ impl StudioAgentRepository {
             }
         }
         Ok(failures)
+    }
+
+    /// 冷激活前严格审计 session 与 wire-v7 Skill item；不得在读取时修复旧 payload。
+    pub(super) async fn audit_thread_recovery_payloads(
+        &self,
+        thread_id: &str,
+    ) -> Result<(), SessionSnapshotAuditError> {
+        audit_session_snapshot(&self.store, thread_id).await?;
+        let skill_items = item::Entity::find()
+            .filter(item::Column::ThreadId.eq(thread_id))
+            .filter(item::Column::StateKind.eq("skill"))
+            .order_by_asc(item::Column::Ordinal)
+            .all(self.store.database())
+            .await
+            .map_err(|error| SessionSnapshotAuditError::Fatal(store_error(error)))?;
+        for row in skill_items {
+            ThreadItem::try_from(row).map_err(SessionSnapshotAuditError::Corrupt)?;
+        }
+        Ok(())
     }
 
     pub(super) async fn restore_inputs(

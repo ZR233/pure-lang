@@ -30,6 +30,13 @@ pub(super) fn normalize_provider_error(
     active_subagent: Option<&crate::tool::SubagentContext>,
     error: PureError,
 ) -> (String, ErrorSeverity, TurnFailure) {
+    if let PureError::Protocol(message) = error {
+        return (
+            message.clone(),
+            ErrorSeverity::Fatal,
+            TurnFailure::permanent(TurnFailureCategory::Protocol, message),
+        );
+    }
     let message = error.to_string();
     let provider_failure = error.provider_failure_ref().cloned();
     let (code, http_status) = error
@@ -133,7 +140,7 @@ pub(super) fn interrupted_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.ensure_assistant_text_item(turn_id, &content);
+    recorder.cancel_open_items(turn_id, &reason);
     let outcome = TurnOutcome::cancelled(TurnCancellationCause::UserRequested);
     let item = recorder.terminal_turn_item(turn_id, &outcome);
     recorder.fail_item(item);
@@ -194,8 +201,8 @@ pub(super) fn failed_turn_result_with_abort_reason(
     mut failure: TurnFailure,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.ensure_assistant_text_item(turn_id, &content);
     failure.message = error.clone();
+    recorder.fail_open_items(turn_id, &error);
     let outcome = TurnOutcome::failed(failure);
     let item = recorder.terminal_turn_item(turn_id, &outcome);
     recorder.fail_item(item);
@@ -232,7 +239,7 @@ pub(super) fn budget_limited_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.ensure_assistant_text_item(turn_id, &content);
+    recorder.cancel_open_items(turn_id, &reason);
     let outcome = TurnOutcome::budget_limited(
         pl_protocol::BudgetLimitSnapshot {
             kind: limit_kind,

@@ -343,6 +343,10 @@ pub(super) async fn execute_tool_call_batch(
 
         match decision {
             ToolApprovalDecision::Approved => {
+                if awaited_approval {
+                    emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
+                }
+                emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Running);
                 let active = context.active_subagent.as_ref();
                 let identity = ToolCallIdentity {
                     call_id: tool_call.call_id.clone(),
@@ -358,6 +362,7 @@ pub(super) async fn execute_tool_call_batch(
                     session_id: context.session_id.to_string(),
                     turn_id: context.turn_id.to_string(),
                     step: context.step,
+                    started_sequence: item.started_sequence(),
                     revision_base: item.revision(),
                 };
                 let approval = ToolApprovalContext::new(
@@ -369,12 +374,9 @@ pub(super) async fn execute_tool_call_batch(
                     context.options.user_input_mode,
                 );
                 let tool_context = ToolCallContext::new(identity, recorder.sender().clone())
+                    .with_trace_sink(recorder.trace_sink())
                     .with_cancellation(context.options.cancellation_token.clone())
                     .with_approval(approval);
-                if awaited_approval {
-                    emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Approved);
-                }
-                emit_tool_snapshot(recorder, &mut item, TraceToolActivePhase::Running);
                 progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
                 let invocation = ToolInvocation::from_tool_call(tool_call, tool_context);
                 let _display_arguments = invocation.payload.arguments_for_display();

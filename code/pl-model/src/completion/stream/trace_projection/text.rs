@@ -54,7 +54,11 @@ impl TraceProjection {
         if let Err(error) =
             item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
         {
-            tracing::error!(%error, "failed to append text trace delta");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to append text trace delta: {error}"
+                ))
+            });
             return events;
         }
         let Ok(event) = item.delta_event(trace_delta) else {
@@ -126,7 +130,11 @@ impl TraceProjection {
         if let Err(error) =
             item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
         {
-            tracing::error!(%error, "failed to append thinking trace delta");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to append thinking trace delta: {error}"
+                ))
+            });
             return events;
         }
         let Ok(event) = item.delta_event(trace_delta) else {
@@ -161,7 +169,11 @@ impl TraceProjection {
         if let Err(error) =
             item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
         {
-            tracing::error!(%error, "failed to append reasoning content trace delta");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to append reasoning content trace delta: {error}"
+                ))
+            });
             return events;
         }
         let Ok(event) = item.delta_event(trace_delta) else {

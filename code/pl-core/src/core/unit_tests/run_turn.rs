@@ -37,7 +37,7 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     let started_kinds = trace_started_kinds(events);
     assert_eq!(started_kinds[0], TracePartKind::Text);
     assert_eq!(started_kinds[1], TracePartKind::Turn);
-    assert_eq!(started_kinds[2], TracePartKind::Inference);
+    assert!(started_kinds[2..].contains(&TracePartKind::Inference));
 
     let user_item = events
         .iter()
@@ -932,7 +932,7 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
 }
 
 #[tokio::test]
-async fn ending_tool_content_becomes_persisted_turn_final_text() {
+async fn ending_tool_content_is_not_synthesized_as_a_final_trace_item() {
     let (base_url, bodies, handle) = serve_sse_sequence(vec![text_then_tool_call_sse(
         "end-turn-content",
         "Submitting final completion.",
@@ -966,7 +966,7 @@ async fn ending_tool_content_becomes_persisted_turn_final_text() {
         message.role == MessageRole::Assistant
             && message.content == MessageContent::Text("TASK_E2E_DONE".to_string())
     }));
-    assert!(result.trace_events.iter().any(|event| match &event.kind {
+    assert!(!result.trace_events.iter().any(|event| match &event.kind {
         TraceEventKind::TracePartCompleted { item } => item.text().is_some_and(|text| {
             text.channel() == TraceTextChannel::Final && text.content() == "TASK_E2E_DONE"
         }),

@@ -4,9 +4,9 @@ use pl_protocol::{
     InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
     Result, ToolCallCaller,
 };
+use pl_trace::TraceEventSink;
 use pl_trace::{AgentEventSender, TraceTextChannel};
 use std::collections::{HashMap, VecDeque};
-#[cfg(test)]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +18,6 @@ mod tool_stream;
 mod trace_projection;
 
 use crate::completion::{CompletionResponse, CompletionTraceContext, TokenUsage, ToolCall};
-use crate::runtime::ModelTraceEventBuffer;
 use crate::runtime::openai::sse;
 use crate::runtime::openai::{OpenAiProtocol, VisibleOutputProtocol};
 
@@ -80,13 +79,17 @@ pub(crate) async fn collect_completion_event_stream(
     stream: CompletionEventStream,
     event_tx: &AgentEventSender,
     trace: Option<CompletionTraceContext>,
-    trace_events: ModelTraceEventBuffer,
+    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    cancellation: Option<tokio_util::sync::CancellationToken>,
+    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
 ) -> Result<CompletionResponse> {
     collect_completion_event_stream_with_idle_timeout(
         stream,
         event_tx,
         trace,
-        trace_events,
+        trace_sink,
+        cancellation,
+        input_trace_projections,
         COMPLETION_STREAM_IDLE_TIMEOUT,
     )
     .await
@@ -96,13 +99,32 @@ async fn collect_completion_event_stream_with_idle_timeout(
     mut stream: CompletionEventStream,
     event_tx: &AgentEventSender,
     trace: Option<CompletionTraceContext>,
-    trace_events: ModelTraceEventBuffer,
+    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    cancellation: Option<tokio_util::sync::CancellationToken>,
+    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     idle_timeout: Duration,
 ) -> Result<CompletionResponse> {
-    let mut accumulator = StreamCompletionAccumulator::new(trace);
+    let mut accumulator = StreamCompletionAccumulator::with_trace_sink_and_projections(
+        trace,
+        trace_sink,
+        input_trace_projections,
+    );
 
     loop {
-        let event = match tokio::time::timeout(idle_timeout, stream.next()).await {
+        let next_event = tokio::time::timeout(idle_timeout, stream.next());
+        let next_event = match cancellation.as_ref() {
+            Some(token) => {
+                tokio::select! {
+                    event = next_event => event,
+                    _ = token.cancelled() => {
+                        accumulator.cancel_attempt("model invocation cancelled", event_tx);
+                        return Err(PureError::LlmError("model invocation cancelled".to_string()));
+                    }
+                }
+            }
+            None => next_event.await,
+        };
+        let event = match next_event {
             Ok(Some(event)) => event,
             Ok(None) => break,
             Err(_) => {
@@ -110,7 +132,6 @@ async fn collect_completion_event_stream_with_idle_timeout(
                     "stream error: idle timeout waiting for provider event",
                 );
                 accumulator.fail_attempt(&error, event_tx);
-                accumulator.flush_trace_events(&trace_events);
                 return Err(error);
             }
         };
@@ -118,18 +139,16 @@ async fn collect_completion_event_stream_with_idle_timeout(
             Ok(event) => event,
             Err(error) => {
                 accumulator.fail_attempt(&error, event_tx);
-                accumulator.flush_trace_events(&trace_events);
                 return Err(error);
             }
         };
         if let Err(error) = accumulator.apply(event, event_tx) {
             accumulator.fail_attempt(&error, event_tx);
-            accumulator.flush_trace_events(&trace_events);
             return Err(error);
         }
     }
 
-    accumulator.finish_with_trace_events(event_tx, &trace_events)
+    accumulator.finish(event_tx)
 }
 
 pub(crate) struct StreamCompletionAccumulator {
@@ -149,7 +168,24 @@ pub(crate) struct StreamCompletionAccumulator {
 }
 
 impl StreamCompletionAccumulator {
+    #[cfg(test)]
     pub(crate) fn new(trace: Option<CompletionTraceContext>) -> Self {
+        Self::with_trace_sink(trace, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_trace_sink(
+        trace: Option<CompletionTraceContext>,
+        trace_sink: Option<Arc<dyn TraceEventSink>>,
+    ) -> Self {
+        Self::with_trace_sink_and_projections(trace, trace_sink, Arc::new(HashMap::new()))
+    }
+
+    pub(crate) fn with_trace_sink_and_projections(
+        trace: Option<CompletionTraceContext>,
+        trace_sink: Option<Arc<dyn TraceEventSink>>,
+        input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
+    ) -> Self {
         Self {
             content_parts: Vec::new(),
             content_indexes: HashMap::new(),
@@ -163,7 +199,13 @@ impl StreamCompletionAccumulator {
             final_usage: None,
             response_id: None,
             state: StreamAccumulatorState::open(),
-            trace: trace.map(TraceProjection::new),
+            trace: trace.map(|trace| {
+                TraceProjection::with_sink_and_projections(
+                    trace,
+                    trace_sink,
+                    input_trace_projections,
+                )
+            }),
         }
     }
 
@@ -188,6 +230,7 @@ impl StreamCompletionAccumulator {
         }
         for stream_event in self.lifecycle.normalize(stream_event)? {
             self.apply_normalized(stream_event, event_tx)?;
+            self.ensure_trace_sink()?;
         }
 
         Ok(())
@@ -213,10 +256,6 @@ impl StreamCompletionAccumulator {
             } => {
                 let _ = id;
             }
-            ModelStreamEvent::BlockOpened {
-                kind: ModelBlockKind::Plan,
-                ..
-            } => {}
             ModelStreamEvent::BlockDelta {
                 id,
                 kind: ModelBlockKind::Text { channel },
@@ -240,10 +279,6 @@ impl StreamCompletionAccumulator {
                 self.record_thinking_delta(&id, section_index.unwrap_or_default(), delta, event_tx);
             }
             ModelStreamEvent::BlockDelta {
-                kind: ModelBlockKind::Plan,
-                ..
-            }
-            | ModelStreamEvent::BlockDelta {
                 kind: ModelBlockKind::Text { .. },
                 ..
             }
@@ -259,8 +294,7 @@ impl StreamCompletionAccumulator {
             } => {
                 let authoritative_text = match authoritative_content {
                     Some(ModelBlockContent::Text(text)) => Some(text),
-                    Some(ModelBlockContent::ReasoningSummary(_) | ModelBlockContent::Plan(_))
-                    | None => None,
+                    Some(ModelBlockContent::ReasoningSummary(_)) | None => None,
                 };
                 if channel == TraceTextChannel::Final
                     && let Some(text) = authoritative_text.as_deref()
@@ -286,10 +320,6 @@ impl StreamCompletionAccumulator {
                     };
                 self.record_thinking_completed(&id, authoritative_summary, event_tx);
             }
-            ModelStreamEvent::BlockClosed {
-                kind: ModelBlockKind::Plan,
-                ..
-            } => {}
             ModelStreamEvent::ReasoningRawDelta {
                 id,
                 content_index,
@@ -418,16 +448,25 @@ impl StreamCompletionAccumulator {
         Ok(())
     }
 
-    #[cfg(test)]
     pub(crate) fn finish(self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
-        let trace_events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.finish_with_trace_events(event_tx, &trace_events)
+        self.finish_inner(event_tx, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn finish_with_trace_events(
+        self,
+        event_tx: &AgentEventSender,
+        trace_events: &Arc<std::sync::Mutex<Vec<pl_trace::TraceEvent>>>,
+    ) -> Result<CompletionResponse> {
+        self.finish_inner(event_tx, Some(trace_events))
+    }
+
+    fn finish_inner(
         mut self,
         event_tx: &AgentEventSender,
-        trace_events: &ModelTraceEventBuffer,
+        #[cfg_attr(not(test), allow(unused_variables))] trace_events: Option<
+            &Arc<std::sync::Mutex<Vec<pl_trace::TraceEvent>>>,
+        >,
     ) -> Result<CompletionResponse> {
         let terminal_error = match &self.state {
             StreamAccumulatorState::Open(_) => Some(PureError::transient_model_transport(
@@ -440,7 +479,6 @@ impl StreamCompletionAccumulator {
         };
         if let Some(error) = terminal_error {
             self.fail_attempt(&error, event_tx);
-            self.flush_trace_events(trace_events);
             return Err(error);
         }
 
@@ -454,6 +492,7 @@ impl StreamCompletionAccumulator {
                 let _ = event_tx.send(event);
             }
         }
+        self.ensure_trace_sink()?;
 
         let content = if self.content_parts.is_empty() {
             None
@@ -470,7 +509,13 @@ impl StreamCompletionAccumulator {
         } else {
             Some(self.raw_reasoning_parts.join(""))
         };
-        self.flush_trace_events(trace_events);
+        #[cfg(test)]
+        if let Some(target) = trace_events
+            && let Some(trace) = self.trace.as_ref()
+            && let Ok(mut events) = target.lock()
+        {
+            events.extend(trace.events());
+        }
         let orchestration =
             stream_orchestration_metrics(&self.responses_context_items, &self.tool_calls);
         Ok(CompletionResponse {
@@ -483,15 +528,6 @@ impl StreamCompletionAccumulator {
             usage: self.final_usage.unwrap_or_default(),
             model: String::new(),
         })
-    }
-
-    fn flush_trace_events(&self, target: &ModelTraceEventBuffer) {
-        let Some(trace) = self.trace.as_ref() else {
-            return;
-        };
-        if let Ok(mut events) = target.lock() {
-            events.extend(trace.events());
-        }
     }
 
     fn attach_tool_caller(&mut self, call: &mut ToolCall) {
@@ -508,6 +544,27 @@ impl StreamCompletionAccumulator {
         };
         for event in trace.fail_attempt(&error.to_string()) {
             let _ = event_tx.send(event);
+        }
+    }
+
+    fn cancel_attempt(&mut self, reason: &str, event_tx: &AgentEventSender) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
+        for event in trace.cancel_attempt(reason) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn ensure_trace_sink(&mut self) -> Result<()> {
+        let Some(trace) = self.trace.as_mut() else {
+            return Ok(());
+        };
+        match trace.take_trace_error() {
+            Some(error) => Err(PureError::Protocol(format!(
+                "canonical trace publication failed: {error}"
+            ))),
+            None => Ok(()),
         }
     }
 

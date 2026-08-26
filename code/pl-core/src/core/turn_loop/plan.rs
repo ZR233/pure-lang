@@ -12,7 +12,7 @@ pub(super) fn record_plan_items(
         }
         for event in &tool_result.runtime_events {
             if let crate::tool::ToolDirective::PlanCompleted { content } = event {
-                let item_id = format!("{turn_id}-plan");
+                let item_id = format!("{}:plan", tool_result.id);
                 recorder.complete_plan_item(turn_id, &item_id, content.clone());
             }
         }
@@ -60,7 +60,7 @@ mod tests {
         record_plan_items(&mut recorder, "turn-1", &results);
 
         let item = recorder
-            .latest_trace_part("turn-1-plan")
+            .latest_trace_part("tool-1:plan")
             .expect("completed plan should create a trace item");
         assert!(matches!(
             item.state(),
@@ -81,6 +81,6 @@ mod tests {
 
         record_plan_items(&mut recorder, "turn-1", &results);
 
-        assert!(recorder.latest_trace_part("turn-1-plan").is_none());
+        assert!(recorder.latest_trace_part("tool-1:plan").is_none());
     }
 }

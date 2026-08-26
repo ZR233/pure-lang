@@ -10,15 +10,16 @@
 - `lagged`：只表示 best-effort 事件发生丢弃，客户端必须重新订阅。
 - `closed`：Thread 或 runtime 已关闭。
 
-订阅实现先注册 receiver，再读取数据库并合并 ThreadActor live overlay，最后发送 snapshot，避免
-snapshot 与 live 之间漏事件。实时流没有 durable cursor、journal replay 或 ResyncRequired
-补丁协议；恢复永远重新取得 authoritative snapshot。旧历史通过 `listThreadTurns` 的 opaque
-keyset cursor 读取。
+驻留 Thread 的订阅实现先注册 receiver，再直接读取 ThreadActor 的内存 authoritative snapshot，
+最后发送 snapshot，避免 snapshot 与 live 之间漏事件；该路径不得查询 SQLite。未驻留 Thread 必须
+先通过显式激活命令从冷基线创建 ThreadActor，激活完成后再走同一订阅流程。实时流没有 durable
+cursor、journal replay 或 ResyncRequired 补丁协议；恢复永远重新取得同一内存 owner snapshot。
+旧历史通过 `listThreadTurns` 的 opaque keyset cursor 从 SQLite 冷分页读取。
 
 ThreadEventBus 只拥有 Turn、Item、Interaction、runtime 与 live overlay 的实时投影，不拥有
-Thread directory 元数据。订阅注册完成后，StudioRuntime 必须用同一 `studio.sqlite` 中读取的
-Thread 行重绑尚未发送的首帧；不得把 EventBus 中为投影保留的 Thread 副本当成 mode、role、
-title 或 status 的事实源。
+Thread directory 元数据。订阅注册完成后，StudioRuntime 必须用内存 Thread directory owner 的
+当前条目重绑尚未发送的首帧；不得为了重绑查询 SQLite，也不得把 EventBus 中为投影保留的 Thread
+副本当成 mode、role、title 或 status 的事实源。数据库行只在 owner 冷激活前作为恢复基线。
 
 ## 8.2 Notification
 
@@ -90,8 +91,9 @@ query，均返回完整 `ThreadSnapshot`，不得让 HTTP route 退化为只返�
 Skill 激活使用普通的终态 Skill Item 和 `threadRuntimeUpdated` 通知；激活来源是 typed
 `Tool { toolCallId } | UserGesture { invocationId }`，资源位置是 typed resource base，不允许 transport
 或前端从工具 JSON 推断。Timeline 文案按来源区分代理激活与用户激活。首次订阅及重连 snapshot
-必须包含相同的 Skill Item 与 `runtime.activeSkills`。Thread wire schema 为 v6；旧 v5
-`path + toolCallId` Skill Item 在协议反序列化边界映射为目录资源与 Tool 来源。
+必须包含相同的 Skill Item 与 `runtime.activeSkills`。Thread wire schema 为 v7；Skill Item 只接受
+typed resource base、provider identity 与 `Tool | UserGesture` 来源。旧 `path + toolCallId`、缺失
+provider 或未知字段一律是协议错误，不做映射、默认填充或读时升级。
 
 Product lag 发送 `stale` 并要求重读 `/api/v1/state`。SSE 不提供 durable replay；收到
 `Last-Event-ID` 时先发送 `stale`。每 15 秒发送 comment heartbeat；heartbeat 不占用领域 sequence，

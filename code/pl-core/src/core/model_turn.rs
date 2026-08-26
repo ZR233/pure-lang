@@ -2,7 +2,7 @@ use pl_model::{
     CompletionRequest, CompletionResponse, ModelInvocationContext, ModelRuntime, ReasoningConfig,
     ReasoningSummary, ToolSpec,
 };
-use pl_protocol::{PureError, Result};
+use pl_protocol::Result;
 use tokio_util::sync::CancellationToken;
 
 use crate::message::{
@@ -134,15 +134,8 @@ impl ModelTurnClient {
             .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let invocation = ModelInvocationContext::new(session.model_session(), event_tx)
-            .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string));
-        match options.cancellation_token {
-            Some(token) => {
-                tokio::select! {
-                    response = self.runtime.complete(request, invocation) => response,
-                    _ = token.cancelled() => Err(PureError::LlmError("model request cancelled".to_string())),
-                }
-            }
-            None => self.runtime.complete(request, invocation).await,
-        }
+            .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
+            .with_cancellation(options.cancellation_token);
+        self.runtime.complete(request, invocation).await
     }
 }

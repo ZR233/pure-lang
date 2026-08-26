@@ -41,6 +41,19 @@ pub(super) fn finalize_tool_item(
     mut item: pl_trace::TracePart,
     record: &ToolExecutionRecord,
 ) {
+    if let Some(revision) = record
+        .runtime_events
+        .iter()
+        .filter_map(|event| match event {
+            ToolDirective::ToolResultRevision { revision } => Some(*revision),
+            _ => None,
+        })
+        .max()
+        && let Err(error) = item.synchronize_open_revision(revision, unix_seconds())
+    {
+        tracing::error!(%error, "failed to join streamed tool-result revision");
+        return;
+    }
     let output = TraceToolOutput::new(record.display_result.clone()).with_details(
         record.exit_code,
         output_artifacts(&record.runtime_events),
@@ -72,6 +85,13 @@ pub(super) fn finalize_tool_item(
         ToolExecutionOutcome::Failed(_)
         | ToolExecutionOutcome::Denied
         | ToolExecutionOutcome::Cancelled => recorder.fail_item(item),
+    }
+    if record.outcome != ToolExecutionOutcome::Succeeded {
+        recorder.terminalize_plan_item_for_tool(
+            &record.id,
+            record.outcome == ToolExecutionOutcome::Cancelled,
+            &record.display_result,
+        );
     }
     if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {

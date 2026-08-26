@@ -107,14 +107,17 @@ async fn openai_responses_smoke() {
     let runtime = ModelRuntime::new(info, live_model(&model_slug)).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
+    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new(
+        "openai-live-session",
+        0,
+    ));
     let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
         CompletionTraceContext {
             session_id: "openai-live-session".to_string(),
             turn_id: "openai-live-turn".to_string(),
             inference_id: "openai-live-inference".to_string(),
-            plan_mode: false,
-            trace_sequence_base: 0,
         },
+        trace_sink,
     );
 
     let response = match runtime.complete(openai_request(), context).await {

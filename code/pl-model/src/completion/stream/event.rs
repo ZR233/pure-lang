@@ -91,28 +91,20 @@ pub enum ModelStreamEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelBlockKind {
-    Text {
-        channel: TraceTextChannel,
-    },
+    Text { channel: TraceTextChannel },
     ReasoningSummary,
-    #[allow(dead_code)]
-    Plan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelBlockField {
     Text,
     ReasoningSummary,
-    #[allow(dead_code)]
-    PlanContent,
 }
 
 #[derive(Debug, Clone)]
 pub enum ModelBlockContent {
     Text(String),
     ReasoningSummary(Vec<String>),
-    #[allow(dead_code)]
-    Plan(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

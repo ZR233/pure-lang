@@ -35,6 +35,7 @@ impl TaskIssueDisposition {
             }
             TurnFailureCategory::Provider
             | TurnFailureCategory::Tool
+            | TurnFailureCategory::Protocol
             | TurnFailureCategory::Internal => Self::Fatal,
         }
     }

@@ -51,8 +51,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_skill_item_maps_path_and_tool_call_to_typed_fields() {
-        let activation: SkillActivation = serde_json::from_value(serde_json::json!({
+    fn legacy_skill_item_is_rejected() {
+        let error = serde_json::from_value::<SkillActivation>(serde_json::json!({
             "name": "pdf",
             "source": "system",
             "path": "/skills/pdf",
@@ -60,12 +60,23 @@ mod tests {
             "toolCallId": "tool-1",
             "activatedAt": 7
         }))
-        .unwrap();
+        .unwrap_err();
 
-        assert_eq!(activation.directory_path(), Some("/skills/pdf"));
-        assert!(matches!(
-            activation.cause,
-            crate::SkillActivationCause::Tool { ref tool_call_id } if tool_call_id == "tool-1"
-        ));
+        assert!(error.to_string().contains("unknown field `path`"));
+    }
+
+    #[test]
+    fn missing_provider_is_rejected() {
+        let error = serde_json::from_value::<SkillActivation>(serde_json::json!({
+            "name": "pdf",
+            "source": "system",
+            "resourceBase": {"kind": "directory", "path": "/skills/pdf"},
+            "turnId": "turn-1",
+            "cause": {"kind": "tool", "toolCallId": "tool-1"},
+            "activatedAt": 7
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("provider"), "{error}");
     }
 }

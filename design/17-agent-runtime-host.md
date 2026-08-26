@@ -93,6 +93,12 @@ Turn 终态、Interaction 提交与 resolution 都不等待 flush。发布通道
 触发从 ThreadActor 快照重同步，不得使已经提交的 Agent 进入 Faulted。Task tool 把类型化事实提交给
 TaskRuntime；core 不携带 SQLite mutation。
 
+模型、工具和 `TraceRecorder` 共享一个线程安全的 canonical trace sink。producer 只提交不含
+session/sequence 的 draft；sink 在单一临界区分配 sequence、推进 TracePart revision、保存本 Turn
+内存 capture 并立即投递 ThreadActor。模型 completion 不再拥有 trace buffer，也不得在调用结束后
+把一批事件回灌 recorder。`TurnResult.trace_events` 只是同一 sink 的审计 capture，不是第二条发布
+路径。provider/tool chunk 的可见边界是 sink 接受该 draft，而不是 provider EOS、工具终态或 SQLite。
+
 合法 provider 输入上的 trace/Thread 投影准备错误只终结当前 Turn，使用类型化协议失败结果并让 Agent
 回到可接收输入状态。只有 ThreadActor 的复合聚合本身无法验证、或无法构造一致的 Turn 终态时，才允许
 进入 Faulted。每个独立 reasoning TracePart 内的 Thinking 与 ReasoningContent 首个增量都使用本地
@@ -125,7 +131,9 @@ collaboration caller、MCP generation、LSP availability 或宿主自定义能�
 RunningTurn 包含 turnId、进程内 identity、canonical Turn running state、CancellationToken、abort handle、done、
 steer sender 与单一 budget-refresh signal。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
-abort；Turn 终态完成内存提交后立即广播 turnCompleted。
+abort；model collect loop 直接观察同一 token，并在返回前把已开始的 trace item 结算为 Cancelled。
+硬 abort 或其他无法执行 producer 清理的路径由 ThreadActor 在 Turn terminal 前补齐剩余 item 终态；
+Turn 终态完成内存提交后立即广播 turnCompleted，不能留下永久 Streaming item。
 
 parent→direct-child `send_message` 是唯一预算刷新 mailbox。runtime 在 durable `TurnQueued` 提交且
 steer 被活动 Turn 接受后，以消息接受时刻推进 refresh signal；TurnEngine 在每个预算检查点应用

@@ -7,9 +7,10 @@ Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v13；测试和�
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
 
-Skill Provider 与用户手势不增加数据库表，数据库 schema 仍为 v13。Thread wire schema v6 的 Skill
-Item 保存 typed resource base 与 `Tool | UserGesture` 激活来源；读取旧 `path + toolCallId` JSON 时在
-协议边界兼容映射，不重建或清除现有 Thread。
+Skill Provider 与用户手势不增加数据库表，数据库 schema 仍为 v13。Thread wire schema v7 的 Skill
+Item 保存 typed resource base、provider identity 与 `Tool | UserGesture` 激活来源；旧
+`path + toolCallId`、缺失 provider 或未知字段严格拒绝。恢复审计发现旧 Skill Item 时阻断其 root
+tree 激活并发布 cleanup recovery issue，不迁移、不默认填充、不自动删除现有数据库。
 
 打开、检查、删除或重建 SQLite 之前，`StudioRuntime` 必须取得 Studio home 下
 `runtime.lock` 的跨进程独占 OS 文件锁。锁文件只记录 PID、宿主类型和启动时间供诊断，占用
@@ -50,7 +51,7 @@ runtime snapshot、agent outcome 或 durable event journal。
 
 ThreadActor、TaskRuntime 与产品目录 owner 的内存 snapshot 是各自活动聚合的唯一权威实例。每次
 mutation 先在串行 owner 中完成全部校验和纯投影，以一个复合状态原子替换 snapshot、递增 revision
-并追加待落库批次，然后立即广播可观察事实。SQLite writer 在后台按 owner/revision 顺序异步落库；
+并立即广播可观察事实，再追加待落库批次。SQLite writer 在后台按 owner/revision 顺序异步落库；
 确认只推进 `durable_revision`，不得改变业务状态。
 
 Thread 与 Project 的目录事实（创建、child 注册、mode 变更、归档、项目打开/关闭）使用同一条
@@ -74,9 +75,10 @@ writer 不得在重试耗尽后退出或删除批次。三次快速重试失败�
 创建，但停止、查询、当前活动轮次收束和手动重试保持可用。
 
 队列上限仍为 1024 个批次，其中 768 个用于普通提交，256 个为已启动生命周期的终态收束预留。启动
-新生命周期前必须取得终态许可。普通区满时先合并同一活动 Item 的流式更新；仍无法释放时受控取消继续
-产生数据的轮次，并使用预留位置提交终态，禁止静默丢弃。正常关机必须等待 pending=0；强制退出必须
-明确告知最后耐久修订号之后的数据可能丢失。
+新生命周期前必须取得终态许可。Timeline delta 只存在于内存 owner 与 live stream，不进入持久化
+队列；writer 只能合并已经发布后的冷存储事实，不能合并或延迟 live delta。普通区满时受控取消继续
+产生持久事实的轮次，并使用预留位置提交终态，禁止静默丢弃。正常关机必须等待 pending=0；强制退出
+必须明确告知最后耐久修订号之后的数据可能丢失。
 
 Faulted 可以保留来源 Turn 作为诊断身份，但该身份不再属于活动 Turn；同一个内存 commit 必须把
 对应 Turn 写为 Failed 并立即发布。诊断 Turn 缺少失败结果、身份不一致或结果不是失败终态时，在

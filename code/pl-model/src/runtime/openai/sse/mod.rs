@@ -269,17 +269,6 @@ impl OpenAiStreamDecoder {
                     let _ = block_id;
                     normalized.extend(events);
                 }
-                ModelStreamEvent::BlockOpened {
-                    id,
-                    kind: ModelBlockKind::Plan,
-                    provider_metadata,
-                } => {
-                    normalized.push(ModelStreamEvent::BlockOpened {
-                        id,
-                        kind: ModelBlockKind::Plan,
-                        provider_metadata,
-                    });
-                }
                 ModelStreamEvent::BlockDelta {
                     id,
                     kind: ModelBlockKind::Text { channel },

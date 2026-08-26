@@ -114,6 +114,12 @@ fn detects_unexecuted_tool_call_text() {
 fn failed_turn_result_preserves_error_message() {
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let turn_item = recorder.running_turn_item("turn-1");
+    recorder.start_item(turn_item);
+    assert!(matches!(
+        event_rx.try_recv().unwrap(),
+        AgentEvent::TracePartStarted { item } if item.item_id() == "turn-1-turn"
+    ));
 
     let result = failed_turn_result(
         &mut recorder,
@@ -143,24 +149,6 @@ fn failed_turn_result_preserves_error_message() {
         result.outcome.failure().map(|failure| failure.category),
         Some(pl_protocol::TurnFailureCategory::Provider)
     );
-    assert!(matches!(
-        event_rx.try_recv().unwrap(),
-        AgentEvent::TracePartStarted { item }
-            if item.item_id() == "turn-1-assistant"
-                && item.text().is_some_and(|text| {
-                    text.channel() == TraceTextChannel::Final
-                        && text.content() == "partial summary"
-                })
-    ));
-    assert!(matches!(
-        event_rx.try_recv().unwrap(),
-        AgentEvent::TracePartCompleted { item }
-            if item.item_id() == "turn-1-assistant"
-                && item.text().is_some_and(|text| {
-                    text.channel() == TraceTextChannel::Final
-                        && text.content() == "partial summary"
-                })
-    ));
     assert!(matches!(
         event_rx.try_recv().unwrap(),
         AgentEvent::TracePartFailed { item } if item.item_id() == "turn-1-turn"

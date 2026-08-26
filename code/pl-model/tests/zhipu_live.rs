@@ -100,14 +100,17 @@ async fn run_zhipu(
     let runtime = ModelRuntime::new(info, model).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
+    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new(
+        "zhipu-live-session",
+        0,
+    ));
     let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
         CompletionTraceContext {
             session_id: "zhipu-live-session".to_string(),
             turn_id: "zhipu-live-turn".to_string(),
             inference_id: "zhipu-live-inference".to_string(),
-            plan_mode: false,
-            trace_sequence_base: 0,
         },
+        trace_sink,
     );
 
     let response = match runtime.complete(request, context).await {

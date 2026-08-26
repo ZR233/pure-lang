@@ -19,7 +19,7 @@ pub struct PlanExitTool;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlanExitInput {
     /// The complete final plan in Markdown.
-    content: String,
+    plan: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,6 +47,10 @@ impl Tool for PlanExitTool {
         Some(ToolEffect::Read)
     }
 
+    fn input_trace_projection(&self) -> Option<pl_trace::ToolInputTraceProjection> {
+        Some(pl_trace::ToolInputTraceProjection::plan_markdown("plan"))
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -54,10 +58,10 @@ impl Tool for PlanExitTool {
     ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let args = deserialize_tool_input::<PlanExitInput>(self.name(), input.arguments)?;
-            if args.content.trim().is_empty() {
+            if !has_markdown_level_one_heading(args.plan.trim()) {
                 return Err(PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
-                    error: "content must not be empty".to_string(),
+                    error: "plan must start with a level-one Markdown heading".to_string(),
                 });
             }
 
@@ -72,11 +76,18 @@ impl Tool for PlanExitTool {
                 Some(0),
                 false,
                 vec![ToolDirective::PlanCompleted {
-                    content: args.content.trim().to_string(),
+                    content: args.plan,
                 }],
             ))
         }.boxed()
     }
+}
+
+fn has_markdown_level_one_heading(plan: &str) -> bool {
+    let mut characters = plan.chars();
+    characters.next() == Some('#')
+        && characters.next().is_some_and(char::is_whitespace)
+        && characters.any(|character| !character.is_whitespace())
 }
 
 #[cfg(test)]
@@ -90,9 +101,9 @@ mod tests {
         ToolCallContext::test(event_tx)
     }
 
-    fn input(content: &str) -> ToolInput {
+    fn input(plan: &str) -> ToolInput {
         ToolInput {
-            arguments: serde_json::json!({ "content": content }),
+            arguments: serde_json::json!({ "plan": plan }),
         }
     }
 
@@ -119,12 +130,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_empty_content() {
+    async fn rejects_empty_plan() {
         let error = PlanExitTool
             .execute(input("  "), context())
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("content must not be empty"));
+        assert!(error.to_string().contains("level-one Markdown heading"));
+    }
+
+    #[tokio::test]
+    async fn rejects_legacy_content_field() {
+        let error = PlanExitTool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "content": "# Legacy" }),
+                },
+                context(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `content`"));
+    }
+
+    #[tokio::test]
+    async fn preserves_original_plan_content() {
+        let plan = "  # Plan\n\n- Do it\n  ";
+        let output = PlanExitTool.execute(input(plan), context()).await.unwrap();
+        assert_eq!(
+            output.runtime_events,
+            vec![ToolDirective::PlanCompleted {
+                content: plan.to_string(),
+            }]
+        );
     }
 }

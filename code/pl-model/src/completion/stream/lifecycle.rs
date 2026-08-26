@@ -398,7 +398,6 @@ fn block_kind_label(kind: ModelBlockKind) -> &'static str {
     match kind {
         ModelBlockKind::Text { channel } => channel.as_str(),
         ModelBlockKind::ReasoningSummary => "reasoning.summary",
-        ModelBlockKind::Plan => "plan",
     }
 }
 

@@ -461,8 +461,8 @@ impl ThreadEventSubscription {
     /// Rebinds the undelivered bootstrap snapshot to product-owned Thread metadata.
     ///
     /// Product adapters call this after the listener has been registered and after
-    /// reading their durable Thread directory. Timeline and runtime projection state
-    /// remains owned by this subscription snapshot.
+    /// reading their resident in-memory Thread directory. Timeline and runtime
+    /// projection state remains owned by this subscription snapshot.
     pub fn replace_bootstrap_thread(&mut self, thread: Thread) -> Result<(), ThreadEventError> {
         if thread.id != self.thread_id {
             return Err(ThreadEventError::ThreadMismatch {

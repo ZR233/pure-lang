@@ -1,6 +1,8 @@
 //! Agent 执行 trace 的 canonical typed 生命周期与事件。
 
+mod input_projection;
 mod part;
+mod sink;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -10,7 +12,9 @@ use pl_protocol::{
     SkillActivation, TodoListSnapshot,
 };
 
+pub use input_projection::*;
 pub use part::*;
+pub use sink::*;
 
 pub type AgentEventSender = broadcast::Sender<AgentEvent>;
 pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;

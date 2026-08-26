@@ -432,9 +432,9 @@ fn thread_tool_item(tool: &pl_trace::TraceToolPart, updated_at: i64) -> ThreadTo
                 ThreadToolState::AwaitingApproval(AwaitingApprovalThreadTool)
             }
             TraceToolState::Approved(_) => ThreadToolState::Approved(ApprovedThreadTool),
-            TraceToolState::Running(_) => {
-                ThreadToolState::Running(RunningThreadTool::new(String::new()))
-            }
+            TraceToolState::Running(value) => ThreadToolState::Running(RunningThreadTool::new(
+                value.streamed_output().to_string(),
+            )),
             TraceToolState::Succeeded(value) => ThreadToolState::Succeeded(
                 SucceededThreadTool::new(updated_at, thread_tool_output(value.output())),
             ),
@@ -682,6 +682,7 @@ mod tests {
         ResolveUserInput, RunningTurnState, SkillActivation, THREAD_SCHEMA_VERSION, Thread,
         ThreadItemState, ThreadSnapshot,
     };
+    use pl_trace::{TracePartAction, TracePartCompletion};
 
     use super::*;
 
@@ -710,6 +711,76 @@ mod tests {
             ThreadNotification::ItemCompleted { item }
                 if matches!(item.state(), ThreadItemState::Text(_))
         ));
+    }
+
+    #[test]
+    fn every_trace_delta_projects_to_an_independent_thread_notification() {
+        let mut item = TracePart::streaming_text("turn-1", "item-1", 1, TraceTextChannel::Final, 7);
+        let started = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 1,
+            timestamp: 7,
+            kind: TraceEventKind::TracePartStarted { item: item.clone() },
+        };
+        let mut traces = vec![started];
+        for (sequence, delta) in [(2, "a"), (3, "b")] {
+            item.apply(item.command(
+                sequence as i64 + 6,
+                TracePartAction::Append(TraceDelta::Text {
+                    channel: TraceTextChannel::Final,
+                    delta: delta.to_string(),
+                }),
+            ))
+            .unwrap();
+            traces.push(TraceEvent {
+                session_id: "thread-1".to_string(),
+                sequence,
+                timestamp: sequence as i64 + 6,
+                kind: TraceEventKind::TracePartDelta {
+                    event: TracePartDeltaEvent {
+                        turn_id: "turn-1".to_string(),
+                        item_id: "item-1".to_string(),
+                        started_sequence: 1,
+                        revision: item.revision(),
+                        created_at: 7,
+                        updated_at: sequence as i64 + 6,
+                        delta: TraceDelta::Text {
+                            channel: TraceTextChannel::Final,
+                            delta: delta.to_string(),
+                        },
+                    },
+                },
+            });
+        }
+        item.apply(item.command(
+            10,
+            TracePartAction::Complete(TracePartCompletion::Text {
+                authoritative_content: Some("ab".to_string()),
+            }),
+        ))
+        .unwrap();
+        traces.push(TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 4,
+            timestamp: 10,
+            kind: TraceEventKind::TracePartCompleted { item },
+        });
+
+        let batch = project_trace_events("thread-1", &snapshot(), &traces);
+        let item_notifications = batch
+            .notifications
+            .iter()
+            .filter_map(|notification| match &notification.notification {
+                ThreadNotification::ItemStarted { .. } => Some("started"),
+                ThreadNotification::ItemDelta { delta } => match &delta.delta {
+                    ThreadItemDeltaState::Text { delta } => Some(delta.as_str()),
+                    _ => None,
+                },
+                ThreadNotification::ItemCompleted { .. } => Some("completed"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(item_notifications, ["started", "a", "b", "completed"]);
     }
 
     #[test]

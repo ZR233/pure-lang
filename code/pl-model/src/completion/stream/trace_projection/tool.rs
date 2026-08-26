@@ -19,15 +19,12 @@ impl TraceProjection {
         if self.started.contains_key(&item_id) {
             return Vec::new();
         }
-        let invocation = TraceToolInvocation::new(
-            item_id.clone(),
-            snapshot.name.clone(),
-            snapshot.arguments.clone(),
-        )
-        .with_provider_identity(
-            snapshot.call_id.clone(),
-            (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
-        );
+        let invocation =
+            TraceToolInvocation::new(item_id.clone(), snapshot.name.clone(), String::new())
+                .with_provider_identity(
+                    snapshot.call_id.clone(),
+                    (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+                );
         let item = TracePart::streaming_tool(
             self.turn_id.clone(),
             item_id.clone(),
@@ -62,7 +59,11 @@ impl TraceProjection {
                 if let Err(error) = item
                     .apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
                 {
-                    tracing::error!(%error, "failed to update web search trace invocation");
+                    self.trace_error.get_or_insert_with(|| {
+                        pl_trace::TraceEventSinkError::new(format!(
+                            "failed to update web search trace invocation: {error}"
+                        ))
+                    });
                 }
             }
             return Vec::new();
@@ -119,7 +120,11 @@ impl TraceProjection {
         if let Err(error) =
             item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
         {
-            tracing::error!(%error, "failed to finalize web search invocation");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to finalize web search invocation: {error}"
+                ))
+            });
             return events;
         }
         let output =
@@ -128,7 +133,11 @@ impl TraceProjection {
             now,
             TracePartAction::Complete(TracePartCompletion::Tool { output }),
         )) {
-            tracing::error!(%error, "failed to complete web search trace");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to complete web search trace: {error}"
+                ))
+            });
             return events;
         }
         let item = item.clone();
@@ -163,7 +172,11 @@ impl TraceProjection {
         if let Err(error) =
             item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
         {
-            tracing::error!(%error, "failed to update streamed tool invocation");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to update streamed tool invocation: {error}"
+                ))
+            });
             return events;
         }
         let trace_delta = TraceDelta::ToolArguments { delta };
@@ -177,6 +190,7 @@ impl TraceProjection {
             now,
         );
         events.push(AgentEvent::TracePartDelta { event });
+        events.extend(self.project_plan_arguments(snapshot));
         events
     }
 
@@ -209,12 +223,22 @@ impl TraceProjection {
             if let Err(error) =
                 item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
             {
-                tracing::error!(%error, "failed to update canonical tool trace");
+                self.trace_error.get_or_insert_with(|| {
+                    pl_trace::TraceEventSinkError::new(format!(
+                        "failed to update canonical tool trace: {error}"
+                    ))
+                });
             }
         }
         let item = item.clone();
         self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
-        vec![AgentEvent::TracePartStarted { item }]
+        let mut events = vec![AgentEvent::TracePartStarted { item }];
+        if call.invalid_arguments.is_some() {
+            events.extend(
+                self.fail_projected_plan(&item_id, "function arguments are not valid JSON"),
+            );
+        }
+        events
     }
 }
 

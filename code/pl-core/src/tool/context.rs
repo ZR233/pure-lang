@@ -1,8 +1,13 @@
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
-use pl_trace::AgentEventSender;
+use pl_protocol::OutputStream;
+use pl_trace::{
+    AgentEvent, AgentEventSender, TraceDelta, TraceEventDraft, TraceEventKind, TraceEventSink,
+    TraceEventSinkError, TracePartDeltaEvent,
+};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
@@ -95,7 +100,103 @@ pub struct ToolCallIdentity {
     pub session_id: String,
     pub turn_id: String,
     pub step: u32,
+    pub started_sequence: u64,
     pub revision_base: u64,
+}
+
+/// 工具运行期输出的 canonical delta 出口。
+///
+/// sink 先提交 authoritative trace，再向非权威观察通道广播；revision 由调用身份和
+/// 输出顺序共同决定，工具无需接触内部 sender 或自行拼装 timeline 事件。
+#[derive(Clone)]
+pub struct ToolOutputDeltaEmitter {
+    event_tx: tokio::sync::broadcast::WeakSender<AgentEvent>,
+    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    identity: ToolCallIdentity,
+    next_revision: Arc<AtomicU64>,
+    last_error: Arc<StdMutex<Option<TraceEventSinkError>>>,
+}
+
+impl fmt::Debug for ToolOutputDeltaEmitter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ToolOutputDeltaEmitter")
+            .field("item_id", &self.identity.item_id)
+            .field("trace_sink", &self.trace_sink.as_ref().map(|_| "<sink>"))
+            .finish_non_exhaustive()
+    }
+}
+
+impl ToolOutputDeltaEmitter {
+    fn new(
+        identity: ToolCallIdentity,
+        event_tx: &AgentEventSender,
+        trace_sink: Option<Arc<dyn TraceEventSink>>,
+    ) -> Self {
+        Self {
+            event_tx: event_tx.downgrade(),
+            trace_sink,
+            next_revision: Arc::new(AtomicU64::new(identity.revision_base)),
+            identity,
+            last_error: Arc::new(StdMutex::new(None)),
+        }
+    }
+
+    pub fn emit(
+        &self,
+        stream: OutputStream,
+        text: impl Into<String>,
+    ) -> Result<(), TraceEventSinkError> {
+        let revision = self
+            .next_revision
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        self.emit_at(stream, text, revision)
+    }
+
+    pub(crate) fn emit_at(
+        &self,
+        stream: OutputStream,
+        text: impl Into<String>,
+        revision: u64,
+    ) -> Result<(), TraceEventSinkError> {
+        self.next_revision.fetch_max(revision, Ordering::Relaxed);
+        let mut delta = text.into();
+        if matches!(stream, OutputStream::Stderr) {
+            delta = format!("[stderr] {delta}");
+        }
+        let timestamp = crate::time::unix_seconds();
+        let event = TracePartDeltaEvent {
+            turn_id: self.identity.turn_id.clone(),
+            item_id: self.identity.item_id.clone(),
+            started_sequence: self.identity.started_sequence,
+            revision,
+            created_at: timestamp,
+            updated_at: timestamp,
+            delta: TraceDelta::ToolResult { delta },
+        };
+        if let Some(sink) = &self.trace_sink
+            && let Err(error) = sink.emit(TraceEventDraft::new(
+                timestamp,
+                TraceEventKind::TracePartDelta {
+                    event: event.clone(),
+                },
+            ))
+        {
+            if let Ok(mut slot) = self.last_error.lock() {
+                *slot = Some(error.clone());
+            }
+            return Err(error);
+        }
+        if let Some(event_tx) = self.event_tx.upgrade() {
+            let _ = event_tx.send(AgentEvent::TracePartDelta { event });
+        }
+        Ok(())
+    }
+
+    fn take_error(&self) -> Option<TraceEventSinkError> {
+        self.last_error.lock().ok().and_then(|mut slot| slot.take())
+    }
 }
 
 /// Dispatcher 已经裁决后的调用级审批与宿主交互能力。
@@ -171,10 +272,12 @@ pub struct ToolCallContext {
     cancellation_token: Option<CancellationToken>,
     approval: ToolApprovalContext,
     event_tx: AgentEventSender,
+    output: ToolOutputDeltaEmitter,
 }
 
 impl ToolCallContext {
     pub fn new(identity: ToolCallIdentity, event_tx: AgentEventSender) -> Self {
+        let output = ToolOutputDeltaEmitter::new(identity.clone(), &event_tx, None);
         Self {
             identity,
             cancellation_token: None,
@@ -183,7 +286,14 @@ impl ToolCallContext {
                 WorkspaceAccess::WorkspaceOnly,
             ),
             event_tx,
+            output,
         }
+    }
+
+    pub fn with_trace_sink(mut self, trace_sink: Option<Arc<dyn TraceEventSink>>) -> Self {
+        self.output =
+            ToolOutputDeltaEmitter::new(self.identity.clone(), &self.event_tx, trace_sink);
+        self
     }
 
     pub fn with_cancellation(mut self, cancellation_token: Option<CancellationToken>) -> Self {
@@ -218,6 +328,23 @@ impl ToolCallContext {
         &self.event_tx
     }
 
+    /// 立即发布一段工具运行输出。
+    pub fn emit_output_delta(
+        &self,
+        stream: OutputStream,
+        text: impl Into<String>,
+    ) -> Result<(), TraceEventSinkError> {
+        self.output.emit(stream, text)
+    }
+
+    pub(crate) fn output_delta_emitter(&self) -> ToolOutputDeltaEmitter {
+        self.output.clone()
+    }
+
+    pub(crate) fn take_output_delta_error(&self) -> Option<TraceEventSinkError> {
+        self.output.take_error()
+    }
+
     #[cfg(test)]
     pub(crate) fn test(event_tx: AgentEventSender) -> Self {
         Self::new(
@@ -232,6 +359,7 @@ impl ToolCallContext {
                 session_id: "session-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 step: 0,
+                started_sequence: 0,
                 revision_base: 0,
             },
             event_tx,

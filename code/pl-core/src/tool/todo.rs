@@ -238,6 +238,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 step: 0,
+                started_sequence: 0,
                 revision_base: 0,
             },
             event_tx,

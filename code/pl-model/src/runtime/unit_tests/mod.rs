@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use pl_protocol::{Message, MessageContent, MessageRole};
-use pl_trace::{AgentEvent, TracePartKind};
+use pl_trace::{AgentEvent, TraceDelta, TracePartKind};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 

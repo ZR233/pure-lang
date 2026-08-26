@@ -100,32 +100,12 @@ impl StudioRuntime {
 
     /// 读取包含尚未终态化 delta overlay 的 authoritative Thread snapshot。
     pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
-        if let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? {
-            let mut snapshot = handle
-                .thread_snapshot(&agent_id)
-                .map_err(|error| anyhow::anyhow!(error))?;
-            snapshot.thread = self.read_protocol_thread(thread_id).await?;
-            return Ok(snapshot);
-        }
-        if let Some(snapshot) = self
-            .persistence_repository()
-            .await
-            .context("Studio persistence writer is unavailable")?
-            .read_thread_snapshot(thread_id)
-            .await?
-        {
-            return Ok(snapshot);
-        }
-        if let Some(thread) = self
-            .agent_facility
-            .product_events
-            .thread_snapshot(thread_id)
-        {
-            let mut snapshot = pl_protocol::ThreadSnapshot::empty(thread_id);
-            snapshot.thread = thread;
-            return Ok(snapshot);
-        }
-        Err(anyhow::anyhow!("selected Thread not found"))
+        let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
+        let mut snapshot = handle
+            .thread_snapshot(&agent_id)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        snapshot.thread = self.read_protocol_thread(thread_id).await?;
+        Ok(snapshot)
     }
 
     /// 查询路径使用的只读 repository 句柄（共享进程级 writer 的实例）。

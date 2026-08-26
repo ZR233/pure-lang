@@ -4,38 +4,144 @@ use pl_protocol::{
     RunningTurnState, TokenUsageSnapshot, TurnOutcome, TurnPhase, TurnState,
 };
 use pl_trace::{
-    AgentEvent, AgentEventSender, TraceAgentPart, TraceDelta, TraceEvent, TraceEventKind,
-    TracePart, TracePartAction, TracePartCompletion, TracePartKind, TracePartState,
-    TraceTextChannel, TraceToolInvocation,
+    AgentEvent, AgentEventSender, TraceAgentPart, TraceEvent, TraceEventDraft, TraceEventKind,
+    TraceEventSink, TraceEventSinkError, TracePart, TracePartAction, TracePartCompletion,
+    TracePartKind, TracePartState, TraceTextChannel, TraceToolFailureKind, TraceToolInvocation,
 };
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 /// In-memory trace recorder that captures structured lifecycle events during a turn.
 ///
 /// Wraps an `AgentEventSender` and simultaneously:
 /// - Passes `AgentEvent`s through to the broadcast channel (unchanged behavior)
-/// - Appends item-first `TraceEvent`s to an in-memory log
-/// - Agent runtime 模式下同步送入 durable channel，由 actor 先持久化再广播
+/// - Appends item-first `TraceEvent`s to an in-memory turn capture
+/// - Agent runtime 模式下同步送入 owner channel，由 actor 先提交内存再冷持久化
 ///
 /// When tracing is not needed, use `TraceRecorder::disabled()` which still
 /// forwards broadcasts but discards trace events.
 pub struct TraceRecorder {
     session_id: String,
     event_tx: AgentEventSender,
-    durable_tx: Option<tokio::sync::mpsc::UnboundedSender<TraceEvent>>,
-    events: Vec<TraceEvent>,
-    sequence: u64,
+    sink: Option<Arc<RecorderTraceEventSink>>,
+    publication_error: Option<TraceEventSinkError>,
     disabled: bool,
+}
+
+#[derive(Debug)]
+struct RecorderTraceEventSink {
+    session_id: String,
+    durable_tx: Option<tokio::sync::mpsc::UnboundedSender<TraceEvent>>,
+    discard_events: bool,
+    state: Mutex<RecorderTraceState>,
+}
+
+#[derive(Debug)]
+struct RecorderTraceState {
+    events: Vec<TraceEvent>,
+    next_sequence: u64,
+    ledger: pl_trace::TraceEventLedger,
+}
+
+impl RecorderTraceEventSink {
+    fn new(
+        session_id: String,
+        starting_sequence: u64,
+        durable_tx: Option<tokio::sync::mpsc::UnboundedSender<TraceEvent>>,
+    ) -> Self {
+        Self {
+            session_id,
+            durable_tx,
+            discard_events: false,
+            state: Mutex::new(RecorderTraceState {
+                events: Vec::new(),
+                next_sequence: starting_sequence,
+                ledger: pl_trace::TraceEventLedger::default(),
+            }),
+        }
+    }
+
+    fn discarding() -> Self {
+        Self {
+            session_id: String::new(),
+            durable_tx: None,
+            discard_events: true,
+            state: Mutex::new(RecorderTraceState {
+                events: Vec::new(),
+                next_sequence: 0,
+                ledger: pl_trace::TraceEventLedger::default(),
+            }),
+        }
+    }
+
+    fn snapshot(&self) -> Vec<TraceEvent> {
+        self.state
+            .lock()
+            .map(|state| state.events.clone())
+            .unwrap_or_default()
+    }
+
+    fn drain(&self) -> Vec<TraceEvent> {
+        self.state
+            .lock()
+            .map(|mut state| std::mem::take(&mut state.events))
+            .unwrap_or_default()
+    }
+
+    fn advance_sequence(&self, next_sequence: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            state.next_sequence = state.next_sequence.max(next_sequence);
+        }
+    }
+}
+
+impl TraceEventSink for RecorderTraceEventSink {
+    fn emit(&self, draft: TraceEventDraft) -> Result<TraceEvent, TraceEventSinkError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| TraceEventSinkError::new("trace sink state is poisoned"))?;
+        let sequence = state.next_sequence;
+        state.ledger.validate(sequence, &draft.kind)?;
+        let event = TraceEvent {
+            session_id: self.session_id.clone(),
+            sequence,
+            timestamp: draft.timestamp,
+            kind: draft.kind,
+        };
+        if let Some(durable_tx) = &self.durable_tx {
+            durable_tx.send(event.clone()).map_err(|_| {
+                TraceEventSinkError::new("canonical trace owner is no longer available")
+            })?;
+        }
+        state.next_sequence = state.next_sequence.saturating_add(1);
+        if !self.discard_events {
+            state.events.push(event.clone());
+        }
+        Ok(event)
+    }
+
+    fn next_sequence(&self) -> u64 {
+        self.state
+            .lock()
+            .map(|state| state.next_sequence)
+            .unwrap_or_default()
+    }
 }
 
 impl TraceRecorder {
     /// Create a recorder that captures trace events.
     pub fn new(session_id: String, event_tx: AgentEventSender, starting_sequence: u64) -> Self {
+        let sink = Arc::new(RecorderTraceEventSink::new(
+            session_id.clone(),
+            starting_sequence,
+            None,
+        ));
         Self {
             session_id,
             event_tx,
-            durable_tx: None,
-            events: Vec::new(),
-            sequence: starting_sequence,
+            sink: Some(sink),
+            publication_error: None,
             disabled: false,
         }
     }
@@ -47,12 +153,16 @@ impl TraceRecorder {
         starting_sequence: u64,
         durable_tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
     ) -> Self {
+        let sink = Arc::new(RecorderTraceEventSink::new(
+            session_id.clone(),
+            starting_sequence,
+            Some(durable_tx),
+        ));
         Self {
             session_id,
             event_tx,
-            durable_tx: Some(durable_tx),
-            events: Vec::new(),
-            sequence: starting_sequence,
+            sink: Some(sink),
+            publication_error: None,
             disabled: false,
         }
     }
@@ -62,9 +172,8 @@ impl TraceRecorder {
         Self {
             session_id: String::new(),
             event_tx,
-            durable_tx: None,
-            events: Vec::new(),
-            sequence: 0,
+            sink: Some(Arc::new(RecorderTraceEventSink::discarding())),
+            publication_error: None,
             disabled: true,
         }
     }
@@ -74,32 +183,14 @@ impl TraceRecorder {
         if self.disabled {
             return;
         }
-        let event = TraceEvent {
-            session_id: self.session_id.clone(),
-            sequence: self.sequence,
-            timestamp: unix_seconds(),
-            kind,
-        };
-        self.sequence += 1;
-        self.push_event(event);
+        self.emit_trace(TraceEventDraft::new(unix_seconds(), kind));
     }
 
-    pub fn record_event(&mut self, mut event: TraceEvent) {
+    pub fn record_event(&mut self, event: TraceEvent) {
         if self.disabled {
             return;
         }
-        // recorder 是 sequence 的唯一分配者：强制覆盖 event 自带的 sequence（pl-model
-        // projection 每 turn 从 0，不再可信），保证 recorder.events 跨 turn 全局单调。
-        event.sequence = self.sequence;
-        event.session_id = self.session_id.clone();
-        self.sequence += 1;
-        self.push_event(event);
-    }
-
-    pub fn record_events(&mut self, events: Vec<TraceEvent>) {
-        for event in events {
-            self.record_event(event);
-        }
+        self.emit_trace(TraceEventDraft::new(event.timestamp, event.kind));
     }
 
     pub fn start_item(&mut self, item: TracePart) {
@@ -115,16 +206,13 @@ impl TraceRecorder {
             self.broadcast(AgentEvent::TracePartCompleted { item });
             return;
         }
-        let sequence = self.sequence;
         let timestamp = item.updated_at();
-        let event = TraceEvent {
-            session_id: self.session_id.clone(),
-            sequence,
+        if !self.emit_trace(TraceEventDraft::new(
             timestamp,
-            kind: TraceEventKind::TracePartCompleted { item: item.clone() },
-        };
-        self.sequence += 1;
-        self.push_event(event);
+            TraceEventKind::TracePartCompleted { item: item.clone() },
+        )) {
+            return;
+        }
         self.broadcast(AgentEvent::TracePartCompleted { item });
     }
 
@@ -133,16 +221,13 @@ impl TraceRecorder {
             self.broadcast(AgentEvent::TracePartFailed { item });
             return;
         }
-        let sequence = self.sequence;
         let timestamp = item.updated_at();
-        let event = TraceEvent {
-            session_id: self.session_id.clone(),
-            sequence,
+        if !self.emit_trace(TraceEventDraft::new(
             timestamp,
-            kind: TraceEventKind::TracePartFailed { item: item.clone() },
-        };
-        self.sequence += 1;
-        self.push_event(event);
+            TraceEventKind::TracePartFailed { item: item.clone() },
+        )) {
+            return;
+        }
         self.broadcast(AgentEvent::TracePartFailed { item });
     }
 
@@ -170,28 +255,10 @@ impl TraceRecorder {
         let item = TracePart::completed_text(
             turn_id,
             item_id,
-            self.sequence,
+            self.current_sequence(),
             TraceTextChannel::User,
             content,
             attachments,
-            timestamp,
-        );
-        self.record_and_broadcast_item_start(item.clone());
-        self.complete_item(item);
-    }
-
-    pub fn ensure_assistant_text_item(&mut self, turn_id: &str, content: &str) {
-        if content.trim().is_empty() || self.has_assistant_text_content(turn_id, content) {
-            return;
-        }
-        let timestamp = unix_seconds();
-        let item = TracePart::completed_text(
-            turn_id,
-            format!("{turn_id}-assistant"),
-            self.sequence,
-            TraceTextChannel::Final,
-            content.to_string(),
-            Vec::new(),
             timestamp,
         );
         self.record_and_broadcast_item_start(item.clone());
@@ -203,7 +270,7 @@ impl TraceRecorder {
         TracePart::turn(
             turn_id.to_string(),
             format!("{turn_id}-turn"),
-            self.sequence,
+            self.current_sequence(),
             timestamp,
             TurnState::Running(RunningTurnState::new(timestamp, TurnPhase::Preparing)),
         )
@@ -252,7 +319,7 @@ impl TraceRecorder {
         if let Err(error) =
             item.apply(item.command(timestamp, TracePartAction::TransitionTurn { state }))
         {
-            tracing::error!(%error, "failed to terminalize turn trace item");
+            self.remember_protocol_error(format!("failed to terminalize turn trace item: {error}"));
         }
         item
     }
@@ -268,7 +335,7 @@ impl TraceRecorder {
             let item = TracePart::started_plan(
                 turn_id.to_string(),
                 item_id.to_string(),
-                self.sequence,
+                self.current_sequence(),
                 timestamp,
             );
             self.start_item(item.clone());
@@ -280,10 +347,64 @@ impl TraceRecorder {
                 content: Some(content),
             }),
         )) {
-            tracing::error!(%error, "failed to complete plan trace item");
+            self.remember_protocol_error(format!("failed to complete plan trace item: {error}"));
             return;
         }
         self.complete_item(item);
+    }
+
+    pub fn terminalize_plan_item_for_tool(
+        &mut self,
+        tool_item_id: &str,
+        cancelled: bool,
+        message: &str,
+    ) {
+        let item_id = format!("{tool_item_id}:plan");
+        let Some(mut item) = self.latest_trace_part(&item_id) else {
+            return;
+        };
+        if item.is_terminal() {
+            return;
+        }
+        let timestamp = unix_seconds();
+        let action = if cancelled {
+            TracePartAction::Cancel {
+                reason: message.to_string(),
+            }
+        } else {
+            TracePartAction::Fail {
+                error: message.to_string(),
+                tool_kind: TraceToolFailureKind::Execution,
+            }
+        };
+        if let Err(error) = item.apply(item.command(timestamp, action)) {
+            self.remember_protocol_error(format!(
+                "failed to terminalize projected plan trace item: {error}"
+            ));
+            return;
+        }
+        self.fail_item(item);
+    }
+
+    /// Cancel every non-terminal item owned by `turn_id`, except the turn item itself.
+    pub(crate) fn cancel_open_items(&mut self, turn_id: &str, reason: &str) -> Vec<String> {
+        self.terminalize_open_items(
+            turn_id,
+            TracePartAction::Cancel {
+                reason: reason.to_string(),
+            },
+        )
+    }
+
+    /// Fail every non-terminal item owned by `turn_id`, except the turn item itself.
+    pub(crate) fn fail_open_items(&mut self, turn_id: &str, error: &str) -> Vec<String> {
+        self.terminalize_open_items(
+            turn_id,
+            TracePartAction::Fail {
+                error: error.to_string(),
+                tool_kind: TraceToolFailureKind::Execution,
+            },
+        )
     }
 
     pub fn inference_item(&mut self, turn_id: &str, inference_id: &str, model: &str) -> TracePart {
@@ -291,7 +412,7 @@ impl TraceRecorder {
         TracePart::running_inference(
             turn_id.to_string(),
             inference_id.to_string(),
-            self.sequence,
+            self.current_sequence(),
             timestamp,
             inference_id.to_string(),
             model.to_string(),
@@ -304,7 +425,9 @@ impl TraceRecorder {
             timestamp,
             TracePartAction::Complete(TracePartCompletion::Inference { usage }),
         )) {
-            tracing::error!(%error, "failed to complete inference trace item");
+            self.remember_protocol_error(format!(
+                "failed to complete inference trace item: {error}"
+            ));
             return;
         }
         self.complete_item(item);
@@ -325,23 +448,36 @@ impl TraceRecorder {
         TracePart::started_tool(
             turn_id.to_string(),
             tool_call_id.to_string(),
-            self.sequence,
+            self.current_sequence(),
             timestamp,
             invocation,
         )
     }
 
     pub fn latest_trace_part(&self, item_id: &str) -> Option<TracePart> {
-        self.events
-            .iter()
-            .rev()
-            .find_map(|event| match &event.kind {
+        let mut latest: Option<TracePart> = None;
+        for event in self.events_snapshot() {
+            match event.kind {
                 TraceEventKind::TracePartStarted { item }
                 | TraceEventKind::TracePartCompleted { item }
                 | TraceEventKind::TracePartFailed { item }
                     if item.item_id() == item_id =>
                 {
-                    Some(item.clone())
+                    latest = Some(item);
+                }
+                TraceEventKind::TracePartDelta { event }
+                    if event.item_id == item_id
+                        && latest.as_ref().is_some_and(|item| {
+                            item.started_sequence() == event.started_sequence
+                                && item.revision().saturating_add(1) == event.revision
+                                && !item.is_terminal()
+                        }) =>
+                {
+                    if let Some(item) = latest.as_mut() {
+                        let _ = item.apply(
+                            item.command(event.updated_at, TracePartAction::Append(event.delta)),
+                        );
+                    }
                 }
                 TraceEventKind::TracePartDelta { .. }
                 | TraceEventKind::InteractionChanged { .. }
@@ -349,8 +485,10 @@ impl TraceRecorder {
                 | TraceEventKind::EnabledToolsRecorded { .. }
                 | TraceEventKind::TracePartStarted { .. }
                 | TraceEventKind::TracePartCompleted { .. }
-                | TraceEventKind::TracePartFailed { .. } => None,
-            })
+                | TraceEventKind::TracePartFailed { .. } => {}
+            }
+        }
+        latest
     }
 
     pub fn latest_tool_trace_part(
@@ -359,7 +497,7 @@ impl TraceRecorder {
         call_id: Option<&str>,
         provider_item_id: Option<&str>,
     ) -> Option<TracePart> {
-        self.events
+        self.events_snapshot()
             .iter()
             .rev()
             .find_map(|event| match &event.kind {
@@ -391,7 +529,7 @@ impl TraceRecorder {
         TracePart::agent(
             turn_id.to_string(),
             item_id,
-            self.sequence,
+            self.current_sequence(),
             timestamp,
             agent,
         )
@@ -400,13 +538,6 @@ impl TraceRecorder {
     /// Broadcast an AgentEvent without recording a trace event.
     pub fn broadcast(&self, event: AgentEvent) {
         let _ = self.event_tx.send(event);
-    }
-
-    fn push_event(&mut self, event: TraceEvent) {
-        if let Some(durable_tx) = &self.durable_tx {
-            let _ = durable_tx.send(event.clone());
-        }
-        self.events.push(event);
     }
 
     /// Get the raw event sender for passing to providers.
@@ -420,15 +551,31 @@ impl TraceRecorder {
 
     /// Drain all recorded trace events. Called after turn completes.
     pub fn drain(&mut self) -> Vec<TraceEvent> {
-        std::mem::take(&mut self.events)
+        self.sink
+            .as_ref()
+            .map_or_else(Vec::new, |sink| sink.drain())
     }
 
     pub fn current_sequence(&self) -> u64 {
-        self.sequence
+        self.sink.as_ref().map_or(0, |sink| sink.next_sequence())
     }
 
     pub fn advance_sequence(&mut self, next_sequence: u64) {
-        self.sequence = self.sequence.max(next_sequence);
+        if let Some(sink) = &self.sink {
+            sink.advance_sequence(next_sequence);
+        }
+    }
+
+    /// Returns the shared canonical trace sink for model and tool producers.
+    pub fn trace_sink(&self) -> Option<Arc<dyn TraceEventSink>> {
+        self.sink
+            .as_ref()
+            .map(|sink| Arc::clone(sink) as Arc<dyn TraceEventSink>)
+    }
+
+    /// Returns the first typed failure observed while publishing recorder-owned events.
+    pub(crate) fn publication_error(&self) -> Option<&TraceEventSinkError> {
+        self.publication_error.as_ref()
     }
 
     fn record_and_broadcast_item_start(&mut self, item: TracePart) {
@@ -437,44 +584,93 @@ impl TraceRecorder {
             return;
         }
         let timestamp = item.created_at();
-        let event = TraceEvent {
-            session_id: self.session_id.clone(),
-            sequence: self.sequence,
+        if !self.emit_trace(TraceEventDraft::new(
             timestamp,
-            kind: TraceEventKind::TracePartStarted { item: item.clone() },
-        };
-        self.sequence += 1;
-        self.push_event(event);
+            TraceEventKind::TracePartStarted { item: item.clone() },
+        )) {
+            return;
+        }
         self.broadcast(AgentEvent::TracePartStarted { item });
     }
 
-    fn has_assistant_text_content(&self, turn_id: &str, content: &str) -> bool {
-        self.events.iter().any(|event| match &event.kind {
-            TraceEventKind::TracePartStarted { item }
-            | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item } => {
-                item.turn_id() == turn_id
-                    && matches!(
-                        item.state(),
-                        TracePartState::Text(text)
-                            if text.channel() == TraceTextChannel::Final
-                                && text.content() == content
-                    )
+    fn events_snapshot(&self) -> Vec<TraceEvent> {
+        self.sink
+            .as_ref()
+            .map_or_else(Vec::new, |sink| sink.snapshot())
+    }
+
+    fn terminalize_open_items(&mut self, turn_id: &str, action: TracePartAction) -> Vec<String> {
+        let timestamp = unix_seconds();
+        let mut terminalized = Vec::new();
+        for mut item in self.latest_trace_parts() {
+            if item.turn_id() != turn_id || item.kind() == TracePartKind::Turn || item.is_terminal()
+            {
+                continue;
             }
-            TraceEventKind::TracePartDelta { event } => {
-                event.turn_id == turn_id
-                    && matches!(
-                        &event.delta,
-                        TraceDelta::Text {
-                            channel: TraceTextChannel::Final,
-                            delta,
-                        } if delta == content
-                    )
+            let item_id = item.item_id().to_string();
+            if let Err(error) = item.apply(item.command(timestamp, action.clone())) {
+                self.remember_protocol_error(format!(
+                    "failed to settle open trace item {item_id}: {error}"
+                ));
+                continue;
             }
-            TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => false,
-        })
+            self.fail_item(item);
+            terminalized.push(item_id);
+        }
+        terminalized
+    }
+
+    fn latest_trace_parts(&self) -> Vec<TracePart> {
+        let mut latest = BTreeMap::<String, TracePart>::new();
+        for event in self.events_snapshot() {
+            match event.kind {
+                TraceEventKind::TracePartStarted { item }
+                | TraceEventKind::TracePartCompleted { item }
+                | TraceEventKind::TracePartFailed { item } => {
+                    latest.insert(item.item_id().to_string(), item);
+                }
+                TraceEventKind::TracePartDelta { event } => {
+                    let Some(item) = latest.get_mut(&event.item_id) else {
+                        continue;
+                    };
+                    if item.started_sequence() != event.started_sequence
+                        || item.revision().saturating_add(1) != event.revision
+                        || item.is_terminal()
+                    {
+                        continue;
+                    }
+                    let _ = item.apply(
+                        item.command(event.updated_at, TracePartAction::Append(event.delta)),
+                    );
+                }
+                TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => {}
+            }
+        }
+        latest.into_values().collect()
+    }
+
+    fn emit_trace(&mut self, draft: TraceEventDraft) -> bool {
+        if self.publication_error.is_some() {
+            return false;
+        }
+        let Some(sink) = &self.sink else {
+            return true;
+        };
+        match sink.emit(draft) {
+            Ok(_) => true,
+            Err(error) => {
+                self.publication_error = Some(error);
+                false
+            }
+        }
+    }
+
+    fn remember_protocol_error(&mut self, message: impl Into<String>) {
+        if self.publication_error.is_none() {
+            self.publication_error = Some(TraceEventSinkError::new(message));
+        }
     }
 }
 
@@ -565,41 +761,42 @@ mod tests {
     }
 
     #[test]
-    fn ensure_assistant_text_item_records_fallback_text_once() {
+    fn plan_terminal_joins_streamed_delta_revision_and_replaces_content() {
         let (mut recorder, _rx) = make_recorder();
-
-        recorder.ensure_assistant_text_item("t1", "final answer");
-        recorder.ensure_assistant_text_item("t1", "final answer");
-
-        let events = recorder.drain();
-        let text_items = events
-            .iter()
-            .filter_map(|event| match &event.kind {
-                TraceEventKind::TracePartStarted { item }
-                | TraceEventKind::TracePartCompleted { item }
-                    if item.kind() == TracePartKind::Text =>
-                {
-                    let text = item.text().expect("assistant text part");
-                    Some((item.item_id(), text.content(), Some(text.channel())))
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            text_items,
-            vec![
-                (
-                    "t1-assistant",
-                    "final answer",
-                    Some(TraceTextChannel::Final)
-                ),
-                (
-                    "t1-assistant",
-                    "final answer",
-                    Some(TraceTextChannel::Final)
-                ),
-            ],
+        let item = TracePart::started_plan(
+            "t1".to_string(),
+            "tool-1:plan".to_string(),
+            recorder.current_sequence(),
+            1,
         );
+        let started_sequence = item.started_sequence();
+        recorder.start_item(item);
+        for (revision, delta) in [(1, "# Plan"), (2, "\n\n- streamed")] {
+            recorder.record_trace_only(TraceEventKind::TracePartDelta {
+                event: pl_trace::TracePartDeltaEvent {
+                    turn_id: "t1".to_string(),
+                    item_id: "tool-1:plan".to_string(),
+                    started_sequence,
+                    revision,
+                    created_at: 1,
+                    updated_at: 2,
+                    delta: pl_trace::TraceDelta::Plan {
+                        delta: delta.to_string(),
+                    },
+                },
+            });
+        }
+
+        recorder.complete_plan_item("t1", "tool-1:plan", "# Plan\n\n- authoritative".to_string());
+
+        let item = recorder
+            .latest_trace_part("tool-1:plan")
+            .expect("completed plan");
+        assert_eq!(item.revision(), 3);
+        assert!(item.is_terminal());
+        assert!(matches!(
+            item.state(),
+            TracePartState::Plan(plan) if plan.content() == "# Plan\n\n- authoritative"
+        ));
     }
 }

@@ -934,6 +934,10 @@ class DemoStudioApi implements StudioApi {
     await Future<void>.delayed(promptStartDelay);
     if (_promptGenerations[threadId] != generation) return;
     final reasoningId = '$turnId:reasoning';
+    const reasoningSummary =
+        '## Inspecting the request\n\nChecking the live ThreadItem projection.';
+    const reasoningContent =
+        'The provider is folding summary and raw reasoning independently.';
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
@@ -946,7 +950,7 @@ class DemoStudioApi implements StudioApi {
           createdAt: startedAt,
           updatedAt: startedAt,
           state: const ThreadThinkingItemStateView(
-            summary: ['## Inspecting the request'],
+            summary: [],
             content: [],
             lifecycle: StreamingThreadContentView(),
           ),
@@ -961,30 +965,111 @@ class DemoStudioApi implements StudioApi {
         ThreadItemDeltaView(
           itemId: reasoningId,
           revision: 1,
-          state: const ThreadThinkingSummaryDeltaView(
-            0,
-            '\n\nChecking the live ThreadItem projection.',
-          ),
+          state: const ThreadThinkingSummaryDeltaView(0, '## Inspecting'),
         ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: reasoningId,
+          revision: 2,
+          state: const ThreadThinkingSummaryDeltaView(
+            0,
+            ' the request\n\nChecking the live ThreadItem projection.',
+          ),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: reasoningId,
+          revision: 3,
+          state: const ThreadThinkingContentDeltaView(0, reasoningContent),
+        ),
+      ),
+    );
     final liveReasoning = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == reasoningId,
     );
-    final reasoningState = liveReasoning.state as ThreadThinkingItemStateView;
     final reasoningCompletedAt = DateTime.now();
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
         liveReasoning.copyWith(
-          revision: 2,
+          revision: 4,
           updatedAt: reasoningCompletedAt,
           state: ThreadThinkingItemStateView(
-            summary: reasoningState.summary,
-            content: reasoningState.content,
+            summary: const [reasoningSummary],
+            content: const [reasoningContent],
             lifecycle: CompletedThreadContentView(reasoningCompletedAt),
+          ),
+        ),
+      ),
+    );
+    final commentaryId = '$turnId:commentary';
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        ThreadItemView(
+          id: commentaryId,
+          threadId: threadId,
+          turnId: turnId,
+          ordinal: _nextOrdinal(threadId),
+          revision: 0,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          state: const ThreadTextItemStateView(
+            channel: ThreadTextChannel.commentary,
+            text: '',
+            attachments: [],
+            lifecycle: StreamingThreadContentView(),
+          ),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: commentaryId,
+          revision: 1,
+          state: const ThreadTextDeltaView('正在逐段核对 Timeline'),
+        ),
+      ),
+    );
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: commentaryId,
+          revision: 2,
+          state: const ThreadTextDeltaView(' 的 typed delta。'),
+        ),
+      ),
+    );
+    final commentaryCompletedAt = DateTime.now();
+    final liveCommentary = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == commentaryId,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        liveCommentary.copyWith(
+          revision: 3,
+          updatedAt: commentaryCompletedAt,
+          state: ThreadTextItemStateView(
+            channel: ThreadTextChannel.commentary,
+            text: '正在逐段核对 Timeline 的 typed delta。',
+            attachments: const [],
+            lifecycle: CompletedThreadContentView(commentaryCompletedAt),
           ),
         ),
       ),
@@ -1020,17 +1105,78 @@ class DemoStudioApi implements StudioApi {
             invocation: ThreadToolInvocationView(
               toolCallId: '$turnId:tool-call',
               name: 'exec',
-              arguments: jsonEncode({
-                'command': 'flutter test test/widget_test.dart',
-              }),
+              arguments: '',
             ),
+            lifecycle: const StartedThreadToolView(),
+          ),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: toolId,
+          revision: 1,
+          state: const ThreadToolArgumentsDeltaView(
+            '{"command":"flutter test ',
+          ),
+        ),
+      ),
+    );
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: toolId,
+          revision: 2,
+          state: const ThreadToolArgumentsDeltaView('test/widget_test.dart"}'),
+        ),
+      ),
+    );
+    final streamedTool = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == toolId,
+    );
+    final streamedToolState = streamedTool.state as ThreadToolItemStateView;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        streamedTool.copyWith(
+          revision: 3,
+          updatedAt: DateTime.now(),
+          state: ThreadToolItemStateView(
+            invocation: streamedToolState.invocation,
             lifecycle: const RunningThreadToolView(''),
           ),
         ),
       ),
     );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: toolId,
+          revision: 4,
+          state: const ThreadToolResultDeltaView('running widget tests...\n'),
+        ),
+      ),
+    );
     await Future<void>.delayed(promptToolDelay);
     if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: toolId,
+          revision: 5,
+          state: const ThreadToolResultDeltaView(
+            '[stderr] analyzer warnings: 0\n',
+          ),
+        ),
+      ),
+    );
     final runningTool = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == toolId,
     );
@@ -1040,14 +1186,17 @@ class DemoStudioApi implements StudioApi {
       threadId,
       ThreadItemUpsert(
         runningTool.copyWith(
-          revision: 1,
+          revision: 6,
           updatedAt: toolCompletedAt,
           state: ThreadToolItemStateView(
             invocation: runningToolState.invocation,
             lifecycle: SucceededThreadToolView(
               toolCompletedAt,
               const ThreadToolOutputView(
-                result: 'All widget tests passed.',
+                result:
+                    'running widget tests...\n'
+                    '[stderr] analyzer warnings: 0\n'
+                    'All widget tests passed.',
                 outputArtifacts: [],
               ),
             ),
@@ -1055,20 +1204,132 @@ class DemoStudioApi implements StudioApi {
         ),
       ),
     );
+    final planToolId = '$turnId:plan-exit';
+    final planId = '$planToolId:plan';
+    const plan =
+        '# Implementation plan\n\n'
+        '1. Keep one typed Thread stream.\n'
+        '2. Replace each overlay with its terminal payload.';
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
-        _messageItem(
-          id: '$turnId:final',
+        ThreadItemView(
+          id: planId,
           threadId: threadId,
           turnId: turnId,
           ordinal: _nextOrdinal(threadId),
-          kind: ThreadItemKind.agentMessage,
-          channel: AgentMessageChannel.finalAnswer,
-          text:
-              'Demo response for: **$trimmedPrompt**\n\n'
-              '- reasoning 与 tool 都直接来自 ThreadItem',
-          createdAt: DateTime.now(),
+          revision: 0,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          state: const ThreadPlanItemStateView(
+            content: '',
+            lifecycle: StreamingThreadContentView(),
+          ),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: planId,
+          revision: 1,
+          state: const ThreadPlanDeltaView('# Implementation plan'),
+        ),
+      ),
+    );
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: planId,
+          revision: 2,
+          state: const ThreadPlanDeltaView(
+            '\n\n1. Keep one typed Thread stream.\n'
+            '2. Replace each overlay with its terminal payload.',
+          ),
+        ),
+      ),
+    );
+    final planCompletedAt = DateTime.now();
+    final livePlan = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == planId,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        livePlan.copyWith(
+          revision: 3,
+          updatedAt: planCompletedAt,
+          state: ThreadPlanItemStateView(
+            content: plan,
+            lifecycle: CompletedThreadContentView(planCompletedAt),
+          ),
+        ),
+      ),
+    );
+    final finalId = '$turnId:final';
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        ThreadItemView(
+          id: finalId,
+          threadId: threadId,
+          turnId: turnId,
+          ordinal: _nextOrdinal(threadId),
+          revision: 0,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          state: const ThreadTextItemStateView(
+            channel: ThreadTextChannel.finalAnswer,
+            text: '',
+            attachments: [],
+            lifecycle: StreamingThreadContentView(),
+          ),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: finalId,
+          revision: 1,
+          state: ThreadTextDeltaView('Demo response for: **$trimmedPrompt**'),
+        ),
+      ),
+    );
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[threadId] != generation) return;
+    const finalSuffix = '\n\n- reasoning、tool output 与 Plan 都直接来自 typed delta';
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: finalId,
+          revision: 2,
+          state: const ThreadTextDeltaView(finalSuffix),
+        ),
+      ),
+    );
+    final finalCompletedAt = DateTime.now();
+    final liveFinal = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == finalId,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        liveFinal.copyWith(
+          revision: 3,
+          updatedAt: finalCompletedAt,
+          state: ThreadTextItemStateView(
+            channel: ThreadTextChannel.finalAnswer,
+            text: 'Demo response for: **$trimmedPrompt**$finalSuffix',
+            attachments: const [],
+            lifecycle: CompletedThreadContentView(finalCompletedAt),
+          ),
         ),
       ),
     );

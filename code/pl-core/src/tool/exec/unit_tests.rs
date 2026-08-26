@@ -276,12 +276,19 @@ fn large_output_command() -> &'static str {
 #[tokio::test]
 async fn background_output_observer_does_not_keep_turn_event_channel_open() {
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolCallContext::new(
+        crate::tool::ToolCallIdentity {
+            item_id: "tool-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            ..crate::tool::ToolCallIdentity::default()
+        },
+        event_tx.clone(),
+    );
     let observer = ToolResultOutputObserver {
-        event_tx: event_tx.downgrade(),
-        turn_id: "turn-1".to_string(),
-        item_id: "tool-1".to_string(),
+        emitter: context.output_delta_emitter(),
         revision_base: 0,
     };
+    drop(context);
 
     observer.output_chunk(CommandOutputStream::Stdout, b"running", 1);
     assert!(matches!(
@@ -296,6 +303,89 @@ async fn background_output_observer_does_not_keep_turn_event_channel_open() {
     ));
 
     observer.output_chunk(CommandOutputStream::Stdout, b"late output", 2);
+}
+
+#[test]
+fn output_observer_publishes_each_stdout_and_stderr_chunk_to_trace_sink() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 11));
+    let started_at = crate::time::unix_seconds();
+    let mut item = pl_trace::TracePart::started_tool(
+        "turn-1".to_string(),
+        "tool-1".to_string(),
+        11,
+        started_at,
+        pl_trace::TraceToolInvocation::new(
+            "tool-1".to_string(),
+            "exec".to_string(),
+            "{}".to_string(),
+        ),
+    );
+    pl_trace::TraceEventSink::emit(
+        sink.as_ref(),
+        pl_trace::TraceEventDraft::new(
+            started_at,
+            pl_trace::TraceEventKind::TracePartStarted { item: item.clone() },
+        ),
+    )
+    .expect("tool start must seed the canonical lifecycle");
+    item.apply(item.command(
+        started_at,
+        pl_trace::TracePartAction::EnterToolPhase {
+            phase: pl_trace::TraceToolActivePhase::Running,
+        },
+    ))
+    .expect("tool must enter its running phase");
+    pl_trace::TraceEventSink::emit(
+        sink.as_ref(),
+        pl_trace::TraceEventDraft::new(
+            started_at,
+            pl_trace::TraceEventKind::TracePartStarted { item: item.clone() },
+        ),
+    )
+    .expect("running tool snapshot must reach the canonical sink");
+    let context = ToolCallContext::new(
+        crate::tool::ToolCallIdentity {
+            item_id: "tool-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            started_sequence: 11,
+            revision_base: item.revision(),
+            ..crate::tool::ToolCallIdentity::default()
+        },
+        event_tx,
+    )
+    .with_trace_sink(Some(sink.clone()));
+    let observer = ToolResultOutputObserver {
+        emitter: context.output_delta_emitter(),
+        revision_base: item.revision(),
+    };
+
+    observer.output_chunk(CommandOutputStream::Stdout, b"out", 1);
+    observer.output_chunk(CommandOutputStream::Stderr, b"err", 2);
+    if let Some(error) = context.take_output_delta_error() {
+        panic!("output observer must publish each chunk: {error}");
+    }
+
+    let deltas = sink
+        .events()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            pl_trace::TraceEventKind::TracePartDelta { event } => Some(event),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(deltas.len(), 2);
+    assert_eq!(deltas[0].started_sequence, 11);
+    assert_eq!(deltas[0].revision, item.revision() + 1);
+    assert_eq!(deltas[1].revision, item.revision() + 2);
+    assert!(matches!(
+        &deltas[0].delta,
+        pl_trace::TraceDelta::ToolResult { delta } if delta == "out"
+    ));
+    assert!(matches!(
+        &deltas[1].delta,
+        pl_trace::TraceDelta::ToolResult { delta } if delta == "[stderr] err"
+    ));
 }
 
 #[tokio::test]

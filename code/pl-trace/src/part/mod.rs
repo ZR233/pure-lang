@@ -100,17 +100,17 @@ impl TracePart {
         content: impl Into<String>,
         timestamp: i64,
     ) -> Self {
-        let mut item = Self::completed_text(
-            turn_id,
-            item_id,
+        Self::new(
+            turn_id.into(),
+            item_id.into(),
             sequence,
-            TraceTextChannel::Commentary,
-            content,
-            Vec::new(),
             timestamp,
-        );
-        item.source = TracePartSource::Runtime;
-        item
+            TracePartSource::Runtime,
+            TracePartState::Text(TraceTextPart::streaming(
+                TraceTextChannel::Commentary,
+                content.into(),
+            )),
+        )
     }
 
     pub fn streaming_thinking(
@@ -240,6 +240,27 @@ impl TracePart {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Advances an open item to the revision reached by externally published deltas.
+    ///
+    /// Tool output observers publish deltas while the dispatcher retains its own item copy;
+    /// the authoritative terminal snapshot must first join that delta revision before applying
+    /// the terminal transition.
+    pub fn synchronize_open_revision(
+        &mut self,
+        revision: u64,
+        updated_at: i64,
+    ) -> Result<(), &'static str> {
+        if self.is_terminal() {
+            return Err("cannot synchronize a terminal trace part");
+        }
+        if revision < self.revision {
+            return Err("cannot move a trace part revision backwards");
+        }
+        self.revision = revision;
+        self.updated_at = self.updated_at.max(updated_at);
+        Ok(())
     }
 
     pub fn created_at(&self) -> i64 {
@@ -923,5 +944,47 @@ mod tests {
             restored.tool().map(TraceToolPart::state),
             Some(TraceToolState::Succeeded(_))
         ));
+    }
+
+    #[test]
+    fn running_tool_result_deltas_fold_until_terminal_authoritative_replace() {
+        let invocation =
+            TraceToolInvocation::new("tool-1".to_string(), "exec".to_string(), "{}".to_string());
+        let mut item =
+            TracePart::started_tool("turn-1".to_string(), "tool-1".to_string(), 1, 7, invocation);
+        item.apply(item.command(
+            8,
+            TracePartAction::EnterToolPhase {
+                phase: TraceToolActivePhase::Running,
+            },
+        ))
+        .expect("tool enters running phase");
+        for delta in ["out", "[stderr] err"] {
+            item.apply(item.command(
+                9,
+                TracePartAction::Append(TraceDelta::ToolResult {
+                    delta: delta.to_string(),
+                }),
+            ))
+            .expect("running tool accepts output delta");
+        }
+        let TraceToolState::Running(running) = item.tool().unwrap().state() else {
+            panic!("tool must remain running while output streams");
+        };
+        assert_eq!(running.streamed_output(), "out[stderr] err");
+
+        item.apply(item.command(
+            10,
+            TracePartAction::Complete(TracePartCompletion::Tool {
+                output: TraceToolOutput::new("canonical result".to_string()),
+            }),
+        ))
+        .expect("terminal output replaces the live overlay");
+        assert_eq!(
+            item.tool()
+                .and_then(TraceToolPart::terminal_output)
+                .map(TraceToolOutput::result),
+            Some("canonical result")
+        );
     }
 }

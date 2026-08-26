@@ -439,14 +439,15 @@ async fn responses_websocket_partial_failure_falls_back_only_for_the_next_turn()
     let session = ModelSession::default();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
     let request = minimal_request("local-responses");
-    let context =
-        ModelInvocationContext::new(session.clone(), event_tx).with_trace(CompletionTraceContext {
+    let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let context = ModelInvocationContext::new(session.clone(), event_tx).with_trace(
+        CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
-            plan_mode: false,
-            trace_sequence_base: 0,
-        });
+        },
+        trace_sink,
+    );
 
     let error = provider
         .complete(request, context)
@@ -1295,16 +1296,18 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
     .unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let request = minimal_request("local-chat");
-    let context = invocation(event_tx).with_trace(CompletionTraceContext {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        inference_id: "inf-1".to_string(),
-        plan_mode: true,
-        trace_sequence_base: 0,
-    });
+    let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let context = invocation(event_tx).with_trace(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+        },
+        trace_sink.clone(),
+    );
 
-    let response = provider.complete(request, context.clone()).await.unwrap();
-    let trace_events = context.take_trace_events();
+    let response = provider.complete(request, context).await.unwrap();
+    let trace_events = trace_sink.events();
     let captured = handle.await.unwrap();
 
     assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
@@ -1325,6 +1328,83 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
             if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
                 && trace_part_text(item) == "Ready"
     )));
+}
+
+#[tokio::test]
+async fn gated_responses_sse_publishes_delta_before_next_frame_and_completion() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (first_frame_tx, first_frame_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let first = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"a\"}\n\n"
+    );
+    let rest = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"b\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ab\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let content_length = first.len() + rest.len();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let captured = capture_http_request(&mut socket).await;
+        let header = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {content_length}\r\nconnection: close\r\n\r\n"
+        );
+        socket.write_all(header.as_bytes()).await.unwrap();
+        socket.write_all(first.as_bytes()).await.unwrap();
+        socket.flush().await.unwrap();
+        first_frame_tx.send(()).unwrap();
+        release_rx.await.unwrap();
+        socket.write_all(rest.as_bytes()).await.unwrap();
+        socket.shutdown().await.unwrap();
+        captured
+    });
+
+    let provider = openai_provider(format!("http://{address}/v1"), ProviderConnectionMode::Http);
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+    let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let context = invocation(event_tx).with_trace(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+        },
+        sink.clone(),
+    );
+    let completion = tokio::spawn(async move {
+        provider
+            .complete(minimal_request("local-responses"), context)
+            .await
+    });
+
+    first_frame_rx.await.unwrap();
+    let first_delta = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if let AgentEvent::TracePartDelta { event } = event_rx.recv().await.unwrap()
+                && matches!(&event.delta, TraceDelta::Text { delta, .. } if delta == "a")
+            {
+                break event;
+            }
+        }
+    })
+    .await
+    .expect("first delta must publish while the provider is gated");
+    assert_eq!(first_delta.revision, 1);
+    assert!(!completion.is_finished());
+    assert!(sink.events().iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartDelta { event }
+            if matches!(&event.delta, TraceDelta::Text { delta, .. } if delta == "a")
+    )));
+
+    release_tx.send(()).unwrap();
+    let response = completion.await.unwrap().unwrap();
+    let captured = server.await.unwrap();
+    assert_eq!(response.content.as_deref(), Some("ab"));
+    assert_eq!(captured.request_line, "POST /v1/responses HTTP/1.1");
 }
 
 #[tokio::test]

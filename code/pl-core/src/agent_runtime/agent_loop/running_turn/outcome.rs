@@ -413,6 +413,7 @@ mod tests {
             None,
             None,
         );
+        recorder.start_item(item.clone());
         let action = match outcome {
             ToolTraceOutcome::Completed => {
                 pl_trace::TracePartAction::Complete(pl_trace::TracePartCompletion::Tool {

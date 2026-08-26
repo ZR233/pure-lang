@@ -2,7 +2,6 @@ use pl_protocol::ThreadNotificationEnvelope;
 use pl_trace::TraceEvent;
 
 use super::super::host::{AgentCommitObserver, PersistenceClass, ThreadRepository};
-use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeHost, AgentRuntimeResult,
     DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadId, ThreadMutation, TurnId,
@@ -105,10 +104,11 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
-    /// 统一执行内存待落库入队与状态/事件发布模板。
+    /// 统一执行内存状态/事件发布与待落库入队模板。
     ///
     /// 调用方负责准备领域 state、facts 与 mutation；repository 只接受到进程内
-    /// 待落库队列，不等待 SQLite。接受后替换 owner snapshot 并立即广播同一事实。
+    /// 待落库队列，不等待 SQLite。owner snapshot 与 live notification 先提交；队列
+    /// 拒绝只表示持久化健康退化，不得回滚或把已经发生的业务命令改写成失败。
     pub(super) async fn commit_and_publish(
         &mut self,
         commit: PendingCommit,
@@ -119,57 +119,62 @@ where
             expected_revision.saturating_add(1),
             "pending commit must advance the actor revision exactly once"
         );
-        self.host
-            .repository()
-            .commit(ThreadCommit {
-                agent_id: commit.next_state.snapshot.identity.id.clone(),
-                persistence: commit.persistence,
-                expected_revision: Some(expected_revision),
-                next_state: commit.next_state.clone(),
-                facts: commit.facts,
-                mutation: commit.mutation,
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-
-        self.state = commit.next_state;
-        let Some(publication) = commit.publication else {
-            return Ok(());
+        let repository_commit = ThreadCommit {
+            agent_id: commit.next_state.snapshot.identity.id.clone(),
+            persistence: commit.persistence,
+            expected_revision: Some(expected_revision),
+            next_state: commit.next_state.clone(),
+            facts: commit.facts,
+            mutation: commit.mutation,
         };
-        match &publication.directory_update {
-            DirectoryUpdate::Unchanged => {}
-            DirectoryUpdate::StoreSnapshot => self
+        self.state = commit.next_state;
+        let publication = commit.publication;
+        if let Some(publication) = &publication {
+            match &publication.directory_update {
+                DirectoryUpdate::Unchanged => {}
+                DirectoryUpdate::StoreSnapshot => self
+                    .runtime
+                    .directory
+                    .store_snapshot(self.state.snapshot.clone()),
+                DirectoryUpdate::RuntimeEvent(event) => {
+                    self.runtime.directory.publish_runtime_event(event);
+                }
+            }
+            if let Err(error) = self
                 .runtime
-                .directory
-                .store_snapshot(self.state.snapshot.clone()),
-            DirectoryUpdate::RuntimeEvent(event) => {
-                self.runtime.directory.publish_runtime_event(event);
+                .thread_events
+                .publish_batch(publication.thread_notifications.clone())
+                .await
+            {
+                tracing::error!(
+                    agent_id = %self.state.snapshot.identity.id,
+                    revision = self.state.snapshot.revision,
+                    error = %error,
+                    "thread projection rejected a committed in-memory fact; subscribers must resync"
+                );
             }
         }
-        if let Err(error) = self
-            .runtime
-            .thread_events
-            .publish_batch(publication.thread_notifications.clone())
-            .await
-        {
+        if let Err(error) = self.host.repository().commit(repository_commit).await {
             tracing::error!(
                 agent_id = %self.state.snapshot.identity.id,
                 revision = self.state.snapshot.revision,
                 error = %error,
-                "thread projection rejected a committed in-memory fact; subscribers must resync"
+                "write-behind rejected a committed in-memory fact"
             );
         }
-        self.host
-            .observer()
-            .publish(AgentCommittedEvent {
-                agent_id: self.state.snapshot.identity.id.clone(),
-                thread_id: publication.thread_id,
-                turn_id: publication.turn_id,
-                runtime_events: publication.runtime_events,
-                trace_events: publication.trace_events,
-                thread_notifications: publication.thread_notifications,
-            })
-            .await;
+        if let Some(publication) = publication {
+            self.host
+                .observer()
+                .publish(AgentCommittedEvent {
+                    agent_id: self.state.snapshot.identity.id.clone(),
+                    thread_id: publication.thread_id,
+                    turn_id: publication.turn_id,
+                    runtime_events: publication.runtime_events,
+                    trace_events: publication.trace_events,
+                    thread_notifications: publication.thread_notifications,
+                })
+                .await;
+        }
         Ok(())
     }
 }

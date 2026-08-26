@@ -46,6 +46,9 @@ pub enum PureError {
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
 
+    #[error("protocol error: {0}")]
+    Protocol(String),
+
     #[error("HTTP error: {0}")]
     HttpError(String),
 
@@ -139,6 +142,7 @@ impl PureError {
             | Self::ConfigError(_)
             | Self::Io(_)
             | Self::SerdeJson(_)
+            | Self::Protocol(_)
             | Self::HttpError(_) => None,
         }
     }
@@ -163,6 +167,7 @@ impl PureError {
             | Self::ConfigError(_)
             | Self::Io(_)
             | Self::SerdeJson(_)
+            | Self::Protocol(_)
             | Self::HttpError(_) => None,
         }
     }

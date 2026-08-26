@@ -116,7 +116,11 @@ impl TraceProjection {
         }
         let now = unix_seconds();
         if let Err(error) = item.apply(item.command(now, TracePartAction::Complete(completion))) {
-            tracing::error!(%error, "failed to complete resolved trace item");
+            self.trace_error.get_or_insert_with(|| {
+                pl_trace::TraceEventSinkError::new(format!(
+                    "failed to complete resolved trace item: {error}"
+                ))
+            });
             return Vec::new();
         }
         let item = item.clone();

@@ -54,8 +54,6 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -171,8 +169,6 @@ fn tagged_stream_flushes_visible_text_before_tool_call() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
     let mut decoder = tagged_decoder();
 
@@ -256,8 +252,6 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator

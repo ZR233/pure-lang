@@ -91,6 +91,7 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
         Some("call-1".to_string()),
         None,
     );
+    recorder.start_item(item.clone());
     let mut record = completed_record("exec");
     record
         .runtime_events

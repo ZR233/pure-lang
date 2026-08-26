@@ -11,9 +11,114 @@ fn trace() -> TraceProjection {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inference-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     })
+}
+
+fn trace_with_projection(
+    tool: &str,
+    projection: pl_trace::ToolInputTraceProjection,
+) -> TraceProjection {
+    TraceProjection::with_sink_and_projections(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inference-1".to_string(),
+        },
+        None,
+        Arc::new(HashMap::from([(tool.to_string(), projection)])),
+    )
+}
+
+#[test]
+fn plan_projection_decodes_every_escaped_json_byte_boundary() {
+    let raw = r##"{"plan":"# Plan\n\u8ba1\u5212 \uD83D\uDE80\n\n- do it"}"##;
+    let expected = "# Plan\n计划 🚀\n\n- do it";
+    for split in 0..=raw.len() {
+        let mut trace = trace_with_projection(
+            "plan_exit",
+            pl_trace::ToolInputTraceProjection::plan_markdown("plan"),
+        );
+        let first = ToolCallAccumulatorSnapshot {
+            id: "tool-1".to_string(),
+            trace_id: "tool-1".to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "plan_exit".to_string(),
+            arguments: raw[..split].to_string(),
+            function_arguments: true,
+        };
+        let second = ToolCallAccumulatorSnapshot {
+            arguments: raw.to_string(),
+            ..ToolCallAccumulatorSnapshot {
+                id: first.id.clone(),
+                trace_id: first.trace_id.clone(),
+                call_id: first.call_id.clone(),
+                name: first.name.clone(),
+                arguments: String::new(),
+                function_arguments: true,
+            }
+        };
+        let events = trace
+            .append_tool_arguments_delta(&first, raw[..split].to_string())
+            .into_iter()
+            .chain(trace.append_tool_arguments_delta(&second, raw[split..].to_string()))
+            .collect::<Vec<_>>();
+        let projected = events
+            .into_iter()
+            .filter_map(|event| match event {
+                AgentEvent::TracePartDelta { event } => match event.delta {
+                    pl_trace::TraceDelta::Plan { delta } => Some(delta),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(projected, expected, "split at byte {split}");
+    }
+}
+
+#[test]
+fn conditional_plan_projection_waits_for_matching_discriminator() {
+    let projection = pl_trace::ToolInputTraceProjection::conditional_plan_markdown(
+        "summary",
+        "action",
+        "submitPlan",
+    );
+    for raw in [
+        r##"{"action":"submitPlan","summary":"# Plan"}"##,
+        r##"{"summary":"# Plan","action":"submitPlan"}"##,
+    ] {
+        let mut trace = trace_with_projection("task_transition", projection.clone());
+        let snapshot = ToolCallAccumulatorSnapshot {
+            id: "tool-1".to_string(),
+            trace_id: "tool-1".to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "task_transition".to_string(),
+            arguments: raw.to_string(),
+            function_arguments: true,
+        };
+        let projected = trace
+            .append_tool_arguments_delta(&snapshot, raw.to_string())
+            .into_iter()
+            .any(|event| matches!(event, AgentEvent::TracePartDelta { event } if matches!(event.delta, pl_trace::TraceDelta::Plan { .. })));
+        assert!(projected, "matching discriminator must publish plan");
+    }
+
+    let mut trace = trace_with_projection("task_transition", projection);
+    let raw = r##"{"summary":"# Plan","action":"complete"}"##;
+    let snapshot = ToolCallAccumulatorSnapshot {
+        id: "tool-1".to_string(),
+        trace_id: "tool-1".to_string(),
+        call_id: Some("call-1".to_string()),
+        name: "task_transition".to_string(),
+        arguments: raw.to_string(),
+        function_arguments: true,
+    };
+    assert!(
+        trace
+            .append_tool_arguments_delta(&snapshot, raw.to_string())
+            .into_iter()
+            .all(|event| !matches!(event, AgentEvent::TracePartStarted { item } if item.kind() == TracePartKind::Plan))
+    );
 }
 
 #[test]
@@ -211,8 +316,6 @@ fn generated_part_ids_are_scoped_to_inference() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "inference-2".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     });
 
     let first_delta = first
@@ -231,21 +334,25 @@ fn generated_part_ids_are_scoped_to_inference() {
 }
 
 #[test]
-fn trace_sequence_base_offsets_started_sequence() {
-    let mut first = TraceProjection::new(CompletionTraceContext {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 10,
-    });
-    let mut second = TraceProjection::new(CompletionTraceContext {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        inference_id: "turn-1-inf-1".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 20,
-    });
+fn trace_sink_sequence_offsets_started_sequence() {
+    let first_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 10));
+    let second_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 20));
+    let mut first = TraceProjection::with_sink(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+        },
+        Some(first_sink),
+    );
+    let mut second = TraceProjection::with_sink(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-1".to_string(),
+        },
+        Some(second_sink),
+    );
 
     let first_sequence = first
         .start_thinking("thinking", 0)
@@ -331,6 +438,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
         arguments: "{\"cmd\":\"ec".to_string(),
+        function_arguments: true,
     };
     let _ = trace.append_tool_arguments_delta(&snapshot, "{\"cmd\":\"ec".to_string());
     let updated = trace
@@ -353,7 +461,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         updated.tool().map(|tool| tool.state()),
         Some(TraceToolState::Streaming(_))
     ));
-    assert_eq!(updated.revision(), 1);
+    assert_eq!(updated.revision(), 2);
     let tool = updated.tool().expect("tool metadata");
     assert_eq!(tool.invocation().arguments(), "{\"cmd\":\"echo hi\"}");
 }
@@ -367,6 +475,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
         arguments: "{\"cmd\":\"ec".to_string(),
+        function_arguments: true,
     };
     let late = ToolCallAccumulatorSnapshot {
         id: "provider-tool-1".to_string(),
@@ -374,6 +483,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
         arguments: "{\"cmd\":\"echo hi\"}".to_string(),
+        function_arguments: true,
     };
 
     let first_delta = trace
@@ -404,7 +514,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
     assert_eq!(first_delta, "turn-1-call-1");
     assert_eq!(second_delta, "turn-1-call-1");
     assert_eq!(updated.item_id(), "turn-1-call-1");
-    assert_eq!(updated.revision(), 1);
+    assert_eq!(updated.revision(), 2);
     let tool = updated.tool().expect("tool metadata");
     assert_eq!(
         tool.invocation().provider_item_id(),

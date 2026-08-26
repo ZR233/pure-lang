@@ -149,7 +149,6 @@ impl TaggedVisibleOutputAdapter {
                     }])
                     .collect()
             }
-            ModelStreamEvent::BlockClosed { .. } => vec![event],
             ModelStreamEvent::Completed { response_id } => self
                 .flush_all()
                 .into_iter()

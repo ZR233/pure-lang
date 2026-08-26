@@ -208,7 +208,9 @@ async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls
         stream,
         &event_tx,
         None,
-        Default::default(),
+        None,
+        None,
+        Arc::new(HashMap::new()),
         std::time::Duration::from_millis(10),
     )
     .await

@@ -123,6 +123,72 @@ async fn unsafe_system_skills_target_prevents_runtime_from_becoming_ready() {
 }
 
 #[tokio::test]
+async fn incompatible_thread_recovery_issue_blocks_all_read_and_start_surfaces_as_protocol() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "blocked", StudioMode::Simple)
+        .await
+        .unwrap();
+    let runtime = StudioRuntime::new(store, config_store).unwrap();
+    runtime.recovery.replace(vec![crate::StudioRecoveryIssue {
+        id: format!("session-context-{}", thread.id),
+        scope: crate::StudioRecoveryIssueScope::Thread,
+        category: crate::StudioRecoveryIssueCategory::AgentState,
+        action: crate::StudioRecoveryIssueAction::CleanupThread,
+        project_id: Some(project.id),
+        thread_id: Some(thread.id.clone()),
+        task_run_id: None,
+        message: "durable Skill payload is incompatible".to_string(),
+    }]);
+
+    assert_eq!(runtime.recovery_issues().len(), 1);
+    assert_protocol_error(runtime.thread_snapshot(&thread.id).await.unwrap_err());
+    assert_protocol_error(
+        runtime
+            .list_thread_turns(&thread.id, None, 20)
+            .await
+            .unwrap_err(),
+    );
+    let subscription_error = match runtime
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread.id.clone(),
+        })
+        .await
+    {
+        Ok(_) => panic!("blocked Thread subscription unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_protocol_error(subscription_error);
+    assert_protocol_error(
+        runtime
+            .submit_prompt(StudioSubmitPromptRequest {
+                thread_id: thread.id,
+                prompt: "must be rejected".to_string(),
+                attachment_ids: Vec::new(),
+                options: StudioSubmitPromptOptions::default(),
+            })
+            .await
+            .unwrap_err(),
+    );
+}
+
+fn assert_protocol_error(error: anyhow::Error) {
+    let error = crate::studio_error_from_anyhow(error);
+    assert_eq!(error.code, pl_protocol::studio::StudioErrorCode::Protocol);
+    assert!(!error.message.contains("Skill"));
+    assert!(!error.message.contains("payload"));
+}
+
+#[tokio::test]
 async fn start_new_thread_accepts_first_prompt_before_publishing_thread() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("home");

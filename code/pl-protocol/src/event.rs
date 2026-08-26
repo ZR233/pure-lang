@@ -256,8 +256,8 @@ pub struct TokenUsageSnapshot {
 ///
 /// Emitted when `skill_view` or a direct user gesture successfully loads a
 /// Skill and that content has entered the model-visible context.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SkillActivation {
     pub name: String,
     pub source: String,
@@ -269,7 +269,7 @@ pub struct SkillActivation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum SkillActivationResourceBase {
     Directory { path: String },
     Url { url: String },
@@ -277,7 +277,12 @@ pub enum SkillActivationResourceBase {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    deny_unknown_fields
+)]
 pub enum SkillActivationCause {
     Tool { tool_call_id: String },
     UserGesture { invocation_id: String },
@@ -299,58 +304,5 @@ impl SkillActivation {
             SkillActivationResourceBase::Url { .. }
             | SkillActivationResourceBase::Opaque { .. } => None,
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for SkillActivation {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            name: String,
-            source: String,
-            #[serde(default)]
-            provider_id: Option<String>,
-            #[serde(default)]
-            resource_base: Option<SkillActivationResourceBase>,
-            turn_id: String,
-            #[serde(default)]
-            cause: Option<SkillActivationCause>,
-            activated_at: i64,
-            #[serde(default)]
-            path: Option<String>,
-            #[serde(default)]
-            tool_call_id: Option<String>,
-        }
-
-        let wire = Wire::deserialize(deserializer)?;
-        let resource_base = wire
-            .resource_base
-            .or_else(|| {
-                wire.path
-                    .map(|path| SkillActivationResourceBase::Directory { path })
-            })
-            .ok_or_else(|| serde::de::Error::missing_field("resourceBase"))?;
-        let cause = wire
-            .cause
-            .or_else(|| {
-                wire.tool_call_id
-                    .map(|tool_call_id| SkillActivationCause::Tool { tool_call_id })
-            })
-            .ok_or_else(|| serde::de::Error::missing_field("cause"))?;
-        Ok(Self {
-            name: wire.name,
-            source: wire.source,
-            provider_id: wire
-                .provider_id
-                .unwrap_or_else(|| "local-filesystem".to_string()),
-            resource_base,
-            turn_id: wire.turn_id,
-            cause,
-            activated_at: wire.activated_at,
-        })
     }
 }

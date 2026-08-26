@@ -465,18 +465,14 @@ impl TaskRuntime {
         let expected_run_revision = current.as_ref().and_then(|aggregate| {
             (aggregate.facts.run.id == facts.run.id).then_some(aggregate.facts.run.revision)
         });
-        self.writer
-            .enqueue_task(TaskPersistenceCommit {
-                owner_id: root_thread_id.to_string(),
-                expected_owner_revision,
-                revision,
-                expected_run_revision,
-                aggregate: facts.clone(),
-                stop_events,
-            })
-            .await
-            .map_err(anyhow::Error::msg)?;
-
+        let persistence_commit = TaskPersistenceCommit {
+            owner_id: root_thread_id.to_string(),
+            expected_owner_revision,
+            revision,
+            expected_run_revision,
+            aggregate: facts.clone(),
+            stop_events,
+        };
         let entry = StudioTaskDirectoryEntry {
             root_thread_id: root_thread_id.to_string(),
             task: facts.runtime.clone(),
@@ -502,6 +498,14 @@ impl TaskRuntime {
                 revision,
                 error_bytes = error.to_string().len(),
                 "Task hot commit succeeded but product projection publication failed"
+            );
+        }
+        if let Err(error) = self.writer.enqueue_task(persistence_commit).await {
+            tracing::error!(
+                root_thread_id,
+                revision,
+                error = %error,
+                "Task write-behind rejected a committed in-memory fact"
             );
         }
         Ok(facts)

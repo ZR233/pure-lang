@@ -80,8 +80,9 @@ workspace，不能残留上一个 Thread 的内容。
 
 ## 11.3 订阅与增量
 
-选择 Thread 时增加本地 generation 并立即建立新订阅。服务端先注册监听，再返回
-authoritative `ThreadSnapshot`，随后发送：
+选择 Thread 时增加本地 generation 并立即建立新订阅。驻留 Thread 的服务端先注册监听，再从
+ThreadActor 内存 owner 返回 authoritative `ThreadSnapshot`；未驻留 Thread 先显式冷激活 actor，
+随后走同一路径。订阅、重订阅和 lag resync 均不得把 SQLite 行合并回活动 snapshot。首帧之后发送：
 
 - `TurnStarted / TurnUpdated / TurnCompleted`
 - `ItemStarted / ItemDelta / ItemCompleted`
@@ -123,8 +124,9 @@ canonical commentary Item，按普通 commentary 展示并进入历史。
 工具相邻合并和连续 reasoning 折叠只属于 `TimelineRow` 视觉投影，不能改写 Item。commentary
 是明确的 agentMessage Item；瞬时 runtime progress 只显示在状态区域，不生成或折叠伪 timeline
 消息。阶段 milestone 使用 runtime source 的 commentary Item，不由 UI 根据 snapshot 伪造。
-text、plan、reasoning 和 tool delta 只写当前 Item overlay；terminal Item 到达后清除
-overlay并以完整 payload 为准。
+text、plan、reasoning 和 tool delta 到达后立即写当前 Item overlay；terminal Item 到达后清除
+overlay并以完整 payload 为准。delta 不等待模型、工具或持久化批次结束，不写 SQLite，也不由
+Flutter 从终态 payload 反推。异常退出可以丢失尚未终态的 delta 前缀，重启以最后冷存储事实恢复。
 
 Timeline row key 使用 `threadId + itemId` 或稳定工具组首 Item identity。未知 Item union 变体
 是协议错误；已知但内部不可见的变体由 Rust bridge 过滤。

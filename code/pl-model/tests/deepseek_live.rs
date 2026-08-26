@@ -95,17 +95,17 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         text_delta_count
     });
 
+    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new("live-session", 0));
     let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
         CompletionTraceContext {
             session_id: "live-session".to_string(),
             turn_id: turn_id.to_string(),
             inference_id: format!("{turn_id}-inference"),
-            plan_mode: false,
-            trace_sequence_base: 0,
         },
+        trace_sink.clone(),
     );
     let response = runtime
-        .complete(deepseek_request(messages), context.clone())
+        .complete(deepseek_request(messages), context)
         .await
         .unwrap();
     let text_delta_count = event_counter.await.unwrap();
@@ -113,7 +113,7 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         content: response.content.unwrap_or_default(),
         reasoning_content: response.reasoning_content.unwrap_or_default(),
         text_delta_count,
-        trace_events: context.take_trace_events(),
+        trace_events: trace_sink.events(),
     }
 }
 

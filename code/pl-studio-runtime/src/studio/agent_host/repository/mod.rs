@@ -5,7 +5,6 @@ use pl_core::{
     MailboxDeliveryState, RestoredAgentRuntime, ThreadActorState, ThreadCommit, ThreadId,
     ThreadRepository, TurnId,
 };
-use pl_protocol::ThreadSnapshot;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect,
@@ -22,10 +21,7 @@ pub(super) mod labels;
 mod write_behind;
 
 use billing::persist_inference_billing;
-use context::{
-    SessionSnapshotAuditError, audit_session_snapshot, persist_session_snapshot,
-    serialize_thread_metadata,
-};
+use context::{SessionSnapshotAuditError, persist_session_snapshot, serialize_thread_metadata};
 use labels::presentation_label;
 
 use input_metadata::serialize_input_metadata;
@@ -69,39 +65,6 @@ impl StudioAgentRepository {
     /// write-behind writer 句柄；关机排空与进度查询使用。
     pub(in crate::studio) fn writer(&self) -> &ThreadWriteBehindWriter {
         &self.writer
-    }
-
-    pub(in crate::studio) async fn read_thread_snapshot(
-        &self,
-        thread_id: &str,
-    ) -> Result<Option<ThreadSnapshot>, PureError> {
-        let Some(model) = thread::Entity::find_by_id(thread_id.to_string())
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?
-        else {
-            return Ok(None);
-        };
-        if model.archived != 0 {
-            return Ok(None);
-        }
-        if model.runtime_revision.is_none() {
-            return Ok(Some(ThreadSnapshot {
-                schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
-                revision: u64_from_i64(model.revision)?,
-                thread: model.try_into()?,
-                active_turn: None,
-                items: Vec::new(),
-                interactions: Vec::new(),
-                runtime: None,
-            }));
-        }
-        let context = self.restore_session(&model).await?;
-        Ok(Some(
-            self.restore_thread_snapshot(model, &context)
-                .await?
-                .snapshot,
-        ))
     }
 }
 
@@ -160,14 +123,16 @@ impl ThreadRepository for StudioAgentRepository {
         if model.runtime_revision.is_none() {
             return Ok(None);
         }
-        if let Err(SessionSnapshotAuditError::Corrupt(_)) =
-            audit_session_snapshot(&self.store, &model.id).await
-        {
-            tracing::warn!(
-                agent_thread_id = %model.id,
-                " refusing to lazily restore a thread with a corrupt durable session"
-            );
-            return Ok(None);
+        match self.audit_thread_recovery_payloads(&model.id).await {
+            Ok(()) => {}
+            Err(SessionSnapshotAuditError::Corrupt(_)) => {
+                tracing::warn!(
+                    agent_thread_id = %model.id,
+                    "refusing to lazily restore a thread with an invalid durable payload"
+                );
+                return Ok(None);
+            }
+            Err(SessionSnapshotAuditError::Fatal(error)) => return Err(error),
         }
         let parents = self.ancestor_parents(std::slice::from_ref(&model)).await?;
         Ok(Some(self.restore_model(model, &parents).await?))

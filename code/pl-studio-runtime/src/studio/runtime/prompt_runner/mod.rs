@@ -437,11 +437,29 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<ThreadRecord> {
-        let thread = self
+        let thread = if let Some(thread) = self
             .agent_facility
             .product_events
             .thread_snapshot(thread_id)
-            .context("selected Thread not found in the in-memory directory")?;
+        {
+            thread
+        } else {
+            self.store
+                .read_thread(thread_id)
+                .await?
+                .map(pl_protocol::Thread::from)
+                .context("selected Thread not found")?
+        };
+        if self.recovery_issues().iter().any(|issue| {
+            issue.scope == crate::StudioRecoveryIssueScope::Thread
+                && issue.thread_id.as_deref() == Some(thread.root_thread_id.as_str())
+        }) {
+            return Err(anyhow::Error::new(pl_protocol::studio::StudioError::new(
+                pl_protocol::studio::StudioErrorCode::Protocol,
+                "This Thread is blocked because its durable timeline is incompatible; use the recovery cleanup action",
+                false,
+            )));
+        }
         Ok(ThreadRecord {
             id: thread.id,
             project_id: thread.project_id,

@@ -69,8 +69,13 @@ impl TraceToolPart {
         Ok(next)
     }
 
-    pub(super) fn append_result(&self, _delta: &str) -> Result<Self, &'static str> {
-        Err("tool result deltas require a streaming provider result owner")
+    pub(super) fn append_result(&self, delta: &str) -> Result<Self, &'static str> {
+        let TraceToolState::Running(state) = &self.state else {
+            return Err("tool result delta requires running state");
+        };
+        let mut next = self.clone();
+        next.state = TraceToolState::Running(state.append(delta));
+        Ok(next)
     }
 
     pub(super) fn enter(&self, phase: TraceToolActivePhase) -> Result<Self, &'static str> {
@@ -98,7 +103,9 @@ impl TraceToolPart {
                 TraceToolState::AwaitingApproval(AwaitingApprovalTraceTool)
             }
             TraceToolActivePhase::Approved => TraceToolState::Approved(ApprovedTraceTool),
-            TraceToolActivePhase::Running => TraceToolState::Running(RunningTraceTool),
+            TraceToolActivePhase::Running => {
+                TraceToolState::Running(RunningTraceTool::new(String::new()))
+            }
         };
         Ok(next)
     }
@@ -351,9 +358,27 @@ pub struct AwaitingApprovalTraceTool;
 #[serde(rename_all = "camelCase")]
 pub struct ApprovedTraceTool;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct RunningTraceTool;
+pub struct RunningTraceTool {
+    streamed_output: String,
+}
+
+impl RunningTraceTool {
+    pub fn new(streamed_output: String) -> Self {
+        Self { streamed_output }
+    }
+
+    pub fn streamed_output(&self) -> &str {
+        &self.streamed_output
+    }
+
+    fn append(&self, delta: &str) -> Self {
+        let mut next = self.clone();
+        next.streamed_output.push_str(delta);
+        next
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

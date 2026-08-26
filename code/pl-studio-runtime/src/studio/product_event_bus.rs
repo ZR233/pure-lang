@@ -241,7 +241,7 @@ impl ProductEventBus {
         )))
     }
 
-    /// 提交一次目录事实：先入 write-behind 队列，再更新内存热集合并广播事件。
+    /// 提交一次目录事实：先更新内存热集合并广播，再加入 write-behind 队列。
     ///
     /// 这是 Thread/Project 目录 mutation 的唯一命令通道；SQLite 失败只影响
     /// 持久化健康状态（Degraded/Blocked），内存事实保持已发布状态。
@@ -249,7 +249,6 @@ impl ProductEventBus {
         &self,
         delta: DirectoryDelta,
     ) -> Result<StudioProductEventEnvelope> {
-        self.writer.enqueue_directory(delta.clone()).await?;
         let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
             delta.thread_upserts.clone(),
             delta
@@ -278,6 +277,9 @@ impl ProductEventBus {
         }
         for removal in &delta.project_removals {
             self.remove_project_entry(&removal.project_id).await?;
+        }
+        if let Err(error) = self.writer.enqueue_directory(delta).await {
+            tracing::error!(%error, "directory write-behind rejected a committed in-memory fact");
         }
         Ok(envelope)
     }
@@ -315,9 +317,11 @@ impl ProductEventBus {
         spec: RegisteredChildThread,
     ) -> Result<()> {
         let delta = DirectoryDelta::register_child_thread(spec);
-        self.writer.enqueue_directory(delta.clone()).await?;
-        self.apply_thread_delta(delta.thread_upserts, Vec::new())
+        self.apply_thread_delta(delta.thread_upserts.clone(), Vec::new())
             .await?;
+        if let Err(error) = self.writer.enqueue_directory(delta).await {
+            tracing::error!(%error, "child directory write-behind rejected a committed in-memory fact");
+        }
         Ok(())
     }
 

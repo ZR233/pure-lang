@@ -27,6 +27,9 @@ impl StudioRuntime {
         limit: usize,
     ) -> Result<ThreadTurnPage> {
         let limit = limit.clamp(1, 200);
+        // 冷历史仍需先经过 root recovery gate；坏 payload 只能由显式 cleanup 处置，
+        // 不得直接落入 serde 错误或在读取时跳过/升级。
+        self.read_owned_thread(thread_id).await?;
         let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? else {
             return self.store.list_thread_turns(thread_id, cursor, limit).await;
         };

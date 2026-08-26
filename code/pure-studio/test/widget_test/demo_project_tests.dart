@@ -101,11 +101,13 @@ void registerDemoProjectTests() {
 
     expect(receipt.threadId, 'thread-main');
     expect(frames.first, isA<ThreadSnapshotFrame>());
-    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
     while (DateTime.now().isBefore(deadline) &&
-        !frames.whereType<ThreadNotificationFrame>().any(
-          (frame) => frame.update is ThreadItemDeltaUpdate,
-        )) {
+        !frames.whereType<ThreadNotificationFrame>().any((frame) {
+          final update = frame.update;
+          return update is ThreadTurnUpdate &&
+              update.turn.state is CompletedStudioTurnState;
+        })) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
     expect(
@@ -116,6 +118,30 @@ void registerDemoProjectTests() {
         isA<ThreadItemDeltaUpdate>(),
       ]),
     );
+    final deltaTypes = frames
+        .whereType<ThreadNotificationFrame>()
+        .map((frame) => frame.update)
+        .whereType<ThreadItemDeltaUpdate>()
+        .map((update) => update.delta.state.runtimeType)
+        .toSet();
+    expect(
+      deltaTypes,
+      containsAll(<Type>[
+        ThreadTextDeltaView,
+        ThreadThinkingSummaryDeltaView,
+        ThreadThinkingContentDeltaView,
+        ThreadToolArgumentsDeltaView,
+        ThreadToolResultDeltaView,
+        ThreadPlanDeltaView,
+      ]),
+    );
+    final snapshot =
+        await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
+    final turnItems = snapshot.workspace.items.where(
+      (item) => item.turnId == receipt.turnId,
+    );
+    expect(turnItems, isNotEmpty);
+    expect(turnItems.every(_demoItemIsTerminal), isTrue);
   });
 
   test('Driver demo interactions live in the Thread snapshot', () async {
@@ -190,6 +216,14 @@ void registerDemoProjectTests() {
     expect(revisions.toSet().length, revisions.length);
   });
 }
+
+bool _demoItemIsTerminal(ThreadItemView item) => switch (item.state) {
+  ThreadTextItemStateView(:final lifecycle) => lifecycle.isTerminal,
+  ThreadThinkingItemStateView(:final lifecycle) => lifecycle.isTerminal,
+  ThreadPlanItemStateView(:final lifecycle) => lifecycle.isTerminal,
+  ThreadToolItemStateView(:final lifecycle) => lifecycle.isTerminal,
+  _ => true,
+};
 
 class _FastLspDemoApi extends DemoStudioApi {
   _FastLspDemoApi() : super(lspActivityLoop: true);

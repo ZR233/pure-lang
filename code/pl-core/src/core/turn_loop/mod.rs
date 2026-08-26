@@ -265,9 +265,6 @@ pub(super) async fn run_turn_with_trace(
         }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
-        let plan_mode = iteration_tools
-            .iter()
-            .any(|schema| schema.name() == "plan_exit");
         let tool_schema_estimated_tokens =
             crate::tool::estimate_tool_schema_tokens(&iteration_tools);
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
@@ -284,39 +281,22 @@ pub(super) async fn run_turn_with_trace(
             recorder.sender().clone(),
         )
         .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
-        .with_trace(pl_model::CompletionTraceContext {
-            session_id: recorder.session_id().to_string(),
-            turn_id: turn_id.clone(),
-            inference_id: inference_id.clone(),
-            plan_mode,
-            trace_sequence_base: recorder.current_sequence(),
-        });
-        let trace_output = invocation.clone();
+        .with_trace(
+            pl_model::CompletionTraceContext {
+                session_id: recorder.session_id().to_string(),
+                turn_id: turn_id.clone(),
+                inference_id: inference_id.clone(),
+            },
+            recorder
+                .trace_sink()
+                .expect("enabled turn tracing must provide a canonical sink"),
+        )
+        .with_input_trace_projections(tool_plan.input_trace_projections())
+        .with_cancellation(cancellation_token.clone());
         progress.heartbeat(recorder, "正在等待模型响应。");
         progress.debug(recorder, format!("模型 `{model}` 流式请求已发起。"));
 
-        let response_result = match &cancellation_token {
-            Some(token) => {
-                tokio::select! {
-                    result = runtime.complete(completion_request, invocation) => result,
-                    _ = token.cancelled() => {
-                        session.truncate_messages(safe_message_count);
-                        return Ok(interrupted_turn_result(
-                            recorder,
-                            &turn_id,
-                            last_content,
-                            last_reasoning_content,
-                            last_model,
-                            total_usage,
-                            safe_message_count,
-                            cancellation_reason(),
-                        ));
-                    }
-                }
-            }
-            None => runtime.complete(completion_request, invocation).await,
-        };
-        recorder.record_events(trace_output.take_trace_events());
+        let response_result = runtime.complete(completion_request, invocation).await;
         let mut response = match response_result {
             Ok(response) => response,
             Err(_) if is_cancelled(&options) => {

@@ -8,8 +8,6 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -72,8 +70,6 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -155,8 +151,6 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
@@ -252,8 +246,6 @@ fn stream_trace_scope_rejects_similar_turn_prefix() {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),
         inference_id: "turn-1-inf-0".to_string(),
-        plan_mode: false,
-        trace_sequence_base: 0,
     }));
 
     accumulator
