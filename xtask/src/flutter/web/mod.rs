@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const DRIVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
 const DRIVER_EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 const DRIVER_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const DRIVER_START_ATTEMPTS: usize = 3;
