@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pl_core::{PersistenceClass, ThreadCommit, ThreadContextMutation, ThreadMutation};
-use pl_protocol::{StateError, ThreadNotification};
+use pl_core::{PersistenceClass, ThreadCommit};
+use pl_protocol::StateError;
 use sea_orm::TransactionTrait;
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -616,105 +616,7 @@ fn try_coalesce_tail(queue: &mut VecDeque<QueueEntry>, next: ThreadCommit) -> bo
     let Some(QueueEntry::ThreadCommit(previous)) = queue.back_mut() else {
         return false;
     };
-    if !can_coalesce(previous, &next) {
-        return false;
-    }
-    merge_coalescible_commits(previous, next);
-    true
-}
-
-fn can_coalesce(previous: &ThreadCommit, next: &ThreadCommit) -> bool {
-    previous.persistence == PersistenceClass::Coalescible
-        && next.persistence == PersistenceClass::Coalescible
-        && previous.agent_id == next.agent_id
-        && next.expected_revision == Some(previous.facts.revision)
-        && previous.facts.turn_id == next.facts.turn_id
-        && previous.facts.inference.is_none()
-        && next.facts.inference.is_none()
-        && previous.facts.submission.is_none()
-        && next.facts.submission.is_none()
-        // TurnStarted 必须经过终态许可登记；终态本身必须经过预留区核算。
-        // 两类事件都不能被流式合并的快速路径绕过。
-        && started_turn_key(previous).is_none()
-        && started_turn_key(next).is_none()
-        && terminal_turn_key(previous).is_none()
-        && terminal_turn_key(next).is_none()
-        && previous.mutation == ThreadMutation::SnapshotAndQueue
-        && next.mutation == ThreadMutation::SnapshotAndQueue
-        && coalescing_subject(previous) == coalescing_subject(next)
-        && coalescing_subject(previous).is_some()
-}
-
-fn coalescing_subject(commit: &ThreadCommit) -> Option<String> {
-    let mut item_id: Option<&str> = None;
-    for envelope in &commit.facts.notifications {
-        match &envelope.notification {
-            ThreadNotification::ItemDelta { delta } => match item_id {
-                Some(current) if current != delta.item_id => return None,
-                Some(_) => {}
-                None => item_id = Some(delta.item_id.as_str()),
-            },
-            ThreadNotification::ThreadRuntimeUpdated { .. } => {}
-            ThreadNotification::TurnStarted { .. }
-            | ThreadNotification::TurnUpdated { .. }
-            | ThreadNotification::TurnCompleted { .. }
-            | ThreadNotification::ItemStarted { .. }
-            | ThreadNotification::ItemCompleted { .. }
-            | ThreadNotification::InteractionChanged { .. }
-            | ThreadNotification::Lagged { .. } => return None,
-        }
-    }
-    Some(item_id.map_or_else(|| "runtime".to_string(), |id| format!("item:{id}")))
-}
-
-fn merge_coalescible_commits(previous: &mut ThreadCommit, next: ThreadCommit) {
-    previous
-        .facts
-        .notifications
-        .extend(next.facts.notifications);
-    previous
-        .facts
-        .runtime_events
-        .extend(next.facts.runtime_events);
-    previous.facts.trace_events.extend(next.facts.trace_events);
-    previous.facts.context =
-        merge_context_mutations(previous.facts.context.take(), next.facts.context);
-    if next.facts.turn_transition.is_some() {
-        previous.facts.turn_transition = next.facts.turn_transition;
-    }
-    if next.facts.projection_snapshot.is_some() {
-        previous.facts.projection_snapshot = next.facts.projection_snapshot;
-    }
-    previous.facts.turn_id = next.facts.turn_id;
-    previous.facts.through_revision = next.facts.through_revision;
-    previous.facts.revision = next.facts.revision;
-    previous.next_state = next.next_state;
-    previous.mutation = next.mutation;
-}
-
-fn merge_context_mutations(
-    previous: Option<ThreadContextMutation>,
-    next: Option<ThreadContextMutation>,
-) -> Option<ThreadContextMutation> {
-    match (previous, next) {
-        (None, next) => next,
-        (previous, None) => previous,
-        (
-            Some(ThreadContextMutation::Append { mut items }),
-            Some(ThreadContextMutation::Append { items: suffix }),
-        ) => {
-            items.extend(suffix);
-            Some(ThreadContextMutation::Append { items })
-        }
-        (
-            Some(ThreadContextMutation::Replace { mut items }),
-            Some(ThreadContextMutation::Append { items: suffix }),
-        ) => {
-            items.extend(suffix);
-            Some(ThreadContextMutation::Replace { items })
-        }
-        (_, Some(replacement @ ThreadContextMutation::Replace { .. })) => Some(replacement),
-    }
+    previous.coalesce(Box::new(next)).is_ok()
 }
 
 struct PendingBatch {

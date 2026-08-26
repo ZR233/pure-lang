@@ -83,7 +83,10 @@ pl-core 只保留三个窄端口：
   它不返回业务转换结果，也不决定内存提交是否成立。耐久屏障只有一种形式：显式
   `awaitDurable(threadId, revision)`；端口不提供按线程的无目标 flush，全局排空只属于宿主关机
   流程。实现侧 repository 与 TaskRuntime 共享同一个进程级 writer 实例，恢复出的耐久基线必须
-  seed 进该共享实例，不构造只读用的第二 writer。
+  seed 进该共享实例，不构造只读用的第二 writer。严格连续且同属一个 owner、Turn 与活动 Item
+  的流式提交只使用 `ThreadCommit::coalesce` 定义的唯一合并规则：repository 可以压缩中间完整
+  快照写入，但必须保留全部规范通知、trace、runtime event 与最终快照；Turn 起止、submission、
+  inference 等业务边界一律不可合并。
 - `TurnFactory`：准备 TurnEngine、request、instructions、持久 `AgentToolSet` 与 execution policy；
   不为每个 Turn 建立临时工具注册表。
 - `ChildLifecycle`：为 child Thread 准备/释放产品外部资源；Task 实现可以拒绝不安全的 close。

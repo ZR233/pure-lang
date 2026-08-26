@@ -72,6 +72,130 @@ pub struct ThreadCommit {
     pub mutation: ThreadMutation,
 }
 
+impl ThreadCommit {
+    /// 把严格连续、同一 owner/Turn/Item 的流式提交合并到当前提交。
+    ///
+    /// 合并只压缩 write-behind 队列中的完整快照写入；规范通知、trace、runtime
+    /// event 与 context mutation 都会保留。不可合并时原样返还 `next`，repository
+    /// 必须把它作为独立提交入队。
+    pub fn coalesce(&mut self, next: Box<Self>) -> std::result::Result<(), Box<Self>> {
+        if !self.can_coalesce(&next) {
+            return Err(next);
+        }
+        let next = *next;
+
+        self.facts.notifications.extend(next.facts.notifications);
+        self.facts.runtime_events.extend(next.facts.runtime_events);
+        self.facts.trace_events.extend(next.facts.trace_events);
+        self.facts.context = merge_context_mutations(self.facts.context.take(), next.facts.context);
+        if next.facts.turn_transition.is_some() {
+            self.facts.turn_transition = next.facts.turn_transition;
+        }
+        if next.facts.projection_snapshot.is_some() {
+            self.facts.projection_snapshot = next.facts.projection_snapshot;
+        }
+        self.facts.turn_id = next.facts.turn_id;
+        self.facts.through_revision = next.facts.through_revision;
+        self.facts.revision = next.facts.revision;
+        self.next_state = next.next_state;
+        self.mutation = next.mutation;
+        Ok(())
+    }
+
+    fn can_coalesce(&self, next: &Self) -> bool {
+        self.persistence == PersistenceClass::Coalescible
+            && next.persistence == PersistenceClass::Coalescible
+            && self.agent_id == next.agent_id
+            && next.expected_revision == Some(self.facts.revision)
+            && self.facts.turn_id == next.facts.turn_id
+            && self.facts.inference.is_none()
+            && next.facts.inference.is_none()
+            && self.facts.submission.is_none()
+            && next.facts.submission.is_none()
+            && !contains_turn_start(&self.facts.runtime_events)
+            && !contains_turn_start(&next.facts.runtime_events)
+            && !contains_turn_terminal(&self.facts.runtime_events)
+            && !contains_turn_terminal(&next.facts.runtime_events)
+            && self.mutation == ThreadMutation::SnapshotAndQueue
+            && next.mutation == ThreadMutation::SnapshotAndQueue
+            && coalescing_subject(&self.facts.notifications)
+                == coalescing_subject(&next.facts.notifications)
+            && coalescing_subject(&self.facts.notifications).is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CoalescingSubject<'a> {
+    Runtime,
+    Item(&'a str),
+}
+
+fn coalescing_subject(
+    notifications: &[ThreadNotificationEnvelope],
+) -> Option<CoalescingSubject<'_>> {
+    let mut item_id = None;
+    for envelope in notifications {
+        match &envelope.notification {
+            ThreadNotification::ItemDelta { delta } => match item_id {
+                Some(current) if current != delta.item_id => return None,
+                Some(_) => {}
+                None => item_id = Some(delta.item_id.as_str()),
+            },
+            ThreadNotification::ThreadRuntimeUpdated { .. } => {}
+            ThreadNotification::TurnStarted { .. }
+            | ThreadNotification::TurnUpdated { .. }
+            | ThreadNotification::TurnCompleted { .. }
+            | ThreadNotification::ItemStarted { .. }
+            | ThreadNotification::ItemCompleted { .. }
+            | ThreadNotification::InteractionChanged { .. }
+            | ThreadNotification::Lagged { .. } => return None,
+        }
+    }
+    Some(item_id.map_or(CoalescingSubject::Runtime, CoalescingSubject::Item))
+}
+
+fn contains_turn_start(events: &[AgentRuntimeEvent]) -> bool {
+    events
+        .iter()
+        .any(|event| matches!(event.kind, super::AgentRuntimeEventKind::TurnStarted { .. }))
+}
+
+fn contains_turn_terminal(events: &[AgentRuntimeEvent]) -> bool {
+    events.iter().any(|event| {
+        matches!(
+            event.kind,
+            super::AgentRuntimeEventKind::TurnFinished { .. }
+                | super::AgentRuntimeEventKind::RecoveryCancelledTurn { .. }
+                | super::AgentRuntimeEventKind::Faulted { .. }
+        )
+    })
+}
+
+fn merge_context_mutations(
+    previous: Option<ThreadContextMutation>,
+    next: Option<ThreadContextMutation>,
+) -> Option<ThreadContextMutation> {
+    match (previous, next) {
+        (None, next) => next,
+        (previous, None) => previous,
+        (
+            Some(ThreadContextMutation::Append { mut items }),
+            Some(ThreadContextMutation::Append { items: suffix }),
+        ) => {
+            items.extend(suffix);
+            Some(ThreadContextMutation::Append { items })
+        }
+        (
+            Some(ThreadContextMutation::Replace { mut items }),
+            Some(ThreadContextMutation::Append { items: suffix }),
+        ) => {
+            items.extend(suffix);
+            Some(ThreadContextMutation::Replace { items })
+        }
+        (_, Some(replacement @ ThreadContextMutation::Replace { .. })) => Some(replacement),
+    }
+}
+
 /// 一次提交中需要原子持久化的 typed Thread 变更。
 #[derive(Debug, Clone)]
 pub struct DurableCommitFacts {
