@@ -61,7 +61,8 @@ pub(super) fn session_read_requires_age_gate(state: &AgentState) -> bool {
 mod tests {
     use crate::agent_runtime::{
         AgentCommand, AgentDirectoryWaitMessage, AgentIdentity, AgentProgressCheckpoint,
-        AgentProgressReport, AgentProgressStage, AgentState, ThreadId, TurnId,
+        AgentProgressReport, AgentProgressStage, AgentState, AgentStateTransition, ThreadId,
+        TurnId,
     };
     use crate::model_config::AgentRoleId;
 

@@ -2,7 +2,7 @@ use super::super::host::AgentLifecycleAdapter;
 use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentCommand, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentState, CloseLifecycleRequest,
+    AgentSnapshotTransition, AgentState, CloseLifecycleRequest,
 };
 use super::AgentLoop;
 use crate::AgentRoleId;

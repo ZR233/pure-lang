@@ -1,34 +1,11 @@
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
-
 use crate::AgentRoleId;
 use crate::agent_runtime::{ThreadId, TurnId};
 
-use super::AgentState;
+use super::{AgentIdentity, AgentSnapshot, AgentState};
 use super::{mailbox::*, snapshot::*};
-
-/// runtime event 转换为 AgentCommand 时使用的瞬时活动更新。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum AgentActivityUpdate {
-    Running,
-    WaitingTool,
-    WaitingInteraction { interaction_id: String },
-}
-
-/// agent 最新进度阶段；`ReadyForReview` 仅由产品的 durable completion 路径提升。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentProgressStage {
-    Exploring,
-    Implementing,
-    Verifying,
-    Blocked,
-    ReadyForCompletion,
-    ReadyForReview,
-}
 
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
 #[derive(Debug, Clone)]

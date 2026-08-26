@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// 没有 active 或 queued Turn 的 Agent。
+/// 已拒绝新工作、正在释放资源的 Agent。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IdleAgentState;
+#[serde(deny_unknown_fields)]
+pub struct ClosingAgentState;
 
-impl IdleAgentState {
+impl ClosingAgentState {
     pub fn new() -> Self {
         Self
     }

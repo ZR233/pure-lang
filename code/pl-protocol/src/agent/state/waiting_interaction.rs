@@ -1,21 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+use crate::TurnId;
+
+/// 等待指定用户 Interaction 的 Agent。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StudioWaitingInteractionAgent {
-    turn_id: String,
+pub struct WaitingInteractionAgentState {
+    turn_id: TurnId,
     interaction_id: String,
 }
 
-impl StudioWaitingInteractionAgent {
-    pub fn new(turn_id: impl Into<String>, interaction_id: impl Into<String>) -> Self {
+impl WaitingInteractionAgentState {
+    pub fn new(turn_id: TurnId, interaction_id: String) -> Self {
         Self {
-            turn_id: turn_id.into(),
-            interaction_id: interaction_id.into(),
+            turn_id,
+            interaction_id,
         }
     }
 
-    pub fn turn_id(&self) -> &str {
+    pub fn turn_id(&self) -> &TurnId {
         &self.turn_id
     }
 

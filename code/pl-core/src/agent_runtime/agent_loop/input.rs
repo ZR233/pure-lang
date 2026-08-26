@@ -1,8 +1,8 @@
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentCommand, AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest,
-    AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSubmitRequest,
-    AgentTurnSubmitPolicy, DurableMailboxEnvelope, TurnId,
+    AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshotTransition,
+    AgentSubmitRequest, AgentTurnSubmitPolicy, DurableMailboxEnvelope, TurnId,
 };
 use super::AgentLoop;
 

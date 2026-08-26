@@ -1,4 +1,4 @@
-use super::super::{AgentRuntimeEventKind, AgentRuntimeHost};
+use super::super::{AgentRuntimeEventKind, AgentRuntimeHost, AgentSnapshotTransition};
 use super::AgentLoop;
 use super::running_turn::{TurnCompletion, TurnSessionDisposition, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;

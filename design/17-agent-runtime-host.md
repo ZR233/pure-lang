@@ -26,6 +26,17 @@ Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling
 | Closing | Closed | Faulted
 ```
 
+该状态以及 `AgentIdentity`、`AgentSnapshot`、进度 checkpoint、最近 Turn 结果和它们使用的
+`ThreadId`、`TurnId`、`AgentRoleId` 都是跨产品协议事实，唯一类型定义位于 `pl-protocol`。
+`pl-core` 只拥有 `AgentCommand`、纯转换 trait、ThreadActor 与命令编排，不保存一套同形 runtime
+DTO；Studio、Bridge 与产品宿主直接序列化该协议 union，也不得再声明 `StudioAgentState` 或把状态
+映射为字符串字段。模型 token usage 同样由 `pl-protocol` 定义，`pl-model` 只生产和消费这一类型。
+
+状态数据与转换行为的边界固定为：`pl-protocol::AgentState` 只提供无副作用查询，
+`pl-core::AgentStateTransition::decide` 处理 `AgentCommand`，
+`pl-core::AgentSnapshotTransition::transition` 原子替换 snapshot 中的状态。产品层不能自行重放
+variant 映射或直接改写 snapshot 字段。
+
 `AgentState` 的每个 variant 承载独立 state struct；Running、WaitingTool、WaitingInteraction 与
 Cancelling 必须携带 active Turn identity，WaitingInteraction 还携带 Interaction identity，Faulted
 携带 typed error 和可选诊断 Turn。ThreadActor 只接受 `AgentCommand`，由状态机返回 next state 与

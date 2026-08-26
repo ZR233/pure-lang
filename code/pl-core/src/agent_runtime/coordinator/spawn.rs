@@ -1,5 +1,8 @@
 use super::super::host::{PersistenceClass, initial_transcript_mutation};
-use super::super::{AgentCommand, AgentFaultClassification, AgentIdentity, ThreadActorState};
+use super::super::{
+    AgentCommand, AgentFaultClassification, AgentIdentity, AgentSnapshotTransition,
+    ThreadActorState,
+};
 use super::*;
 
 enum SpawnCompensation {

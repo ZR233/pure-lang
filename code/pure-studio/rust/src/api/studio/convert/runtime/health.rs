@@ -18,10 +18,10 @@ pub(crate) fn bridge_agent_directory_entry(
         depth: agent.depth,
         state: bridge_agent_state(agent.state),
         progress: agent.progress.map(|progress| BridgeAgentProgressDto {
-            stage: progress.stage,
-            summary: progress.summary,
-            next_step: progress.next_step,
-            revision: progress.revision,
+            stage: progress_stage_label(progress.report.stage).to_string(),
+            summary: progress.report.summary,
+            next_step: progress.report.next_step,
+            revision: progress.report.revision,
             updated_at: progress.updated_at,
         }),
         updated_at: agent.updated_at,
@@ -29,37 +29,44 @@ pub(crate) fn bridge_agent_directory_entry(
     }
 }
 
-fn bridge_agent_state(state: StudioAgentState) -> BridgeAgentState {
+fn bridge_agent_state(state: AgentState) -> BridgeAgentState {
     match state {
-        StudioAgentState::Idle(_) => BridgeAgentState::Idle(BridgeIdleAgent {}),
-        StudioAgentState::Queued(value) => BridgeAgentState::Queued(BridgeQueuedAgent {
+        AgentState::Idle(_) => BridgeAgentState::Idle(BridgeIdleAgent {}),
+        AgentState::Queued(value) => BridgeAgentState::Queued(BridgeQueuedAgent {
             turn_id: value.turn_id().to_string(),
         }),
-        StudioAgentState::Running(value) => BridgeAgentState::Running(BridgeRunningAgent {
+        AgentState::Running(value) => BridgeAgentState::Running(BridgeRunningAgent {
             turn_id: value.turn_id().to_string(),
         }),
-        StudioAgentState::WaitingTool(value) => {
-            BridgeAgentState::WaitingTool(BridgeWaitingToolAgent {
-                turn_id: value.turn_id().to_string(),
-            })
-        }
-        StudioAgentState::WaitingInteraction(value) => {
+        AgentState::WaitingTool(value) => BridgeAgentState::WaitingTool(BridgeWaitingToolAgent {
+            turn_id: value.turn_id().to_string(),
+        }),
+        AgentState::WaitingInteraction(value) => {
             BridgeAgentState::WaitingInteraction(BridgeWaitingInteractionAgent {
                 turn_id: value.turn_id().to_string(),
                 interaction_id: value.interaction_id().to_string(),
             })
         }
-        StudioAgentState::Cancelling(value) => {
-            BridgeAgentState::Cancelling(BridgeCancellingAgent {
-                turn_id: value.turn_id().to_string(),
-            })
-        }
-        StudioAgentState::Closing(_) => BridgeAgentState::Closing(BridgeClosingAgent {}),
-        StudioAgentState::Closed(_) => BridgeAgentState::Closed(BridgeClosedAgent {}),
-        StudioAgentState::Faulted(value) => BridgeAgentState::Faulted(BridgeFaultedAgent {
-            error: bridge_state_error(value.error()),
-            diagnostic_turn_id: value.diagnostic_turn_id().map(ToOwned::to_owned),
+        AgentState::Cancelling(value) => BridgeAgentState::Cancelling(BridgeCancellingAgent {
+            turn_id: value.turn_id().to_string(),
         }),
+        AgentState::Closing(_) => BridgeAgentState::Closing(BridgeClosingAgent {}),
+        AgentState::Closed(_) => BridgeAgentState::Closed(BridgeClosedAgent {}),
+        AgentState::Faulted(value) => BridgeAgentState::Faulted(BridgeFaultedAgent {
+            error: bridge_state_error(value.error()),
+            diagnostic_turn_id: value.turn_id().map(ToString::to_string),
+        }),
+    }
+}
+
+fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
+    match stage {
+        AgentProgressStage::Exploring => "exploring",
+        AgentProgressStage::Implementing => "implementing",
+        AgentProgressStage::Verifying => "verifying",
+        AgentProgressStage::Blocked => "blocked",
+        AgentProgressStage::ReadyForCompletion => "readyForCompletion",
+        AgentProgressStage::ReadyForReview => "readyForReview",
     }
 }
 

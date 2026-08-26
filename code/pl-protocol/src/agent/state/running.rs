@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
-/// 已确定下一 Turn、等待启动的 Agent。
+/// 正在执行模型或本地编排的 Agent。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct QueuedAgentState {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunningAgentState {
     turn_id: TurnId,
 }
 
-impl QueuedAgentState {
+impl RunningAgentState {
     pub fn new(turn_id: TurnId) -> Self {
         Self { turn_id }
     }

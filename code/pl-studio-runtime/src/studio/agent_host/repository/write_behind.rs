@@ -1258,9 +1258,9 @@ mod tests {
     use std::time::Duration;
 
     use pl_core::{
-        AgentCommand, AgentRuntimeEvent, AgentRuntimeEventKind, AgentTurnOutcome,
-        DurableCommitFacts, DurableMailboxEnvelope, MailboxBudgetAction, MailboxDeliveryState,
-        MailboxInputPayload, TurnId,
+        AgentCommand, AgentRuntimeEvent, AgentRuntimeEventKind, AgentSnapshotTransition,
+        AgentTurnOutcome, DurableCommitFacts, DurableMailboxEnvelope, MailboxBudgetAction,
+        MailboxDeliveryState, MailboxInputPayload, TurnId,
     };
     use pl_model::TokenUsage;
     use pl_protocol::{

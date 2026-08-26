@@ -5,8 +5,8 @@ use pl_core::{
 use pl_trace::{TraceEvent, TraceEventKind};
 use tokio::sync::watch;
 
+use crate::StudioAgentDirectoryEntry;
 use crate::config::StudioRole;
-use crate::{StudioAgentDirectoryEntry, StudioAgentProgressRuntime};
 
 use crate::studio::ProductEventBus;
 use crate::studio::task_coordinator::{
@@ -16,7 +16,6 @@ use crate::studio::task_coordinator::{
 use super::super::resources::StudioAgentResources;
 use super::super::wait_for_runtime;
 use super::continuation::submit_executor_continuation;
-use super::mapping::studio_agent_state;
 use super::planner_wake::materialize_pending_task_planner_wakes;
 
 pub(super) struct StudioAgentEventProjector {
@@ -304,10 +303,7 @@ impl StudioAgentEventProjector {
         if let Some(mut thread) = self.product_events.thread_snapshot(thread_id) {
             thread.status = super::super::repository::labels::thread_status(&snapshot.state);
             thread.updated_at = thread.updated_at.max(snapshot.updated_at);
-            let progress = snapshot
-                .progress
-                .as_ref()
-                .map(StudioAgentProgressRuntime::from);
+            let progress = snapshot.progress.clone();
             let summary_age_seconds = u64::try_from(
                 crate::studio::ids::unix_seconds()
                     .saturating_sub(
@@ -340,7 +336,7 @@ impl StudioAgentEventProjector {
                         .as_ref()
                         .map(|progress| progress.report.summary.clone()),
                     depth: snapshot.identity.depth,
-                    state: studio_agent_state(&snapshot.state),
+                    state: snapshot.state.clone(),
                     progress,
                     updated_at: snapshot.updated_at,
                     summary_age_seconds,

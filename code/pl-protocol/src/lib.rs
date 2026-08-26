@@ -1,6 +1,8 @@
+mod agent;
 mod billing;
 mod error;
 mod event;
+mod id;
 mod interaction;
 mod labeled;
 mod mcp;
@@ -16,6 +18,8 @@ mod tool;
 mod turn;
 mod turn_failure;
 
+pub use agent::*;
+pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
     InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics,
     InferenceTokenUsage, ModelPricingSnapshot, TurnBillingRecord,
@@ -28,6 +32,7 @@ pub use event::{
     TokenUsageSnapshot, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
     UserQuestionOption,
 };
+pub use id::{AgentRoleId, ThreadId, TurnId};
 pub use interaction::*;
 pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};

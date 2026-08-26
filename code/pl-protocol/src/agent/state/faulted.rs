@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
-use pl_protocol::StateError;
+use crate::{StateError, TurnId};
 
 /// Faulted 状态的稳定恢复分类；旧快照缺少该字段时保持未知并拒绝自动恢复。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub enum AgentFaultClassification {
     RecoverableRuntime,
     RecoverableProtocol,

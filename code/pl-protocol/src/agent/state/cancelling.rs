@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
-/// 等待工具或 child Agent 返回的 Agent。
+/// 正在收束取消请求的 Agent。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct WaitingToolAgentState {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CancellingAgentState {
     turn_id: TurnId,
 }
 
-impl WaitingToolAgentState {
+impl CancellingAgentState {
     pub fn new(turn_id: TurnId) -> Self {
         Self { turn_id }
     }

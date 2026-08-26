@@ -6,8 +6,8 @@ use super::host::{AgentCommitObserver, PersistenceClass, ThreadRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentCommand, AgentCommittedEvent, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentState, AgentTurnOutcome,
-    MailboxDeliveryState, RestoredAgentRuntime, ThreadId, TurnId,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshotTransition, AgentState,
+    AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, ThreadId, TurnId,
 };
 use crate::thread_event::{project_runtime_event, runtime_event_thread_id};
 use crate::{ThreadEventBus, ThreadEventBusHandle, ThreadEventOptions};

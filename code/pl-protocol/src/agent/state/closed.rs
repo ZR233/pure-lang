@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// 已拒绝新工作、正在释放资源的 Agent。
+/// 已完成资源释放的 Agent 终态。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ClosingAgentState;
+#[serde(deny_unknown_fields)]
+pub struct ClosedAgentState;
 
-impl ClosingAgentState {
+impl ClosedAgentState {
     pub fn new() -> Self {
         Self
     }

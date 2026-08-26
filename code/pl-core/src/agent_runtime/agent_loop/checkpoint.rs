@@ -5,8 +5,8 @@ use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentActivityUpdate, AgentCommand, AgentInferenceCommit, AgentProgressCheckpoint,
     AgentProgressReport, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
-    AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState, ThreadId,
-    ThreadMutation, TurnId,
+    AgentRuntimeResult, AgentSnapshotTransition, AgentTurnCheckpoint, DurableCommitFacts,
+    MailboxDeliveryState, ThreadId, ThreadMutation, TurnId,
 };
 use super::AgentLoop;
 use super::commit::{CommitPublication, PendingCommit};

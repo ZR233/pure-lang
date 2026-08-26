@@ -77,6 +77,7 @@ macro_rules! string_id {
 }
 
 string_id!(ProviderId, "provider id");
-string_id!(AgentRoleId, "agent role id");
 string_id!(ModelCatalogId, "model catalog id");
 string_id!(ProviderPresetId, "provider preset id");
+
+pub use pl_protocol::AgentRoleId;

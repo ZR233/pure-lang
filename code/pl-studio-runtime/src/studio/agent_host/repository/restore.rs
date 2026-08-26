@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use pl_core::{
     AgentCommand, AgentFaultClassification, AgentIdentity, AgentRecoveryTarget, AgentRoleId,
-    AgentSession, AgentSnapshot, AgentState, AgentTurnOutcome, DurableMailboxEnvelope,
-    FaultedAgentState, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
-    ThreadContextState, ThreadId,
+    AgentSession, AgentSnapshot, AgentState, AgentStateTransition, AgentTurnOutcome,
+    DurableMailboxEnvelope, FaultedAgentState, RestoredAgentRuntime, RestoredThreadSnapshot,
+    ThreadActorState, ThreadContextState, ThreadId,
 };
 use pl_protocol::{
     PureError, ThreadItem, ThreadItemState, ThreadRuntimeSnapshot, ThreadRuntimeUsage,

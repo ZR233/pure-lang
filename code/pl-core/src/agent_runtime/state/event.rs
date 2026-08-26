@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_runtime::{ThreadId, TurnId};
 
-use super::{lifecycle::*, mailbox::*, snapshot::*};
+use super::{AgentActivityUpdate, AgentSnapshot, AgentTurnOutcome, mailbox::*};
 
 /// 提交后广播的 framework runtime 事件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +69,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::{AgentIdentity, AgentRegistration, ThreadContextState};
 
     #[test]
     fn boxed_snapshot_keeps_event_wire_flat_and_enum_compact() {

@@ -628,7 +628,7 @@ mod tests {
 
     use super::*;
     use crate::agent_runtime::{
-        AgentCommand, AgentIdentity, AgentRecoveryTarget, AgentTurnOutcome,
+        AgentCommand, AgentIdentity, AgentRecoveryTarget, AgentSnapshotTransition, AgentTurnOutcome,
     };
 
     #[test]

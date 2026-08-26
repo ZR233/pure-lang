@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
-/// 正在收束取消请求的 Agent。
+/// 已确定下一 Turn、等待启动的 Agent。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CancellingAgentState {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueuedAgentState {
     turn_id: TurnId,
 }
 
-impl CancellingAgentState {
+impl QueuedAgentState {
     pub fn new(turn_id: TurnId) -> Self {
         Self { turn_id }
     }

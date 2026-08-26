@@ -513,16 +513,6 @@ pub struct StudioBudgetUsageRuntime {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioAgentProgressRuntime {
-    pub stage: String,
-    pub summary: String,
-    pub next_step: String,
-    pub revision: u64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct StudioAgentDirectoryEntry {
     pub id: String,
     pub thread_id: String,
@@ -533,8 +523,8 @@ pub struct StudioAgentDirectoryEntry {
     pub task: String,
     pub summary: Option<String>,
     pub depth: u32,
-    pub state: crate::StudioAgentState,
-    pub progress: Option<StudioAgentProgressRuntime>,
+    pub state: pl_protocol::AgentState,
+    pub progress: Option<pl_protocol::AgentProgressCheckpoint>,
     pub updated_at: i64,
     pub summary_age_seconds: u64,
 }

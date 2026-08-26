@@ -6,7 +6,6 @@ mod coordinator;
 mod directory;
 mod handle;
 mod host;
-mod id;
 mod policy;
 mod runtime;
 mod state;
@@ -22,7 +21,7 @@ pub use host::{
     SpawnRollbackReason, ThreadCommit, ThreadContextMutation, ThreadMutation,
     ThreadProjectionCommit, ThreadRepository,
 };
-pub use id::{ThreadId, TurnId};
+pub use pl_protocol::{ThreadId, TurnId};
 pub use policy::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentTargetSelector, ToolEffectSet,
     TurnFinalizationPolicy,
