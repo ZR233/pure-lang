@@ -59,6 +59,8 @@ struct TestRepository {
     fail_fault: Arc<Mutex<bool>>,
     fail_turn_queue: Arc<Mutex<bool>>,
     fail_turn_started: Arc<Mutex<bool>>,
+    fail_durability: Arc<Mutex<bool>>,
+    durable_barriers: Arc<Mutex<Vec<(ThreadId, u64)>>>,
 }
 
 impl TestRepository {
@@ -76,6 +78,8 @@ impl TestRepository {
             fail_fault: Arc::new(Mutex::new(false)),
             fail_turn_queue: Arc::new(Mutex::new(false)),
             fail_turn_started: Arc::new(Mutex::new(false)),
+            fail_durability: Arc::new(Mutex::new(false)),
+            durable_barriers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -111,6 +115,10 @@ impl TestRepository {
 
     fn fail_next_turn_queue_commit(&self) {
         *self.fail_turn_queue.lock().unwrap() = true;
+    }
+
+    fn fail_next_durability_barrier(&self) {
+        *self.fail_durability.lock().unwrap() = true;
     }
 
     fn state(&self, id: &ThreadId) -> ThreadActorState {
@@ -245,10 +253,18 @@ impl ThreadRepository for TestRepository {
 
     async fn await_durable(
         &self,
-        _thread_id: &ThreadId,
-        _revision: u64,
+        thread_id: &ThreadId,
+        revision: u64,
     ) -> std::result::Result<(), Self::Error> {
-        Ok(())
+        self.durable_barriers
+            .lock()
+            .unwrap()
+            .push((thread_id.clone(), revision));
+        if std::mem::take(&mut *self.fail_durability.lock().unwrap()) {
+            Err(TestError("durability barrier failed".to_string()))
+        } else {
+            Ok(())
+        }
     }
 
     fn pending_commit_count(&self) -> usize {
@@ -2384,7 +2400,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
 #[tokio::test]
 async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
     let repository = TestRepository::empty();
-    let host = TestHost::new(repository, FactoryMode::Fail);
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
     let root = ThreadId::new("root").unwrap();
@@ -2421,6 +2437,10 @@ async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
     ));
     assert!(handle.thread_snapshot(&root).is_err());
     assert!(handle.thread_snapshot(&child).is_err());
+    assert_eq!(
+        repository.durable_barriers.lock().unwrap().as_slice(),
+        &[(child.clone(), 2), (root.clone(), 2), (child, 3), (root, 3),]
+    );
     runtime.shutdown().await.unwrap();
 }
 
@@ -2589,6 +2609,29 @@ async fn closing_commit_failure_rolls_back_prepared_resources() {
     assert_eq!(
         host.lifecycle.close_rollbacks.lock().unwrap().as_slice(),
         &[root]
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn close_durability_failure_prevents_external_resource_commit() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    repository.fail_next_durability_barrier();
+
+    let error = handle.close(root.clone()).await.unwrap_err();
+
+    assert!(error.to_string().contains("durability barrier failed"));
+    assert!(host.lifecycle.close_order.lock().unwrap().is_empty());
+    assert_eq!(
+        host.lifecycle.close_rollbacks.lock().unwrap().as_slice(),
+        std::slice::from_ref(&root)
     );
     runtime.shutdown().await.unwrap();
 }

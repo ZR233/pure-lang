@@ -1,4 +1,4 @@
-use super::super::host::AgentLifecycleAdapter;
+use super::super::host::{AgentLifecycleAdapter, ThreadRepository};
 use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentCommand, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
@@ -149,17 +149,37 @@ where
             return Err(error);
         }
         self.stop_active_turn();
-        if let Err(error) = self.host.lifecycle().commit_close(&lease).await {
+        let close_result = match self
+            .host
+            .repository()
+            .await_durable(
+                &self.state.snapshot.identity.id,
+                self.state.snapshot.revision,
+            )
+            .await
+        {
+            Ok(()) => self
+                .host
+                .lifecycle()
+                .commit_close(&lease)
+                .await
+                .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string())),
+            Err(error) => Err(AgentRuntimeError::Repository(error.to_string())),
+        };
+        if let Err(error) = close_result {
             let rollback = self.host.lifecycle().rollback_close(lease).await;
-            let (reason, compensation) = match rollback {
-                Ok(()) => (error.to_string(), CloseCompensation::Restored),
+            let (return_error, compensation) = match rollback {
+                Ok(()) => (error, CloseCompensation::Restored),
                 Err(rollback_error) => {
                     let reason = format!("{error}; close rollback failed: {rollback_error}");
-                    (reason.clone(), CloseCompensation::Faulted { reason })
+                    (
+                        AgentRuntimeError::Lifecycle(reason.clone()),
+                        CloseCompensation::Faulted { reason },
+                    )
                 }
             };
             self.persist_close_compensation(compensation).await?;
-            return Err(AgentRuntimeError::Lifecycle(reason));
+            return Err(return_error);
         }
         let mut closed = self.state.clone();
         closed.pending_inputs.clear();
@@ -240,9 +260,9 @@ where
         Ok(())
     }
 
-    pub(super) async fn shutdown(&mut self) -> AgentRuntimeResult<()> {
+    pub(super) async fn shutdown(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
         if self.active.is_none() {
-            return Ok(());
+            return Ok(self.state.snapshot.clone());
         }
         let result = self
             .interrupt_active_turn(pl_protocol::TurnCancellationCause::RuntimeShutdown)
@@ -250,6 +270,6 @@ where
         if let Err(error) = &result {
             self.fault(error.to_string()).await;
         }
-        result
+        result.map(|()| self.state.snapshot.clone())
     }
 }

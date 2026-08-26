@@ -122,7 +122,7 @@ async fn run_coordinator<H>(
                 let _ = reply.send(result);
             }
             CoordinatorCommand::EvictAgent { agent_id, reply } => {
-                let result = evict_agent(&actors, &runtime, &agent_id).await;
+                let result = evict_agent(&host, &actors, &runtime, &agent_id).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::Spawn { request, reply } => {
@@ -134,7 +134,7 @@ async fn run_coordinator<H>(
                 let _ = reply.send(result);
             }
             CoordinatorCommand::Retire { agent_id, reply } => {
-                let result = retire_agent_tree(&actors, &runtime, &agent_id).await;
+                let result = retire_agent_tree(&host, &actors, &runtime, &agent_id).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::List { reply } => {
@@ -144,7 +144,7 @@ async fn run_coordinator<H>(
                 let _ = reply.send(start_pending_inputs(&actors).await);
             }
             CoordinatorCommand::Shutdown { reply } => {
-                let result = shutdown_agents(&actors).await;
+                let result = shutdown_agents(&host, &actors).await;
                 actors.write().await.clear();
                 let _ = reply.send(result);
                 break;
@@ -157,15 +157,19 @@ async fn run_coordinator<H>(
     }
 }
 
-async fn shutdown_agents(actors: &AgentRegistry) -> AgentRuntimeResult<()> {
+async fn shutdown_agents<H>(host: &H, actors: &AgentRegistry) -> AgentRuntimeResult<()>
+where
+    H: AgentRuntimeHost,
+{
     let mut first_error = None;
     for actor in actor_handles(actors).await {
         let (reply, receiver) = oneshot::channel();
         let result = match actor.send(AgentLoopCommand::Shutdown { reply }).await {
-            Ok(()) => receiver
-                .await
-                .map_err(|_| AgentRuntimeError::ChannelClosed)
-                .and_then(|result| result),
+            Ok(()) => match receiver.await {
+                Ok(Ok(snapshot)) => await_snapshot_durable(host, &snapshot).await,
+                Ok(Err(error)) => Err(error),
+                Err(_) => Err(AgentRuntimeError::ChannelClosed),
+            },
             Err(error) => Err(error),
         };
         if first_error.is_none() {
@@ -213,15 +217,19 @@ async fn close_agent_tree(
     close_snapshots(actors, agent_id, &close_order).await
 }
 
-async fn retire_agent_tree(
+async fn retire_agent_tree<H>(
+    host: &H,
     actors: &AgentRegistry,
     runtime: &AgentRuntimeHandle,
     agent_id: &ThreadId,
-) -> AgentRuntimeResult<AgentSnapshot> {
+) -> AgentRuntimeResult<AgentSnapshot>
+where
+    H: AgentRuntimeHost,
+{
     let close_order = agent_tree_snapshots(actors, agent_id).await?;
     let target = close_snapshots(actors, agent_id, &close_order).await?;
     for snapshot in close_order {
-        evict_agent(actors, runtime, &snapshot.identity.id).await?;
+        evict_agent(host, actors, runtime, &snapshot.identity.id).await?;
     }
     Ok(target)
 }
@@ -379,11 +387,15 @@ where
 }
 
 /// 淘汰一个空闲驻留 actor：通知 loop 退出并从 registry/directory 移除。
-async fn evict_agent(
+async fn evict_agent<H>(
+    host: &H,
     actors: &AgentRegistry,
     runtime: &AgentRuntimeHandle,
     agent_id: &ThreadId,
-) -> AgentRuntimeResult<()> {
+) -> AgentRuntimeResult<()>
+where
+    H: AgentRuntimeHost,
+{
     let snapshot = snapshot_for(actors, agent_id).await?;
     if matches!(
         snapshot.state,
@@ -409,9 +421,10 @@ async fn evict_agent(
         .send(AgentLoopCommand::Shutdown { reply })
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)?;
-    receiver
+    let final_snapshot = receiver
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)??;
+    await_snapshot_durable(host, &final_snapshot).await?;
     actors.write().await.remove(agent_id);
     runtime.directory.remove(agent_id);
     runtime
@@ -419,4 +432,14 @@ async fn evict_agent(
         .remove_thread(agent_id.as_str())
         .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     Ok(())
+}
+
+async fn await_snapshot_durable<H>(host: &H, snapshot: &AgentSnapshot) -> AgentRuntimeResult<()>
+where
+    H: AgentRuntimeHost,
+{
+    host.repository()
+        .await_durable(&snapshot.identity.id, snapshot.revision)
+        .await
+        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
 }
