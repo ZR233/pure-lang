@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod codegen;
+#[cfg(target_os = "linux")]
+mod linux;
+mod web;
 
 const PUB_FINGERPRINT_FILE: &str = "pure-xtask-pub.sha256";
 
@@ -127,7 +130,20 @@ pub(crate) fn check_gui_generated() -> Result<()> {
 pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::studio_app_dir(&workspace_root);
+    let integration_target = options
+        .integration
+        .then(DesktopTarget::current)
+        .transpose()?;
     print_context(&workspace_root, &app_dir);
+    if let Some(target) = integration_target {
+        ensure_desktop_build_environment(target)?;
+    }
+    let web_environment = if options.web_integration {
+        ensure_web_integration_environment(&app_dir)?;
+        Some(web::WebDriverEnvironment::discover()?)
+    } else {
+        None
+    };
     GeneratedSourcesPolicy::RegenerateAndCheck.prepare(&workspace_root, &app_dir)?;
     run_tool("cargo", &["fmt", "--all", "--check"], &workspace_root)?;
     run_tool(
@@ -160,10 +176,29 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
         &["test", "-p", "pl-studio-bridge"],
         &workspace_root,
     )?;
-    if options.integration {
-        run_gui_integration(&workspace_root, &app_dir, DesktopTarget::current()?)?;
+    if let Some(target) = integration_target {
+        run_gui_integration(&workspace_root, &app_dir, target)?;
+    }
+    if let Some(environment) = web_environment {
+        run_web_gui_integration(&workspace_root, &app_dir, &environment)?;
     }
     Ok(())
+}
+
+fn ensure_desktop_build_environment(target: DesktopTarget) -> Result<()> {
+    match target {
+        DesktopTarget::Linux => {
+            #[cfg(target_os = "linux")]
+            {
+                linux::ensure_native_build_environment()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Ok(())
+            }
+        }
+        DesktopTarget::Windows | DesktopTarget::Macos => Ok(()),
+    }
 }
 
 fn run_gui_integration(workspace_root: &Path, app_dir: &Path, target: DesktopTarget) -> Result<()> {
@@ -192,6 +227,95 @@ fn integration_drive_args(target: DesktopTarget) -> Result<Vec<&'static str>> {
         device,
         "--no-pub",
     ])
+}
+
+fn run_web_gui_integration(
+    workspace_root: &Path,
+    app_dir: &Path,
+    environment: &web::WebDriverEnvironment,
+) -> Result<()> {
+    let artifacts_dir = app_dir.join("build").join("web-integration-artifacts");
+    fs::create_dir_all(&artifacts_dir)
+        .with_context(|| format!("failed to create {}", artifacts_dir.display()))?;
+    let driver = environment.start(&artifacts_dir)?;
+    let driver_port = driver.port().to_string();
+    let browser = environment
+        .browser()
+        .to_str()
+        .context("Chrome/Chromium executable path must contain valid Unicode")?;
+    let run_result = run_flutter(
+        workspace_root,
+        app_dir,
+        &web_integration_drive_args(&driver_port, browser),
+        DemoMode::Demo,
+    );
+    let driver_result = driver.stop(run_result.is_err());
+    match (run_result, driver_result) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Ok(()), Err(driver_error)) => Err(driver_error),
+        (Err(run_error), Ok(driver_output)) => {
+            if !driver_output.trim().is_empty() {
+                eprintln!("ChromeDriver 原始输出:\n{driver_output}");
+            }
+            Err(run_error)
+        }
+        (Err(run_error), Err(driver_error)) => Err(run_error.context(format!(
+            "ChromeDriver cleanup also failed: {driver_error:#}"
+        ))),
+    }
+}
+
+fn web_integration_drive_args<'a>(driver_port: &'a str, browser: &'a str) -> Vec<&'a str> {
+    vec![
+        "drive",
+        "--driver",
+        "test_driver/integration_test.dart",
+        "--target",
+        "integration_test/studio_smoke_test.dart",
+        "-d",
+        "web-server",
+        "--driver-port",
+        driver_port,
+        "--chrome-binary",
+        browser,
+        "--headless",
+        "--browser-dimension",
+        "1440x900@1",
+        "--no-pub",
+    ]
+}
+
+fn ensure_web_integration_environment(app_dir: &Path) -> Result<()> {
+    let args = [OsString::from("config"), OsString::from("--list")];
+    let display = process::display_command("flutter", &args);
+    let mut command = process::path_command("flutter", &args);
+    command.current_dir(app_dir);
+    let output = command
+        .output()
+        .with_context(|| format!("failed to start command from PATH: {display}"))?;
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "Flutter Web 远程验收环境探测失败。\n命令: {display}\n原始 stdout:\n{stdout}\n原始 stderr:\n{stderr}"
+        );
+    }
+    let config = String::from_utf8_lossy(&output.stdout);
+    if web_support_explicitly_disabled(&config) {
+        bail!("{}", disabled_web_support_diagnostic());
+    }
+    Ok(())
+}
+
+fn web_support_explicitly_disabled(config: &str) -> bool {
+    config
+        .lines()
+        .map(str::trim)
+        .any(|line| line == "enable-web: false")
+}
+
+fn disabled_web_support_diagnostic() -> &'static str {
+    "Flutter Web 远程验收不可用：当前 Flutter SDK 明确配置为 enable-web: false。\n请先运行 'cargo flutter config --enable-web'，再重试 'cargo xtask verify-gui --web-integration'。xtask 不会静默修改用户的全局 Flutter 配置。"
 }
 
 fn linux_graphical_session_available() -> bool {
@@ -246,7 +370,7 @@ fn run_linux_headless_flutter(workspace_root: &Path, app_dir: &Path, args: &[&st
 fn ensure_linux_headless_dependencies(xvfb_run_available: bool) -> Result<()> {
     if !xvfb_run_available {
         bail!(
-            "headless Linux Flutter integration requires xvfb-run; install it with 'sudo apt-get install -y xvfb'"
+            "headless Linux Flutter integration requires xvfb-run. Install the Xvfb package for your distribution (Debian/Ubuntu example: 'sudo apt-get install -y xvfb')"
         );
     }
     Ok(())
@@ -281,6 +405,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
+    ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
     GeneratedSourcesPolicy::UseCurrent.prepare(&workspace_root, &app_dir)?;
 
@@ -360,6 +485,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         bail!("release version does not match pubspec.yaml version {app_version}");
     }
     print_context(&workspace_root, &app_dir);
+    ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
     generated_sources_policy(options.check_generated).prepare(&workspace_root, &app_dir)?;
 
@@ -785,6 +911,47 @@ mod tests {
         assert!(linux.contains(&"--no-pub"));
         assert!(integration_drive_args(DesktopTarget::Macos).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn web_integration_uses_the_headless_demo_driver_target() {
+        assert_eq!(
+            web_integration_drive_args("4567", "/opt/chrome/chrome"),
+            vec![
+                "drive",
+                "--driver",
+                "test_driver/integration_test.dart",
+                "--target",
+                "integration_test/studio_smoke_test.dart",
+                "-d",
+                "web-server",
+                "--driver-port",
+                "4567",
+                "--chrome-binary",
+                "/opt/chrome/chrome",
+                "--headless",
+                "--browser-dimension",
+                "1440x900@1",
+                "--no-pub",
+            ]
+        );
+    }
+
+    #[test]
+    fn explicitly_disabled_web_support_has_an_actionable_non_mutating_hint() {
+        assert!(web_support_explicitly_disabled(
+            "All Settings:\n  enable-web: false\n"
+        ));
+        assert!(!web_support_explicitly_disabled(
+            "All Settings:\n  enable-web: true\n"
+        ));
+        assert!(!web_support_explicitly_disabled(
+            "All Settings:\n  enable-web: (Not set)\n"
+        ));
+
+        let diagnostic = disabled_web_support_diagnostic();
+        assert!(diagnostic.contains("cargo flutter config --enable-web"));
+        assert!(diagnostic.contains("xtask 不会静默修改"));
     }
 
     #[test]

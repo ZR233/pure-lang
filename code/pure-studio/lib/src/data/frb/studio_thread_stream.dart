@@ -450,9 +450,9 @@ StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
 
 StudioTurnState _turnStateFromFrb(frb.BridgeTurnState value) {
   return value.when(
-    queued: (queuedAt) => QueuedStudioTurnState(queuedAt: queuedAt),
+    queued: (queuedAt) => QueuedStudioTurnState(queuedAt: _frbInt(queuedAt)),
     running: (startedAt, phase) => RunningStudioTurnState(
-      startedAt: startedAt,
+      startedAt: _frbInt(startedAt),
       activity: switch (phase) {
         frb.BridgeTurnPhase.preparing => StudioTurnActivity.preparing,
         frb.BridgeTurnPhase.thinking => StudioTurnActivity.thinking,
@@ -463,8 +463,8 @@ StudioTurnState _turnStateFromFrb(frb.BridgeTurnState value) {
       },
     ),
     completed: (startedAt, completedAt, completion) => CompletedStudioTurnState(
-      startedAt: startedAt,
-      completedAt: completedAt,
+      startedAt: _frbNullableInt(startedAt),
+      completedAt: _frbInt(completedAt),
       completion: switch (completion) {
         frb.BridgeTurnCompletion.normal => StudioTurnCompletion.normal,
         frb.BridgeTurnCompletion.interactionRequested =>
@@ -473,20 +473,20 @@ StudioTurnState _turnStateFromFrb(frb.BridgeTurnState value) {
     ),
     cancelled: (startedAt, requestedAt, completedAt, cause) =>
         CancelledStudioTurnState(
-          startedAt: startedAt,
-          requestedAt: requestedAt,
-          completedAt: completedAt,
+          startedAt: _frbNullableInt(startedAt),
+          requestedAt: _frbInt(requestedAt),
+          completedAt: _frbInt(completedAt),
           cause: _turnCancellationCauseFromFrb(cause),
         ),
     failed: (startedAt, completedAt, failure) => FailedStudioTurnState(
-      startedAt: startedAt,
-      completedAt: completedAt,
+      startedAt: _frbNullableInt(startedAt),
+      completedAt: _frbInt(completedAt),
       failure: _turnFailureFromFrb(failure),
     ),
     budgetLimited: (startedAt, completedAt, limit, rollover) =>
         BudgetLimitedStudioTurnState(
-          startedAt: startedAt,
-          completedAt: completedAt,
+          startedAt: _frbNullableInt(startedAt),
+          completedAt: _frbInt(completedAt),
           limit: StudioTurnBudgetLimit(
             kind: StudioTurnBudgetLimitKind.values.byName(limit.kind.name),
             usage: StudioTurnBudgetUsage(

@@ -52,11 +52,17 @@
   ```
 
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
-- Linux 首次构建需要系统依赖：`sudo apt-get install -y libgtk-3-dev`（Flutter Linux runner 必需）；Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `PURE_STUDIO_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
+- Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `PURE_STUDIO_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
 - GUI smoke 使用 `cargo xtask run-gui --demo`；需要确定性数据和交互验收时使用 `cargo xtask run-gui --demo --driver`。
 - Driver 命令结束后，其 Flutter、DTD 和 GUI 子进程必须随 Windows Job Object 一起退出，不得残留。
 - 调试和验收 Flutter GUI 时，Flutter Driver 能覆盖的交互必须使用 Flutter Driver，不使用 Computer Use。只有 Driver 无法覆盖且确有必要时，才可使用 Computer Use，以减少对用户鼠标、键盘、窗口焦点和桌面状态的影响。
+
+### Web GUI 远程验收
+
+- `cargo xtask verify-gui --web-integration` 使用纯 Dart demo 和同一套 Flutter integration test 在无头 Chrome/Chromium 中验收布局与交互；它不替代原生 bridge、文件系统、进程、MCP/LSP 或真实 provider 验收。
+- 首次使用先运行 `cargo flutter config --enable-web`，并安装主版本匹配的 Chrome/Chromium 与 ChromeDriver；浏览器不在 PATH 时设置 `CHROME_EXECUTABLE`。xtask 负责发现版本、解析可执行 wrapper/sandbox 载荷、分配临时端口、启动及回收 driver 进程树，失败日志写入 `code/pure-studio/build/web-integration-artifacts`。
+- canonical Web 交互使用 Flutter integration test 与稳定 `ValueKey`；Playwright 等工具只能补充截图、console 或可访问性观察，不能维护第二套 DOM/坐标状态机。
 
 ### GUI 生成文件
 

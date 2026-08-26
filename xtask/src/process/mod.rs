@@ -29,6 +29,17 @@ pub(crate) fn configure_background_command(command: &mut Command) {
     }
 }
 
+pub(crate) fn own_current_process_tree() -> Result<()> {
+    #[cfg(windows)]
+    {
+        windows::own_current_process_tree()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
     print_command_context(command, display);
     let status = command
@@ -40,8 +51,7 @@ pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
 pub(crate) fn run_resident_checked(command: &mut Command, display: &str) -> Result<()> {
     configure_background_command(command);
     print_command_context(command, display);
-    #[cfg(windows)]
-    windows::own_current_process_tree()
+    own_current_process_tree()
         .with_context(|| format!("failed to own resident command process tree: {display}"))?;
 
     command.stdin(Stdio::piped());
@@ -105,7 +115,9 @@ fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
             .code()
             .map(|code| code.to_string())
             .unwrap_or_else(|| "terminated by signal".to_owned());
-        bail!("command failed with exit code {code}: {display}");
+        bail!(
+            "command failed with exit code {code}: {display}; original stdout/stderr was streamed above"
+        );
     }
     Ok(())
 }

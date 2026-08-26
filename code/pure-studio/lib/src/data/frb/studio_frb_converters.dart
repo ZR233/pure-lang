@@ -1568,7 +1568,9 @@ frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
                   TaskRecoveryTurnState.budgetLimited =>
                     frb.BridgeTaskRecoveryTurnState.budgetLimited,
                 },
-                updatedAt: turn.updatedAt.millisecondsSinceEpoch ~/ 1000,
+                updatedAt: PlatformInt64Util.from(
+                  turn.updatedAt.millisecondsSinceEpoch ~/ 1000,
+                ),
                 itemCount: BigInt.from(turn.itemCount),
                 inputCount: BigInt.from(turn.inputCount),
                 toolCount: BigInt.from(turn.toolCount),

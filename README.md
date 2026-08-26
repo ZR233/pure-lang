@@ -175,10 +175,24 @@ cargo test --workspace
 
 ### Flutter 开发
 
-Linux 首次构建需要 GTK runner 依赖；无图形会话的 integration smoke 额外需要 Xvfb：
+Linux 原生构建需要可用的 C/C++ 工具链、CMake、Ninja、pkg-config 与 GTK 3 开发文件；无图形
+会话的 desktop integration smoke 还需要 Xvfb。Debian/Ubuntu 可安装：
 
 ```bash
-sudo apt-get install -y libgtk-3-dev xvfb
+sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev xvfb
+```
+
+xtask 会在 Flutter 构建前用当前 PATH 中的真实工具链编译、链接最小 GTK/C++ 探针。缺少命令、
+C++ 标准库头文件或 GTK 链接库时会报告实际命令和原始输出，不依赖固定 Clang/GCC 版本，也不
+注入机器专用的 include/library 路径。
+
+远程无头 Web 交互验收还需要主版本匹配的 Chrome/Chromium 与 ChromeDriver，并需要显式启用
+Flutter Web。Ubuntu 可使用 `chromium-browser chromium-chromedriver`，Debian 常用
+`chromium chromium-driver`；其他发行版安装等价软件包即可：
+
+```bash
+cargo flutter config --enable-web
+# 浏览器不在 PATH 时，在运行验证前设置 CHROME_EXECUTABLE=/absolute/path/to/chrome
 ```
 
 ```powershell
@@ -193,6 +207,9 @@ cargo xtask verify-gui
 # 在当前 Windows/Linux 桌面目标运行 integration smoke；Linux headless 自动使用 Xvfb
 cargo xtask verify-gui --integration
 
+# 在临时本地端口启动 ChromeDriver，以 Flutter Web demo 跑同一套无头交互 smoke
+cargo xtask verify-gui --web-integration
+
 # 从仓库根目录运行 GUI
 cargo xtask run-gui
 
@@ -205,6 +222,12 @@ Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 r
 ```powershell
 cargo xtask run-gui --demo
 ```
+
+`--web-integration` 只验证纯 Dart demo 的布局、路由、交互与状态投影，不替代桌面 Rust bridge
+或真实 server/model 验收。xtask 自动发现浏览器和 driver、校验主版本、处理 wrapper/sandbox
+封装、选择空闲端口并回收进程树；失败时原始驱动日志保存在
+`code/pure-studio/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
+但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
 
 本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
 

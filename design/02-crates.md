@@ -163,7 +163,7 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 - `cargo dart <args...>`
 - `cargo xtask generate-gui`
 - `cargo xtask check-gui-generated`
-- `cargo xtask verify-gui [--integration]`
+- `cargo xtask verify-gui [--integration] [--web-integration]`
 - `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean] [--check-generated]`
 - `cargo xtask release-gui stage|finalize|verify --version <semver>`
@@ -186,6 +186,27 @@ Windows/Linux 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 
 Linux 存在 `DISPLAY`/`WAYLAND_DISPLAY` 时使用当前图形会话；无图形会话时由 xtask 使用
 `xvfb-run` 启动隔离的 X11 server，并强制软件渲染。headless Linux 缺少 Xvfb 时必须在启动
 Flutter 前失败并给出安装依赖提示，不能静默跳过 integration。
+
+Linux 原生 GUI 的 `run-gui`、`build-gui` 和桌面 integration 在解析 Dart 依赖或启动 Flutter
+前执行同一套隔离预检。预检按 Flutter Linux 实际使用的 Clang、CMake、Ninja、pkg-config 与
+`gtk+-3.0` 链路配置并构建最小 C++ 工程；它只能依赖 PATH、标准工具发现和临时目录，不能写死
+GCC/Clang 版本、系统库目录或通过注入 `LIBRARY_PATH`、`CPLUS_INCLUDE_PATH` 修补特定机器。
+缺少命令、开发头文件、链接库或工具链不匹配时，xtask 必须在产品构建前指出失败阶段、实际
+命令、原始探针输出、所需能力和无版本号的安装建议。探针通过后实际 Flutter/CMake 命令仍继承
+终端 stdout/stderr；底层错误必须原样可见，xtask 只追加命令、工作目录和重试入口上下文。
+
+`verify-gui --web-integration` 在 `web-server` 设备上执行同一套 Flutter integration test，并
+始终编译为 `PURE_STUDIO_DEMO=true`。该入口服务于无桌面会话的远程 agent/CI Widget 交互验证，
+不要求 Linux 原生 C++/GTK 工具链，也不引入第二套 Playwright 选择器或测试状态机。Web 目标只
+覆盖纯 Dart demo 的布局、路由、交互与状态投影；Rust bridge、SQLite、文件系统、子进程、
+MCP/LSP 和真实 provider 仍由桌面 integration 与独立 server/runtime harness 验收。xtask 在
+完整 GUI 门禁前检查当前 Flutter SDK 是否明确关闭 Web；关闭时给出
+`cargo flutter config --enable-web` 修复入口，但不能自行修改用户 Flutter SDK 的全局配置。
+启用后还必须发现版本匹配的 Chrome/Chromium 与 ChromeDriver；xtask 为每次验收选择临时本地
+端口、启动并在完成或失败时回收 ChromeDriver，向 Flutter 传入明确浏览器路径；wrapper 或
+沙箱封装的浏览器必须解析到 driver 实际可执行的载荷，不能写死包版本。失败时保留原始
+ChromeDriver 日志到 `build/web-integration-artifacts`。缺少浏览器/driver 时在完整 GUI 门禁前
+给出安装与 `CHROME_EXECUTABLE` 提示，不要求用户手工驻留 4444 端口。
 
 ## 2.10 数据版本
 

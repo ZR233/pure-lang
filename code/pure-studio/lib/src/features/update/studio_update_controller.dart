@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../data/frb/studio_api.dart' show FrbStudioApi, updaterStateFromFrb;
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../platform/studio_platform.dart';
 import '../../rust/api/studio.dart' as frb;
 
 part 'studio_update_controller.g.dart';
@@ -22,7 +21,7 @@ final studioUpdateApiProvider = Provider<StudioUpdateApi>(
 );
 
 final studioUpdateEnabledProvider = Provider<bool>(
-  (ref) => Platform.isWindows && _isReleaseBuild && !_isDemoBuild,
+  (ref) => isWindowsPlatform && _isReleaseBuild && !_isDemoBuild,
 );
 
 final studioVersionProvider = Provider<String>((ref) => _compiledStudioVersion);
@@ -76,10 +75,7 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
 
   @override
   Future<void> openReleaseNotes(String url) async {
-    await Process.start('rundll32.exe', [
-      'url.dll,FileProtocolHandler',
-      url,
-    ], mode: ProcessStartMode.detached);
+    await openExternalUrl(url);
   }
 }
 

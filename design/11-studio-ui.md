@@ -3,7 +3,9 @@
 ## 11.1 UI 边界
 
 Pure Studio 是 Flutter 桌面应用（Windows 为发布平台，Linux 为开发/验证平台），使用 Material 3、Riverpod、`go_router` 和 typed
-FRB。UI 只能通过 bridge 访问 StudioRuntime，不读取 SQLite 或配置文件。
+FRB。UI 只能通过 bridge 访问 StudioRuntime，不读取 SQLite 或配置文件。Flutter Web 仅是
+`PURE_STUDIO_DEMO` 下的远程 UI 验收目标，不是产品 transport，也不得在 Web 中伪造 bridge、
+SQLite、文件系统、进程管理、MCP/LSP 或 provider 能力。
 
 Flutter 分层保持简单：
 
@@ -281,6 +283,11 @@ directory 增量更新和 selected agent 重建时必须保留。
 - 空正文 provider failure、`Completed { Failed }` / recoverable issue 投影、agent directory 错误保留与
   `task_transition.complete` 门禁拒绝 message 有 widget test；
 - Flutter analyze、widget/integration tests 通过；
+- `cargo xtask verify-gui --web-integration` 在无桌面会话和无原生 GTK/C++ 工具链的环境中，通过
+  Flutter `web-server` 无头设备执行 demo integration；测试继续使用 canonical `ValueKey`，不维护
+  与 Flutter Driver 并行的 Playwright DOM/坐标选择器。Playwright 等浏览器工具如用于外层截图、
+  console 或可访问性检查，只能作为补充观察层，不能替代 Widget 断言或证明原生 runtime；
+  xtask 托管临时 ChromeDriver 并在失败时保留 `build/web-integration-artifacts` 驱动日志；
 - Flutter Driver 验收覆盖侧栏翻页到底、时间线驱逐回源与关机阶段序列；真实 runtime harness
   在隔离 `PURE_STUDIO_HOME` 下验证 write-behind flush、pending 归零、二次启动数据完整与
   进程树清理；

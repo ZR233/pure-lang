@@ -62,6 +62,9 @@ pub(crate) struct VerifyGuiOptions {
     /// Run the current Windows/Linux Flutter integration test through flutter drive.
     #[arg(long)]
     pub(crate) integration: bool,
+    /// Run the demo integration test on Flutter's headless web-server device.
+    #[arg(long)]
+    pub(crate) web_integration: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
@@ -276,6 +279,20 @@ mod tests {
         assert_eq!(
             parse(["xtask", "check-gui-generated"].map(OsString::from))?,
             ParseOutcome::Run(Command::CheckGuiGenerated)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn desktop_and_web_gui_verification_can_be_selected_together() -> Result<()> {
+        assert_eq!(
+            parse(
+                ["xtask", "verify-gui", "--integration", "--web-integration",].map(OsString::from),
+            )?,
+            ParseOutcome::Run(Command::VerifyGui(VerifyGuiOptions {
+                integration: true,
+                web_integration: true,
+            }))
         );
         Ok(())
     }

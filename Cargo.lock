@@ -2874,6 +2874,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
  "minisign-verify",
  "pretty_assertions",
  "semver",
@@ -2881,6 +2882,8 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "sha2 0.10.9",
+ "tempfile",
+ "which",
  "windows-sys 0.61.2",
 ]
 
