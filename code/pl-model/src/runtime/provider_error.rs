@@ -65,6 +65,25 @@ pub(crate) fn openai_error_to_pure(error: OpenAIError) -> PureError {
     }
 }
 
+pub(crate) fn provider_stream_failure(
+    code: Option<&str>,
+    http_status: Option<u16>,
+    retry_after_ms: Option<u64>,
+    message: String,
+) -> PureError {
+    let metadata = ProviderFailureMetadata {
+        code,
+        http_status,
+        retry_after_ms,
+    };
+    let message = redact_secret_like_values(&message);
+    if metadata.is_retryable() {
+        metadata.into_transient(message)
+    } else {
+        metadata.into_permanent(message)
+    }
+}
+
 /// SSE 流中断：传输层根因（连接被掐断/响应体解码失败）按瞬态处理并允许重试；
 /// 纯协议解析错误仍保持 Permanent。
 fn stream_error_to_pure(error: &async_openai::error::StreamError) -> PureError {

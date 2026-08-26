@@ -258,9 +258,19 @@ impl StreamLifecycle {
                 vec![ModelStreamEvent::ResponsesContextItem { item }]
             }
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
-            ModelStreamEvent::Failed { code, message } => {
+            ModelStreamEvent::Failed {
+                code,
+                http_status,
+                retry_after_ms,
+                message,
+            } => {
                 let mut events = self.close_open_blocks();
-                events.push(ModelStreamEvent::Failed { code, message });
+                events.push(ModelStreamEvent::Failed {
+                    code,
+                    http_status,
+                    retry_after_ms,
+                    message,
+                });
                 events
             }
         })

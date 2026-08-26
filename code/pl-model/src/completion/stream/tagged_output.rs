@@ -154,10 +154,20 @@ impl TaggedVisibleOutputAdapter {
                 .into_iter()
                 .chain([ModelStreamEvent::Completed { response_id }])
                 .collect(),
-            ModelStreamEvent::Failed { code, message } => self
+            ModelStreamEvent::Failed {
+                code,
+                http_status,
+                retry_after_ms,
+                message,
+            } => self
                 .flush_all()
                 .into_iter()
-                .chain([ModelStreamEvent::Failed { code, message }])
+                .chain([ModelStreamEvent::Failed {
+                    code,
+                    http_status,
+                    retry_after_ms,
+                    message,
+                }])
                 .collect(),
             event @ (ModelStreamEvent::ToolInputStarted { .. }
             | ModelStreamEvent::ToolInputDelta { .. }

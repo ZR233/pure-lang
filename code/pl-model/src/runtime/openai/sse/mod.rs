@@ -27,6 +27,12 @@ pub struct SseStreamEvent {
     pub item_id: Option<String>,
     pub call_id: Option<String>,
     pub response: Option<serde_json::Value>,
+    pub error: Option<serde_json::Value>,
+    pub code: Option<String>,
+    pub message: Option<String>,
+    pub retry_after_ms: Option<u64>,
+    pub status: Option<serde_json::Value>,
+    pub status_code: Option<serde_json::Value>,
     pub summary_index: Option<i64>,
     pub content_index: Option<i64>,
     pub choices: Option<Vec<ChatStreamChoice>>,
@@ -724,25 +730,94 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             Some(StreamEventBatch::Many(events))
         }
 
-        "response.failed" => Some(StreamEventBatch::Single(ModelStreamEvent::Failed {
-            code: event
-                .response
-                .as_ref()
-                .and_then(|r| r.get("error")?.get("code")?.as_str().map(String::from)),
-            message: event
-                .response
-                .as_ref()
-                .and_then(|r| r.get("error")?.get("message")?.as_str().map(String::from))
-                .unwrap_or_else(|| "response failed".into()),
-        })),
+        "response.failed" => {
+            let response = event.response.as_ref();
+            Some(StreamEventBatch::Single(provider_failure_event(
+                response.and_then(|response| response.get("error")),
+                response.and_then(|response| response.get("code").and_then(|value| value.as_str())),
+                response
+                    .and_then(|response| response.get("message").and_then(|value| value.as_str())),
+                response.and_then(provider_status),
+                response.and_then(|response| {
+                    response
+                        .get("retry_after_ms")
+                        .and_then(|value| value.as_u64())
+                }),
+                "response failed",
+            )))
+        }
 
-        "response.incomplete" => Some(StreamEventBatch::Single(ModelStreamEvent::Failed {
-            code: None,
-            message: "response incomplete".into(),
-        })),
+        "response.incomplete" => {
+            let response = event.response.as_ref();
+            let reason = response
+                .and_then(|response| response.get("incomplete_details")?.get("reason")?.as_str());
+            Some(StreamEventBatch::Single(provider_failure_event(
+                response.and_then(|response| response.get("error")),
+                reason,
+                None,
+                response.and_then(provider_status),
+                None,
+                "response incomplete",
+            )))
+        }
+
+        "error" => Some(StreamEventBatch::Single(provider_failure_event(
+            event.error.as_ref(),
+            event.code.as_deref(),
+            event.message.as_deref(),
+            event
+                .status
+                .as_ref()
+                .and_then(provider_status_value)
+                .or_else(|| event.status_code.as_ref().and_then(provider_status_value)),
+            event.retry_after_ms,
+            "provider stream failed",
+        ))),
 
         _ => None,
     }
+}
+
+fn provider_failure_event(
+    error: Option<&serde_json::Value>,
+    fallback_code: Option<&str>,
+    fallback_message: Option<&str>,
+    fallback_status: Option<u16>,
+    fallback_retry_after_ms: Option<u64>,
+    default_message: &str,
+) -> ModelStreamEvent {
+    ModelStreamEvent::Failed {
+        code: error
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str)
+            .or(fallback_code)
+            .map(ToString::to_string),
+        http_status: error.and_then(provider_status).or(fallback_status),
+        retry_after_ms: error
+            .and_then(|error| error.get("retry_after_ms"))
+            .and_then(serde_json::Value::as_u64)
+            .or(fallback_retry_after_ms),
+        message: error
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .or(fallback_message)
+            .unwrap_or(default_message)
+            .to_string(),
+    }
+}
+
+fn provider_status(value: &serde_json::Value) -> Option<u16> {
+    value
+        .get("status")
+        .or_else(|| value.get("status_code"))
+        .and_then(provider_status_value)
+}
+
+fn provider_status_value(value: &serde_json::Value) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|status| u16::try_from(status).ok())
+        .or_else(|| value.as_str()?.parse().ok())
 }
 
 /// 解析 Responses 流事件携带的工具调用身份。

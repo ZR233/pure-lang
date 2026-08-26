@@ -164,7 +164,7 @@ Responses hosted tools 属于 endpoint 服务能力，不由 URL 字符串在运
 Responses endpoint 不会因未支持的 `programmatic_tool_calling` 返回 400。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
-Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经产生首个可见或 canonical 事件，transport 不得因为后续流错误自动重放并制造重复输出；尚未产生任何事件的流中断（如连接被掐断、响应体解码失败）按瞬态处理，允许在既有重试预算内完整重放，与 13 的运行时错误分类一致。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
+Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；请求级 HTTP 错误、SSE `response.failed` 与顶层 `type:error` 必须进入同一个分类器，进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经产生首个可见或 canonical 事件，transport 不得因为后续流错误自动重放并制造重复输出；尚未产生任何事件的流中断（如连接被掐断、响应体解码失败）按瞬态处理，允许在既有重试预算内完整重放，与 13 的运行时错误分类一致。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
 
 `ProviderFailureKind` 固定为 authentication、authorization、capacity、configuration、transport、
 protocol 与 unknown。`RetryDisposition` 只回答同一次模型请求是否能在尚无副作用时安全重放，

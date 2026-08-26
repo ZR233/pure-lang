@@ -173,6 +173,33 @@ fn chat_success_sse(text: &str) -> String {
     )
 }
 
+#[tokio::test]
+async fn responses_http_terminal_server_error_preserves_retry_metadata() {
+    let body = concat!(
+        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",",
+        "\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, server) = serve_sse_once(body).await;
+    let provider = openai_provider(base_url, ProviderConnectionMode::Http);
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    let error = provider
+        .complete(minimal_request("local-responses"), invocation(event_tx))
+        .await
+        .expect_err("response.failed must surface a typed provider failure");
+    server.await.unwrap();
+
+    let failure = error
+        .provider_failure_ref()
+        .expect("response.failed must preserve provider metadata");
+    assert_eq!(failure.kind, pl_protocol::ProviderFailureKind::Capacity);
+    assert_eq!(failure.code.as_deref(), Some("server_error"));
+    assert_eq!(failure.http_status, None);
+    assert!(failure.retry.is_retryable());
+}
+
 async fn capture_model_http_request(
     mut info: ProviderEndpoint,
     model: ModelInfo,

@@ -19,6 +19,7 @@ mod responses_websocket;
 mod session;
 pub(crate) mod transport_policy;
 
+pub(crate) use provider_error::provider_stream_failure;
 pub use session::ModelSession;
 
 use crate::completion::stream::{

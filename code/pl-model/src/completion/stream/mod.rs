@@ -432,9 +432,18 @@ impl StreamCompletionAccumulator {
                 }
                 self.state = StreamAccumulatorState::Completed(CompletedStream::new());
             }
-            ModelStreamEvent::Failed { code, message } => {
-                let _ = code;
-                let error = PureError::LlmError(message);
+            ModelStreamEvent::Failed {
+                code,
+                http_status,
+                retry_after_ms,
+                message,
+            } => {
+                let error = crate::runtime::provider_stream_failure(
+                    code.as_deref(),
+                    http_status,
+                    retry_after_ms,
+                    message,
+                );
                 self.state = StreamAccumulatorState::Failed(FailedStream::new(error.to_string()));
                 return Err(error);
             }

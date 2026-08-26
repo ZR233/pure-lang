@@ -85,6 +85,8 @@ pub enum ModelStreamEvent {
     },
     Failed {
         code: Option<String>,
+        http_status: Option<u16>,
+        retry_after_ms: Option<u64>,
         message: String,
     },
 }
