@@ -511,9 +511,27 @@ impl StudioRuntime {
         let emitter = self.interaction_emitter(thread_id.clone());
 
         if current.kind() == InteractionKind::PlanConfirmation {
+            let task = self
+                .store
+                .find_latest_task_run_for_root_thread(&thread_id)
+                .await?;
+            let context = crate::error_mapping::StudioDiagnosticContext {
+                operation: "resolvePlanConfirmation",
+                task_run_id: task.as_ref().map(|task| task.id.clone()),
+                thread_id: Some(thread_id),
+                turn_id: Some(current.scope.turn_id.clone()),
+                interaction_id: Some(interaction_id.clone()),
+                state: Some(match current.status() {
+                    InteractionStatus::Pending => "pending",
+                    InteractionStatus::Resolved => "resolved",
+                    InteractionStatus::Cancelled => "cancelled",
+                    InteractionStatus::Expired => "expired",
+                }),
+            };
             return self
                 .resolve_plan_confirmation(interaction_id, current, resolution, emitter)
-                .await;
+                .await
+                .map_err(|error| crate::error_mapping::with_studio_diagnostics(error, context));
         }
 
         if current.status() != InteractionStatus::Pending {
@@ -675,10 +693,31 @@ impl StudioRuntime {
                 }
                 emitter(interaction).await?;
             }
+            let canonical = handle
+                .thread_snapshot(&pl_core::ThreadId::new(thread_id.clone())?)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            let root_thread_id = self
+                .store
+                .read_thread(&thread_id)
+                .await?
+                .with_context(|| format!("recovered Thread {thread_id} is missing"))?
+                .root_thread_id;
+            let task_is_terminal = self
+                .store
+                .find_latest_task_run_for_root_thread(&root_thread_id)
+                .await?
+                .is_some_and(|task| task.kind().is_terminal());
+            if task_is_terminal {
+                self.agent_facility
+                    .interactions
+                    .cancel_thread(canonical.interactions, "task completed", emitter)
+                    .await?;
+                continue;
+            }
             self.agent_facility
                 .interactions
                 .cancel_recovered_tool_approvals(
-                    canonical.interactions.clone(),
+                    canonical.interactions,
                     "application restarted before approval completed",
                     emitter,
                 )

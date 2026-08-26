@@ -95,6 +95,12 @@ Studio toolCall Item id 使用最早稳定的 provider item id 或 runtime tool 
 诊断输入，由 ThreadActor 转换成 typed `ItemStarted`、`ItemDelta` 和 `ItemCompleted`；它不是
 Studio 的第二套持久化模型。
 
+由工具输入流投影出的 Plan Item 使用已建立的 canonical toolCall Item id 加固定 `:plan` 后缀。
+开始事件确定该 id 后，工具成功、失败、拒绝和取消的终态必须复用同一个 id；终态路径不得根据
+provider item id 或 call id 再次拼接另一个 Plan Item id。没有流式计划输入时，工具成功终态可以
+用同一 canonical toolCall Item id 首次创建并完成 Plan Item。Turn 完成前仍以开放 TracePart 检查
+兜底拒绝真正缺失终态的 Item，不能用该兜底掩盖开始与结束身份不一致。
+
 ## 模型流完成语义
 
 `pl-model` 只有在收到 provider-independent `StreamEvent::Completed` 后，才能把一次模型调用视为成功。SSE parse error、transport error 或 EOF-before-completed 都必须返回稳定 `PureError`，并让 turn 失败，不能把已累计的局部内容当作成功 assistant 响应写入历史。`Completed` 或 `Failed` 是单次 provider stream 的终态；终态之后到达的 text、reasoning summary、raw reasoning、tool 或 usage 事件都是 provider 协议错误，不得继续追加到 response 内容、trace part 或 Studio timeline。
@@ -218,6 +224,12 @@ Studio 回答 UserInput 时，把 resolved Interaction 与一个 hidden durable 
 hidden input，mail ID 同样固定为 `interaction-resolution:{interactionId}`，idle 时开启 fresh
 Planner Turn，active 时只排队且绝不 steer。`Confirm` 原子推进到 `EditingDocuments`；
 `RevisePlan` 原子回到 `Planning`，新的 Planner Turn 必须重新调用 `task_transition.submitPlan`。
+
+Task 进入 `Completed` 后不再存在可执行的用户交互。Task 热终态提交后，Studio 协调层必须通过
+各 Task-owned Thread 的 canonical owner 幂等取消仍为 pending 的 Interaction，再关闭相关 agent；
+该后置收束失败不能回滚已经提交的 Task 终态，启动恢复必须在重新发布 pending Interaction 前完成
+同一对账。来源 Turn 已 completed、但 Task 仍处于非终态并等待 PlanConfirmation 是合法状态，不能
+被该规则取消。
 
 pending Interaction 是成功的 Turn completion boundary，不是 Turn 内的等待 phase。当
 origin Turn 仍是 Thread 当前 active Turn 时，pending Interaction 与随后的 `EndTurn` 一起提交：

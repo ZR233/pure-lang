@@ -433,6 +433,7 @@ void registerControllerStreamTests() {
           .read(studioControllerProvider.notifier)
           .resolveActiveInteraction(
             'session-1',
+            interaction.id,
             const UserInputResolutionCommand(answers: []),
           );
 
@@ -1072,6 +1073,7 @@ void registerControllerStreamTests() {
           .read(studioControllerProvider.notifier)
           .resolveActiveInteraction(
             'session-1',
+            interaction.id,
             const UserInputResolutionCommand(answers: []),
           );
 

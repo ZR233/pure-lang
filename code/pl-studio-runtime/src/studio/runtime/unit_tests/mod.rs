@@ -4,7 +4,10 @@ use super::*;
 use crate::config::{
     ConfigPaths, ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole,
 };
-use crate::studio::task_coordinator::CreateTaskRun;
+use crate::studio::store::directory::RegisteredChildThread;
+use crate::studio::task_coordinator::{
+    CreateTaskRun, RecordTaskAgentFailure, TaskFailureKind, TaskIssueDisposition, TaskOutcome,
+};
 use crate::{
     ConfigStore, StudioHostKind, StudioMode, StudioRuntimeOptions, StudioRuntimeStateKind,
     StudioTaskState,
@@ -358,7 +361,7 @@ async fn cold_start_restores_plan_confirmation_after_loading_memory_directories(
         .unwrap();
     drop(setup);
 
-    let runtime = StudioRuntime::with_options(options).await.unwrap();
+    let runtime = StudioRuntime::with_options(options.clone()).await.unwrap();
     let snapshot = runtime.start_runtime().await.unwrap();
 
     assert!(snapshot.state.is_ready());
@@ -377,6 +380,351 @@ async fn cold_start_restores_plan_confirmation_after_loading_memory_directories(
             .interactions
             .iter()
             .any(|candidate| { candidate.interaction_id == interaction.interaction_id })
+    );
+
+    runtime.shutdown_runtime().await.unwrap();
+}
+
+#[tokio::test]
+async fn cold_start_cancels_plan_confirmation_for_a_completed_task() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
+    config_store
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let options = StudioRuntimeOptions {
+        studio_home: Some(home.clone()),
+        host: StudioHostKind::Test,
+    };
+    let setup = StudioRuntime::with_options(options.clone()).await.unwrap();
+    let project = setup.open_project(&workspace).await.unwrap();
+    let thread = setup
+        .create_thread(&project.id, "Completed pending plan confirmation")
+        .await
+        .unwrap();
+    setup
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+    setup
+        .store
+        .create_task_run(CreateTaskRun {
+            project_id: project.id,
+            root_thread_id: thread.id.clone(),
+            request: "deliver the requested feature".to_string(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+        })
+        .await
+        .unwrap();
+    let (pending, interaction) = setup
+        .store
+        .submit_task_plan(&thread.id, "implementation plan", "plan-call", 0, 0)
+        .await
+        .unwrap();
+    let interaction_id = interaction.interaction_id.clone();
+    setup
+        .task_runtime
+        .initialize(vec![pending.clone()])
+        .await
+        .unwrap();
+    let completed = setup
+        .task_runtime
+        .complete_task(
+            &thread.id,
+            pending.revision,
+            pending.generation(),
+            TaskOutcome::Failed {
+                kind: TaskFailureKind::Fatal,
+                summary: "planner failed".to_string(),
+                evidence: "test evidence".to_string(),
+                cause: "test failure".to_string(),
+                completed_at: crate::studio::unix_seconds(),
+            },
+        )
+        .await
+        .unwrap();
+    setup
+        .task_runtime
+        .await_durable(&thread.id, completed.revision)
+        .await
+        .unwrap();
+    drop(setup);
+
+    let runtime = StudioRuntime::with_options(options.clone()).await.unwrap();
+    let snapshot = runtime.start_runtime().await.unwrap();
+
+    assert!(snapshot.state.is_ready());
+    let task = runtime
+        .thread_task_view(&thread.id)
+        .await
+        .unwrap()
+        .expect("completed Task remains available as cold data");
+    assert!(matches!(task.state, StudioTaskState::Completed(_)));
+    assert!(
+        runtime
+            .thread_snapshot(&thread.id)
+            .await
+            .unwrap()
+            .interactions
+            .is_empty()
+    );
+    let stored = runtime
+        .store
+        .read_interaction(&interaction.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.status(), crate::InteractionStatus::Cancelled);
+    assert_eq!(stored.revision, interaction.revision + 1);
+    let late_click = runtime
+        .resolve_interaction(
+            interaction_id.clone(),
+            crate::InteractionResolution::PlanConfirmation(
+                crate::PlanConfirmationResolutionPayload {
+                    decision: crate::PlanConfirmationResolution::Confirm,
+                    content: None,
+                    reason: None,
+                },
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        crate::studio_error_from_anyhow(late_click).code,
+        pl_protocol::studio::StudioErrorCode::Conflict
+    );
+
+    let cancelled_revision = stored.revision;
+    runtime.shutdown_runtime().await.unwrap();
+    drop(runtime);
+
+    let reopened = StudioRuntime::with_options(options).await.unwrap();
+    reopened.start_runtime().await.unwrap();
+    assert_eq!(
+        reopened
+            .store
+            .read_interaction(&interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        cancelled_revision
+    );
+    reopened.shutdown_runtime().await.unwrap();
+}
+
+#[tokio::test]
+async fn fatal_task_settlement_cancels_root_and_child_interactions_once() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    ConfigStore::new(ConfigPaths::from_home(&home))
+        .save(&test_config("http://127.0.0.1:9".to_string()))
+        .unwrap();
+    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(home),
+        host: StudioHostKind::Test,
+    })
+    .await
+    .unwrap();
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let root_thread = runtime
+        .create_thread(&project.id, "Fatal pending interaction tree")
+        .await
+        .unwrap();
+    runtime
+        .set_thread_mode(&root_thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+    let child_thread_id = format!("{}-executor", root_thread.id);
+    runtime
+        .agent_facility
+        .product_events
+        .register_child_thread(RegisteredChildThread {
+            id: child_thread_id.clone(),
+            parent_thread_id: root_thread.id.clone(),
+            agent_path: child_thread_id.clone(),
+            project_id: project.id.clone(),
+            root_thread_id: root_thread.id.clone(),
+            mode: pl_protocol::ThreadMode::Task,
+            role: "executor".to_string(),
+            title: "Executor".to_string(),
+        })
+        .await
+        .unwrap();
+    runtime.start_runtime().await.unwrap();
+    let (handle, _) = runtime.ensure_thread_agent(&child_thread_id).await.unwrap();
+
+    let task = runtime
+        .task_runtime
+        .create_task(CreateTaskRun {
+            project_id: project.id,
+            root_thread_id: root_thread.id.clone(),
+            request: "deliver the requested feature".to_string(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+        })
+        .await
+        .unwrap();
+    let pending = runtime
+        .task_runtime
+        .submit_plan(
+            &root_thread.id,
+            "implementation plan",
+            task.revision,
+            task.generation(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        pending.state,
+        crate::studio::task_coordinator::TaskRunState::PendingConfirmation { .. }
+    ));
+
+    let root_interaction = crate::InteractionRequest::plan_confirmation(
+        "root-plan-confirmation",
+        pl_protocol::InteractionScope {
+            thread_id: root_thread.id.clone(),
+            turn_id: "root-plan-turn".to_string(),
+            item_id: Some("root-plan-item".to_string()),
+            tool_id: Some("task_transition".to_string()),
+            agent_path: Some(root_thread.agent_path.clone()),
+        },
+        "plan-1",
+        "implementation plan",
+        crate::studio::unix_seconds(),
+    );
+    let child_interaction = crate::InteractionRequest::user_input(
+        "child-user-input",
+        pl_protocol::InteractionScope {
+            thread_id: child_thread_id.clone(),
+            turn_id: "child-turn".to_string(),
+            item_id: Some("child-item".to_string()),
+            tool_id: Some("ask_user".to_string()),
+            agent_path: Some(child_thread_id.clone()),
+        },
+        Vec::new(),
+        crate::studio::unix_seconds(),
+    );
+    for (thread_id, interaction) in [
+        (root_thread.id.as_str(), root_interaction.clone()),
+        (child_thread_id.as_str(), child_interaction.clone()),
+    ] {
+        runtime
+            .record_thread_facts(
+                thread_id,
+                vec![pl_core::ThreadNotificationFact::durable(
+                    interaction.updated_at,
+                    pl_protocol::ThreadNotification::InteractionChanged {
+                        interaction: Box::new(interaction),
+                    },
+                )],
+            )
+            .await
+            .unwrap();
+    }
+
+    let terminalized = runtime
+        .task_coordinator
+        .handle_agent_turn_failure(
+            RecordTaskAgentFailure {
+                root_thread_id: root_thread.id.clone(),
+                source_thread_id: root_thread.id.clone(),
+                source_turn_id: "root-plan-turn".to_string(),
+                source_agent_id: root_thread.agent_path.clone(),
+                source_role: "planner".to_string(),
+                failure: pl_protocol::TurnFailure::permanent(
+                    pl_protocol::TurnFailureCategory::Protocol,
+                    "plan trace remained open",
+                ),
+                disposition: TaskIssueDisposition::Fatal,
+            },
+            &handle,
+        )
+        .await
+        .unwrap();
+    assert!(terminalized);
+    assert!(matches!(
+        runtime
+            .thread_task_view(&root_thread.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        StudioTaskState::Completed(_)
+    ));
+    for owner_id in [&root_thread.agent_path, &child_thread_id] {
+        assert!(
+            handle
+                .thread_snapshot(&pl_core::ThreadId::new(owner_id.clone()).unwrap())
+                .unwrap()
+                .interactions
+                .is_empty()
+        );
+    }
+
+    runtime
+        .persistence_repository()
+        .await
+        .unwrap()
+        .writer()
+        .flush()
+        .await
+        .unwrap();
+    let root_cancelled = runtime
+        .store
+        .read_interaction(&root_interaction.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let child_cancelled = runtime
+        .store
+        .read_interaction(&child_interaction.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(root_cancelled.status(), crate::InteractionStatus::Cancelled);
+    assert_eq!(
+        child_cancelled.status(),
+        crate::InteractionStatus::Cancelled
+    );
+    assert_eq!(root_cancelled.revision, root_interaction.revision + 1);
+    assert_eq!(child_cancelled.revision, child_interaction.revision + 1);
+
+    runtime
+        .task_coordinator
+        .settle_terminal_interactions_after_commit(&root_thread.id, &handle)
+        .await;
+    runtime
+        .persistence_repository()
+        .await
+        .unwrap()
+        .writer()
+        .flush()
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime
+            .store
+            .read_interaction(&root_interaction.interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        root_cancelled.revision
+    );
+    assert_eq!(
+        runtime
+            .store
+            .read_interaction(&child_interaction.interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        child_cancelled.revision
     );
 
     runtime.shutdown_runtime().await.unwrap();

@@ -481,6 +481,8 @@ impl TaskCoordinator {
                             .await?
                     }
                 };
+                self.settle_terminal_interactions_after_commit(thread_id, runtime)
+                    .await;
                 Ok((
                     run,
                     vec![serde_json::json!({"outcome": outcome, "summary": summary})],

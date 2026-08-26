@@ -4,12 +4,51 @@ use pl_protocol::studio::{StudioError, StudioErrorCode};
 use crate::ConfigRuntimeError;
 use crate::{StudioDatabaseError, StudioUpdateError, StudioUpdateErrorCode};
 
+#[derive(Debug, Clone)]
+pub(crate) struct StudioDiagnosticContext {
+    pub(crate) operation: &'static str,
+    pub(crate) task_run_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) turn_id: Option<String>,
+    pub(crate) interaction_id: Option<String>,
+    pub(crate) state: Option<&'static str>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Studio operation failed")]
+struct StudioDiagnosticError {
+    context: StudioDiagnosticContext,
+    #[source]
+    source: anyhow::Error,
+}
+
+pub(crate) fn with_studio_diagnostics(
+    error: anyhow::Error,
+    context: StudioDiagnosticContext,
+) -> anyhow::Error {
+    anyhow::Error::new(StudioDiagnosticError {
+        context,
+        source: error,
+    })
+}
+
 /// Maps an internal runtime failure to the shared, redacted Studio API error.
 ///
 /// Classification is based exclusively on typed error sources. Unclassified
 /// failures are logged for diagnostics and cross the adapter boundary only as
 /// a redacted internal error.
 pub fn studio_error_from_anyhow(error: anyhow::Error) -> StudioError {
+    let (error, context) = match error.downcast_ref::<StudioDiagnosticError>() {
+        Some(diagnostic) => (&diagnostic.source, Some(&diagnostic.context)),
+        None => (&error, None),
+    };
+    studio_error_from_ref(error, context)
+}
+
+fn studio_error_from_ref(
+    error: &anyhow::Error,
+    context: Option<&StudioDiagnosticContext>,
+) -> StudioError {
     if let Some(error) = error.downcast_ref::<StudioError>() {
         return error.clone();
     }
@@ -46,11 +85,20 @@ pub fn studio_error_from_anyhow(error: anyhow::Error) -> StudioError {
         return pure_error(error);
     }
 
+    let studio_error = StudioError::internal();
     tracing::error!(
+        correlation_id = %studio_error.correlation_id,
+        operation = context.map_or("studioRuntime", |context| context.operation),
+        error_code = "internal",
+        task_run_id = ?context.and_then(|context| context.task_run_id.as_deref()),
+        thread_id = ?context.and_then(|context| context.thread_id.as_deref()),
+        turn_id = ?context.and_then(|context| context.turn_id.as_deref()),
+        interaction_id = ?context.and_then(|context| context.interaction_id.as_deref()),
+        state = ?context.and_then(|context| context.state),
         diagnostic_bytes = error.to_string().len(),
         "unclassified Studio runtime failure"
     );
-    StudioError::internal()
+    studio_error
 }
 
 fn pure_error(error: &PureError) -> StudioError {
@@ -122,17 +170,57 @@ fn update_error(error: &StudioUpdateError) -> StudioError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct CapturedLog(Arc<Mutex<Vec<u8>>>);
+
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+        type Writer = CapturedWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CapturedWriter(self.0.clone())
+        }
+    }
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn unclassified_error_is_redacted() {
-        let error = studio_error_from_anyhow(anyhow::anyhow!(
-            "provider token secret-token at /private/config.toml"
-        ));
+        let captured = CapturedLog::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(captured.clone())
+            .finish();
+        let error = tracing::subscriber::with_default(subscriber, || {
+            studio_error_from_anyhow(anyhow::anyhow!(
+                "provider token secret-token at /private/config.toml"
+            ))
+        });
+        let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
 
         assert_eq!(error.code, StudioErrorCode::Internal);
         assert!(!error.message.contains("secret-token"));
         assert!(!error.message.contains("config.toml"));
+        assert!(log.contains(&error.correlation_id));
+        assert!(log.contains("operation=\"studioRuntime\""));
+        assert!(!log.contains("secret-token"));
+        assert!(!log.contains("config.toml"));
     }
 
     #[test]

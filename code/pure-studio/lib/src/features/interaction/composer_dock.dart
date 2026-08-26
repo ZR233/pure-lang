@@ -426,6 +426,7 @@ class _InteractionDock extends StatelessWidget {
     return switch (interaction.kind) {
       InteractionKind.toolApproval => ToolApprovalDock(
         threadId: workspace.threadId,
+        interactionId: interaction.id,
         payload: payload,
         enabled: enabled,
         trailing: trailing,
@@ -439,6 +440,7 @@ class _InteractionDock extends StatelessWidget {
       ),
       InteractionKind.planConfirmation => PlanConfirmationDock(
         threadId: workspace.threadId,
+        interactionId: interaction.id,
         planContent: payload.planContent,
         enabled: enabled,
         trailing: trailing,

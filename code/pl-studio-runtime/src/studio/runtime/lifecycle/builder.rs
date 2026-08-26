@@ -97,8 +97,11 @@ impl StudioRuntime {
         let task_runtime = TaskRuntime::with_writer(store.clone(), product_events.clone(), writer);
         let persistence = StudioAgentRepository::with_writer(store.clone(), task_runtime.writer());
         product_events.observe_persistence(persistence.writer().subscribe_state());
-        let task_coordinator =
-            std::sync::Arc::new(TaskCoordinator::new(store.clone(), task_runtime.clone()));
+        let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(
+            store.clone(),
+            task_runtime.clone(),
+            interactions.clone(),
+        ));
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
         let tool_manager = pl_core::ToolManager::new();

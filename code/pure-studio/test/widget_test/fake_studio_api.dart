@@ -64,6 +64,7 @@ class _FakeStudioApi implements StudioApi {
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
   Object? resolveInteractionError;
+  Completer<PendingInteraction>? blockedInteractionResponse;
   int resolveInteractionCount = 0;
   String? discoverProjectId;
   int discoverCallCount = 0;
@@ -471,6 +472,9 @@ class _FakeStudioApi implements StudioApi {
     }
     resolvedInteractionId = interactionId;
     resolvedInteraction = _interactionResolutionJson(resolution);
+    if (blockedInteractionResponse case final blocked?) {
+      return blocked.future;
+    }
     return PendingInteraction(
       id: interactionId,
       threadId: _currentState.selectedThreadId ?? '',

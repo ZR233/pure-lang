@@ -1,4 +1,4 @@
-//! Task 计划确认：用户答复与 TaskRun 状态在同一事务提交，再开启新的计划者执行。
+//! Task 计划确认：先推进 TaskRun，再以稳定 continuation 记录用户答复并开启新的计划者执行。
 
 use anyhow::{Context, Result};
 
@@ -7,6 +7,7 @@ use crate::{
     InteractionContent, InteractionRequest, InteractionResolution, InteractionStatus,
     PlanConfirmationResolution,
 };
+use pl_protocol::studio::{StudioError, StudioErrorCode};
 
 use super::{StudioResolveInteractionResponse, StudioRuntime};
 
@@ -23,10 +24,7 @@ impl StudioRuntime {
     ) -> Result<StudioResolveInteractionResponse> {
         let thread_id = current.scope.thread_id.clone();
         if current.status() != InteractionStatus::Pending {
-            return Ok(StudioResolveInteractionResponse {
-                thread_id,
-                interaction: current,
-            });
+            return Err(plan_confirmation_conflict());
         }
         let InteractionContent::PlanConfirmation(plan) = &current.content else {
             unreachable!("plan confirmation resolution was validated before resolving");
@@ -44,11 +42,19 @@ impl StudioRuntime {
                 .context("plan adjustment is empty")?;
         }
 
-        let aggregate = self
-            .task_runtime
-            .aggregate(&thread_id)
-            .await
-            .context("plan confirmation Task aggregate is not resident")?;
+        let aggregate = self.task_runtime.aggregate(&thread_id).await;
+        let persisted_task = self
+            .store
+            .find_latest_task_run_for_root_thread(&thread_id)
+            .await?;
+        if aggregate
+            .as_ref()
+            .is_some_and(|aggregate| aggregate.facts.run.kind().is_terminal())
+            || persisted_task.is_some_and(|task| task.kind().is_terminal())
+        {
+            return Err(plan_confirmation_conflict());
+        }
+        let aggregate = aggregate.context("plan confirmation Task aggregate is not resident")?;
         let task_command = match payload.decision {
             PlanConfirmationResolution::Confirm => {
                 crate::studio::task_coordinator::TaskCommand::ConfirmPlan {
@@ -67,17 +73,19 @@ impl StudioRuntime {
         };
         let mut resolved = current.clone();
         let now = crate::studio::unix_seconds();
-        let interaction_decision = resolved.decide(
-            crate::InteractionCommand::ResolvePlanConfirmation(crate::ResolvePlanConfirmation {
-                interaction_id: resolved.interaction_id.clone(),
-                expected_revision: resolved.revision,
-                operation_id: format!("resolve:{}", resolved.interaction_id),
-                resolved_at: now,
-                decision: payload.decision,
-                content: payload.content.clone(),
-                reason: payload.reason.clone(),
-            }),
-        )?;
+        let interaction_decision = resolved
+            .decide(crate::InteractionCommand::ResolvePlanConfirmation(
+                crate::ResolvePlanConfirmation {
+                    interaction_id: resolved.interaction_id.clone(),
+                    expected_revision: resolved.revision,
+                    operation_id: format!("resolve:{}", resolved.interaction_id),
+                    resolved_at: now,
+                    decision: payload.decision,
+                    content: payload.content.clone(),
+                    reason: payload.reason.clone(),
+                },
+            ))
+            .map_err(|_| plan_confirmation_conflict())?;
         resolved.apply(interaction_decision, now);
         let run = self
             .task_runtime
@@ -87,7 +95,8 @@ impl StudioRuntime {
                 aggregate.facts.run.generation(),
                 task_command,
             )
-            .await?;
+            .await
+            .map_err(|_| plan_confirmation_conflict())?;
         let message = match payload.decision {
             PlanConfirmationResolution::Confirm => EDIT_DOCUMENTS_MESSAGE.to_string(),
             PlanConfirmationResolution::RevisePlan => format!(
@@ -130,4 +139,13 @@ impl StudioRuntime {
             interaction: resolved,
         })
     }
+}
+
+fn plan_confirmation_conflict() -> anyhow::Error {
+    StudioError::new(
+        StudioErrorCode::Conflict,
+        "This plan confirmation is no longer current",
+        false,
+    )
+    .into()
 }

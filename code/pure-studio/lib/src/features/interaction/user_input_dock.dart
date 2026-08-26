@@ -219,6 +219,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
         .read(studioControllerProvider.notifier)
         .resolveActiveInteraction(
           widget.threadId,
+          widget.interactionId,
           UserInputResolutionCommand(
             answers: [
               UserInputAnswerCommand(questionId: 'answer', answers: [text]),
@@ -232,6 +233,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
         .read(studioControllerProvider.notifier)
         .resolveActiveInteraction(
           widget.threadId,
+          widget.interactionId,
           UserInputResolutionCommand(answers: _answers()),
         );
   }

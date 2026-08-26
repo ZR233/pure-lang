@@ -11,6 +11,7 @@ import 'interaction_widgets.dart';
 class ToolApprovalDock extends ConsumerStatefulWidget {
   const ToolApprovalDock({
     required this.threadId,
+    required this.interactionId,
     required this.payload,
     required this.enabled,
     this.trailing,
@@ -18,6 +19,7 @@ class ToolApprovalDock extends ConsumerStatefulWidget {
   });
 
   final String threadId;
+  final String interactionId;
   final InteractionPayloadSnapshot payload;
   final bool enabled;
   final Widget? trailing;
@@ -114,6 +116,7 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
         .read(studioControllerProvider.notifier)
         .resolveActiveInteraction(
           widget.threadId,
+          widget.interactionId,
           ToolApprovalResolutionCommand(
             decision: decision,
             reason: reason.isEmpty ? null : reason,

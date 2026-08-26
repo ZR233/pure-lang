@@ -96,11 +96,19 @@ fn conditional_plan_projection_waits_for_matching_discriminator() {
             arguments: raw.to_string(),
             function_arguments: true,
         };
-        let projected = trace
+        let events = trace
             .append_tool_arguments_delta(&snapshot, raw.to_string())
             .into_iter()
-            .any(|event| matches!(event, AgentEvent::TracePartDelta { event } if matches!(event.delta, pl_trace::TraceDelta::Plan { .. })));
-        assert!(projected, "matching discriminator must publish plan");
+            .collect::<Vec<_>>();
+        assert!(
+            events.iter().any(
+                |event| matches!(event, AgentEvent::TracePartDelta { event } if matches!(event.delta, pl_trace::TraceDelta::Plan { .. }))
+            ),
+            "matching discriminator must publish plan"
+        );
+        assert!(events.iter().any(
+            |event| matches!(event, AgentEvent::TracePartStarted { item } if item.item_id() == "turn-1-tool-1:plan")
+        ));
     }
 
     let mut trace = trace_with_projection("task_transition", projection);

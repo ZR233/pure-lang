@@ -359,7 +359,7 @@ impl TraceRecorder {
         cancelled: bool,
         message: &str,
     ) {
-        let item_id = format!("{tool_item_id}:plan");
+        let item_id = pl_trace::plan_trace_part_id(tool_item_id);
         let Some(mut item) = self.latest_trace_part(&item_id) else {
             return;
         };

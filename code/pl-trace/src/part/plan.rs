@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// Returns the canonical trace item id for the plan projected from a tool item.
+pub fn plan_trace_part_id(tool_trace_part_id: &str) -> String {
+    format!("{tool_trace_part_id}:plan")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TracePlanPart {

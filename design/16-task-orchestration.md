@@ -547,6 +547,10 @@ canonical 最终状态：失败发生在业务事务提交前时仍是原状态�
 - 完成时的任务版本和执行代次。
 
 写入成功终态后，迟到完成声明、审查结论、合并记账、唤醒和旧代次请求都必须拒绝。
+终态提交后，协调层还必须通过 Task 根对话及其子对话的 canonical owner 幂等取消全部 pending
+Interaction，再关闭活动代理。Interaction 收束是跨 owner 的终态后置效果：失败不能回滚已提交的
+Task 结果，但必须保留可诊断事实并由启动恢复再次对账。已完成 Task 不得继续向界面暴露可答复的
+PlanConfirmation、UserInput 或 ToolApproval。
 
 ## 16.9 已完成·失败
 
@@ -576,6 +580,10 @@ canonical 最终状态：失败发生在业务事务提交前时仍是原状态�
 
 代理判定无法继续时也要在终态事务中收束未结束子记录，并在提交后中断活动代理。两类失败的差别在于
 来源和证据，不在于是否形成终态。
+
+Task 终态与 Interaction 由不同 owner 提交，因此 Interaction 取消发生在 Task 热终态之后；取消使用
+稳定 operation id 并只处理仍为 pending 的记录，重复执行不得推进第二次 revision。进程在两次提交
+之间退出时，启动恢复必须先识别“已完成 Task + pending Interaction”并完成取消，再恢复其余合法交互。
 
 ## 16.10 执行者工作单和审查轮
 

@@ -3,12 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use futures::FutureExt;
 use tokio::sync::MutexGuard;
 
 use super::{CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskWorktreeOwnerSnapshot};
 use crate::studio::runtime_state::StudioRecoveryIssue;
 use crate::studio::store::StudioStore;
-use crate::studio::{TaskRuntime, ThreadKind, ThreadRecord};
+use crate::studio::{
+    InteractionEmitter, InteractionService, TaskRuntime, ThreadKind, ThreadRecord,
+};
 use crate::{AgentRuntimeHandle, AgentState};
 
 mod recovery;
@@ -52,6 +55,7 @@ impl PartialEq<Vec<TaskRun>> for TaskRecoveryReport {
 pub(crate) struct TaskCoordinator {
     pub(super) store: StudioStore,
     pub(super) task_runtime: TaskRuntime,
+    interactions: InteractionService,
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
     branch_mutation_owner: Arc<()>,
@@ -81,6 +85,9 @@ impl TaskCoordinator {
         if !settlement.terminalized {
             return Ok(false);
         }
+
+        self.settle_terminal_interactions_after_commit(&root_thread_id, runtime)
+            .await;
 
         let root = crate::studio::agent_host::root_agent_id(&root_thread_id);
         let snapshots = runtime
@@ -112,14 +119,114 @@ impl TaskCoordinator {
         Ok(true)
     }
 
-    pub(crate) fn new(store: StudioStore, task_runtime: TaskRuntime) -> Self {
+    pub(crate) fn new(
+        store: StudioStore,
+        task_runtime: TaskRuntime,
+        interactions: InteractionService,
+    ) -> Self {
         Self {
             store,
             task_runtime,
+            interactions,
             allocation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_owner: Arc::new(()),
         }
+    }
+
+    pub(crate) async fn settle_terminal_interactions_after_commit(
+        &self,
+        root_thread_id: &str,
+        runtime: &AgentRuntimeHandle,
+    ) {
+        if let Err(error) = self
+            .settle_terminal_interactions(root_thread_id, runtime)
+            .await
+        {
+            tracing::error!(
+                operation = "taskTerminalInteractionSettlement",
+                root_thread_id,
+                diagnostic_bytes = error.to_string().len(),
+                "failed to settle pending interactions after Task terminal commit"
+            );
+        }
+    }
+
+    async fn settle_terminal_interactions(
+        &self,
+        root_thread_id: &str,
+        runtime: &AgentRuntimeHandle,
+    ) -> Result<()> {
+        let mut thread_ids = self
+            .store
+            .list_threads_for_root(root_thread_id)
+            .await?
+            .into_iter()
+            .map(|thread| thread.id)
+            .collect::<Vec<_>>();
+        if !thread_ids
+            .iter()
+            .any(|thread_id| thread_id == root_thread_id)
+        {
+            thread_ids.push(root_thread_id.to_string());
+        }
+        let snapshots = runtime
+            .list()
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let mut task_owned_agents = HashSet::from([root_thread_id.to_string()]);
+        loop {
+            let before = task_owned_agents.len();
+            for snapshot in &snapshots {
+                if snapshot
+                    .identity
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|parent| task_owned_agents.contains(parent.as_str()))
+                {
+                    task_owned_agents.insert(snapshot.identity.id.to_string());
+                }
+            }
+            if task_owned_agents.len() == before {
+                break;
+            }
+        }
+        thread_ids.extend(task_owned_agents);
+        thread_ids.sort();
+        thread_ids.dedup();
+
+        for thread_id in thread_ids {
+            let canonical_thread_id = pl_core::ThreadId::new(thread_id.clone())?;
+            let snapshot = match runtime.thread_snapshot(&canonical_thread_id) {
+                Ok(snapshot) => snapshot,
+                Err(pl_core::AgentRuntimeError::NotFound(_)) => {
+                    if self
+                        .store
+                        .list_pending_interactions(&thread_id)
+                        .await?
+                        .is_empty()
+                    {
+                        continue;
+                    }
+                    bail!("canonical Thread owner is unavailable during terminal settlement");
+                }
+                Err(error) => return Err(anyhow::anyhow!(error)),
+            };
+            if snapshot.interactions.is_empty() {
+                continue;
+            }
+            self.interactions
+                .cancel_thread(
+                    snapshot.interactions,
+                    "task completed",
+                    terminal_interaction_emitter(runtime.clone(), thread_id.clone()),
+                )
+                .await
+                .with_context(|| {
+                    format!("failed to settle pending interactions for Thread {thread_id}")
+                })?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn lock_branch_mutation(&self) -> BranchMutationGuard<'_> {
@@ -186,4 +293,31 @@ impl TaskCoordinator {
         }
         Ok(())
     }
+}
+
+fn terminal_interaction_emitter(
+    runtime: AgentRuntimeHandle,
+    thread_id: String,
+) -> InteractionEmitter {
+    Arc::new(move |interaction| {
+        let runtime = runtime.clone();
+        let thread_id = thread_id.clone();
+        async move {
+            let owner_id = pl_core::ThreadId::new(thread_id.clone())?;
+            runtime
+                .record_thread_facts(
+                    owner_id,
+                    pl_core::ThreadId::new(thread_id)?,
+                    vec![pl_core::ThreadNotificationFact::durable(
+                        interaction.updated_at,
+                        pl_protocol::ThreadNotification::InteractionChanged {
+                            interaction: Box::new(interaction),
+                        },
+                    )],
+                )
+                .await?;
+            Ok(())
+        }
+        .boxed()
+    })
 }

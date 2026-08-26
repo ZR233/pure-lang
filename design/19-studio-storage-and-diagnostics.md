@@ -194,6 +194,11 @@ Rust 使用 tracing，只记录稳定 ID、kind、数量、字节数、事务耗
 不记录完整 prompt、模型上下文、secret 或工具结果。数据库 mutation、恢复、订阅和 Task 操作
 都携带 correlation ID。日志保留与 crash 文件策略沿用 Studio 现有实现。
 
+任何返回 `StudioError` 的错误映射必须先生成 correlation ID，再以同一个 ID 写入安全结构化日志。
+未分类错误日志至少包含 correlation ID、稳定操作名、错误类别和诊断字节数；上下文可追加 Thread、
+Turn、Task、Interaction、revision 与 generation 等稳定标识，但不得记录原始错误链、prompt、工具
+参数或结果、配置正文、header、绝对私有路径和凭据。FRB 错误、HTTP 响应体与响应头继续透传同一 ID。
+
 缓存诊断只记录 provider/wire/model、prompt generation、有效缓存策略、前缀变化原因、各固定层
 hash、token 分类、费用与缓存节省。cache key、prompt、配置正文、header、凭据、工具参数和结果
 均不得进入日志。Bridge 只暴露 generation、策略、变化原因与聚合 usage；内部 hash、逐 inference
@@ -234,6 +239,12 @@ TaskRuntime 使用同一驻留原则，且启动只恢复活动 Task：以 `list
 Task 目录条目继续保留。再次访问该条目时是显式冷激活，从 SQLite 恢复聚合基线，不允许活动事件
 用数据库快照覆盖驻留聚合。Task 目录同样只有"活动 + 已显式激活"的热条目；线程被选中或订阅时
 显式激活其最新 Task，供该 Thread 的任务视图使用。
+
+启动恢复 transient pending Interaction 时，先恢复对应 Thread owner，再读取该 root Thread 最新
+Task。最新 Task 已 `Completed` 时，通过恢复后的 canonical owner 取消该 Thread 及 Task-owned child
+Thread 的 pending Interaction；非终态 Task 的 PlanConfirmation 与 UserInput 继续按恢复原则保留。
+该对账只扫描已经因 pending Interaction 被钉住的 Thread，不把终态 Task 全量装入内存，也不新增
+运行期 SQLite 直写边界。
 
 会话内容查询遵循同一窗口语义：驻留 actor 的热窗口与未确认事实从内存读取，更早 Timeline 按
 `(thread_id, turn_sequence)` keyset 分页从 SQLite 读取；跨越冷热边界时按 item identity 和 ordinal

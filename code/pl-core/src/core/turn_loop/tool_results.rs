@@ -243,6 +243,7 @@ mod tests {
         ToolExecutionRecord {
             id: id.to_string(),
             call_id: format!("call-{id}"),
+            trace_part_id: format!("turn-1-{id}"),
             name: "read_file".to_string(),
             kind: pl_protocol::ToolCallKind::Function,
             display_result: result.clone(),

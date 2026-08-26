@@ -2,7 +2,7 @@
 
 use pl_trace::{
     AgentEvent, ToolInputTraceDiscriminator, ToolInputTraceProjection, TraceDelta, TraceEventKind,
-    TracePart, TracePartAction, TraceToolFailureKind,
+    TracePart, TracePartAction, TraceToolFailureKind, plan_trace_part_id,
 };
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
@@ -32,7 +32,7 @@ impl TraceProjection {
             discriminator,
         } = projection;
         let tool_item_id = self.active_tool_item_id(snapshot);
-        let plan_item_id = format!("{tool_item_id}:plan");
+        let plan_item_id = plan_trace_part_id(&tool_item_id);
         let extraction = match extract_plan_string(
             &snapshot.arguments,
             &content_field,

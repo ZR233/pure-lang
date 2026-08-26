@@ -886,6 +886,7 @@ class StudioController extends _$StudioController {
 
   Future<void> resolveActiveInteraction(
     String threadId,
+    String interactionId,
     InteractionResolutionCommand resolution,
   ) async {
     final current = state.value;
@@ -894,27 +895,57 @@ class StudioController extends _$StudioController {
     if (current == null ||
         current.selectedThreadId != threadId ||
         workspace == null ||
-        interaction == null) {
-      return;
+        interaction == null ||
+        interaction.id != interactionId) {
+      throw _interactionConflict();
     }
-    await _api.respondInteraction(interaction.id, resolution);
+    final selectedThread = current.selectedThread;
+    final task = selectedThread == null
+        ? null
+        : current.tasksByRootThread[selectedThread.effectiveRootThreadId];
+    if (task != null && !task.isActive) {
+      throw _interactionConflict();
+    }
+    final interactionsBeforeResponse = {
+      for (final candidate in workspace.interactions) candidate.id,
+    };
+    await _api.respondInteraction(interactionId, resolution);
     if (!ref.mounted) return;
     final latest = state.value;
     final active = latest?.workspacesByThread[threadId];
     if (latest == null || active == null) return;
+    final pending = [...active.interactions]
+      ..sort(
+        (left, right) =>
+            interactionPriority(left.kind)
+                .compareTo(interactionPriority(right.kind)),
+      );
+    final replacement = pending.firstOrNull;
+    if (replacement != null &&
+        replacement.id != interactionId &&
+        !interactionsBeforeResponse.contains(replacement.id)) {
+      throw _interactionConflict();
+    }
     state = AsyncData(
       latest.copyWith(
         workspacesByThread: {
           ...latest.workspacesByThread,
           threadId: active.copyWith(
             interactions: active.interactions
-                .where((candidate) => candidate.id != interaction.id)
+                .where((candidate) => candidate.id != interactionId)
                 .toList(),
           ),
         },
       ),
     );
   }
+
+  StudioFailure _interactionConflict() => const StudioFailure(
+    code: StudioFailureCode.conflict,
+    message: 'The displayed interaction is no longer current',
+    retryable: false,
+    correlationId: 'client-interaction-conflict',
+  );
 
   void _handleProductEvent(Object event) {
     final current = state.value;

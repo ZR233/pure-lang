@@ -38,6 +38,7 @@ use records::{
 pub(super) struct ToolExecutionRecord {
     pub(super) id: String,
     pub(super) call_id: String,
+    pub(super) trace_part_id: String,
     pub(super) name: String,
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
@@ -195,6 +196,7 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
+                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(message),
                     ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
@@ -223,6 +225,7 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
+                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(message),
                     ToolExecutionOutcome::Denied,
                     None,
@@ -248,6 +251,7 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
+                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(format!("Unknown tool: {name}")),
                     ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
@@ -328,6 +332,7 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
+                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
                     ToolExecutionOutcome::Cancelled,
                     None,
@@ -429,6 +434,7 @@ pub(super) async fn execute_tool_call_batch(
                             item,
                             future: ready_tool_execution_record(
                                 tool_call.clone(),
+                                trace_part_id.clone(),
                                 ToolExecutionError::RespondToModel(receipt),
                                 ToolExecutionOutcome::Succeeded,
                                 Some(0),
@@ -443,6 +449,7 @@ pub(super) async fn execute_tool_call_batch(
                     }
                     scheduled_exact_once_calls.insert(dedupe_key, cache_call_id.clone());
                 }
+                let trace_part_id_for_task = trace_part_id.clone();
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -490,8 +497,12 @@ pub(super) async fn execute_tool_call_batch(
                             cache.invalidate_tool(&tool_name);
                         }
                         cache.record_effect(tool_effect, result.is_ok());
-                        let mut record =
-                            tool_execution_record(tool_call_for_task, tool_name, result)?;
+                        let mut record = tool_execution_record(
+                            tool_call_for_task,
+                            trace_part_id_for_task,
+                            tool_name,
+                            result,
+                        )?;
                         record.execution_millis = execution_elapsed.as_millis() as u64;
                         Ok(record)
                     }
@@ -507,6 +518,7 @@ pub(super) async fn execute_tool_call_batch(
                     item,
                     future: ready_tool_execution_record(
                         tool_call.clone(),
+                        trace_part_id.clone(),
                         ToolExecutionError::RespondToModel(format!(
                             "Tool execution denied: {reason}"
                         )),
@@ -630,7 +642,10 @@ async fn collect_scheduled_tools(
                     next = futures.next() => next,
                     _ = token.cancelled() => {
                         for (index, (tool_call, item)) in pending {
-                            let record = interrupted_tool_execution_record(tool_call);
+                            let record = interrupted_tool_execution_record(
+                                tool_call,
+                                item.item_id().to_string(),
+                            );
                             finalize_tool_item(recorder, item, &record);
                             emit_tool_progress(progress, recorder, &record);
                             notify_tool_completion(options, &record).await?;
@@ -656,7 +671,11 @@ async fn collect_scheduled_tools(
         let record = match record {
             Ok(record) => record,
             Err(ToolExecutionError::RespondToModel(message)) => {
-                respond_to_model_tool_execution_record(tool_call, message)
+                respond_to_model_tool_execution_record(
+                    tool_call,
+                    item.item_id().to_string(),
+                    message,
+                )
             }
             Err(ToolExecutionError::Fatal(message)) => {
                 return Err(ToolExecutionError::Fatal(message));
