@@ -160,6 +160,40 @@ async fn provider_registration_order_breaks_equal_rank_ties() {
 }
 
 #[tokio::test]
+async fn explicit_directories_are_frozen_by_the_shared_provider_kernel() {
+    let source = tempfile::tempdir().unwrap();
+    let unrelated_workspace = tempfile::tempdir().unwrap();
+    write_skill(source.path(), "project-review", "", "review body");
+    let provider = FileSystemSkillProvider::from_directories(
+        "mai-project",
+        vec![SkillDirectorySource::new(
+            source.path().join("skills"),
+            SkillSourceKind::Project,
+        )],
+    )
+    .unwrap();
+    let registry = SkillRegistry::new();
+    let _guard = registry.register(Arc::new(provider)).unwrap();
+
+    let catalog = registry
+        .discover(request(unrelated_workspace.path()))
+        .await
+        .unwrap();
+    let skill = catalog.find("project-review").expect("explicit skill");
+    assert_eq!(skill.source, SkillSourceKind::Project);
+    assert_eq!(skill.provider_id.as_str(), "mai-project");
+    let loaded = catalog
+        .load(
+            "project-review",
+            SkillLoadInvocation::Model,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(loaded.content.contains("review body"));
+}
+
+#[tokio::test]
 async fn invalid_provider_candidates_are_warned_and_excluded() {
     let root = tempfile::tempdir().unwrap();
     let registry = SkillRegistry::new();
@@ -251,8 +285,9 @@ async fn user_gestures_honor_policy_boundaries_and_deduplicate() {
     .unwrap();
 
     let loaded = catalog
-        .load_user_invocations(
-            "/both /model-only /both /unknown /user-only.json /user-only",
+        .load_user_invocations_with_selections(
+            "$both /model-only /both /unknown /user-only.json /user-only",
+            &["user-only".to_string()],
             "turn-1",
             CancellationToken::new(),
         )
@@ -265,7 +300,7 @@ async fn user_gestures_honor_policy_boundaries_and_deduplicate() {
             .iter()
             .map(|activation| activation.name.as_str())
             .collect::<Vec<_>>(),
-        ["both", "user-only"]
+        ["user-only", "both"]
     );
     let instruction = loaded.instruction.unwrap();
     assert!(instruction.contains("both body"));

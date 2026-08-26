@@ -19,7 +19,7 @@ use crate::permission::parse_reviewer_decision;
 use crate::session::AgentSession;
 use crate::tool::{
     AgentToolSet, BeforeModelStepHook, ExecutionBackend, GitCredentialProvider, GitTool,
-    GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillViewTool, SkillsListTool,
+    GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillToolMode, SkillViewTool, SkillsListTool,
     SubagentContext, Tool, ToolGroupId, ToolPlan, WorkspaceAccess,
 };
 #[cfg(test)]
@@ -224,6 +224,31 @@ impl TurnEngine {
         self.workspace = Some(crate::tool::AgentWorkspace::local(workspace_root.clone()));
         self.workspace_instructions = workspace_instructions;
         self.register_skill_tools_for_workspace(workspace_root)
+    }
+
+    /// 从宿主发现并冻结的目录安装原生 Skill 工具组。
+    ///
+    /// 该入口同时把目录绑定为本 Turn 的 instruction 事实源；工具组仍由 per-agent
+    /// `AgentToolSet` 持有，并在每个模型 step 冻结进唯一 `ToolPlan`。
+    pub fn install_skill_tools_from_catalog(
+        &mut self,
+        catalog: std::sync::Arc<crate::skill::FrozenSkillCatalog>,
+        mode: SkillToolMode,
+    ) -> Result<()> {
+        self.skills
+            .get_or_insert_with(crate::config::SkillsConfig::default);
+        self.skill_catalog = Some(catalog.clone());
+        let workspace = self.workspace.clone().unwrap_or_else(|| {
+            crate::tool::AgentWorkspace::local(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )
+        });
+        let tool_workspace =
+            crate::tool::ToolWorkspace::new(workspace).with_lsp_runtime(self.lsp_runtime.clone());
+        self.agent_tools.install(
+            ToolGroupId::new("skills"),
+            crate::tool::skill_tools_from_catalog(catalog, tool_workspace, mode),
+        )
     }
 
     fn register_skill_tools_for_workspace(

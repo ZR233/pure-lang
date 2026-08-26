@@ -17,7 +17,7 @@ use crate::config::SkillsConfig;
 
 mod filesystem;
 
-pub use filesystem::FileSystemSkillProvider;
+pub use filesystem::{FileSystemSkillProvider, SkillDirectorySource};
 
 /// Stable identity of a process-registered Skill provider.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -499,7 +499,7 @@ impl FrozenSkillCatalog {
             .await
     }
 
-    /// Resolves exact whitespace-delimited `/name` gestures in first-seen order.
+    /// Resolves exact whitespace-delimited `/name` and `$name` gestures in first-seen order.
     ///
     /// # Errors
     ///
@@ -510,17 +510,46 @@ impl FrozenSkillCatalog {
         turn_id: &str,
         cancellation: CancellationToken,
     ) -> Result<SkillUserInvocationLoad> {
+        self.load_user_invocations_with_selections(input, &[], turn_id, cancellation)
+            .await
+    }
+
+    /// 解析文本中的 `/name`、`$name` 与宿主 UI 显式选择，并冻结为本 Turn 的 Skill
+    /// instruction 与 activation 事实。
+    ///
+    /// 显式选择优先，所有来源按首次出现去重；未知或不可由用户调用的 Skill 被忽略。
+    pub async fn load_user_invocations_with_selections(
+        &self,
+        input: &str,
+        selections: &[String],
+        turn_id: &str,
+        cancellation: CancellationToken,
+    ) -> Result<SkillUserInvocationLoad> {
+        let mut names = selections.to_vec();
+        names.extend(input.split_whitespace().filter_map(|token| {
+            token
+                .strip_prefix('/')
+                .or_else(|| token.strip_prefix('$'))
+                .map(str::to_string)
+        }));
+        self.load_user_invocation_names(names, turn_id, cancellation)
+            .await
+    }
+
+    async fn load_user_invocation_names(
+        &self,
+        names: Vec<String>,
+        turn_id: &str,
+        cancellation: CancellationToken,
+    ) -> Result<SkillUserInvocationLoad> {
         let mut seen = BTreeSet::new();
         let mut definitions = Vec::new();
         let mut activations = Vec::new();
-        for token in input.split_whitespace() {
-            let Some(name) = token.strip_prefix('/') else {
-                continue;
-            };
-            if super::validate_skill_name(name).is_err() {
+        for name in names {
+            if super::validate_skill_name(&name).is_err() {
                 continue;
             }
-            let Some(skill) = self.find(name) else {
+            let Some(skill) = self.find(&name) else {
                 continue;
             };
             if !skill.invocation.user_invocable {

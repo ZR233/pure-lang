@@ -13,8 +13,8 @@ use crate::config::SkillsConfig;
 pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
 pub use provider::{
     FileSystemSkillProvider, FrozenSkillCatalog, SkillCandidate, SkillDefinition,
-    SkillInvocationPolicy, SkillLoadInvocation, SkillProvider, SkillProviderId,
-    SkillProviderInvalidator, SkillProviderObservation, SkillProviderRegistration,
+    SkillDirectorySource, SkillInvocationPolicy, SkillLoadInvocation, SkillProvider,
+    SkillProviderId, SkillProviderInvalidator, SkillProviderObservation, SkillProviderRegistration,
     SkillProviderRequest, SkillRegistry, SkillResourceBase, SkillSummary, SkillUserInvocationLoad,
     discover_local_skills, local_skill_registry,
 };

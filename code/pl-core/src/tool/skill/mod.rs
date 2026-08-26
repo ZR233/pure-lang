@@ -40,6 +40,43 @@ pub struct SkillManageTool {
     workspace: ToolWorkspace,
 }
 
+/// Agent Skill 工具组是否允许修改项目 Skill。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillToolMode {
+    /// 只安装目录与读取工具，适用于产品提供的只读或快照目录。
+    ReadOnly,
+    /// 同时安装项目 Skill 管理工具。
+    ProjectWritable,
+}
+
+/// 从单个冻结目录构造原生 Skill 工具组。
+///
+/// 工具共享同一个 `FrozenSkillCatalog`，因此 list、view 与 manage 不会在一个模型 step
+/// 内观察到不同 generation。
+pub fn skill_tools_from_catalog(
+    catalog: Arc<FrozenSkillCatalog>,
+    workspace: ToolWorkspace,
+    mode: SkillToolMode,
+) -> Vec<Arc<dyn Tool>> {
+    let mut tools = vec![
+        Arc::new(SkillsListTool::from_catalog(
+            catalog.clone(),
+            workspace.clone(),
+        )) as Arc<dyn Tool>,
+        Arc::new(SkillViewTool::from_catalog(
+            catalog.clone(),
+            workspace.clone(),
+        )),
+    ];
+    match mode {
+        SkillToolMode::ReadOnly => {}
+        SkillToolMode::ProjectWritable => {
+            tools.push(Arc::new(SkillManageTool::from_catalog(catalog, workspace)));
+        }
+    }
+    tools
+}
+
 #[derive(Debug, Clone)]
 enum SkillCatalogSource {
     Config(SkillsConfig),

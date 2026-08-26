@@ -2,6 +2,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 
 use super::*;
 
@@ -37,6 +38,33 @@ fn write_project_skill(workspace: &Path, name: &str) {
     )
     .unwrap();
     fs::write(skill_dir.join("references/example.md"), "support").unwrap();
+}
+
+#[tokio::test]
+async fn read_only_catalog_tool_group_omits_project_mutation() {
+    let workspace = tempfile::tempdir().unwrap();
+    write_project_skill(workspace.path(), "readonly");
+    let catalog = Arc::new(
+        discover_local_skills(
+            workspace.path(),
+            &SkillsConfig::default(),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let tools = skill_tools_from_catalog(
+        catalog,
+        tool_workspace(workspace.path()),
+        SkillToolMode::ReadOnly,
+    );
+
+    assert_eq!(
+        tools.iter().map(|tool| tool.name()).collect::<Vec<_>>(),
+        ["skills_list", "skill_view"]
+    );
 }
 
 #[cfg(unix)]

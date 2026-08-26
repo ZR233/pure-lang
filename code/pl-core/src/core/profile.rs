@@ -136,6 +136,8 @@ impl TurnEngineBuilder {
         mut self,
         catalog: std::sync::Arc<crate::skill::FrozenSkillCatalog>,
     ) -> Self {
+        self.skills
+            .get_or_insert_with(crate::config::SkillsConfig::default);
         self.skill_catalog = Some(catalog);
         self
     }

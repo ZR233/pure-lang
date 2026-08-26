@@ -20,6 +20,32 @@ const FILESYSTEM_PROVIDER_ID: &str = "local-filesystem";
 #[derive(Debug)]
 pub struct FileSystemSkillProvider {
     id: SkillProviderId,
+    sources: FileSystemSkillSources,
+}
+
+#[derive(Debug)]
+enum FileSystemSkillSources {
+    Configured,
+    Explicit(Vec<SkillDirectorySource>),
+}
+
+/// 宿主显式注册的只读 Skill 目录来源。
+///
+/// 目录按传入顺序决定同名 Skill 的优先级，靠前来源优先。每个来源仍由 PL 统一负责
+/// SKILL.md 校验、平台过滤、revision 冻结和支持资源路径安全。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillDirectorySource {
+    pub root: PathBuf,
+    pub source: crate::skill::SkillSourceKind,
+}
+
+impl SkillDirectorySource {
+    pub fn new(root: impl Into<PathBuf>, source: crate::skill::SkillSourceKind) -> Self {
+        Self {
+            root: root.into(),
+            source,
+        }
+    }
 }
 
 impl FileSystemSkillProvider {
@@ -27,7 +53,22 @@ impl FileSystemSkillProvider {
     pub fn new() -> Self {
         Self {
             id: SkillProviderId(FILESYSTEM_PROVIDER_ID.to_string()),
+            sources: FileSystemSkillSources::Configured,
         }
+    }
+
+    /// 创建一个使用宿主显式目录集合的 Provider。
+    ///
+    /// 该模式不读取 `SkillProviderRequest` 中的默认 project/user/system 路径，只复用其中
+    /// 的 enable/disable 配置与取消令牌。
+    pub fn from_directories(
+        id: impl Into<String>,
+        sources: Vec<SkillDirectorySource>,
+    ) -> Result<Self> {
+        Ok(Self {
+            id: SkillProviderId::new(id)?,
+            sources: FileSystemSkillSources::Explicit(sources),
+        })
     }
 }
 
@@ -47,8 +88,12 @@ impl SkillProvider for FileSystemSkillProvider {
         request: SkillProviderRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SkillProviderObservation>> + Send + 'a>> {
         let id = self.id.clone();
+        let sources = match &self.sources {
+            FileSystemSkillSources::Configured => None,
+            FileSystemSkillSources::Explicit(sources) => Some(sources.clone()),
+        };
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || list_local_skills(&id, request))
+            tokio::task::spawn_blocking(move || list_local_skills(&id, request, sources))
                 .await
                 .map_err(|error| {
                     PureError::ConfigError(format!(
@@ -139,17 +184,29 @@ fn read_local_resource(
 fn list_local_skills(
     provider_id: &SkillProviderId,
     request: SkillProviderRequest,
+    explicit_sources: Option<Vec<SkillDirectorySource>>,
 ) -> Result<SkillProviderObservation> {
     if request.cancellation.is_cancelled() {
         return Err(cancelled_error());
     }
-    let agents_user_dir = crate::skill::util::agents_user_skills_dir().ok();
-    let sources = crate::skill::catalog::skill_sources(
-        &request.workspace_root,
-        &request.config,
-        request.system_dir.as_deref(),
-        agents_user_dir.as_deref(),
-    )?;
+    let sources = if let Some(sources) = explicit_sources {
+        sources
+            .into_iter()
+            .enumerate()
+            .map(|(rank, source)| (source.root, source.source, rank as u16))
+            .collect::<Vec<_>>()
+    } else {
+        let agents_user_dir = crate::skill::util::agents_user_skills_dir().ok();
+        crate::skill::catalog::skill_sources(
+            &request.workspace_root,
+            &request.config,
+            request.system_dir.as_deref(),
+            agents_user_dir.as_deref(),
+        )?
+        .into_iter()
+        .map(|source| (source.root, source.kind, source.priority.into()))
+        .collect::<Vec<_>>()
+    };
     let disabled = request
         .config
         .disabled
@@ -158,18 +215,18 @@ fn list_local_skills(
         .collect::<BTreeSet<_>>();
     let mut observation = SkillProviderObservation::empty();
     let mut local_order = 0;
-    for source in sources {
+    for (root, source_kind, rank) in sources {
         if request.cancellation.is_cancelled() {
             return Err(cancelled_error());
         }
-        let scan = scan_skill_files(&source.root);
+        let scan = scan_skill_files(&root);
         observation.complete &= scan.complete;
         observation.warnings.extend(scan.warnings);
         for skill_file in scan.files {
             if request.cancellation.is_cancelled() {
                 return Err(cancelled_error());
             }
-            match metadata_from_file(&skill_file, &source.root, source.kind) {
+            match metadata_from_file(&skill_file, &root, source_kind) {
                 Ok(mut metadata) => {
                     if disabled.contains(&metadata.name.to_ascii_lowercase())
                         || !platform_matches(&metadata.platforms)
@@ -190,7 +247,7 @@ fn list_local_skills(
                         summary: SkillSummary::from(metadata.clone()),
                         locator: metadata.path.to_string_lossy().to_string(),
                         revision: content_revision(&content),
-                        rank: source.priority.into(),
+                        rank,
                         local_order,
                     });
                     local_order += 1;
