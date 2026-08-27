@@ -31,11 +31,13 @@ async fn run_offline_task_flow() -> Result<()> {
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
-            prompt: format!(
-                "Create the offline task integration fixture and carry it through review. \
-                 Unique parent marker: {PARENT_HISTORY_MARKER}"
-            ),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: format!(
+                    "Create the offline task integration fixture and carry it through review. \
+                     Unique parent marker: {PARENT_HISTORY_MARKER}"
+                ),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;
@@ -206,9 +208,11 @@ async fn run_offline_required_review_flow() -> Result<()> {
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
-            prompt: "Create the offline fixture, adjust the merge content, and satisfy the required integrated review."
-                .to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "Create the offline fixture, adjust the merge content, and satisfy the required integrated review."
+                    .to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;

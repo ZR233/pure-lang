@@ -110,7 +110,7 @@ fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Mess
     }
     Some(Message {
         role: MessageRole::System,
-        content: MessageContent::Text(rendered),
+        content: MessageContent::text(rendered),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -336,11 +336,10 @@ mod tests {
             .filter_map(ModelContextItem::as_message)
             .filter(|message| {
                 message.role == MessageRole::System
-                    && matches!(
-                        &message.content,
-                        MessageContent::Text(content)
-                            if content.starts_with("# Current working context")
-                    )
+                    && message
+                        .content
+                        .text_value()
+                        .starts_with("# Current working context")
             })
             .count()
     }

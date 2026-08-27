@@ -98,12 +98,12 @@ pub enum BridgeThreadContentLifecycle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeThreadAttachment {
     pub id: String,
+    pub modality: crate::api::studio::types::BridgeAttachmentModality,
     pub media_type: String,
     pub filename: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub byte_size: u64,
-    pub data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

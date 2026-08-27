@@ -180,6 +180,10 @@ fn deepseek_default_models_use_china_pricing() {
         .iter()
         .find(|model| model.slug == "deepseek-v4-flash")
         .unwrap();
+    let vision = models
+        .iter()
+        .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
+        .unwrap();
     let pro = models
         .iter()
         .find(|model| model.slug == "deepseek-v4-pro")
@@ -188,9 +192,77 @@ fn deepseek_default_models_use_china_pricing() {
     assert_eq!(flash.cache_read_price_per_mtok, Some(0.02));
     assert_eq!(flash.input_price_per_mtok, Some(1.0));
     assert_eq!(flash.output_price_per_mtok, Some(2.0));
+    assert_eq!(vision.cache_read_price_per_mtok, Some(0.02));
+    assert_eq!(vision.input_price_per_mtok, Some(1.0));
+    assert_eq!(vision.output_price_per_mtok, Some(2.0));
     assert_eq!(pro.cache_read_price_per_mtok, Some(0.025));
     assert_eq!(pro.input_price_per_mtok, Some(3.0));
     assert_eq!(pro.output_price_per_mtok, Some(6.0));
+}
+
+#[test]
+fn deepseek_vision_model_has_complete_responses_image_contract() {
+    assert_eq!(
+        deepseek_default_model_slugs(),
+        [
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+            "deepseek-v4-pro",
+        ]
+    );
+    let model = default_models()
+        .into_iter()
+        .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
+        .unwrap();
+
+    assert_eq!(
+        model
+            .capabilities
+            .input
+            .iter()
+            .map(|capability| capability.modality)
+            .collect::<Vec<_>>(),
+        vec![ModelModality::Text, ModelModality::Image]
+    );
+    let image = model
+        .capabilities
+        .input_capability(ModelModality::Image)
+        .unwrap();
+    assert_eq!(
+        image.sources,
+        vec![ModelInputSource::Local, ModelInputSource::RemoteUrl]
+    );
+    assert_eq!(image.limits.max_count, Some(600));
+    assert_eq!(image.limits.max_bytes, Some(32 * 1024 * 1024));
+    assert_eq!(image.limits.max_total_bytes, Some(32 * 1024 * 1024));
+    assert_eq!(image.limits.max_width, Some(4096));
+    assert_eq!(image.limits.max_height, Some(4096));
+    assert_eq!(
+        image.limits.media_types,
+        ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    );
+    let profile = model
+        .request_profile
+        .media_profile(ModelModality::Image)
+        .unwrap();
+    assert_eq!(profile.wire, MediaWireFormat::ResponsesInputImage);
+    assert_eq!(
+        profile.first_send,
+        vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+    );
+    assert_eq!(profile.replay, vec![MediaRepresentation::DataUrl]);
+    assert!(
+        model
+            .request_profile
+            .media_profile(ModelModality::Video)
+            .is_none()
+    );
+    assert!(
+        model
+            .request_profile
+            .media_profile(ModelModality::File)
+            .is_none()
+    );
 }
 
 #[test]
@@ -254,7 +326,7 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
             .capabilities
             .input
             .iter()
-            .all(|modality| *modality == ModelModality::Text)
+            .all(|capability| capability.modality == ModelModality::Text)
     );
 
     let glm_53_flash = models
@@ -265,7 +337,12 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
     assert_eq!(glm_53_flash.context_window, Some(1_000_000));
     assert_eq!(glm_53_flash.max_output_tokens, Some(128_000));
     assert_eq!(
-        glm_53_flash.capabilities.input,
+        glm_53_flash
+            .capabilities
+            .input
+            .iter()
+            .map(|capability| capability.modality)
+            .collect::<Vec<_>>(),
         vec![ModelModality::Text, ModelModality::Image]
     );
     assert!(
@@ -273,13 +350,48 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
             .capabilities
             .supports_input_modality(ModelModality::Image)
     );
+    let image_capability = glm_53_flash
+        .capabilities
+        .input_capability(ModelModality::Image)
+        .unwrap();
+    assert_eq!(
+        image_capability.sources,
+        vec![ModelInputSource::Local, ModelInputSource::RemoteUrl]
+    );
+    let image_profile = glm_53_flash
+        .request_profile
+        .media_profile(ModelModality::Image)
+        .unwrap();
+    assert_eq!(image_profile.wire, MediaWireFormat::ChatImageUrl);
+    assert_eq!(
+        image_profile.first_send,
+        vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+    );
+    assert_eq!(image_profile.replay, vec![MediaRepresentation::DataUrl]);
+    assert!(
+        glm_53_flash
+            .request_profile
+            .media_profile(ModelModality::Video)
+            .is_none()
+    );
+    assert!(
+        glm_53_flash
+            .request_profile
+            .media_profile(ModelModality::File)
+            .is_none()
+    );
 
     let glm_5v = models
         .iter()
         .find(|model| model.slug == "glm-5v-turbo")
         .unwrap();
     assert_eq!(
-        glm_5v.capabilities.input,
+        glm_5v
+            .capabilities
+            .input
+            .iter()
+            .map(|capability| capability.modality)
+            .collect::<Vec<_>>(),
         vec![ModelModality::Text, ModelModality::Image]
     );
     assert!(
@@ -287,6 +399,23 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
             .capabilities
             .supports_input_modality(ModelModality::Image)
     );
+}
+
+#[test]
+fn builtin_model_media_contracts_are_complete_and_protocol_specific() {
+    for model in default_models() {
+        model
+            .validate_media_contract()
+            .unwrap_or_else(|error| panic!("invalid media contract for {}: {error}", model.slug));
+    }
+
+    let mut invalid = default_models()
+        .into_iter()
+        .find(|model| model.slug == "glm-5.3-flash")
+        .unwrap();
+    invalid.request_profile.media[0].wire = MediaWireFormat::ResponsesInputImage;
+    let error = invalid.validate_media_contract().unwrap_err();
+    assert!(error.contains("does not match transport"));
 }
 
 #[test]

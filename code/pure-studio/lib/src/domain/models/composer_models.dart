@@ -1,3 +1,4 @@
+import 'attachment_models.dart';
 import 'thread_directory_models.dart';
 import 'turn_models.dart';
 
@@ -37,12 +38,14 @@ sealed class ComposerThreadState {
 
   const factory ComposerThreadState.idle({
     String draft,
+    List<AttachmentDraftView> attachments,
     int submissionRevision,
   }) = IdleComposerThreadState;
 
   const factory ComposerThreadState.failure({
     required String error,
     String draft,
+    List<AttachmentDraftView> attachments,
     int submissionRevision,
   }) = FailedComposerThreadState;
 
@@ -51,6 +54,13 @@ sealed class ComposerThreadState {
     SubmittingComposerThreadState(:final draft) ||
     FailedComposerThreadState(:final draft) => draft,
     PendingStartComposerThreadState() => '',
+  };
+
+  List<AttachmentDraftView> get attachments => switch (this) {
+    IdleComposerThreadState(:final attachments) ||
+    SubmittingComposerThreadState(:final attachments) ||
+    FailedComposerThreadState(:final attachments) => attachments,
+    PendingStartComposerThreadState() => const [],
   };
 
   int get submissionRevision => switch (this) {
@@ -75,12 +85,34 @@ sealed class ComposerThreadState {
     if (isSubmissionPending) return this;
     return IdleComposerThreadState(
       draft: value,
+      attachments: attachments,
+      submissionRevision: submissionRevision,
+    );
+  }
+
+  ComposerThreadState updateAttachments(List<AttachmentDraftView> value) {
+    if (isSubmissionPending) return this;
+    return IdleComposerThreadState(
+      draft: draft,
+      attachments: List.unmodifiable(value),
+      submissionRevision: submissionRevision,
+    );
+  }
+
+  ComposerThreadState reportFailure(Object error) {
+    if (isSubmissionPending) return this;
+    return FailedComposerThreadState(
+      draft: draft,
+      attachments: attachments,
+      error: error.toString(),
       submissionRevision: submissionRevision,
     );
   }
 
   ComposerThreadState beginSubmission() {
-    if (isSubmissionPending || draft.trim().isEmpty) return this;
+    if (isSubmissionPending || (draft.trim().isEmpty && attachments.isEmpty)) {
+      return this;
+    }
     return _startSubmission();
   }
 
@@ -91,6 +123,7 @@ sealed class ComposerThreadState {
 
   ComposerThreadState _startSubmission() => SubmittingComposerThreadState(
     draft: draft,
+    attachments: attachments,
     submissionRevision: submissionRevision + 1,
   );
 
@@ -109,6 +142,7 @@ sealed class ComposerThreadState {
     if (!_matchesSubmittingRevision(submissionRevision)) return this;
     return FailedComposerThreadState(
       draft: draft,
+      attachments: attachments,
       error: error.toString(),
       submissionRevision: this.submissionRevision,
     );
@@ -143,10 +177,16 @@ sealed class ComposerThreadState {
 }
 
 final class IdleComposerThreadState extends ComposerThreadState {
-  const IdleComposerThreadState({this.draft = '', this.submissionRevision = 0});
+  const IdleComposerThreadState({
+    this.draft = '',
+    this.attachments = const [],
+    this.submissionRevision = 0,
+  });
 
   @override
   final String draft;
+  @override
+  final List<AttachmentDraftView> attachments;
   @override
   final int submissionRevision;
 }
@@ -154,11 +194,14 @@ final class IdleComposerThreadState extends ComposerThreadState {
 final class SubmittingComposerThreadState extends ComposerThreadState {
   const SubmittingComposerThreadState({
     required this.draft,
+    required this.attachments,
     required this.submissionRevision,
   });
 
   @override
   final String draft;
+  @override
+  final List<AttachmentDraftView> attachments;
   @override
   final int submissionRevision;
 }
@@ -178,6 +221,7 @@ final class FailedComposerThreadState extends ComposerThreadState {
   const FailedComposerThreadState({
     required this.error,
     this.draft = '',
+    this.attachments = const [],
     this.submissionRevision = 0,
   });
 
@@ -185,6 +229,8 @@ final class FailedComposerThreadState extends ComposerThreadState {
   final String error;
   @override
   final String draft;
+  @override
+  final List<AttachmentDraftView> attachments;
   @override
   final int submissionRevision;
 }

@@ -34,11 +34,12 @@ pub mod attachment {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
         pub thread_id: String,
-        pub item_id: Option<String>,
+        pub kind: String,
         pub media_type: String,
         pub filename: Option<String>,
         pub storage_path: String,
         pub byte_size: i64,
+        pub content_sha256: String,
         pub width: Option<i64>,
         pub height: Option<i64>,
         pub created_at: i64,

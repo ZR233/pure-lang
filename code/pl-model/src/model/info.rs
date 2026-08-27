@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::model::capabilities::ModelCapabilities;
+use crate::model::capabilities::{ModelCapabilities, ModelModality};
 use crate::model::parameter::ModelParameter;
 use crate::provider::{ProviderConnectionMode, ProviderWireProtocol};
 
@@ -131,6 +131,10 @@ pub struct ModelRequestProfile {
     pub max_tokens_field: MaxTokensField,
     #[serde(default, skip_serializing_if = "ResponsesMaxTokensField::is_default")]
     pub responses_max_tokens_field: ResponsesMaxTokensField,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<ModelMediaInputProfile>,
+    #[serde(default, skip_serializing_if = "MediaMixPolicy::is_default")]
+    pub media_mix_policy: MediaMixPolicy,
 }
 
 impl ModelRequestProfile {
@@ -143,6 +147,72 @@ impl ModelRequestProfile {
             && !self.responses_programmatic_tool_calling
             && self.max_tokens_field.is_default()
             && self.responses_max_tokens_field.is_default()
+            && self.media.is_empty()
+            && self.media_mix_policy.is_default()
+    }
+
+    pub fn media_profile(&self, modality: ModelModality) -> Option<&ModelMediaInputProfile> {
+        self.media
+            .iter()
+            .find(|profile| profile.modality == modality)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelMediaInputProfile {
+    pub modality: ModelModality,
+    pub wire: MediaWireFormat,
+    pub first_send: Vec<MediaRepresentation>,
+    pub replay: Vec<MediaRepresentation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaWireFormat {
+    ChatImageUrl,
+    ChatVideoUrl,
+    ChatFileUrl,
+    ResponsesInputImage,
+}
+
+impl MediaWireFormat {
+    fn modality(self) -> ModelModality {
+        match self {
+            Self::ChatImageUrl | Self::ResponsesInputImage => ModelModality::Image,
+            Self::ChatVideoUrl => ModelModality::Video,
+            Self::ChatFileUrl => ModelModality::File,
+        }
+    }
+
+    fn protocol(self) -> ProviderWireProtocol {
+        match self {
+            Self::ChatImageUrl | Self::ChatVideoUrl | Self::ChatFileUrl => {
+                ProviderWireProtocol::ChatCompletions
+            }
+            Self::ResponsesInputImage => ProviderWireProtocol::Responses,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaRepresentation {
+    RemoteUrl,
+    ProviderFile,
+    DataUrl,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaMixPolicy {
+    #[default]
+    Any,
+    SingleModality,
+}
+
+impl MediaMixPolicy {
+    fn is_default(&self) -> bool {
+        *self == Self::Any
     }
 }
 
@@ -204,6 +274,123 @@ pub enum TruncationMode {
 }
 
 impl ModelInfo {
+    pub fn validate_media_contract(&self) -> Result<(), String> {
+        let mut modalities = Vec::new();
+        for capability in &self.capabilities.input {
+            if modalities.contains(&capability.modality) {
+                return Err(format!(
+                    "model {} declares duplicate input modality {:?}",
+                    self.slug, capability.modality
+                ));
+            }
+            modalities.push(capability.modality);
+            if capability.modality == ModelModality::Text {
+                if !capability.sources.is_empty() {
+                    return Err(format!(
+                        "model {} text input must not declare media sources",
+                        self.slug
+                    ));
+                }
+                continue;
+            }
+            let profile = self
+                .request_profile
+                .media_profile(capability.modality)
+                .ok_or_else(|| {
+                    format!(
+                        "model {} input modality {:?} has no request media profile",
+                        self.slug, capability.modality
+                    )
+                })?;
+            if capability.sources.is_empty() {
+                return Err(format!(
+                    "model {} input modality {:?} has no admitted sources",
+                    self.slug, capability.modality
+                ));
+            }
+            if profile.first_send.is_empty() || profile.replay.is_empty() {
+                return Err(format!(
+                    "model {} input modality {:?} needs first-send and replay representations",
+                    self.slug, capability.modality
+                ));
+            }
+            if profile.wire.modality() != profile.modality {
+                return Err(format!(
+                    "model {} input modality {:?} does not match media wire {:?}",
+                    self.slug, capability.modality, profile.wire
+                ));
+            }
+            if profile.wire.protocol() != self.transport.protocol {
+                return Err(format!(
+                    "model {} media wire {:?} does not match transport {:?}",
+                    self.slug, profile.wire, self.transport.protocol
+                ));
+            }
+            if has_duplicates(&profile.first_send) || has_duplicates(&profile.replay) {
+                return Err(format!(
+                    "model {} input modality {:?} repeats a media representation",
+                    self.slug, capability.modality
+                ));
+            }
+            if profile.replay.contains(&MediaRepresentation::RemoteUrl) {
+                return Err(format!(
+                    "model {} input modality {:?} replay must not use the original remote URL",
+                    self.slug, capability.modality
+                ));
+            }
+            if capability.sources.contains(&crate::ModelInputSource::Local)
+                && !profile.first_send.iter().any(|representation| {
+                    matches!(
+                        representation,
+                        MediaRepresentation::ProviderFile | MediaRepresentation::DataUrl
+                    )
+                })
+            {
+                return Err(format!(
+                    "model {} input modality {:?} cannot send an admitted local snapshot",
+                    self.slug, capability.modality
+                ));
+            }
+            if profile.first_send.contains(&MediaRepresentation::RemoteUrl)
+                && !capability
+                    .sources
+                    .contains(&crate::ModelInputSource::RemoteUrl)
+            {
+                return Err(format!(
+                    "model {} input modality {:?} has a remote URL strategy without admitting URLs",
+                    self.slug, capability.modality
+                ));
+            }
+            if profile
+                .replay
+                .iter()
+                .all(|representation| *representation == MediaRepresentation::RemoteUrl)
+            {
+                return Err(format!(
+                    "model {} input modality {:?} cannot replay a durable snapshot",
+                    self.slug, capability.modality
+                ));
+            }
+        }
+        let mut profile_modalities = Vec::new();
+        for profile in &self.request_profile.media {
+            if profile_modalities.contains(&profile.modality) {
+                return Err(format!(
+                    "model {} declares duplicate media profile {:?}",
+                    self.slug, profile.modality
+                ));
+            }
+            profile_modalities.push(profile.modality);
+            if !self.capabilities.supports_input_modality(profile.modality) {
+                return Err(format!(
+                    "model {} has a request media profile for undeclared modality {:?}",
+                    self.slug, profile.modality
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn resolved_context_window(&self) -> Option<u64> {
         self.context_window.or(self.max_context_window)
     }
@@ -265,4 +452,11 @@ impl ModelInfo {
         self.effort_parameter()
             .and_then(|parameter| parameter.candidates.first().cloned())
     }
+}
+
+fn has_duplicates<T: PartialEq>(values: &[T]) -> bool {
+    values
+        .iter()
+        .enumerate()
+        .any(|(index, value)| values[..index].contains(value))
 }

@@ -29,11 +29,33 @@ pub struct Message {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum MessageContent {
-    Text(String),
-    MultiPart(Vec<ContentPart>),
+pub struct MessageContent {
+    pub parts: Vec<ContentPart>,
+}
+
+impl MessageContent {
+    pub fn new(parts: Vec<ContentPart>) -> Self {
+        Self { parts }
+    }
+
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            parts: vec![ContentPart::Text { text: text.into() }],
+        }
+    }
+
+    pub fn text_value(&self) -> String {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(text.as_str()),
+                ContentPart::Attachment { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,19 +64,21 @@ pub enum ContentPart {
     Text {
         text: String,
     },
-    Image {
-        source: ImageSource,
+    Attachment {
+        attachment_id: String,
+        modality: AttachmentModality,
         media_type: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         filename: Option<String>,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ImageSource {
-    Attachment { attachment_id: String },
-    InlineBase64 { data: String },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AttachmentModality {
+    Image,
+    Video,
+    File,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

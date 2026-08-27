@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 fn text_message(text: &str) -> Message {
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(text.to_string()),
+        content: MessageContent::text(text.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -62,7 +62,7 @@ fn push_assistant_completion_response_adds_text_message() {
         session.messages(),
         &[Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("reply".to_string()),
+            content: MessageContent::text("reply".to_string()),
             reasoning_content: Some("thinking".to_string()),
             tool_calls: None,
             tool_result: None,
@@ -97,7 +97,7 @@ fn push_assistant_completion_response_preserves_tool_call_history() {
     assert_eq!(session.messages()[0].role, MessageRole::Assistant);
     assert_eq!(
         session.messages()[0].content,
-        MessageContent::Text("running".to_string())
+        MessageContent::text("running".to_string())
     );
     assert_eq!(
         session.messages()[0].reasoning_content,
@@ -255,7 +255,7 @@ fn tool_result_history_message_stores_result_metadata() {
     );
 
     assert_eq!(message.role, MessageRole::Tool);
-    assert_eq!(message.content, MessageContent::Text("ok".to_string()));
+    assert_eq!(message.content, MessageContent::text("ok".to_string()));
     let record = message
         .tool_result
         .as_ref()
@@ -271,7 +271,7 @@ fn from_messages_preserves_order() {
     let msgs = vec![
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("q".to_string()),
+            content: MessageContent::text("q".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -279,7 +279,7 @@ fn from_messages_preserves_order() {
         },
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("a".to_string()),
+            content: MessageContent::text("a".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -418,7 +418,7 @@ fn replace_messages_updates_history_and_revision() {
     let original_revision = session.revision();
     let messages = vec![Message {
         role: MessageRole::User,
-        content: MessageContent::Text("summary".to_string()),
+        content: MessageContent::text("summary".to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -448,7 +448,7 @@ fn truncate_messages_keeps_prefix_and_invalidates_history_revision() {
     assert_eq!(session.messages()[0].role, MessageRole::User);
     assert_eq!(
         session.messages()[0].content,
-        MessageContent::Text("first".to_string())
+        MessageContent::text("first".to_string())
     );
     assert_eq!(session.session_note(), Some(&note));
 }
@@ -525,7 +525,7 @@ fn repair_incomplete_tool_history_inserts_missing_result_before_next_user_messag
     assert_eq!(record.kind, ToolCallKind::Function);
     assert_eq!(
         history[1].content,
-        MessageContent::Text("error: tool execution interrupted".to_string())
+        MessageContent::text("error: tool execution interrupted".to_string())
     );
     assert_eq!(history[2].role, MessageRole::User);
 }

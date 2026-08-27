@@ -284,6 +284,20 @@ impl ModelRuntime {
                 }
                 return Err(error);
             }
+            if !request.prepared_content.is_empty() {
+                let (provider_code, http_status) =
+                    error.transient_model_metadata().unwrap_or((None, None));
+                tracing::warn!(
+                    provider = %self.endpoint.name,
+                    transport = transport.label(),
+                    provider_code,
+                    http_status,
+                    attachment_count = request.prepared_content.len(),
+                    error_bytes = error.to_string().len(),
+                    "含附件的推理请求已开始，禁止自动重放"
+                );
+                return Err(error);
+            }
             if !error.is_transient_model_transport() {
                 return Err(error);
             }

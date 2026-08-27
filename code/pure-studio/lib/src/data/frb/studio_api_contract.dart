@@ -8,8 +8,7 @@ abstract class StudioApi {
   Future<StudioProject> openProject(String path);
   Future<StartNewThreadResult> startNewThread(
     String projectId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
     StudioMode mode,
   );
   Future<ArchiveThreadResult> archiveThread(String threadId);
@@ -48,14 +47,19 @@ abstract class StudioApi {
   });
   Future<SubmitPromptReceipt> startTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
   );
   Future<SubmitPromptReceipt> steerTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
   );
+  Future<List<AttachmentDraftView>> admitAttachmentDrafts(
+    AttachmentAdmissionContext context,
+    List<AttachmentDraftSource> sources,
+  );
+  Future<bool> removeAttachmentDraft(String draftId);
+  Future<Uint8List> readAttachmentDraft(String draftId);
+  Future<Uint8List> readThreadAttachment(String threadId, String attachmentId);
   Future<void> interruptTurn(String threadId, String turnId);
   Future<PendingInteraction> respondInteraction(
     String interactionId,
@@ -100,6 +104,36 @@ abstract class StudioApi {
   Future<LspStateSnapshot> repairLspServer(String projectId, String serverId);
   Future<LspStateSnapshot> resetLspServer(String projectId, String serverId);
   Future<LspStateSnapshot> resetLspWorkspace(String projectId);
+}
+
+frb_attachment_types.BridgeStudioPromptInput _bridgePromptInput(
+  StudioPromptInput input,
+) {
+  return frb_attachment_types.BridgeStudioPromptInput(
+    text: input.text,
+    attachmentDraftIds: input.attachmentDraftIds,
+  );
+}
+
+AttachmentDraftView _attachmentDraftFromFrb(
+  frb_attachment_types.BridgeAttachmentDraft value,
+) {
+  return AttachmentDraftView(
+    id: value.draftId,
+    modality: switch (value.modality) {
+      frb_attachment_types.BridgeAttachmentModality.image =>
+        AttachmentModalityView.image,
+      frb_attachment_types.BridgeAttachmentModality.video =>
+        AttachmentModalityView.video,
+      frb_attachment_types.BridgeAttachmentModality.file =>
+        AttachmentModalityView.file,
+    },
+    mediaType: value.mediaType,
+    filename: value.filename,
+    byteSize: value.byteSize.toInt(),
+    width: value.width,
+    height: value.height,
+  );
 }
 
 class FrbStudioApi implements StudioApi {
@@ -229,16 +263,14 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StartNewThreadResult> startNewThread(
     String projectId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
     StudioMode mode,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
       () => frb.startNewThread(
         projectId: projectId,
-        prompt: prompt,
-        attachmentIds: attachmentIds,
+        input: _bridgePromptInput(input),
         mode: _bridgeThreadMode(mode),
       ),
     );
@@ -604,16 +636,11 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<SubmitPromptReceipt> startTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.startTurn(
-        threadId: threadId,
-        prompt: prompt,
-        attachmentIds: attachmentIds,
-      ),
+      () => frb.startTurn(threadId: threadId, input: _bridgePromptInput(input)),
     );
     return SubmitPromptReceipt(
       threadId: response.threadId,
@@ -625,21 +652,84 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<SubmitPromptReceipt> steerTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.steerTurn(
-        threadId: threadId,
-        prompt: prompt,
-        attachmentIds: attachmentIds,
-      ),
+      () => frb.steerTurn(threadId: threadId, input: _bridgePromptInput(input)),
     );
     return SubmitPromptReceipt(
       threadId: response.threadId,
       turnId: response.turnId,
       cursor: response.revision.toInt(),
+    );
+  }
+
+  @override
+  Future<List<AttachmentDraftView>> admitAttachmentDrafts(
+    AttachmentAdmissionContext context,
+    List<AttachmentDraftSource> sources,
+  ) async {
+    await _ensureReady();
+    final drafts = await _bridgeCall(
+      () => frb_attachment.admitAttachmentDrafts(
+        context: switch (context) {
+          ExistingThreadAttachmentAdmissionContext(:final threadId) =>
+            frb_attachment_types
+                .BridgeAttachmentAdmissionContext.existingThread(
+              threadId: threadId,
+            ),
+          NewThreadAttachmentAdmissionContext(:final mode) =>
+            frb_attachment_types.BridgeAttachmentAdmissionContext.newThread(
+              mode: _bridgeThreadMode(mode),
+            ),
+        },
+        sources: [
+          for (final source in sources)
+            switch (source) {
+              LocalFileAttachmentDraftSource(:final path) =>
+                frb_attachment_types.BridgeAttachmentDraftSource.localFile(
+                  path: path,
+                ),
+              RemoteUrlAttachmentDraftSource(:final url, :final filename) =>
+                frb_attachment_types.BridgeAttachmentDraftSource.remoteUrl(
+                  url: url,
+                  filename: filename,
+                ),
+            },
+        ],
+      ),
+    );
+    return [for (final draft in drafts) _attachmentDraftFromFrb(draft)];
+  }
+
+  @override
+  Future<bool> removeAttachmentDraft(String draftId) async {
+    await _ensureReady();
+    return _bridgeCall(
+      () => frb_attachment.removeAttachmentDraft(draftId: draftId),
+    );
+  }
+
+  @override
+  Future<Uint8List> readAttachmentDraft(String draftId) async {
+    await _ensureReady();
+    return _bridgeCall(
+      () => frb_attachment.readAttachmentDraft(draftId: draftId),
+    );
+  }
+
+  @override
+  Future<Uint8List> readThreadAttachment(
+    String threadId,
+    String attachmentId,
+  ) async {
+    await _ensureReady();
+    return _bridgeCall(
+      () => frb_attachment.readThreadAttachment(
+        threadId: threadId,
+        attachmentId: attachmentId,
+      ),
     );
   }
 

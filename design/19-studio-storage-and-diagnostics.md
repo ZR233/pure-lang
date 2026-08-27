@@ -2,12 +2,12 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v13；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v14；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
 
-Skill Provider 与用户手势不增加数据库表，数据库 schema 仍为 v13。Thread wire schema v7 的 Skill
+Skill Provider 与用户手势不增加数据库表。Thread wire schema v8 的 Skill
 Item 保存 typed resource base、provider identity 与 `Tool | UserGesture` 激活来源；旧
 `path + toolCallId`、缺失 provider 或未知字段严格拒绝。恢复审计发现旧 Skill Item 时阻断其 root
 tree 激活并发布 cleanup recovery issue，不迁移、不默认填充、不自动删除现有数据库。
@@ -158,16 +158,20 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 只读缓存命中，以及 Responses continuation/retry/fallback 分类。Turn 聚合只做可加计数、token 与
 时长汇总；比率和节省量由聚合后的原始量计算，避免平均值再平均。旧记录缺少该对象时按零值读取。
 
-## 19.3 不兼容库重建
+## 19.3 不兼容库重建与唯一一次附件迁移
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。Studio schema 只保留当前版本 v13 一个事实：不存在跨版本迁移链，任何非 v13
-库一律按不兼容处理，不迁移、不归档、不导入：
+fingerprint。Studio 只读写当前版本 v14，不保留跨版本兼容读路径。唯一迁移入口是精确匹配
+canonical v13 fingerprint 的 image attachment 表：迁移先验证所有旧 blob 位于 attachments 目录、
+大小与数据库一致，再计算 SHA-256、写入 content-addressed object，最后在单个 SQLite 事务内重建
+attachment 表并提升 `user_version`。迁移失败保留原 v13 数据库且启动报错，不转入重建。
+
+除上述精确 v13 来源外，任何非 v14 库一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v13 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v14 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建
@@ -181,6 +185,26 @@ Project），再把同一 `DirectoryDelta` 交给 write-behind writer，由后�
 关闭和 Thread 已归档，保留 Turn、Item、Interaction、attachment row 与附件文件。有活动 Task
 时拒绝归档 Project。Task worktree 只能走 preview-confirm-revalidate 产品清理，普通归档
 不删除库外文件、worktree 或 branch。
+
+持久附件由 `attachments` metadata row 与 content-addressed blob 组成。row 保存 attachment kind、
+实际 MIME、安全文件名、字节数、SHA-256 与可选宽高；附件表不保存 Item 外键，durable mailbox
+input 持久化按用户顺序排列的 typed attachment manifest，Timeline Item 与模型请求从同一 manifest
+引用 opaque attachment id，并在物化时用 Thread owner 校验 metadata row。
+本地路径、Base64、外部 URL、provider file id 和 Flutter preview URL 均不得持久化。旧 schema v13
+中的 image row 一次迁移为 kind=image，同时为 mailbox input 建立 canonical attachment manifest；迁移
+完成后只读写新结构，不保留旧字段解释分支。
+
+Composer admission 使用 Studio home 下受限的临时 draft store，不进入 durable projection。批次先
+完成 capability、来源、MIME、文件头、大小和模型限制校验，再按原顺序原子发布 drafts；任一失败
+清理本批全部临时对象。移除、30 分钟固定过期和进程启动都回收 draft；读取、解析或新 admission
+前先执行过期清理。提交失败回滚本次新建 blob/ref，但保留仍有效的 draft 供 Composer 原样重试。
+提交在 owner 临界区中把
+drafts 提升为持久 blob/ref 并与用户输入一起发布；新 Thread 只有在全部附件通过 admission 后创建。
+
+远程输入只接受 HTTPS，并使用不读取环境代理、无 cookie 的专用 client；每次 DNS 与 redirect 都
+拒绝 loopback、私网、链路本地、保留和 metadata 地址，同时限制 redirect、超时、声明长度、流式
+实际长度并执行 MIME sniff。原始 URL 只存在于当前进程的 draft，用于模型明确优选 URL 的一次首发，
+不得进入 SQLite、事件或日志；后续历史、重试和恢复统一读取持久快照。
 
 `reset_agent_sessions_for_root`、项目清理时的 `cancel_thread_for_project_cleanup`、重启恢复
 扫描的 `reconcile_task_agents_after_restart` 与 `mark_restart_user_input_recovered` 是仅有的

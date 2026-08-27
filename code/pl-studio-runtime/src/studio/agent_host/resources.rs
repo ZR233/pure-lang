@@ -21,6 +21,7 @@ pub(in crate::studio) struct StudioAgentResources {
     entries: Arc<RwLock<BTreeMap<ThreadId, StudioAgentResource>>>,
     tool_sets: Arc<RwLock<BTreeMap<ThreadId, pl_core::AgentToolSet>>>,
     cleanup_takeovers: Arc<RwLock<BTreeSet<String>>>,
+    initial_remote_urls: Arc<RwLock<BTreeMap<String, String>>>,
 }
 
 impl StudioAgentResources {
@@ -101,6 +102,34 @@ impl StudioAgentResources {
 
     pub(super) async fn thread_id(&self, id: &ThreadId) -> Option<String> {
         Some(id.to_string())
+    }
+
+    pub(in crate::studio) async fn insert_initial_remote_urls(
+        &self,
+        urls: impl IntoIterator<Item = (String, String)>,
+    ) {
+        self.initial_remote_urls.write().await.extend(urls);
+    }
+
+    pub(super) async fn take_initial_remote_urls(
+        &self,
+        attachment_ids: &[String],
+    ) -> BTreeMap<String, String> {
+        let mut urls = self.initial_remote_urls.write().await;
+        attachment_ids
+            .iter()
+            .filter_map(|attachment_id| {
+                urls.remove(attachment_id)
+                    .map(|url| (attachment_id.clone(), url))
+            })
+            .collect()
+    }
+
+    pub(in crate::studio) async fn remove_initial_remote_urls(&self, attachment_ids: &[String]) {
+        let mut urls = self.initial_remote_urls.write().await;
+        for attachment_id in attachment_ids {
+            urls.remove(attachment_id);
+        }
     }
 }
 

@@ -643,6 +643,7 @@ impl TracePartSource {
 #[serde(rename_all = "camelCase")]
 pub struct TraceAttachment {
     pub id: String,
+    pub modality: TraceAttachmentModality,
     pub media_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
@@ -651,8 +652,14 @@ pub struct TraceAttachment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
     pub byte_size: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TraceAttachmentModality {
+    Image,
+    Video,
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -29,7 +29,7 @@ pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
 pub use store::{ConfigPaths, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 14;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 15;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 

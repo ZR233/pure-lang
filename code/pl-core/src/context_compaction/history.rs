@@ -68,7 +68,7 @@ fn summary_message(summary: &str, summary_prefix: &str) -> Message {
     let trimmed = summary.trim();
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(format!("{summary_prefix}\n\n{trimmed}")),
+        content: MessageContent::text(format!("{summary_prefix}\n\n{trimmed}")),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -102,32 +102,27 @@ fn truncate_message_to_token_budget(message: &Message, max_tokens: u64) -> Optio
     }
     let max_chars = max_tokens.saturating_mul(APPROX_CHARS_PER_TOKEN) as usize;
     let mut message = message.clone();
-    message.content = match message.content {
-        MessageContent::Text(text) => MessageContent::Text(take_last_chars(&text, max_chars)),
-        MessageContent::MultiPart(parts) => {
-            let mut remaining = max_chars;
-            let mut retained = Vec::new();
-            for part in parts {
-                match part {
-                    ContentPart::Text { text } if remaining > 0 => {
-                        let text = if text.chars().count() <= remaining {
-                            text
-                        } else {
-                            take_last_chars(&text, remaining)
-                        };
-                        remaining = remaining.saturating_sub(text.chars().count());
-                        retained.push(ContentPart::Text { text });
-                    }
-                    ContentPart::Image { .. } => retained.push(part),
-                    _ => {}
-                }
+    let mut remaining = max_chars;
+    let mut retained = Vec::new();
+    for part in message.content.parts {
+        match part {
+            ContentPart::Text { text } if remaining > 0 => {
+                let text = if text.chars().count() <= remaining {
+                    text
+                } else {
+                    take_last_chars(&text, remaining)
+                };
+                remaining = remaining.saturating_sub(text.chars().count());
+                retained.push(ContentPart::Text { text });
             }
-            if retained.is_empty() {
-                return None;
-            }
-            MessageContent::MultiPart(retained)
+            ContentPart::Attachment { .. } => retained.push(part),
+            _ => {}
         }
-    };
+    }
+    if retained.is_empty() {
+        return None;
+    }
+    message.content = MessageContent::new(retained);
     Some(message)
 }
 
@@ -218,7 +213,7 @@ fn recent_interaction_tail(
 fn user_text_message(text: impl Into<String>) -> Message {
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(text.into()),
+        content: MessageContent::text(text.into()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -229,7 +224,7 @@ fn user_text_message(text: impl Into<String>) -> Message {
 fn assistant_text_message(text: impl Into<String>) -> Message {
     Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text(text.into()),
+        content: MessageContent::text(text.into()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -241,27 +236,14 @@ fn user_message_text(message: &Message) -> Option<&str> {
     if message.role != MessageRole::User {
         return None;
     }
-    match &message.content {
-        MessageContent::Text(text) => Some(text.as_str()),
-        MessageContent::MultiPart(parts) => parts.iter().find_map(|part| match part {
-            ContentPart::Text { text } => Some(text.as_str()),
-            ContentPart::Image { .. } => None,
-        }),
-    }
+    message.content.parts.iter().find_map(|part| match part {
+        ContentPart::Text { text } => Some(text.as_str()),
+        ContentPart::Attachment { .. } => None,
+    })
 }
 
 pub(super) fn message_text(message: &Message) -> String {
-    match &message.content {
-        MessageContent::Text(text) => text.clone(),
-        MessageContent::MultiPart(parts) => parts
-            .iter()
-            .filter_map(|part| match part {
-                ContentPart::Text { text } => Some(text.as_str()),
-                ContentPart::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
+    message.content.text_value()
 }
 
 fn compact_tool_output(output: &str, max_chars: usize) -> String {
@@ -293,16 +275,15 @@ fn is_summary_text(text: &str, summary_prefix: &str) -> bool {
 }
 
 pub(super) fn estimate_message_tokens(message: &Message) -> u64 {
-    match &message.content {
-        MessageContent::Text(text) => estimate_text_tokens(text),
-        MessageContent::MultiPart(parts) => parts
-            .iter()
-            .map(|part| match part {
-                ContentPart::Text { text } => estimate_text_tokens(text),
-                ContentPart::Image { .. } => 0,
-            })
-            .sum(),
-    }
+    message
+        .content
+        .parts
+        .iter()
+        .map(|part| match part {
+            ContentPart::Text { text } => estimate_text_tokens(text),
+            ContentPart::Attachment { .. } => 0,
+        })
+        .sum()
 }
 
 pub(super) fn estimate_text_tokens(text: &str) -> u64 {

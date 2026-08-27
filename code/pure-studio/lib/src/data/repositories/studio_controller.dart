@@ -391,6 +391,171 @@ class StudioController extends _$StudioController {
     );
   }
 
+  Future<void> addLocalAttachments(
+    List<String> paths, {
+    String? threadId,
+  }) async {
+    if (paths.isEmpty) return;
+    await _admitAttachments([
+      for (final path in paths) AttachmentDraftSource.localFile(path),
+    ], threadId: threadId);
+  }
+
+  Future<void> addRemoteAttachment(String url, {String? threadId}) async {
+    await _admitAttachments([
+      AttachmentDraftSource.remoteUrl(url.trim()),
+    ], threadId: threadId);
+  }
+
+  Future<void> _admitAttachments(
+    List<AttachmentDraftSource> sources, {
+    String? threadId,
+  }) async {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (current == null ||
+        (threadId != null && current.selectedThreadId != threadId) ||
+        (threadId == null &&
+            (projectId == null || current.selectedThreadId != null))) {
+      return;
+    }
+    final composer = threadId == null
+        ? current.newThreadComposer
+        : _workspaceUi(current, threadId).composer;
+    if (composer.isSubmissionPending) return;
+    List<AttachmentDraftView> admitted = const [];
+    try {
+      admitted = await _api.admitAttachmentDrafts(
+        threadId == null
+            ? AttachmentAdmissionContext.newThread(current.newThreadMode)
+            : AttachmentAdmissionContext.existingThread(threadId),
+        sources,
+      );
+      admitted = await Future.wait([
+        for (final draft in admitted)
+          if (draft.modality == AttachmentModalityView.image)
+            _api
+                .readAttachmentDraft(draft.id)
+                .then((bytes) => draft.copyWith(previewBytes: bytes))
+          else
+            Future.value(draft),
+      ]);
+    } catch (error) {
+      await Future.wait([
+        for (final draft in admitted) _api.removeAttachmentDraft(draft.id),
+      ]);
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      state = AsyncData(
+        threadId == null
+            ? latest.copyWith(
+                newThreadComposerByProject: {
+                  ...latest.newThreadComposerByProject,
+                  ?projectId: latest.newThreadComposer.reportFailure(error),
+                },
+              )
+            : _withWorkspaceUi(
+                latest,
+                threadId,
+                (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
+              ),
+      );
+      return;
+    }
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+    final active = threadId == null
+        ? latest.newThreadComposer
+        : _workspaceUi(latest, threadId).composer;
+    if (active.isSubmissionPending) {
+      await Future.wait([
+        for (final draft in admitted) _api.removeAttachmentDraft(draft.id),
+      ]);
+      return;
+    }
+    final updated = active.updateAttachments([
+      ...active.attachments,
+      ...admitted,
+    ]);
+    state = AsyncData(
+      threadId == null
+          ? latest.copyWith(
+              newThreadComposerByProject: {
+                ...latest.newThreadComposerByProject,
+                ?projectId: updated,
+              },
+            )
+          : _withWorkspaceUi(
+              latest,
+              threadId,
+              (ui) => ui.copyWith(composer: updated),
+            ),
+    );
+  }
+
+  Future<void> removeAttachmentDraft(String draftId, {String? threadId}) async {
+    final current = state.value;
+    if (current == null) return;
+    final composer = threadId == null
+        ? current.newThreadComposer
+        : _workspaceUi(current, threadId).composer;
+    if (composer.isSubmissionPending ||
+        !composer.attachments.any((attachment) => attachment.id == draftId)) {
+      return;
+    }
+    try {
+      if (!await _api.removeAttachmentDraft(draftId)) {
+        throw StateError('Attachment draft is unavailable.');
+      }
+    } catch (error) {
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      state = AsyncData(
+        threadId == null
+            ? latest.copyWith(
+                newThreadComposerByProject: {
+                  ...latest.newThreadComposerByProject,
+                  ?latest.selectedProjectId: latest.newThreadComposer
+                      .reportFailure(error),
+                },
+              )
+            : _withWorkspaceUi(
+                latest,
+                threadId,
+                (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
+              ),
+      );
+      return;
+    }
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+    final active = threadId == null
+        ? latest.newThreadComposer
+        : _workspaceUi(latest, threadId).composer;
+    final updated = active.updateAttachments([
+      for (final attachment in active.attachments)
+        if (attachment.id != draftId) attachment,
+    ]);
+    state = AsyncData(
+      threadId == null
+          ? latest.copyWith(
+              newThreadComposerByProject: {
+                ...latest.newThreadComposerByProject,
+                ?latest.selectedProjectId: updated,
+              },
+            )
+          : _withWorkspaceUi(
+              latest,
+              threadId,
+              (ui) => ui.copyWith(composer: updated),
+            ),
+    );
+  }
+
   Future<void> submitNewThreadComposer() async {
     final current = state.value;
     final projectId = current?.selectedProjectId;
@@ -406,7 +571,7 @@ class StudioController extends _$StudioController {
               projectId: projectId,
             ) !=
             null ||
-        prompt.isEmpty ||
+        (prompt.isEmpty && composer.attachments.isEmpty) ||
         composer.isSubmissionPending) {
       return;
     }
@@ -426,8 +591,12 @@ class StudioController extends _$StudioController {
     try {
       result = await _api.startNewThread(
         projectId,
-        prompt,
-        const [],
+        StudioPromptInput(
+          text: prompt,
+          attachmentDraftIds: [
+            for (final attachment in composer.attachments) attachment.id,
+          ],
+        ),
         current.newThreadMode,
       );
     } catch (error) {
@@ -528,14 +697,20 @@ class StudioController extends _$StudioController {
     if (current == null ||
         !_acceptsNewWork(current) ||
         current.selectedThreadId != threadId ||
-        prompt.isEmpty ||
+        (prompt.isEmpty && composer.attachments.isEmpty) ||
         composer.isSubmissionPending) {
       return;
     }
     final workspace = current.workspacesByThread[threadId];
+    final input = StudioPromptInput(
+      text: prompt,
+      attachmentDraftIds: [
+        for (final attachment in composer.attachments) attachment.id,
+      ],
+    );
     final submit = workspace?.activeTurn?.state.isBusy == true
-        ? () => _api.steerTurn(threadId, prompt, const [])
-        : () => _api.startTurn(threadId, prompt, const []);
+        ? () => _api.steerTurn(threadId, input)
+        : () => _api.startTurn(threadId, input);
     await _submitThreadInput(
       current,
       threadId,
@@ -690,6 +865,50 @@ class StudioController extends _$StudioController {
   }) async {
     final current = state.value;
     if (current == null) return;
+    final target = current.providers
+        .where((provider) => provider.id == providerId)
+        .expand((provider) => provider.allModels)
+        .where((candidate) => candidate.slug == model)
+        .firstOrNull;
+    final selectedMode = current.selectedThread?.mode ?? current.newThreadMode;
+    final activeRole = selectedMode == StudioMode.task ? 'planner' : 'executor';
+    final composer = current.selectedThreadId == null
+        ? current.newThreadComposer
+        : _workspaceUi(current, current.selectedThreadId!).composer;
+    if (roleKey == activeRole && target != null) {
+      final supported = target.inputCapabilities
+          .map((capability) => capability.modality)
+          .toSet();
+      final conflicts = composer.attachments
+          .where(
+            (attachment) => !supported.contains(switch (attachment.modality) {
+              AttachmentModalityView.image => ModelModalityView.image,
+              AttachmentModalityView.video => ModelModalityView.video,
+              AttachmentModalityView.file => ModelModalityView.file,
+            }),
+          )
+          .toList();
+      if (conflicts.isNotEmpty) {
+        final error = StateError(
+          'Cannot switch model: ${conflicts.map((item) => item.filename).join(', ')} is not supported.',
+        );
+        state = AsyncData(
+          current.selectedThreadId == null
+              ? current.copyWith(
+                  newThreadComposerByProject: {
+                    ...current.newThreadComposerByProject,
+                    ?current.selectedProjectId: composer.reportFailure(error),
+                  },
+                )
+              : _withWorkspaceUi(
+                  current,
+                  current.selectedThreadId!,
+                  (ui) => ui.copyWith(composer: composer.reportFailure(error)),
+                ),
+        );
+        return;
+      }
+    }
     final role = current.role(roleKey);
     if (role != null &&
         role.providerId == providerId &&

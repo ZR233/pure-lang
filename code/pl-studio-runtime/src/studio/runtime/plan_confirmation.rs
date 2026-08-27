@@ -119,7 +119,6 @@ impl StudioRuntime {
                             "interactionResolutionId": interaction_id,
                             "interactionKind": "planConfirmation",
                             "taskRunId": run.id,
-                            "attachmentIds": [],
                         })),
                 ),
             )

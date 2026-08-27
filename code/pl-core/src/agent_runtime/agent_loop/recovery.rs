@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use pl_protocol::{
     ConversationRecoveryMode, ConversationRecoveryRecord, ConversationRecoveryTurnRange,
-    InteractionStatus, MessageContent, MessageRole, ModelContextItem, PromptPrefixChangedReason,
+    InteractionStatus, MessageRole, ModelContextItem, PromptPrefixChangedReason,
     ThreadNotification,
 };
 
@@ -317,7 +317,7 @@ fn rewind_cutoff(items: &[ModelContextItem], input_hashes: &[String]) -> AgentRu
         if expected == 0 {
             break;
         }
-        let MessageContent::Text(text) = &message.content else {
+        let [pl_protocol::ContentPart::Text { text }] = message.content.parts.as_slice() else {
             return Err(AgentRuntimeError::InvalidInput(
                 "rewindTail cannot match a multipart user message".to_string(),
             ));
@@ -431,7 +431,7 @@ mod tests {
     fn message(role: MessageRole, text: &str) -> ModelContextItem {
         Message {
             role,
-            content: MessageContent::Text(text.to_string()),
+            content: MessageContent::text(text.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -443,7 +443,7 @@ mod tests {
     fn assistant_tool_call(id: &str) -> ModelContextItem {
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text(String::new()),
+            content: MessageContent::text(String::new()),
             reasoning_content: None,
             tool_calls: Some(vec![ToolCallRecord {
                 item_id: id.to_string(),
@@ -462,7 +462,7 @@ mod tests {
     fn tool_result(id: &str) -> ModelContextItem {
         Message {
             role: MessageRole::Tool,
-            content: MessageContent::Text("done".to_string()),
+            content: MessageContent::text("done".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: Some(ToolResultRecord {

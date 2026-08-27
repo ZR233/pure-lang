@@ -1,4 +1,5 @@
 import 'composer_models.dart';
+import 'attachment_models.dart';
 import 'agent_workspace_view.dart';
 import 'interaction_models.dart';
 import 'runtime_models.dart';
@@ -28,21 +29,21 @@ enum ThreadTextChannel { user, commentary, finalAnswer }
 class ThreadAttachmentView {
   const ThreadAttachmentView({
     required this.id,
+    required this.modality,
     required this.mediaType,
     required this.byteSize,
     this.filename,
     this.width,
     this.height,
-    this.dataUrl,
   });
 
   final String id;
+  final AttachmentModalityView modality;
   final String mediaType;
   final String? filename;
   final int? width;
   final int? height;
   final int byteSize;
-  final String? dataUrl;
 }
 
 sealed class ThreadItemDeltaStateView {

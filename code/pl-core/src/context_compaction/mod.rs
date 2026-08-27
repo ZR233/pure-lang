@@ -50,7 +50,7 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
             ModelContextItem::ToolResult { message, receipt }
                 if message.role == pl_protocol::MessageRole::Tool =>
             {
-                message.content = pl_protocol::MessageContent::Text(
+                message.content = pl_protocol::MessageContent::text(
                     serde_json::json!({
                         "compactedToolResult": true,
                         "receipt": receipt,
@@ -63,7 +63,7 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
                 if message.role == pl_protocol::MessageRole::Tool =>
             {
                 let text = serde_json::to_string(&message.content).unwrap_or_default();
-                message.content = pl_protocol::MessageContent::Text(
+                message.content = pl_protocol::MessageContent::text(
                     serde_json::json!({
                         "compactedToolResult": true,
                         "resultHash": crate::canonical_content_hash(text.as_bytes()),

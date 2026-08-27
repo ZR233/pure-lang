@@ -3,7 +3,9 @@
 use pl_core::{AgentTurnOutcome, TurnId};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 
-use crate::studio::entity::{item, thread_context_segment, thread_session_state, turn};
+use crate::studio::entity::{
+    item, thread_context_segment, thread_input, thread_session_state, turn,
+};
 
 use super::input_metadata::{deserialize_input_metadata, serialize_input_metadata};
 
@@ -12,6 +14,36 @@ use pl_core::MailboxPresentation;
 use pl_protocol::TurnOutcome;
 
 use super::restore::active_skills_from_items;
+
+#[test]
+fn thread_input_restores_typed_attachment_manifest() {
+    let attachment = pl_protocol::ThreadAttachment {
+        id: "attachment-1".to_string(),
+        modality: pl_protocol::AttachmentModality::Image,
+        media_type: "image/png".to_string(),
+        filename: Some("marker.png".to_string()),
+        width: Some(1200),
+        height: Some(800),
+        byte_size: 80_000,
+    };
+    let restored = pl_core::DurableMailboxEnvelope::try_from(thread_input::Model {
+        id: "mail-1".to_string(),
+        thread_id: "thread-1".to_string(),
+        mail_id: "mail-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        content: "inspect".to_string(),
+        attachments_json: serde_json::to_string(std::slice::from_ref(&attachment)).unwrap(),
+        metadata_json: "null".to_string(),
+        presentation: "user".to_string(),
+        state_json: serde_json::to_string(&pl_core::MailboxDeliveryState::default()).unwrap(),
+        state_kind: "pending".to_string(),
+        queue_ordinal: 0,
+        queued_at: 7,
+    })
+    .unwrap();
+
+    assert_eq!(restored.payload.attachments, [attachment]);
+}
 
 #[test]
 fn budget_limited_turn_restores_typed_rollover_state() {
@@ -58,6 +90,7 @@ fn input_metadata_round_trips_queue_coalescing_key_without_changing_payload() {
         thread_id: ThreadId::new("thread-wake").unwrap(),
         payload: pl_core::MailboxInputPayload {
             message: "wake".to_string(),
+            attachments: Vec::new(),
             presentation: MailboxPresentation::Hidden,
             metadata: serde_json::json!({"kind": "taskWake"}),
         },
@@ -83,6 +116,7 @@ fn input_metadata_round_trips_budget_refresh_without_queue_key() {
         thread_id: ThreadId::new("thread-refresh").unwrap(),
         payload: pl_core::MailboxInputPayload {
             message: "continue".to_string(),
+            attachments: Vec::new(),
             presentation: MailboxPresentation::Hidden,
             metadata: serde_json::json!({"kind": "plannerMessage"}),
         },

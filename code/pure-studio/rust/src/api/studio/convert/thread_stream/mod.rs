@@ -457,12 +457,16 @@ fn content_lifecycle(value: &ThreadContentLifecycle) -> BridgeThreadContentLifec
 fn attachment(value: &ThreadAttachment) -> BridgeThreadAttachment {
     BridgeThreadAttachment {
         id: value.id.clone(),
+        modality: match value.modality {
+            pl_protocol::AttachmentModality::Image => BridgeAttachmentModality::Image,
+            pl_protocol::AttachmentModality::Video => BridgeAttachmentModality::Video,
+            pl_protocol::AttachmentModality::File => BridgeAttachmentModality::File,
+        },
         media_type: value.media_type.clone(),
         filename: value.filename.clone(),
         width: value.width,
         height: value.height,
         byte_size: value.byte_size,
-        data_url: value.data_url.clone(),
     }
 }
 

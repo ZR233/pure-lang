@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use pl_protocol::studio::{
     ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
-    ProviderSettingsUpdate, RoleSettingsUpdate, SetModelRoleRequest, StudioError,
-    StudioGeneralSettings, StudioInstructionsSettings, StudioMcpServerSettings,
-    StudioProviderModelSettings, StudioProviderSettings, StudioRoleSettings, StudioSettings,
+    ProviderSettingsUpdate, RoleSettingsUpdate, SetModelRoleRequest, StudioCustomModelSettings,
+    StudioError, StudioGeneralSettings, StudioInstructionsSettings, StudioMcpServerSettings,
+    StudioModelConnectionSettings, StudioProviderSettings, StudioRoleSettings, StudioSettings,
     StudioSettingsSnapshot, StudioSkillsSettings, StudioWebSearchSettings,
     UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
     UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
@@ -254,7 +254,6 @@ fn settings_view(
         .providers
         .iter()
         .map(|(id, provider)| {
-            let declared_models = provider.declared_models()?;
             let models = provider.effective_models()?;
             let default_model = config
                 .models
@@ -297,25 +296,17 @@ fn settings_view(
                     .responses_tools
                     .programmatic_tool_calling,
                 default_model,
-                models: declared_models
-                    .iter()
-                    .map(|model| {
-                        let current = models
-                            .iter()
-                            .find(|candidate| candidate.slug == model.slug)
-                            .unwrap_or(model);
-                        model_settings(model, current)
-                    })
-                    .collect(),
                 custom_models: provider
                     .editable_models()
                     .iter()
-                    .map(|model| {
-                        let current = models
-                            .iter()
-                            .find(|candidate| candidate.slug == model.slug)
-                            .unwrap_or(model);
-                        model_settings(model, current)
+                    .map(custom_model_settings)
+                    .collect(),
+                model_connection_modes: provider
+                    .connection_overrides()
+                    .iter()
+                    .map(|(slug, mode)| StudioModelConnectionSettings {
+                        slug: slug.clone(),
+                        connection_mode: connection_mode_label(*mode).to_string(),
                     })
                     .collect(),
                 catalog_id,
@@ -402,24 +393,16 @@ fn settings_view(
     })
 }
 
-fn model_settings(model: &ModelInfo, current: &ModelInfo) -> StudioProviderModelSettings {
+fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
     let reasoning_efforts = model
         .parameters
         .iter()
         .find(|parameter| parameter.name == "effort")
         .map(|parameter| parameter.candidates.as_slice())
         .unwrap_or_default();
-    StudioProviderModelSettings {
+    StudioCustomModelSettings {
         slug: model.slug.clone(),
         display_name: model.display_name.clone(),
-        description: model.description.clone().unwrap_or_default(),
-        context_window: model.context_window,
-        max_output_tokens: model.max_output_tokens,
-        currency: model.currency.clone().unwrap_or_default(),
-        input_price_per_m_tok: model.input_price_per_mtok,
-        output_price_per_m_tok: model.output_price_per_mtok,
-        cache_read_price_per_m_tok: model.cache_read_price_per_mtok,
-        cache_write_price_per_m_tok: model.cache_write_price_per_mtok,
         reasoning_efforts: reasoning_efforts.to_vec(),
         base_instructions: model.base_instructions.clone(),
         wire_protocol: match model.transport.protocol {
@@ -436,8 +419,6 @@ fn model_settings(model: &ModelInfo, current: &ModelInfo) -> StudioProviderModel
             .map(str::to_string)
             .collect(),
         default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
-            .to_string(),
-        connection_mode: connection_mode_label(current.transport.default_connection_mode)
             .to_string(),
     }
 }

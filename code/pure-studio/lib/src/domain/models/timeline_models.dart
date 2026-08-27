@@ -301,6 +301,7 @@ class TimelineEntry {
     this.tool,
     this.planContent,
     this.skill,
+    this.attachments = const [],
     this.contextDisposition = ThreadContextDisposition.active,
   });
 
@@ -325,6 +326,7 @@ class TimelineEntry {
   final TimelineToolPart? tool;
   final String? planContent;
   final TimelineSkillActivation? skill;
+  final List<ThreadAttachmentView> attachments;
   final ThreadContextDisposition contextDisposition;
 }
 

@@ -87,15 +87,5 @@ fn session_digest(session: &ThreadContextState) -> AgentSessionDigest {
 }
 
 fn message_text(content: &MessageContent) -> String {
-    match content {
-        MessageContent::Text(text) => text.clone(),
-        MessageContent::MultiPart(parts) => parts
-            .iter()
-            .filter_map(|part| match part {
-                pl_protocol::ContentPart::Text { text } => Some(text.as_str()),
-                pl_protocol::ContentPart::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
+    content.text_value()
 }

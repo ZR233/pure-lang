@@ -231,7 +231,7 @@ pub fn assistant_text_message(text: impl Into<String>) -> Message {
 pub fn assistant_reasoning_message(content: impl Into<String>) -> Message {
     Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text(String::new()),
+        content: MessageContent::text(String::new()),
         reasoning_content: Some(content.into()),
         tool_calls: None,
         tool_result: None,
@@ -246,17 +246,10 @@ pub fn user_message_text(message: &Message) -> Option<&str> {
     if message.role != MessageRole::User {
         return None;
     }
-    match &message.content {
-        MessageContent::Text(text) => Some(text.as_str()),
-        MessageContent::MultiPart(parts) => parts.iter().find_map(|part| match part {
-            ContentPart::Text { text } => Some(text.as_str()),
-            ContentPart::Image {
-                source: _,
-                media_type: _,
-                filename: _,
-            } => None,
-        }),
-    }
+    message.content.parts.iter().find_map(|part| match part {
+        ContentPart::Text { text } => Some(text.as_str()),
+        ContentPart::Attachment { .. } => None,
+    })
 }
 
 /// 判断一段文本是否使用调用方定义的 compaction summary 前缀。
@@ -265,27 +258,21 @@ pub fn is_compaction_summary_text(text: &str, summary_prefix: &str) -> bool {
 }
 
 fn message_content_text_with_separator(content: &MessageContent, separator: &str) -> String {
-    match content {
-        MessageContent::Text(text) => text.clone(),
-        MessageContent::MultiPart(parts) => parts
-            .iter()
-            .filter_map(|part| match part {
-                ContentPart::Text { text } => Some(text.as_str()),
-                ContentPart::Image {
-                    source: _,
-                    media_type: _,
-                    filename: _,
-                } => None,
-            })
-            .collect::<Vec<_>>()
-            .join(separator),
-    }
+    content
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            ContentPart::Text { text } => Some(text.as_str()),
+            ContentPart::Attachment { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join(separator)
 }
 
 fn text_message(role: MessageRole, content: String) -> Message {
     Message {
         role,
-        content: MessageContent::Text(content),
+        content: MessageContent::text(content),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -313,21 +300,20 @@ pub fn append_message_fragment_text(message: String, fragment: Option<&Message>)
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole};
+    use pl_protocol::{AttachmentModality, ContentPart, Message, MessageContent, MessageRole};
     use pretty_assertions::assert_eq;
 
     #[test]
     fn append_message_fragment_text_appends_text_parts_and_ignores_images() {
         let fragment = Message {
             role: MessageRole::User,
-            content: MessageContent::MultiPart(vec![
+            content: MessageContent::new(vec![
                 ContentPart::Text {
                     text: "skill one".to_string(),
                 },
-                ContentPart::Image {
-                    source: ImageSource::Attachment {
-                        attachment_id: "image-1".to_string(),
-                    },
+                ContentPart::Attachment {
+                    attachment_id: "image-1".to_string(),
+                    modality: AttachmentModality::Image,
                     media_type: "image/png".to_string(),
                     filename: None,
                 },
@@ -347,7 +333,7 @@ mod tests {
         );
         let empty_fragment = Message {
             role: MessageRole::User,
-            content: MessageContent::Text("   ".to_string()),
+            content: MessageContent::text("   ".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -371,11 +357,10 @@ mod tests {
         let reasoning = super::assistant_reasoning_message("thinking");
         let multipart_user = Message {
             role: MessageRole::User,
-            content: MessageContent::MultiPart(vec![
-                ContentPart::Image {
-                    source: ImageSource::Attachment {
-                        attachment_id: "image-1".to_string(),
-                    },
+            content: MessageContent::new(vec![
+                ContentPart::Attachment {
+                    attachment_id: "image-1".to_string(),
+                    modality: AttachmentModality::Image,
                     media_type: "image/png".to_string(),
                     filename: None,
                 },
@@ -390,9 +375,9 @@ mod tests {
         };
 
         assert_eq!(user.role, MessageRole::User);
-        assert_eq!(user.content, MessageContent::Text("hello".to_string()));
+        assert_eq!(user.content, MessageContent::text("hello".to_string()));
         assert_eq!(assistant.role, MessageRole::Assistant);
-        assert_eq!(assistant.content, MessageContent::Text("done".to_string()));
+        assert_eq!(assistant.content, MessageContent::text("done".to_string()));
         assert_eq!(reasoning.role, MessageRole::Assistant);
         assert_eq!(reasoning.reasoning_content.as_deref(), Some("thinking"));
         assert_eq!(super::user_message_text(&multipart_user), Some("visible"));

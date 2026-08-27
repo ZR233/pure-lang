@@ -50,8 +50,10 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
-            prompt: live_task_prompt(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: live_task_prompt(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;

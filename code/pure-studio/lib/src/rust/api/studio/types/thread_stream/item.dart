@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../../frb_generated.dart';
+import '../attachment.dart';
 import '../thread_stream.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -101,32 +102,32 @@ sealed class BridgeThreadAgentState with _$BridgeThreadAgentState {
 
 class BridgeThreadAttachment {
   final String id;
+  final BridgeAttachmentModality modality;
   final String mediaType;
   final String? filename;
   final int? width;
   final int? height;
   final BigInt byteSize;
-  final String? dataUrl;
 
   const BridgeThreadAttachment({
     required this.id,
+    required this.modality,
     required this.mediaType,
     this.filename,
     this.width,
     this.height,
     required this.byteSize,
-    this.dataUrl,
   });
 
   @override
   int get hashCode =>
       id.hashCode ^
+      modality.hashCode ^
       mediaType.hashCode ^
       filename.hashCode ^
       width.hashCode ^
       height.hashCode ^
-      byteSize.hashCode ^
-      dataUrl.hashCode;
+      byteSize.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -134,12 +135,12 @@ class BridgeThreadAttachment {
       other is BridgeThreadAttachment &&
           runtimeType == other.runtimeType &&
           id == other.id &&
+          modality == other.modality &&
           mediaType == other.mediaType &&
           filename == other.filename &&
           width == other.width &&
           height == other.height &&
-          byteSize == other.byteSize &&
-          dataUrl == other.dataUrl;
+          byteSize == other.byteSize;
 }
 
 @freezed

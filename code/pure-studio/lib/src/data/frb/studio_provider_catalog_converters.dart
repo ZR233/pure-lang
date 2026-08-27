@@ -55,7 +55,30 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     contextWindow: model.contextWindow?.toInt(),
     maxContextWindow: model.maxContextWindow?.toInt(),
     maxOutputTokens: model.maxOutputTokens?.toInt(),
-    modalities: model.modalities,
+    inputCapabilities: [
+      for (final capability in model.capabilities.input)
+        ModelInputCapabilityView(
+          modality: _modelModalityFromFrb(capability.modality),
+          sources: [
+            for (final source in capability.sources)
+              switch (source) {
+                frb.BridgeModelInputSource.local => ModelInputSourceView.local,
+                frb.BridgeModelInputSource.remoteUrl =>
+                  ModelInputSourceView.remoteUrl,
+              },
+          ],
+          maxCount: capability.maxCount,
+          maxBytes: capability.maxBytes?.toInt(),
+          maxTotalBytes: capability.maxTotalBytes?.toInt(),
+          maxWidth: capability.maxWidth,
+          maxHeight: capability.maxHeight,
+          mediaTypes: capability.mediaTypes,
+        ),
+    ],
+    outputModalities: [
+      for (final modality in model.capabilities.output)
+        _modelModalityFromFrb(modality),
+    ],
     capabilities: capabilities,
     reasoningEfforts: reasoning?.candidates ?? const [],
     reasoningLabel: reasoning?.label ?? '',
@@ -72,4 +95,14 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     defaultConnectionMode: model.transport.defaultConnectionMode,
     connectionMode: model.transport.defaultConnectionMode,
   );
+}
+
+ModelModalityView _modelModalityFromFrb(frb.BridgeModelModality modality) {
+  return switch (modality) {
+    frb.BridgeModelModality.text => ModelModalityView.text,
+    frb.BridgeModelModality.image => ModelModalityView.image,
+    frb.BridgeModelModality.audio => ModelModalityView.audio,
+    frb.BridgeModelModality.video => ModelModalityView.video,
+    frb.BridgeModelModality.file => ModelModalityView.file,
+  };
 }

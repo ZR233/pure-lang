@@ -13,10 +13,15 @@ pub struct OpenProjectRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateThreadRequest {
     pub title: String,
-    pub prompt: String,
-    #[serde(default)]
-    pub attachment_ids: Vec<String>,
+    pub input: StudioPromptInput,
     pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioPromptInput {
+    pub text: String,
+    pub attachment_draft_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -28,17 +33,13 @@ pub struct SetThreadModeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartTurnRequest {
-    pub prompt: String,
-    #[serde(default)]
-    pub attachment_ids: Vec<String>,
+    pub input: StudioPromptInput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SteerTurnRequest {
-    pub prompt: String,
-    #[serde(default)]
-    pub attachment_ids: Vec<String>,
+    pub input: StudioPromptInput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -106,8 +107,7 @@ mod tests {
     #[test]
     fn request_bodies_reject_unknown_fields() {
         let error = serde_json::from_value::<StartTurnRequest>(serde_json::json!({
-            "prompt": "hello",
-            "attachmentIds": [],
+            "input": {"text": "hello", "attachmentDraftIds": []},
             "unknown": true,
         }))
         .unwrap_err();

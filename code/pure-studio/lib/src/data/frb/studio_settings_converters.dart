@@ -3,15 +3,13 @@ part of 'studio_api.dart';
 ProviderSettingsView _providerSettingsFromFrb(
   frb.BridgeProviderSettingsDto value,
 ) {
-  final models = value.models.map(_providerModelSettingsFromFrb).toList();
   final customModels = value.customModels
-      .map(_providerModelSettingsFromFrb)
+      .map(_customModelSettingsFromFrb)
       .toList();
-  final customSlugs = customModels.map((model) => model.slug).toSet();
-  final defaultModels = models
-      .where((model) => !customSlugs.contains(model.slug))
-      .toList();
-  final modelCount = models.length;
+  final connectionModes = {
+    for (final mode in value.modelConnectionModes)
+      mode.slug: mode.connectionMode,
+  };
 
   return ProviderSettingsView(
     id: value.id,
@@ -22,12 +20,12 @@ ProviderSettingsView _providerSettingsFromFrb(
     bearerToken: '',
     hasBearerToken: value.hasBearerToken,
     defaultModel: value.defaultModel,
-    models: models,
-    defaultModels: defaultModels,
+    models: const [],
     customModels: customModels,
+    modelConnectionModes: connectionModes,
     status: value.hasBearerToken ? 'ready' : 'missingCredential',
-    usageLabel: models.isEmpty ? value.defaultModel : '$modelCount models',
-    modelCount: '$modelCount',
+    usageLabel: value.defaultModel,
+    modelCount: '${customModels.length}',
     updatedAt: 'Loaded',
     catalogId: value.catalogId ?? '',
     capabilitySource: value.capabilitySource,
@@ -38,26 +36,18 @@ ProviderSettingsView _providerSettingsFromFrb(
   );
 }
 
-ProviderModelView _providerModelSettingsFromFrb(
-  frb.BridgeProviderModelSettingsDto value,
+ProviderModelView _customModelSettingsFromFrb(
+  frb.BridgeCustomModelSettingsDto value,
 ) {
   return ProviderModelView(
     slug: value.slug,
     displayName: value.displayName,
-    description: value.description,
-    contextWindow: value.contextWindow?.toInt(),
-    maxOutputTokens: value.maxOutputTokens?.toInt(),
-    currency: value.currency,
-    inputPricePerMTok: value.inputPricePerMTok,
-    outputPricePerMTok: value.outputPricePerMTok,
-    cacheReadPricePerMTok: value.cacheReadPricePerMTok,
-    cacheWritePricePerMTok: value.cacheWritePricePerMTok,
     baseInstructions: value.baseInstructions,
     reasoningEfforts: value.reasoningEfforts,
     wireProtocol: value.wireProtocol,
     supportedConnectionModes: value.supportedConnectionModes,
     defaultConnectionMode: value.defaultConnectionMode,
-    connectionMode: value.connectionMode,
+    connectionMode: value.defaultConnectionMode,
   );
 }
 

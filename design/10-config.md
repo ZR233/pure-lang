@@ -22,18 +22,18 @@ Windows 下对应：
 
 单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 Task 产品表。Flutter
 临时 UI 状态不入库，实时流也不保存 replay journal。数据库由 `pl-studio-runtime` 通过
-SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
+SeaORM 2.0 异步访问；schema v14 与不兼容库/一次性 v13 附件迁移合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 14 表达。
+`~/.pure/config.toml` schema 15 表达。
 
 `ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-14；旧 schema、未知版本、无法解析或无法校验的配置不迁移、不归档、不导入，直接使用
-`StudioConfig::default_config()` 生成当前初始配置并原子替换原文件。替换不会从不兼容文件导入
-provider 凭据，也不会清理系统凭据库；替换后的初始配置只按自身 provider id 注入已有系统凭据。
+15；旧 schema、未知版本、无法解析或无法校验的配置不迁移、不归档、不导入，也不覆盖原文件，
+而是直接返回结构化配置错误。仅配置文件不存在时使用 `StudioConfig::default_config()` 构造内存初始
+配置；该路径只按默认 provider id 注入已有系统凭据。
 文件读取、系统凭据读取或原子写入失败不属于配置不兼容，必须 fail closed 并保留原文件。
 
 `pure-studio` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
@@ -52,7 +52,7 @@ provider 凭据，也不会清理系统凭据库；替换后的初始配置只�
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与唯一支持的 schema version 14。
+- `StudioConfig` 与唯一支持的 schema version 15。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
 - 生成 Thread 首轮固定的 instruction snapshot。
@@ -89,7 +89,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 14
+schema_version = 15
 
 [runtime]
 permission_mode = "request-approval"
@@ -179,7 +179,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 14，provider catalog snapshot schema 为 6。
+`ProviderId`。当前 StudioConfig schema 为 15，provider catalog snapshot schema 为 8。
 
 每个 provider 实例持久化：
 
@@ -200,7 +200,7 @@ Chat+HTTP。
 hosted 或 standalone Web Search，`ModelCapabilities` 仍表示当前模型能否使用 native search 或
 function tools。核心编排必须同时检查 endpoint 服务能力、模型能力与模型 request profile。官方
 OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url` 后默认关闭，只有显式配置
-才能重新开启。产品 UI 从 catalog schema 6 的无密钥 descriptor 动态渲染能力选项，
+才能重新开启。产品 UI 从 catalog schema 7 的无密钥 descriptor 动态渲染能力选项，
 不得识别 OpenAI、muxai 或其他具体 id。
 
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
@@ -232,7 +232,11 @@ preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mi
 
 `used_fallback` 是运行时状态，不写入 TOML。
 
-`capabilities` 是结构化能力矩阵。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
+`capabilities` 是结构化能力矩阵。每个 input capability 显式声明 modality、允许来源和限制；
+`request_profile.media` 同时声明当前 provider codec 可使用的有序表示与混合规则。两者不完整或
+无法把持久快照重新编码时，该 modality 校验失败。未知模型默认 text-only；非视觉模型即使
+provider wire API 接受图片字段，也会在任何附件 IO 和凭据读取前被拒绝。PDF 使用 file modality，
+不保留旧的 pdf modality 别名。
 
 价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格或缺失 `currency` 时，本次 token 仍进入上下文和用量统计，但费用标记为未计价。
 
@@ -244,7 +248,7 @@ Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/m
 
 `request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
 
-Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。`glm-5.3-flash` 复用 `glm-5.3` 的候选值与 wire，并额外声明图片输入。
+Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。`glm-5.3-flash` 复用 `glm-5.3` 的候选值与 wire，输入能力固定为 text/image；remote URL 图片首发优选 URL，local 与 durable snapshot 使用 Data URL。video/file 在缺少该模型精确契约时不得声明。
 
 Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直接校验失败，不支持字段级覆盖。
 完全自定义 provider 用 `Explicit` 保存完整模型列表。角色引用的 model 必须存在于
@@ -471,14 +475,14 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 Provider 的 API token 保存到操作系统凭据库，service 固定为 `pure-studio`，account 为 `provider:{provider_id}`；`~/.pure/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
 设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。旧 schema 不读取凭据，也不生成兼容备份。
-不兼容配置不得按旧 provider id 读取或迁移凭据；原子替换为初始配置前，只允许按初始配置的
-provider id 读取系统凭据。凭据读取失败时保留原配置文件。
+不兼容配置不得按旧 provider id 读取或迁移凭据，也不得自动替换为初始配置；加载直接返回版本
+错误并保留原配置文件。只有配置文件不存在时才创建 schema 15 的初始配置。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
 
 ## 10.13 Web 搜索配置与凭据门控
 
-Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 的初始配置替换合同处理，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
+Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 直接报错，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
 
 配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
 
@@ -486,7 +490,7 @@ Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | ind
 
 ## 10.14 LSP 自定义 server 配置
 
-自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 14 下为可选段：没有该段的旧
+自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 15 下为可选段：没有该段的旧
 config 按默认（空表）加载，不 bump schema 版本。每个条目必须配置 `command` 与非空
 `language_ids`，可选 `args`、`detection`（workspace 检测文件名/glob，缺省总是匹配）、
 `extensions`（文件扩展名，缺省为空）、`display_name`（缺省使用 server id）和 `operations`

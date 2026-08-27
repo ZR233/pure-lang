@@ -1,10 +1,14 @@
-use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
+use pl_protocol::{
+    AttachmentModality, ContentPart, MessageContent, MessageRole, Result, ToolCallKind,
+    ToolCallRecord,
+};
 use serde::Serialize;
 
 use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary, ToolSpec};
+use crate::model::info::MediaWireFormat;
 
 use super::body::ToolFormatBody;
-use super::content::{data_url, message_content_text};
+use super::content::{MediaRepresentationPlan, media_url, message_content_text};
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input, tool_callers_by_call_id};
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +38,7 @@ impl ResponsesRequestBody {
         prompt_cache_key: Option<&str>,
     ) -> Result<Self> {
         let mut input = Vec::new();
+        let media_plan = MediaRepresentationPlan::for_request(request, model)?;
         let history = request
             .input
             .iter()
@@ -102,7 +107,12 @@ impl ResponsesRequestBody {
                 MessageRole::System | MessageRole::User | MessageRole::Assistant => {
                     input.push(ResponsesInputItem::message(
                         ResponsesRole::from(msg.role),
-                        responses_content_for_message(&msg.content, msg.role)?,
+                        responses_content_for_message(
+                            &msg.content,
+                            msg.role,
+                            &request.prepared_content,
+                            &media_plan,
+                        )?,
                     ));
                 }
             }
@@ -360,38 +370,49 @@ impl ResponsesReasoningSummary {
 fn responses_content_for_message(
     content: &MessageContent,
     role: MessageRole,
+    prepared_content: &[crate::completion::PreparedContentPart],
+    media_plan: &MediaRepresentationPlan,
 ) -> Result<Vec<ResponsesContent>> {
-    match content {
-        MessageContent::Text(text) => {
-            let part = match role {
-                MessageRole::Assistant => ResponsesContent::OutputText { text: text.clone() },
-                MessageRole::System | MessageRole::User | MessageRole::Tool => {
-                    ResponsesContent::InputText { text: text.clone() }
-                }
-            };
-            Ok(vec![part])
-        }
-        MessageContent::MultiPart(parts) => {
-            let mut content = Vec::new();
-            for part in parts {
-                match part {
-                    ContentPart::Text { text } => {
-                        if role == MessageRole::Assistant {
-                            content.push(ResponsesContent::OutputText { text: text.clone() });
-                        } else {
-                            content.push(ResponsesContent::InputText { text: text.clone() });
-                        }
-                    }
-                    ContentPart::Image {
-                        source, media_type, ..
-                    } => {
-                        content.push(ResponsesContent::InputImage {
-                            image_url: data_url(source, media_type)?,
-                        });
-                    }
+    let mut response_content = Vec::new();
+    for part in &content.parts {
+        match part {
+            ContentPart::Text { text } => {
+                if role == MessageRole::Assistant {
+                    response_content.push(ResponsesContent::OutputText { text: text.clone() });
+                } else {
+                    response_content.push(ResponsesContent::InputText { text: text.clone() });
                 }
             }
-            Ok(content)
+            ContentPart::Attachment {
+                attachment_id,
+                modality,
+                media_type,
+                ..
+            } => match modality {
+                AttachmentModality::Image => {
+                    if media_plan.wire(*modality)? != MediaWireFormat::ResponsesInputImage {
+                        return Err(protocol_error(
+                            "Chat media wire cannot be serialized by Responses",
+                        ));
+                    }
+                    response_content.push(ResponsesContent::InputImage {
+                        image_url: media_url(
+                            attachment_id,
+                            media_type,
+                            *modality,
+                            prepared_content,
+                            media_plan,
+                        )?,
+                    });
+                }
+                AttachmentModality::File | AttachmentModality::Video => {
+                    return Err(protocol_error(format!(
+                        "Responses does not support {:?} attachments",
+                        modality
+                    )));
+                }
+            },
         }
     }
+    Ok(response_content)
 }

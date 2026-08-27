@@ -280,7 +280,7 @@ impl AgentSession {
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
-        self.push_user_content(MessageContent::Text(prompt));
+        self.push_user_content(MessageContent::text(prompt));
     }
 
     pub fn push_user_content(&mut self, content: MessageContent) {
@@ -297,7 +297,7 @@ impl AgentSession {
     pub fn push_assistant_response(&mut self, content: String, reasoning_content: Option<String>) {
         self.push_message(Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text(content),
+            content: MessageContent::text(content),
             reasoning_content,
             tool_calls: None,
             tool_result: None,
@@ -321,7 +321,7 @@ impl AgentSession {
             .collect::<Vec<_>>();
         self.push_message(Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text(content.unwrap_or_default()),
+            content: MessageContent::text(content.unwrap_or_default()),
             reasoning_content,
             tool_calls: Some(records),
             tool_result: None,

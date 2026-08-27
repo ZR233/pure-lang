@@ -2,8 +2,8 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::thread_stream::bridge_interaction;
 use crate::api::studio::types::{
     BridgeError, BridgeInteractionRequest, BridgeInteractionResolution,
-    BridgePlanConfirmationResolution, BridgeToolApprovalResolution, InterruptTurnResponse,
-    StartTurnResponse, SteerTurnResponse,
+    BridgePlanConfirmationResolution, BridgeStudioPromptInput, BridgeToolApprovalResolution,
+    InterruptTurnResponse, StartTurnResponse, SteerTurnResponse,
 };
 use pl_protocol::{
     InteractionResolution, PlanConfirmationResolution, PlanConfirmationResolutionPayload,
@@ -14,8 +14,7 @@ use std::collections::HashMap;
 
 pub async fn start_turn(
     thread_id: String,
-    prompt: String,
-    attachment_ids: Vec<String>,
+    input: BridgeStudioPromptInput,
 ) -> Result<StartTurnResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let response = bridge
@@ -23,8 +22,7 @@ pub async fn start_turn(
         .start_turn(
             thread_id,
             pl_protocol::studio::StartTurnRequest {
-                prompt,
-                attachment_ids,
+                input: input.into(),
             },
         )
         .await?;
@@ -37,8 +35,7 @@ pub async fn start_turn(
 
 pub async fn steer_turn(
     thread_id: String,
-    prompt: String,
-    attachment_ids: Vec<String>,
+    input: BridgeStudioPromptInput,
 ) -> Result<SteerTurnResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let response = bridge
@@ -46,8 +43,7 @@ pub async fn steer_turn(
         .steer_turn(
             thread_id,
             pl_protocol::studio::SteerTurnRequest {
-                prompt,
-                attachment_ids,
+                input: input.into(),
             },
         )
         .await?;

@@ -64,6 +64,7 @@ pub mod thread_input {
         pub mail_id: String,
         pub turn_id: String,
         pub content: String,
+        pub attachments_json: String,
         pub metadata_json: String,
         pub presentation: String,
         pub state_json: String,

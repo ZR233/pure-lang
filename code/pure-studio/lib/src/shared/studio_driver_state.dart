@@ -118,6 +118,15 @@ abstract final class StudioDriverState {
           },
           'submissionRevision': _newThreadComposer.submissionRevision,
           'error': _newThreadComposer.error,
+          'attachments': [
+            for (final attachment in _newThreadComposer.attachments)
+              {
+                'id': attachment.id,
+                'modality': attachment.modality.name,
+                'filename': attachment.filename,
+                'byteSize': attachment.byteSize,
+              },
+          ],
         },
       },
       'shutdownPhases': <String>[
@@ -153,10 +162,52 @@ abstract final class StudioDriverState {
               'threadMode': workspace.thread.mode.name,
               'threadStatus': workspace.thread.status.name,
               'isBusy': workspace.isBusy,
+              'model': workspace.runtime.model,
+              'modelCapabilities': _modelCapabilities(workspace),
+              'modelProvider': _modelProvider(workspace),
               'composer': {
                 'mode': workspace.composerMode.name,
                 'lockedByInteraction': workspace.activeInteraction != null,
+                'attachments': [
+                  for (final attachment in workspace.composer.attachments)
+                    {
+                      'id': attachment.id,
+                      'modality': _attachmentModalityName(attachment.modality),
+                      'filename': attachment.filename,
+                      'byteSize': attachment.byteSize,
+                    },
+                ],
               },
+              'historyAttachments': [
+                for (final row in workspace.timelineRows)
+                  for (final attachment in row.part?.attachments ?? const [])
+                    {
+                      'id': attachment.id,
+                      'modality': _attachmentModalityName(attachment.modality),
+                      'filename': attachment.filename,
+                      'byteSize': attachment.byteSize,
+                    },
+              ],
+              'timeline': [
+                for (final row in workspace.timelineRows)
+                  {
+                    'id': row.id,
+                    'type': row.type.name,
+                    'text': row.part?.text,
+                    'attachments': [
+                      for (final attachment
+                          in row.part?.attachments ?? const [])
+                        {
+                          'id': attachment.id,
+                          'modality': _attachmentModalityName(
+                            attachment.modality,
+                          ),
+                          'filename': attachment.filename,
+                          'byteSize': attachment.byteSize,
+                        },
+                    ],
+                  },
+              ],
               'interactionCount': workspace.activeInteraction == null ? 0 : 1,
               'activeInteraction': workspace.activeInteraction == null
                   ? null
@@ -189,6 +240,35 @@ abstract final class StudioDriverState {
             : _taskRecoveryResultJson(_taskRecoveryResult!),
       },
     });
+  }
+
+  static List<String> _modelCapabilities(AgentWorkspaceView workspace) {
+    for (final provider in workspace.providers) {
+      for (final model in provider.allModels) {
+        if (model.slug == workspace.runtime.model) {
+          return [
+            for (final capability in model.inputCapabilities)
+              capability.modality.name,
+          ];
+        }
+      }
+    }
+    return const [];
+  }
+
+  static Map<String, Object?>? _modelProvider(AgentWorkspaceView workspace) {
+    for (final provider in workspace.providers) {
+      if (provider.allModels.any(
+        (model) => model.slug == workspace.runtime.model,
+      )) {
+        return {
+          'id': provider.id,
+          'hasBearerToken': provider.hasBearerToken,
+          'credentialEnv': provider.credentialEnv,
+        };
+      }
+    }
+    return null;
   }
 
   static Map<String, Object?> _taskRecoveryPreviewJson(
@@ -444,4 +524,11 @@ abstract final class StudioDriverState {
     'reason': turn.state.reason,
     'updatedAt': turn.updatedAt.toUtc().toIso8601String(),
   };
+
+  static String _attachmentModalityName(AttachmentModalityView modality) =>
+      switch (modality) {
+        AttachmentModalityView.image => 'image',
+        AttachmentModalityView.video => 'video',
+        AttachmentModalityView.file => 'file',
+      };
 }

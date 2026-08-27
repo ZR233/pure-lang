@@ -73,19 +73,26 @@ pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
     })
 }
 
-pub fn attachment_record(model: entities::attachment::Model) -> AttachmentRecord {
-    AttachmentRecord {
+pub fn attachment_record(model: entities::attachment::Model) -> Result<AttachmentRecord> {
+    let modality = match model.kind.as_str() {
+        "image" => pl_protocol::studio::StudioAttachmentModality::Image,
+        "video" => pl_protocol::studio::StudioAttachmentModality::Video,
+        "file" => pl_protocol::studio::StudioAttachmentModality::File,
+        other => anyhow::bail!("invalid attachment kind in studio db: {other}"),
+    };
+    Ok(AttachmentRecord {
         id: model.id,
         thread_id: model.thread_id,
-        item_id: model.item_id,
+        modality,
         media_type: model.media_type,
         filename: model.filename,
         storage_path: model.storage_path,
         byte_size: model.byte_size.max(0) as u64,
+        content_sha256: model.content_sha256,
         width: model.width.and_then(|value| u32::try_from(value).ok()),
         height: model.height.and_then(|value| u32::try_from(value).ok()),
         created_at: model.created_at,
-    }
+    })
 }
 
 pub fn interaction_record(model: entities::interaction::Model) -> Result<InteractionRequest> {

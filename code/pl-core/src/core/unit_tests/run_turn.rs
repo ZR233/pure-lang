@@ -151,7 +151,7 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     assert_eq!(assistant_messages.len(), 1);
     assert_eq!(
         assistant_messages[0].content,
-        MessageContent::Text("Done".to_string())
+        MessageContent::text("Done".to_string())
     );
 }
 
@@ -258,7 +258,7 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
         .build();
     let mut session = AgentSession::from_messages(vec![Message {
         role: MessageRole::User,
-        content: MessageContent::Text("only message".to_string()),
+        content: MessageContent::text("only message".to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -964,7 +964,7 @@ async fn ending_tool_content_is_not_synthesized_as_a_final_trace_item() {
     assert_eq!(bodies.lock().unwrap().len(), 1);
     assert!(session.messages().iter().any(|message| {
         message.role == MessageRole::Assistant
-            && message.content == MessageContent::Text("TASK_E2E_DONE".to_string())
+            && message.content == MessageContent::text("TASK_E2E_DONE".to_string())
     }));
     assert!(!result.trace_events.iter().any(|event| match &event.kind {
         TraceEventKind::TracePartCompleted { item } => item.text().is_some_and(|text| {

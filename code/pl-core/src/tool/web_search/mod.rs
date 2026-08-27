@@ -327,7 +327,7 @@ mod tests {
     fn recent_context_keeps_two_user_turns_and_visible_assistant_text() {
         let message = |role, text: &str| Message {
             role,
-            content: MessageContent::Text(text.to_string()),
+            content: MessageContent::text(text.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -352,7 +352,7 @@ mod tests {
     fn recent_context_starts_at_the_oldest_selected_user_message() {
         let message = |role, text: &str| Message {
             role,
-            content: MessageContent::Text(text.to_string()),
+            content: MessageContent::text(text.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 #[cfg(debug_assertions)]
 use std::time::Duration;
 
-use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
+use crate::{AttachmentModality, ContentPart, MessageContent, PureError, Result};
 use futures::FutureExt;
 #[cfg(debug_assertions)]
 use pl_core::TurnBudget;
@@ -405,24 +405,37 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let attachment_ids = context
             .input
             .payload
-            .metadata
-            .get("attachmentIds")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_string)
+            .attachments
+            .iter()
+            .map(|attachment| attachment.id.clone())
             .collect::<Vec<_>>();
         let attachments = self
             .store
             .load_attachments(&thread_id, &attachment_ids)
             .await
             .map_err(anyhow_error)?;
-        let materialized = self
+        let stored_thread_attachments = attachments
+            .iter()
+            .map(crate::studio::store::attachment::thread_attachment)
+            .collect::<Vec<_>>();
+        if stored_thread_attachments != context.input.payload.attachments {
+            return Err(anyhow_error(anyhow::anyhow!(
+                "mailbox attachment manifest does not match the canonical attachment store"
+            )));
+        }
+        let mut materialized = self
             .store
             .materialize_thread_attachments(&thread_id)
             .await
             .map_err(anyhow_error)?;
+        let initial_remote_urls = self
+            .resources
+            .take_initial_remote_urls(&attachment_ids)
+            .await;
+        for attachment in &mut materialized {
+            attachment.initial_remote_url =
+                initial_remote_urls.get(&attachment.attachment_id).cloned();
+        }
         let user_content = prompt_content(&input_message, &attachments);
         let trace_attachments = attachments
             .iter()
@@ -617,7 +630,7 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
 
 fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord]) -> MessageContent {
     if attachments.is_empty() {
-        return MessageContent::Text(prompt.to_string());
+        return MessageContent::text(prompt.to_string());
     }
     let mut parts = Vec::new();
     if !prompt.is_empty() {
@@ -625,14 +638,25 @@ fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord])
             text: prompt.to_string(),
         });
     }
-    parts.extend(attachments.iter().map(|attachment| ContentPart::Image {
-        source: ImageSource::Attachment {
-            attachment_id: attachment.id.clone(),
-        },
-        media_type: attachment.media_type.clone(),
-        filename: attachment.filename.clone(),
-    }));
-    MessageContent::MultiPart(parts)
+    parts.extend(
+        attachments
+            .iter()
+            .map(|attachment| ContentPart::Attachment {
+                attachment_id: attachment.id.clone(),
+                modality: match attachment.modality {
+                    pl_protocol::studio::StudioAttachmentModality::Image => {
+                        AttachmentModality::Image
+                    }
+                    pl_protocol::studio::StudioAttachmentModality::Video => {
+                        AttachmentModality::Video
+                    }
+                    pl_protocol::studio::StudioAttachmentModality::File => AttachmentModality::File,
+                },
+                media_type: attachment.media_type.clone(),
+                filename: attachment.filename.clone(),
+            }),
+    );
+    MessageContent::new(parts)
 }
 
 fn interaction_emitter(

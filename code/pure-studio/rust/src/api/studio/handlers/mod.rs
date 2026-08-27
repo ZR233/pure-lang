@@ -1,3 +1,4 @@
+pub mod attachment;
 pub mod external_state;
 pub mod history;
 pub mod lifecycle;
@@ -9,6 +10,7 @@ pub mod snapshot;
 pub mod thread;
 pub mod updater;
 
+pub use attachment::*;
 pub use external_state::*;
 pub use history::*;
 pub use lifecycle::*;

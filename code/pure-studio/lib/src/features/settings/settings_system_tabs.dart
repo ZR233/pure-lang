@@ -125,12 +125,19 @@ class RolesTab extends ConsumerWidget {
         if (model.slug.isEmpty) {
           continue;
         }
+        final modalities = model.inputCapabilities
+            .map((capability) => _roleModalityLabel(capability.modality))
+            .join('/');
         options.add(
           _RoleModelOption(
             providerId: provider.id,
             model: model.slug,
-            label:
-                '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName} · ${_roleProtocolLabel(model.wireProtocol)} · ${_roleConnectionLabel(model.connectionMode)}',
+            label: [
+              '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
+              if (modalities.isNotEmpty) modalities,
+              _roleProtocolLabel(model.wireProtocol),
+              _roleConnectionLabel(model.connectionMode),
+            ].join(' · '),
             efforts: model.reasoningEfforts,
             defaultEffort: model.defaultReasoningEffort.isNotEmpty
                 ? model.defaultReasoningEffort
@@ -153,6 +160,14 @@ String _roleConnectionLabel(String mode) => switch (mode) {
   'web_socket' => 'WS',
   'http' => 'HTTP',
   _ => mode,
+};
+
+String _roleModalityLabel(ModelModalityView modality) => switch (modality) {
+  ModelModalityView.text => '文本',
+  ModelModalityView.image => '视觉',
+  ModelModalityView.audio => '音频',
+  ModelModalityView.video => '视频',
+  ModelModalityView.file => '文件',
 };
 
 class _RoleSettingsRow extends StatelessWidget {

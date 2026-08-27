@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pretty_assertions::assert_eq;
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement};
+use sha2::{Digest, Sha256};
 
 use super::*;
 #[cfg(windows)]
@@ -11,8 +12,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v13_with_six_state_tasks() {
-    let root = unique_test_root("schema-v13");
+async fn creates_canonical_schema_v14_with_six_state_tasks() {
+    let root = unique_test_root("schema-v14");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -130,6 +131,12 @@ async fn creates_canonical_schema_v13_with_six_state_tasks() {
         );
     }
     assert!(!item_columns.contains(&"provider_private_payload".to_string()));
+    let input_columns = table_columns(store.database(), "thread_inputs").await;
+    assert!(input_columns.contains(&"attachments_json".to_string()));
+    let attachment_columns = table_columns(store.database(), "attachments").await;
+    assert!(attachment_columns.contains(&"kind".to_string()));
+    assert!(attachment_columns.contains(&"content_sha256".to_string()));
+    assert!(!attachment_columns.contains(&"item_id".to_string()));
     let review_round_columns = table_columns(store.database(), "review_rounds").await;
     assert!(review_round_columns.contains(&"file_reviews_json".to_string()));
     assert!(review_round_columns.contains(&"state_json".to_string()));
@@ -280,6 +287,169 @@ async fn incompatible_schema_is_rebuilt_to_current_without_migration() {
     assert!(rebuilt.list_projects().await.unwrap().is_empty());
 
     drop(rebuilt);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v14() {
+    let root = unique_test_root("schema-v13-attachment-migration");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let database_path = root.join("studio.sqlite");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open(&database_path).await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Migrated image", StudioMode::Simple)
+        .await
+        .unwrap();
+    let image_bytes = b"canonical-v13-image-snapshot";
+    let old_dir = root.join("attachments").join(&thread.id);
+    tokio::fs::create_dir_all(&old_dir).await.unwrap();
+    let old_path = old_dir.join("attachment-v13.png");
+    tokio::fs::write(&old_path, image_bytes).await.unwrap();
+    store
+        .database()
+        .execute_unprepared("ALTER TABLE attachments ADD COLUMN item_id TEXT;")
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO attachments (
+                 id, thread_id, item_id, kind, media_type, filename, storage_path,
+                 byte_size, content_sha256, width, height, created_at
+             ) VALUES (?, ?, NULL, 'image', 'image/png', 'marker.png', ?, ?, 'obsolete', 640, 480, 7)",
+            [
+                "attachment-v13".into(),
+                thread.id.clone().into(),
+                old_path.to_string_lossy().to_string().into(),
+                i64::try_from(image_bytes.len()).unwrap().into(),
+            ],
+        ))
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared(
+            "ALTER TABLE attachments DROP COLUMN kind;
+             ALTER TABLE attachments DROP COLUMN content_sha256;
+             ALTER TABLE thread_inputs DROP COLUMN attachments_json;
+             PRAGMA user_version = 13;",
+        )
+        .await
+        .unwrap();
+    drop(store);
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+    let records = migrated.list_thread_attachments(&thread.id).await.unwrap();
+    let expected_hash = format!("{:x}", Sha256::digest(image_bytes));
+
+    assert_eq!(schema_version(migrated.database()).await, 14);
+    assert!(
+        table_columns(migrated.database(), "thread_inputs")
+            .await
+            .contains(&"attachments_json".to_string())
+    );
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, "attachment-v13");
+    assert_eq!(
+        records[0].modality,
+        pl_protocol::studio::StudioAttachmentModality::Image
+    );
+    assert_eq!(records[0].filename.as_deref(), Some("marker.png"));
+    assert_eq!(records[0].width, Some(640));
+    assert_eq!(records[0].height, Some(480));
+    assert_eq!(records[0].content_sha256, expected_hash);
+    assert!(records[0].storage_path.ends_with(&expected_hash));
+    assert_eq!(
+        migrated
+            .read_attachment_bytes(&thread.id, "attachment-v13")
+            .await
+            .unwrap(),
+        image_bytes
+    );
+
+    drop(migrated);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn failed_v13_attachment_migration_preserves_the_original_database() {
+    let root = unique_test_root("schema-v13-migration-failure");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let database_path = root.join("studio.sqlite");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open(&database_path).await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Missing image", StudioMode::Simple)
+        .await
+        .unwrap();
+    let missing_path = root.join("attachments/missing.png");
+    store
+        .database()
+        .execute_unprepared("ALTER TABLE attachments ADD COLUMN item_id TEXT;")
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO attachments (
+                 id, thread_id, item_id, kind, media_type, filename, storage_path,
+                 byte_size, content_sha256, width, height, created_at
+             ) VALUES (?, ?, NULL, 'image', 'image/png', 'missing.png', ?, 3, 'obsolete', 1, 1, 7)",
+            [
+                "attachment-missing".into(),
+                thread.id.into(),
+                missing_path.to_string_lossy().to_string().into(),
+            ],
+        ))
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared(
+            "ALTER TABLE attachments DROP COLUMN kind;
+             ALTER TABLE attachments DROP COLUMN content_sha256;
+             ALTER TABLE thread_inputs DROP COLUMN attachments_json;
+             PRAGMA user_version = 13;",
+        )
+        .await
+        .unwrap();
+    drop(store);
+
+    let error = match StudioStore::open(&database_path).await {
+        Ok(_) => panic!("a missing v13 snapshot must block migration"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("original database was preserved")
+    );
+
+    let untouched = Database::connect(sqlite_url(&database_path)).await.unwrap();
+    assert_eq!(schema_version(&untouched).await, 13);
+    assert_eq!(
+        table_columns(&untouched, "attachments").await,
+        vec![
+            "id",
+            "thread_id",
+            "media_type",
+            "filename",
+            "storage_path",
+            "byte_size",
+            "width",
+            "height",
+            "created_at",
+            "item_id",
+        ]
+    );
+    untouched.close().await.unwrap();
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

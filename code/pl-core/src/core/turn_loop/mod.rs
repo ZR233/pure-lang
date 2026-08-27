@@ -14,7 +14,7 @@ mod prompt_cache;
 mod tool_results;
 mod turn_setup;
 
-use attachments::materialize_context_items;
+use attachments::prepare_context_items;
 use compaction::CompactionStep;
 use enabled_tools::record_enabled_tools;
 use plan::record_plan_items;
@@ -247,7 +247,7 @@ pub(super) async fn run_turn_with_trace(
         .await?;
         safe_message_count = session.len();
         session_message_count = safe_message_count;
-        let history_items = materialize_context_items(
+        let (history_items, prepared_content) = prepare_context_items(
             &assembled_context.history,
             &request.materialized_attachments,
         )?;
@@ -272,6 +272,7 @@ pub(super) async fn run_turn_with_trace(
         let completion_request = CompletionRequest::builder()
             .instructions(assembled_context.instructions.clone())
             .input(input.clone())
+            .prepared_content(prepared_content)
             .tools(iteration_tools)
             .parallel_tool_calls(parallel_tool_calls)
             .reasoning(reasoning.clone())
@@ -464,7 +465,7 @@ pub(super) async fn run_turn_with_trace(
 
         core.tool_session_runtime
             .update_parent_session(Arc::new(AgentSession::from_items(
-                materialize_context_items(session.items(), &request.materialized_attachments)?,
+                prepare_context_items(session.items(), &request.materialized_attachments)?.0,
             )));
         let tool_session_id = recorder.session_id().to_string();
         let tool_batch = match execute_tool_call_batch(

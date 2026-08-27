@@ -10,8 +10,10 @@ Widget _timelineHarness({
   ),
   VoidCallback? onLoadOlder,
   bool isLoadingOlder = false,
+  StudioApi? api,
 }) {
   return _timelineApp(
+    api: api,
     home: Scaffold(
       body: SizedBox(
         width: 980,
@@ -130,8 +132,10 @@ Widget _localizedApp({
 Widget _timelineApp({
   required Widget home,
   Locale locale = const Locale('en'),
+  StudioApi? api,
 }) {
   return ProviderScope(
+    overrides: [if (api != null) studioApiProvider.overrideWithValue(api)],
     child: _localizedApp(home: home, locale: locale),
   );
 }

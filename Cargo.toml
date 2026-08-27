@@ -55,7 +55,7 @@ time = { version = "0.3", features = ["local-offset"] }
 base64 = "0.22"
 which = "8"
 dunce = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 axum = "0.8"
 fs4 = "=1.1.0"

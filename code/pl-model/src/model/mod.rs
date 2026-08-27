@@ -7,8 +7,9 @@ pub(crate) mod info;
 mod parameter;
 
 pub use capabilities::{
-    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ReasoningInterleaved,
-    ReasoningInterleavedField, ToolCapabilities,
+    ModelCapabilities, ModelInputCapability, ModelInputLimits, ModelInputSource, ModelModality,
+    PromptCacheModelCapabilities, ReasoningInterleaved, ReasoningInterleavedField,
+    ToolCapabilities,
 };
 pub use catalog::{
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
@@ -16,7 +17,8 @@ pub use catalog::{
 };
 pub use family::{ModelFamily, ModelPricing};
 pub use info::{
-    MaxTokensField, ModelInfo, ModelRequestProfile, ModelTransportProfile, ResponsesMaxTokensField,
+    MaxTokensField, MediaMixPolicy, MediaRepresentation, MediaWireFormat, ModelInfo,
+    ModelMediaInputProfile, ModelRequestProfile, ModelTransportProfile, ResponsesMaxTokensField,
     TruncationMode, TruncationPolicy,
 };
 pub use parameter::{

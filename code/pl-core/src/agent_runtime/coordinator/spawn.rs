@@ -116,6 +116,7 @@ where
             thread_id: child_thread_id.clone(),
             payload: super::super::MailboxInputPayload {
                 message,
+                attachments: Vec::new(),
                 presentation: super::super::MailboxPresentation::Hidden,
                 metadata: request.metadata,
             },

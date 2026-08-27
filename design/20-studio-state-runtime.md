@@ -73,6 +73,17 @@ subscribeThread(threadId)
 repairThreadRuntime(threadId)
 ```
 
+附件遵循显式 command/query 边界：`admitAttachmentDrafts`、`removeAttachmentDraft` 与携带
+`StudioPromptInput { text, attachmentDraftIds }` 的 create/start/steer 是 command；
+`readDraftAttachmentPreview`、`readThreadAttachment` 是带 owner 校验的纯 query。FRB native source
+可以是本地路径或 HTTPS URL，HTTP source 使用 multipart 或 URL admission；二者最终进入同一个
+runtime admission。任何 query 都不得下载外部 URL、创建 draft、materialize provider file 或修改
+引用计数。
+
+模型 capability gate 必须在文件读取、网络访问、凭据解析和持久 mutation 前完成；提交时再次以
+当前 resolved route 校验全部 draft，防止 admission 后模型切换。promote、Thread 创建和用户输入
+发布使用同一 owner command 的回滚边界，不能由 bridge 或 Flutter 分步编排。
+
 查询优先从已注册 ThreadActor 的 canonical snapshot 读取；actor 不存在时只读 SQLite 冷基线并返回
 `runtimeAvailability=inactive`，不得让数据库行覆盖活动 owner。订阅是显式激活命令，可从冷基线创建
 actor；纯查询不激活、不修复、不投递 wake。transport 重同步对驻留 Thread 只重新订阅同一 actor；

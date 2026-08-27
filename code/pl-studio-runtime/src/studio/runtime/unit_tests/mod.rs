@@ -175,8 +175,10 @@ async fn incompatible_thread_recovery_issue_blocks_all_read_and_start_surfaces_a
         runtime
             .submit_prompt(StudioSubmitPromptRequest {
                 thread_id: thread.id,
-                prompt: "must be rejected".to_string(),
-                attachment_ids: Vec::new(),
+                input: pl_protocol::studio::StudioPromptInput {
+                    text: "must be rejected".to_string(),
+                    attachment_draft_ids: Vec::new(),
+                },
                 options: StudioSubmitPromptOptions::default(),
             })
             .await
@@ -210,8 +212,10 @@ async fn start_new_thread_accepts_first_prompt_before_publishing_thread() {
         .start_new_thread(StudioStartNewThreadRequest {
             project_id: project.id.clone(),
             title: "First prompt".to_string(),
-            prompt: "Inspect the temporary project.".to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "Inspect the temporary project.".to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             mode: StudioMode::Simple,
             options: StudioSubmitPromptOptions::default(),
         })
@@ -253,8 +257,10 @@ async fn start_new_task_thread_uses_hot_root_before_write_behind_persists_it() {
         .start_new_thread(StudioStartNewThreadRequest {
             project_id: project.id.clone(),
             title: "First task prompt".to_string(),
-            prompt: "Create notes.txt with the requested marker.".to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "Create notes.txt with the requested marker.".to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             mode: StudioMode::Task,
             options: StudioSubmitPromptOptions::default(),
         })
@@ -302,8 +308,10 @@ async fn task_hot_record_is_committed_before_runtime_readiness_is_checked() {
     let error = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread.id.clone(),
-            prompt: "deliver the requested feature".to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "deliver the requested feature".to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await

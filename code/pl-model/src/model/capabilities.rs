@@ -12,7 +12,7 @@ pub struct ModelCapabilities {
     #[serde(default)]
     pub web_search: bool,
     #[serde(default)]
-    pub input: Vec<ModelModality>,
+    pub input: Vec<ModelInputCapability>,
     #[serde(default)]
     pub output: Vec<ModelModality>,
     #[serde(default)]
@@ -36,7 +36,7 @@ impl ModelCapabilities {
             temperature: true,
             reasoning: false,
             web_search: false,
-            input: vec![ModelModality::Text],
+            input: vec![ModelInputCapability::text()],
             output: vec![ModelModality::Text],
             tools: ToolCapabilities {
                 function_calling: true,
@@ -87,7 +87,15 @@ impl ModelCapabilities {
     }
 
     pub fn supports_input_modality(&self, modality: ModelModality) -> bool {
-        self.input.contains(&modality)
+        self.input
+            .iter()
+            .any(|capability| capability.modality == modality)
+    }
+
+    pub fn input_capability(&self, modality: ModelModality) -> Option<&ModelInputCapability> {
+        self.input
+            .iter()
+            .find(|capability| capability.modality == modality)
     }
 
     pub fn supports_output_modality(&self, modality: ModelModality) -> bool {
@@ -110,14 +118,69 @@ pub struct PromptCacheModelCapabilities {
     pub cache_write_tokens: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelModality {
     Text,
     Image,
     Audio,
     Video,
-    Pdf,
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelInputCapability {
+    pub modality: ModelModality,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<ModelInputSource>,
+    #[serde(default)]
+    pub limits: ModelInputLimits,
+}
+
+impl ModelInputCapability {
+    pub fn text() -> Self {
+        Self {
+            modality: ModelModality::Text,
+            sources: Vec::new(),
+            limits: ModelInputLimits::default(),
+        }
+    }
+
+    pub fn media(modality: ModelModality, sources: Vec<ModelInputSource>) -> Self {
+        debug_assert!(modality != ModelModality::Text);
+        Self {
+            modality,
+            sources,
+            limits: ModelInputLimits::default(),
+        }
+    }
+
+    pub fn supports_source(&self, source: ModelInputSource) -> bool {
+        self.sources.contains(&source)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelInputSource {
+    Local,
+    RemoteUrl,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelInputLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

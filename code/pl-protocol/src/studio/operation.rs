@@ -20,6 +20,11 @@ pub enum StudioOperation {
     StartTurn,
     SteerTurn,
     InterruptTurn,
+    AdmitAttachmentDrafts,
+    UploadAttachmentDrafts,
+    RemoveAttachmentDraft,
+    ReadAttachmentDraft,
+    ReadThreadAttachment,
     RespondInteraction,
     LoadProviderCatalog,
     ReadSettings,
@@ -57,7 +62,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 52] = [
         Self::ReadState,
         Self::OpenProject,
         Self::ActivateProject,
@@ -71,6 +76,11 @@ impl StudioOperation {
         Self::StartTurn,
         Self::SteerTurn,
         Self::InterruptTurn,
+        Self::AdmitAttachmentDrafts,
+        Self::UploadAttachmentDrafts,
+        Self::RemoveAttachmentDraft,
+        Self::ReadAttachmentDraft,
+        Self::ReadThreadAttachment,
         Self::RespondInteraction,
         Self::LoadProviderCatalog,
         Self::ReadSettings,
@@ -122,6 +132,11 @@ impl StudioOperation {
             Self::StartTurn => "turn.start",
             Self::SteerTurn => "turn.steer",
             Self::InterruptTurn => "turn.interrupt",
+            Self::AdmitAttachmentDrafts => "attachment.admit",
+            Self::UploadAttachmentDrafts => "attachment.upload",
+            Self::RemoveAttachmentDraft => "attachment.removeDraft",
+            Self::ReadAttachmentDraft => "attachment.readDraft",
+            Self::ReadThreadAttachment => "attachment.readThread",
             Self::RespondInteraction => "interaction.respond",
             Self::LoadProviderCatalog => "settings.loadProviderCatalog",
             Self::ReadSettings => "settings.read",

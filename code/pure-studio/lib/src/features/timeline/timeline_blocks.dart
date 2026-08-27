@@ -406,17 +406,161 @@ class _MarkdownBubble extends StatelessWidget {
           horizontal: isUser ? 14 : 0,
           vertical: isUser ? 10 : 0,
         ),
-        child: SelectionArea(
-          child: _AgentMarkdown(
-            id: part.id,
-            status: part.status,
-            text: part.text.trim().isEmpty ? part.error ?? '' : part.text,
-            surface: surface,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (part.attachments.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final attachment in part.attachments)
+                    _HistoryAttachmentCard(
+                      threadId: part.threadId,
+                      attachment: attachment,
+                    ),
+                ],
+              ),
+            if (part.attachments.isNotEmpty && part.text.trim().isNotEmpty)
+              const SizedBox(height: 8),
+            if (part.text.trim().isNotEmpty || part.error != null)
+              SelectionArea(
+                child: _AgentMarkdown(
+                  id: part.id,
+                  status: part.status,
+                  text: part.text.trim().isEmpty ? part.error ?? '' : part.text,
+                  surface: surface,
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
+}
+
+class _HistoryAttachmentCard extends ConsumerStatefulWidget {
+  const _HistoryAttachmentCard({
+    required this.threadId,
+    required this.attachment,
+  });
+
+  final String threadId;
+  final ThreadAttachmentView attachment;
+
+  @override
+  ConsumerState<_HistoryAttachmentCard> createState() =>
+      _HistoryAttachmentCardState();
+}
+
+class _HistoryAttachmentCardState
+    extends ConsumerState<_HistoryAttachmentCard> {
+  Future<Uint8List>? _image;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.attachment.modality == AttachmentModalityView.image) {
+      _image = ref
+          .read(studioApiProvider)
+          .readThreadAttachment(widget.threadId, widget.attachment.id);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final attachment = widget.attachment;
+    return InkWell(
+      key: StudioDriverKeys.historyAttachment(attachment.id),
+      borderRadius: BorderRadius.circular(10),
+      onTap: attachment.modality == AttachmentModalityView.image
+          ? _showImage
+          : null,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 230),
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: context.studioPaper,
+          border: Border.all(color: context.studioLine),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox.square(
+              dimension: 54,
+              child: attachment.modality == AttachmentModalityView.image
+                  ? FutureBuilder<Uint8List>(
+                      future: _image,
+                      builder: (context, snapshot) => snapshot.hasData
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(7),
+                              child: Image.memory(
+                                snapshot.data!,
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : const Icon(Icons.image_outlined),
+                    )
+                  : Icon(_attachmentIcon(attachment.modality)),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    attachment.filename ?? '附件',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '${_attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showImage() async {
+    final image = await _image;
+    if (!mounted || image == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5,
+          child: Image.memory(image),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _attachmentIcon(AttachmentModalityView modality) => switch (modality) {
+  AttachmentModalityView.image => Icons.image_outlined,
+  AttachmentModalityView.video => Icons.movie_outlined,
+  AttachmentModalityView.file => Icons.insert_drive_file_outlined,
+};
+
+String _attachmentModalityLabel(AttachmentModalityView modality) =>
+    switch (modality) {
+      AttachmentModalityView.image => '视觉',
+      AttachmentModalityView.video => '视频',
+      AttachmentModalityView.file => '文件',
+    };
+
+String _formatBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
 class _ReasoningPart extends StatelessWidget {

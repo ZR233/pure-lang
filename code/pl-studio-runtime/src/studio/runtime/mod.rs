@@ -15,7 +15,9 @@ use crate::studio::{
     InteractionService, ProductEventBus, StudioActiveTurn, StudioRecoveryCleanupPreview,
     StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
 };
+use pl_protocol::studio::StudioPromptInput;
 
+mod attachment_drafts;
 mod history;
 mod interaction_continuation;
 mod lifecycle;
@@ -47,8 +49,7 @@ pub use updater::*;
 /// `pl_core::AgentRuntime` 管理。
 pub struct StudioSubmitPromptRequest {
     pub thread_id: String,
-    pub prompt: String,
-    pub attachment_ids: Vec<String>,
+    pub input: StudioPromptInput,
     pub options: StudioSubmitPromptOptions,
 }
 
@@ -56,8 +57,7 @@ pub struct StudioSubmitPromptRequest {
 pub struct StudioStartNewThreadRequest {
     pub project_id: String,
     pub title: String,
-    pub prompt: String,
-    pub attachment_ids: Vec<String>,
+    pub input: StudioPromptInput,
     pub mode: StudioMode,
     pub options: StudioSubmitPromptOptions,
 }
@@ -145,6 +145,7 @@ pub struct StudioRuntime {
     activation: ProjectActivationRuntime,
     task_runtime: crate::studio::TaskRuntime,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
+    attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,

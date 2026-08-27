@@ -4,7 +4,8 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::{
-    ArchiveThreadResult, BridgeError, BridgeThreadMode, StartNewThreadResponse, StartTurnResponse,
+    ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThreadMode,
+    StartNewThreadResponse, StartTurnResponse,
 };
 use pl_studio_runtime::StudioMode;
 
@@ -22,8 +23,7 @@ fn studio_mode(mode: BridgeThreadMode) -> StudioMode {
 /// Returns an error when the Project does not exist, the prompt is empty, or the Turn is rejected.
 pub async fn start_new_thread(
     project_id: String,
-    prompt: String,
-    attachment_ids: Vec<String>,
+    input: BridgeStudioPromptInput,
     mode: BridgeThreadMode,
 ) -> Result<StartNewThreadResponse, BridgeError> {
     let mode = studio_mode(mode);
@@ -34,8 +34,7 @@ pub async fn start_new_thread(
             project_id,
             pl_protocol::studio::CreateThreadRequest {
                 title: "New Session".to_string(),
-                prompt,
-                attachment_ids,
+                input: input.into(),
                 mode: mode.label().to_string(),
             },
         )

@@ -2,7 +2,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::ModelInfo;
-use pl_protocol::{MessageContent, MessageRole};
+use pl_protocol::MessageRole;
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -214,18 +214,18 @@ fn profile_can_override_base_and_add_context_blocks() {
         snapshot.base.source.kind,
         InstructionSourceKind::ProfileBaseOverride
     );
-    assert!(bundle.prelude_messages.iter().any(|message| {
-        matches!(
-            &message.content,
-            MessageContent::Text(text) if text.contains("profile developer")
-        )
-    }));
-    assert!(bundle.prelude_messages.iter().any(|message| {
-        matches!(
-            &message.content,
-            MessageContent::Text(text) if text.contains("profile user")
-        )
-    }));
+    assert!(
+        bundle
+            .prelude_messages
+            .iter()
+            .any(|message| message.content.text_value().contains("profile developer"))
+    );
+    assert!(
+        bundle
+            .prelude_messages
+            .iter()
+            .any(|message| message.content.text_value().contains("profile user"))
+    );
     assert_eq!(
         snapshot
             .user
@@ -295,17 +295,15 @@ fn bundle_orders_fixed_layers_from_global_to_workspace() {
         bundle
             .prelude_messages
             .iter()
-            .map(|message| match &message.content {
-                MessageContent::Text(text) => text.lines().next().unwrap_or_default(),
-                _ => panic!("fixed instruction groups must use text messages"),
-            })
+            .map(|message| message.content.text_value())
+            .map(|text| text.lines().next().unwrap_or_default().to_string())
             .collect::<Vec<_>>(),
         vec![
-            "# Global Developer Instructions",
-            "# Global User Context",
-            "# Mode and Role Instructions",
-            "# Skill Instructions",
-            "# Workspace Context",
+            "# Global Developer Instructions".to_string(),
+            "# Global User Context".to_string(),
+            "# Mode and Role Instructions".to_string(),
+            "# Skill Instructions".to_string(),
+            "# Workspace Context".to_string(),
         ]
     );
 }
@@ -326,12 +324,9 @@ fn direct_skill_invocation_is_a_transient_user_instruction_group() {
 
     assert_eq!(bundle.prelude_messages.len(), 1);
     assert_eq!(bundle.prelude_messages[0].role, MessageRole::User);
-    assert!(matches!(
-        &bundle.prelude_messages[0].content,
-        MessageContent::Text(text)
-            if text.starts_with("# Turn Skill Instructions")
-                && text.contains("follow the review skill")
-    ));
+    let content = bundle.prelude_messages[0].content.text_value();
+    assert!(content.starts_with("# Turn Skill Instructions"));
+    assert!(content.contains("follow the review skill"));
     assert!(bundle.prefix_section_hashes.contains_key("turnSkills"));
 }
 

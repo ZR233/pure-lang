@@ -120,11 +120,12 @@ impl ThreadVisibility {
 pub struct AttachmentRecord {
     pub id: String,
     pub thread_id: String,
-    pub item_id: Option<String>,
+    pub modality: pl_protocol::studio::StudioAttachmentModality,
     pub media_type: String,
     pub filename: Option<String>,
     pub storage_path: String,
     pub byte_size: u64,
+    pub content_sha256: String,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub created_at: i64,

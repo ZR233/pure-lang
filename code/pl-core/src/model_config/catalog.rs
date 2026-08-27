@@ -8,9 +8,10 @@ use pl_model::{
 };
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
-    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
-    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
+    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPricingDto,
+    ModelReasoningDescriptor, ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
+    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ProviderServiceCapabilitiesDescriptor, PureError, Result,
     WebSearchProviderCapabilitiesDescriptor,
 };
 
@@ -356,12 +357,32 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
             default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
                 .to_string(),
         },
-        modalities: capabilities
-            .input
-            .iter()
-            .map(|modality| modality_label(*modality).to_string())
-            .collect(),
         capabilities: ModelCapabilitiesDto {
+            input: capabilities
+                .input
+                .iter()
+                .map(|capability| ModelInputCapabilityDto {
+                    modality: modality_descriptor(capability.modality),
+                    sources: capability
+                        .sources
+                        .iter()
+                        .copied()
+                        .map(input_source_descriptor)
+                        .collect(),
+                    max_count: capability.limits.max_count,
+                    max_bytes: capability.limits.max_bytes,
+                    max_total_bytes: capability.limits.max_total_bytes,
+                    max_width: capability.limits.max_width,
+                    max_height: capability.limits.max_height,
+                    media_types: capability.limits.media_types.clone(),
+                })
+                .collect(),
+            output: capabilities
+                .output
+                .iter()
+                .copied()
+                .map(modality_descriptor)
+                .collect(),
             streaming: capabilities.streaming,
             temperature: capabilities.temperature,
             reasoning: capabilities.reasoning,
@@ -383,13 +404,20 @@ fn protocol_label(protocol: ProviderWireProtocol) -> &'static str {
     }
 }
 
-fn modality_label(modality: ModelModality) -> &'static str {
+fn modality_descriptor(modality: ModelModality) -> ModelModalityDto {
     match modality {
-        ModelModality::Text => "text",
-        ModelModality::Image => "image",
-        ModelModality::Audio => "audio",
-        ModelModality::Video => "video",
-        ModelModality::Pdf => "pdf",
+        ModelModality::Text => ModelModalityDto::Text,
+        ModelModality::Image => ModelModalityDto::Image,
+        ModelModality::Audio => ModelModalityDto::Audio,
+        ModelModality::Video => ModelModalityDto::Video,
+        ModelModality::File => ModelModalityDto::File,
+    }
+}
+
+fn input_source_descriptor(source: pl_model::ModelInputSource) -> ModelInputSourceDto {
+    match source {
+        pl_model::ModelInputSource::Local => ModelInputSourceDto::Local,
+        pl_model::ModelInputSource::RemoteUrl => ModelInputSourceDto::RemoteUrl,
     }
 }
 

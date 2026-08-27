@@ -110,14 +110,36 @@ class ModelRoleSelector extends ConsumerWidget {
                   const Icon(Icons.smart_toy_outlined, size: 18),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(option.label, overflow: TextOverflow.ellipsis),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(option.label, overflow: TextOverflow.ellipsis),
+                        if (option.inputModalities.isNotEmpty)
+                          Text(
+                            option.inputModalities
+                                .map(modelInputCapabilityLabel)
+                                .join(' · '),
+                            key: StudioDriverKeys.modelCapabilityTags(
+                              option.providerId,
+                              option.model,
+                            ),
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
       ],
-      child: _ControlItem(label: current.model, enabled: true),
+      child: _ControlItem(
+        label: [
+          current.model,
+          ...current.inputModalities.map(modelInputCapabilityLabel),
+        ].join(' · '),
+        enabled: true,
+      ),
     );
   }
 }
@@ -219,12 +241,17 @@ class ModelOption {
     required this.model,
     required this.label,
     required this.reasoningEfforts,
+    required this.inputCapabilities,
   });
 
   final String providerId;
   final String model;
   final String label;
   final List<String> reasoningEfforts;
+  final List<ModelInputCapabilityView> inputCapabilities;
+
+  List<ModelModalityView> get inputModalities =>
+      inputCapabilities.map((capability) => capability.modality).toList();
 
   String get key => '$providerId::$model';
 }
@@ -280,9 +307,19 @@ List<ModelOption> modelOptions(List<ProviderSettingsView> providers) {
           label:
               '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
           reasoningEfforts: model.reasoningEfforts,
+          inputCapabilities: model.inputCapabilities,
         ),
       );
     }
   }
   return options;
 }
+
+String modelInputCapabilityLabel(ModelModalityView modality) =>
+    switch (modality) {
+      ModelModalityView.text => '文本',
+      ModelModalityView.image => '视觉',
+      ModelModalityView.audio => '音频',
+      ModelModalityView.video => '视频',
+      ModelModalityView.file => '文件',
+    };

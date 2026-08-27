@@ -317,7 +317,7 @@ impl TurnEngine {
         });
         let message = Message {
             role: MessageRole::User,
-            content: MessageContent::Text(
+            content: MessageContent::text(
                 serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
             ),
             reasoning_content: None,

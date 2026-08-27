@@ -1,4 +1,6 @@
-use pl_protocol::{ConversationRecoveryMode, ConversationRecoveryRecord, InteractionRequest};
+use pl_protocol::{
+    ConversationRecoveryMode, ConversationRecoveryRecord, InteractionRequest, ThreadAttachment,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::agent_runtime::{ThreadId, TurnId};
@@ -53,6 +55,7 @@ impl MailboxBudgetAction {
 #[serde(rename_all = "camelCase")]
 pub struct MailboxInputPayload {
     pub message: String,
+    pub attachments: Vec<ThreadAttachment>,
     #[serde(default)]
     pub presentation: MailboxPresentation,
     #[serde(default)]
@@ -63,6 +66,7 @@ impl MailboxInputPayload {
     pub fn user(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            attachments: Vec::new(),
             presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
         }
@@ -256,6 +260,12 @@ impl AgentSubmitRequest {
         self
     }
 
+    /// 设置随输入持久化并投影到 Timeline 的 typed 附件清单。
+    pub fn with_attachments(mut self, attachments: Vec<ThreadAttachment>) -> Self {
+        self.payload.attachments = attachments;
+        self
+    }
+
     /// 合并队首连续、key 相同的 queued 输入，并在同一 Turn 中按顺序消费。
     pub fn with_queue_coalescing_key(mut self, key: impl Into<String>) -> Self {
         self.queue_coalescing_key = Some(key.into());
@@ -362,6 +372,7 @@ mod tests {
             thread_id: ThreadId::new("thread-1").unwrap(),
             payload: MailboxInputPayload {
                 message: "hello".to_string(),
+                attachments: Vec::new(),
                 presentation: MailboxPresentation::Hidden,
                 metadata: json!({"kind": "test"}),
             },
@@ -372,6 +383,7 @@ mod tests {
         };
         let envelope_json = serde_json::to_value(&envelope).unwrap();
         assert_eq!(envelope_json["message"], "hello");
+        assert_eq!(envelope_json["attachments"], json!([]));
         assert_eq!(envelope_json["presentation"], json!({"type": "hidden"}));
         assert_eq!(envelope_json["metadata"], json!({"kind": "test"}));
         assert_eq!(envelope_json["budgetAction"], "refresh");
@@ -412,6 +424,7 @@ mod tests {
             "turnId": "turn-1",
             "threadId": "thread-1",
             "message": "hello",
+            "attachments": [],
             "presentation": { "type": "hidden" },
             "metadata": { "kind": "test" },
             "deliveryState": { "kind": "pending", "data": null },
@@ -419,6 +432,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(envelope.payload.message, "hello");
+        assert!(envelope.payload.attachments.is_empty());
         assert_eq!(envelope.payload.presentation, MailboxPresentation::Hidden);
         assert_eq!(envelope.payload.metadata, json!({"kind": "test"}));
         assert_eq!(envelope.budget_action, MailboxBudgetAction::Preserve);

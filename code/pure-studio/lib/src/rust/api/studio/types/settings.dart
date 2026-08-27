@@ -9,7 +9,52 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+
+/// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
+class BridgeCustomModelSettingsDto {
+  final String slug;
+  final String displayName;
+  final List<String> reasoningEfforts;
+  final String baseInstructions;
+  final String wireProtocol;
+  final List<String> supportedConnectionModes;
+  final String defaultConnectionMode;
+
+  const BridgeCustomModelSettingsDto({
+    required this.slug,
+    required this.displayName,
+    required this.reasoningEfforts,
+    required this.baseInstructions,
+    required this.wireProtocol,
+    required this.supportedConnectionModes,
+    required this.defaultConnectionMode,
+  });
+
+  @override
+  int get hashCode =>
+      slug.hashCode ^
+      displayName.hashCode ^
+      reasoningEfforts.hashCode ^
+      baseInstructions.hashCode ^
+      wireProtocol.hashCode ^
+      supportedConnectionModes.hashCode ^
+      defaultConnectionMode.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCustomModelSettingsDto &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          displayName == other.displayName &&
+          reasoningEfforts == other.reasoningEfforts &&
+          baseInstructions == other.baseInstructions &&
+          wireProtocol == other.wireProtocol &&
+          supportedConnectionModes == other.supportedConnectionModes &&
+          defaultConnectionMode == other.defaultConnectionMode;
+}
 
 /// Flutter 本地通用设置的 typed 快照。
 class BridgeGeneralSettingsDto {
@@ -121,6 +166,8 @@ class BridgeMcpServerSettingsDto {
 }
 
 class BridgeModelCapabilities {
+  final List<BridgeModelInputCapability> input;
+  final List<BridgeModelModality> output;
   final bool streaming;
   final bool temperature;
   final bool reasoning;
@@ -131,6 +178,8 @@ class BridgeModelCapabilities {
   final bool freeformTools;
 
   const BridgeModelCapabilities({
+    required this.input,
+    required this.output,
     required this.streaming,
     required this.temperature,
     required this.reasoning,
@@ -143,6 +192,8 @@ class BridgeModelCapabilities {
 
   @override
   int get hashCode =>
+      input.hashCode ^
+      output.hashCode ^
       streaming.hashCode ^
       temperature.hashCode ^
       reasoning.hashCode ^
@@ -157,6 +208,8 @@ class BridgeModelCapabilities {
       identical(this, other) ||
       other is BridgeModelCapabilities &&
           runtimeType == other.runtimeType &&
+          input == other.input &&
+          output == other.output &&
           streaming == other.streaming &&
           temperature == other.temperature &&
           reasoning == other.reasoning &&
@@ -185,6 +238,28 @@ class BridgeModelCatalogDescriptor {
           models == other.models;
 }
 
+/// Provider 实例对 canonical catalog 模型的连接方式覆盖。
+class BridgeModelConnectionSettingsDto {
+  final String slug;
+  final String connectionMode;
+
+  const BridgeModelConnectionSettingsDto({
+    required this.slug,
+    required this.connectionMode,
+  });
+
+  @override
+  int get hashCode => slug.hashCode ^ connectionMode.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelConnectionSettingsDto &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          connectionMode == other.connectionMode;
+}
+
 class BridgeModelDescriptor {
   final String id;
   final String displayName;
@@ -193,7 +268,6 @@ class BridgeModelDescriptor {
   final BigInt? maxContextWindow;
   final BigInt? maxOutputTokens;
   final BridgeModelTransportDescriptor transport;
-  final List<String> modalities;
   final BridgeModelCapabilities capabilities;
   final BridgeModelReasoningDescriptor? reasoning;
   final BridgeModelPricing? pricing;
@@ -206,7 +280,6 @@ class BridgeModelDescriptor {
     this.maxContextWindow,
     this.maxOutputTokens,
     required this.transport,
-    required this.modalities,
     required this.capabilities,
     this.reasoning,
     this.pricing,
@@ -221,7 +294,6 @@ class BridgeModelDescriptor {
       maxContextWindow.hashCode ^
       maxOutputTokens.hashCode ^
       transport.hashCode ^
-      modalities.hashCode ^
       capabilities.hashCode ^
       reasoning.hashCode ^
       pricing.hashCode;
@@ -238,11 +310,61 @@ class BridgeModelDescriptor {
           maxContextWindow == other.maxContextWindow &&
           maxOutputTokens == other.maxOutputTokens &&
           transport == other.transport &&
-          modalities == other.modalities &&
           capabilities == other.capabilities &&
           reasoning == other.reasoning &&
           pricing == other.pricing;
 }
+
+class BridgeModelInputCapability {
+  final BridgeModelModality modality;
+  final List<BridgeModelInputSource> sources;
+  final int? maxCount;
+  final BigInt? maxBytes;
+  final BigInt? maxTotalBytes;
+  final int? maxWidth;
+  final int? maxHeight;
+  final List<String> mediaTypes;
+
+  const BridgeModelInputCapability({
+    required this.modality,
+    required this.sources,
+    this.maxCount,
+    this.maxBytes,
+    this.maxTotalBytes,
+    this.maxWidth,
+    this.maxHeight,
+    required this.mediaTypes,
+  });
+
+  @override
+  int get hashCode =>
+      modality.hashCode ^
+      sources.hashCode ^
+      maxCount.hashCode ^
+      maxBytes.hashCode ^
+      maxTotalBytes.hashCode ^
+      maxWidth.hashCode ^
+      maxHeight.hashCode ^
+      mediaTypes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelInputCapability &&
+          runtimeType == other.runtimeType &&
+          modality == other.modality &&
+          sources == other.sources &&
+          maxCount == other.maxCount &&
+          maxBytes == other.maxBytes &&
+          maxTotalBytes == other.maxTotalBytes &&
+          maxWidth == other.maxWidth &&
+          maxHeight == other.maxHeight &&
+          mediaTypes == other.mediaTypes;
+}
+
+enum BridgeModelInputSource { local, remoteUrl }
+
+enum BridgeModelModality { text, image, audio, video, file }
 
 class BridgeModelPricing {
   final String currency;
@@ -389,86 +511,6 @@ class BridgeProviderConnectionModeDescriptor {
           displayName == other.displayName;
 }
 
-/// Provider 设置页使用的模型视图。
-class BridgeProviderModelSettingsDto {
-  final String slug;
-  final String displayName;
-  final String description;
-  final BigInt? contextWindow;
-  final BigInt? maxOutputTokens;
-  final String currency;
-  final double? inputPricePerMTok;
-  final double? outputPricePerMTok;
-  final double? cacheReadPricePerMTok;
-  final double? cacheWritePricePerMTok;
-  final List<String> reasoningEfforts;
-  final String baseInstructions;
-  final String wireProtocol;
-  final List<String> supportedConnectionModes;
-  final String defaultConnectionMode;
-  final String connectionMode;
-
-  const BridgeProviderModelSettingsDto({
-    required this.slug,
-    required this.displayName,
-    required this.description,
-    this.contextWindow,
-    this.maxOutputTokens,
-    required this.currency,
-    this.inputPricePerMTok,
-    this.outputPricePerMTok,
-    this.cacheReadPricePerMTok,
-    this.cacheWritePricePerMTok,
-    required this.reasoningEfforts,
-    required this.baseInstructions,
-    required this.wireProtocol,
-    required this.supportedConnectionModes,
-    required this.defaultConnectionMode,
-    required this.connectionMode,
-  });
-
-  @override
-  int get hashCode =>
-      slug.hashCode ^
-      displayName.hashCode ^
-      description.hashCode ^
-      contextWindow.hashCode ^
-      maxOutputTokens.hashCode ^
-      currency.hashCode ^
-      inputPricePerMTok.hashCode ^
-      outputPricePerMTok.hashCode ^
-      cacheReadPricePerMTok.hashCode ^
-      cacheWritePricePerMTok.hashCode ^
-      reasoningEfforts.hashCode ^
-      baseInstructions.hashCode ^
-      wireProtocol.hashCode ^
-      supportedConnectionModes.hashCode ^
-      defaultConnectionMode.hashCode ^
-      connectionMode.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeProviderModelSettingsDto &&
-          runtimeType == other.runtimeType &&
-          slug == other.slug &&
-          displayName == other.displayName &&
-          description == other.description &&
-          contextWindow == other.contextWindow &&
-          maxOutputTokens == other.maxOutputTokens &&
-          currency == other.currency &&
-          inputPricePerMTok == other.inputPricePerMTok &&
-          outputPricePerMTok == other.outputPricePerMTok &&
-          cacheReadPricePerMTok == other.cacheReadPricePerMTok &&
-          cacheWritePricePerMTok == other.cacheWritePricePerMTok &&
-          reasoningEfforts == other.reasoningEfforts &&
-          baseInstructions == other.baseInstructions &&
-          wireProtocol == other.wireProtocol &&
-          supportedConnectionModes == other.supportedConnectionModes &&
-          defaultConnectionMode == other.defaultConnectionMode &&
-          connectionMode == other.connectionMode;
-}
-
 class BridgeProviderPresetDescriptor {
   final String id;
   final String displayName;
@@ -565,8 +607,8 @@ class BridgeProviderSettingsDto {
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
   final String defaultModel;
-  final List<BridgeProviderModelSettingsDto> models;
-  final List<BridgeProviderModelSettingsDto> customModels;
+  final List<BridgeCustomModelSettingsDto> customModels;
+  final List<BridgeModelConnectionSettingsDto> modelConnectionModes;
   final String? catalogId;
 
   const BridgeProviderSettingsDto({
@@ -581,8 +623,8 @@ class BridgeProviderSettingsDto {
     required this.promptCacheDialect,
     required this.responsesProgrammaticToolCalling,
     required this.defaultModel,
-    required this.models,
     required this.customModels,
+    required this.modelConnectionModes,
     this.catalogId,
   });
 
@@ -599,8 +641,8 @@ class BridgeProviderSettingsDto {
       promptCacheDialect.hashCode ^
       responsesProgrammaticToolCalling.hashCode ^
       defaultModel.hashCode ^
-      models.hashCode ^
       customModels.hashCode ^
+      modelConnectionModes.hashCode ^
       catalogId.hashCode;
 
   @override
@@ -620,8 +662,8 @@ class BridgeProviderSettingsDto {
           responsesProgrammaticToolCalling ==
               other.responsesProgrammaticToolCalling &&
           defaultModel == other.defaultModel &&
-          models == other.models &&
           customModels == other.customModels &&
+          modelConnectionModes == other.modelConnectionModes &&
           catalogId == other.catalogId;
 }
 

@@ -36,6 +36,7 @@ impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
             thread_id: ThreadId::new(model.thread_id)?,
             payload: MailboxInputPayload {
                 message: model.content,
+                attachments: serde_json::from_str(&model.attachments_json)?,
                 presentation: presentation_from_label(&model.presentation)?,
                 metadata,
             },

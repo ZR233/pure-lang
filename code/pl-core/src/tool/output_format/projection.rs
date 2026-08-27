@@ -500,7 +500,7 @@ mod tests {
     ) -> pl_protocol::Message {
         pl_protocol::Message {
             role: pl_protocol::MessageRole::Assistant,
-            content: pl_protocol::MessageContent::Text(String::new()),
+            content: pl_protocol::MessageContent::text(String::new()),
             reasoning_content: None,
             tool_calls: Some(vec![pl_protocol::ToolCallRecord {
                 item_id: id.to_string(),
@@ -524,7 +524,7 @@ mod tests {
     ) -> pl_protocol::Message {
         pl_protocol::Message {
             role: pl_protocol::MessageRole::Tool,
-            content: pl_protocol::MessageContent::Text(output.to_string()),
+            content: pl_protocol::MessageContent::text(output.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: Some(pl_protocol::ToolResultRecord {

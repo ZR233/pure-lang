@@ -449,7 +449,7 @@ mod tests {
         metadata.insert("alpha".to_string(), "1".to_string());
         let transcript = vec![ModelContextItem::from(Message {
             role: MessageRole::User,
-            content: MessageContent::Text("metadata".to_string()),
+            content: MessageContent::text("metadata".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -601,7 +601,7 @@ mod tests {
     fn text_item(content: &str) -> ModelContextItem {
         ModelContextItem::from(Message {
             role: MessageRole::User,
-            content: MessageContent::Text(content.to_string()),
+            content: MessageContent::text(content.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,

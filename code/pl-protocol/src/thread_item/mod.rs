@@ -306,6 +306,7 @@ pub enum ThreadItemKind {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadAttachment {
     pub id: String,
+    pub modality: crate::AttachmentModality,
     pub media_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
@@ -314,8 +315,6 @@ pub struct ThreadAttachment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
     pub byte_size: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

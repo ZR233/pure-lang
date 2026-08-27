@@ -1,3 +1,4 @@
+pub mod attachment;
 pub mod error;
 pub mod event;
 pub mod history;
@@ -7,6 +8,7 @@ pub mod settings;
 pub mod thread_stream;
 pub mod updater;
 
+pub use attachment::*;
 pub use error::*;
 pub use event::*;
 pub use history::*;

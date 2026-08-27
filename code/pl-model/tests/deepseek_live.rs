@@ -14,7 +14,7 @@ const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
 fn user_message(content: &str) -> Message {
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(content.to_string()),
+        content: MessageContent::text(content.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -25,7 +25,7 @@ fn user_message(content: &str) -> Message {
 fn assistant_message(content: String, reasoning_content: String) -> Message {
     Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text(content),
+        content: MessageContent::text(content),
         reasoning_content: Some(reasoning_content),
         tool_calls: None,
         tool_result: None,

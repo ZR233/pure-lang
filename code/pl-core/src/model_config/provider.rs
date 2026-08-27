@@ -318,6 +318,9 @@ impl ProviderConfig {
                 .transport
                 .validate(&model.slug)
                 .map_err(PureError::ConfigError)?;
+            model
+                .validate_media_contract()
+                .map_err(PureError::ConfigError)?;
             if model.slug.trim().is_empty() {
                 return Err(PureError::ConfigError(format!(
                     "provider {provider_id} contains a model with empty slug"

@@ -2,10 +2,10 @@ use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind
 use serde::Serialize;
 
 use crate::completion::{CompletionRequest, ToolSpec};
-use crate::model::info::{MaxTokensField, ModelInfo};
+use crate::model::info::{MaxTokensField, MediaWireFormat, ModelInfo};
 
 use super::body::ToolFormatBody;
-use super::content::{data_url, message_content_text};
+use super::content::{MediaRepresentationPlan, media_url, message_content_text};
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input};
 #[derive(Debug, Clone, Serialize)]
@@ -30,6 +30,7 @@ pub(super) struct ChatRequestBody {
 impl ChatRequestBody {
     pub(super) fn from_request(request: &CompletionRequest, model: &ModelInfo) -> Result<Self> {
         let mut messages = Vec::new();
+        let media_plan = MediaRepresentationPlan::for_request(request, model)?;
 
         if let Some(instructions) = &request.instructions {
             messages.push(ChatMessage::System {
@@ -77,7 +78,11 @@ impl ChatRequestBody {
                     content: message_content_text(&msg.content),
                 }),
                 MessageRole::User => messages.push(ChatMessage::User {
-                    content: chat_content_for_user(&msg.content)?,
+                    content: chat_content_for_user(
+                        &msg.content,
+                        &request.prepared_content,
+                        &media_plan,
+                    )?,
                 }),
                 MessageRole::Assistant => messages.push(ChatMessage::Assistant {
                     content: Some(message_content_text(&msg.content)),
@@ -160,10 +165,17 @@ enum ChatMessageContent {
 enum ChatContentPart {
     Text { text: String },
     ImageUrl { image_url: ChatImageUrl },
+    VideoUrl { video_url: ChatMediaUrl },
+    FileUrl { file_url: ChatMediaUrl },
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ChatImageUrl {
+    url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatMediaUrl {
     url: String,
 }
 
@@ -271,34 +283,54 @@ struct ChatToolCustom {
     format: ToolFormatBody,
 }
 
-fn chat_content_for_user(content: &MessageContent) -> Result<ChatMessageContent> {
-    match content {
-        MessageContent::Text(text) => Ok(ChatMessageContent::Text(text.clone())),
-        MessageContent::MultiPart(parts) => {
-            let mut has_image = false;
-            let mut chat_parts = Vec::new();
-            for part in parts {
-                match part {
-                    ContentPart::Text { text } => {
-                        chat_parts.push(ChatContentPart::Text { text: text.clone() });
-                    }
-                    ContentPart::Image {
-                        source, media_type, ..
-                    } => {
-                        has_image = true;
-                        chat_parts.push(ChatContentPart::ImageUrl {
-                            image_url: ChatImageUrl {
-                                url: data_url(source, media_type)?,
-                            },
-                        });
-                    }
-                }
+fn chat_content_for_user(
+    content: &MessageContent,
+    prepared_content: &[crate::completion::PreparedContentPart],
+    media_plan: &MediaRepresentationPlan,
+) -> Result<ChatMessageContent> {
+    let mut has_media = false;
+    let mut chat_parts = Vec::new();
+    for part in &content.parts {
+        match part {
+            ContentPart::Text { text } => {
+                chat_parts.push(ChatContentPart::Text { text: text.clone() });
             }
-            if has_image {
-                Ok(ChatMessageContent::Parts(chat_parts))
-            } else {
-                Ok(ChatMessageContent::Text(message_content_text(content)))
+            ContentPart::Attachment {
+                attachment_id,
+                modality,
+                media_type,
+                ..
+            } => {
+                has_media = true;
+                let url = media_url(
+                    attachment_id,
+                    media_type,
+                    *modality,
+                    prepared_content,
+                    media_plan,
+                )?;
+                chat_parts.push(match media_plan.wire(*modality)? {
+                    MediaWireFormat::ChatImageUrl => ChatContentPart::ImageUrl {
+                        image_url: ChatImageUrl { url },
+                    },
+                    MediaWireFormat::ChatVideoUrl => ChatContentPart::VideoUrl {
+                        video_url: ChatMediaUrl { url },
+                    },
+                    MediaWireFormat::ChatFileUrl => ChatContentPart::FileUrl {
+                        file_url: ChatMediaUrl { url },
+                    },
+                    MediaWireFormat::ResponsesInputImage => {
+                        return Err(protocol_error(
+                            "Responses input_image wire cannot be serialized by Chat Completions",
+                        ));
+                    }
+                });
             }
         }
+    }
+    if has_media {
+        Ok(ChatMessageContent::Parts(chat_parts))
+    } else {
+        Ok(ChatMessageContent::Text(message_content_text(content)))
     }
 }

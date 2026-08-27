@@ -84,6 +84,19 @@ class _FakeStudioApi implements StudioApi {
   String? resetLspWorkspaceProjectId;
   int submitPromptCount = 0;
   final List<({String threadId, String prompt})> submittedPrompts = [];
+  final List<({String threadId, StudioPromptInput input})> submittedInputs = [];
+  final List<
+    ({AttachmentAdmissionContext context, List<AttachmentDraftSource> sources})
+  >
+  attachmentAdmissionRequests = [];
+  List<AttachmentDraftView> nextAdmittedDrafts = const [];
+  Object? attachmentAdmissionError;
+  final Map<String, Uint8List> attachmentDraftBytes = {};
+  final Map<({String threadId, String attachmentId}), Uint8List>
+  threadAttachmentBytes = {};
+  final List<String> removedAttachmentDraftIds = [];
+  final List<({String threadId, String attachmentId})>
+  readThreadAttachmentRequests = [];
   Completer<SubmitPromptReceipt>? blockedPromptSubmit;
   Exception? submitPromptError;
   String? submitReceiptSessionId;
@@ -174,15 +187,15 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<StartNewThreadResult> startNewThread(
     String projectId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
     StudioMode mode,
   ) async {
     createdThreadProjectId = projectId;
     createdThreadMode = mode;
-    newThreadPrompt = prompt;
+    newThreadPrompt = input.text;
     submitPromptCount += 1;
-    submittedPrompts.add((threadId: '<new>', prompt: prompt));
+    submittedPrompts.add((threadId: '<new>', prompt: input.text));
+    submittedInputs.add((threadId: '<new>', input: input));
     if (submitPromptError case final error?) throw error;
     final blocked = blockedPromptSubmit;
     final receipt = blocked == null
@@ -560,23 +573,58 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<SubmitPromptReceipt> startTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
-  ) => _submitTurn(threadId, prompt);
+    StudioPromptInput input,
+  ) => _submitTurn(threadId, input);
 
   @override
   Future<SubmitPromptReceipt> steerTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
-  ) => _submitTurn(threadId, prompt);
+    StudioPromptInput input,
+  ) => _submitTurn(threadId, input);
+
+  @override
+  Future<List<AttachmentDraftView>> admitAttachmentDrafts(
+    AttachmentAdmissionContext context,
+    List<AttachmentDraftSource> sources,
+  ) async {
+    attachmentAdmissionRequests.add((context: context, sources: sources));
+    if (attachmentAdmissionError case final error?) throw error;
+    return nextAdmittedDrafts;
+  }
+
+  @override
+  Future<bool> removeAttachmentDraft(String draftId) async {
+    removedAttachmentDraftIds.add(draftId);
+    return true;
+  }
+
+  @override
+  Future<Uint8List> readAttachmentDraft(String draftId) async =>
+      attachmentDraftBytes[draftId] ?? Uint8List(0);
+
+  @override
+  Future<Uint8List> readThreadAttachment(
+    String threadId,
+    String attachmentId,
+  ) async {
+    readThreadAttachmentRequests.add((
+      threadId: threadId,
+      attachmentId: attachmentId,
+    ));
+    return threadAttachmentBytes[(
+          threadId: threadId,
+          attachmentId: attachmentId,
+        )] ??
+        Uint8List(0);
+  }
 
   Future<SubmitPromptReceipt> _submitTurn(
     String threadId,
-    String prompt,
+    StudioPromptInput input,
   ) async {
     submitPromptCount += 1;
-    submittedPrompts.add((threadId: threadId, prompt: prompt));
+    submittedPrompts.add((threadId: threadId, prompt: input.text));
+    submittedInputs.add((threadId: threadId, input: input));
     if (submitPromptError case final error?) {
       throw error;
     }

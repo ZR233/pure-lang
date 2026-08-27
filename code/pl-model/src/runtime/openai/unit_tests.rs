@@ -1,20 +1,22 @@
 use std::collections::HashMap;
 
 use pl_protocol::{
-    ContentPart, ImageSource, Message, MessageContent, MessageRole, ModelContextItem, PureError,
-    ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind, ToolCallRecord,
-    ToolResultRecord,
+    AttachmentModality, ContentPart, Message, MessageContent, MessageRole, ModelContextItem,
+    PureError, ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind,
+    ToolCallRecord, ToolResultRecord,
 };
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload, ToolSpec};
-use crate::model::info::{MaxTokensField, ResponsesMaxTokensField};
+use crate::model::info::{
+    MaxTokensField, MediaRepresentation, ModelMediaInputProfile, ResponsesMaxTokensField,
+};
 
 fn text_message(role: MessageRole, content: &str) -> Message {
     Message {
         role,
-        content: MessageContent::Text(content.to_string()),
+        content: MessageContent::text(content.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,
@@ -25,14 +27,13 @@ fn text_message(role: MessageRole, content: &str) -> Message {
 fn image_message() -> Message {
     Message {
         role: MessageRole::User,
-        content: MessageContent::MultiPart(vec![
+        content: MessageContent::new(vec![
             ContentPart::Text {
                 text: "describe".to_string(),
             },
-            ContentPart::Image {
-                source: ImageSource::InlineBase64 {
-                    data: "aGVsbG8=".to_string(),
-                },
+            ContentPart::Attachment {
+                attachment_id: "attachment-1".to_string(),
+                modality: AttachmentModality::Image,
                 media_type: "image/png".to_string(),
                 filename: Some("sample.png".to_string()),
             },
@@ -42,6 +43,117 @@ fn image_message() -> Message {
         tool_result: None,
         metadata: HashMap::new(),
     }
+}
+
+fn image_prepared_content() -> Vec<crate::PreparedContentPart> {
+    vec![crate::PreparedContentPart {
+        attachment_id: "attachment-1".to_string(),
+        modality: AttachmentModality::Image,
+        media_type: "image/png".to_string(),
+        filename: Some("sample.png".to_string()),
+        sources: vec![crate::PreparedContentSource::DataUrl {
+            base64: "aGVsbG8=".to_string(),
+        }],
+    }]
+}
+
+fn two_image_message() -> Message {
+    Message {
+        role: MessageRole::User,
+        content: MessageContent::new(vec![
+            ContentPart::Attachment {
+                attachment_id: "attachment-1".to_string(),
+                modality: AttachmentModality::Image,
+                media_type: "image/png".to_string(),
+                filename: Some("first.png".to_string()),
+            },
+            ContentPart::Attachment {
+                attachment_id: "attachment-2".to_string(),
+                modality: AttachmentModality::Image,
+                media_type: "image/png".to_string(),
+                filename: Some("second.png".to_string()),
+            },
+        ]),
+        reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
+        metadata: HashMap::new(),
+    }
+}
+
+fn prepared_image(
+    attachment_id: &str,
+    remote_url: Option<&str>,
+    base64: Option<&str>,
+) -> crate::PreparedContentPart {
+    let mut sources = Vec::new();
+    if let Some(remote_url) = remote_url {
+        sources.push(crate::PreparedContentSource::RemoteUrl {
+            url: remote_url.to_string(),
+        });
+    }
+    if let Some(base64) = base64 {
+        sources.push(crate::PreparedContentSource::DataUrl {
+            base64: base64.to_string(),
+        });
+    }
+    crate::PreparedContentPart {
+        attachment_id: attachment_id.to_string(),
+        modality: AttachmentModality::Image,
+        media_type: "image/png".to_string(),
+        filename: Some(format!("{attachment_id}.png")),
+        sources,
+    }
+}
+
+fn media_message(attachment_id: &str, modality: AttachmentModality, media_type: &str) -> Message {
+    Message {
+        role: MessageRole::User,
+        content: MessageContent::new(vec![ContentPart::Attachment {
+            attachment_id: attachment_id.to_string(),
+            modality,
+            media_type: media_type.to_string(),
+            filename: Some(attachment_id.to_string()),
+        }]),
+        reasoning_content: None,
+        tool_calls: None,
+        tool_result: None,
+        metadata: HashMap::new(),
+    }
+}
+
+fn data_media(
+    attachment_id: &str,
+    modality: AttachmentModality,
+    media_type: &str,
+) -> crate::PreparedContentPart {
+    crate::PreparedContentPart {
+        attachment_id: attachment_id.to_string(),
+        modality,
+        media_type: media_type.to_string(),
+        filename: Some(attachment_id.to_string()),
+        sources: vec![crate::PreparedContentSource::DataUrl {
+            base64: "cGF5bG9hZA==".to_string(),
+        }],
+    }
+}
+
+fn profiled_media_model(modality: crate::ModelModality) -> ModelInfo {
+    let mut model = ModelInfo::fallback("profiled-media-model");
+    model.request_profile.media = vec![ModelMediaInputProfile {
+        modality,
+        wire: match modality {
+            crate::ModelModality::Image => crate::MediaWireFormat::ChatImageUrl,
+            crate::ModelModality::Video => crate::MediaWireFormat::ChatVideoUrl,
+            crate::ModelModality::File => crate::MediaWireFormat::ChatFileUrl,
+            crate::ModelModality::Text | crate::ModelModality::Audio => {
+                panic!("unsupported media test modality")
+            }
+        },
+        first_send: vec![MediaRepresentation::DataUrl],
+        replay: vec![MediaRepresentation::DataUrl],
+    }];
+    model
 }
 
 fn context_items(messages: Vec<Message>) -> Vec<ModelContextItem> {
@@ -105,10 +217,33 @@ fn responses_use_top_level_instructions_and_developer_messages() {
 fn responses_maps_image_parts_to_input_image() {
     let request = CompletionRequest::builder()
         .input(context_items(vec![image_message()]))
+        .prepared_content(image_prepared_content())
         .build();
 
-    let body = OpenAiProtocol::responses().build_request_body(&request);
+    let model = bundled_model("gpt-5.4");
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
+    assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+    assert_eq!(body["input"][0]["content"][0]["text"], "describe");
+    assert_eq!(body["input"][0]["content"][1]["type"], "input_image");
+    assert_eq!(
+        body["input"][0]["content"][1]["image_url"],
+        "data:image/png;base64,aGVsbG8="
+    );
+}
+
+#[test]
+fn responses_maps_deepseek_vision_image_to_its_exact_input_image_wire() {
+    let request = CompletionRequest::builder()
+        .input(context_items(vec![image_message()]))
+        .prepared_content(image_prepared_content())
+        .build();
+
+    let model = bundled_model("deepseek-v4-flash-vision-exp");
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["model"], "deepseek-v4-flash-vision-exp");
+    assert_eq!(body["input"][0]["role"], "user");
     assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
     assert_eq!(body["input"][0]["content"][0]["text"], "describe");
     assert_eq!(body["input"][0]["content"][1]["type"], "input_image");
@@ -122,9 +257,11 @@ fn responses_maps_image_parts_to_input_image() {
 fn chat_maps_image_parts_to_content_array() {
     let request = CompletionRequest::builder()
         .input(context_items(vec![image_message()]))
+        .prepared_content(image_prepared_content())
         .build();
 
-    let body = OpenAiProtocol::chat().build_request_body(&request);
+    let model = bundled_model("glm-5.3-flash");
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
 
     assert_eq!(body["messages"][0]["content"][0]["type"], "text");
     assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
@@ -132,6 +269,154 @@ fn chat_maps_image_parts_to_content_array() {
         body["messages"][0]["content"][1]["image_url"]["url"],
         "data:image/png;base64,aGVsbG8="
     );
+}
+
+#[test]
+fn chat_uses_one_remote_url_representation_for_the_entire_image_batch() {
+    let request = CompletionRequest::builder()
+        .input(context_items(vec![two_image_message()]))
+        .prepared_content(vec![
+            prepared_image(
+                "attachment-1",
+                Some("https://cdn.example/first.png"),
+                Some("Zmlyc3Q="),
+            ),
+            prepared_image(
+                "attachment-2",
+                Some("https://cdn.example/second.png"),
+                Some("c2Vjb25k"),
+            ),
+        ])
+        .build();
+
+    let body = OpenAiProtocol::chat()
+        .build_request_body_with_model(&request, &bundled_model("glm-5.3-flash"));
+
+    assert_eq!(
+        body["messages"][0]["content"][0]["image_url"]["url"],
+        "https://cdn.example/first.png"
+    );
+    assert_eq!(
+        body["messages"][0]["content"][1]["image_url"]["url"],
+        "https://cdn.example/second.png"
+    );
+}
+
+#[test]
+fn chat_falls_back_the_entire_image_batch_to_data_urls() {
+    let request = CompletionRequest::builder()
+        .input(context_items(vec![two_image_message()]))
+        .prepared_content(vec![
+            prepared_image(
+                "attachment-1",
+                Some("https://cdn.example/first.png"),
+                Some("Zmlyc3Q="),
+            ),
+            prepared_image("attachment-2", None, Some("c2Vjb25k")),
+        ])
+        .build();
+
+    let body = OpenAiProtocol::chat()
+        .build_request_body_with_model(&request, &bundled_model("glm-5.3-flash"));
+
+    assert_eq!(
+        body["messages"][0]["content"][0]["image_url"]["url"],
+        "data:image/png;base64,Zmlyc3Q="
+    );
+    assert_eq!(
+        body["messages"][0]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,c2Vjb25k"
+    );
+}
+
+#[test]
+fn media_planning_failure_is_structured_and_does_not_expose_source_values() {
+    let secret_url = "https://secret.example/private.png";
+    let request = CompletionRequest::builder()
+        .input(context_items(vec![two_image_message()]))
+        .prepared_content(vec![
+            prepared_image("attachment-1", Some(secret_url), None),
+            prepared_image("attachment-2", None, Some("c2Vuc2l0aXZlLWJ5dGVz")),
+        ])
+        .build();
+
+    let error = OpenAiProtocol::chat()
+        .build_request(&request, &bundled_model("glm-5.3-flash"), None)
+        .expect_err("a batch without a common representation must fail");
+    let message = error.to_string();
+
+    assert!(message.contains("model=glm-5.3-flash"));
+    assert!(message.contains("modality=image"));
+    assert!(message.contains("count=2"));
+    assert!(!message.contains(secret_url));
+    assert!(!message.contains("c2Vuc2l0aXZlLWJ5dGVz"));
+}
+
+#[test]
+fn chat_serializes_exact_video_url_and_file_url_parts() {
+    for (modality, model_modality, media_type, wire_field) in [
+        (
+            AttachmentModality::Video,
+            crate::ModelModality::Video,
+            "video/mp4",
+            "video_url",
+        ),
+        (
+            AttachmentModality::File,
+            crate::ModelModality::File,
+            "application/pdf",
+            "file_url",
+        ),
+    ] {
+        let request = CompletionRequest::builder()
+            .input(context_items(vec![media_message(
+                "attachment-1",
+                modality,
+                media_type,
+            )]))
+            .prepared_content(vec![data_media("attachment-1", modality, media_type)])
+            .build();
+
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request, &profiled_media_model(model_modality));
+
+        assert_eq!(body["messages"][0]["content"][0]["type"], wire_field);
+        assert_eq!(
+            body["messages"][0]["content"][0][wire_field]["url"],
+            format!("data:{media_type};base64,cGF5bG9hZA==")
+        );
+    }
+}
+
+#[test]
+fn responses_rejects_video_and_file_attachments() {
+    for (modality, model_modality, media_type) in [
+        (
+            AttachmentModality::Video,
+            crate::ModelModality::Video,
+            "video/mp4",
+        ),
+        (
+            AttachmentModality::File,
+            crate::ModelModality::File,
+            "application/pdf",
+        ),
+    ] {
+        let request = CompletionRequest::builder()
+            .input(context_items(vec![media_message(
+                "attachment-1",
+                modality,
+                media_type,
+            )]))
+            .prepared_content(vec![data_media("attachment-1", modality, media_type)])
+            .build();
+
+        let error = OpenAiProtocol::responses()
+            .build_request(&request, &profiled_media_model(model_modality), None)
+            .expect_err("Responses must fail closed for video and file attachments");
+
+        assert!(error.to_string().contains("Responses does not support"));
+    }
 }
 
 #[test]
@@ -211,7 +496,7 @@ fn tool_call_result_record(call: &ToolCallRecord) -> ToolResultRecord {
 fn assistant_tool_call_history(call: ToolCallRecord) -> Message {
     Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text(String::new()),
+        content: MessageContent::text(String::new()),
         reasoning_content: None,
         tool_calls: Some(vec![call]),
         tool_result: None,
@@ -222,7 +507,7 @@ fn assistant_tool_call_history(call: ToolCallRecord) -> Message {
 fn tool_result_history(record: ToolResultRecord, output: &str) -> Message {
     Message {
         role: MessageRole::Tool,
-        content: MessageContent::Text(output.to_string()),
+        content: MessageContent::text(output.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: Some(record),
@@ -475,6 +760,7 @@ fn glm53_flash_chat_body_links_thinking_and_sends_image_parts() {
     let model = bundled_model("glm-5.3-flash");
     let request = CompletionRequest::builder()
         .input(context_items(vec![image_message()]))
+        .prepared_content(image_prepared_content())
         .reasoning(Some(ReasoningConfig {
             effort: Some("max".to_string()),
             summary: None,
@@ -499,7 +785,7 @@ fn chat_body_writes_assistant_reasoning_content() {
     let mut request = request_with_effort("high");
     request.input = vec![pl_protocol::ModelContextItem::from(Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text("9.11 更大。".to_string()),
+        content: MessageContent::text("9.11 更大。".to_string()),
         reasoning_content: Some("比较小数位。".to_string()),
         tool_calls: None,
         tool_result: None,
@@ -1233,7 +1519,7 @@ fn tool_result_without_typed_record_fails_request_build() {
     let mut request = request_with_function_tool_history(None);
     request.input.push(ModelContextItem::from(Message {
         role: MessageRole::Tool,
-        content: MessageContent::Text("ok".to_string()),
+        content: MessageContent::text("ok".to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,

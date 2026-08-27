@@ -1,5 +1,6 @@
 //! Studio transport-neutral command, response, event, and error protocol.
 
+mod attachment;
 mod error;
 mod operation;
 mod query;
@@ -8,6 +9,7 @@ mod settings;
 mod settings_update;
 mod task_recovery;
 
+pub use attachment::*;
 pub use error::*;
 pub use operation::*;
 pub use query::*;

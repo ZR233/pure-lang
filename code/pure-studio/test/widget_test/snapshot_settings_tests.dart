@@ -73,7 +73,7 @@ void registerSnapshotSettingsTests() {
 
     final next = applyThreadSnapshot(current, snapshot);
 
-    expect(next.providers, current.providers);
+    expect(next.settingsState, same(current.settingsState));
     expect(next.roles, current.roles);
     expect(next.runtime.model, 'runtime/model');
   });

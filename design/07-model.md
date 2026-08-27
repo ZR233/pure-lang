@@ -121,9 +121,9 @@ Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协�
 列表、默认模式不在支持列表，以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝。
 Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
-内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash 与 Pro 使用
-Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。runtime 必须按当前模型选择对应
-endpoint path，同一 provider 实例可以路由不同协议的模型。
+内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash、V4 Pro 与
+V4 Flash Vision Exp 使用 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。
+runtime 必须按当前模型选择对应 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 持有的 `ModelSession`：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
@@ -181,14 +181,34 @@ retryable。Studio 另行从 typed failure 派生 Task disposition，任何层�
 
 ## 7.6 多模态消息
 
-`MessageContent` 支持一等 multipart 内容。文本使用 `ContentPart::Text`，图片使用 `ContentPart::Image`。图片 source 分为：
+`MessageContent` 只有一个有序 multipart 形态：`parts: Vec<ContentPart>`。持久协议仅允许
+`ContentPart::Text` 与 `ContentPart::Attachment { attachment_id, modality }`；attachment modality
+为 image、video 或 file，PDF 属于 file。持久消息不得保存本地路径、外部 URL、Base64、provider
+file id 或请求期 data URL，也不保留 text/multipart 双形态。
 
-- `Attachment { attachment_id }`：Studio 或核心持久化消息中的稳定引用。
-- `InlineBase64 { data }`：模型请求前由 `pl-core` materialize 后传给 `pl-model` 的临时内容。
+`ModelCapabilities.input` 使用 `ModelInputCapability`，同时声明 modality、允许的输入来源与
+格式/数量、单项字节、批次总字节和图片宽高限制。`ModelRequestProfile.media` 为每种 modality 声明
+有序的发送表示、provider wire 映射和混合规则；表示是封闭枚举，例如 `RemoteUrl`、`ProviderFile`
+与 `DataUrl`。能力声明
+必须至少有一条当前输入可用的首发路线和一条基于持久快照的重放路线；未知模型或缺少完整 profile
+的 modality 按不支持处理，不按模型名、provider 名或 wire 宽松程度推断。
 
-`pl-model` 不读取 Studio 存储，也不解析附件路径。进入 provider adapter 前，`CompletionRequest` 中的图片必须已经 materialize 为 `InlineBase64`；如果 adapter 收到未 materialize 的附件引用，应返回本地协议错误。
+`pl-core` 在进入 provider adapter 前把稳定 attachment ref materialize 为 `pl-model` 私有的
+`PreparedContentPart`。它只携带已校验 bytes、当前首发允许使用的瞬时 URL 或 provider file id；
+`pl-model` 不读取 Studio 存储，也不解析本地路径。同一 modality 批次选择同一种表示，provider
+文件上传失败只能在推理请求发出前整批切换到下一条 profile 路线，流建立后不得自动重发。
 
-OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、MiMo、Zhipu/GLM 使用 content array 的 `text` 与 `image_url`。DeepSeek 或未声明视觉输入的模型在本地拒绝图片请求。
+OpenAI Responses 的已实现图片路线使用 `input_image`；OpenAI Chat 使用 `image_url`。Zhipu Chat
+codec 还定义 `video_url` 与 `file_url`，但模型只有在精确请求契约、限制与快照重放路线都经过验证后
+才声明对应能力。GLM-5.3-Flash 当前只声明 text/image：远程图片首发优选 URL，本地图片以及历史、
+重试和恢复统一使用 Data URL。未声明相应 modality 的模型必须在任何附件 IO 或凭据读取前拒绝。
+
+DeepSeek V4 Flash Vision Exp 当前声明 text/image，并通过 Responses `input_image` 发送：远程图片
+首发优选 URL，本地图片、历史、重试和恢复使用 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、
+WebP。官方接口还提供 Files API，但 Pure 在 provider file 上传、瞬时 file id 与快照回放生命周期
+全部实现前不声明该表示。官方对少于 15 张与至少 15 张图片使用不同边长上限；canonical profile
+选择全批次均可成立的 4096 像素保守上限，并以 32 MiB snapshot 批次总字节上限保证 Data URL
+重放不会越过接口的 48 MiB 请求体边界。该保守子集不按模型名在 adapter 中特判。
 
 ## 7.7 自定义模型
 
@@ -306,7 +326,17 @@ pub struct ModelPricing {
 }
 ```
 
-`pl-model` 的内建 family 预设按供应商与模型线划分：`openai_family`、`openai_gpt56_family`、`deepseek_family`、`mimo_family`、`zhipu_text_family`、`zhipu_glm52_family`、`zhipu_glm53_family`、`zhipu_glm53_flash_family` 与 `zhipu_vision_family`。共享能力矩阵由 `openai_capabilities` / `deepseek_capabilities` / `mimo_capabilities` / `zhipu_capabilities` 构造并供各 family 复用；family 之间的差异集中在 effort 候选值域、request profile 与输入模态。GLM-5.3 与 GLM-5.2 复用同一条「启用思考」wire 组合，差异只在候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选。GLM-5.3-Flash 复用 GLM-5.3 的始终思考 wire 与候选值域，差异仅在声明图片输入（`input = [text, image]`）。
+`pl-model` 的内建 family 预设按供应商与模型线划分：`openai_family`、`openai_gpt56_family`、
+`deepseek_family`、`deepseek_vision_family`、`mimo_family`、`zhipu_text_family`、
+`zhipu_glm52_family`、`zhipu_glm53_family`、`zhipu_glm53_flash_family` 与
+`zhipu_vision_family`。共享能力矩阵由 `openai_capabilities` / `deepseek_capabilities` /
+`deepseek_vision_capabilities` / `mimo_capabilities` / `zhipu_capabilities` 构造并供各 family 复用；
+family 之间的差异集中在 effort 候选值域、request profile 与 typed input capabilities。
+DeepSeek Vision Exp 复用 V4 Flash 的 effort、thinking、上下文与计费事实，只增加经过官方文档确认的
+Responses image profile。GLM-5.3 与 GLM-5.2 复用同一条「启用思考」wire 组合，差异只在候选值域：
+GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选。GLM-5.3-Flash 复用 GLM-5.3 的始终思考
+wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapshot 路线；不得从相邻视觉模型
+推断 video/file 能力。
 
 ## 7.10 Prompt 缓存
 

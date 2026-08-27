@@ -18,7 +18,7 @@ struct TraceDeltaCounts {
 fn user_message(content: &str) -> Message {
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(content.to_string()),
+        content: MessageContent::text(content.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,

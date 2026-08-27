@@ -67,7 +67,7 @@ pub(crate) struct VerifyGuiOptions {
     pub(crate) web_integration: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct RunGuiOptions {
     /// Run with PURE_STUDIO_DEMO=true.
     #[arg(long)]
@@ -75,6 +75,9 @@ pub(crate) struct RunGuiOptions {
     /// Enable Flutter Driver through test_driver/driver_main.dart.
     #[arg(long)]
     pub(crate) driver: bool,
+    /// Deterministic file-picker result exposed only to the Driver build.
+    #[arg(long, value_name = "PATH", requires = "driver")]
+    pub(crate) driver_attachment: Option<std::path::PathBuf>,
     /// Override RUST_LOG with a process-wide tracing level.
     #[arg(long, value_enum, value_name = "LEVEL")]
     pub(crate) log_level: Option<LogLevel>,
@@ -225,6 +228,7 @@ mod tests {
             ParseOutcome::Run(Command::RunGui(RunGuiOptions {
                 demo: true,
                 driver: true,
+                driver_attachment: None,
                 log_level: Some(LogLevel::Trace),
             }))
         );

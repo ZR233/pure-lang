@@ -37,7 +37,7 @@ pub(super) async fn compact_local(
     super::compact_old_tool_results_for_request(&mut input);
     input.push(ModelContextItem::from(Message {
         role: MessageRole::User,
-        content: MessageContent::Text(config.instructions.clone()),
+        content: MessageContent::text(config.instructions.clone()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,

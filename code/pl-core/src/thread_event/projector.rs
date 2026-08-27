@@ -300,7 +300,7 @@ fn project_user_input(
                 projector.thread_id.to_string(),
                 turn_id.to_string(),
                 input.payload.message.clone(),
-                Vec::new(),
+                input.payload.attachments.clone(),
                 input.queued_at,
             )),
         },
@@ -484,12 +484,16 @@ fn thread_tool_output(output: &pl_trace::TraceToolOutput) -> ThreadToolOutput {
 fn thread_attachment(value: &pl_trace::TraceAttachment) -> ThreadAttachment {
     ThreadAttachment {
         id: value.id.clone(),
+        modality: match value.modality {
+            pl_trace::TraceAttachmentModality::Image => pl_protocol::AttachmentModality::Image,
+            pl_trace::TraceAttachmentModality::Video => pl_protocol::AttachmentModality::Video,
+            pl_trace::TraceAttachmentModality::File => pl_protocol::AttachmentModality::File,
+        },
         media_type: value.media_type.clone(),
         filename: value.filename.clone(),
         width: value.width,
         height: value.height,
         byte_size: value.byte_size,
-        data_url: value.data_url.clone(),
     }
 }
 
@@ -678,13 +682,52 @@ impl<'a> Projector<'a> {
 #[cfg(test)]
 mod tests {
     use pl_protocol::{
-        InteractionChangedEvent, InteractionCommand, InteractionRequest, InteractionScope,
-        ResolveUserInput, RunningTurnState, SkillActivation, THREAD_SCHEMA_VERSION, Thread,
-        ThreadItemState, ThreadSnapshot,
+        AttachmentModality, InteractionChangedEvent, InteractionCommand, InteractionRequest,
+        InteractionScope, ResolveUserInput, RunningTurnState, SkillActivation,
+        THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadItemState, ThreadSnapshot,
     };
     use pl_trace::{TracePartAction, TracePartCompletion};
 
     use super::*;
+
+    #[test]
+    fn durable_user_input_projects_its_typed_attachment_manifest() {
+        let current = snapshot();
+        let mut projector = Projector::new("thread-1", &current);
+        let attachment = ThreadAttachment {
+            id: "attachment-1".to_string(),
+            modality: AttachmentModality::Image,
+            media_type: "image/png".to_string(),
+            filename: Some("marker.png".to_string()),
+            width: Some(1200),
+            height: Some(800),
+            byte_size: 80_000,
+        };
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail-1".to_string(),
+            turn_id: crate::TurnId::new("turn-1").unwrap(),
+            thread_id: crate::ThreadId::new("thread-1").unwrap(),
+            payload: crate::MailboxInputPayload {
+                message: "inspect".to_string(),
+                attachments: vec![attachment.clone()],
+                presentation: MailboxPresentation::User,
+                metadata: serde_json::Value::Null,
+            },
+            queue_coalescing_key: None,
+            budget_action: crate::MailboxBudgetAction::Preserve,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 7,
+        };
+
+        project_user_input(&mut projector, &input, "turn-1", 7);
+        let batch = projector.finish();
+
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.text().is_some_and(|text| text.attachments() == [attachment])
+        ));
+    }
 
     #[test]
     fn trace_text_is_one_item_not_message_and_part() {

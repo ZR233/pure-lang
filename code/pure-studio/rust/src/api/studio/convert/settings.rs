@@ -1,8 +1,8 @@
 use crate::api::studio::types::{
-    BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration,
-    BridgeMcpServerSettingsDto, BridgeProviderModelSettingsDto, BridgeProviderSettingsDto,
-    BridgeProviderUsageData, BridgeProviderUsageState, BridgeRoleSettingsDto,
-    BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStateError,
+    BridgeCustomModelSettingsDto, BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto,
+    BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto, BridgeModelConnectionSettingsDto,
+    BridgeProviderSettingsDto, BridgeProviderUsageData, BridgeProviderUsageState,
+    BridgeRoleSettingsDto, BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStateError,
     BridgeStudioSettingsDto, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
     DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto,
     ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
@@ -39,15 +39,18 @@ pub(crate) fn bridge_settings(
                 prompt_cache_dialect: provider.prompt_cache_dialect,
                 responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,
                 default_model: provider.default_model,
-                models: provider
-                    .models
-                    .into_iter()
-                    .map(bridge_provider_model_settings)
-                    .collect(),
                 custom_models: provider
                     .custom_models
                     .into_iter()
-                    .map(bridge_provider_model_settings)
+                    .map(bridge_custom_model_settings)
+                    .collect(),
+                model_connection_modes: provider
+                    .model_connection_modes
+                    .into_iter()
+                    .map(|mode| BridgeModelConnectionSettingsDto {
+                        slug: mode.slug,
+                        connection_mode: mode.connection_mode,
+                    })
                     .collect(),
                 catalog_id: provider.catalog_id,
             })
@@ -129,26 +132,17 @@ pub(crate) fn bridge_web_search_settings(
     }
 }
 
-fn bridge_provider_model_settings(
-    model: pl_protocol::studio::StudioProviderModelSettings,
-) -> BridgeProviderModelSettingsDto {
-    BridgeProviderModelSettingsDto {
+fn bridge_custom_model_settings(
+    model: pl_protocol::studio::StudioCustomModelSettings,
+) -> BridgeCustomModelSettingsDto {
+    BridgeCustomModelSettingsDto {
         slug: model.slug,
         display_name: model.display_name,
-        description: model.description,
-        context_window: model.context_window,
-        max_output_tokens: model.max_output_tokens,
-        currency: model.currency,
-        input_price_per_m_tok: model.input_price_per_m_tok,
-        output_price_per_m_tok: model.output_price_per_m_tok,
-        cache_read_price_per_m_tok: model.cache_read_price_per_m_tok,
-        cache_write_price_per_m_tok: model.cache_write_price_per_m_tok,
         reasoning_efforts: model.reasoning_efforts,
         base_instructions: model.base_instructions,
         wire_protocol: model.wire_protocol,
         supported_connection_modes: model.supported_connection_modes,
         default_connection_mode: model.default_connection_mode,
-        connection_mode: model.connection_mode,
     }
 }
 

@@ -259,6 +259,7 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
       ),
       null => null,
     },
+    attachments: item.attachments,
     contextDisposition: item.contextDisposition,
   );
 }

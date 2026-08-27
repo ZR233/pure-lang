@@ -130,8 +130,10 @@ async fn run_prompt_and_assert(runtime: &StudioRuntime, thread_id: &str) -> Resu
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread_id.to_string(),
-            prompt: live_prompt().to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: live_prompt().to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;

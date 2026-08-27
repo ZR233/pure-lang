@@ -54,7 +54,7 @@ pub fn tool_call_history_message(
         serde_json::from_str(&raw_arguments).unwrap_or(serde_json::Value::String(raw_arguments));
     Message {
         role: MessageRole::Assistant,
-        content: MessageContent::Text(String::new()),
+        content: MessageContent::text(String::new()),
         reasoning_content: None,
         tool_calls: Some(vec![ToolCallRecord {
             item_id: call_id.clone(),
@@ -73,7 +73,7 @@ pub fn tool_call_history_message(
 pub fn tool_result_history_message(call_id: String, tool_name: String, output: String) -> Message {
     Message {
         role: MessageRole::Tool,
-        content: MessageContent::Text(output),
+        content: MessageContent::text(output),
         reasoning_content: None,
         tool_calls: None,
         tool_result: Some(ToolResultRecord {
@@ -163,7 +163,7 @@ fn interrupted_tool_result_message(call: ToolCallRecord) -> Message {
 pub(super) fn tool_result_message(record: ToolResultRecord, result: &str) -> Message {
     Message {
         role: MessageRole::Tool,
-        content: MessageContent::Text(result.to_string()),
+        content: MessageContent::text(result.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: Some(record),

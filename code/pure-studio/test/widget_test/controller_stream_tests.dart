@@ -1,6 +1,112 @@
 part of '../widget_test.dart';
 
 void registerControllerStreamTests() {
+  test(
+    'attachment-only submission preserves drafts on failure and sends IDs',
+    () async {
+      final api = _FakeStudioApi(_stateWithAttachmentModels())
+        ..nextAdmittedDrafts = const [
+          AttachmentDraftView(
+            id: 'draft-local-1',
+            modality: AttachmentModalityView.image,
+            mediaType: 'image/png',
+            filename: 'PURE-7429.png',
+            byteSize: 128,
+            width: 20,
+            height: 10,
+          ),
+        ]
+        ..attachmentDraftBytes['draft-local-1'] = Uint8List.fromList([1, 2, 3]);
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.addLocalAttachments([
+        '/tmp/PURE-7429.png',
+      ], threadId: 'session-1');
+
+      var composer = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspaceUi
+          .composer;
+      expect(composer.attachments.map((item) => item.id), ['draft-local-1']);
+      expect(
+        api.attachmentAdmissionRequests.single.context,
+        isA<ExistingThreadAttachmentAdmissionContext>(),
+      );
+
+      api.submitPromptError = Exception('provider unavailable');
+      await controller.submitComposer('session-1');
+      composer = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspaceUi
+          .composer;
+      expect(composer.error, contains('provider unavailable'));
+      expect(composer.attachments.map((item) => item.id), ['draft-local-1']);
+      expect(api.submittedInputs.last.input.text, isEmpty);
+      expect(api.submittedInputs.last.input.attachmentDraftIds, [
+        'draft-local-1',
+      ]);
+
+      api.submitPromptError = null;
+      await controller.submitComposer('session-1');
+      composer = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspaceUi
+          .composer;
+      expect(composer.attachments, isEmpty);
+      expect(api.submittedInputs.last.input.attachmentDraftIds, [
+        'draft-local-1',
+      ]);
+    },
+  );
+
+  test('model switch rejects drafts unsupported by the target model', () async {
+    final api = _FakeStudioApi(_stateWithAttachmentModels())
+      ..nextAdmittedDrafts = const [
+        AttachmentDraftView(
+          id: 'draft-conflict',
+          modality: AttachmentModalityView.image,
+          mediaType: 'image/png',
+          filename: 'conflict.png',
+          byteSize: 12,
+        ),
+      ]
+      ..attachmentDraftBytes['draft-conflict'] = Uint8List.fromList([1]);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+    await controller.addLocalAttachments([
+      '/tmp/conflict.png',
+    ], threadId: 'session-1');
+
+    await controller.setModelRole(
+      roleKey: 'executor',
+      providerId: 'zhipu',
+      model: 'glm-5.3',
+    );
+
+    expect(api.roleUpdate, isNull);
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspaceUi
+          .composer
+          .error,
+      contains('conflict.png'),
+    );
+  });
+
   test('controller subscribes only the selected Thread', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(

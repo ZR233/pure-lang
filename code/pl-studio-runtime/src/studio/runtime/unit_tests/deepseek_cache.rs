@@ -88,8 +88,10 @@ async fn run_tool_failure_fixture(root: &Path) -> Result<()> {
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread.id.clone(),
-            prompt: "Read the deliberately missing file and report the tool failure.".to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "Read the deliberately missing file and report the tool failure.".to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;
@@ -179,8 +181,10 @@ async fn run_interrupted_fixture(root: &Path) -> Result<()> {
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: thread.id.clone(),
-            prompt: "Wait until interrupted.".to_string(),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: "Wait until interrupted.".to_string(),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;
@@ -245,8 +249,10 @@ async fn run_fixture(root: &Path) -> Result<()> {
         let submitted = runtime
             .submit_prompt(StudioSubmitPromptRequest {
                 thread_id: thread.id.clone(),
-                prompt: prompt.to_string(),
-                attachment_ids: Vec::new(),
+                input: pl_protocol::studio::StudioPromptInput {
+                    text: prompt.to_string(),
+                    attachment_draft_ids: Vec::new(),
+                },
                 options: StudioSubmitPromptOptions::default(),
             })
             .await?;

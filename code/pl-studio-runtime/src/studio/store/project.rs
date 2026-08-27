@@ -19,7 +19,15 @@ use crate::studio::paths::project_name;
 use crate::studio::paths::{default_db_path, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
-use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
+use crate::studio::store_support::{
+    STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema, migrate_studio_schema_v13_to_v14,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingDatabaseState {
+    Current,
+    MigrateV13,
+}
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
@@ -62,25 +70,25 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        // Studio schema 只支持当前 v12：其他版本直接按不兼容数据库精确重建，
-        // 不保留 Task 状态或工具协议的跨版本迁移链。
-        let existing_is_compatible = if database_exists {
+        // v13 附件数据执行唯一一次精确迁移；更早或结构不匹配的数据库仍按
+        // 不兼容数据库重建，不引入长期迁移链或兼容读路径。
+        let existing_state = if database_exists {
             match inspect_database(&path).await {
-                Ok(()) => true,
+                Ok(state) => Some(state),
                 Err(error) => {
                     tracing::warn!(
                         path = %path.display(),
                         error = %error,
                         "Studio database is incompatible and will be rebuilt"
                     );
-                    false
+                    None
                 }
             }
         } else {
-            false
+            None
         };
 
-        if family_exists && !existing_is_compatible {
+        if family_exists && existing_state.is_none() {
             delete_database_family(&path).await?;
         }
 
@@ -90,16 +98,33 @@ impl StudioStore {
             /* max_connections */ 1,
         )
         .await?;
-        let created = !existing_is_compatible;
+        let created = existing_state.is_none();
+        let attachments_dir = path
+            .parent()
+            .context("Studio database path has no parent directory")?
+            .join("attachments");
+        let migrating = existing_state == Some(ExistingDatabaseState::MigrateV13);
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
+            } else if migrating {
+                migrate_studio_schema_v13_to_v14(&db, &attachments_dir).await?;
             }
             validate_database(&db).await
         }
         .await;
         if let Err(error) = initialization {
             let close = db.close().await;
+            if migrating {
+                return match close {
+                    Ok(()) => Err(error).context(
+                        "Studio v13 to v14 migration failed; the original database was preserved",
+                    ),
+                    Err(close_error) => Err(error).context(format!(
+                        "Studio v13 to v14 migration failed; the original database was preserved; closing the database also failed: {close_error:#}"
+                    )),
+                };
+            }
             let cleanup = delete_database_family(&path).await;
             return match (close, cleanup) {
                 (Ok(()), Ok(())) => {
@@ -116,10 +141,6 @@ impl StudioStore {
                 )),
             };
         }
-        let attachments_dir = path
-            .parent()
-            .context("Studio database path has no parent directory")?
-            .join("attachments");
         Ok(Self {
             db,
             attachments_dir,
@@ -244,14 +265,28 @@ async fn connect_read_only_database(path: &Path) -> Result<DatabaseConnection> {
         .with_context(|| format!("无法以只读方式打开 Studio 数据库：{}", path.display()))
 }
 
-async fn inspect_database(path: &Path) -> Result<()> {
+async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
     let database = connect_read_only_database(path).await?;
-    let validation = validate_database_version(&database, STUDIO_DATABASE_SCHEMA_VERSION).await;
+    let version = database_schema_version(&database).await;
+    let validation = match version {
+        Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
+            .await
+            .map(|()| ExistingDatabaseState::Current),
+        Ok(13) => validate_v13_migration_source(&database)
+            .await
+            .map(|()| ExistingDatabaseState::MigrateV13),
+        Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
+            found,
+            supported: STUDIO_DATABASE_SCHEMA_VERSION,
+        }
+        .into()),
+        Err(error) => Err(error),
+    };
     let close = database.close().await;
     match (validation, close) {
-        (Ok(()), Ok(())) => Ok(()),
+        (Ok(state), Ok(())) => Ok(state),
         (Err(error), Ok(())) => Err(error),
-        (Ok(()), Err(error)) => Err(error).context("failed to close Studio schema probe"),
+        (Ok(_), Err(error)) => Err(error).context("failed to close Studio schema probe"),
         (Err(error), Err(close_error)) => Err(error).context(format!(
             "Studio schema probe failed; closing its connection also failed: {close_error}"
         )),
@@ -298,6 +333,55 @@ async fn validate_database_version(db: &DatabaseConnection, expected_version: i6
     Ok(())
 }
 
+async fn validate_v13_migration_source(db: &DatabaseConnection) -> Result<()> {
+    validate_database_health(db).await?;
+    let mut columns = table_columns(db, "attachments").await?;
+    columns.sort();
+    ensure!(
+        columns
+            == [
+                "byte_size",
+                "created_at",
+                "filename",
+                "height",
+                "id",
+                "item_id",
+                "media_type",
+                "storage_path",
+                "thread_id",
+                "width",
+            ],
+        "Studio v13 attachment table does not match the only supported migration source"
+    );
+    let expected = expected_schema_fingerprint_without_attachment_table().await?;
+    let actual = schema_fingerprint_without_attachment_table(db).await?;
+    ensure!(
+        actual == expected,
+        "Studio v13 schema outside attachments is incompatible"
+    );
+    Ok(())
+}
+
+async fn validate_database_health(db: &DatabaseConnection) -> Result<()> {
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "PRAGMA quick_check".to_string(),
+        ))
+        .await?;
+    let results = rows
+        .into_iter()
+        .map(|row| row.try_get::<String>("", "quick_check"))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if results.as_slice() != ["ok"] {
+        return Err(StudioDatabaseError::CorruptDatabase {
+            reason: results.join("; "),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
     let row = db
         .query_one_raw(Statement::from_string(
@@ -322,17 +406,43 @@ async fn expected_schema_fingerprint() -> Result<String> {
     fingerprint
 }
 
+async fn expected_schema_fingerprint_without_attachment_table() -> Result<String> {
+    let database = connect_sqlite(
+        "sqlite::memory:",
+        SqliteSynchronous::Normal,
+        /* max_connections */ 1,
+    )
+    .await?;
+    initialize_studio_schema(&database).await?;
+    database
+        .execute_unprepared("ALTER TABLE thread_inputs DROP COLUMN attachments_json;")
+        .await?;
+    let fingerprint = schema_fingerprint_without_attachment_table(&database).await;
+    database.close().await?;
+    fingerprint
+}
+
 async fn schema_fingerprint(db: &DatabaseConnection) -> Result<String> {
+    schema_fingerprint_where(db, "1 = 1").await
+}
+
+async fn schema_fingerprint_without_attachment_table(db: &DatabaseConnection) -> Result<String> {
+    schema_fingerprint_where(db, "NOT (type = 'table' AND name = 'attachments')").await
+}
+
+async fn schema_fingerprint_where(db: &DatabaseConnection, predicate: &str) -> Result<String> {
     let rows = db
         .query_all_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
-            "SELECT type, name, tbl_name, sql
+            format!(
+                "SELECT type, name, tbl_name, sql
              FROM sqlite_schema
              WHERE name NOT LIKE 'sqlite_%'
                AND type IN ('table', 'index')
                AND sql IS NOT NULL
+               AND {predicate}
              ORDER BY type, name"
-                .to_string(),
+            ),
         ))
         .await?;
     let mut entries = Vec::with_capacity(rows.len());
@@ -345,6 +455,18 @@ async fn schema_fingerprint(db: &DatabaseConnection) -> Result<String> {
         entries.push(format!("{kind}:{name}:{table}:{normalized_sql}"));
     }
     Ok(format!("v1:{}", entries.join("|")))
+}
+
+async fn table_columns(db: &DatabaseConnection, table: &str) -> Result<Vec<String>> {
+    Ok(db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("PRAGMA table_xinfo(\"{table}\")"),
+        ))
+        .await?
+        .into_iter()
+        .map(|row| row.try_get("", "name"))
+        .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 async fn resolve_configured_database_path(path: &Path) -> Result<PathBuf> {

@@ -4,7 +4,7 @@ use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
 use crate::rust_bridge::{self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, RustBridgeArtifacts};
 use crate::studio_version;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
@@ -419,7 +419,30 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     } else {
         DriverMode::Disabled
     };
-    let run_args = run_gui_args(target, &version_define, driver_mode);
+    let driver_attachment_define = options
+        .driver_attachment
+        .as_ref()
+        .map(|path| {
+            let path = path
+                .canonicalize()
+                .with_context(|| format!("Driver attachment does not exist: {}", path.display()))?;
+            ensure!(
+                path.is_file(),
+                "Driver attachment is not a file: {}",
+                path.display()
+            );
+            Ok::<_, anyhow::Error>(format!(
+                "--dart-define=PURE_STUDIO_DRIVER_ATTACHMENT_PATH={}",
+                path.to_string_lossy()
+            ))
+        })
+        .transpose()?;
+    let run_args = run_gui_args(
+        target,
+        &version_define,
+        driver_mode,
+        driver_attachment_define.as_deref(),
+    );
     let process_mode = match driver_mode {
         DriverMode::Disabled => FlutterProcessMode::Batch,
         DriverMode::Enabled => FlutterProcessMode::ResidentDriver,
@@ -443,7 +466,12 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     )
 }
 
-fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {
+fn run_gui_args<'a>(
+    target: DesktopTarget,
+    version_define: &'a str,
+    driver_mode: DriverMode,
+    driver_attachment_define: Option<&'a str>,
+) -> Vec<&'a str> {
     let mut args = Vec::new();
     if matches!(driver_mode, DriverMode::Enabled) {
         args.push("--print-dtd");
@@ -460,9 +488,11 @@ fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: Driver
             "-t",
             "test_driver/driver_main.dart",
             "--dart-define=PURE_STUDIO_DRIVER=true",
-            "--disable-service-auth-codes",
-            "--verbose",
         ]);
+        if let Some(define) = driver_attachment_define {
+            args.push(define);
+        }
+        args.extend(["--disable-service-auth-codes", "--verbose"]);
     }
     args
 }
@@ -869,7 +899,12 @@ mod tests {
         let version_define = "--dart-define=PURE_STUDIO_VERSION=1.2.3";
 
         assert_eq!(
-            run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Enabled),
+            run_gui_args(
+                DesktopTarget::Windows,
+                version_define,
+                DriverMode::Enabled,
+                None
+            ),
             vec![
                 "--print-dtd",
                 "run",
@@ -885,7 +920,12 @@ mod tests {
             ]
         );
         assert_eq!(
-            run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Disabled,),
+            run_gui_args(
+                DesktopTarget::Windows,
+                version_define,
+                DriverMode::Disabled,
+                None
+            ),
             vec!["run", "-d", "windows", version_define, "--no-pub"]
         );
     }

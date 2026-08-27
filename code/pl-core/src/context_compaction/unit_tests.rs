@@ -22,7 +22,7 @@ use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
 fn text_message(role: MessageRole, text: &str) -> Message {
     Message {
         role,
-        content: MessageContent::Text(text.to_string()),
+        content: MessageContent::text(text.to_string()),
         reasoning_content: None,
         tool_calls: None,
         tool_result: None,

@@ -25,8 +25,7 @@ impl StudioRuntime {
     ) -> Result<StudioSubmitPromptResponse> {
         self.submit_prompt(StudioSubmitPromptRequest {
             thread_id,
-            prompt: request.prompt,
-            attachment_ids: request.attachment_ids,
+            input: request.input,
             options: StudioSubmitPromptOptions {
                 turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
                 ..StudioSubmitPromptOptions::default()
@@ -43,8 +42,7 @@ impl StudioRuntime {
     ) -> Result<StudioSubmitPromptResponse> {
         self.submit_prompt(StudioSubmitPromptRequest {
             thread_id,
-            prompt: request.prompt,
-            attachment_ids: request.attachment_ids,
+            input: request.input,
             options: StudioSubmitPromptOptions {
                 turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
                 ..StudioSubmitPromptOptions::default()
@@ -57,7 +55,7 @@ impl StudioRuntime {
         &self,
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
-        validate_prompt_content(&request.prompt, &request.attachment_ids)?;
+        validate_prompt_content(&request.input)?;
         self.ensure_persistence_accepts_new_work()?;
         // Serialize turn registration with the updater's final idle check.
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
@@ -80,74 +78,140 @@ impl StudioRuntime {
     ) -> Result<StudioSubmitPromptResponse> {
         let StudioSubmitPromptRequest {
             thread_id,
-            prompt,
-            attachment_ids,
+            input,
             options,
         } = request;
-        validate_prompt_content(&prompt, &attachment_ids)?;
+        validate_prompt_content(&input)?;
+        let pl_protocol::studio::StudioPromptInput {
+            text: prompt,
+            attachment_draft_ids,
+        } = input;
         self.ensure_persistence_accepts_new_work()?;
         anyhow::ensure!(
             thread_record.id == thread_id,
             "prompt Thread does not match its canonical owner"
         );
-        if thread_record.mode == crate::StudioMode::Task
-            && thread_record.thread_kind == ThreadKind::Root
-            && !self.task_runtime.has_active_task(&thread_id).await
-        {
-            let project = self
-                .agent_facility
-                .product_events
-                .project_snapshot()
-                .await
-                .into_iter()
-                .find(|project| project.id == thread_record.project_id)
-                .context("Task project not found in the in-memory directory")?;
-            self.task_coordinator
-                .start_task(&thread_record, &prompt, &project.path)
-                .await?;
-        }
-        self.ensure_prompt_runtime_ready().await?;
-        let (handle, agent_id) = self
-            .ensure_thread_agent_for_record(thread_record.clone())
+        let drafts = self
+            .attachment_drafts
+            .resolve(&attachment_draft_ids)
             .await?;
-        let mut snapshot = handle
-            .snapshot(agent_id.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        if matches!(
-            &snapshot.state,
-            pl_core::AgentState::Faulted(faulted)
-                if faulted.classification().is_recoverable()
-        ) {
-            snapshot = handle
-                .recover_faulted(agent_id.clone())
+        let role = if thread_record.parent_thread_id.is_none() {
+            thread_record.mode.root_role()
+        } else {
+            StudioRole::from_key(&thread_record.role).context("Thread has an invalid model role")?
+        };
+        let config = self.config_runtime.read()?;
+        let route = config.config.models.resolve(&role.id())?;
+        self.attachment_drafts
+            .validate_for_model(&route.model, &drafts)?;
+        let attachments = self
+            .store
+            .promote_attachment_drafts(&thread_id, &drafts)
+            .await?;
+        let attachment_ids = attachments
+            .iter()
+            .map(|attachment| attachment.id.clone())
+            .collect::<Vec<_>>();
+        let thread_attachments = attachments
+            .iter()
+            .map(crate::studio::store::attachment::thread_attachment)
+            .collect::<Vec<_>>();
+        self.agent_facility
+            .resources
+            .insert_initial_remote_urls(attachments.iter().zip(&drafts).filter_map(
+                |(attachment, draft)| {
+                    draft
+                        .initial_remote_url
+                        .clone()
+                        .map(|url| (attachment.id.clone(), url))
+                },
+            ))
+            .await;
+        let mut accepted = false;
+        let result = async {
+            if thread_record.mode == crate::StudioMode::Task
+                && thread_record.thread_kind == ThreadKind::Root
+                && !self.task_runtime.has_active_task(&thread_id).await
+            {
+                let project = self
+                    .agent_facility
+                    .product_events
+                    .project_snapshot()
+                    .await
+                    .into_iter()
+                    .find(|project| project.id == thread_record.project_id)
+                    .context("Task project not found in the in-memory directory")?;
+                self.task_coordinator
+                    .start_task(&thread_record, &prompt, &project.path)
+                    .await?;
+            }
+            self.ensure_prompt_runtime_ready().await?;
+            let (handle, agent_id) = self
+                .ensure_thread_agent_for_record(thread_record.clone())
+                .await?;
+            let mut snapshot = handle
+                .snapshot(agent_id.clone())
                 .await
                 .map_err(|error| anyhow::anyhow!(error))?;
+            if matches!(
+                &snapshot.state,
+                pl_core::AgentState::Faulted(faulted)
+                    if faulted.classification().is_recoverable()
+            ) {
+                snapshot = handle
+                    .recover_faulted(agent_id.clone())
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error))?;
+            }
+            self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
+                .await?;
+            let thread = pl_core::ThreadId::new(thread_id.clone())?;
+            let metadata = submit_metadata(&options);
+            let presentation = options.presentation.clone();
+            let turn_id = handle
+                .submit(
+                    agent_id.clone(),
+                    pl_core::AgentSubmitRequest::start(thread.clone(), prompt.clone())
+                        .with_presentation(presentation)
+                        .with_attachments(thread_attachments)
+                        .with_metadata(metadata)
+                        .with_turn_policy(options.turn_policy),
+                )
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?;
+            accepted = true;
+            let cursor = handle
+                .thread_snapshot(&thread)
+                .map_err(|error| anyhow::anyhow!(error))?
+                .revision;
+            Ok::<_, anyhow::Error>(StudioSubmitPromptResponse {
+                thread_id,
+                turn_id: turn_id.into_string(),
+                cursor,
+            })
         }
-        self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
-            .await?;
-        let thread = pl_core::ThreadId::new(thread_id.clone())?;
-        let metadata = submit_metadata(&attachment_ids, &options);
-        let presentation = options.presentation.clone();
-        let turn_id = handle
-            .submit(
-                agent_id.clone(),
-                pl_core::AgentSubmitRequest::start(thread.clone(), prompt.clone())
-                    .with_presentation(presentation)
-                    .with_metadata(metadata)
-                    .with_turn_policy(options.turn_policy),
-            )
+        .await;
+        if accepted {
+            self.attachment_drafts.commit(&attachment_draft_ids).await;
+            return result;
+        }
+        self.agent_facility
+            .resources
+            .remove_initial_remote_urls(&attachment_ids)
+            .await;
+        if let Err(cleanup_error) = self
+            .store
+            .delete_attachments(&thread_record.id, &attachment_ids)
             .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        let cursor = handle
-            .thread_snapshot(&thread)
-            .map_err(|error| anyhow::anyhow!(error))?
-            .revision;
-        Ok(StudioSubmitPromptResponse {
-            thread_id,
-            turn_id: turn_id.into_string(),
-            cursor,
-        })
+        {
+            return Err(result
+                .err()
+                .unwrap_or_else(|| anyhow::anyhow!("prompt submission failed"))
+                .context(format!(
+                    "failed to roll back attachments: {cleanup_error:#}"
+                )));
+        }
+        result
     }
 
     pub(super) async fn ensure_prompt_runtime_ready(&self) -> Result<()> {
@@ -557,7 +621,6 @@ impl StudioRuntime {
                 serde_json::json!({
                     "interactionResolutionId": interaction_id,
                     "mailId": mail_id,
-                    "attachmentIds": [],
                 }),
             )
             .await?
@@ -727,17 +790,16 @@ impl StudioRuntime {
     }
 }
 
-pub(super) fn validate_prompt_content(prompt: &str, attachment_ids: &[String]) -> Result<()> {
-    if prompt.trim().is_empty() && attachment_ids.is_empty() {
+pub(super) fn validate_prompt_content(
+    input: &pl_protocol::studio::StudioPromptInput,
+) -> Result<()> {
+    if input.text.trim().is_empty() && input.attachment_draft_ids.is_empty() {
         bail!("prompt is empty");
     }
     Ok(())
 }
 
-fn submit_metadata(
-    attachment_ids: &[String],
-    options: &StudioSubmitPromptOptions,
-) -> serde_json::Value {
+fn submit_metadata(options: &StudioSubmitPromptOptions) -> serde_json::Value {
     let lifecycle = options.lifecycle.as_ref().map(|lifecycle| {
         serde_json::json!({
             "threadId": lifecycle.thread_id,
@@ -745,7 +807,6 @@ fn submit_metadata(
         })
     });
     serde_json::json!({
-        "attachmentIds": attachment_ids,
         "historyPolicy": "persist",
         "planLifecycle": lifecycle,
     })

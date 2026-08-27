@@ -1541,6 +1541,7 @@ void registerShellSettingsTests() {
       responsesProgrammaticToolCalling: false,
       defaultModel: 'gpt-5.6-sol',
       models: [],
+      modelConnectionModes: {'gpt-5.6-sol': 'http'},
       status: 'ready',
       usageLabel: '',
     );
@@ -1554,6 +1555,11 @@ void registerShellSettingsTests() {
     expect(resolved.promptCacheDialect, 'none');
     expect(resolved.responsesProgrammaticToolCalling, isFalse);
     expect(resolved.credentialEnv, 'OPENAI_API_KEY');
+    expect(
+      resolved.models.first.inputCapabilities.map((value) => value.modality),
+      [ModelModalityView.text],
+    );
+    expect(resolved.models.first.connectionMode, 'http');
   });
 
   testWidgets('provider editor cancel does not save local draft', (
@@ -1637,7 +1643,8 @@ void registerShellSettingsTests() {
             subtitle: 'OpenAI Platform',
             baseUrl: 'https://api.openai.com/v1',
             defaultModel: 'gpt-5.5',
-            models: [
+            models: [],
+            customModels: [
               ProviderModelView(
                 slug: 'gpt-5.5',
                 displayName: 'GPT-5.5',
@@ -1680,10 +1687,12 @@ void registerShellSettingsTests() {
     final openAi = providers.last! as Map<String, Object?>;
     expect(openAi['id'], 'openai-team');
     expect(openAi['originalId'], 'openai');
-    expect((openAi['modelConnectionModes'] as List<Object?>).single, {
-      'slug': 'gpt-5.5',
-      'connectionMode': 'web_socket',
-    });
+    final modelConnectionModes =
+        openAi['modelConnectionModes'] as List<Object?>;
+    final customModelConnection = modelConnectionModes
+        .cast<Map<String, Object?>>()
+        .singleWhere((mode) => mode['slug'] == 'gpt-5.5');
+    expect(customModelConnection['connectionMode'], 'web_socket');
   });
 
   testWidgets(
@@ -2074,7 +2083,7 @@ void registerShellSettingsTests() {
         find.descendant(
           of: flashOption,
           matching: find.text(
-            'DeepSeek / DeepSeek V4 Flash · Responses · HTTP',
+            'DeepSeek / DeepSeek V4 Flash · 文本 · Responses · HTTP',
           ),
         ),
         findsOneWidget,
@@ -2090,7 +2099,7 @@ void registerShellSettingsTests() {
         find.descendant(
           of: reasonerOption,
           matching: find.text(
-            'DeepSeek / DeepSeek Reasoner · Chat Completions · HTTP',
+            'DeepSeek / DeepSeek Reasoner · 文本 · Chat Completions · HTTP',
           ),
         ),
         findsOneWidget,
@@ -2250,7 +2259,22 @@ void registerShellSettingsTests() {
       expect(find.text('服务'), findsWidgets);
       expect(find.text('添加 provider'), findsOneWidget);
       expect(find.text('DeepSeek'), findsOneWidget);
-      expect(find.text('deepseek-reasoner'), findsWidgets);
+      await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
+      await tester.pumpAndSettle();
+      expect(find.text('DeepSeek Reasoner'), findsOneWidget);
+      final capabilityTags = find.byKey(
+        StudioDriverKeys.modelCapabilityTags('deepseek', 'deepseek-reasoner'),
+      );
+      expect(capabilityTags, findsOneWidget);
+      expect(tester.widget<Text>(capabilityTags).data, '文本');
+      final visionCapabilityTags = find.byKey(
+        StudioDriverKeys.modelCapabilityTags(
+          'deepseek',
+          'deepseek-v4-flash-vision-exp',
+        ),
+      );
+      expect(visionCapabilityTags, findsOneWidget);
+      expect(tester.widget<Text>(visionCapabilityTags).data, '文本 · 视觉');
 
       await tester.pumpWidget(
         ProviderScope(
@@ -2266,7 +2290,7 @@ void registerShellSettingsTests() {
       );
       await tester.pumpAndSettle();
       expect(find.text('描述你的需求...'), findsOneWidget);
-      expect(find.text('deepseek-v4-flash'), findsOneWidget);
+      expect(find.text('deepseek-v4-flash · 文本'), findsOneWidget);
       expect(find.text('high'), findsOneWidget);
     },
   );

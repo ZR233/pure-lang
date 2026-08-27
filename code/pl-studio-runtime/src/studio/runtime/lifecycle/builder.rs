@@ -12,6 +12,7 @@ use crate::studio::{
 use crate::{McpConnector, McpRuntime};
 
 use super::super::StudioRuntime;
+use super::super::attachment_drafts::AttachmentDraftRuntime;
 use super::super::lsp_state::LspStateRuntime;
 use super::super::mcp_health::McpStateRuntime;
 use super::super::residency::ThreadResidency;
@@ -107,6 +108,8 @@ impl StudioRuntime {
         let tool_manager = pl_core::ToolManager::new();
         let mcp_state = McpStateRuntime::new();
         let lsp_state = LspStateRuntime::new(product_events.clone());
+        let attachment_drafts =
+            AttachmentDraftRuntime::new(store.attachments_dir().join("drafts"))?;
         Ok(Self {
             instance_lock: RuntimeLockOwner::new(instance_lock),
             store,
@@ -143,6 +146,7 @@ impl StudioRuntime {
             activation: Default::default(),
             task_runtime,
             task_coordinator,
+            attachment_drafts,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
             initialization_entry_barrier: None,

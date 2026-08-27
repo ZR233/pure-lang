@@ -127,7 +127,11 @@ class ProviderDetails extends StatelessWidget {
           title: context.l10n.settingsProviderModelsTitle,
           children: [
             for (final model in provider.allModels)
-              _ModelReadout(model: model, framed: true),
+              _ModelReadout(
+                model: model,
+                providerId: provider.id,
+                framed: true,
+              ),
           ],
         ),
       ],
@@ -279,6 +283,7 @@ class ProviderEditor extends StatelessWidget {
             ],
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue:
                   models.any((model) => model.slug == provider.defaultModel)
                   ? provider.defaultModel
@@ -290,7 +295,11 @@ class ProviderEditor extends StatelessWidget {
                 for (final model in models)
                   DropdownMenuItem(
                     value: model.slug,
-                    child: Text('${model.displayName} (${model.slug})'),
+                    child: Text(
+                      '${model.displayName} (${model.slug})',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
               ],
               onChanged: saving
@@ -715,7 +724,13 @@ class _ModelReadout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final price = providerModelPriceLabel(model);
-    final traits = [...model.modalities, ...model.capabilities];
+    final traits = model.capabilities;
+    final inputCapabilities = model.inputCapabilities
+        .map((capability) => _modelModalityLabel(capability.modality))
+        .toList();
+    final outputCapabilities = model.outputModalities
+        .map(_modelModalityLabel)
+        .toList();
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -754,6 +769,24 @@ class _ModelReadout extends StatelessWidget {
                     color: context.studioInkSoft,
                   ),
                 ),
+                if (inputCapabilities.isNotEmpty)
+                  Text(
+                    inputCapabilities.join(' · '),
+                    key: StudioDriverKeys.modelCapabilityTags(
+                      providerId,
+                      model.slug,
+                    ),
+                    style: context.text.labelSmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  ),
+                if (outputCapabilities.isNotEmpty)
+                  Text(
+                    '输出：${outputCapabilities.join(' · ')}',
+                    style: context.text.labelSmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  ),
                 if (traits.isNotEmpty)
                   Text(
                     traits.join(' · '),
@@ -830,6 +863,14 @@ class _ModelReadout extends StatelessWidget {
     );
   }
 }
+
+String _modelModalityLabel(ModelModalityView modality) => switch (modality) {
+  ModelModalityView.text => '文本',
+  ModelModalityView.image => '视觉',
+  ModelModalityView.audio => '音频',
+  ModelModalityView.video => '视频',
+  ModelModalityView.file => '文件',
+};
 
 String _protocolLabel(String protocol) => switch (protocol) {
   'responses' => 'Responses',

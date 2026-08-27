@@ -127,32 +127,27 @@ fn truncate_user_message(message: &Message, max_tokens: u64) -> Option<Message> 
     }
     let mut message = message.clone();
     let max_chars = max_tokens.saturating_mul(APPROX_CHARS_PER_TOKEN) as usize;
-    message.content = match message.content {
-        MessageContent::Text(text) => MessageContent::Text(take_last_chars(&text, max_chars)),
-        MessageContent::MultiPart(parts) => {
-            let mut remaining = max_chars;
-            let mut kept = Vec::new();
-            for part in parts {
-                match part {
-                    ContentPart::Image { .. } => kept.push(part),
-                    ContentPart::Text { text } if remaining > 0 => {
-                        let text = if text.chars().count() <= remaining {
-                            text
-                        } else {
-                            take_last_chars(&text, remaining)
-                        };
-                        remaining = remaining.saturating_sub(text.chars().count());
-                        kept.push(ContentPart::Text { text });
-                    }
-                    _ => {}
-                }
+    let mut remaining = max_chars;
+    let mut kept = Vec::new();
+    for part in message.content.parts {
+        match part {
+            ContentPart::Attachment { .. } => kept.push(part),
+            ContentPart::Text { text } if remaining > 0 => {
+                let text = if text.chars().count() <= remaining {
+                    text
+                } else {
+                    take_last_chars(&text, remaining)
+                };
+                remaining = remaining.saturating_sub(text.chars().count());
+                kept.push(ContentPart::Text { text });
             }
-            if kept.is_empty() {
-                return None;
-            }
-            MessageContent::MultiPart(kept)
+            _ => {}
         }
-    };
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    message.content = MessageContent::new(kept);
     Some(message)
 }
 
@@ -180,7 +175,7 @@ fn trim_tool_outputs_to_context_window(
         }
         let replacement_message = Message {
             role: MessageRole::Tool,
-            content: MessageContent::Text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
+            content: MessageContent::text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -232,7 +227,7 @@ mod tests {
     fn user(text: &str) -> Message {
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text(text.to_string()),
+            content: MessageContent::text(text.to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -263,7 +258,7 @@ mod tests {
         let metadata = HashMap::from([("tool_call_id".to_string(), "call-1".to_string())]);
         let mut input = vec![ModelContextItem::from(Message {
             role: MessageRole::Tool,
-            content: MessageContent::Text("x".repeat(100)),
+            content: MessageContent::text("x".repeat(100)),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -278,7 +273,7 @@ mod tests {
         assert_eq!(message.metadata, metadata);
         assert_eq!(
             message.content,
-            MessageContent::Text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string())
+            MessageContent::text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string())
         );
     }
 }

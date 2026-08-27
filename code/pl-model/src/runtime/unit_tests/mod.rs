@@ -196,7 +196,7 @@ fn minimal_request(_model: &str) -> CompletionRequest {
         .input(vec![
             Message {
                 role: MessageRole::User,
-                content: MessageContent::Text("hello".to_string()),
+                content: MessageContent::text("hello".to_string()),
                 reasoning_content: None,
                 tool_calls: None,
                 tool_result: None,

@@ -27,8 +27,7 @@ impl StudioRuntime {
         self.start_new_thread(StudioStartNewThreadRequest {
             project_id,
             title: request.title,
-            prompt: request.prompt,
-            attachment_ids: request.attachment_ids,
+            input: request.input,
             mode,
             options: super::StudioSubmitPromptOptions {
                 turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
@@ -112,10 +111,21 @@ impl StudioRuntime {
         &self,
         request: StudioStartNewThreadRequest,
     ) -> Result<StudioStartNewThreadResponse> {
-        super::prompt_runner::validate_prompt_content(&request.prompt, &request.attachment_ids)?;
+        super::prompt_runner::validate_prompt_content(&request.input)?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
         self.ensure_persistence_accepts_new_work()?;
+        let drafts = self
+            .attachment_drafts
+            .resolve(&request.input.attachment_draft_ids)
+            .await?;
+        let config = self.config_runtime.read()?;
+        let route = config
+            .config
+            .models
+            .resolve(&request.mode.root_role().id())?;
+        self.attachment_drafts
+            .validate_for_model(&route.model, &drafts)?;
         // 校验走内存目录 owner：open_project 的落库是异步跟随的。
         let projects = self.agent_facility.product_events.project_snapshot().await;
         anyhow::ensure!(
@@ -138,8 +148,7 @@ impl StudioRuntime {
             .submit_prompt_for_owned_thread_with_lifecycle_lock(
                 StudioSubmitPromptRequest {
                     thread_id: thread.id.clone(),
-                    prompt: request.prompt,
-                    attachment_ids: request.attachment_ids,
+                    input: request.input,
                     options: request.options,
                 },
                 thread.clone(),

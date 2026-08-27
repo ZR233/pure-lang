@@ -142,7 +142,7 @@ fn normalize_generated_dart_files(root: &Path) -> Result<Vec<PathBuf>> {
     for path in &files {
         let content = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let normalized = normalize_generated_dart_text(&content);
+        let normalized = normalize_generated_text(&content);
         if normalized != content {
             fs::write(path, normalized)
                 .with_context(|| format!("failed to normalize {}", path.display()))?;
@@ -199,6 +199,13 @@ fn format_generated_dart_files(app_dir: &Path, files: &[PathBuf]) -> Result<()> 
 
 fn format_generated_rust_file(workspace_root: &Path, app_dir: &Path) -> Result<()> {
     let generated = app_dir.join("rust").join("src").join("frb_generated.rs");
+    let content = fs::read_to_string(&generated)
+        .with_context(|| format!("failed to read {}", generated.display()))?;
+    let normalized = normalize_generated_text(&content);
+    if normalized != content {
+        fs::write(&generated, normalized)
+            .with_context(|| format!("failed to normalize {}", generated.display()))?;
+    }
     let args = vec![
         OsString::from("--edition"),
         OsString::from("2024"),
@@ -219,7 +226,7 @@ fn is_generated_dart_path(root: &Path, path: &Path) -> bool {
         .any(|output| output.matches_dart_path(relative, file_name))
 }
 
-fn normalize_generated_dart_text(content: &str) -> String {
+fn normalize_generated_text(content: &str) -> String {
     let mut normalized = String::with_capacity(content.len());
     for chunk in content.split_inclusive('\n') {
         let (line, newline) = chunk
@@ -428,7 +435,7 @@ mod tests {
     #[test]
     fn generated_text_normalization_uses_lf_and_trims_trailing_whitespace() {
         assert_eq!(
-            normalize_generated_dart_text("alpha  \r\nbeta\t\ngamma  "),
+            normalize_generated_text("alpha  \r\nbeta\t\ngamma  "),
             "alpha\nbeta\ngamma"
         );
     }

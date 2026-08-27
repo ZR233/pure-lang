@@ -72,8 +72,9 @@ pub use pl_lsp::{
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    ModelCapabilities, ModelInfo, ModelModality, ModelParameter, ModelRequestProfile,
-    OpenAiCompactionMode, PromptCacheDialect, PromptCacheProviderCapabilities,
+    MediaMixPolicy, MediaRepresentation, ModelCapabilities, ModelInfo, ModelInputCapability,
+    ModelInputLimits, ModelInputSource, ModelMediaInputProfile, ModelModality, ModelParameter,
+    ModelRequestProfile, OpenAiCompactionMode, PromptCacheDialect, PromptCacheProviderCapabilities,
     ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
     ReasoningConfig, ReasoningInterleaved, ReasoningInterleavedField, ReasoningSummary,
     ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolSpec,
@@ -83,12 +84,13 @@ pub use pl_model::{
     openai_default_model_slugs, zhipu_default_model_slugs,
 };
 pub use pl_protocol::{
-    AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
-    ImageSource, InteractionChangedEvent, InteractionContent, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, McpAvailabilityDescriptor,
-    McpHealthSnapshot, McpServerDescriptor, Message, MessageContent, MessageRole, ModelContextItem,
-    OutputStream, PermissionLevel, PinnedContextSection, PipelineStage, PlanConfirmationResolution,
-    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    AgentRuntimeDelta, AttachmentModality, BudgetLimitKind, BudgetUsage, ContentPart,
+    ContextSectionId, ErrorSeverity, InteractionChangedEvent, InteractionContent, InteractionKind,
+    InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
+    McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor, Message, MessageContent,
+    MessageRole, ModelContextItem, OutputStream, PermissionLevel, PinnedContextSection,
+    PipelineStage, PlanConfirmationResolution, ProviderCatalogSnapshot,
+    ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
     ProviderServiceCapabilitiesDescriptor, PureError, Result, RetryDisposition, RuntimeCostAmount,
     RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot, ToolApprovalResolution,
     ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer, UserInputRequest,

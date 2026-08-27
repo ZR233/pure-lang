@@ -26,7 +26,7 @@ impl TurnRequest {
         let prompt = prompt.into();
         Self {
             turn_id: None,
-            user_content: MessageContent::Text(prompt.clone()),
+            user_content: MessageContent::text(prompt.clone()),
             prompt,
             workspace_instructions: None,
             instruction_snapshot: None,

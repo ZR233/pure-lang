@@ -10,16 +10,22 @@ use serde_json::Map;
 use serde_json::Value;
 
 use crate::model::capabilities::{
-    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ReasoningInterleaved,
-    ReasoningInterleavedField, ToolCapabilities,
+    ModelCapabilities, ModelInputCapability, ModelInputLimits, ModelInputSource, ModelModality,
+    PromptCacheModelCapabilities, ReasoningInterleaved, ReasoningInterleavedField,
+    ToolCapabilities,
 };
 use crate::model::family::{ModelFamily, ModelPricing};
 use crate::model::info::{
-    MaxTokensField, ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode,
+    MaxTokensField, MediaRepresentation, MediaWireFormat, ModelInfo, ModelMediaInputProfile,
+    ModelRequestProfile, ModelTransportProfile, TruncationMode,
 };
 use crate::model::parameter::{ModelParameter, ParameterWire, WireAssignment};
 
-const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &[
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+    "deepseek-v4-pro",
+];
 const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "gpt-5.5",
     "gpt-5.4",
@@ -62,6 +68,7 @@ pub fn default_models() -> Vec<ModelInfo> {
     let openai_gpt56 = openai_gpt56_family("medium");
     let openai_gpt56_sol = openai_gpt56_family("low");
     let deepseek_flash = deepseek_family(ModelTransportProfile::responses_http());
+    let deepseek_vision = deepseek_vision_family();
     let deepseek_pro = deepseek_family(ModelTransportProfile::responses_http());
     let mimo_text = mimo_family(false);
     let mimo_vision = mimo_family(true);
@@ -77,6 +84,21 @@ pub fn default_models() -> Vec<ModelInfo> {
             "deepseek-v4-flash",
             "DeepSeek V4 Flash",
             "DeepSeek fast reasoning model with thinking mode.",
+            1_000_000,
+            1_000_000,
+            Some(384_000),
+            ModelPricing {
+                currency: Some("CNY".to_string()),
+                input_per_mtok: Some(1.0),
+                output_per_mtok: Some(2.0),
+                cache_read_per_mtok: Some(0.02),
+                cache_write_per_mtok: None,
+            },
+        ),
+        deepseek_vision.instantiate(
+            "deepseek-v4-flash-vision-exp",
+            "DeepSeek V4 Flash Vision Exp",
+            "DeepSeek experimental multimodal reasoning model with image understanding.",
             1_000_000,
             1_000_000,
             Some(384_000),
@@ -443,6 +465,20 @@ fn deepseek_family(transport: ModelTransportProfile) -> ModelFamily {
     }
 }
 
+fn deepseek_vision_family() -> ModelFamily {
+    ModelFamily {
+        id: "deepseek-vision-reasoning",
+        capabilities: deepseek_vision_capabilities(),
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![deepseek_effort_parameter()],
+        transport: ModelTransportProfile::responses_http(),
+        request_profile: deepseek_request_profile()
+            .with_image_media(MediaWireFormat::ResponsesInputImage, true),
+        base_instructions: String::new(),
+    }
+}
+
 fn zhipu_text_family() -> ModelFamily {
     ModelFamily {
         id: "zhipu-text",
@@ -466,6 +502,11 @@ fn mimo_family(vision: bool) -> ModelFamily {
         transport: ModelTransportProfile::chat_completions_http(),
         request_profile: ModelRequestProfile {
             max_tokens_field: MaxTokensField::MaxCompletionTokens,
+            media: if vision {
+                image_media_profiles(MediaWireFormat::ChatImageUrl, false)
+            } else {
+                Vec::new()
+            },
             ..ModelRequestProfile::default()
         },
         base_instructions: String::new(),
@@ -507,7 +548,8 @@ fn zhipu_glm53_flash_family() -> ModelFamily {
         truncation_limit: 10_000,
         parameters: vec![zhipu_glm53_effort_parameter()],
         transport: ModelTransportProfile::chat_completions_http(),
-        request_profile: chat_parallel_request_profile(),
+        request_profile: chat_parallel_request_profile()
+            .with_image_media(MediaWireFormat::ChatImageUrl, true),
         base_instructions: String::new(),
     }
 }
@@ -520,7 +562,8 @@ fn zhipu_vision_family() -> ModelFamily {
         truncation_limit: 10_000,
         parameters: vec![zhipu_plain_effort_parameter()],
         transport: ModelTransportProfile::chat_completions_http(),
-        request_profile: chat_parallel_request_profile(),
+        request_profile: chat_parallel_request_profile()
+            .with_image_media(MediaWireFormat::ChatImageUrl, true),
         base_instructions: String::new(),
     }
 }
@@ -547,8 +590,33 @@ fn chat_parallel_request_profile() -> ModelRequestProfile {
 fn openai_responses_request_profile() -> ModelRequestProfile {
     ModelRequestProfile {
         responses_programmatic_tool_calling: true,
+        media: image_media_profiles(MediaWireFormat::ResponsesInputImage, true),
         ..ModelRequestProfile::default()
     }
+}
+
+impl ModelRequestProfile {
+    fn with_image_media(mut self, wire: MediaWireFormat, remote_url_first: bool) -> Self {
+        self.media = image_media_profiles(wire, remote_url_first);
+        self
+    }
+}
+
+fn image_media_profiles(
+    wire: MediaWireFormat,
+    remote_url_first: bool,
+) -> Vec<ModelMediaInputProfile> {
+    let first_send = if remote_url_first {
+        vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+    } else {
+        vec![MediaRepresentation::DataUrl]
+    };
+    vec![ModelMediaInputProfile {
+        modality: ModelModality::Image,
+        wire,
+        first_send,
+        replay: vec![MediaRepresentation::DataUrl],
+    }]
 }
 
 // ---- effort 参数声明 ----
@@ -710,7 +778,13 @@ fn openai_capabilities() -> ModelCapabilities {
         temperature: false,
         reasoning: true,
         web_search: true,
-        input: vec![ModelModality::Text, ModelModality::Image],
+        input: vec![
+            ModelInputCapability::text(),
+            ModelInputCapability::media(
+                ModelModality::Image,
+                vec![ModelInputSource::Local, ModelInputSource::RemoteUrl],
+            ),
+        ],
         output: vec![ModelModality::Text],
         tools: ToolCapabilities {
             function_calling: true,
@@ -730,7 +804,7 @@ fn deepseek_capabilities() -> ModelCapabilities {
         temperature: false,
         reasoning: true,
         web_search: false,
-        input: vec![ModelModality::Text],
+        input: vec![ModelInputCapability::text()],
         output: vec![ModelModality::Text],
         tools: ToolCapabilities {
             function_calling: true,
@@ -746,10 +820,33 @@ fn deepseek_capabilities() -> ModelCapabilities {
     }
 }
 
+fn deepseek_vision_capabilities() -> ModelCapabilities {
+    let mut capabilities = deepseek_capabilities();
+    capabilities.input.push(ModelInputCapability {
+        modality: ModelModality::Image,
+        sources: vec![ModelInputSource::Local, ModelInputSource::RemoteUrl],
+        limits: ModelInputLimits {
+            max_count: Some(600),
+            max_bytes: Some(32 * 1024 * 1024),
+            max_total_bytes: Some(32 * 1024 * 1024),
+            max_width: Some(4096),
+            max_height: Some(4096),
+            media_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+                .into_iter()
+                .map(ToString::to_string)
+                .collect(),
+        },
+    });
+    capabilities
+}
+
 fn mimo_capabilities(vision: bool) -> ModelCapabilities {
-    let mut input = vec![ModelModality::Text];
+    let mut input = vec![ModelInputCapability::text()];
     if vision {
-        input.push(ModelModality::Image);
+        input.push(ModelInputCapability::media(
+            ModelModality::Image,
+            vec![ModelInputSource::Local],
+        ));
     }
     ModelCapabilities {
         streaming: true,
@@ -773,9 +870,12 @@ fn mimo_capabilities(vision: bool) -> ModelCapabilities {
 }
 
 fn zhipu_capabilities(vision: bool) -> ModelCapabilities {
-    let mut input = vec![ModelModality::Text];
+    let mut input = vec![ModelInputCapability::text()];
     if vision {
-        input.push(ModelModality::Image);
+        input.push(ModelInputCapability::media(
+            ModelModality::Image,
+            vec![ModelInputSource::Local, ModelInputSource::RemoteUrl],
+        ));
     }
     ModelCapabilities {
         streaming: true,

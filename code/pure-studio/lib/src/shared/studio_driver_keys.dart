@@ -32,6 +32,13 @@ abstract final class StudioDriverKeys {
   static const composerStop = ValueKey<String>('composer-stop');
   static const composerPending = ValueKey<String>('composer-pending');
   static const composerError = ValueKey<String>('composer-error');
+  static const attachmentEntry = ValueKey<String>('composer-attachment-entry');
+  static const attachmentLocal = ValueKey<String>('composer-attachment-local');
+  static const attachmentUrl = ValueKey<String>('composer-attachment-url');
+  static const attachmentUrlDialog = ValueKey<String>('attachment-url-dialog');
+  static const attachmentUrlInput = ValueKey<String>('attachment-url-input');
+  static const attachmentUrlSubmit = ValueKey<String>('attachment-url-submit');
+  static const attachmentDraftRail = ValueKey<String>('attachment-draft-rail');
   static const taskRecoveryOpen = ValueKey<String>('task-recovery-open');
   static const taskRecoveryDialog = ValueKey<String>('task-recovery-dialog');
   static const taskRecoveryTarget = ValueKey<String>('task-recovery-target');
@@ -108,6 +115,23 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> modelOption(String providerId, String model) =>
       ValueKey<String>('model-$providerId-$model');
+
+  static ValueKey<String> modelCapabilityTags(
+    String providerId,
+    String model,
+  ) => ValueKey<String>('model-$providerId-$model-capabilities');
+
+  static ValueKey<String> attachmentDraft(String id) =>
+      ValueKey<String>('attachment-draft-$id');
+
+  static ValueKey<String> attachmentRemove(String id) =>
+      ValueKey<String>('attachment-remove-$id');
+
+  static ValueKey<String> attachmentModality(String id) =>
+      ValueKey<String>('attachment-modality-$id');
+
+  static ValueKey<String> historyAttachment(String id) =>
+      ValueKey<String>('history-attachment-$id');
 
   static ValueKey<String> reasoningEffortOption(String effort) =>
       ValueKey<String>('reasoning-effort-$effort');

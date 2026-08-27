@@ -55,12 +55,14 @@ async fn run_live_simple_flow(fixture: &LiveTaskFixture) -> Result<()> {
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
-            prompt: format!(
-                "Create a file named notes.txt in the repository root with exactly this single \
-                 line of content and no extra whitespace: {EXPECTED_NOTES}. Use your file tools, \
-                 then finish with a one-line summary."
-            ),
-            attachment_ids: Vec::new(),
+            input: pl_protocol::studio::StudioPromptInput {
+                text: format!(
+                    "Create a file named notes.txt in the repository root with exactly this single \
+                     line of content and no extra whitespace: {EXPECTED_NOTES}. Use your file tools, \
+                     then finish with a one-line summary."
+                ),
+                attachment_draft_ids: Vec::new(),
+            },
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;

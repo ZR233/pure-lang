@@ -192,30 +192,29 @@ pub struct BridgeProviderSettingsDto {
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
-    pub models: Vec<BridgeProviderModelSettingsDto>,
-    pub custom_models: Vec<BridgeProviderModelSettingsDto>,
+    pub custom_models: Vec<BridgeCustomModelSettingsDto>,
+    pub model_connection_modes: Vec<BridgeModelConnectionSettingsDto>,
     pub catalog_id: Option<String>,
 }
 
-/// Provider 设置页使用的模型视图。
+/// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeProviderModelSettingsDto {
+pub struct BridgeCustomModelSettingsDto {
     pub slug: String,
     pub display_name: String,
-    pub description: String,
-    pub context_window: Option<u64>,
-    pub max_output_tokens: Option<u64>,
-    pub currency: String,
-    pub input_price_per_m_tok: Option<f64>,
-    pub output_price_per_m_tok: Option<f64>,
-    pub cache_read_price_per_m_tok: Option<f64>,
-    pub cache_write_price_per_m_tok: Option<f64>,
     pub reasoning_efforts: Vec<String>,
     pub base_instructions: String,
     pub wire_protocol: String,
     pub supported_connection_modes: Vec<String>,
     pub default_connection_mode: String,
+}
+
+/// Provider 实例对 canonical catalog 模型的连接方式覆盖。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelConnectionSettingsDto {
+    pub slug: String,
     pub connection_mode: String,
 }
 
@@ -358,7 +357,6 @@ pub struct BridgeModelDescriptor {
     pub max_context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
     pub transport: BridgeModelTransportDescriptor,
-    pub modalities: Vec<String>,
     pub capabilities: BridgeModelCapabilities,
     pub reasoning: Option<BridgeModelReasoningDescriptor>,
     pub pricing: Option<BridgeModelPricing>,
@@ -366,6 +364,8 @@ pub struct BridgeModelDescriptor {
 
 #[derive(Debug, Clone)]
 pub struct BridgeModelCapabilities {
+    pub input: Vec<BridgeModelInputCapability>,
+    pub output: Vec<BridgeModelModality>,
     pub streaming: bool,
     pub temperature: bool,
     pub reasoning: bool,
@@ -374,6 +374,33 @@ pub struct BridgeModelCapabilities {
     pub parallel_tool_calls: bool,
     pub custom_tools: bool,
     pub freeform_tools: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BridgeModelModality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BridgeModelInputSource {
+    Local,
+    RemoteUrl,
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeModelInputCapability {
+    pub modality: BridgeModelModality,
+    pub sources: Vec<BridgeModelInputSource>,
+    pub max_count: Option<u32>,
+    pub max_bytes: Option<u64>,
+    pub max_total_bytes: Option<u64>,
+    pub max_width: Option<u32>,
+    pub max_height: Option<u32>,
+    pub media_types: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -464,8 +491,32 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                     .collect(),
                 default_connection_mode: model.transport.default_connection_mode,
             },
-            modalities: model.modalities,
             capabilities: BridgeModelCapabilities {
+                input: model
+                    .capabilities
+                    .input
+                    .into_iter()
+                    .map(|capability| BridgeModelInputCapability {
+                        modality: bridge_modality(capability.modality),
+                        sources: capability
+                            .sources
+                            .into_iter()
+                            .map(bridge_input_source)
+                            .collect(),
+                        max_count: capability.max_count,
+                        max_bytes: capability.max_bytes,
+                        max_total_bytes: capability.max_total_bytes,
+                        max_width: capability.max_width,
+                        max_height: capability.max_height,
+                        media_types: capability.media_types,
+                    })
+                    .collect(),
+                output: model
+                    .capabilities
+                    .output
+                    .into_iter()
+                    .map(bridge_modality)
+                    .collect(),
                 streaming: model.capabilities.streaming,
                 temperature: model.capabilities.temperature,
                 reasoning: model.capabilities.reasoning,
@@ -491,5 +542,22 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                 cache_write_per_mtok: pricing.cache_write_per_mtok,
             }),
         }
+    }
+}
+
+fn bridge_modality(modality: pl_protocol::ModelModalityDto) -> BridgeModelModality {
+    match modality {
+        pl_protocol::ModelModalityDto::Text => BridgeModelModality::Text,
+        pl_protocol::ModelModalityDto::Image => BridgeModelModality::Image,
+        pl_protocol::ModelModalityDto::Audio => BridgeModelModality::Audio,
+        pl_protocol::ModelModalityDto::Video => BridgeModelModality::Video,
+        pl_protocol::ModelModalityDto::File => BridgeModelModality::File,
+    }
+}
+
+fn bridge_input_source(source: pl_protocol::ModelInputSourceDto) -> BridgeModelInputSource {
+    match source {
+        pl_protocol::ModelInputSourceDto::Local => BridgeModelInputSource::Local,
+        pl_protocol::ModelInputSourceDto::RemoteUrl => BridgeModelInputSource::RemoteUrl,
     }
 }

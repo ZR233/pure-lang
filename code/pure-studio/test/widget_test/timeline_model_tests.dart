@@ -1,6 +1,55 @@
 part of '../widget_test.dart';
 
 void registerTimelineModelTests() {
+  testWidgets('history image loads through the authorized attachment API', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'message-with-image',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      kind: ThreadItemKind.userMessage,
+      text: 'marker',
+      attachments: const [
+        ThreadAttachmentView(
+          id: 'attachment-history-1',
+          modality: AttachmentModalityView.image,
+          mediaType: 'image/png',
+          filename: 'PURE-7429.png',
+          byteSize: 68,
+          width: 1,
+          height: 1,
+        ),
+      ],
+    );
+    final api = _FakeStudioApi(_emptyState())
+      ..threadAttachmentBytes[(
+        threadId: 'thread-1',
+        attachmentId: 'attachment-history-1',
+      )] = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      );
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: [item], api: api),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(StudioDriverKeys.historyAttachment('attachment-history-1')),
+      findsOneWidget,
+    );
+    expect(api.readThreadAttachmentRequests, [
+      (threadId: 'thread-1', attachmentId: 'attachment-history-1'),
+    ]);
+    await tester.tap(
+      find.byKey(StudioDriverKeys.historyAttachment('attachment-history-1')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+  });
+
   test('timeline projects ThreadItems by immutable ordinal', () {
     final rows = timelineRowsFromThreadItems([
       _threadItemFixture(

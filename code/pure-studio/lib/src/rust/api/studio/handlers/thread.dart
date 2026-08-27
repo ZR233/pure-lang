@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import '../types/attachment.dart';
 import '../types/error.dart';
 import '../types/response.dart';
 import '../types/thread_stream.dart';
@@ -19,13 +20,11 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// Returns an error when the Project does not exist, the prompt is empty, or the Turn is rejected.
 Future<StartNewThreadResponse> startNewThread({
   required String projectId,
-  required String prompt,
-  required List<String> attachmentIds,
+  required BridgeStudioPromptInput input,
   required BridgeThreadMode mode,
 }) => RustLib.instance.api.crateApiStudioHandlersThreadStartNewThread(
   projectId: projectId,
-  prompt: prompt,
-  attachmentIds: attachmentIds,
+  input: input,
   mode: mode,
 );
 

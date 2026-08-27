@@ -1,3 +1,31 @@
+enum ModelModalityView { text, image, audio, video, file }
+
+enum ModelInputSourceView { local, remoteUrl }
+
+class ModelInputCapabilityView {
+  const ModelInputCapabilityView({
+    required this.modality,
+    required this.sources,
+    this.maxCount,
+    this.maxBytes,
+    this.maxTotalBytes,
+    this.maxWidth,
+    this.maxHeight,
+    this.mediaTypes = const [],
+  });
+
+  final ModelModalityView modality;
+  final List<ModelInputSourceView> sources;
+  final int? maxCount;
+  final int? maxBytes;
+  final int? maxTotalBytes;
+  final int? maxWidth;
+  final int? maxHeight;
+  final List<String> mediaTypes;
+
+  bool supportsSource(ModelInputSourceView source) => sources.contains(source);
+}
+
 class ProviderModelView {
   const ProviderModelView({
     required this.slug,
@@ -7,7 +35,8 @@ class ProviderModelView {
     this.contextWindow,
     this.maxContextWindow,
     this.maxOutputTokens,
-    this.modalities = const [],
+    this.inputCapabilities = const [],
+    this.outputModalities = const [],
     this.capabilities = const [],
     this.reasoningLabel = '',
     this.defaultReasoningEffort = '',
@@ -30,7 +59,8 @@ class ProviderModelView {
   final int? contextWindow;
   final int? maxContextWindow;
   final int? maxOutputTokens;
-  final List<String> modalities;
+  final List<ModelInputCapabilityView> inputCapabilities;
+  final List<ModelModalityView> outputModalities;
   final List<String> capabilities;
   final String reasoningLabel;
   final String defaultReasoningEffort;
@@ -53,7 +83,8 @@ class ProviderModelView {
     int? contextWindow,
     int? maxContextWindow,
     int? maxOutputTokens,
-    List<String>? modalities,
+    List<ModelInputCapabilityView>? inputCapabilities,
+    List<ModelModalityView>? outputModalities,
     List<String>? capabilities,
     String? reasoningLabel,
     String? defaultReasoningEffort,
@@ -76,7 +107,8 @@ class ProviderModelView {
       contextWindow: contextWindow ?? this.contextWindow,
       maxContextWindow: maxContextWindow ?? this.maxContextWindow,
       maxOutputTokens: maxOutputTokens ?? this.maxOutputTokens,
-      modalities: modalities ?? this.modalities,
+      inputCapabilities: inputCapabilities ?? this.inputCapabilities,
+      outputModalities: outputModalities ?? this.outputModalities,
       capabilities: capabilities ?? this.capabilities,
       reasoningLabel: reasoningLabel ?? this.reasoningLabel,
       defaultReasoningEffort:
@@ -112,6 +144,7 @@ class ProviderSettingsView {
     required this.models,
     this.defaultModels = const [],
     this.customModels = const [],
+    this.modelConnectionModes = const {},
     required this.status,
     required this.usageLabel,
     this.modelCount = '',
@@ -138,6 +171,7 @@ class ProviderSettingsView {
   final List<ProviderModelView> models;
   final List<ProviderModelView> defaultModels;
   final List<ProviderModelView> customModels;
+  final Map<String, String> modelConnectionModes;
   final String status;
   final String usageLabel;
   final String modelCount;
@@ -166,6 +200,7 @@ class ProviderSettingsView {
       models: models.map(update).toList(),
       defaultModels: defaultModels.map(update).toList(),
       customModels: customModels.map(update).toList(),
+      modelConnectionModes: {...modelConnectionModes, slug: mode},
     );
   }
 
@@ -181,6 +216,7 @@ class ProviderSettingsView {
     List<ProviderModelView>? models,
     List<ProviderModelView>? defaultModels,
     List<ProviderModelView>? customModels,
+    Map<String, String>? modelConnectionModes,
     String? status,
     String? usageLabel,
     String? modelCount,
@@ -207,6 +243,7 @@ class ProviderSettingsView {
       models: models ?? this.models,
       defaultModels: defaultModels ?? this.defaultModels,
       customModels: customModels ?? this.customModels,
+      modelConnectionModes: modelConnectionModes ?? this.modelConnectionModes,
       status: status ?? this.status,
       usageLabel: usageLabel ?? this.usageLabel,
       modelCount: modelCount ?? this.modelCount,
@@ -340,21 +377,33 @@ ProviderSettingsView providerWithCatalogMetadata(
   ProviderCatalogView catalog,
 ) {
   final preset = catalog.preset(provider.templateKind);
-  if (preset == null) return provider;
-  final bundledModels = catalog.modelsFor(preset.modelCatalogId);
-  final effectiveModels = [...bundledModels, ...provider.customModels];
+  final bundledModels = preset == null
+      ? const <ProviderModelView>[]
+      : catalog.modelsFor(preset.modelCatalogId);
+  ProviderModelView applyConnectionMode(ProviderModelView model) =>
+      model.copyWith(
+        connectionMode:
+            provider.modelConnectionModes[model.slug] ??
+            model.defaultConnectionMode,
+      );
+  final defaultModels = bundledModels.map(applyConnectionMode).toList();
+  final customModels = provider.customModels.map(applyConnectionMode).toList();
+  final effectiveModels = [...defaultModels, ...customModels];
   return provider.copyWith(
-    subtitle: provider.subtitle.isEmpty
+    subtitle: provider.subtitle.isEmpty && preset != null
         ? preset.description
         : provider.subtitle,
-    catalogId: preset.modelCatalogId,
-    credentialLabel: preset.credentialLabel,
-    credentialEnv: preset.credentialEnv,
-    iconKey: preset.iconKey,
-    defaultModels: provider.defaultModels.isEmpty
-        ? bundledModels
-        : provider.defaultModels,
-    models: provider.models.isEmpty ? effectiveModels : provider.models,
+    catalogId: preset?.modelCatalogId ?? provider.catalogId,
+    credentialLabel: preset?.credentialLabel ?? provider.credentialLabel,
+    credentialEnv: preset?.credentialEnv ?? provider.credentialEnv,
+    iconKey: preset?.iconKey ?? provider.iconKey,
+    defaultModels: defaultModels,
+    customModels: customModels,
+    models: effectiveModels,
+    modelCount: '${effectiveModels.length}',
+    usageLabel: effectiveModels.isEmpty
+        ? provider.defaultModel
+        : '${effectiveModels.length} models',
   );
 }
 

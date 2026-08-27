@@ -141,7 +141,7 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
         instructions: "canonical instructions".to_string(),
         input: vec![ModelContextItem::from(Message {
             role: MessageRole::User,
-            content: MessageContent::Text("hello".to_string()),
+            content: MessageContent::text("hello".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -356,7 +356,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("ok-1".to_string()),
+            content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -365,7 +365,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
         .into(),
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("again".to_string()),
+            content: MessageContent::text("again".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -704,7 +704,7 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("http-ok-1".to_string()),
+            content: MessageContent::text("http-ok-1".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -713,7 +713,7 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
         .into(),
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("again".to_string()),
+            content: MessageContent::text("again".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -872,7 +872,7 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("ok-1".to_string()),
+            content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -881,7 +881,7 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
         .into(),
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("again".to_string()),
+            content: MessageContent::text("again".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -1019,7 +1019,7 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("ok-1".to_string()),
+            content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -1028,7 +1028,7 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
         .into(),
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("again".to_string()),
+            content: MessageContent::text("again".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -1147,7 +1147,7 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
-            content: MessageContent::Text("not-consumed".to_string()),
+            content: MessageContent::text("not-consumed".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -1156,7 +1156,7 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
         .into(),
         Message {
             role: MessageRole::User,
-            content: MessageContent::Text("again".to_string()),
+            content: MessageContent::text("again".to_string()),
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -1518,4 +1518,70 @@ async fn http_retries_transient_request_failures_before_the_stream_starts() {
             .iter()
             .all(|request| request.request_line == "POST /v1/responses HTTP/1.1")
     );
+}
+
+#[tokio::test]
+async fn http_does_not_replay_media_requests_after_the_first_send() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let first = capture_http_request(&mut socket).await;
+        socket.shutdown().await.unwrap();
+        let replayed = tokio::time::timeout(Duration::from_millis(750), listener.accept())
+            .await
+            .is_ok();
+        (first, replayed)
+    });
+
+    let model = default_models()
+        .into_iter()
+        .find(|model| model.slug == "glm-5.3-flash")
+        .unwrap();
+    let mut endpoint = ProviderEndpoint::zhipu(Some(format!("http://{address}/v1")));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let provider = ModelRuntime::new(endpoint, model).unwrap();
+    let attachment_id = "attachment-1".to_string();
+    let request = CompletionRequest::builder()
+        .input(vec![
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::new(vec![
+                    pl_protocol::ContentPart::Text {
+                        text: "inspect".to_string(),
+                    },
+                    pl_protocol::ContentPart::Attachment {
+                        attachment_id: attachment_id.clone(),
+                        modality: pl_protocol::AttachmentModality::Image,
+                        media_type: "image/png".to_string(),
+                        filename: Some("marker.png".to_string()),
+                    },
+                ]),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+        ])
+        .prepared_content(vec![crate::PreparedContentPart {
+            attachment_id,
+            modality: pl_protocol::AttachmentModality::Image,
+            media_type: "image/png".to_string(),
+            filename: Some("marker.png".to_string()),
+            sources: vec![crate::PreparedContentSource::DataUrl {
+                base64: "aW1hZ2U=".to_string(),
+            }],
+        }])
+        .build();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    provider
+        .complete(request, invocation(event_tx))
+        .await
+        .expect_err("a failed media request must surface without automatic replay");
+    let (first, replayed) = server.await.unwrap();
+
+    assert_eq!(first.request_line, "POST /v1/chat/completions HTTP/1.1");
+    assert!(!replayed, "the media inference request was replayed");
 }

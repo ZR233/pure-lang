@@ -381,6 +381,7 @@ async fn upsert_input(
         mail_id: Set(input.mail_id.clone()),
         turn_id: Set(input.turn_id.to_string()),
         content: Set(input.payload.message.clone()),
+        attachments_json: Set(serde_json::to_string(&input.payload.attachments)?),
         metadata_json: Set(serialize_input_metadata(input)?),
         presentation: Set(presentation_label(input.payload.presentation.clone()).to_string()),
         state_json: Set(serde_json::to_string(&input.delivery_state)?),

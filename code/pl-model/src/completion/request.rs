@@ -6,7 +6,7 @@ use crate::completion::tool_schema::provider_compatible_tool;
 use crate::completion::usage::ReasoningConfig;
 use crate::{ModelCapabilities, ModelModality};
 use pl_protocol::{
-    ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolSpec,
+    AttachmentModality, ContentPart, Message, ModelContextItem, PureError, ToolSpec,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,8 @@ pub struct CompletionRequest {
     pub instructions: Option<String>,
     pub input: Vec<ModelContextItem>,
     #[serde(default)]
+    pub prepared_content: Vec<PreparedContentPart>,
+    #[serde(default)]
     pub tools: Vec<ToolSpec>,
     #[serde(default = "default_tool_choice")]
     pub tool_choice: String,
@@ -24,6 +26,25 @@ pub struct CompletionRequest {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
     pub reasoning: Option<ReasoningConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedContentPart {
+    pub attachment_id: String,
+    pub modality: AttachmentModality,
+    pub media_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    pub sources: Vec<PreparedContentSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PreparedContentSource {
+    DataUrl { base64: String },
+    RemoteUrl { url: String },
+    ProviderFile { file_id: String },
 }
 
 fn default_tool_choice() -> String {
@@ -53,6 +74,11 @@ impl CompletionRequestBuilder {
 
     pub fn input(mut self, input: Vec<ModelContextItem>) -> Self {
         self.request.input = input;
+        self
+    }
+
+    pub fn prepared_content(mut self, prepared_content: Vec<PreparedContentPart>) -> Self {
+        self.request.prepared_content = prepared_content;
         self
     }
 
@@ -102,6 +128,7 @@ impl CompletionRequest {
             request: CompletionRequest {
                 instructions: None,
                 input: Vec::new(),
+                prepared_content: Vec::new(),
                 tools: Vec::new(),
                 tool_choice: default_tool_choice(),
                 parallel_tool_calls: false,
@@ -126,7 +153,7 @@ impl CompletionRequest {
         model: &str,
         capabilities: &ModelCapabilities,
     ) -> pl_protocol::Result<()> {
-        let requirements = RequestRequirements::from_input(&self.input)?;
+        let requirements = RequestRequirements::from_input(&self.input, &self.prepared_content)?;
         if requirements.text && !capabilities.supports_input_modality(ModelModality::Text) {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support text input",
@@ -136,6 +163,18 @@ impl CompletionRequest {
         if requirements.image && !capabilities.supports_input_modality(ModelModality::Image) {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support image input",
+                model
+            )));
+        }
+        if requirements.video && !capabilities.supports_input_modality(ModelModality::Video) {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support video input",
+                model
+            )));
+        }
+        if requirements.file && !capabilities.supports_input_modality(ModelModality::File) {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support file input",
                 model
             )));
         }
@@ -205,38 +244,49 @@ impl CompletionRequest {
 struct RequestRequirements {
     text: bool,
     image: bool,
+    video: bool,
+    file: bool,
 }
 
 impl RequestRequirements {
-    fn from_input(input: &[ModelContextItem]) -> pl_protocol::Result<Self> {
+    fn from_input(
+        input: &[ModelContextItem],
+        prepared_content: &[PreparedContentPart],
+    ) -> pl_protocol::Result<Self> {
         let mut requirements = Self::default();
         for item in input {
             let Some(message) = item.as_message() else {
                 continue;
             };
-            match &message.content {
-                MessageContent::Text(text) => {
-                    if !text.is_empty() {
-                        requirements.text = true;
+            for part in &message.content.parts {
+                match part {
+                    ContentPart::Text { text } => {
+                        if !text.is_empty() {
+                            requirements.text = true;
+                        }
                     }
-                }
-                MessageContent::MultiPart(parts) => {
-                    for part in parts {
-                        match part {
-                            ContentPart::Text { text } => {
-                                if !text.is_empty() {
-                                    requirements.text = true;
-                                }
-                            }
-                            ContentPart::Image { source, .. } => {
-                                requirements.image = true;
-                                if matches!(source, ImageSource::Attachment { .. }) {
-                                    return Err(PureError::ConfigError(
-                                        "image attachments must be materialized before model request"
-                                            .to_string(),
-                                    ));
-                                }
-                            }
+                    ContentPart::Attachment {
+                        attachment_id,
+                        modality,
+                        ..
+                    } => {
+                        match modality {
+                            AttachmentModality::Image => requirements.image = true,
+                            AttachmentModality::Video => requirements.video = true,
+                            AttachmentModality::File => requirements.file = true,
+                        }
+                        let prepared = prepared_content
+                            .iter()
+                            .find(|media| media.attachment_id == *attachment_id)
+                            .ok_or_else(|| {
+                                PureError::ConfigError(format!(
+                                    "attachment {attachment_id} must be prepared before model request"
+                                ))
+                            })?;
+                        if prepared.modality != *modality {
+                            return Err(PureError::ConfigError(format!(
+                                "attachment {attachment_id} modality does not match prepared media"
+                            )));
                         }
                     }
                 }
@@ -250,12 +300,14 @@ impl RequestRequirements {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole};
+    use pl_protocol::{AttachmentModality, ContentPart, Message, MessageContent, MessageRole};
     use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::completion::usage::{ReasoningConfig, ReasoningSummary};
-    use crate::{ModelCapabilities, ModelModality, ToolCapabilities};
+    use crate::{
+        ModelCapabilities, ModelInputCapability, ModelInputSource, ModelModality, ToolCapabilities,
+    };
 
     fn base_request(content: MessageContent) -> CompletionRequest {
         CompletionRequest::builder()
@@ -276,7 +328,7 @@ mod tests {
             temperature: false,
             reasoning: false,
             web_search: false,
-            input: vec![ModelModality::Text],
+            input: vec![ModelInputCapability::text()],
             output: vec![ModelModality::Text],
             tools: ToolCapabilities::default(),
             prompt_cache: Default::default(),
@@ -286,13 +338,21 @@ mod tests {
 
     #[test]
     fn validation_rejects_image_when_model_is_text_only() {
-        let request = base_request(MessageContent::MultiPart(vec![ContentPart::Image {
-            source: ImageSource::InlineBase64 {
-                data: "aGVsbG8=".to_string(),
-            },
+        let mut request = base_request(MessageContent::new(vec![ContentPart::Attachment {
+            attachment_id: "attachment-1".to_string(),
+            modality: AttachmentModality::Image,
             media_type: "image/png".to_string(),
             filename: None,
         }]));
+        request.prepared_content = vec![PreparedContentPart {
+            attachment_id: "attachment-1".to_string(),
+            modality: AttachmentModality::Image,
+            media_type: "image/png".to_string(),
+            filename: None,
+            sources: vec![PreparedContentSource::DataUrl {
+                base64: "aGVsbG8=".to_string(),
+            }],
+        }];
 
         let error = request
             .validate_against("model", &text_capabilities())
@@ -306,27 +366,32 @@ mod tests {
 
     #[test]
     fn validation_rejects_unmaterialized_attachment() {
-        let request = base_request(MessageContent::MultiPart(vec![ContentPart::Image {
-            source: ImageSource::Attachment {
-                attachment_id: "attachment-1".to_string(),
-            },
+        let request = base_request(MessageContent::new(vec![ContentPart::Attachment {
+            attachment_id: "attachment-1".to_string(),
+            modality: AttachmentModality::Image,
             media_type: "image/png".to_string(),
             filename: None,
         }]));
 
+        let mut capabilities = text_capabilities();
+        capabilities.input.push(ModelInputCapability::media(
+            ModelModality::Image,
+            vec![ModelInputSource::Local],
+        ));
+
         let error = request
-            .validate_against("model", &text_capabilities())
+            .validate_against("model", &capabilities)
             .unwrap_err();
 
         assert_eq!(
             error.to_string(),
-            "configuration error: image attachments must be materialized before model request"
+            "configuration error: attachment attachment-1 must be prepared before model request"
         );
     }
 
     #[test]
     fn validation_allows_disabled_reasoning_for_text_model() {
-        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        let mut request = base_request(MessageContent::text("hello".to_string()));
         request.reasoning = Some(ReasoningConfig {
             effort: Some("none".to_string()),
             summary: Some(ReasoningSummary::Disabled),
@@ -339,7 +404,7 @@ mod tests {
 
     #[test]
     fn validation_rejects_enabled_reasoning_for_text_model() {
-        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        let mut request = base_request(MessageContent::text("hello".to_string()));
         request.reasoning = Some(ReasoningConfig {
             effort: Some("high".to_string()),
             summary: Some(ReasoningSummary::Enabled),
@@ -357,7 +422,7 @@ mod tests {
 
     #[test]
     fn validation_rejects_unsupported_provider_hosted_tool() {
-        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        let mut request = base_request(MessageContent::text("hello".to_string()));
         request.tools = vec![ToolSpec::ProgrammaticToolCalling];
 
         let error = request

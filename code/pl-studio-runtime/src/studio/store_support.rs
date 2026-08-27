@@ -1,11 +1,162 @@
-use anyhow::Result;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, ensure};
 use sea_orm::sea_query::{Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, Schema, Statement, TransactionTrait,
+};
+use sha2::{Digest, Sha256};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本；任何其他版本都按不兼容处理并精确重建。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 13;
+/// 唯一支持的 Studio schema 版本；仅 v13 附件表有一次性迁移。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 14;
+
+pub(super) async fn migrate_studio_schema_v13_to_v14(
+    db: &DatabaseConnection,
+    attachments_dir: &Path,
+) -> Result<()> {
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT id, storage_path, byte_size FROM attachments ORDER BY id".to_string(),
+        ))
+        .await?;
+    tokio::fs::create_dir_all(attachments_dir).await?;
+    let canonical_attachments_dir = std::fs::canonicalize(attachments_dir)
+        .context("failed to resolve Studio attachments directory for v13 migration")?;
+    let mut migrations = Vec::with_capacity(rows.len());
+    let mut created_paths = Vec::new();
+
+    for row in rows {
+        let id: String = row.try_get("", "id")?;
+        let storage_path: String = row.try_get("", "storage_path")?;
+        let expected_size: i64 = row.try_get("", "byte_size")?;
+        ensure!(
+            expected_size >= 0,
+            "attachment {id} has a negative byte size"
+        );
+        let old_path = PathBuf::from(storage_path);
+        let metadata = std::fs::symlink_metadata(&old_path)
+            .with_context(|| format!("attachment {id} snapshot is unavailable"))?;
+        ensure!(
+            metadata.is_file() && !pl_core::path_safety::is_link_or_reparse(&metadata),
+            "attachment {id} snapshot is not a regular file"
+        );
+        let canonical_old_path = std::fs::canonicalize(&old_path)
+            .with_context(|| format!("attachment {id} snapshot cannot be resolved"))?;
+        ensure!(
+            canonical_old_path.starts_with(&canonical_attachments_dir),
+            "attachment {id} snapshot escapes the attachments directory"
+        );
+        let bytes = tokio::fs::read(&canonical_old_path)
+            .await
+            .with_context(|| format!("attachment {id} snapshot cannot be read"))?;
+        ensure!(
+            bytes.len() == usize::try_from(expected_size)?,
+            "attachment {id} snapshot size does not match the database"
+        );
+        let content_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let object_dir = attachments_dir.join("objects").join(&content_sha256[..2]);
+        tokio::fs::create_dir_all(&object_dir).await?;
+        let object_path = object_dir.join(&content_sha256);
+        if tokio::fs::try_exists(&object_path).await? {
+            let existing = tokio::fs::read(&object_path).await?;
+            ensure!(
+                Sha256::digest(&existing).as_slice() == Sha256::digest(&bytes).as_slice(),
+                "attachment {id} content-addressed target is inconsistent"
+            );
+        } else {
+            if let Err(error) = tokio::fs::write(&object_path, &bytes).await {
+                cleanup_migration_blobs(&created_paths).await;
+                return Err(error).context("failed to create migrated attachment snapshot");
+            }
+            created_paths.push(object_path.clone());
+        }
+        migrations.push((id, object_path, content_sha256));
+    }
+
+    let migration = async {
+        let transaction = db.begin().await?;
+        transaction
+            .execute_unprepared(
+                "DROP INDEX IF EXISTS idx_attachments_item_id;
+                 DROP INDEX IF EXISTS idx_attachments_thread_id;
+                 DROP INDEX IF EXISTS idx_thread_inputs_queue;
+                 ALTER TABLE attachments RENAME TO attachments_v13;
+                 ALTER TABLE thread_inputs RENAME TO thread_inputs_v13;
+                 CREATE TABLE thread_inputs (
+                     id TEXT PRIMARY KEY NOT NULL,
+                     thread_id TEXT NOT NULL,
+                     mail_id TEXT NOT NULL UNIQUE,
+                     turn_id TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     attachments_json TEXT NOT NULL CHECK (json_valid(attachments_json)),
+                     metadata_json TEXT NOT NULL,
+                     presentation TEXT NOT NULL,
+                     state_json TEXT NOT NULL CHECK (json_valid(state_json)),
+                     state_kind TEXT GENERATED ALWAYS AS (
+                         json_extract(state_json, '$.kind')
+                     ) STORED NOT NULL CHECK (state_kind IN ('pending', 'claimed', 'consumed')),
+                     queue_ordinal INTEGER NOT NULL,
+                     queued_at INTEGER NOT NULL,
+                     FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+                 );
+                 INSERT INTO thread_inputs (
+                     id, thread_id, mail_id, turn_id, content, attachments_json,
+                     metadata_json, presentation, state_json, queue_ordinal, queued_at
+                 )
+                 SELECT id, thread_id, mail_id, turn_id, content, '[]', metadata_json,
+                        presentation, state_json, queue_ordinal, queued_at
+                 FROM thread_inputs_v13;
+                 DROP TABLE thread_inputs_v13;",
+            )
+            .await?;
+        Schema::new(transaction.get_database_backend())
+            .builder()
+            .register(entity::attachment::Entity)
+            .apply(&transaction)
+            .await?;
+        for (id, object_path, content_sha256) in &migrations {
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Sqlite,
+                    "INSERT INTO attachments (
+                         id, thread_id, kind, media_type, filename, storage_path,
+                         byte_size, content_sha256, width, height, created_at
+                     )
+                     SELECT id, thread_id, 'image', media_type, filename, ?,
+                            byte_size, ?, width, height, created_at
+                     FROM attachments_v13 WHERE id = ?",
+                    [
+                        object_path.to_string_lossy().to_string().into(),
+                        content_sha256.clone().into(),
+                        id.clone().into(),
+                    ],
+                ))
+                .await?;
+        }
+        transaction
+            .execute_unprepared("DROP TABLE attachments_v13")
+            .await?;
+        create_thread_input_index(&transaction).await?;
+        create_attachment_indexes(&transaction).await?;
+        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+        transaction.commit().await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    if migration.is_err() {
+        cleanup_migration_blobs(&created_paths).await;
+    }
+    migration
+}
+
+async fn cleanup_migration_blobs(paths: &[PathBuf]) {
+    for path in paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+}
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_task_run_table(db).await?;
@@ -197,6 +348,7 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             mail_id TEXT NOT NULL UNIQUE,
             turn_id TEXT NOT NULL,
             content TEXT NOT NULL,
+            attachments_json TEXT NOT NULL CHECK (json_valid(attachments_json)),
             metadata_json TEXT NOT NULL,
             presentation TEXT NOT NULL,
             state_json TEXT NOT NULL CHECK (json_valid(state_json)),
@@ -408,17 +560,8 @@ async fn set_schema_version(db: &impl ConnectionTrait, version: i64) -> Result<(
 }
 
 async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
+    create_attachment_indexes(db).await?;
     let indexes = [
-        Index::create()
-            .name("idx_attachments_item_id")
-            .table(entity::attachment::Entity)
-            .col(entity::attachment::Column::ItemId)
-            .to_owned(),
-        Index::create()
-            .name("idx_attachments_thread_id")
-            .table(entity::attachment::Entity)
-            .col(entity::attachment::Column::ThreadId)
-            .to_owned(),
         Index::create()
             .name("idx_interactions_thread_state_updated")
             .table(entity::interaction::Entity)
@@ -603,6 +746,31 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
         "#,
     )
     .await?;
+    Ok(())
+}
+
+async fn create_attachment_indexes(db: &impl ConnectionTrait) -> Result<()> {
+    for index in [Index::create()
+        .name("idx_attachments_thread_id")
+        .table(entity::attachment::Entity)
+        .col(entity::attachment::Column::ThreadId)
+        .to_owned()]
+    {
+        db.execute(&index).await?;
+    }
+    Ok(())
+}
+
+async fn create_thread_input_index(db: &impl ConnectionTrait) -> Result<()> {
+    let index = Index::create()
+        .name("idx_thread_inputs_queue")
+        .table(entity::thread_input::Entity)
+        .col(entity::thread_input::Column::ThreadId)
+        .col(entity::thread_input::Column::StateKind)
+        .col(entity::thread_input::Column::QueueOrdinal)
+        .unique()
+        .to_owned();
+    db.execute(&index).await?;
     Ok(())
 }
 

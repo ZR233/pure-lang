@@ -40,29 +40,27 @@ pub struct StudioProviderSettings {
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
-    pub models: Vec<StudioProviderModelSettings>,
-    pub custom_models: Vec<StudioProviderModelSettings>,
+    pub custom_models: Vec<StudioCustomModelSettings>,
+    pub model_connection_modes: Vec<StudioModelConnectionSettings>,
     pub catalog_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StudioProviderModelSettings {
+pub struct StudioCustomModelSettings {
     pub slug: String,
     pub display_name: String,
-    pub description: String,
-    pub context_window: Option<u64>,
-    pub max_output_tokens: Option<u64>,
-    pub currency: String,
-    pub input_price_per_m_tok: Option<f64>,
-    pub output_price_per_m_tok: Option<f64>,
-    pub cache_read_price_per_m_tok: Option<f64>,
-    pub cache_write_price_per_m_tok: Option<f64>,
     pub reasoning_efforts: Vec<String>,
     pub base_instructions: String,
     pub wire_protocol: String,
     pub supported_connection_modes: Vec<String>,
     pub default_connection_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioModelConnectionSettings {
+    pub slug: String,
     pub connection_mode: String,
 }
 

@@ -1,11 +1,14 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use image::GenericImageView;
+use pl_protocol::{AttachmentModality, ThreadAttachment};
 use pl_trace::TraceAttachment;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 
 use crate::studio::entity as entities;
@@ -15,42 +18,6 @@ use crate::studio::records::{AttachmentRecord, MaterializedAttachment};
 use crate::studio::store::StudioStore;
 
 impl StudioStore {
-    pub async fn create_image_attachment(
-        &self,
-        thread_id: &str,
-        data_url: &str,
-        filename: Option<String>,
-    ) -> Result<AttachmentRecord> {
-        let (media_type, bytes) = decode_image_data_url(data_url)?;
-        let decoded_image =
-            image::load_from_memory(&bytes).with_context(|| "failed to decode image attachment")?;
-        let normalized = normalize_image_attachment(media_type, bytes, decoded_image)?;
-        let attachment_id = new_id("attachment");
-        let extension = extension_for_media_type(normalized.media_type)?;
-        let dir = self.attachments_dir().join(thread_id);
-        tokio::fs::create_dir_all(&dir).await?;
-        let storage_path = dir.join(format!("{attachment_id}.{extension}"));
-        tokio::fs::write(&storage_path, &normalized.bytes).await?;
-
-        use entities::attachment;
-        let now = unix_seconds();
-        let row = attachment::ActiveModel {
-            id: Set(attachment_id),
-            thread_id: Set(thread_id.to_string()),
-            item_id: Set(None),
-            media_type: Set(normalized.media_type.to_string()),
-            filename: Set(filename.filter(|name| !name.trim().is_empty())),
-            storage_path: Set(storage_path.to_string_lossy().to_string()),
-            byte_size: Set(normalized.bytes.len() as i64),
-            width: Set(Some(normalized.dimensions.0 as i64)),
-            height: Set(Some(normalized.dimensions.1 as i64)),
-            created_at: Set(now),
-        }
-        .insert(&self.db)
-        .await?;
-        Ok(attachment_record(row))
-    }
-
     pub async fn list_thread_attachments(&self, thread_id: &str) -> Result<Vec<AttachmentRecord>> {
         use entities::attachment;
         let rows = attachment::Entity::find()
@@ -59,7 +26,7 @@ impl StudioStore {
             .order_by_asc(attachment::Column::Id)
             .all(&self.db)
             .await?;
-        Ok(rows.into_iter().map(attachment_record).collect())
+        rows.into_iter().map(attachment_record).collect()
     }
 
     pub async fn load_attachments(
@@ -76,7 +43,23 @@ impl StudioStore {
             .filter(attachment::Column::Id.is_in(attachment_ids.iter().cloned()))
             .all(&self.db)
             .await?;
-        Ok(rows.into_iter().map(attachment_record).collect())
+        let mut records = rows
+            .into_iter()
+            .map(attachment_record)
+            .collect::<Result<Vec<_>>>()?;
+        let mut ordered = Vec::with_capacity(attachment_ids.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for attachment_id in attachment_ids {
+            if !seen.insert(attachment_id) {
+                bail!("duplicate attachment id: {attachment_id}");
+            }
+            let index = records
+                .iter()
+                .position(|record| record.id == *attachment_id)
+                .with_context(|| format!("attachment {attachment_id} does not belong to Thread"))?;
+            ordered.push(records.swap_remove(index));
+        }
+        Ok(ordered)
     }
 
     pub async fn materialize_thread_attachments(
@@ -95,6 +78,149 @@ impl StudioStore {
         let records = self.load_attachments(thread_id, attachment_ids).await?;
         materialize_attachments(records).await
     }
+
+    pub(crate) async fn read_attachment_bytes(
+        &self,
+        thread_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>> {
+        let record = self
+            .load_attachments(thread_id, &[attachment_id.to_string()])
+            .await?
+            .into_iter()
+            .next()
+            .context("attachment is unavailable")?;
+        tokio::fs::read(record.storage_path)
+            .await
+            .with_context(|| format!("failed to load attachment {attachment_id}"))
+    }
+
+    pub(crate) async fn promote_attachment_drafts(
+        &self,
+        thread_id: &str,
+        drafts: &[AttachmentDraftObject],
+    ) -> Result<Vec<AttachmentRecord>> {
+        let mut created_paths = Vec::new();
+        let mut prepared = Vec::with_capacity(drafts.len());
+        for draft in drafts {
+            let result = async {
+                let dir = self
+                    .attachments_dir()
+                    .join("objects")
+                    .join(&draft.content_sha256[..2]);
+                tokio::fs::create_dir_all(&dir).await?;
+                let storage_path = dir.join(&draft.content_sha256);
+                let created = if tokio::fs::try_exists(&storage_path).await? {
+                    false
+                } else {
+                    tokio::fs::copy(&draft.storage_path, &storage_path).await?;
+                    true
+                };
+                Ok::<_, anyhow::Error>((storage_path, created))
+            }
+            .await;
+            match result {
+                Ok((storage_path, created)) => {
+                    if created {
+                        created_paths.push(storage_path.clone());
+                    }
+                    prepared.push((draft, storage_path));
+                }
+                Err(error) => {
+                    cleanup_created_blobs(created_paths).await;
+                    return Err(error);
+                }
+            }
+        }
+
+        let result = async {
+            let transaction = self.db.begin().await?;
+            let mut records = Vec::with_capacity(drafts.len());
+            for (draft, storage_path) in prepared {
+                let row = entities::attachment::ActiveModel {
+                    id: Set(new_id("attachment")),
+                    thread_id: Set(thread_id.to_string()),
+                    kind: Set(attachment_kind_label(draft.modality).to_string()),
+                    media_type: Set(draft.media_type.clone()),
+                    filename: Set(Some(draft.filename.clone())),
+                    storage_path: Set(storage_path.to_string_lossy().to_string()),
+                    byte_size: Set(i64::try_from(draft.byte_size)
+                        .context("attachment byte size exceeds SQLite range")?),
+                    content_sha256: Set(draft.content_sha256.clone()),
+                    width: Set(draft.width.map(i64::from)),
+                    height: Set(draft.height.map(i64::from)),
+                    created_at: Set(unix_seconds()),
+                }
+                .insert(&transaction)
+                .await?;
+                records.push(attachment_record(row)?);
+            }
+            transaction.commit().await?;
+            Ok::<_, anyhow::Error>(records)
+        }
+        .await;
+        if result.is_err() {
+            cleanup_created_blobs(created_paths).await;
+        }
+        result
+    }
+
+    pub(crate) async fn delete_attachments(
+        &self,
+        thread_id: &str,
+        attachment_ids: &[String],
+    ) -> Result<()> {
+        if attachment_ids.is_empty() {
+            return Ok(());
+        }
+        let records = self.load_attachments(thread_id, attachment_ids).await?;
+        entities::attachment::Entity::delete_many()
+            .filter(entities::attachment::Column::ThreadId.eq(thread_id.to_string()))
+            .filter(entities::attachment::Column::Id.is_in(attachment_ids.iter().cloned()))
+            .exec(&self.db)
+            .await?;
+        for record in records {
+            let remaining = entities::attachment::Entity::find()
+                .filter(
+                    entities::attachment::Column::ContentSha256.eq(record.content_sha256.clone()),
+                )
+                .count(&self.db)
+                .await?;
+            if remaining == 0 {
+                let _ = tokio::fs::remove_file(record.storage_path).await;
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn cleanup_created_blobs(paths: Vec<PathBuf>) {
+    for path in paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AttachmentDraftObject {
+    pub draft_id: String,
+    pub modality: pl_protocol::studio::StudioAttachmentModality,
+    pub media_type: String,
+    pub filename: String,
+    pub storage_path: PathBuf,
+    pub byte_size: u64,
+    pub content_sha256: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub initial_remote_url: Option<String>,
+    pub admitted_at: Instant,
+}
+
+fn attachment_kind_label(modality: pl_protocol::studio::StudioAttachmentModality) -> &'static str {
+    match modality {
+        pl_protocol::studio::StudioAttachmentModality::Image => "image",
+        pl_protocol::studio::StudioAttachmentModality::Video => "video",
+        pl_protocol::studio::StudioAttachmentModality::File => "file",
+    }
 }
 
 pub(super) const MAX_IMAGE_SIDE: u32 = 2000;
@@ -102,46 +228,13 @@ pub(super) const MAX_BASE64_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const JPEG_COMPRESSION_QUALITIES: [u8; 6] = [85, 75, 65, 55, 45, 35];
 const JPEG_COMPRESSION_MAX_SIDES: [u32; 6] = [2000, 1600, 1280, 1024, 768, 512];
 
-pub(super) struct NormalizedImageAttachment {
-    pub(super) media_type: &'static str,
-    pub(super) bytes: Vec<u8>,
-    pub(super) dimensions: (u32, u32),
+pub(in crate::studio) struct NormalizedImageAttachment {
+    pub(in crate::studio) media_type: &'static str,
+    pub(in crate::studio) bytes: Vec<u8>,
+    pub(in crate::studio) dimensions: (u32, u32),
 }
 
-fn decode_image_data_url(data_url: &str) -> Result<(&'static str, Vec<u8>)> {
-    let (header, data) = data_url
-        .split_once(',')
-        .context("image attachment must be a data URL")?;
-    let media_type = header
-        .strip_prefix("data:")
-        .and_then(|value| value.strip_suffix(";base64"))
-        .context("image attachment must be base64 encoded")?;
-    let media_type = normalize_image_media_type(media_type)?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .with_context(|| "invalid base64 image attachment")?;
-    Ok((media_type, bytes))
-}
-
-fn normalize_image_media_type(media_type: &str) -> Result<&'static str> {
-    match media_type {
-        "image/png" => Ok("image/png"),
-        "image/jpeg" | "image/jpg" => Ok("image/jpeg"),
-        "image/webp" => Ok("image/webp"),
-        other => bail!("unsupported image attachment media type: {other}"),
-    }
-}
-
-fn extension_for_media_type(media_type: &str) -> Result<&'static str> {
-    match media_type {
-        "image/png" => Ok("png"),
-        "image/jpeg" => Ok("jpg"),
-        "image/webp" => Ok("webp"),
-        other => bail!("unsupported image attachment media type: {other}"),
-    }
-}
-
-pub(super) fn normalize_image_attachment(
+pub(in crate::studio) fn normalize_image_attachment(
     media_type: &'static str,
     bytes: Vec<u8>,
     decoded_image: image::DynamicImage,
@@ -219,12 +312,24 @@ async fn materialize_attachments(
             })?;
         materialized.push(MaterializedAttachment {
             attachment_id: record.id,
+            modality: match record.modality {
+                pl_protocol::studio::StudioAttachmentModality::Image => {
+                    pl_protocol::AttachmentModality::Image
+                }
+                pl_protocol::studio::StudioAttachmentModality::Video => {
+                    pl_protocol::AttachmentModality::Video
+                }
+                pl_protocol::studio::StudioAttachmentModality::File => {
+                    pl_protocol::AttachmentModality::File
+                }
+            },
             media_type: record.media_type,
             filename: record.filename,
             data: base64::engine::general_purpose::STANDARD.encode(bytes),
             byte_size: record.byte_size,
             width: record.width,
             height: record.height,
+            initial_remote_url: None,
         });
     }
     Ok(materialized)
@@ -233,11 +338,37 @@ async fn materialize_attachments(
 pub(crate) fn trace_attachment(record: &AttachmentRecord) -> TraceAttachment {
     TraceAttachment {
         id: record.id.clone(),
+        modality: match record.modality {
+            pl_protocol::studio::StudioAttachmentModality::Image => {
+                pl_trace::TraceAttachmentModality::Image
+            }
+            pl_protocol::studio::StudioAttachmentModality::Video => {
+                pl_trace::TraceAttachmentModality::Video
+            }
+            pl_protocol::studio::StudioAttachmentModality::File => {
+                pl_trace::TraceAttachmentModality::File
+            }
+        },
         media_type: record.media_type.clone(),
         filename: record.filename.clone(),
         width: record.width,
         height: record.height,
         byte_size: record.byte_size,
-        data_url: None,
+    }
+}
+
+pub(crate) fn thread_attachment(record: &AttachmentRecord) -> ThreadAttachment {
+    ThreadAttachment {
+        id: record.id.clone(),
+        modality: match record.modality {
+            pl_protocol::studio::StudioAttachmentModality::Image => AttachmentModality::Image,
+            pl_protocol::studio::StudioAttachmentModality::Video => AttachmentModality::Video,
+            pl_protocol::studio::StudioAttachmentModality::File => AttachmentModality::File,
+        },
+        media_type: record.media_type.clone(),
+        filename: record.filename.clone(),
+        width: record.width,
+        height: record.height,
+        byte_size: record.byte_size,
     }
 }

@@ -335,6 +335,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attachment_json_endpoint_rejects_local_paths() {
+        let app = test_app().await;
+        let body = serde_json::json!({
+            "context": {"type": "newThread", "mode": "simple"},
+            "sources": [{"type": "localFile", "path": "/tmp/private.png"}],
+        })
+        .to_string();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/attachments/drafts")
+            .header("host", "localhost:1421")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let error = json_body(response).await;
+        assert_eq!(error["code"], "invalidArgument");
+        assert!(error["message"].as_str().unwrap().contains("multipart"));
+    }
+
+    #[tokio::test]
+    async fn multipart_upload_preflights_unsupported_files() {
+        let app = test_app().await;
+        let boundary = "pure-studio-boundary";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{{\"type\":\"newThread\",\"mode\":\"simple\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"unsupported.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-must-not-be-admitted\r\n--{boundary}--\r\n"
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/attachments/drafts/upload")
+            .header("host", "localhost:1421")
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(response).await["code"], "invalidArgument");
+    }
+
+    #[tokio::test]
     async fn settings_cas_returns_stale_revision_as_http_conflict() {
         let app = test_app().await;
         let settings = app

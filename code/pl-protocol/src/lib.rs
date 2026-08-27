@@ -37,8 +37,8 @@ pub use interaction::*;
 pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
-    ContentPart, ImageSource, Message, MessageContent, MessageRole, ToolCallCaller, ToolCallKind,
-    ToolCallRecord, ToolResultRecord,
+    AttachmentModality, ContentPart, Message, MessageContent, MessageRole, ToolCallCaller,
+    ToolCallKind, ToolCallRecord, ToolResultRecord,
 };
 pub use model_context::{
     AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,
@@ -57,10 +57,11 @@ pub use observed_state::{
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
-    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
-    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor,
-    WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
+    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPricingDto,
+    ModelReasoningDescriptor, ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
+    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ProviderServiceCapabilitiesDescriptor, WebSearchProviderCapabilitiesDescriptor,
+    WebSearchResolutionDescriptor,
 };
 pub use thread::{
     THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadMode, ThreadNotification,

@@ -1,8 +1,8 @@
 part of '../widget_test.dart';
 
 const _testProviderCatalog = ProviderCatalogView(
-  schemaVersion: 6,
-  revision: 'widget-test-catalog-v6',
+  schemaVersion: 8,
+  revision: 'widget-test-catalog-v8',
   presets: [
     ProviderPresetView(
       id: 'deepseek',
@@ -58,6 +58,39 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'deepseek-v4-flash',
         displayName: 'DeepSeek V4 Flash',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
+        reasoningEfforts: ['high', 'max'],
+        defaultReasoningEffort: 'high',
+        wireProtocol: 'responses',
+        supportedConnectionModes: ['http'],
+      ),
+      ProviderModelView(
+        slug: 'deepseek-v4-flash-vision-exp',
+        displayName: 'DeepSeek V4 Flash Vision Exp',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+          ModelInputCapabilityView(
+            modality: ModelModalityView.image,
+            sources: [
+              ModelInputSourceView.local,
+              ModelInputSourceView.remoteUrl,
+            ],
+            maxCount: 600,
+            maxBytes: 32 * 1024 * 1024,
+            maxTotalBytes: 32 * 1024 * 1024,
+            maxWidth: 4096,
+            maxHeight: 4096,
+            mediaTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+          ),
+        ],
         reasoningEfforts: ['high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'responses',
@@ -66,6 +99,12 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'deepseek-reasoner',
         displayName: 'DeepSeek Reasoner',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
         reasoningEfforts: ['high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'chat_completions',
@@ -75,6 +114,12 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'gpt-5.6-sol',
         displayName: 'GPT-5.6-Sol',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
         reasoningEfforts: ['low', 'medium', 'high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'responses',
@@ -85,6 +130,12 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'gpt-5.6-terra',
         displayName: 'GPT-5.6-Terra',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
         reasoningEfforts: ['low', 'medium', 'high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'responses',
@@ -95,6 +146,12 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'gpt-5.6-luna',
         displayName: 'GPT-5.6-Luna',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
         reasoningEfforts: ['low', 'medium', 'high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'responses',
@@ -107,6 +164,12 @@ const _testProviderCatalog = ProviderCatalogView(
       ProviderModelView(
         slug: 'glm-4.7',
         displayName: 'GLM-4.7',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [],
+          ),
+        ],
         reasoningEfforts: ['enabled', 'disabled'],
         defaultReasoningEffort: 'enabled',
       ),
@@ -239,25 +302,11 @@ StudioState _stateWithPlannerModels() {
           providers: [
             ProviderSettingsView(
               id: 'deepseek',
+              templateKind: 'deepseek',
               name: 'DeepSeek',
               baseUrl: 'https://api.deepseek.com',
               defaultModel: 'deepseek-v4-flash',
-              models: [
-                ProviderModelView(
-                  slug: 'deepseek-v4-flash',
-                  displayName: 'DeepSeek V4 Flash',
-                  reasoningEfforts: ['high', 'max'],
-                  wireProtocol: 'responses',
-                  supportedConnectionModes: ['http'],
-                  defaultConnectionMode: 'http',
-                  connectionMode: 'http',
-                ),
-                ProviderModelView(
-                  slug: 'deepseek-reasoner',
-                  displayName: 'DeepSeek Reasoner',
-                  reasoningEfforts: ['high', 'max'],
-                ),
-              ],
+              models: [],
               status: 'ready',
               usageLabel: '2 models',
               promptCacheDialect: 'implicit_prefix',
@@ -283,6 +332,74 @@ StudioState _stateWithPlannerModels() {
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
         runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
+      ),
+    },
+  );
+}
+
+StudioState _stateWithAttachmentModels() {
+  final state = _emptyState();
+  const imageModel = ProviderModelView(
+    slug: 'glm-5.3-flash',
+    displayName: 'GLM-5.3-Flash',
+    reasoningEfforts: ['high'],
+    defaultReasoningEffort: 'high',
+    inputCapabilities: [
+      ModelInputCapabilityView(modality: ModelModalityView.text, sources: []),
+      ModelInputCapabilityView(
+        modality: ModelModalityView.image,
+        sources: [ModelInputSourceView.local, ModelInputSourceView.remoteUrl],
+      ),
+    ],
+    outputModalities: [ModelModalityView.text],
+  );
+  const textModel = ProviderModelView(
+    slug: 'glm-5.3',
+    displayName: 'GLM-5.3',
+    reasoningEfforts: ['high'],
+    defaultReasoningEffort: 'high',
+    inputCapabilities: [
+      ModelInputCapabilityView(modality: ModelModalityView.text, sources: []),
+    ],
+    outputModalities: [ModelModalityView.text],
+  );
+  return state.copyWith(
+    settingsState: SettingsStateSnapshot.fromState(
+      state: _testReady(
+        const SettingsStateData(
+          providers: [
+            ProviderSettingsView(
+              id: 'zhipu',
+              templateKind: 'zhipu-coding-plan',
+              name: 'Zhipu',
+              baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+              defaultModel: 'glm-5.3-flash',
+              models: [],
+              customModels: [imageModel, textModel],
+              status: 'ready',
+              usageLabel: '2 models',
+            ),
+          ],
+          roles: [
+            RoleSettingsView(
+              key: 'executor',
+              providerId: 'zhipu',
+              model: 'glm-5.3-flash',
+              effort: 'high',
+            ),
+            RoleSettingsView(
+              key: 'planner',
+              providerId: 'zhipu',
+              model: 'glm-5.3-flash',
+              effort: 'high',
+            ),
+          ],
+        ),
+      ),
+    ),
+    workspacesByThread: {
+      state.selectedThreadId!: state.selectedWorkspace!.copyWith(
+        runtime: state.runtime.copyWith(model: 'glm-5.3-flash'),
       ),
     },
   );
@@ -457,6 +574,7 @@ ThreadItemView _threadItemFixture({
   List<String> reasoningContent = const [],
   String? filePath,
   String? mediaType,
+  List<ThreadAttachmentView> attachments = const [],
   ThreadContextDisposition contextDisposition = ThreadContextDisposition.active,
 }) {
   final timestamp = createdAt is DateTime
@@ -475,7 +593,7 @@ ThreadItemView _threadItemFixture({
       ThreadItemKind.userMessage => ThreadTextItemStateView(
         channel: ThreadTextChannel.user,
         text: text,
-        attachments: const [],
+        attachments: attachments,
         lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
       ),
       ThreadItemKind.agentMessage => ThreadTextItemStateView(
@@ -483,7 +601,7 @@ ThreadItemView _threadItemFixture({
             ? ThreadTextChannel.commentary
             : ThreadTextChannel.finalAnswer,
         text: text,
-        attachments: const [],
+        attachments: attachments,
         lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
       ),
       ThreadItemKind.reasoning => ThreadThinkingItemStateView(

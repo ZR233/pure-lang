@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 6;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -87,7 +87,6 @@ pub struct ModelDescriptor {
     pub max_context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
     pub transport: ModelTransportDescriptor,
-    pub modalities: Vec<String>,
     pub capabilities: ModelCapabilitiesDto,
     pub reasoning: Option<ModelReasoningDescriptor>,
     pub pricing: Option<ModelPricingDto>,
@@ -104,6 +103,8 @@ pub struct ModelTransportDescriptor {
 /// UI 可直接判断的模型能力摘要。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelCapabilitiesDto {
+    pub input: Vec<ModelInputCapabilityDto>,
+    pub output: Vec<ModelModalityDto>,
     pub streaming: bool,
     pub temperature: bool,
     pub reasoning: bool,
@@ -112,6 +113,36 @@ pub struct ModelCapabilitiesDto {
     pub parallel_tool_calls: bool,
     pub custom_tools: bool,
     pub freeform_tools: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelModalityDto {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelInputSourceDto {
+    Local,
+    RemoteUrl,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInputCapabilityDto {
+    pub modality: ModelModalityDto,
+    pub sources: Vec<ModelInputSourceDto>,
+    pub max_count: Option<u32>,
+    pub max_bytes: Option<u64>,
+    pub max_total_bytes: Option<u64>,
+    pub max_width: Option<u32>,
+    pub max_height: Option<u32>,
+    pub media_types: Vec<String>,
 }
 
 /// reasoning/effort 下拉的完整动态描述。

@@ -65,7 +65,7 @@ Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry�
 
 以下都是 UI 本地状态，放入按 Thread 隔离的 `WorkspaceUiState`：
 
-- Composer draft、提交阶段和 submission revision；
+- Composer 文本 draft、typed attachment draft 列表、提交阶段和 submission revision；
 - 滚动、bottom-following 与未读计数；
 - reasoning/tool/Todo 展开状态；
 - subscription generation 与临时 delta overlay。
@@ -144,6 +144,19 @@ Markdown 使用 `GptMarkdown` 容错渲染流式不完整内容。修复只处�
 Composer 状态按 Thread 保存：`idle | submitting | pendingStart`。提交冻结当前 draft 并递增
 revision；只有同 Thread、同 revision 的响应能清空或恢复 draft。服务端 Turn receipt 与订阅中
 同一 Turn 对上后才解除 pending gate。
+
+attachment draft 只保存 bridge 返回的 opaque draft id 与安全展示 metadata，不保存持久 attachment
+id、Base64 或外部 URL。Composer 支持本地多选、桌面文件拖放和 HTTPS URL admission；图片显示
+缩略图，video/file 显示 typed card。模型选择器、当前模型控件和设置模型列表都从同一 typed
+capability DTO 渲染输入标签（文本、视觉、视频、文件），设置页另行展示输出能力。
+例如 `deepseek-v4-flash-vision-exp` 与 `glm-5.3-flash` 都显示“文本 / 视觉”，普通
+`deepseek-v4-flash` 仍只显示“文本”；Flutter 不按 slug 或 provider 身份拼装标签。
+
+附件入口按当前 resolved model 的 modality 与 source 过滤。选择、拖入或 URL admission 遇到不支持
+输入时必须拒绝添加，不自动切换模型、不静默删除也不保留不兼容 draft；已有 draft 时切换到不兼容
+模型同样拒绝切换。文本为空但 attachment 非空可以提交。批次 admission、提交或 Turn 创建失败时
+保留完整草稿；command receipt 接受后才清空。原始外部 URL 不进入 Widget state，Timeline 与预览
+只通过 thread/draft 授权 loader 读取本地快照。
 
 receipt 已接受后，Composer 必须继续关联该 Turn，不能在首次 `TurnStarted` 时丢失 identity。
 对应 Turn 若随后 failed，Composer 解除 pending 并显示 typed failure message（缺失时回退到 Turn

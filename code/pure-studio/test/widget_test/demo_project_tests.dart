@@ -97,7 +97,10 @@ void registerDemoProjectTests() {
     addTearDown(subscription.cancel);
     await pumpEventQueue();
 
-    final receipt = await api.startTurn('thread-main', 'hello demo', const []);
+    final receipt = await api.startTurn(
+      'thread-main',
+      const StudioPromptInput(text: 'hello demo', attachmentDraftIds: []),
+    );
 
     expect(receipt.threadId, 'thread-main');
     expect(frames.first, isA<ThreadSnapshotFrame>());

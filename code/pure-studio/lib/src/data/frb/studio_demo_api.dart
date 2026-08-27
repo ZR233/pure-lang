@@ -20,6 +20,7 @@ class DemoStudioApi implements StudioApi {
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
   final Map<String, StudioMode> _threadModes = {};
+  final Map<String, AttachmentDraftView> _attachmentDrafts = {};
   final Set<String> _archivedProjectIds = {};
   final Set<String> _archivedThreadIds = {};
   final List<StudioThread> _createdRootThreads = [];
@@ -43,6 +44,7 @@ class DemoStudioApi implements StudioApi {
   int _turnSequence = 0;
   int _threadSequence = 0;
   int _settingsRevision = 1;
+  int _attachmentSequence = 0;
   int _skillsRevision = 1;
   int _providerUsageRevision = 1;
   int _mcpRevision = 0;
@@ -604,16 +606,15 @@ class DemoStudioApi implements StudioApi {
   @override
   Future<StartNewThreadResult> startNewThread(
     String projectId,
-    String prompt,
-    List<String> attachmentIds,
+    StudioPromptInput input,
     StudioMode mode,
   ) async {
     final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
       throw StateError('unknown demo project $projectId');
     }
-    if (prompt.trim().isEmpty && attachmentIds.isEmpty) {
-      throw ArgumentError.value(prompt, 'prompt', 'empty');
+    if (input.text.trim().isEmpty && input.attachmentDraftIds.isEmpty) {
+      throw ArgumentError.value(input.text, 'text', 'empty');
     }
     final now = DateTime.now();
     final thread = StudioThread(
@@ -628,7 +629,7 @@ class DemoStudioApi implements StudioApi {
     _createdRootThreads.add(thread);
     _ensureWorkspaceFixture();
     _selectedThreadId = thread.id;
-    final receipt = await _submitPrompt(thread.id, prompt);
+    final receipt = await _submitPrompt(thread.id, input);
     return StartNewThreadResult(thread: thread, receipt: receipt);
   }
 
@@ -852,23 +853,55 @@ class DemoStudioApi implements StudioApi {
   @override
   Future<SubmitPromptReceipt> startTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
-  ) => _submitPrompt(threadId, prompt);
+    StudioPromptInput input,
+  ) => _submitPrompt(threadId, input);
 
   @override
   Future<SubmitPromptReceipt> steerTurn(
     String threadId,
-    String prompt,
-    List<String> attachmentIds,
-  ) => _submitPrompt(threadId, prompt);
+    StudioPromptInput input,
+  ) => _submitPrompt(threadId, input);
+
+  @override
+  Future<List<AttachmentDraftView>> admitAttachmentDrafts(
+    AttachmentAdmissionContext context,
+    List<AttachmentDraftSource> sources,
+  ) async {
+    return [
+      for (final source in sources)
+        _demoAttachmentDraft(source, ++_attachmentSequence),
+    ].map((draft) {
+      _attachmentDrafts[draft.id] = draft;
+      return draft;
+    }).toList();
+  }
+
+  @override
+  Future<bool> removeAttachmentDraft(String draftId) async =>
+      _attachmentDrafts.remove(draftId) != null;
+
+  @override
+  Future<Uint8List> readAttachmentDraft(String draftId) async {
+    if (!_attachmentDrafts.containsKey(draftId)) {
+      throw StateError('unknown demo attachment draft');
+    }
+    return Uint8List(0);
+  }
+
+  @override
+  Future<Uint8List> readThreadAttachment(
+    String threadId,
+    String attachmentId,
+  ) async => Uint8List(0);
 
   Future<SubmitPromptReceipt> _submitPrompt(
     String threadId,
-    String prompt,
+    StudioPromptInput input,
   ) async {
-    final trimmed = prompt.trim();
-    if (trimmed.isEmpty) throw ArgumentError.value(prompt, 'prompt', 'empty');
+    final trimmed = input.text.trim();
+    if (trimmed.isEmpty && input.attachmentDraftIds.isEmpty) {
+      throw ArgumentError.value(input.text, 'text', 'empty');
+    }
     final workspace = _workspaces[threadId];
     if (workspace == null) throw StateError('unknown demo thread $threadId');
     final generation = _promptGenerations.update(
@@ -894,6 +927,19 @@ class DemoStudioApi implements StudioApi {
           kind: ThreadItemKind.userMessage,
           text: trimmed,
           createdAt: now,
+          attachments: [
+            for (final id in input.attachmentDraftIds)
+              if (_attachmentDrafts[id] case final draft?)
+                ThreadAttachmentView(
+                  id: draft.id,
+                  modality: draft.modality,
+                  mediaType: draft.mediaType,
+                  filename: draft.filename,
+                  width: draft.width,
+                  height: draft.height,
+                  byteSize: draft.byteSize,
+                ),
+          ],
         ),
       ),
     );
@@ -1666,6 +1712,7 @@ ThreadItemView _messageItem({
   required String text,
   required DateTime createdAt,
   AgentMessageChannel? channel,
+  List<ThreadAttachmentView> attachments = const [],
 }) {
   return ThreadItemView(
     id: id,
@@ -1679,7 +1726,7 @@ ThreadItemView _messageItem({
       ThreadItemKind.userMessage => ThreadTextItemStateView(
         channel: ThreadTextChannel.user,
         text: text,
-        attachments: const [],
+        attachments: attachments,
         lifecycle: CompletedThreadContentView(createdAt),
       ),
       ThreadItemKind.agentMessage => ThreadTextItemStateView(
@@ -1707,6 +1754,35 @@ ThreadItemView _messageItem({
         'demo message helper only accepts text and plan items',
       ),
     },
+  );
+}
+
+AttachmentDraftView _demoAttachmentDraft(
+  AttachmentDraftSource source,
+  int sequence,
+) {
+  final filename = switch (source) {
+    LocalFileAttachmentDraftSource(:final path) =>
+      path.replaceAll('\\', '/').split('/').last,
+    RemoteUrlAttachmentDraftSource(:final url, :final filename) =>
+      filename ?? Uri.parse(url).pathSegments.last,
+  };
+  final extension = filename.split('.').last.toLowerCase();
+  final modality = switch (extension) {
+    'png' || 'jpg' || 'jpeg' || 'webp' => AttachmentModalityView.image,
+    'mp4' || 'mov' || 'webm' || 'mkv' => AttachmentModalityView.video,
+    _ => AttachmentModalityView.file,
+  };
+  return AttachmentDraftView(
+    id: 'demo-attachment-$sequence',
+    modality: modality,
+    mediaType: switch (modality) {
+      AttachmentModalityView.image => 'image/png',
+      AttachmentModalityView.video => 'video/mp4',
+      AttachmentModalityView.file => 'application/octet-stream',
+    },
+    filename: filename,
+    byteSize: 0,
   );
 }
 
