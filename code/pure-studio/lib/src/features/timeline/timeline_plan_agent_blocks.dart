@@ -30,13 +30,11 @@ class _PlanPart extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            SelectionArea(
-              child: _AgentMarkdown(
-                id: part.id,
-                status: part.status,
-                text: part.text,
-                surface: _MarkdownSurface.panel,
-              ),
+            _AgentMarkdown(
+              id: part.id,
+              status: part.status,
+              text: part.text,
+              surface: _MarkdownSurface.panel,
             ),
           ],
         ),

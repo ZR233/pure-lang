@@ -143,6 +143,14 @@ Markdown 使用 `GptMarkdown` 容错渲染流式不完整内容。修复只处�
 其他 scheme 不进入通用链接通道。裸 URL 后的普通标点和未配对闭合括号不属于目标；系统打开
 失败只显示本地化提示，不改写正文或中断 Timeline。
 
+整条 Timeline 共享挂在 `TimelineView` 根部的一个 `SelectionArea`，消息、plan、reasoning
+详情与工具卡正文都注册到同一选区，支持跨行、跨消息拖选；各消息块内部不再嵌套独立
+`SelectionArea`。代码块继续使用自带复制语义的 `SelectableText`，不并入共享选区。桌面右键
+唤起 `AdaptiveTextSelectionToolbar`；Flutter 3.47 桌面端右键会把选区折叠导致默认菜单缺失
+Copy，Timeline 以最近一次非空选区文本为缓存补齐 Copy 按钮（framework 修复后自动让位），
+复制线程切换时缓存失效。已知限制：列表项滚出视口销毁后其选区内容随之丢弃，复制以当前
+挂载内容为准。
+
 ## 11.5 Composer 与 Interaction
 
 Composer 状态按 Thread 保存：`idle | submitting | pendingStart`。提交冻结当前 draft 并递增

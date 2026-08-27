@@ -432,13 +432,11 @@ class _MarkdownBubble extends StatelessWidget {
             if (part.attachments.isNotEmpty && part.text.trim().isNotEmpty)
               const SizedBox(height: 8),
             if (part.text.trim().isNotEmpty || part.error != null)
-              SelectionArea(
-                child: _AgentMarkdown(
-                  id: part.id,
-                  status: part.status,
-                  text: part.text.trim().isEmpty ? part.error ?? '' : part.text,
-                  surface: surface,
-                ),
+              _AgentMarkdown(
+                id: part.id,
+                status: part.status,
+                text: part.text.trim().isEmpty ? part.error ?? '' : part.text,
+                surface: surface,
               ),
           ],
         ),
@@ -667,13 +665,11 @@ class _ReasoningPart extends StatelessWidget {
                           color: context.studioInkSoft,
                         ),
                       )
-                    : SelectionArea(
-                        child: _AgentMarkdown(
-                          id: group.id,
-                          status: group.status,
-                          text: details,
-                          surface: _MarkdownSurface.reasoning,
-                        ),
+                    : _AgentMarkdown(
+                        id: group.id,
+                        status: group.status,
+                        text: details,
+                        surface: _MarkdownSurface.reasoning,
                       ),
               ),
             ),

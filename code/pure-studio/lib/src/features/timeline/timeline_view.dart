@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gpt_markdown/custom_widgets/markdown_config.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
@@ -59,6 +60,46 @@ class _TimelineViewState extends State<TimelineView> {
   _BottomScrollIntent _scheduledBottomIntent = _BottomScrollIntent.jump;
   _TimelineRestore _pendingRestore = const _TimelineRestore.bottom();
 
+  /// 最近一次非空选区的文本。
+  ///
+  /// Flutter 3.47 桌面端右键会把选区折叠后再构建菜单,菜单的 Copy 只能
+  /// 依赖此缓存执行;线程切换时失效。
+  String? _lastSelectedText;
+
+  void _handleTimelineSelectionChanged(SelectedContent? content) {
+    final text = content?.plainText;
+    if (text != null && text.isNotEmpty) {
+      _lastSelectedText = text;
+    }
+  }
+
+  Widget _buildTimelineContextMenu(
+    BuildContext context,
+    SelectableRegionState selectableRegion,
+  ) {
+    final items = selectableRegion.contextMenuButtonItems;
+    final hasCopy = items.any(
+      (item) => item.type == ContextMenuButtonType.copy,
+    );
+    final cached = _lastSelectedText;
+    if (!hasCopy && cached != null && cached.isNotEmpty) {
+      items.insert(
+        0,
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: cached));
+            selectableRegion.hideToolbar();
+          },
+        ),
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      buttonItems: items,
+      anchors: selectableRegion.contextMenuAnchors,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -79,6 +120,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (threadChanged) {
       _saveThreadState(oldWidget.threadId);
       _expandedReasoningGroups.clear();
+      _lastSelectedText = null;
       _restoreThreadState();
       _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -202,110 +244,115 @@ class _TimelineViewState extends State<TimelineView> {
       currentActivityRowId: currentActivityRow?.id,
     );
     final activityCount = activeTurn == null ? 0 : 1;
-    return Stack(
-      children: [
-        Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: StudioLayout.conversationWidth,
-            ),
-            child: NotificationListener<ScrollMetricsNotification>(
-              onNotification: _handleScrollMetricsChanged,
-              child: ListView.builder(
-                key: StudioDriverKeys.timeline,
-                controller: _controller,
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-                itemCount: blocks.length + activityCount + 1,
-                findChildIndexCallback: (key) {
-                  if (key is! ValueKey<String>) {
-                    return null;
-                  }
-                  if (activeTurn != null &&
-                      key ==
-                          StudioDriverKeys.turnActivity(
-                            _turnActivityId(activeTurn),
-                          )) {
-                    return blocks.length;
-                  }
-                  final index = blocks.indexWhere(
-                    (block) => StudioDriverKeys.timelineBlock(block.id) == key,
-                  );
-                  return index == -1 ? null : index;
-                },
-                itemBuilder: (context, index) {
-                  if (activeTurn != null && index == blocks.length) {
-                    return _TurnActivityBlock(
-                      key: StudioDriverKeys.turnActivity(
-                        _turnActivityId(activeTurn),
-                      ),
-                      turn: activeTurn,
-                      reasoningGroup: currentActivityRow?.reasoningGroup,
-                      toolGroup: currentActivityRow?.toolGroup,
-                      reasoningExpanded: _expandedReasoningGroups.contains(
-                        currentActivityRow?.reasoningGroup?.id,
-                      ),
-                      onToggleReasoning: () {
-                        final group = currentActivityRow?.reasoningGroup;
-                        if (group != null) {
-                          _toggleReasoning(group.id);
-                        }
-                      },
+    return SelectionArea(
+      onSelectionChanged: _handleTimelineSelectionChanged,
+      contextMenuBuilder: _buildTimelineContextMenu,
+      child: Stack(
+        children: [
+          Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: StudioLayout.conversationWidth,
+              ),
+              child: NotificationListener<ScrollMetricsNotification>(
+                onNotification: _handleScrollMetricsChanged,
+                child: ListView.builder(
+                  key: StudioDriverKeys.timeline,
+                  controller: _controller,
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
+                  itemCount: blocks.length + activityCount + 1,
+                  findChildIndexCallback: (key) {
+                    if (key is! ValueKey<String>) {
+                      return null;
+                    }
+                    if (activeTurn != null &&
+                        key ==
+                            StudioDriverKeys.turnActivity(
+                              _turnActivityId(activeTurn),
+                            )) {
+                      return blocks.length;
+                    }
+                    final index = blocks.indexWhere(
+                      (block) =>
+                          StudioDriverKeys.timelineBlock(block.id) == key,
                     );
-                  }
-                  if (index == blocks.length + activityCount) {
-                    return const SizedBox(height: 24);
-                  }
-                  final block = blocks[index];
-                  return _TimelineRowBlock(
-                    key: StudioDriverKeys.timelineBlock(block.id),
-                    row: block.rows.single,
-                    isCurrentActivity: block.isCurrentActivity,
-                    isReasoningExpanded: _expandedReasoningGroups.contains(
-                      block.rows.single.reasoningGroup?.id,
-                    ),
-                    onToggleReasoning: _toggleReasoning,
-                  );
-                },
+                    return index == -1 ? null : index;
+                  },
+                  itemBuilder: (context, index) {
+                    if (activeTurn != null && index == blocks.length) {
+                      return _TurnActivityBlock(
+                        key: StudioDriverKeys.turnActivity(
+                          _turnActivityId(activeTurn),
+                        ),
+                        turn: activeTurn,
+                        reasoningGroup: currentActivityRow?.reasoningGroup,
+                        toolGroup: currentActivityRow?.toolGroup,
+                        reasoningExpanded: _expandedReasoningGroups.contains(
+                          currentActivityRow?.reasoningGroup?.id,
+                        ),
+                        onToggleReasoning: () {
+                          final group = currentActivityRow?.reasoningGroup;
+                          if (group != null) {
+                            _toggleReasoning(group.id);
+                          }
+                        },
+                      );
+                    }
+                    if (index == blocks.length + activityCount) {
+                      return const SizedBox(height: 24);
+                    }
+                    final block = blocks[index];
+                    return _TimelineRowBlock(
+                      key: StudioDriverKeys.timelineBlock(block.id),
+                      row: block.rows.single,
+                      isCurrentActivity: block.isCurrentActivity,
+                      isReasoningExpanded: _expandedReasoningGroups.contains(
+                        block.rows.single.reasoningGroup?.id,
+                      ),
+                      onToggleReasoning: _toggleReasoning,
+                    );
+                  },
+                ),
               ),
             ),
           ),
-        ),
-        if (_showJumpToLatest)
-          Positioned.fill(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: StudioLayout.conversationWidth,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                  child: Align(
-                    alignment: Alignment.bottomRight,
-                    child: _JumpToLatestButton(
-                      pendingCount: _pendingNewEvents,
-                      onPressed: _jumpToLatest,
+          if (_showJumpToLatest)
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: StudioLayout.conversationWidth,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: _JumpToLatestButton(
+                        pendingCount: _pendingNewEvents,
+                        onPressed: _jumpToLatest,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        if (widget.isLoadingOlder)
-          const Positioned(
-            top: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: SizedBox.square(
-                key: ValueKey('timeline-history-loading'),
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+          if (widget.isLoadingOlder)
+            const Positioned(
+              top: 8,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: SizedBox.square(
+                  key: ValueKey('timeline-history-loading'),
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +41,7 @@ part 'widget_test/agent_workspace_tests.dart';
 part 'widget_test/demo_project_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
+part 'widget_test/timeline_selection_tests.dart';
 part 'widget_test/status_accessibility_tests.dart';
 part 'widget_test/shell_settings_tests.dart';
 part 'widget_test/interaction_tests.dart';
@@ -65,6 +68,7 @@ void main() {
   registerDemoProjectTests();
   registerTimelineToolTests();
   registerTimelineScrollTests();
+  registerTimelineSelectionTests();
   registerStatusAccessibilityTests();
   registerShellSettingsTests();
   registerInteractionTests();

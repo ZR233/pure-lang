@@ -211,13 +211,11 @@ class _WebSearchToolCard extends StatelessWidget {
           ),
           if (data.details.isNotEmpty) ...[
             const SizedBox(height: 9),
-            SelectionArea(
-              child: Text(
-                data.details.join('\n'),
-                style: context.text.bodySmall?.copyWith(
-                  color: context.studioInkSoft,
-                  height: 1.45,
-                ),
+            Text(
+              data.details.join('\n'),
+              style: context.text.bodySmall?.copyWith(
+                color: context.studioInkSoft,
+                height: 1.45,
               ),
             ),
           ],
@@ -240,14 +238,12 @@ class _WebSearchToolCard extends StatelessWidget {
                     Icon(Icons.link, size: 14, color: context.colors.primary),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: SelectionArea(
-                        child: Text(
-                          link,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.text.bodySmall?.copyWith(
-                            color: context.colors.primary,
-                          ),
+                      child: Text(
+                        link,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.text.bodySmall?.copyWith(
+                          color: context.colors.primary,
                         ),
                       ),
                     ),
@@ -491,15 +487,13 @@ class _ToolGroupItemRow extends StatelessWidget {
                 ),
                 if (detailLines.isNotEmpty) ...[
                   const SizedBox(height: 3),
-                  SelectionArea(
-                    child: Text(
-                      detailLines.join('\n'),
-                      maxLines: 8,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.text.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
-                        height: 1.38,
-                      ),
+                  Text(
+                    detailLines.join('\n'),
+                    maxLines: 8,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInkSoft,
+                      height: 1.38,
                     ),
                   ),
                 ],
