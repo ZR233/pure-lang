@@ -41,6 +41,8 @@ pub(crate) enum Command {
     },
     /// Build and copy Windows Rust bridge artifacts.
     BuildRustBridge(BuildRustBridgeOptions),
+    /// Refresh bundled upstream preset Skills inside pl-studio-runtime.
+    SyncSkills,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,6 +285,15 @@ mod tests {
         assert_eq!(
             parse(["xtask", "check-gui-generated"].map(OsString::from))?,
             ParseOutcome::Run(Command::CheckGuiGenerated)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn preset_skill_sync_has_a_dedicated_command() -> Result<()> {
+        assert_eq!(
+            parse(["xtask", "sync-skills"].map(OsString::from))?,
+            ParseOutcome::Run(Command::SyncSkills)
         );
         Ok(())
     }

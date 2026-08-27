@@ -78,6 +78,18 @@
 - `check-gui-generated`、`verify-gui` 和 `build-gui --check-generated` 会重新生成并检查 canonical 输出，适用于提交前、CI 和发布门禁。
 - Git 索引与普通源码统一使用 LF；PowerShell、RC 和 Inno Setup 文件使用 CRLF，`.gitattributes` 与 `.editorconfig` 必须保持一致。不得通过全局 Git 配置、构建后索引刷新或全仓 renormalize 修复行尾。
 
+### 预置系统技能
+
+- `pl-studio-runtime` 的上游预置技能（`canvas-design`、`frontend-design` 来自 anthropics/skills；`docx`、`pdf`、`powerpoint`、`xlsx` 来自 NousResearch/hermes-agent）只能通过仓库根目录的命令同步：
+
+  ```powershell
+  cargo xtask sync-skills
+  ```
+
+- 命令浅拉取各上游默认分支最新提交到 `target/xtask-sync-skills/` 缓存，完全替换 `code/pl-studio-runtime/assets/skills/` 下同名技能目录，替换前校验 frontmatter。
+- 同步结果必须提交进源码库；源码库是 canonical 内容，构建期不访问网络，也不使用 build.rs 下载上游内容。
+- 同步后人工核对 `code/pl-studio-runtime/THIRD_PARTY_NOTICES.md` 中的 revision 与许可边界（上游许可必须允许再分发；anthropics/skills 的 `pdf`/`docx`/`pptx`/`xlsx` 为禁止再分发的专有许可，不得预置）。
+
 ## 工程边界
 
 ### Rust 模块与文件

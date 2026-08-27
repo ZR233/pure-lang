@@ -2914,6 +2914,7 @@ dependencies = [
  "clap",
  "libc",
  "minisign-verify",
+ "pl-skill-core",
  "pretty_assertions",
  "semver",
  "serde",

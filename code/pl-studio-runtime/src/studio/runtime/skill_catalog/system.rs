@@ -8,7 +8,17 @@ use pl_core::path_safety::{metadata_if_real, remove_dir_all_no_follow, validate_
 use rust_embed::Embed;
 
 const LEGACY_SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
-const EXPECTED_SYSTEM_SKILLS: [&str; 3] = ["skill-creator", "studio-config", "subagent-workflow"];
+const EXPECTED_SYSTEM_SKILLS: [&str; 9] = [
+    "canvas-design",
+    "docx",
+    "frontend-design",
+    "pdf",
+    "powerpoint",
+    "skill-creator",
+    "studio-config",
+    "subagent-workflow",
+    "xlsx",
+];
 
 #[derive(Embed)]
 #[folder = "assets/skills/"]

@@ -40,7 +40,25 @@ winner 依次按来源 rank、Provider 注册顺序和 Provider 本地顺序确�
 项目 skills 路径按主机文件边界处理：项目目录、skill 目录、`SKILL.md`、支持文件和使用统计的已有祖先都不能是 symbolic link 或 Windows reparse point。发现和支持文件索引跳过链接入口；`skill_view` 与 `skill_manage` 直接访问链接时拒绝。删除 skill 时，skill 子树内的链接只删除入口，不能递归进入或修改其目标。用户、系统和显式 external source 仍是只读来源，但其内部发现同样不跟随链接。
 
 Studio 预置 skills 归 `pl-studio-runtime` 所有，其 canonical 源码根目录固定为
-`code/pl-studio-runtime/assets/skills/`。每个预置 skill 以独立目录保存，主文件仍为
+`code/pl-studio-runtime/assets/skills/`。预置 skill 分两类来源：
+
+- 仓库原创类（`skill-creator`、`studio-config`、`subagent-workflow`）直接检入源码树。
+- 上游同步类（`canvas-design`、`docx`、`frontend-design`、`pdf`、`powerpoint`、
+  `xlsx`）由 `cargo xtask sync-skills` 手动同步：浅拉取上游默认分支最新提交，完全替换
+  同名技能目录并提交进源码库；源码库即 canonical 内容，构建期不访问网络。上游来源、
+  最近同步 revision 与许可记录在 `code/pl-studio-runtime/THIRD_PARTY_NOTICES.md`。
+
+同步命令通过 git 子进程完成：克隆缓存位于 `target/xtask-sync-skills/`，浅拉取远程默认
+分支（大仓库使用 blobless partial clone 加 sparse checkout 缩小下载），所有 git 调用
+关闭 `core.autocrlf` 保证行尾确定。替换前校验每个选中技能存在 `SKILL.md` 且 frontmatter
+的 name 与目录一致、description 非空，避免把损坏技能提交进源码库；其余 frontmatter 完整
+性仍由启动刷新统一校验。同步命令的技能清单必须与 `EXPECTED_SYSTEM_SKILLS` 人工保持
+一致；从清单移除技能时需手动删除对应目录。上游同步类的许可必须允许再分发
+（Apache 2.0、MIT 等）；`anthropics/skills` 的 `pdf`/`docx`/`pptx`/`xlsx` 使用禁止再分发
+的 Anthropic 专有许可，不得预置，文档技能使用 MIT 许可的 `NousResearch/hermes-agent`
+版本。不使用 build.rs 在构建期下载上游内容。
+
+每个预置 skill 以独立目录保存，主文件仍为
 `SKILL.md`；`pl-studio-runtime` 通过启用 zstd 压缩、debug embed 与确定性时间戳的
 `rust-embed` 将资源打进所有构建模式，并在每次 `startStudioRuntime` 把完整资源树重建到
 `<studio_home>/studio/skills/.system/`。缓存目录由 Pure 管理，不是源码，用户不应手动编辑；
@@ -93,7 +111,9 @@ platforms: ["windows", "linux", "macos"]
 - `scripts/`
 - `assets/`
 
-工具读取和写入支持文件时必须拒绝 path traversal，并拒绝访问这些目录之外的文件。
+工具读取和写入支持文件时必须拒绝 path traversal，并拒绝访问这些目录之外的文件。上游
+技能若包含白名单之外的目录（如 `canvas-design` 的 `canvas-fonts/`、hermes 文档技能的
+`tests/`），内容仍随技能完整物化，但 `skill_view` 无法把它们当作支持文件读取。
 
 ## 13.4 工具
 
