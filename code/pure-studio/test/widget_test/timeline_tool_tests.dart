@@ -1,6 +1,24 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
+  test('external web URL policy matches the conversation link boundary', () {
+    expect(
+      safeExternalWebUrl('https://exa\u0007mple.com/docs'),
+      'https://example.com/docs',
+    );
+    expect(safeExternalWebUrl('HTTP://example.com'), 'HTTP://example.com');
+    expect(safeExternalWebUrl('https:///missing-host'), isNull);
+    expect(safeExternalWebUrl('file:///tmp/report.html'), isNull);
+    expect(safeExternalWebUrl('mailto:team@example.com'), isNull);
+    expect(safeExternalWebUrl('custom://example.com'), isNull);
+    expect(
+      safeExternalWebUrl(
+        'https://example.com/${List.filled(8 * 1024, 'a').join()}',
+      ),
+      isNull,
+    );
+  });
+
   testWidgets('task_transition rejection exposes its stable code and message', (
     tester,
   ) async {
@@ -707,6 +725,126 @@ void registerTimelineToolTests() {
     expect(find.byKey(const ValueKey('studio-markdown-quote')), findsOneWidget);
     expect(find.textContaining('这是一段引用'), findsOneWidget);
     expect(find.textContaining('> 这是一段引用'), findsNothing);
+  });
+
+  testWidgets('timeline opens markdown and bare web links', (tester) async {
+    final openedUrls = <String>[];
+    const parts = [
+      TimelineEntry(
+        id: 'text-web-links',
+        groupId: 'message-web-links',
+        type: TimelineEntryType.text,
+        text:
+            '[Docs](https://example.com/docs) '
+            'https://example.org/a(b). '
+            'https://example.net/path).',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (url) async => openedUrls.add(url),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Docs'));
+    await tester.tap(
+      find.byKey(
+        const ValueKey('studio-markdown-web-link:https://example.org/a(b)'),
+      ),
+    );
+    await tester.tap(
+      find.byKey(
+        const ValueKey('studio-markdown-web-link:https://example.net/path'),
+      ),
+    );
+    await tester.pump();
+
+    expect(openedUrls, [
+      'https://example.com/docs',
+      'https://example.org/a(b)',
+      'https://example.net/path',
+    ]);
+  });
+
+  testWidgets('timeline ignores unsupported markdown link destinations', (
+    tester,
+  ) async {
+    final openedUrls = <String>[];
+    const parts = [
+      TimelineEntry(
+        id: 'text-unsupported-links',
+        groupId: 'message-unsupported-links',
+        type: TimelineEntryType.text,
+        text:
+            '[File](file:///tmp/report.html) '
+            '[Mail](mailto:team@example.com) '
+            '[Custom](custom://example.com) '
+            '[Hostless](https:///missing-host)',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (url) async => openedUrls.add(url),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    for (final label in ['File', 'Mail', 'Custom', 'Hostless']) {
+      await tester.tap(find.text(label));
+    }
+    await tester.pump();
+
+    expect(openedUrls, isEmpty);
+  });
+
+  testWidgets('timeline reports an external link launch failure', (
+    tester,
+  ) async {
+    const parts = [
+      TimelineEntry(
+        id: 'text-failed-link',
+        groupId: 'message-failed-link',
+        type: TimelineEntryType.text,
+        text: '[Docs](https://example.com/docs)',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (_) async => throw StateError('launch failed'),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Docs'));
+    await tester.pump();
+
+    expect(find.text('Unable to open this link.'), findsOneWidget);
+    expect(find.text('Docs'), findsOneWidget);
   });
 
   testWidgets('timeline renders agent markdown with tight CJK headings', (

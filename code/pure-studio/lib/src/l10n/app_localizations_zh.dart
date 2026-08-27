@@ -702,6 +702,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineEmptyMessage => '打开项目或开始会话后继续。';
 
   @override
+  String get timelineExternalLinkOpenFailed => '无法打开此链接。';
+
+  @override
   String get timelineJumpToLatest => '跳到最新';
 
   @override
@@ -2341,6 +2344,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineEmptyMessage => '打开项目或开始会话后继续。';
+
+  @override
+  String get timelineExternalLinkOpenFailed => '无法打开此链接。';
 
   @override
   String get timelineJumpToLatest => '跳到最新';

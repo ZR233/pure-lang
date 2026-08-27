@@ -24,6 +24,7 @@ import 'package:pure_studio/src/features/todo/todo_panel.dart';
 import 'package:pure_studio/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio/src/l10n/app_localizations.dart';
+import 'package:pure_studio/src/platform/external_url_launcher.dart';
 import 'package:pure_studio/src/shared/studio_chrome.dart';
 import 'package:pure_studio/src/shared/studio_driver_keys.dart';
 

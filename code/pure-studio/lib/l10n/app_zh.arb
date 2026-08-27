@@ -219,6 +219,7 @@
   "agentDetailPathLabel": "路径",
   "timelineEmptyTitle": "还没有消息",
   "timelineEmptyMessage": "打开项目或开始会话后继续。",
+  "timelineExternalLinkOpenFailed": "无法打开此链接。",
   "timelineJumpToLatest": "跳到最新",
   "timelineNew": "新内容",
   "timelineReasoningFallback": "思考",

@@ -11,6 +11,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../platform/external_url_launcher.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'markdown_repair.dart';

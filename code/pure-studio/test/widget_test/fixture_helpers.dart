@@ -133,9 +133,14 @@ Widget _timelineApp({
   required Widget home,
   Locale locale = const Locale('en'),
   StudioApi? api,
+  ExternalUrlLauncher? externalUrlLauncher,
 }) {
   return ProviderScope(
-    overrides: [if (api != null) studioApiProvider.overrideWithValue(api)],
+    overrides: [
+      if (api != null) studioApiProvider.overrideWithValue(api),
+      if (externalUrlLauncher != null)
+        externalUrlLauncherProvider.overrideWithValue(externalUrlLauncher),
+    ],
     child: _localizedApp(home: home, locale: locale),
   );
 }

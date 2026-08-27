@@ -276,6 +276,7 @@
   "agentDetailPathLabel": "Path",
   "timelineEmptyTitle": "No messages yet",
   "timelineEmptyMessage": "Open a project or start a session to begin.",
+  "timelineExternalLinkOpenFailed": "Unable to open this link.",
   "timelineJumpToLatest": "Jump to latest",
   "timelineNew": "New",
   "timelineReasoningFallback": "Thinking",

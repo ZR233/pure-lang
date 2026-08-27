@@ -137,7 +137,11 @@ Timeline row key 使用 `threadId + itemId` 或稳定工具组首 Item identity�
 不从 tool output JSON 临时推导。
 
 Markdown 使用 `GptMarkdown` 容错渲染流式不完整内容。修复只处理换行和 fenced code 的显示，
-不得在协议或 reducer 中改写正文。
+不得在协议或 reducer 中改写正文。共享 Markdown renderer 在显示阶段识别显式 Markdown 链接与
+裸 `http://` / `https://` URL；只有清理控制字符后仍能解析出非空 host、且目标不超过 8 KiB
+的 Web URL 可以点击，并交给桌面系统默认浏览器打开。`file://`、本地相对路径、`mailto:` 与
+其他 scheme 不进入通用链接通道。裸 URL 后的普通标点和未配对闭合括号不属于目标；系统打开
+失败只显示本地化提示，不改写正文或中断 Timeline。
 
 ## 11.5 Composer 与 Interaction
 

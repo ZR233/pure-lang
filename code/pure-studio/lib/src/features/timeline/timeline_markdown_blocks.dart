@@ -9,7 +9,12 @@ final List<MarkdownComponent> _studioMarkdownComponents = MarkdownComponent
     )
     .toList(growable: false);
 
-class _AgentMarkdown extends StatelessWidget {
+final List<MarkdownComponent> _studioMarkdownInlineComponents = [
+  ...MarkdownComponent.inlineComponents,
+  _StudioBareWebLink(),
+];
+
+class _AgentMarkdown extends ConsumerWidget {
   const _AgentMarkdown({
     required this.id,
     required this.status,
@@ -23,13 +28,17 @@ class _AgentMarkdown extends StatelessWidget {
   final _MarkdownSurface surface;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final repaired = repairAgentMarkdownForDisplay(text);
     return GptMarkdown(
       repaired,
       key: ValueKey('gpt-markdown-$id-$status'),
       style: _markdownBodyStyle(context, surface),
       components: _studioMarkdownComponents,
+      inlineComponents: _studioMarkdownInlineComponents,
+      onLinkTap: (url, _) {
+        unawaited(_openTimelineWebLink(context, ref, url));
+      },
       highlightBuilder: (context, text, style) {
         return _MarkdownInlineCode(text: text, style: style, surface: surface);
       },
@@ -63,6 +72,146 @@ class _AgentMarkdown extends StatelessWidget {
       },
     );
   }
+}
+
+Future<void> _openTimelineWebLink(
+  BuildContext context,
+  WidgetRef ref,
+  String rawUrl,
+) async {
+  final url = safeExternalWebUrl(rawUrl);
+  if (url == null) {
+    return;
+  }
+  try {
+    await ref.read(externalUrlLauncherProvider)(url);
+  } catch (_) {
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.timelineExternalLinkOpenFailed)),
+    );
+  }
+}
+
+class _StudioBareWebLink extends InlineMd {
+  @override
+  RegExp get exp => RegExp(r'(?<!\]\()[hH][tT][tT][pP][sS]?://[^\s<]+');
+
+  @override
+  InlineSpan span(BuildContext context, String text, GptMarkdownConfig config) {
+    final urlEnd = _bareWebUrlEnd(text);
+    final candidate = text.substring(0, urlEnd);
+    final url = safeExternalWebUrl(candidate);
+    if (url == null) {
+      return TextSpan(text: text, style: config.style);
+    }
+    final theme = GptMarkdownTheme.of(context);
+    return TextSpan(
+      children: [
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: _BareWebLinkText(
+            text: candidate,
+            style: config.style ?? const TextStyle(),
+            color: theme.linkColor,
+            hoverColor: theme.linkHoverColor,
+            onTap: () => config.onLinkTap?.call(url, candidate),
+          ),
+        ),
+        if (urlEnd < text.length)
+          TextSpan(text: text.substring(urlEnd), style: config.style),
+      ],
+    );
+  }
+}
+
+class _BareWebLinkText extends StatefulWidget {
+  const _BareWebLinkText({
+    required this.text,
+    required this.style,
+    required this.color,
+    required this.hoverColor,
+    required this.onTap,
+  });
+
+  final String text;
+  final TextStyle style;
+  final Color color;
+  final Color hoverColor;
+  final VoidCallback onTap;
+
+  @override
+  State<_BareWebLinkText> createState() => _BareWebLinkTextState();
+}
+
+class _BareWebLinkTextState extends State<_BareWebLinkText> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _hovered ? widget.hoverColor : widget.color;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.text,
+          key: ValueKey('studio-markdown-web-link:${widget.text}'),
+          style: widget.style.copyWith(
+            color: color,
+            decoration: TextDecoration.underline,
+            decorationColor: color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+int _bareWebUrlEnd(String candidate) {
+  final balances = <String, int>{')': 0, ']': 0, '}': 0, '>': 0};
+  for (final char in candidate.characters) {
+    switch (char) {
+      case '(':
+        balances[')'] = balances[')']! + 1;
+      case ')':
+        balances[')'] = balances[')']! - 1;
+      case '[':
+        balances[']'] = balances[']']! + 1;
+      case ']':
+        balances[']'] = balances[']']! - 1;
+      case '{':
+        balances['}'] = balances['}']! + 1;
+      case '}':
+        balances['}'] = balances['}']! - 1;
+      case '<':
+        balances['>'] = balances['>']! + 1;
+      case '>':
+        balances['>'] = balances['>']! - 1;
+    }
+  }
+
+  var end = candidate.length;
+  while (end > 0) {
+    final char = candidate.substring(0, end).characters.last;
+    final balance = balances[char];
+    final shouldTrim = balance == null
+        ? const {',', '.', ';', '!', "'", '"'}.contains(char)
+        : balance < 0;
+    if (!shouldTrim) {
+      break;
+    }
+    if (balance != null) {
+      balances[char] = balance + 1;
+    }
+    end -= char.length;
+  }
+  return end;
 }
 
 TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {

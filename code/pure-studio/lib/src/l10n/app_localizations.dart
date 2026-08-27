@@ -1381,6 +1381,12 @@ abstract class AppLocalizations {
   /// **'Open a project or start a session to begin.'**
   String get timelineEmptyMessage;
 
+  /// No description provided for @timelineExternalLinkOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to open this link.'**
+  String get timelineExternalLinkOpenFailed;
+
   /// No description provided for @timelineJumpToLatest.
   ///
   /// In en, this message translates to:

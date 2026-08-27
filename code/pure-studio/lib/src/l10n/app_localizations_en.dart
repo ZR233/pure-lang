@@ -733,6 +733,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'Open a project or start a session to begin.';
 
   @override
+  String get timelineExternalLinkOpenFailed => 'Unable to open this link.';
+
+  @override
   String get timelineJumpToLatest => 'Jump to latest';
 
   @override
