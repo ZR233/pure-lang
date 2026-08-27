@@ -8662,10 +8662,14 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadT
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_result = <String>::sse_decode(deserializer);
+        let mut var_attachments = <Vec<
+            crate::api::studio::types::thread_stream::item::BridgeThreadAttachment,
+        >>::sse_decode(deserializer);
         let mut var_outputArtifactsJson = <Vec<String>>::sse_decode(deserializer);
         let mut var_exitCode = <Option<i32>>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::item::BridgeThreadToolOutput {
             result: var_result,
+            attachments: var_attachments,
             output_artifacts_json: var_outputArtifactsJson,
             exit_code: var_exitCode,
         };
@@ -17969,6 +17973,7 @@ impl flutter_rust_bridge::IntoDart
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.result.into_into_dart().into_dart(),
+            self.attachments.into_into_dart().into_dart(),
             self.output_artifacts_json.into_into_dart().into_dart(),
             self.exit_code.into_into_dart().into_dart(),
         ]
@@ -24440,6 +24445,10 @@ impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeThreadT
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.result, serializer);
+        <Vec<crate::api::studio::types::thread_stream::item::BridgeThreadAttachment>>::sse_encode(
+            self.attachments,
+            serializer,
+        );
         <Vec<String>>::sse_encode(self.output_artifacts_json, serializer);
         <Option<i32>>::sse_encode(self.exit_code, serializer);
     }

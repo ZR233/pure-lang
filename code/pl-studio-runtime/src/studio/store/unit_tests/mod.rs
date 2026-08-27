@@ -8,8 +8,75 @@ use crate::studio::task_coordinator::{
 use crate::{PlanConfirmationResolution, PlanConfirmationResolutionPayload, StudioMode};
 use pl_protocol::ThreadMode;
 use sea_orm::{ConnectionTrait, TransactionTrait};
+use sha2::{Digest, Sha256};
 
 mod schema;
+
+fn digest(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[tokio::test]
+async fn tool_images_reuse_content_addressed_blob_and_rollback_failed_metadata() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Tool image", StudioMode::Simple)
+        .await
+        .unwrap();
+    let bytes = b"verified-image-snapshot".to_vec();
+    let content_sha256 = digest(&bytes);
+    let input = || pl_core::ToolImageAttachmentInput {
+        filename: "pure-7429.png".to_string(),
+        media_type: "image/png".to_string(),
+        data: bytes.clone(),
+        content_sha256: content_sha256.clone(),
+        width: 320,
+        height: 180,
+    };
+
+    let first = store.persist_tool_image(&thread.id, input()).await.unwrap();
+    let second = store.persist_tool_image(&thread.id, input()).await.unwrap();
+    assert_ne!(first.id, second.id);
+    let records = store.list_thread_attachments(&thread.id).await.unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].storage_path, records[1].storage_path);
+    assert_eq!(
+        tokio::fs::read(&records[0].storage_path).await.unwrap(),
+        bytes
+    );
+
+    let failed_bytes = b"uncommitted-image-snapshot".to_vec();
+    let failed_digest = digest(&failed_bytes);
+    let failed_blob = store
+        .attachments_dir()
+        .join("objects")
+        .join(&failed_digest[..2])
+        .join(&failed_digest);
+    let error = store
+        .persist_tool_image(
+            "missing-thread",
+            pl_core::ToolImageAttachmentInput {
+                filename: "missing.png".to_string(),
+                media_type: "image/png".to_string(),
+                data: failed_bytes,
+                content_sha256: failed_digest,
+                width: 1,
+                height: 1,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("FOREIGN KEY"));
+    assert!(!tokio::fs::try_exists(failed_blob).await.unwrap());
+}
 
 /// 测试 seed：在独立事务中直接应用一次目录 delta。
 async fn seed_directory(store: &StudioStore, delta: DirectoryDelta) {

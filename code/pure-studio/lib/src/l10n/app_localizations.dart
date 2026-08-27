@@ -1487,6 +1487,24 @@ abstract class AppLocalizations {
   /// **'Agent'**
   String get timelineAgentFallback;
 
+  /// No description provided for @timelineViewImageRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Image read'**
+  String get timelineViewImageRead;
+
+  /// No description provided for @timelineViewImageReading.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading image'**
+  String get timelineViewImageReading;
+
+  /// No description provided for @timelineViewImageFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to read image'**
+  String get timelineViewImageFailed;
+
   /// No description provided for @timelineToolCompleted.
   ///
   /// In en, this message translates to:

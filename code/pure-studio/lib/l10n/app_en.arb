@@ -332,6 +332,9 @@
     }
   },
   "timelineAgentFallback": "Agent",
+  "timelineViewImageRead": "Image read",
+  "timelineViewImageReading": "Reading image",
+  "timelineViewImageFailed": "Failed to read image",
   "timelineToolCompleted": "{name} completed",
   "@timelineToolCompleted": {
     "placeholders": {

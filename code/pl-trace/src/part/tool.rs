@@ -235,6 +235,8 @@ pub struct TraceToolOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<crate::TraceAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     output_artifacts: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     audit_metadata: Vec<serde_json::Value>,
@@ -247,6 +249,7 @@ impl TraceToolOutput {
         Self {
             result,
             exit_code: None,
+            attachments: Vec::new(),
             output_artifacts: Vec::new(),
             audit_metadata: Vec::new(),
             metrics: None,
@@ -256,11 +259,13 @@ impl TraceToolOutput {
     pub fn with_details(
         mut self,
         exit_code: Option<i32>,
+        attachments: Vec<crate::TraceAttachment>,
         output_artifacts: Vec<serde_json::Value>,
         audit_metadata: Vec<serde_json::Value>,
         metrics: Option<TraceToolOutputMetrics>,
     ) -> Self {
         self.exit_code = exit_code;
+        self.attachments = attachments;
         self.output_artifacts = output_artifacts;
         self.audit_metadata = audit_metadata;
         self.metrics = metrics;
@@ -273,6 +278,10 @@ impl TraceToolOutput {
 
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code
+    }
+
+    pub fn attachments(&self) -> &[crate::TraceAttachment] {
+        &self.attachments
     }
 
     pub fn output_artifacts(&self) -> &[serde_json::Value] {

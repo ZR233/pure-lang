@@ -393,18 +393,23 @@ class BridgeThreadToolInvocation {
 
 class BridgeThreadToolOutput {
   final String result;
+  final List<BridgeThreadAttachment> attachments;
   final List<String> outputArtifactsJson;
   final int? exitCode;
 
   const BridgeThreadToolOutput({
     required this.result,
+    required this.attachments,
     required this.outputArtifactsJson,
     this.exitCode,
   });
 
   @override
   int get hashCode =>
-      result.hashCode ^ outputArtifactsJson.hashCode ^ exitCode.hashCode;
+      result.hashCode ^
+      attachments.hashCode ^
+      outputArtifactsJson.hashCode ^
+      exitCode.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -412,6 +417,7 @@ class BridgeThreadToolOutput {
       other is BridgeThreadToolOutput &&
           runtimeType == other.runtimeType &&
           result == other.result &&
+          attachments == other.attachments &&
           outputArtifactsJson == other.outputArtifactsJson &&
           exitCode == other.exitCode;
 }

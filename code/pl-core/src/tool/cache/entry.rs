@@ -70,6 +70,8 @@ pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKi
     .to_string();
     let mut output = entry.output.clone();
     output.model_output = description;
+    // 媒体上下文只在首次成功读取时注入；缓存命中只回放紧凑 receipt。
+    output.model_attachments.clear();
     let (artifact_bytes, result_hash) = output
         .runtime_events
         .iter()

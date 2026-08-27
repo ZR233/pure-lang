@@ -511,6 +511,7 @@ fn tool_state(value: &ThreadToolState) -> Result<BridgeThreadToolState> {
 fn tool_output(value: &ThreadToolOutput) -> Result<BridgeThreadToolOutput> {
     Ok(BridgeThreadToolOutput {
         result: value.result().to_string(),
+        attachments: value.attachments().iter().map(attachment).collect(),
         output_artifacts_json: value
             .output_artifacts()
             .iter()

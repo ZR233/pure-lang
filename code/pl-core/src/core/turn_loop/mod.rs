@@ -59,6 +59,7 @@ pub(super) async fn run_turn_with_trace(
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
     let mut budget_tracker = BudgetTracker::new(request.budget);
+    let mut materialized_attachments = request.materialized_attachments.clone();
     let mut budget_limit: Option<BudgetLimit> = None;
 
     let turn_id = request
@@ -249,8 +250,10 @@ pub(super) async fn run_turn_with_trace(
         session_message_count = safe_message_count;
         let (history_items, prepared_content) = prepare_context_items(
             &assembled_context.history,
-            &request.materialized_attachments,
-        )?;
+            &mut materialized_attachments,
+            core.attachment_runtime.as_ref(),
+        )
+        .await?;
         let mut input = assembled_context
             .prelude_messages
             .iter()
@@ -463,10 +466,15 @@ pub(super) async fn run_turn_with_trace(
         let count = tool_calls.len();
         progress.tool_detail(recorder, format!("模型请求调用 {count} 个工具。"));
 
+        let prepared_session_items = prepare_context_items(
+            session.items(),
+            &mut materialized_attachments,
+            core.attachment_runtime.as_ref(),
+        )
+        .await?
+        .0;
         core.tool_session_runtime
-            .update_parent_session(Arc::new(AgentSession::from_items(
-                prepare_context_items(session.items(), &request.materialized_attachments)?.0,
-            )));
+            .update_parent_session(Arc::new(AgentSession::from_items(prepared_session_items)));
         let tool_session_id = recorder.session_id().to_string();
         let tool_batch = match execute_tool_call_batch(
             &tool_calls,
@@ -606,6 +614,27 @@ pub(super) async fn run_turn_with_trace(
                 receipt.clone(),
             );
         }
+        let tool_media = tool_results
+            .iter()
+            .flat_map(|(tool_result, _)| {
+                tool_result
+                    .model_attachments
+                    .iter()
+                    .cloned()
+                    .map(|attachment| {
+                        let label = attachment
+                            .filename
+                            .clone()
+                            .unwrap_or_else(|| "image".to_string());
+                        pl_protocol::ToolMediaContext {
+                            call_id: tool_result.call_id.clone(),
+                            label,
+                            attachment,
+                        }
+                    })
+            })
+            .collect();
+        session.push_tool_media(tool_media);
         if let Some(content) = end_turn_content {
             session.push_assistant_response(content.clone(), None);
             last_content = content;

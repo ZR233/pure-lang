@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use pl_protocol::Result;
+use tokio::io::AsyncReadExt;
 
 use crate::path_safety::{metadata_if_real_async, real_directory_entries_async};
 use crate::tool::file::path::{WorkspacePaths, matches_pattern};
@@ -8,8 +9,8 @@ use crate::tool::{ToolCallContext, ToolWorkspace};
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
+    WorkspaceFileReadBytesRequest, WorkspaceFileReadRequest, WorkspaceFileRemoveRequest,
+    WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
 use crate::tool::tool_error;
 
@@ -136,6 +137,61 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
                 ),
             )
         })
+    }
+
+    async fn read_bytes(&self, request: WorkspaceFileReadBytesRequest) -> Result<Vec<u8>> {
+        let input_path = self.with_cwd(request.cwd.as_deref(), &request.path)?;
+        let path = self.paths.resolve_existing(&input_path).await?;
+        let metadata = tokio::fs::metadata(&path).await?;
+        if !metadata.is_file() {
+            return Err(tool_error(
+                "view_image",
+                format!("'{}' is not a regular file", request.path),
+            ));
+        }
+        if metadata.len() > request.max_bytes as u64 {
+            return Err(tool_error(
+                "view_image",
+                format!(
+                    "'{}' exceeds the {} byte source limit",
+                    self.paths.display_relative(&path),
+                    request.max_bytes
+                ),
+            ));
+        }
+        let file = tokio::fs::File::open(&path).await.map_err(|error| {
+            tool_error(
+                "view_image",
+                format!(
+                    "failed to read '{}': {error}",
+                    self.paths.display_relative(&path)
+                ),
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(request.max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|error| {
+                tool_error(
+                    "view_image",
+                    format!(
+                        "failed to read '{}': {error}",
+                        self.paths.display_relative(&path)
+                    ),
+                )
+            })?;
+        if bytes.len() > request.max_bytes {
+            return Err(tool_error(
+                "view_image",
+                format!(
+                    "'{}' changed while reading and exceeds the {} byte source limit",
+                    self.paths.display_relative(&path),
+                    request.max_bytes
+                ),
+            ));
+        }
+        Ok(bytes)
     }
 
     async fn write_text(&self, request: WorkspaceFileWriteRequest) -> Result<()> {

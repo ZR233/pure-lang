@@ -331,6 +331,8 @@ impl CancelledThreadTool {
 pub struct ThreadToolOutput {
     result: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<crate::ThreadAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     output_artifacts: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     exit_code: Option<i32>,
@@ -339,11 +341,13 @@ pub struct ThreadToolOutput {
 impl ThreadToolOutput {
     pub fn new(
         result: String,
+        attachments: Vec<crate::ThreadAttachment>,
         output_artifacts: Vec<serde_json::Value>,
         exit_code: Option<i32>,
     ) -> Self {
         Self {
             result,
+            attachments,
             output_artifacts,
             exit_code,
         }
@@ -351,6 +355,10 @@ impl ThreadToolOutput {
 
     pub fn result(&self) -> &str {
         &self.result
+    }
+
+    pub fn attachments(&self) -> &[crate::ThreadAttachment] {
+        &self.attachments
     }
 
     pub fn output_artifacts(&self) -> &[serde_json::Value] {

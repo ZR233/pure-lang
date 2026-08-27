@@ -133,6 +133,18 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> historyAttachment(String id) =>
       ValueKey<String>('history-attachment-$id');
 
+  static ValueKey<String> timelineToolGroupSummary(String id) =>
+      ValueKey<String>('timeline-tool-group-summary-$id');
+
+  static ValueKey<String> viewImageTool(String callId) =>
+      ValueKey<String>('view-image-tool-$callId');
+
+  static ValueKey<String> viewImageThumbnail(String id) =>
+      ValueKey<String>('view-image-thumbnail-$id');
+
+  static ValueKey<String> viewImageDialog(String id) =>
+      ValueKey<String>('view-image-dialog-$id');
+
   static ValueKey<String> reasoningEffortOption(String effort) =>
       ValueKey<String>('reasoning-effort-$effort');
 

@@ -8,7 +8,9 @@ use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary, To
 use crate::model::info::MediaWireFormat;
 
 use super::body::ToolFormatBody;
-use super::content::{MediaRepresentationPlan, media_url, message_content_text};
+use super::content::{
+    MediaRepresentationPlan, media_url, message_content_text, tool_media_content,
+};
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input, tool_callers_by_call_id};
 #[derive(Debug, Clone, Serialize)]
@@ -48,6 +50,19 @@ impl ResponsesRequestBody {
         let tool_callers = tool_callers_by_call_id(&history);
 
         for item in &request.input {
+            if let pl_protocol::ModelContextItem::ToolMedia { items } = item {
+                let content = tool_media_content(items);
+                input.push(ResponsesInputItem::message(
+                    ResponsesRole::User,
+                    responses_content_for_message(
+                        &content,
+                        MessageRole::User,
+                        &request.prepared_content,
+                        &media_plan,
+                    )?,
+                ));
+                continue;
+            }
             let msg = match item {
                 pl_protocol::ModelContextItem::Message { message }
                 | pl_protocol::ModelContextItem::ToolResult { message, .. } => message,
@@ -63,6 +78,7 @@ impl ResponsesRequestBody {
                     input.push(ResponsesInputItem::Native(item.value.clone()));
                     continue;
                 }
+                pl_protocol::ModelContextItem::ToolMedia { .. } => unreachable!(),
             };
             match msg.role {
                 MessageRole::Assistant if msg.tool_calls.is_some() => {

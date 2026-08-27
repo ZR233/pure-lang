@@ -43,6 +43,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
     pub(super) display_result: String,
+    pub(super) model_attachments: Vec<pl_protocol::ThreadAttachment>,
     pub(super) arguments: String,
     pub(super) outcome: ToolExecutionOutcome,
     pub(super) exit_code: Option<i32>,

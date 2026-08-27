@@ -94,6 +94,8 @@ class _FakeStudioApi implements StudioApi {
   final Map<String, Uint8List> attachmentDraftBytes = {};
   final Map<({String threadId, String attachmentId}), Uint8List>
   threadAttachmentBytes = {};
+  final Map<({String threadId, String attachmentId}), Object>
+  threadAttachmentErrors = {};
   final List<String> removedAttachmentDraftIds = [];
   final List<({String threadId, String attachmentId})>
   readThreadAttachmentRequests = [];
@@ -611,6 +613,12 @@ class _FakeStudioApi implements StudioApi {
       threadId: threadId,
       attachmentId: attachmentId,
     ));
+    final error =
+        threadAttachmentErrors[(
+          threadId: threadId,
+          attachmentId: attachmentId,
+        )];
+    if (error != null) throw error;
     return threadAttachmentBytes[(
           threadId: threadId,
           attachmentId: attachmentId,

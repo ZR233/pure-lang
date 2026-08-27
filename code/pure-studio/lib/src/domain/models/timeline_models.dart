@@ -45,6 +45,7 @@ class TimelineToolPart {
     this.providerItemId,
     this.arguments = '',
     this.result,
+    this.attachments = const [],
     this.outputArtifacts = const [],
     this.exitCode,
     this.timedOut = false,
@@ -58,6 +59,7 @@ class TimelineToolPart {
   final String? providerItemId;
   final String arguments;
   final String? result;
+  final List<ThreadAttachmentView> attachments;
   final List<Object?> outputArtifacts;
   final int? exitCode;
   final bool timedOut;
@@ -72,6 +74,7 @@ class TimelineToolPart {
       providerItemId: providerItemId,
       arguments: arguments ?? this.arguments,
       result: result ?? this.result,
+      attachments: attachments,
       outputArtifacts: outputArtifacts,
       exitCode: exitCode,
       timedOut: timedOut,

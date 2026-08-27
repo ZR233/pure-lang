@@ -23,6 +23,7 @@ mod text_escape;
 mod todo;
 mod tool_result;
 mod truncation;
+mod view_image;
 mod web_search;
 mod workspace_file;
 
@@ -48,6 +49,7 @@ pub use skill::*;
 pub use todo::*;
 pub use tool_result::*;
 pub use truncation::*;
+pub use view_image::*;
 pub use web_search::*;
 pub use workspace_file::*;
 

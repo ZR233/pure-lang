@@ -232,7 +232,7 @@ mod tests {
             .with_working_directory(Some("workspace".to_string())),
             ThreadToolState::Succeeded(SucceededThreadTool::new(
                 1,
-                ThreadToolOutput::new(String::new(), Vec::new(), Some(1)),
+                ThreadToolOutput::new(String::new(), Vec::new(), Vec::new(), Some(1)),
             )),
         );
 

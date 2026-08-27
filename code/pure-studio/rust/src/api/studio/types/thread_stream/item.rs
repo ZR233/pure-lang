@@ -147,6 +147,7 @@ pub enum BridgeThreadToolState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeThreadToolOutput {
     pub result: String,
+    pub attachments: Vec<BridgeThreadAttachment>,
     pub output_artifacts_json: Vec<String>,
     pub exit_code: Option<i32>,
 }

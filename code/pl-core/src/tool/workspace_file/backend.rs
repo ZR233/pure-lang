@@ -21,6 +21,11 @@ pub trait WorkspaceFileBackend: fmt::Debug + Send + Sync {
         request: WorkspaceFileReadRequest,
     ) -> impl Future<Output = Result<String>> + Send;
 
+    fn read_bytes(
+        &self,
+        request: WorkspaceFileReadBytesRequest,
+    ) -> impl Future<Output = Result<Vec<u8>>> + Send;
+
     fn write_text(
         &self,
         request: WorkspaceFileWriteRequest,
@@ -56,6 +61,13 @@ pub struct WorkspaceFileStat {
 pub struct WorkspaceFileReadRequest {
     pub path: String,
     pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceFileReadBytesRequest {
+    pub path: String,
+    pub cwd: Option<String>,
+    pub max_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

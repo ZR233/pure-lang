@@ -51,7 +51,11 @@ class _TurnActivityBlock extends StatelessWidget {
     if (activity == StudioTurnActivity.runningTool && tools != null) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: _ToolGroupPart(group: tools, isCurrentActivity: true),
+        child: _ToolGroupPart(
+          threadId: turn.threadId,
+          group: tools,
+          isCurrentActivity: true,
+        ),
       );
     }
     return Padding(
@@ -274,6 +278,7 @@ class _RowCard extends StatelessWidget {
       ),
       TimelineRowType.toolGroup => _ToolGroupPart(
         key: ValueKey(row.toolGroup!.id),
+        threadId: row.threadId,
         group: row.toolGroup!,
         isCurrentActivity: isCurrentActivity,
       ),
@@ -415,7 +420,10 @@ class _MarkdownBubble extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   for (final attachment in part.attachments)
-                    _HistoryAttachmentCard(
+                    _ThreadAttachmentCard(
+                      driverKey: StudioDriverKeys.historyAttachment(
+                        attachment.id,
+                      ),
                       threadId: part.threadId,
                       attachment: attachment,
                     ),
@@ -439,22 +447,25 @@ class _MarkdownBubble extends StatelessWidget {
   }
 }
 
-class _HistoryAttachmentCard extends ConsumerStatefulWidget {
-  const _HistoryAttachmentCard({
+class _ThreadAttachmentCard extends ConsumerStatefulWidget {
+  const _ThreadAttachmentCard({
     required this.threadId,
     required this.attachment,
+    required this.driverKey,
+    this.dialogKey,
   });
 
   final String threadId;
   final ThreadAttachmentView attachment;
+  final Key driverKey;
+  final Key? dialogKey;
 
   @override
-  ConsumerState<_HistoryAttachmentCard> createState() =>
-      _HistoryAttachmentCardState();
+  ConsumerState<_ThreadAttachmentCard> createState() =>
+      _ThreadAttachmentCardState();
 }
 
-class _HistoryAttachmentCardState
-    extends ConsumerState<_HistoryAttachmentCard> {
+class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
   Future<Uint8List>? _image;
 
   @override
@@ -471,7 +482,7 @@ class _HistoryAttachmentCardState
   Widget build(BuildContext context) {
     final attachment = widget.attachment;
     return InkWell(
-      key: StudioDriverKeys.historyAttachment(attachment.id),
+      key: widget.driverKey,
       borderRadius: BorderRadius.circular(10),
       onTap: attachment.modality == AttachmentModalityView.image
           ? _showImage
@@ -492,15 +503,25 @@ class _HistoryAttachmentCardState
               child: attachment.modality == AttachmentModalityView.image
                   ? FutureBuilder<Uint8List>(
                       future: _image,
-                      builder: (context, snapshot) => snapshot.hasData
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(7),
-                              child: Image.memory(
-                                snapshot.data!,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          : const Icon(Icons.image_outlined),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return Icon(
+                            Icons.broken_image_outlined,
+                            key: ValueKey(
+                              'attachment-load-failed-${attachment.id}',
+                            ),
+                          );
+                        }
+                        return snapshot.hasData
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(7),
+                                child: Image.memory(
+                                  snapshot.data!,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            : const Icon(Icons.image_outlined);
+                      },
                     )
                   : Icon(_attachmentIcon(attachment.modality)),
             ),
@@ -529,15 +550,22 @@ class _HistoryAttachmentCardState
   }
 
   Future<void> _showImage() async {
-    final image = await _image;
+    Uint8List? image;
+    try {
+      image = await _image;
+    } on Object {
+      return;
+    }
     if (!mounted || image == null) return;
+    final imageBytes = image;
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog(
+        key: widget.dialogKey,
         child: InteractiveViewer(
           minScale: 0.5,
           maxScale: 5,
-          child: Image.memory(image),
+          child: Image.memory(imageBytes),
         ),
       ),
     );

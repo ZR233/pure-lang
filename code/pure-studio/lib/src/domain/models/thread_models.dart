@@ -236,11 +236,13 @@ class ThreadToolInvocationView {
 class ThreadToolOutputView {
   const ThreadToolOutputView({
     required this.result,
+    required this.attachments,
     required this.outputArtifacts,
     this.exitCode,
   });
 
   final String result;
+  final List<ThreadAttachmentView> attachments;
   final List<Object?> outputArtifacts;
   final int? exitCode;
 }
@@ -687,6 +689,12 @@ class ThreadItemView {
           SucceededThreadToolView(:final output) => output.outputArtifacts,
           FailedThreadToolView(:final output) =>
             output?.outputArtifacts ?? const [],
+          _ => const [],
+        },
+        attachments: switch (lifecycle) {
+          SucceededThreadToolView(:final output) => output.attachments,
+          FailedThreadToolView(:final output) =>
+            output?.attachments ?? const [],
           _ => const [],
         },
         exitCode: switch (lifecycle) {

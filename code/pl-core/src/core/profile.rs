@@ -36,6 +36,7 @@ pub struct CoreRuntimeProfile {
     pub tool_profile: ToolProfile,
     pub default_turn_options: TurnOptions,
     pub context_compaction: ContextCompactionConfig,
+    pub attachment_runtime: Option<crate::AttachmentRuntime>,
 }
 
 impl CoreRuntimeProfile {
@@ -87,6 +88,12 @@ impl CoreRuntimeProfile {
 
     pub fn with_context_compaction(mut self, config: ContextCompactionConfig) -> Self {
         self.context_compaction = config;
+        self
+    }
+
+    /// 绑定当前线程的附件持久化与授权读取运行时。
+    pub fn with_attachment_runtime(mut self, runtime: crate::AttachmentRuntime) -> Self {
+        self.attachment_runtime = Some(runtime);
         self
     }
 }
@@ -172,6 +179,7 @@ impl TurnEngineBuilder {
             tool_profile,
             default_turn_options,
             context_compaction,
+            attachment_runtime,
         } = self.runtime_profile;
         let agent_tools = self.agent_tools.unwrap_or_else(|| {
             crate::tool::ToolManager::new()
@@ -192,6 +200,7 @@ impl TurnEngineBuilder {
             tool_capabilities: self.tool_capabilities,
             default_turn_options,
             context_compaction,
+            attachment_runtime,
             active_subagent: None,
             tool_session_runtime: crate::tool::ToolSessionRuntime::default(),
         }

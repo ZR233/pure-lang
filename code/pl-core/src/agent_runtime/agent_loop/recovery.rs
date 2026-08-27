@@ -348,11 +348,26 @@ fn rewind_cutoff(items: &[ModelContextItem], input_hashes: &[String]) -> AgentRu
 
 fn validate_closed_tool_history(items: &[ModelContextItem]) -> AgentRuntimeResult<()> {
     let mut pending = HashSet::<String>::new();
+    let mut batch_calls = HashSet::<String>::new();
+    let mut completed_batch = None::<HashSet<String>>;
     for item in items {
+        if let ModelContextItem::ToolMedia { items } = item {
+            if !pending.is_empty() || items.is_empty() {
+                return Err(invalid_tool_boundary());
+            }
+            let Some(calls) = completed_batch.take() else {
+                return Err(invalid_tool_boundary());
+            };
+            if items.iter().any(|item| !calls.contains(&item.call_id)) {
+                return Err(invalid_tool_boundary());
+            }
+            continue;
+        }
         let Some(message) = item.as_message() else {
             if !pending.is_empty() {
                 return Err(invalid_tool_boundary());
             }
+            completed_batch = None;
             continue;
         };
         match message.role {
@@ -360,8 +375,12 @@ fn validate_closed_tool_history(items: &[ModelContextItem]) -> AgentRuntimeResul
                 if !pending.is_empty() {
                     return Err(invalid_tool_boundary());
                 }
+                completed_batch = None;
+                batch_calls.clear();
                 for call in message.tool_calls.iter().flatten() {
-                    if !pending.insert(call.call_id.clone()) {
+                    if !pending.insert(call.call_id.clone())
+                        || !batch_calls.insert(call.call_id.clone())
+                    {
                         return Err(invalid_tool_boundary());
                     }
                 }
@@ -374,11 +393,15 @@ fn validate_closed_tool_history(items: &[ModelContextItem]) -> AgentRuntimeResul
                 if !pending.remove(&record.call_id) {
                     return Err(invalid_tool_boundary());
                 }
+                if pending.is_empty() {
+                    completed_batch = Some(batch_calls.clone());
+                }
             }
             MessageRole::System | MessageRole::User | MessageRole::Assistant => {
                 if !pending.is_empty() {
                     return Err(invalid_tool_boundary());
                 }
+                completed_batch = None;
             }
         }
     }
@@ -424,7 +447,10 @@ fn recovery_context(record: &ConversationRecoveryRecord) -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{Message, MessageContent, ToolCallKind, ToolCallRecord, ToolResultRecord};
+    use pl_protocol::{
+        AttachmentModality, Message, MessageContent, ThreadAttachment, ToolCallKind,
+        ToolCallRecord, ToolMediaContext, ToolResultRecord,
+    };
 
     use super::*;
 
@@ -476,6 +502,24 @@ mod tests {
         .into()
     }
 
+    fn tool_media(id: &str) -> ModelContextItem {
+        ModelContextItem::ToolMedia {
+            items: vec![ToolMediaContext {
+                call_id: id.to_string(),
+                label: "image.png".to_string(),
+                attachment: ThreadAttachment {
+                    id: "attachment-1".to_string(),
+                    modality: AttachmentModality::Image,
+                    media_type: "image/png".to_string(),
+                    filename: Some("image.png".to_string()),
+                    width: Some(1),
+                    height: Some(1),
+                    byte_size: 3,
+                },
+            }],
+        }
+    }
+
     #[test]
     fn rewind_tail_matches_all_selected_leading_inputs() {
         let items = vec![
@@ -505,6 +549,28 @@ mod tests {
         let items = vec![assistant_tool_call("call-1"), tool_result("call-1")];
 
         validate_closed_tool_history(&items).unwrap();
+    }
+
+    #[test]
+    fn retained_history_accepts_media_attached_to_the_completed_batch() {
+        let items = vec![
+            assistant_tool_call("call-1"),
+            tool_result("call-1"),
+            tool_media("call-1"),
+        ];
+
+        validate_closed_tool_history(&items).unwrap();
+    }
+
+    #[test]
+    fn retained_history_rejects_orphaned_or_wrong_batch_media() {
+        assert!(validate_closed_tool_history(&[tool_media("call-1")]).is_err());
+        let items = vec![
+            assistant_tool_call("call-1"),
+            tool_result("call-1"),
+            tool_media("call-2"),
+        ];
+        assert!(validate_closed_tool_history(&items).is_err());
     }
 
     #[test]

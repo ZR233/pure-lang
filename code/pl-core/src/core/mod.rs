@@ -74,6 +74,7 @@ pub struct TurnEngine {
     tool_capabilities: ToolCapabilityConfig,
     default_turn_options: TurnOptions,
     context_compaction: ContextCompactionConfig,
+    attachment_runtime: Option<crate::AttachmentRuntime>,
     active_subagent: Option<SubagentContext>,
     /// 此 agent 持久拥有的工具集合；每个模型 step 都从它冻结新 plan。
     agent_tools: AgentToolSet,
@@ -195,7 +196,20 @@ impl TurnEngine {
         self.tool_capabilities = capabilities.clone();
         BuiltinToolInstaller::from_capabilities(capabilities)
             .install_agent_workspace(self, workspace, workspace_instructions)
-            .await
+            .await?;
+        if let Some(attachment_runtime) = self.attachment_runtime.clone()
+            && let Some(tool) = crate::tool::ViewImageTool::for_model(
+                self.tool_workspace(),
+                self.runtime.model(),
+                attachment_runtime,
+            )
+        {
+            self.agent_tools.install(
+                ToolGroupId::new("view_image"),
+                vec![std::sync::Arc::new(tool)],
+            )?;
+        }
+        Ok(())
     }
 
     /// 注册 pl-core 提供的通用 git 工具集合（builtin 来源，git 命名空间）。

@@ -341,8 +341,10 @@ HTTP 只在流对象建立前重放两次，两个 transport 都不得在流开�
 0.9–1.1 抖动的 200ms 指数退避，provider `Retry-After` 优先并按 30 秒封顶；鉴权、权限、输入
 验证、请求构造、请求体和协议错误保持永久失败。错误正文仍用于展示和日志，但不再承担控制流协议。
 
-唯一公共执行结果是 `ToolResult`：它保存成功状态、canonical Text/JSON 内容、模型投影、artifact
-与 typed directive。截断、落盘、trace、执行缓存和 history receipt 统一由 manager/dispatcher
+唯一公共执行结果是 `ToolResult`：它保存成功状态、canonical Text/JSON 内容、模型投影、typed
+model attachments、artifact 与 typed directive。model attachment 只携带已提交的
+`ThreadAttachment` metadata，不携带 bytes、路径、URL 或 provider 表示；它与供 UI 使用的动态
+artifact 是两条不同协议。截断、落盘、trace、执行缓存和 history receipt 统一由 manager/dispatcher
 完成。调度层可以使用私有轻量 envelope 组织一次调用的收尾，但不得把它暴露成第二套工具结果
 API：
 
@@ -397,7 +399,20 @@ PL 只做保证可注册所需的最小 normalize，不得把第三方动态 sch
 
 ## 结果回传
 
-工具结果进入模型上下文时仍使用字符串内容。失败结果必须包含稳定前缀和原始错误文本：
+普通工具结果进入模型上下文时仍使用字符串内容。`view_image` 是唯一可额外返回 typed model
+attachment 的内置工具：dispatcher 先按 provider 顺序写入本批全部字符串 tool results，再把成功
+结果中的图片合并为一个 `ModelContextItem::ToolMedia`。adapter 在下一次模型请求中把它投影成内部
+user multipart；不得把图片塞进 tool result 字符串、JSON artifact 或伪造的 durable user message。
+缓存命中不重复追加图片：首次结果已经存在于 durable history，后续只返回紧凑 receipt。
+
+`view_image { path }` 只在当前模型明确支持可重放 image、workspace 文件工具可用且宿主安装
+attachment runtime 时注册。handler 在任何 stat/read 前重复检查能力；路径解析、workspace escape、
+审批与链接拒绝完全复用 `read_file`。读取硬上限为 20 MiB，真实内容只接受 PNG/JPEG/WebP/GIF；
+规范化结果长边不超过 2000，Base64 后不超过 5 MiB，并继续满足模型更严格的 MIME、尺寸和字节限制。
+writer 必须在成功结果发布前提交 content-addressed snapshot。视频、抽帧与 MCP media result 不属于
+本阶段。
+
+失败结果必须包含稳定前缀和原始错误文本：
 
 - 未知工具：`Unknown tool: {name}`
 - 策略或用户拒绝：`Tool execution denied: {reason}`

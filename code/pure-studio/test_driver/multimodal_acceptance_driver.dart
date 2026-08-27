@@ -26,22 +26,31 @@ Future<void> main(List<String> arguments) async {
     );
     await _openWorkspace(session, snapshots, options);
     await _assertModelCapabilities(session, snapshots, options);
-    await _admitImage(session, snapshots, options);
-    await File(options.previewScreenshotOutput)
-        .writeAsBytes(await session.screenshot(), flush: true);
+    if (!options.activeViewImage) {
+      await _admitImage(session, snapshots, options);
+      await File(options.previewScreenshotOutput)
+          .writeAsBytes(await session.screenshot(), flush: true);
+    }
     await _submitPrompt(session, snapshots, options);
     final completed = await _waitForRealCompletion(session, snapshots, options);
-    await File(options.screenshotOutput)
-        .writeAsBytes(await session.screenshot(), flush: true);
+    final viewImage = options.activeViewImage
+        ? await _captureViewImageUi(session, completed, options)
+        : null;
+    if (!options.activeViewImage) {
+      await File(options.screenshotOutput)
+          .writeAsBytes(await session.screenshot(), flush: true);
+    }
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
+        'activeViewImage': options.activeViewImage,
         'model': options.expectedModel,
         'marker': options.expectedMarker,
         'modelScreenshot': options.modelScreenshotOutput,
         'previewScreenshot': options.previewScreenshotOutput,
         'screenshot': options.screenshotOutput,
         'threadId': _workspace(completed)?['threadId'],
+        'viewImage': viewImage,
       }),
     );
   } catch (error, stackTrace) {
@@ -239,6 +248,13 @@ Future<void> _submitPrompt(
     snapshot,
   ) {
     final workspace = _workspace(snapshot);
+    if (options.activeViewImage) {
+      final timeline = workspace?['timeline'];
+      return workspace?['model'] == options.expectedModel &&
+          workspace?['threadId'] is String &&
+          (workspace?['isBusy'] == true ||
+              timeline is List<dynamic> && timeline.isNotEmpty);
+    }
     final attachments = workspace?['historyAttachments'];
     return workspace?['model'] == options.expectedModel &&
         attachments is List<dynamic> &&
@@ -268,13 +284,101 @@ bool _completedWithMarker(
     return false;
   }
   final timeline = workspace['timeline'];
-  return timeline is List<dynamic> &&
+  final hasAnswer =
+      timeline is List<dynamic> &&
       timeline.any(
         (row) =>
             row is Map<String, dynamic> &&
             row['type'] == 'finalAnswer' &&
             (row['text'] as String? ?? '').contains(options.expectedMarker),
       );
+  return hasAnswer &&
+      (!options.activeViewImage ||
+          _viewImageReceipt(snapshot, options) != null);
+}
+
+Map<String, String>? _viewImageReceipt(
+  Map<String, dynamic> snapshot,
+  _DriverOptions options,
+) {
+  final timeline = _workspace(snapshot)?['timeline'];
+  if (timeline is! List<dynamic>) return null;
+  for (final row in timeline) {
+    if (row is! Map<String, dynamic>) continue;
+    final groupId = row['id'];
+    final tools = row['tools'];
+    if (tools is! List<dynamic>) continue;
+    for (final tool in tools) {
+      if (tool is! Map<String, dynamic> || tool['name'] != 'view_image') {
+        continue;
+      }
+      final callId = tool['callId'];
+      final attachments = tool['attachments'];
+      if (groupId is! String ||
+          callId is! String ||
+          attachments is! List<dynamic>) {
+        continue;
+      }
+      for (final attachment in attachments) {
+        if (attachment is Map<String, dynamic> &&
+            attachment['modality'] == 'image' &&
+            attachment['filename'] == options.expectedFilename &&
+            attachment['id'] is String) {
+          return {
+            'groupId': groupId,
+            'callId': callId,
+            'attachmentId': attachment['id'] as String,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+Future<Map<String, String>> _captureViewImageUi(
+  FlutterDriverSession session,
+  Map<String, dynamic> snapshot,
+  _DriverOptions options,
+) async {
+  final receipt = _viewImageReceipt(snapshot, options);
+  if (receipt == null) {
+    throw StateError('completed turn has no typed view_image attachment');
+  }
+  final groupId = receipt['groupId']!;
+  final callId = receipt['callId']!;
+  final attachmentId = receipt['attachmentId']!;
+  final summary = find.byValueKey('timeline-tool-group-summary-$groupId');
+  await _command(
+    session.waitFor(summary, timeout: const Duration(seconds: 30)),
+    'view_image tool group summary',
+  );
+  await _command(session.tap(summary), 'expand view_image tool group');
+  await _command(
+    session.waitFor(
+      find.byValueKey('view-image-tool-$callId'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'expanded view_image tool row',
+  );
+  final thumbnail = find.byValueKey('view-image-thumbnail-$attachmentId');
+  await _command(
+    session.waitFor(thumbnail, timeout: const Duration(seconds: 30)),
+    'view_image thumbnail',
+  );
+  await File(options.previewScreenshotOutput)
+      .writeAsBytes(await session.screenshot(), flush: true);
+  await _command(session.tap(thumbnail), 'open view_image preview');
+  await _command(
+    session.waitFor(
+      find.byValueKey('view-image-dialog-$attachmentId'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'view_image preview dialog',
+  );
+  await File(options.screenshotOutput)
+      .writeAsBytes(await session.screenshot(), flush: true);
+  return receipt;
 }
 
 Future<Map<String, dynamic>> _waitForRealCompletion(
@@ -376,6 +480,7 @@ class _DriverOptions {
     required this.expectedFilename,
     required this.prompt,
     required this.turnTimeout,
+    required this.activeViewImage,
   });
 
   final String vmServiceUrl;
@@ -390,6 +495,7 @@ class _DriverOptions {
   final String expectedFilename;
   final String prompt;
   final Duration turnTimeout;
+  final bool activeViewImage;
 
   static _DriverOptions parse(List<String> arguments) {
     final values = <String, String>{};
@@ -422,6 +528,7 @@ class _DriverOptions {
       turnTimeout: Duration(
         seconds: int.tryParse(values['turn-timeout-seconds'] ?? '') ?? 300,
       ),
+      activeViewImage: values['active-view-image'] == 'true',
     );
   }
 }

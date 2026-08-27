@@ -255,6 +255,16 @@ impl RequestRequirements {
     ) -> pl_protocol::Result<Self> {
         let mut requirements = Self::default();
         for item in input {
+            if let ModelContextItem::ToolMedia { items } = item {
+                for item in items {
+                    requirements.record_attachment(
+                        &item.attachment.id,
+                        item.attachment.modality,
+                        prepared_content,
+                    )?;
+                }
+                continue;
+            }
             let Some(message) = item.as_message() else {
                 continue;
             };
@@ -270,29 +280,43 @@ impl RequestRequirements {
                         modality,
                         ..
                     } => {
-                        match modality {
-                            AttachmentModality::Image => requirements.image = true,
-                            AttachmentModality::Video => requirements.video = true,
-                            AttachmentModality::File => requirements.file = true,
-                        }
-                        let prepared = prepared_content
-                            .iter()
-                            .find(|media| media.attachment_id == *attachment_id)
-                            .ok_or_else(|| {
-                                PureError::ConfigError(format!(
-                                    "attachment {attachment_id} must be prepared before model request"
-                                ))
-                            })?;
-                        if prepared.modality != *modality {
-                            return Err(PureError::ConfigError(format!(
-                                "attachment {attachment_id} modality does not match prepared media"
-                            )));
-                        }
+                        requirements.record_attachment(
+                            attachment_id,
+                            *modality,
+                            prepared_content,
+                        )?;
                     }
                 }
             }
         }
         Ok(requirements)
+    }
+
+    fn record_attachment(
+        &mut self,
+        attachment_id: &str,
+        modality: AttachmentModality,
+        prepared_content: &[PreparedContentPart],
+    ) -> pl_protocol::Result<()> {
+        match modality {
+            AttachmentModality::Image => self.image = true,
+            AttachmentModality::Video => self.video = true,
+            AttachmentModality::File => self.file = true,
+        }
+        let prepared = prepared_content
+            .iter()
+            .find(|media| media.attachment_id == attachment_id)
+            .ok_or_else(|| {
+                PureError::ConfigError(format!(
+                    "attachment {attachment_id} must be prepared before model request"
+                ))
+            })?;
+        if prepared.modality != modality {
+            return Err(PureError::ConfigError(format!(
+                "attachment {attachment_id} modality does not match prepared media"
+            )));
+        }
+        Ok(())
     }
 }
 

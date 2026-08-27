@@ -21,6 +21,7 @@ fn completed_record(name: &str) -> ToolExecutionRecord {
         outcome: ToolExecutionOutcome::Succeeded,
         exit_code: None,
         timed_out: false,
+        model_attachments: Vec::new(),
         runtime_events: Vec::new(),
         execution_millis: 0,
     }

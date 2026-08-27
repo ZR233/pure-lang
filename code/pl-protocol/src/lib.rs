@@ -46,7 +46,7 @@ pub use model_context::{
     ConversationRecoveryState, ConversationRecoveryTurnRange, ModelContextItem,
     ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
     PromptPrefixChangedReason, ResponsesContextItem, ResponsesContextItemKind, SessionNote,
-    ThreadPromptMetadata, ThreadPromptSnapshot, ToolResultReceipt,
+    ThreadPromptMetadata, ThreadPromptSnapshot, ToolMediaContext, ToolResultReceipt,
 };
 pub use observed_state::{
     DegradedResource, FailedResource, LoadingResource, ObservedResource, ObservedResourceCommand,

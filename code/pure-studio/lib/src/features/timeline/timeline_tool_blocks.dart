@@ -2,11 +2,13 @@ part of 'timeline_view.dart';
 
 class _ToolGroupPart extends StatefulWidget {
   const _ToolGroupPart({
+    required this.threadId,
     required this.group,
     required this.isCurrentActivity,
     super.key,
   });
 
+  final String threadId;
   final TimelineToolGroup group;
   final bool isCurrentActivity;
 
@@ -33,6 +35,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Semantics(
+          key: StudioDriverKeys.timelineToolGroupSummary(group.id),
           container: true,
           button: true,
           expanded: expanded,
@@ -73,7 +76,10 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                   for (final item in group.items)
                     _isWebSearch(item)
                         ? _WebSearchToolCard(item: item, embedded: true)
-                        : _ToolGroupItemRow(item: item),
+                        : _ToolGroupItemRow(
+                            threadId: widget.threadId,
+                            item: item,
+                          ),
                 ],
               ),
             ),
@@ -430,8 +436,9 @@ void _collectWebLinks(Object? value, Set<String> links) {
 }
 
 class _ToolGroupItemRow extends StatelessWidget {
-  const _ToolGroupItemRow({required this.item});
+  const _ToolGroupItemRow({required this.threadId, required this.item});
 
+  final String threadId;
   final TimelineToolGroupItem item;
 
   @override
@@ -448,6 +455,11 @@ class _ToolGroupItemRow extends StatelessWidget {
       _resultDetail(item, tool),
     ].whereType<String>().where((value) => value.trim().isNotEmpty).toList();
     return Padding(
+      key: tool?.name == 'view_image'
+          ? StudioDriverKeys.viewImageTool(
+              tool?.callId ?? tool?.toolCallId ?? item.part.id,
+            )
+          : null,
       padding: const EdgeInsets.only(top: 9),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -491,6 +503,26 @@ class _ToolGroupItemRow extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (tool?.attachments.isNotEmpty == true) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final attachment in tool!.attachments)
+                        _ThreadAttachmentCard(
+                          threadId: threadId,
+                          attachment: attachment,
+                          driverKey: StudioDriverKeys.viewImageThumbnail(
+                            attachment.id,
+                          ),
+                          dialogKey: StudioDriverKeys.viewImageDialog(
+                            attachment.id,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -531,6 +563,15 @@ class _ToolGroupItemRow extends StatelessWidget {
 }
 
 String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
+  if (item.name == 'view_image') {
+    return switch (item.status) {
+      'succeeded' => context.l10n.timelineViewImageRead,
+      'failed' ||
+      'denied' ||
+      'cancelled' => context.l10n.timelineViewImageFailed,
+      _ => context.l10n.timelineViewImageReading,
+    };
+  }
   final label = _toolDisplayName(context, item);
   return switch (item.status) {
     'succeeded' => context.l10n.timelineToolCompleted(label),

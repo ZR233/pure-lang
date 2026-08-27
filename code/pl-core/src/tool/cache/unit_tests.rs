@@ -46,6 +46,42 @@ fn read_file_output(start_line: u64, end_line: u64, next_start_line: Option<u64>
 }
 
 #[test]
+fn cache_hit_does_not_duplicate_model_media_context() {
+    let cache = TurnToolCacheHandle::default();
+    let arguments = serde_json::json!({"path": "image.png"});
+    let root = Path::new("/workspace/repo");
+    let attachment = pl_protocol::ThreadAttachment {
+        id: "attachment-1".to_string(),
+        modality: pl_protocol::AttachmentModality::Image,
+        media_type: "image/png".to_string(),
+        filename: Some("image.png".to_string()),
+        width: Some(1),
+        height: Some(1),
+        byte_size: 3,
+    };
+    cache.insert(
+        "view_image",
+        &arguments,
+        root,
+        ToolCachePolicy::UntilWorkspaceMutation,
+        "call-1".to_string(),
+        &output("read image").with_model_attachment(attachment),
+    );
+
+    let hit = cache
+        .lookup(
+            "view_image",
+            &arguments,
+            root,
+            ToolCachePolicy::UntilWorkspaceMutation,
+        )
+        .expect("cached output");
+
+    assert!(hit.model_attachments.is_empty());
+    assert!(hit.model_output().contains("\"cacheHit\":true"));
+}
+
+#[test]
 fn workspace_mutation_invalidates_workspace_but_not_project_view() {
     let cache = TurnToolCacheHandle::default();
     let root = Path::new("/workspace/repo");

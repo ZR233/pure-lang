@@ -383,6 +383,7 @@ ThreadToolLifecycleView _toolLifecycleFromFrb(
 ThreadToolOutputView _toolOutputFromFrb(frb_item.BridgeThreadToolOutput value) {
   return ThreadToolOutputView(
     result: value.result,
+    attachments: value.attachments.map(_attachmentFromFrb).toList(),
     outputArtifacts: value.outputArtifactsJson
         .map(JsonLeafDecoder.decode)
         .toList(),

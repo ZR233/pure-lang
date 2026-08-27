@@ -75,6 +75,7 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
             }
             ModelContextItem::Message { .. }
             | ModelContextItem::ToolResult { .. }
+            | ModelContextItem::ToolMedia { .. }
             | ModelContextItem::Compaction { .. }
             | ModelContextItem::Responses { .. } => {}
         }
@@ -522,6 +523,8 @@ fn estimate_context_request_tokens(
                     estimate_text_tokens(encrypted_content)
                 }
                 ModelContextItem::Responses { item } => serde_json::to_string(&item.value)
+                    .map_or(0, |value| estimate_text_tokens(&value)),
+                ModelContextItem::ToolMedia { items } => serde_json::to_string(items.as_slice())
                     .map_or(0, |value| estimate_text_tokens(&value)),
             })
             .sum::<u64>()

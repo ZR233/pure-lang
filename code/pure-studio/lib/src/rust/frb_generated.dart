@@ -7891,12 +7891,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThreadToolOutput dco_decode_bridge_thread_tool_output(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeThreadToolOutput(
       result: dco_decode_String(arr[0]),
-      outputArtifactsJson: dco_decode_list_String(arr[1]),
-      exitCode: dco_decode_opt_box_autoadd_i_32(arr[2]),
+      attachments: dco_decode_list_bridge_thread_attachment(arr[1]),
+      outputArtifactsJson: dco_decode_list_String(arr[2]),
+      exitCode: dco_decode_opt_box_autoadd_i_32(arr[3]),
     );
   }
 
@@ -16060,10 +16061,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_result = sse_decode_String(deserializer);
+    var var_attachments = sse_decode_list_bridge_thread_attachment(
+      deserializer,
+    );
     var var_outputArtifactsJson = sse_decode_list_String(deserializer);
     var var_exitCode = sse_decode_opt_box_autoadd_i_32(deserializer);
     return BridgeThreadToolOutput(
       result: var_result,
+      attachments: var_attachments,
       outputArtifactsJson: var_outputArtifactsJson,
       exitCode: var_exitCode,
     );
@@ -23903,6 +23908,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.result, serializer);
+    sse_encode_list_bridge_thread_attachment(self.attachments, serializer);
     sse_encode_list_String(self.outputArtifactsJson, serializer);
     sse_encode_opt_box_autoadd_i_32(self.exitCode, serializer);
   }

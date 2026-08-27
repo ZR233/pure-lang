@@ -802,6 +802,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineAgentFallback => 'Agent';
 
   @override
+  String get timelineViewImageRead => 'Image read';
+
+  @override
+  String get timelineViewImageReading => 'Reading image';
+
+  @override
+  String get timelineViewImageFailed => 'Failed to read image';
+
+  @override
   String timelineToolCompleted(String name) {
     return '$name completed';
   }

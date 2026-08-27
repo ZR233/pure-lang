@@ -198,6 +198,20 @@ file id 或请求期 data URL，也不保留 text/multipart 双形态。
 `pl-model` 不读取 Studio 存储，也不解析本地路径。同一 modality 批次选择同一种表示，provider
 文件上传失败只能在推理请求发出前整批切换到下一条 profile 路线，流建立后不得自动重发。
 
+代理主动读取图片使用独立的 `view_image` 工具和 `ModelContextItem::ToolMedia`。工具成功结果仍先以
+普通 typed tool result 闭合 provider tool call；同一批次的全部结果闭合后，core 再追加一个按
+call 顺序排列的 `ToolMedia`，每项只保存 call id、安全展示标签与 thread-owned attachment metadata。
+它不是用户消息，也不进入用户 Timeline；Responses 与 Chat adapter 都把该上下文投影为一个内部
+user multipart，并按「标签文本、图片」顺序发送。这样 Chat 的并行 tool message 保持连续，同时
+两种协议复用同一份 durable history。图片 bytes 仍由宿主 attachment loader 在请求期 materialize，
+同 Turn 后续 inference、失败重试和恢复不得读取原始 workspace 路径。
+
+`AttachmentRuntime` 是 core 与宿主之间唯一的附件运行时边界：writer 在工具结果进入 history 前
+提交规范化图片并返回 opaque metadata；loader 按 attachment id 批量返回受限的
+`MaterializedAttachment`。没有完整 image capability、快照 replay profile、writer 或 loader 时
+不得注册 `view_image`，stale 调用也必须在文件 IO 前拒绝。工具图片、对应 tool results 与前导
+assistant tool calls 在 compaction、rewind 和恢复校验中是一个不可拆分单元。
+
 OpenAI Responses 的已实现图片路线使用 `input_image`；OpenAI Chat 使用 `image_url`。Zhipu Chat
 codec 还定义 `video_url` 与 `file_url`，但模型只有在精确请求契约、限制与快照重放路线都经过验证后
 才声明对应能力。GLM-5.3-Flash 当前只声明 text/image：远程图片首发优选 URL，本地图片以及历史、

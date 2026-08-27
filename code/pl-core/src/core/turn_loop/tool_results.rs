@@ -252,6 +252,7 @@ mod tests {
             outcome: crate::core::tool_dispatch::ToolExecutionOutcome::Succeeded,
             exit_code: Some(0),
             timed_out: false,
+            model_attachments: Vec::new(),
             runtime_events: Vec::new(),
             execution_millis: 0,
         }

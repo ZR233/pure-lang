@@ -7,7 +7,7 @@ use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
     PinnedContextSection, PromptPrefixChangedReason, ResponsesContextItem, SessionNote,
-    ThreadPromptMetadata, ToolResultReceipt, ToolResultRecord,
+    ThreadPromptMetadata, ToolMediaContext, ToolResultReceipt, ToolResultRecord,
 };
 
 use crate::working_set::canonical_content_hash;
@@ -402,6 +402,16 @@ impl AgentSession {
             receipt,
         });
         state.messages.push(message);
+    }
+
+    /// 在完整 tool-result 批次之后追加模型可见、但不伪装成用户消息的媒体上下文。
+    pub fn push_tool_media(&mut self, items: Vec<ToolMediaContext>) {
+        if items.is_empty() {
+            return;
+        }
+        Arc::make_mut(&mut self.state)
+            .items
+            .push(ModelContextItem::ToolMedia { items });
     }
 
     pub fn len(&self) -> usize {

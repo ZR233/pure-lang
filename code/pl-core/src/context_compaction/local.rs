@@ -98,11 +98,11 @@ fn can_retry_context_items(error: &PureError, input: &mut Vec<ModelContextItem>)
         return false;
     }
     input.remove(0);
-    while input
-        .first()
-        .and_then(ModelContextItem::as_message)
-        .is_some_and(|message| message.role == MessageRole::Tool)
-    {
+    while input.first().is_some_and(|item| {
+        item.as_message()
+            .is_some_and(|message| message.role == MessageRole::Tool)
+            || matches!(item, ModelContextItem::ToolMedia { .. })
+    }) {
         input.remove(0);
     }
     true

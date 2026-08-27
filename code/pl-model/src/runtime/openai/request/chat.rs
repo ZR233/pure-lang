@@ -5,7 +5,9 @@ use crate::completion::{CompletionRequest, ToolSpec};
 use crate::model::info::{MaxTokensField, MediaWireFormat, ModelInfo};
 
 use super::body::ToolFormatBody;
-use super::content::{MediaRepresentationPlan, media_url, message_content_text};
+use super::content::{
+    MediaRepresentationPlan, media_url, message_content_text, tool_media_content,
+};
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input};
 #[derive(Debug, Clone, Serialize)]
@@ -39,9 +41,21 @@ impl ChatRequestBody {
         }
 
         for item in &request.input {
+            if let pl_protocol::ModelContextItem::ToolMedia { items } = item {
+                let content = tool_media_content(items);
+                messages.push(ChatMessage::User {
+                    content: chat_content_for_user(
+                        &content,
+                        &request.prepared_content,
+                        &media_plan,
+                    )?,
+                });
+                continue;
+            }
             let msg = match item {
                 pl_protocol::ModelContextItem::Message { message }
                 | pl_protocol::ModelContextItem::ToolResult { message, .. } => message,
+                pl_protocol::ModelContextItem::ToolMedia { .. } => unreachable!(),
                 pl_protocol::ModelContextItem::Compaction { .. } => {
                     return Err(protocol_error(
                         "Chat Completions cannot consume remote compaction items",

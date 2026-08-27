@@ -187,6 +187,18 @@ abstract final class StudioDriverState {
                       'filename': attachment.filename,
                       'byteSize': attachment.byteSize,
                     },
+                for (final row in workspace.timelineRows)
+                  for (final item in row.toolGroup?.items ?? const [])
+                    for (final attachment in item.tool?.attachments ?? const [])
+                      {
+                        'id': attachment.id,
+                        'modality': _attachmentModalityName(
+                          attachment.modality,
+                        ),
+                        'filename': attachment.filename,
+                        'byteSize': attachment.byteSize,
+                        'source': 'tool',
+                      },
               ],
               'timeline': [
                 for (final row in workspace.timelineRows)
@@ -194,6 +206,26 @@ abstract final class StudioDriverState {
                     'id': row.id,
                     'type': row.type.name,
                     'text': row.part?.text,
+                    'tools': [
+                      for (final item in row.toolGroup?.items ?? const [])
+                        if (item.tool case final tool?)
+                          {
+                            'name': tool.name,
+                            'callId': tool.callId,
+                            'status': item.status,
+                            'attachments': [
+                              for (final attachment in tool.attachments)
+                                {
+                                  'id': attachment.id,
+                                  'modality': _attachmentModalityName(
+                                    attachment.modality,
+                                  ),
+                                  'filename': attachment.filename,
+                                  'byteSize': attachment.byteSize,
+                                },
+                            ],
+                          },
+                    ],
                     'attachments': [
                       for (final attachment
                           in row.part?.attachments ?? const [])

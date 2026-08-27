@@ -45,6 +45,7 @@ mod tests {
             outcome,
             exit_code: Some(0),
             timed_out: false,
+            model_attachments: Vec::new(),
             runtime_events,
             execution_millis: 0,
         }

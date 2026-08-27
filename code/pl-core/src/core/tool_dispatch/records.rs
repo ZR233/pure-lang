@@ -17,6 +17,7 @@ use super::{ToolExecutionError, ToolExecutionOutcome, ToolExecutionRecord};
 pub(super) struct ToolOutputEnvelope {
     pub(super) model_visible_text: String,
     pub(super) display_text: String,
+    pub(super) model_attachments: Vec<pl_protocol::ThreadAttachment>,
     pub(super) full_output_file: Option<PathBuf>,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
@@ -56,6 +57,11 @@ pub(super) fn finalize_tool_item(
     }
     let output = TraceToolOutput::new(record.display_result.clone()).with_details(
         record.exit_code,
+        record
+            .model_attachments
+            .iter()
+            .map(trace_attachment)
+            .collect(),
         output_artifacts(&record.runtime_events),
         audit_metadata(&record.runtime_events),
         output_metrics(&record.runtime_events),
@@ -141,6 +147,7 @@ pub(super) async fn ready_tool_execution_record(
             ToolOutputEnvelope {
                 model_visible_text: message.clone(),
                 display_text: message,
+                model_attachments: Vec::new(),
                 full_output_file: None,
                 exit_code,
                 timed_out,
@@ -178,6 +185,7 @@ pub(super) fn tool_execution_record(
                 ),
                 None => model_visible_tool_output(output.model_output()),
             };
+            let model_attachments = output.model_attachments;
             let mut runtime_events = output.runtime_events;
             if !runtime_events
                 .iter()
@@ -194,6 +202,7 @@ pub(super) fn tool_execution_record(
                 ToolOutputEnvelope {
                     model_visible_text,
                     display_text: canonical_output,
+                    model_attachments,
                     full_output_file: (!output.output_file.as_os_str().is_empty())
                         .then_some(output.output_file),
                     exit_code: output.exit_code,
@@ -234,6 +243,7 @@ fn tool_execution_record_from_envelope(
     let ToolOutputEnvelope {
         model_visible_text,
         display_text,
+        model_attachments,
         full_output_file: _full_output_file,
         exit_code,
         timed_out,
@@ -286,6 +296,7 @@ fn tool_execution_record_from_envelope(
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
         result: model_visible_text,
         display_result,
+        model_attachments,
         outcome,
         exit_code,
         timed_out,
@@ -375,6 +386,7 @@ pub(super) fn interrupted_tool_execution_record(
         ToolOutputEnvelope {
             model_visible_text: "Tool execution interrupted".to_string(),
             display_text: "Tool execution interrupted".to_string(),
+            model_attachments: Vec::new(),
             full_output_file: None,
             exit_code: None,
             timed_out: false,
@@ -396,6 +408,7 @@ pub(super) fn respond_to_model_tool_execution_record(
         ToolOutputEnvelope {
             model_visible_text: message.clone(),
             display_text: message,
+            model_attachments: Vec::new(),
             full_output_file: None,
             exit_code: None,
             timed_out: false,
@@ -403,4 +416,20 @@ pub(super) fn respond_to_model_tool_execution_record(
         },
         ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
     )
+}
+
+fn trace_attachment(attachment: &pl_protocol::ThreadAttachment) -> pl_trace::TraceAttachment {
+    pl_trace::TraceAttachment {
+        id: attachment.id.clone(),
+        modality: match attachment.modality {
+            pl_protocol::AttachmentModality::Image => pl_trace::TraceAttachmentModality::Image,
+            pl_protocol::AttachmentModality::Video => pl_trace::TraceAttachmentModality::Video,
+            pl_protocol::AttachmentModality::File => pl_trace::TraceAttachmentModality::File,
+        },
+        media_type: attachment.media_type.clone(),
+        filename: attachment.filename.clone(),
+        width: attachment.width,
+        height: attachment.height,
+        byte_size: attachment.byte_size,
+    }
 }

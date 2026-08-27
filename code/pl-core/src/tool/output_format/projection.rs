@@ -477,6 +477,7 @@ mod tests {
         if let Some(result) = result {
             let output = TraceToolOutput::new(result.to_string()).with_details(
                 None,
+                Vec::new(),
                 output_artifacts,
                 Vec::new(),
                 None,

@@ -476,6 +476,7 @@ fn thread_tool_item(tool: &pl_trace::TraceToolPart, updated_at: i64) -> ThreadTo
 fn thread_tool_output(output: &pl_trace::TraceToolOutput) -> ThreadToolOutput {
     ThreadToolOutput::new(
         output.result().to_string(),
+        output.attachments().iter().map(thread_attachment).collect(),
         output.output_artifacts().to_vec(),
         output.exit_code(),
     )

@@ -1,6 +1,148 @@
 part of '../widget_test.dart';
 
 void registerTimelineModelTests() {
+  testWidgets(
+    'view_image stays inside the tool row and opens its authorized thumbnail',
+    (tester) async {
+      const attachment = ThreadAttachmentView(
+        id: 'tool-image-1',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'PURE-7429.png',
+        byteSize: 68,
+        width: 1,
+        height: 1,
+      );
+      final item = _threadItemFixture(
+        id: 'view-image-tool-item',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-1',
+          callId: 'call-1',
+          name: 'view_image',
+          result: '{"viewedImage":true}',
+          attachments: [attachment],
+        ),
+      );
+      final api = _FakeStudioApi(_emptyState())
+        ..threadAttachmentBytes[(
+          threadId: 'thread-1',
+          attachmentId: 'tool-image-1',
+        )] = base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        );
+
+      await tester.pumpWidget(
+        _timelineHarness(threadId: 'thread-1', items: [item], api: api),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Image read'), findsOneWidget);
+      expect(
+        find.byKey(
+          StudioDriverKeys.timelineToolGroupSummary(
+            'tool-group:turn-1:view-image-tool-item',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.historyAttachment('tool-image-1')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageTool('call-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+        findsOneWidget,
+      );
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-1'),
+      ]);
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageDialog('tool-image-1')),
+        findsOneWidget,
+      );
+      expect(find.byType(InteractiveViewer), findsOneWidget);
+    },
+  );
+
+  testWidgets('view_image reports an authorized attachment load failure', (
+    tester,
+  ) async {
+    const attachment = ThreadAttachmentView(
+      id: 'tool-image-failed',
+      modality: AttachmentModalityView.image,
+      mediaType: 'image/png',
+      filename: 'missing.png',
+      byteSize: 68,
+      width: 1,
+      height: 1,
+    );
+    final item = _threadItemFixture(
+      id: 'view-image-failed-item',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      kind: ThreadItemKind.toolCall,
+      status: 'succeeded',
+      channel: null,
+      tool: const TimelineToolPart(
+        toolCallId: 'tool-call-failed',
+        callId: 'call-failed',
+        name: 'view_image',
+        attachments: [attachment],
+      ),
+    );
+    final api = _FakeStudioApi(_emptyState())
+      ..threadAttachmentErrors[(
+        threadId: 'thread-1',
+        attachmentId: 'tool-image-failed',
+      )] = StateError(
+        'attachment lease expired',
+      );
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: [item], api: api),
+    );
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('attachment-load-failed-tool-image-failed')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-failed')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.viewImageDialog('tool-image-failed')),
+      findsNothing,
+    );
+  });
+
   testWidgets('history image loads through the authorized attachment API', (
     tester,
   ) async {

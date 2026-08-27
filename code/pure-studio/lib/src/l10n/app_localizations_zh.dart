@@ -771,6 +771,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineAgentFallback => 'Agent';
 
   @override
+  String get timelineViewImageRead => '已阅读图片';
+
+  @override
+  String get timelineViewImageReading => '正在读取图片';
+
+  @override
+  String get timelineViewImageFailed => '读取图片失败';
+
+  @override
   String timelineToolCompleted(String name) {
     return '$name 已完成';
   }
@@ -2401,6 +2410,15 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineAgentFallback => 'Agent';
+
+  @override
+  String get timelineViewImageRead => '已阅读图片';
+
+  @override
+  String get timelineViewImageReading => '正在读取图片';
+
+  @override
+  String get timelineViewImageFailed => '读取图片失败';
 
   @override
   String timelineToolCompleted(String name) {

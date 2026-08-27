@@ -1,7 +1,7 @@
 part of '../widget_test.dart';
 
 const _testProviderCatalog = ProviderCatalogView(
-  schemaVersion: 8,
+  schemaVersion: 9,
   revision: 'widget-test-catalog-v8',
   presets: [
     ProviderPresetView(
@@ -685,6 +685,7 @@ ThreadToolItemStateView _toolItemFixture(
   );
   final output = ThreadToolOutputView(
     result: tool.result ?? '',
+    attachments: tool.attachments,
     outputArtifacts: tool.outputArtifacts,
     exitCode: tool.exitCode,
   );

@@ -201,6 +201,14 @@ Composer admission 使用 Studio home 下受限的临时 draft store，不进入
 提交在 owner 临界区中把
 drafts 提升为持久 blob/ref 并与用户输入一起发布；新 Thread 只有在全部附件通过 admission 后创建。
 
+代理通过 `view_image` 读取的图片进入同一 attachment store，但不经过 Composer draft。工具先按
+当前模型能力和 workspace 路径策略读取并规范化 bytes，Studio attachment writer 再以同样的
+content-addressed blob + metadata row 事务提交；只有提交成功的 opaque id 才能进入 tool terminal
+payload 与 `ToolMedia` history。新 blob 写入或 row 事务失败时清理本次创建的 blob；成功记录属于
+Thread 审计事实，即使后续 inference 失败也随 Thread 保留。请求期 loader 必须用 Thread owner
+批量校验全部 id、顺序和 metadata 后才读取 bytes，同 Turn continuation、重试和进程恢复都走该
+loader，不重新访问原始 workspace 文件。
+
 远程输入只接受 HTTPS，并使用不读取环境代理、无 cookie 的专用 client；每次 DNS 与 redirect 都
 拒绝 loopback、私网、链路本地、保留和 metadata 地址，同时限制 redirect、超时、声明长度、流式
 实际长度并执行 MIME sniff。原始 URL 只存在于当前进程的 draft，用于模型明确优选 URL 的一次首发，

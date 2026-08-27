@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pl_protocol::{AttachmentModality, ContentPart, MessageContent, ModelContextItem, Result};
+use pl_protocol::{
+    AttachmentModality, ContentPart, MessageContent, ModelContextItem, Result, ToolMediaContext,
+};
 
 use crate::completion::{CompletionRequest, PreparedContentPart, PreparedContentSource};
 use crate::model::info::{MediaMixPolicy, MediaRepresentation, MediaWireFormat, ModelInfo};
@@ -18,15 +20,23 @@ pub(super) struct MediaRepresentationPlan {
 
 impl MediaRepresentationPlan {
     pub(super) fn for_request(request: &CompletionRequest, model: &ModelInfo) -> Result<Self> {
-        let mut attachment_ids = HashMap::<AttachmentModality, Vec<&str>>::new();
-        let mut seen = HashMap::<&str, AttachmentModality>::new();
+        let mut attachment_ids = HashMap::<AttachmentModality, Vec<String>>::new();
+        let mut seen = HashMap::<String, AttachmentModality>::new();
 
-        for content in request
-            .input
-            .iter()
-            .filter_map(ModelContextItem::as_message)
-        {
-            for part in &content.content.parts {
+        for item in &request.input {
+            let tool_media;
+            let content = match item {
+                ModelContextItem::Message { message }
+                | ModelContextItem::ToolResult { message, .. } => &message.content,
+                ModelContextItem::ToolMedia { items } => {
+                    tool_media = tool_media_content(items);
+                    &tool_media
+                }
+                ModelContextItem::Compaction { .. } | ModelContextItem::Responses { .. } => {
+                    continue;
+                }
+            };
+            for part in &content.parts {
                 let ContentPart::Attachment {
                     attachment_id,
                     modality,
@@ -35,7 +45,7 @@ impl MediaRepresentationPlan {
                 else {
                     continue;
                 };
-                if let Some(existing) = seen.insert(attachment_id, *modality) {
+                if let Some(existing) = seen.insert(attachment_id.clone(), *modality) {
                     if existing != *modality {
                         return Err(protocol_error(format!(
                             "model={} attachment modality conflict for attachment {attachment_id}",
@@ -47,7 +57,7 @@ impl MediaRepresentationPlan {
                 attachment_ids
                     .entry(*modality)
                     .or_default()
-                    .push(attachment_id);
+                    .push(attachment_id.clone());
             }
         }
 
@@ -136,6 +146,25 @@ impl MediaRepresentationPlan {
             ))
         })
     }
+}
+
+pub(super) fn tool_media_content(items: &[ToolMediaContext]) -> MessageContent {
+    let mut parts = Vec::with_capacity(items.len().saturating_mul(2));
+    for item in items {
+        parts.push(ContentPart::Text {
+            text: format!(
+                "Image from view_image call {}: {}",
+                item.call_id, item.label
+            ),
+        });
+        parts.push(ContentPart::Attachment {
+            attachment_id: item.attachment.id.clone(),
+            modality: item.attachment.modality,
+            media_type: item.attachment.media_type.clone(),
+            filename: item.attachment.filename.clone(),
+        });
+    }
+    MessageContent::new(parts)
 }
 
 pub(super) fn media_url(

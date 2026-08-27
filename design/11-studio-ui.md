@@ -158,6 +158,12 @@ capability DTO 渲染输入标签（文本、视觉、视频、文件），设�
 保留完整草稿；command receipt 接受后才清空。原始外部 URL 不进入 Widget state，Timeline 与预览
 只通过 thread/draft 授权 loader 读取本地快照。
 
+代理 `view_image` 成功时，内部 `ToolMedia` 不投影成用户消息。对应 tool group 的折叠摘要显示
+“已阅读图片”；展开后在原 tool row 中显示安全文件名、尺寸、大小和缩略图，点击缩略图使用统一的
+图片预览弹层查看大图。用户历史附件与 tool attachment 复用同一个授权 loader、缩略图组件和
+`Dialog + InteractiveViewer`，不得复制第二套 bytes 缓存或引入新的图片查看依赖。tool attachment
+使用 typed DTO，不从 `outputArtifacts` JSON 推断，并为工具行、缩略图和大图弹层提供稳定 Driver key。
+
 receipt 已接受后，Composer 必须继续关联该 Turn，不能在首次 `TurnStarted` 时丢失 identity。
 对应 Turn 若随后 failed，Composer 解除 pending 并显示 typed failure message（缺失时回退到 Turn
 reason）；该规则也适用于 failure 晚于首次 in-progress 通知到达的情况。失败 Turn 的 terminal
@@ -312,3 +318,6 @@ directory 增量更新和 selected agent 重建时必须保留。
 - MCP/LSP 页刷新无副作用，reset/probe/repair 只由对应稳定控件触发并有 widget test；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。
+- 原生多模态 Driver 使用真实视觉模型，在 Composer 不附加图片的前提下要求代理调用
+  `view_image` 读取 workspace PNG；验收折叠“已阅读图片”、展开缩略图、点击大图、最终识别文本和
+  `dataUrl` 安全诊断，日志不得包含图片 bytes、Base64 或凭据。

@@ -165,6 +165,69 @@ impl StudioStore {
         result
     }
 
+    pub(crate) async fn persist_tool_image(
+        &self,
+        thread_id: &str,
+        input: pl_core::ToolImageAttachmentInput,
+    ) -> Result<ThreadAttachment> {
+        let actual_sha256 = sha256_hex(&input.data);
+        if actual_sha256 != input.content_sha256 {
+            bail!("tool image content digest does not match its bytes");
+        }
+        if input.width == 0 || input.height == 0 {
+            bail!("tool image dimensions must be non-zero");
+        }
+        if !matches!(
+            input.media_type.as_str(),
+            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+        ) {
+            bail!("tool image media type is not supported");
+        }
+
+        let dir = self
+            .attachments_dir()
+            .join("objects")
+            .join(&input.content_sha256[..2]);
+        tokio::fs::create_dir_all(&dir).await?;
+        let storage_path = dir.join(&input.content_sha256);
+        let created = !tokio::fs::try_exists(&storage_path).await?;
+        if created {
+            let path = storage_path.clone();
+            let data = input.data.clone();
+            tokio::task::spawn_blocking(move || {
+                pl_core::atomic_file::write_file_atomically(&path, &data)
+            })
+            .await
+            .context("tool image blob writer task failed")??;
+        }
+
+        let result = async {
+            let row = entities::attachment::ActiveModel {
+                id: Set(new_id("attachment")),
+                thread_id: Set(thread_id.to_string()),
+                kind: Set("image".to_string()),
+                media_type: Set(input.media_type),
+                filename: Set(Some(input.filename)),
+                storage_path: Set(storage_path.to_string_lossy().to_string()),
+                byte_size: Set(i64::try_from(input.data.len())
+                    .context("tool image byte size exceeds SQLite range")?),
+                content_sha256: Set(input.content_sha256),
+                width: Set(Some(i64::from(input.width))),
+                height: Set(Some(i64::from(input.height))),
+                created_at: Set(unix_seconds()),
+            }
+            .insert(&self.db)
+            .await?;
+            let record = attachment_record(row)?;
+            Ok::<_, anyhow::Error>(thread_attachment(&record))
+        }
+        .await;
+        if result.is_err() && created {
+            let _ = tokio::fs::remove_file(storage_path).await;
+        }
+        result
+    }
+
     pub(crate) async fn delete_attachments(
         &self,
         thread_id: &str,
@@ -198,6 +261,18 @@ async fn cleanup_created_blobs(paths: Vec<PathBuf>) {
     for path in paths {
         let _ = tokio::fs::remove_file(path).await;
     }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[derive(Debug, Clone)]

@@ -13,9 +13,9 @@ use pl_core::instruction::{
 };
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
-    BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime,
-    SubagentContext, ToolGroupId, TurnEngineBuilder, TurnOptions, TurnRequest,
-    load_workspace_instruction_documents, plan_web_search,
+    AttachmentRuntime, BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn,
+    PreparedSessionRuntime, SubagentContext, ToolGroupId, TurnEngineBuilder, TurnOptions,
+    TurnRequest, load_workspace_instruction_documents, plan_web_search,
 };
 
 use crate::config::ConfigRuntime;
@@ -315,8 +315,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if !refresh_lsp {
             agent_tools.uninstall(&ToolGroupId::new("lsp"));
         }
+        let attachment_runtime = attachment_runtime(self.store.clone(), thread_id.clone());
         let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
-            .with_workspace_instructions(workspace_instructions.clone());
+            .with_workspace_instructions(workspace_instructions.clone())
+            .with_attachment_runtime(attachment_runtime);
         let task_name = self
             .resources
             .get(&context.snapshot.identity.id)
@@ -686,6 +688,33 @@ fn interaction_emitter(
         }
         .boxed()
     })
+}
+
+fn attachment_runtime(store: StudioStore, thread_id: String) -> AttachmentRuntime {
+    let writer_store = store.clone();
+    let writer_thread_id = thread_id.clone();
+    AttachmentRuntime::new(
+        move |input| {
+            let store = writer_store.clone();
+            let thread_id = writer_thread_id.clone();
+            async move {
+                store
+                    .persist_tool_image(&thread_id, input)
+                    .await
+                    .map_err(anyhow_error)
+            }
+        },
+        move |attachment_ids| {
+            let store = store.clone();
+            let thread_id = thread_id.clone();
+            async move {
+                store
+                    .materialize_attachments(&thread_id, &attachment_ids)
+                    .await
+                    .map_err(anyhow_error)
+            }
+        },
+    )
 }
 
 fn turn_error(error: impl Into<String>) -> PureError {

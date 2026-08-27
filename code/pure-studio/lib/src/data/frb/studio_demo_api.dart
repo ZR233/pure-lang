@@ -489,6 +489,7 @@ class DemoStudioApi implements StudioApi {
               agentCreatedAt,
               const ThreadToolOutputView(
                 result: '1 passed; bridge envelope uses typed payload.',
+                attachments: [],
                 outputArtifacts: [],
               ),
             ),
@@ -1243,6 +1244,7 @@ class DemoStudioApi implements StudioApi {
                     'running widget tests...\n'
                     '[stderr] analyzer warnings: 0\n'
                     'All widget tests passed.',
+                attachments: [],
                 outputArtifacts: [],
               ),
             ),

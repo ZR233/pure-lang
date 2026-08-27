@@ -127,8 +127,13 @@ impl TraceProjection {
             });
             return events;
         }
-        let output =
-            TraceToolOutput::new(String::new()).with_details(None, artifacts, Vec::new(), None);
+        let output = TraceToolOutput::new(String::new()).with_details(
+            None,
+            Vec::new(),
+            artifacts,
+            Vec::new(),
+            None,
+        );
         if let Err(error) = item.apply(item.command(
             now,
             TracePartAction::Complete(TracePartCompletion::Tool { output }),

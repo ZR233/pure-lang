@@ -27,7 +27,7 @@ mod working_set;
 mod workspace;
 
 pub use agent_runtime::*;
-pub use attachment::MaterializedAttachment;
+pub use attachment::{AttachmentRuntime, MaterializedAttachment, ToolImageAttachmentInput};
 pub use config::{
     BuiltinMcpServerState, DEFAULT_PROJECT_DOC_MAX_BYTES, EffectiveMcpServerConfig,
     InstructionsConfig, McpServerConfig, McpServerMutationPolicy, McpServerSourceKind,

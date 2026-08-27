@@ -4,7 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
-use crate::Message;
+use crate::{Message, ThreadAttachment};
 
 /// 不含 revision、时间戳等易变元数据的模型可见工作上下文段。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,6 +270,18 @@ pub struct ResponsesContextItem {
     pub value: serde_json::Value,
 }
 
+/// 一次工具调用提交给后续模型请求的 durable 媒体引用。
+///
+/// `attachment` 只包含 Thread 授权的稳定 metadata；bytes 由宿主在请求期
+/// materialize。`label` 是模型可见的安全路径标签，不得包含未经授权的宿主路径。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolMediaContext {
+    pub call_id: String,
+    pub label: String,
+    pub attachment: ThreadAttachment,
+}
+
 impl ResponsesContextItem {
     pub fn from_wire(value: serde_json::Value) -> Option<Self> {
         let kind = match value.get("type").and_then(serde_json::Value::as_str)? {
@@ -309,6 +321,9 @@ pub enum ModelContextItem {
         message: Message,
         receipt: ToolResultReceipt,
     },
+    ToolMedia {
+        items: Vec<ToolMediaContext>,
+    },
     Compaction {
         #[serde(rename = "encryptedContent")]
         encrypted_content: String,
@@ -323,7 +338,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::Compaction { .. } | Self::Responses { .. } => None,
+            Self::ToolMedia { .. } | Self::Compaction { .. } | Self::Responses { .. } => None,
         }
     }
 
@@ -331,7 +346,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::Compaction { .. } | Self::Responses { .. } => None,
+            Self::ToolMedia { .. } | Self::Compaction { .. } | Self::Responses { .. } => None,
         }
     }
 
@@ -342,7 +357,10 @@ impl ModelContextItem {
     pub fn as_tool_result_receipt(&self) -> Option<&ToolResultReceipt> {
         match self {
             Self::ToolResult { receipt, .. } => Some(receipt),
-            Self::Message { .. } | Self::Compaction { .. } | Self::Responses { .. } => None,
+            Self::Message { .. }
+            | Self::ToolMedia { .. }
+            | Self::Compaction { .. }
+            | Self::Responses { .. } => None,
         }
     }
 }

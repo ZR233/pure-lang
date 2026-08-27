@@ -45,6 +45,9 @@ pub struct ToolResult {
     pub success: bool,
     pub content: ToolResultContent,
     pub model_output: String,
+    /// Durable model-facing attachments committed before this result is returned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_attachments: Vec<pl_protocol::ThreadAttachment>,
     pub truncated: OutputTruncation,
     pub output_file: PathBuf,
     pub exit_code: Option<i32>,
@@ -182,6 +185,7 @@ impl ToolResult {
             success,
             content: ToolResultContent::Text(output),
             model_output,
+            model_attachments: Vec::new(),
             truncated: OutputTruncation::empty(),
             output_file: PathBuf::new(),
             exit_code: Some(if success { 0 } else { 1 }),
@@ -203,6 +207,7 @@ impl ToolResult {
             success: !timed_out && exit_code.unwrap_or_default() == 0,
             content: ToolResultContent::Text(output.clone()),
             model_output: output,
+            model_attachments: Vec::new(),
             truncated,
             output_file,
             exit_code,
@@ -217,6 +222,11 @@ impl ToolResult {
                 final_content: None,
             });
         }
+        self
+    }
+
+    pub fn with_model_attachment(mut self, attachment: pl_protocol::ThreadAttachment) -> Self {
+        self.model_attachments.push(attachment);
         self
     }
 

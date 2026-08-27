@@ -173,6 +173,7 @@ fn workspace_tool_output(execution: WorkspaceFileToolExecution) -> ToolResult {
         success: execution.exit_code.unwrap_or_default() == 0,
         content: crate::tool::ToolResultContent::Text(execution.output),
         model_output: execution.model_output,
+        model_attachments: Vec::new(),
         truncated: execution.truncated,
         output_file: PathBuf::new(),
         exit_code: execution.exit_code,

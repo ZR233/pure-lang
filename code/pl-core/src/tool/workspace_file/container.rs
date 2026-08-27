@@ -10,8 +10,8 @@ use pl_protocol::Result;
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
+    WorkspaceFileReadBytesRequest, WorkspaceFileReadRequest, WorkspaceFileRemoveRequest,
+    WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
 use super::container_path::resolve_container_workspace_path;
 
@@ -121,6 +121,53 @@ where
                 format!("failed to decode `{}` as UTF-8: {error}", request.path),
             )
         })
+    }
+
+    async fn read_bytes(&self, request: WorkspaceFileReadBytesRequest) -> Result<Vec<u8>> {
+        let stat = self
+            .stat(WorkspaceFileStatRequest {
+                path: request.path.clone(),
+                cwd: request.cwd.clone(),
+            })
+            .await?;
+        if !stat.is_file {
+            return Err(tool_error(
+                "view_image",
+                format!("'{}' is not a regular file", request.path),
+            ));
+        }
+        if stat.len.is_some_and(|len| len > request.max_bytes as u64) {
+            return Err(tool_error(
+                "view_image",
+                format!(
+                    "'{}' exceeds the {} byte source limit",
+                    request.path, request.max_bytes
+                ),
+            ));
+        }
+        let bytes = self
+            .backend
+            .copy_from(ContainerCopyFromRequest {
+                path: resolve_container_workspace_path(&request.path, request.cwd.as_deref())?,
+                archive: false,
+            })
+            .await
+            .map_err(|error| {
+                tool_error(
+                    "view_image",
+                    format!("failed to read `{}`: {error}", request.path),
+                )
+            })?;
+        if bytes.len() > request.max_bytes {
+            return Err(tool_error(
+                "view_image",
+                format!(
+                    "'{}' changed while reading and exceeds the {} byte source limit",
+                    request.path, request.max_bytes
+                ),
+            ));
+        }
+        Ok(bytes)
     }
 
     async fn write_text(&self, request: WorkspaceFileWriteRequest) -> Result<()> {

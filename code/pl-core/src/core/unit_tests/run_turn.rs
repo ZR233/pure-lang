@@ -1027,6 +1027,7 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
         .find_map(|item| match item {
             pl_protocol::ModelContextItem::ToolResult { receipt, .. } => Some(receipt),
             pl_protocol::ModelContextItem::Message { .. }
+            | pl_protocol::ModelContextItem::ToolMedia { .. }
             | pl_protocol::ModelContextItem::Compaction { .. }
             | pl_protocol::ModelContextItem::Responses { .. } => None,
         })
