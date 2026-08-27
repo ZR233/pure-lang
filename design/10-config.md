@@ -440,7 +440,7 @@ reconcile。删除 server 和启用切换同样即时写入。页面“刷新”
 Provider 标签页必须提供结构化编辑能力：
 
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
-- 新增 Provider 按 preset suggested model 的模型默认连接方式初始化并自动生成唯一 provider key；编辑页的 preset 下拉完全由 catalog 生成，也提供 Custom provider。
+- 新增 Provider 按 preset suggested model 的模型默认连接方式初始化并自动生成唯一 provider key；编辑页的 preset 下拉完全由 catalog 生成，也提供 Custom provider。创建草稿与切换 preset 必须共用同一个草稿工厂，以 catalog preset 一次性替换完整的 immutable provider 草稿；不得在事件处理器中逐字段拼接供应商默认值。preset 身份变化时必须重建整组表单状态，使 endpoint、凭据提示、默认模型、模型目录、能力及后续新增的 preset 字段从同一份草稿快照同步刷新。
 - 编辑 provider key、显示名、base URL 和 API key。
 - 以 provider 卡片作为主要信息载体，展示 provider key、preset、状态、当前路由模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。

@@ -1280,6 +1280,24 @@ void registerShellSettingsTests() {
     await tester.tap(find.text('OpenAI').last);
     await tester.pumpAndSettle();
 
+    final textInputValues = tester
+        .widgetList<EditableText>(find.byType(EditableText))
+        .map((field) => field.controller.text)
+        .toList();
+    expect(
+      textInputValues,
+      containsAll(['openai', 'OpenAI', 'https://api.openai.com/v1']),
+    );
+    expect(textInputValues, isNot(contains('https://api.deepseek.com')));
+    final dropdownValues = tester
+        .widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>))
+        .map((dropdown) => dropdown.value)
+        .toList();
+    expect(
+      dropdownValues,
+      containsAll(['openai', 'gpt-5.6-sol', 'preset_defaults']),
+    );
+    expect(find.text('OPENAI_API_KEY'), findsOneWidget);
     expect(find.text('GPT-5.6-Sol'), findsOneWidget);
     expect(find.text('gpt-5.6-sol'), findsOneWidget);
     expect(find.text('GPT-5.6-Terra'), findsOneWidget);
@@ -1316,6 +1334,16 @@ void registerShellSettingsTests() {
 
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final openai = providers.last! as Map<String, Object?>;
+    expect(openai['id'], 'openai');
+    expect(openai['templateKind'], 'openai');
+    expect(openai['name'], 'OpenAI');
+    expect(openai['baseUrl'], 'https://api.openai.com/v1');
+    expect(openai['defaultModel'], 'gpt-5.6-sol');
+    expect(openai['capabilitySource'], 'preset_defaults');
+    expect(openai['hostedWebSearch'], isTrue);
+    expect(openai['standaloneWebSearch'], 'open_ai_search_api');
+    expect(openai['promptCacheDialect'], 'open_ai_prompt_cache_key');
+    expect(openai['responsesProgrammaticToolCalling'], isTrue);
     final modes = openai['modelConnectionModes'] as List<Object?>;
     expect(
       modes.cast<Map<String, Object?>>().singleWhere(

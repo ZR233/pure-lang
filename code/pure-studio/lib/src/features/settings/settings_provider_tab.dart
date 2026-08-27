@@ -74,6 +74,11 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980),
             child: ProviderEditor(
+              key: ValueKey((
+                _draft!.mode,
+                _draft!.originalId,
+                _draft!.provider.templateKind,
+              )),
               draft: _draft!,
               presets: catalog.presets,
               saving: _saving,
@@ -175,12 +180,19 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
       return;
     }
     final id = _suggestProviderId(template.id);
+    final draft = ProviderDraftFactory.create(
+      catalog: catalog,
+      templateId: template.id,
+      providerId: id,
+    );
+    if (draft == null) {
+      setState(() => _draftError = 'Provider preset is unavailable.');
+      return;
+    }
     setState(() {
       _selectedProviderId = id;
       _showDetails = false;
-      _draft = ProviderDraft.create(
-        template.createProvider(id, catalog.modelsFor(template.modelCatalogId)),
-      );
+      _draft = draft;
       _draftError = null;
     });
   }
@@ -204,43 +216,19 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
     if (catalog == null || current == null) {
       return;
     }
-    if (templateId.isEmpty) {
-      setState(() {
-        _draft = current.copyWith(
-          provider: current.provider.copyWith(
-            templateKind: '',
-            catalogId: '',
-            defaultModels: const [],
-            models: current.provider.customModels,
-            defaultModel: current.provider.customModels.firstOrNull?.slug ?? '',
-            credentialLabel: 'API Key',
-            credentialEnv: '',
-            capabilitySource: 'explicit',
-            hostedWebSearch: false,
-            standaloneWebSearch: '',
-            promptCacheDialect: 'none',
-            responsesProgrammaticToolCalling: false,
-            iconKey: null,
-          ),
-        );
-      });
+    final id = current.mode == ProviderDraftMode.create && templateId.isNotEmpty
+        ? _suggestProviderId(templateId)
+        : current.provider.id;
+    final next = ProviderDraftFactory.changeTemplate(
+      draft: current,
+      catalog: catalog,
+      templateId: templateId,
+      providerId: id,
+    );
+    if (next == null) {
       return;
     }
-    final template = catalog.preset(templateId);
-    if (template == null) {
-      return;
-    }
-    setState(() {
-      final id = current.mode == ProviderDraftMode.create
-          ? _suggestProviderId(template.id)
-          : current.provider.id;
-      _draft = current.copyWith(
-        provider: template.createProvider(
-          id,
-          catalog.modelsFor(template.modelCatalogId),
-        ),
-      );
-    });
+    setState(() => _draft = next);
   }
 
   void _updateDraft(

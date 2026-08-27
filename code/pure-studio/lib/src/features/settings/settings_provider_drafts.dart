@@ -41,6 +41,74 @@ class ProviderDraft {
   }
 }
 
+abstract final class ProviderDraftFactory {
+  static ProviderDraft? create({
+    required ProviderCatalogView catalog,
+    required String templateId,
+    required String providerId,
+  }) {
+    final provider = _providerFromPreset(
+      catalog: catalog,
+      templateId: templateId,
+      providerId: providerId,
+    );
+    return provider == null ? null : ProviderDraft.create(provider);
+  }
+
+  static ProviderDraft? changeTemplate({
+    required ProviderDraft draft,
+    required ProviderCatalogView catalog,
+    required String templateId,
+    required String providerId,
+  }) {
+    final provider = templateId.isEmpty
+        ? _customProvider(draft.provider, providerId)
+        : _providerFromPreset(
+            catalog: catalog,
+            templateId: templateId,
+            providerId: providerId,
+          );
+    return provider == null ? null : draft.copyWith(provider: provider);
+  }
+
+  static ProviderSettingsView? _providerFromPreset({
+    required ProviderCatalogView catalog,
+    required String templateId,
+    required String providerId,
+  }) {
+    final preset = catalog.preset(templateId);
+    if (preset == null) {
+      return null;
+    }
+    return preset.createProvider(
+      providerId,
+      catalog.modelsFor(preset.modelCatalogId),
+    );
+  }
+
+  static ProviderSettingsView _customProvider(
+    ProviderSettingsView current,
+    String providerId,
+  ) {
+    return current.copyWith(
+      id: providerId,
+      templateKind: '',
+      catalogId: '',
+      defaultModels: const [],
+      models: current.customModels,
+      defaultModel: current.customModels.firstOrNull?.slug ?? '',
+      credentialLabel: 'API Key',
+      credentialEnv: '',
+      capabilitySource: 'explicit',
+      hostedWebSearch: false,
+      standaloneWebSearch: '',
+      promptCacheDialect: 'none',
+      responsesProgrammaticToolCalling: false,
+      iconKey: null,
+    );
+  }
+}
+
 String providerInitials(String value) {
   final words = value.trim().split(RegExp(r'\s+'));
   if (words.isEmpty || words.first.isEmpty) {
