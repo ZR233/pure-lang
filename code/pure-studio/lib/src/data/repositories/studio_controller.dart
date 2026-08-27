@@ -153,6 +153,12 @@ class StudioController extends _$StudioController {
     );
   }
 
+  void dismissConfigRecoveryNotice() {
+    final current = state.value;
+    if (current == null || current.configRecoveryNotice == null) return;
+    state = AsyncData(current.copyWith(configRecoveryNotice: null));
+  }
+
   Future<void> archiveThread(String threadId) async {
     final current = state.value;
     final thread = current?.threads

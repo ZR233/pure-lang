@@ -19,12 +19,14 @@ part 'studio_projection_models.freezed.dart';
 abstract class ShellChromeView with _$ShellChromeView {
   const factory ShellChromeView({
     required List<StudioRecoveryIssue> applicationRecoveryIssues,
+    required ConfigRecoveryNotice? configRecoveryNotice,
     required PersistenceStateSnapshot persistenceState,
   }) = _ShellChromeView;
 
   factory ShellChromeView.fromState(StudioState state) {
     return ShellChromeView(
       applicationRecoveryIssues: state.applicationRecoveryIssues,
+      configRecoveryNotice: state.configRecoveryNotice,
       persistenceState: state.persistenceState,
     );
   }

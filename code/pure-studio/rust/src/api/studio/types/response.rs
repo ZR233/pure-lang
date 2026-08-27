@@ -13,6 +13,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct BridgeStudioStartupResult {
+    pub runtime: RuntimeSnapshot,
+    pub config_recovery: Option<BridgeConfigRecoveryReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConfigRecoveryReport {
+    pub backup_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeStudioStateSnapshot {
     pub runtime: RuntimeSnapshot,
     pub project_directory: BridgeProjectDirectoryState,

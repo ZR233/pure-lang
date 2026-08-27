@@ -78,6 +78,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get runtimeFatalRetry => '重试';
 
   @override
+  String get configRecoveryMessage =>
+      'An incompatible configuration was backed up and replaced with current defaults.';
+
+  @override
+  String configRecoveryBackupPath(String path) {
+    return 'Backup: $path';
+  }
+
+  @override
+  String get configRecoveryDismissTooltip =>
+      'Dismiss configuration recovery notice';
+
+  @override
   String persistenceDegraded(int count) {
     return '保存暂时不可用，$count 项内存更新正在等待落库；新工作已暂停。';
   }
@@ -1720,6 +1733,17 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get runtimeFatalRetry => '重试';
+
+  @override
+  String get configRecoveryMessage => '检测到不兼容配置，原文件已备份并替换为当前默认配置。';
+
+  @override
+  String configRecoveryBackupPath(String path) {
+    return '备份位置：$path';
+  }
+
+  @override
+  String get configRecoveryDismissTooltip => '关闭配置恢复提示';
 
   @override
   String persistenceDegraded(int count) {

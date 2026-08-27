@@ -4,7 +4,7 @@ use crate::studio::unix_seconds;
 use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{ConfigStore, StudioConfig};
+use super::{ConfigRecoveryReport, ConfigStore, StudioConfig};
 
 /// Settings desired state 的唯一进程内 owner。
 ///
@@ -14,6 +14,7 @@ pub struct ConfigRuntime {
     store: ConfigStore,
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<ConfigRuntimeSnapshot>>,
+    startup_recovery: Option<ConfigRecoveryReport>,
 }
 
 /// 已校验 Studio 配置及其单调 revision。
@@ -50,16 +51,21 @@ impl From<ConfigRuntimeError> for PureError {
 impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
     pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
-        let config = store.load_or_default()?;
+        let startup = store.load_for_startup()?;
         Ok(Self {
             store,
             command_lock: Arc::new(Mutex::new(())),
             state: Arc::new(RwLock::new(ConfigRuntimeSnapshot {
                 revision: 1,
                 updated_at: unix_seconds(),
-                config,
+                config: startup.config,
             })),
+            startup_recovery: startup.recovery,
         })
+    }
+
+    pub(crate) fn startup_recovery(&self) -> Option<ConfigRecoveryReport> {
+        self.startup_recovery.clone()
     }
 
     /// 返回内存 canonical snapshot，不访问磁盘。
@@ -172,6 +178,29 @@ mod tests {
     }
 
     #[test]
+    fn initialize_retains_the_startup_recovery_report() {
+        let home = tempfile::Builder::new()
+            .prefix("config-runtime-recovery-")
+            .tempdir()
+            .unwrap()
+            .keep();
+        let store = ConfigStore::new(ConfigPaths::from_home(home));
+        std::fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let legacy = toml::to_string_pretty(&StudioConfig::default_config())
+            .unwrap()
+            .replace("schema_version = 15", "schema_version = 14");
+        std::fs::write(store.paths().config_file(), legacy).unwrap();
+
+        let runtime = ConfigRuntime::initialize(store).unwrap();
+
+        assert_eq!(
+            runtime.read().unwrap().config,
+            StudioConfig::default_config()
+        );
+        assert!(runtime.startup_recovery().unwrap().backup_path().exists());
+    }
+
+    #[test]
     fn stale_revision_cannot_overwrite_new_config() {
         let runtime = runtime("cas");
         let initial = runtime.read().unwrap();
@@ -190,5 +219,33 @@ mod tests {
 
         assert!(error.contains("revision conflict"));
         assert_eq!(runtime.read().unwrap(), first);
+    }
+
+    #[test]
+    fn explicit_reload_rejects_invalid_config_without_recovery() {
+        let runtime = runtime("strict-reload");
+        let before = runtime.read().unwrap();
+        let store = runtime.store();
+        let path = store.paths().config_file();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "invalid external content").unwrap();
+
+        let error = runtime.reload_from_disk(before.revision).unwrap_err();
+
+        assert!(error.to_string().contains("failed to parse Studio config"));
+        assert_eq!(runtime.read().unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "invalid external content"
+        );
+        assert!(
+            std::fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.toml.rejected."))
+        );
     }
 }

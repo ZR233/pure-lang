@@ -1,7 +1,8 @@
 ---
 name: studio-config
 description: Use when asked where Pure Studio stores its configuration or how to configure providers, model routes, permissions, skills, MCP, LSP, UI, or web search. Covers config file locations, TOML schema, credential handling, and safe manual editing.
-category: guides
+metadata:
+  category: guides
 ---
 
 # Pure Studio Configuration
@@ -26,9 +27,10 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 
 ## Format Rules
 
-- TOML with snake_case keys; only `schema_version = 14` is accepted.
+- TOML with snake_case keys; only `schema_version = 15` is accepted.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- An unparsable, invalid, or old-schema file is not migrated: Studio atomically replaces it with the current default config. Back it up before manual edits.
+- At startup, an unparsable, invalid, inline-credential, old-schema, or unknown-schema file is not migrated. Studio first saves the original bytes beside it as `config.toml.rejected.<timestamp>.bak`, then atomically replaces it with the current default config. A failed backup or replacement keeps startup closed and preserves the original file.
+- Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; restart Studio after editing config.toml by hand.
 
 ## Common Sections
@@ -54,7 +56,7 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 Every provider needs `name`, `base_url`, and a `catalog` section; every role needs a route. `effort` is optional and must match the model's supported effort candidates.
 
 ```toml
-schema_version = 14
+schema_version = 15
 
 [models.providers.deepseek]
 name = "DeepSeek"

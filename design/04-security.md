@@ -81,9 +81,11 @@ HTTP 与 FRB 统一返回脱敏 `StudioError { code, message, retryable, correla
 
 ## 4.7 数据切换安全
 
-Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 14，provider API token
-保存在系统凭据库。不兼容配置不迁移、不导入其中的凭据，直接原子替换为当前初始配置；系统
-凭据库保持独立，替换后只按初始 provider id 注入已有凭据。配置文件或凭据库 IO 失败不得触发替换。
+Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 15，provider API token
+保存在系统凭据库。启动发现不兼容配置时不迁移、不导入其中的凭据，先逐字备份到配置目录中的
+唯一 `.rejected.<timestamp>.bak` 文件，再原子替换为当前初始配置；系统凭据库保持独立，替换后
+只按初始 provider id 注入已有凭据。配置文件、备份或凭据库 IO 失败不得触发替换，运行期显式
+重载也不得自动恢复。
 数据库版本、结构 fingerprint 或完整性不兼容时，不迁移、不归档、不导入：关闭检查连接后只
 删除精确 canonical 数据库及其 `-wal/-shm`，再创建空库。删除或重建失败必须停止启动；不得
 扫描、删除或修改 Project、attachments、worktree、branch 或其他 legacy 数据库。完整合同见

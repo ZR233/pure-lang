@@ -31,10 +31,16 @@ SeaORM 2.0 异步访问；schema v14 与不兼容库/一次性 v13 附件迁移�
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-15；旧 schema、未知版本、无法解析或无法校验的配置不迁移、不归档、不导入，也不覆盖原文件，
-而是直接返回结构化配置错误。仅配置文件不存在时使用 `StudioConfig::default_config()` 构造内存初始
-配置；该路径只按默认 provider id 注入已有系统凭据。
-文件读取、系统凭据读取或原子写入失败不属于配置不兼容，必须 fail closed 并保留原文件。
+15。Studio 启动时，旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
+内容不兼容：不迁移、不导入旧字段或旧 provider 凭据，先把原始字节备份到同目录唯一的
+`config.toml.rejected.<timestamp>.bak`，再原子替换为当前默认配置并继续启动；仅按默认 provider id
+注入已有系统凭据。备份路径冲突时递增后缀且不得覆盖已有备份。启动成功后桌面宿主返回一次性恢复
+报告，GUI 展示备份路径；其他宿主至少记录脱敏诊断日志。运行期显式
+`reloadSettingsFromDisk` 仍严格校验，不自动备份或替换。
+
+仅配置文件不存在时使用 `StudioConfig::default_config()` 构造内存初始配置且不产生恢复报告。文件
+读取、默认 provider 系统凭据读取、备份写入或默认配置原子替换失败不属于配置内容不兼容，必须
+fail closed 并保留原文件；默认配置替换失败时已经完整写入的备份可以保留。
 
 `pure-studio` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
 `SettingsStateSnapshot`，由 Flutter 原子替换 Settings 领域；不得返回 Studio 聚合状态，也不得
@@ -474,9 +480,7 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 Provider 的 API token 保存到操作系统凭据库，service 固定为 `pure-studio`，account 为 `provider:{provider_id}`；`~/.pure/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
-设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。旧 schema 不读取凭据，也不生成兼容备份。
-不兼容配置不得按旧 provider id 读取或迁移凭据，也不得自动替换为初始配置；加载直接返回版本
-错误并保留原配置文件。只有配置文件不存在时才创建 schema 15 的初始配置。
+设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。启动恢复不得按旧 provider id 读取、迁移或删除凭据；原配置只以逐字备份保留，默认配置仅按当前默认 provider id 注入已有系统凭据。运行期显式重载仍直接返回配置错误并保留原文件。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
 

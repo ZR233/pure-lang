@@ -2,9 +2,12 @@ use crate::api::studio::bridge_runtime::{
     BridgeRuntime, active_bridge, install_bridge_runtime, installed_bridge,
 };
 use crate::api::studio::convert::runtime::runtime_snapshot;
-use crate::api::studio::types::{BridgeError, ProjectDto, RuntimeSnapshot};
+use crate::api::studio::types::{
+    BridgeConfigRecoveryReport, BridgeError, BridgeStudioStartupResult, ProjectDto, RuntimeSnapshot,
+};
 use anyhow::Context;
 use flutter_rust_bridge::frb;
+use std::path::Path;
 
 use super::updater::cancel_all_update_operations;
 // ── Runtime lifecycle ──
@@ -15,9 +18,22 @@ pub fn init_app() {
     crate::diagnostics::initialize();
 }
 
-pub async fn start_studio_runtime() -> Result<RuntimeSnapshot, BridgeError> {
+pub async fn start_studio_runtime() -> Result<BridgeStudioStartupResult, BridgeError> {
     let bridge = install_bridge_runtime().await?;
-    Ok(runtime_snapshot(bridge.studio.start_runtime().await?))
+    let runtime = runtime_snapshot(bridge.studio.start_runtime().await?);
+    let recovery = bridge.studio.startup_config_recovery();
+    let config_recovery =
+        bridge_config_recovery(recovery.as_ref().map(|report| report.backup_path()));
+    Ok(BridgeStudioStartupResult {
+        runtime,
+        config_recovery,
+    })
+}
+
+fn bridge_config_recovery(backup_path: Option<&Path>) -> Option<BridgeConfigRecoveryReport> {
+    backup_path.map(|backup_path| BridgeConfigRecoveryReport {
+        backup_path: backup_path.display().to_string(),
+    })
 }
 
 pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
@@ -76,4 +92,19 @@ pub async fn archive_project(project_id: String) -> Result<Option<ProjectDto>, B
         .await?
         .context("selected project not found")?;
     Ok(Some(archived.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_recovery_report_maps_only_the_backup_path() {
+        let backup_path = Path::new("config.toml.rejected.42.bak");
+
+        let mapped = bridge_config_recovery(Some(backup_path)).unwrap();
+
+        assert_eq!(mapped.backup_path, backup_path.display().to_string());
+        assert_eq!(bridge_config_recovery(None), None);
+    }
 }

@@ -45,6 +45,7 @@ class StudioState {
     required this.skillsByProject,
     required this.providerUsageState,
     required this.updaterState,
+    this.configRecoveryNotice,
     this.persistenceState = const PersistenceStateSnapshot.ready(),
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
@@ -73,6 +74,7 @@ class StudioState {
   final Map<String, SkillsStateSnapshot> skillsByProject;
   final ProviderUsageStateSnapshot providerUsageState;
   final UpdaterStateSnapshot updaterState;
+  final ConfigRecoveryNotice? configRecoveryNotice;
   final PersistenceStateSnapshot persistenceState;
 
   List<StudioProject> get projects => projectDirectory.values;
@@ -306,6 +308,7 @@ class StudioState {
     Map<String, SkillsStateSnapshot>? skillsByProject,
     ProviderUsageStateSnapshot? providerUsageState,
     UpdaterStateSnapshot? updaterState,
+    Object? configRecoveryNotice = _studioStateUnset,
     PersistenceStateSnapshot? persistenceState,
   }) {
     return StudioState(
@@ -333,6 +336,9 @@ class StudioState {
       skillsByProject: skillsByProject ?? this.skillsByProject,
       providerUsageState: providerUsageState ?? this.providerUsageState,
       updaterState: updaterState ?? this.updaterState,
+      configRecoveryNotice: identical(configRecoveryNotice, _studioStateUnset)
+          ? this.configRecoveryNotice
+          : configRecoveryNotice as ConfigRecoveryNotice?,
       persistenceState: persistenceState ?? this.persistenceState,
     );
   }

@@ -231,6 +231,24 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get runtimeFatalRetry;
 
+  /// No description provided for @configRecoveryMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'An incompatible configuration was backed up and replaced with current defaults.'**
+  String get configRecoveryMessage;
+
+  /// No description provided for @configRecoveryBackupPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup: {path}'**
+  String configRecoveryBackupPath(String path);
+
+  /// No description provided for @configRecoveryDismissTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss configuration recovery notice'**
+  String get configRecoveryDismissTooltip;
+
   /// No description provided for @persistenceDegraded.
   ///
   /// In en, this message translates to:

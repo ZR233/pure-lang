@@ -24,7 +24,7 @@ pub use agent::{
     reconcile_task_worktree_group, same_worktree_path,
 };
 pub use config::{
-    ConfigPaths, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
+    ConfigPaths, ConfigRecoveryReport, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
     STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig, StudioMode, StudioRole,
     StudioUiConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
 };

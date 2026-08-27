@@ -85,6 +85,62 @@ class _ApplicationRecoveryBanner extends StatelessWidget {
   }
 }
 
+class _ConfigRecoveryBanner extends ConsumerWidget {
+  const _ConfigRecoveryBanner({required this.notice});
+
+  final ConfigRecoveryNotice notice;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      key: const ValueKey('config-recovery-banner'),
+      color: colors.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        child: Row(
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 18,
+              color: colors.onTertiaryContainer,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    context.l10n.configRecoveryMessage,
+                    style: context.text.bodySmall?.copyWith(
+                      color: colors.onTertiaryContainer,
+                    ),
+                  ),
+                  SelectableText(
+                    context.l10n.configRecoveryBackupPath(notice.backupPath),
+                    style: context.text.labelSmall?.copyWith(
+                      color: colors.onTertiaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('config-recovery-dismiss'),
+              tooltip: context.l10n.configRecoveryDismissTooltip,
+              onPressed: () => ref
+                  .read(studioControllerProvider.notifier)
+                  .dismissConfigRecoveryNotice(),
+              icon: const Icon(Icons.close, size: 18),
+              color: colors.onTertiaryContainer,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PersistenceBanner extends ConsumerStatefulWidget {
   const _PersistenceBanner({required this.snapshot});
 

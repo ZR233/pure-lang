@@ -79,6 +79,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get runtimeFatalRetry => 'Retry';
 
   @override
+  String get configRecoveryMessage =>
+      'An incompatible configuration was backed up and replaced with current defaults.';
+
+  @override
+  String configRecoveryBackupPath(String path) {
+    return 'Backup: $path';
+  }
+
+  @override
+  String get configRecoveryDismissTooltip =>
+      'Dismiss configuration recovery notice';
+
+  @override
   String persistenceDegraded(int count) {
     return 'Saving is temporarily unavailable. $count in-memory update(s) are waiting; new work is paused.';
   }

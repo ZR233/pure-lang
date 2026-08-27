@@ -46,8 +46,9 @@ revision 并更新相关 canonical 行；失败不更新 actor，也不广播。
 
 启动发现 canonical 库版本、结构或完整性不兼容时，关闭检查连接，精确删除该数据库与
 `-wal/-shm` 后创建空 schema；不迁移、不备份、不导入旧会话或 Task。该流程不触碰其他旧库、
-attachments、Project、worktree 或 branch。`config.toml` 只接受 schema 14；不兼容内容不迁移、
-不导入，直接原子替换为当前初始配置，文件或凭据库 IO 失败时保留原文件并停止启动。
+attachments、Project、worktree 或 branch。`config.toml` 只接受 schema 15；启动发现不兼容内容时
+不迁移、不导入旧字段或旧 provider 凭据，先逐字备份原文件，再原子替换为当前初始配置。文件、
+备份或凭据库 IO 失败时保留原文件并停止启动；运行期显式重载不自动恢复。
 
 ## 12.5 运行时、恢复与订阅
 

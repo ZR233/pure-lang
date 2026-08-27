@@ -141,6 +141,7 @@ class FrbStudioApi implements StudioApi {
   static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
   static bool _rustInitialized = false;
+  static ConfigRecoveryNotice? _pendingConfigRecoveryNotice;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
@@ -152,6 +153,7 @@ class FrbStudioApi implements StudioApi {
     _initFuture = null;
     _shutdownFuture = null;
     _initializationOverrideForTesting = initialization;
+    _pendingConfigRecoveryNotice = null;
   }
 
   static Future<void> _ensureReady() {
@@ -173,7 +175,11 @@ class FrbStudioApi implements StudioApi {
         } else {
           await RustLib.init();
           _rustInitialized = true;
-          await frb.startStudioRuntime();
+          final startup = await frb.startStudioRuntime();
+          final recovery = startup.configRecovery;
+          _pendingConfigRecoveryNotice = recovery == null
+              ? null
+              : ConfigRecoveryNotice(backupPath: recovery.backupPath);
         }
       } catch (error, stackTrace) {
         if (identical(_initFuture, attempt)) {
@@ -208,6 +214,7 @@ class FrbStudioApi implements StudioApi {
       RustLib.dispose();
       _rustInitialized = false;
       _initFuture = null;
+      _pendingConfigRecoveryNotice = null;
     }
   }
 
@@ -226,7 +233,12 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> readStudioState() async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(await _bridgeCall(frb.readStudioState));
+    final state = studioStateFromFrbSnapshot(
+      await _bridgeCall(frb.readStudioState),
+    );
+    final recovery = _pendingConfigRecoveryNotice;
+    _pendingConfigRecoveryNotice = null;
+    return state.copyWith(configRecoveryNotice: recovery);
   }
 
   @override

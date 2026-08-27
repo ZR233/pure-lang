@@ -27,7 +27,7 @@ pub use pl_core::config::{
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
-pub use store::{ConfigPaths, ConfigStore};
+pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 15;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";

@@ -181,6 +181,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeConfigRecoveryReport
+  dco_decode_box_autoadd_bridge_config_recovery_report(dynamic raw);
+
+  @protected
   BridgeDegradedResource dco_decode_box_autoadd_bridge_degraded_resource(
     dynamic raw,
   );
@@ -790,6 +794,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCompletedWorkUnit dco_decode_bridge_completed_work_unit(dynamic raw);
 
   @protected
+  BridgeConfigRecoveryReport dco_decode_bridge_config_recovery_report(
+    dynamic raw,
+  );
+
+  @protected
   BridgeConversationRecoveryMode dco_decode_bridge_conversation_recovery_mode(
     dynamic raw,
   );
@@ -1229,6 +1238,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStudioSettingsDto dco_decode_bridge_studio_settings_dto(dynamic raw);
+
+  @protected
+  BridgeStudioStartupResult dco_decode_bridge_studio_startup_result(
+    dynamic raw,
+  );
 
   @protected
   BridgeStudioStateSnapshot dco_decode_bridge_studio_state_snapshot(
@@ -1946,6 +1960,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeConfigRecoveryReport?
+  dco_decode_opt_box_autoadd_bridge_config_recovery_report(dynamic raw);
+
+  @protected
   BridgeModelPricing? dco_decode_opt_box_autoadd_bridge_model_pricing(
     dynamic raw,
   );
@@ -2242,6 +2260,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeCompletedWorkUnit sse_decode_box_autoadd_bridge_completed_work_unit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeConfigRecoveryReport
+  sse_decode_box_autoadd_bridge_config_recovery_report(
     SseDeserializer deserializer,
   );
 
@@ -3009,6 +3033,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeConfigRecoveryReport sse_decode_bridge_config_recovery_report(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeConversationRecoveryMode sse_decode_bridge_conversation_recovery_mode(
     SseDeserializer deserializer,
   );
@@ -3574,6 +3603,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStudioSettingsDto sse_decode_bridge_studio_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioStartupResult sse_decode_bridge_studio_startup_result(
     SseDeserializer deserializer,
   );
 
@@ -4457,6 +4491,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeConfigRecoveryReport?
+  sse_decode_opt_box_autoadd_bridge_config_recovery_report(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelPricing? sse_decode_opt_box_autoadd_bridge_model_pricing(
     SseDeserializer deserializer,
   );
@@ -4815,6 +4855,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_completed_work_unit(
     BridgeCompletedWorkUnit self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_config_recovery_report(
+    BridgeConfigRecoveryReport self,
     SseSerializer serializer,
   );
 
@@ -5695,6 +5741,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_config_recovery_report(
+    BridgeConfigRecoveryReport self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_conversation_recovery_mode(
     BridgeConversationRecoveryMode self,
     SseSerializer serializer,
@@ -6384,6 +6436,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_studio_settings_dto(
     BridgeStudioSettingsDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_startup_result(
+    BridgeStudioStartupResult self,
     SseSerializer serializer,
   );
 
@@ -7461,6 +7519,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
     BridgeAgentProgressDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_config_recovery_report(
+    BridgeConfigRecoveryReport? self,
     SseSerializer serializer,
   );
 

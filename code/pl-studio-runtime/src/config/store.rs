@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{PureError, Result};
 
@@ -19,6 +21,58 @@ pub struct ConfigPaths {
 pub struct ConfigStore {
     paths: ConfigPaths,
     credentials: Arc<dyn CredentialStore>,
+}
+
+/// Studio 启动时自动恢复不兼容配置所生成的报告。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRecoveryReport {
+    backup_path: PathBuf,
+}
+
+impl ConfigRecoveryReport {
+    /// 返回不兼容配置逐字备份的绝对路径。
+    pub fn backup_path(&self) -> &Path {
+        &self.backup_path
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct StartupConfigLoad {
+    pub config: StudioConfig,
+    pub recovery: Option<ConfigRecoveryReport>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConfigIncompatibilityKind {
+    Parse,
+    InlineCredential,
+    Validation,
+}
+
+impl ConfigIncompatibilityKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Parse => "parse",
+            Self::InlineCredential => "inlineCredential",
+            Self::Validation => "validation",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct IncompatibleConfig {
+    kind: ConfigIncompatibilityKind,
+    error: PureError,
+}
+
+impl IncompatibleConfig {
+    fn new(kind: ConfigIncompatibilityKind, error: PureError) -> Self {
+        Self { kind, error }
+    }
+
+    fn into_error(self) -> PureError {
+        self.error
+    }
 }
 
 impl std::fmt::Debug for ConfigStore {
@@ -104,6 +158,28 @@ impl ConfigStore {
         Ok(config)
     }
 
+    pub(crate) fn load_for_startup(&self) -> Result<StartupConfigLoad> {
+        if !self.config_exists() {
+            let mut config = StudioConfig::default_config();
+            self.hydrate_credentials(&mut config)?;
+            return Ok(StartupConfigLoad {
+                config,
+                recovery: None,
+            });
+        }
+        let content = fs::read(self.paths.config_file())?;
+        match parse_startup_config(&content) {
+            Ok(mut config) => {
+                self.hydrate_credentials(&mut config)?;
+                Ok(StartupConfigLoad {
+                    config,
+                    recovery: None,
+                })
+            }
+            Err(incompatible) => self.replace_incompatible_for_startup(&content, incompatible),
+        }
+    }
+
     pub fn load(&self) -> Result<StudioConfig> {
         let content = fs::read_to_string(self.paths.config_file())?;
         let mut config = parse_current_config(&content)?;
@@ -144,6 +220,45 @@ impl ConfigStore {
             provider.bearer_token = self.credentials.load(provider_id.as_str())?;
         }
         Ok(())
+    }
+
+    fn replace_incompatible_for_startup(
+        &self,
+        original: &[u8],
+        incompatible: IncompatibleConfig,
+    ) -> Result<StartupConfigLoad> {
+        self.replace_incompatible_for_startup_with(
+            original,
+            incompatible,
+            |config_path, persisted| {
+                pl_core::atomic_file::write_file_atomically(config_path, persisted)
+                    .map_err(Into::into)
+            },
+        )
+    }
+
+    fn replace_incompatible_for_startup_with(
+        &self,
+        original: &[u8],
+        incompatible: IncompatibleConfig,
+        replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<StartupConfigLoad> {
+        let mut config = StudioConfig::default_config();
+        config.validate()?;
+        let persisted = serialize_persisted_config(&config)?;
+        self.hydrate_credentials(&mut config)?;
+        let backup_path = write_rejected_backup(self.paths.config_file(), original)?;
+        replace(self.paths.config_file(), persisted.as_bytes())?;
+        tracing::warn!(
+            config_path = %self.paths.config_file().display(),
+            backup_path = %backup_path.display(),
+            incompatibility = incompatible.kind.as_str(),
+            "replaced incompatible Studio config with current defaults"
+        );
+        Ok(StartupConfigLoad {
+            config,
+            recovery: Some(ConfigRecoveryReport { backup_path }),
+        })
     }
 
     fn persisted_provider_ids(&self) -> Result<BTreeSet<String>> {
@@ -219,8 +334,25 @@ impl ConfigStore {
 }
 
 fn parse_current_config(content: &str) -> Result<StudioConfig> {
+    parse_config(content).map_err(IncompatibleConfig::into_error)
+}
+
+fn parse_startup_config(content: &[u8]) -> std::result::Result<StudioConfig, IncompatibleConfig> {
+    let content = std::str::from_utf8(content).map_err(|error| {
+        IncompatibleConfig::new(
+            ConfigIncompatibilityKind::Parse,
+            PureError::ConfigError(format!("failed to parse Studio config as UTF-8: {error}")),
+        )
+    })?;
+    parse_config(content)
+}
+
+fn parse_config(content: &str) -> std::result::Result<StudioConfig, IncompatibleConfig> {
     let config: StudioConfig = toml::from_str(content).map_err(|error| {
-        PureError::ConfigError(format!("failed to parse Studio config: {error}"))
+        IncompatibleConfig::new(
+            ConfigIncompatibilityKind::Parse,
+            PureError::ConfigError(format!("failed to parse Studio config: {error}")),
+        )
     })?;
     if config
         .models
@@ -228,13 +360,64 @@ fn parse_current_config(content: &str) -> Result<StudioConfig> {
         .values()
         .any(|provider| provider.bearer_token.is_some())
     {
-        return Err(PureError::ConfigError(
-            "schema 15 forbids inline provider bearer_token; use the Studio credential store"
-                .to_string(),
+        return Err(IncompatibleConfig::new(
+            ConfigIncompatibilityKind::InlineCredential,
+            PureError::ConfigError(
+                "schema 15 forbids inline provider bearer_token; use the Studio credential store"
+                    .to_string(),
+            ),
         ));
     }
-    config.validate()?;
+    config
+        .validate()
+        .map_err(|error| IncompatibleConfig::new(ConfigIncompatibilityKind::Validation, error))?;
     Ok(config)
+}
+
+fn write_rejected_backup(config_path: &Path, content: &[u8]) -> Result<PathBuf> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    write_rejected_backup_at(config_path, content, stamp)
+}
+
+fn write_rejected_backup_at(config_path: &Path, content: &[u8], stamp: u128) -> Result<PathBuf> {
+    for collision in 0..u32::MAX {
+        let backup_path = rejected_backup_path(config_path, stamp, collision);
+        let mut backup = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup_path)
+        {
+            Ok(backup) => backup,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let result = backup.write_all(content).and_then(|()| backup.sync_all());
+        if let Err(error) = result {
+            drop(backup);
+            let _ = fs::remove_file(&backup_path);
+            return Err(error.into());
+        }
+        return Ok(backup_path);
+    }
+    Err(PureError::ConfigError(
+        "could not allocate a unique Studio config backup path".to_string(),
+    ))
+}
+
+fn rejected_backup_path(config_path: &Path, stamp: u128, collision: u32) -> PathBuf {
+    let file_name = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(super::STUDIO_CONFIG_FILE_NAME);
+    let suffix = if collision == 0 {
+        format!("rejected.{stamp}.bak")
+    } else {
+        format!("rejected.{stamp}.{collision}.bak")
+    };
+    config_path.with_file_name(format!("{file_name}.{suffix}"))
 }
 
 fn serialize_persisted_config(config: &StudioConfig) -> Result<String> {
@@ -286,6 +469,42 @@ mod tests {
         )
     }
 
+    fn assert_recovered_with_backup(
+        store: &ConfigStore,
+        startup: &StartupConfigLoad,
+        original: &[u8],
+    ) {
+        assert_eq!(startup.config, StudioConfig::default_config());
+        let report = startup.recovery.as_ref().unwrap();
+        assert_eq!(
+            report.backup_path().parent(),
+            Some(store.paths().config_dir())
+        );
+        assert!(
+            report
+                .backup_path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("config.toml.rejected.")
+        );
+        assert_eq!(fs::read(report.backup_path()).unwrap(), original);
+        assert_eq!(store.load().unwrap(), StudioConfig::default_config());
+    }
+
+    fn rejected_backups(store: &ConfigStore) -> Vec<PathBuf> {
+        fs::read_dir(store.paths().config_dir())
+            .into_iter()
+            .flatten()
+            .filter_map(std::result::Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("config.toml.rejected."))
+            })
+            .collect()
+    }
+
     #[test]
     fn save_persists_no_secret_and_load_hydrates_from_credential_store() {
         let store = test_store("roundtrip");
@@ -307,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn old_schema_is_rejected_without_rewriting_the_file() {
+    fn old_schema_is_backed_up_and_replaced_during_startup() {
         let store = test_store("old-schema");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
@@ -315,50 +534,44 @@ mod tests {
             .replace("schema_version = 15", "schema_version = 14");
         fs::write(store.paths().config_file(), &legacy).unwrap();
 
-        let error = store.load_or_default().unwrap_err();
+        let startup = store.load_for_startup().unwrap();
 
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported Studio config schema version: 14")
-        );
-        assert_eq!(
-            fs::read_to_string(store.paths().config_file()).unwrap(),
-            legacy
-        );
+        assert_recovered_with_backup(&store, &startup, legacy.as_bytes());
     }
 
     #[test]
-    fn malformed_config_is_rejected_without_rewriting_the_file() {
+    fn future_schema_is_backed_up_and_replaced_during_startup() {
+        let store = test_store("future-schema");
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let future = toml::to_string_pretty(&StudioConfig::default_config())
+            .unwrap()
+            .replace("schema_version = 15", "schema_version = 4294967295");
+        fs::write(store.paths().config_file(), &future).unwrap();
+
+        let startup = store.load_for_startup().unwrap();
+
+        assert_recovered_with_backup(&store, &startup, future.as_bytes());
+    }
+
+    #[test]
+    fn malformed_config_is_backed_up_and_replaced_during_startup() {
         let store = test_store("malformed");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         fs::write(store.paths().config_file(), "not-toml").unwrap();
 
-        let error = store.load_or_default().unwrap_err();
+        let startup = store.load_for_startup().unwrap();
 
-        assert!(error.to_string().contains("failed to parse Studio config"));
-        assert_eq!(
-            fs::read_to_string(store.paths().config_file()).unwrap(),
-            "not-toml"
-        );
+        assert_recovered_with_backup(&store, &startup, b"not-toml");
     }
 
     #[test]
-    fn schema_15_inline_bearer_token_is_rejected_without_credential_access() {
-        let credentials = Arc::new(MemoryCredentialStore::default());
+    fn inline_bearer_token_is_backed_up_without_accessing_legacy_credentials() {
+        let credentials = Arc::new(RecordingCredentialStore::default());
         let store = ConfigStore::with_credential_store(
             ConfigPaths::from_home(temp_home("inline-secret")),
             credentials.clone(),
         );
-        let mut config = StudioConfig::default_config();
-        let provider_id = config
-            .models
-            .providers
-            .keys()
-            .next()
-            .unwrap()
-            .as_str()
-            .to_string();
+        let mut config = config_with_provider_secret("legacy-provider", "forbidden-secret");
         config
             .models
             .providers
@@ -373,17 +586,27 @@ mod tests {
         )
         .unwrap();
 
-        let error = store.load_or_default().unwrap_err();
+        let original = fs::read(store.paths().config_file()).unwrap();
+        let startup = store.load_for_startup().unwrap();
         let persisted = fs::read_to_string(store.paths().config_file()).unwrap();
 
-        assert!(error.to_string().contains("schema 15 forbids inline"));
-        assert!(persisted.contains("forbidden-secret"));
-        assert!(persisted.contains("bearer_token ="));
-        assert_eq!(credentials.load(&provider_id).unwrap(), None);
+        assert_eq!(startup.config, StudioConfig::default_config());
+        assert_eq!(
+            fs::read(startup.recovery.unwrap().backup_path()).unwrap(),
+            original
+        );
+        assert!(!persisted.contains("forbidden-secret"));
+        assert!(!persisted.contains("bearer_token ="));
+        assert_eq!(
+            credentials.loads.lock().unwrap().as_slice(),
+            ["deepseek".to_string()]
+        );
+        assert!(credentials.saves.lock().unwrap().is_empty());
+        assert!(credentials.deletes.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn invalid_current_schema_config_is_rejected_without_rewriting_the_file() {
+    fn invalid_current_schema_config_is_backed_up_and_replaced_during_startup() {
         let store = test_store("invalid-current-schema");
         let mut invalid = StudioConfig::default_config();
         invalid.models.providers.clear();
@@ -391,13 +614,9 @@ mod tests {
         let invalid_toml = toml::to_string_pretty(&invalid).unwrap();
         fs::write(store.paths().config_file(), &invalid_toml).unwrap();
 
-        let error = store.load_or_default().unwrap_err();
+        let startup = store.load_for_startup().unwrap();
 
-        assert!(!error.to_string().is_empty());
-        assert_eq!(
-            fs::read_to_string(store.paths().config_file()).unwrap(),
-            invalid_toml
-        );
+        assert_recovered_with_backup(&store, &startup, invalid_toml.as_bytes());
     }
 
     #[test]
@@ -405,14 +624,14 @@ mod tests {
         let store = test_store("config-read-failure");
         fs::create_dir_all(store.paths().config_file()).unwrap();
 
-        let error = store.load_or_default().unwrap_err();
+        let error = store.load_for_startup().unwrap_err();
 
         assert!(!error.to_string().is_empty());
         assert!(store.paths().config_file().is_dir());
     }
 
     #[test]
-    fn malformed_config_fails_before_credential_read() {
+    fn default_credential_failure_preserves_incompatible_config() {
         let credentials = Arc::new(ReadbackFailingCredentialStore::default());
         let store = ConfigStore::with_credential_store(
             ConfigPaths::from_home(temp_home("replacement-credential-failure")),
@@ -422,13 +641,69 @@ mod tests {
         fs::write(store.paths().config_file(), "not-toml").unwrap();
         credentials.reads_until_failure.lock().unwrap().replace(0);
 
-        let error = store.load_or_default().unwrap_err().to_string();
+        let error = store.load_for_startup().unwrap_err().to_string();
 
-        assert!(error.contains("failed to parse Studio config"));
+        assert!(error.contains("readback failure"));
         assert_eq!(
             fs::read_to_string(store.paths().config_file()).unwrap(),
             "not-toml"
         );
+        assert!(rejected_backups(&store).is_empty());
+    }
+
+    #[test]
+    fn backup_writer_uses_a_non_overwriting_collision_suffix() {
+        let home = temp_home("backup-collision");
+        let config_path = home.join("config.toml");
+        let first = rejected_backup_path(&config_path, 42, 0);
+        fs::write(&first, "existing").unwrap();
+
+        let backup = write_rejected_backup_at(&config_path, b"original", 42).unwrap();
+
+        assert_eq!(backup, rejected_backup_path(&config_path, 42, 1));
+        assert_eq!(fs::read_to_string(first).unwrap(), "existing");
+        assert_eq!(fs::read(backup).unwrap(), b"original");
+    }
+
+    #[test]
+    fn backup_writer_failure_does_not_create_a_partial_backup() {
+        let home = temp_home("backup-failure");
+        let missing = home.join("missing").join("config.toml");
+
+        let error = write_rejected_backup_at(&missing, b"original", 42).unwrap_err();
+
+        assert!(!error.to_string().is_empty());
+        assert!(!rejected_backup_path(&missing, 42, 0).exists());
+    }
+
+    #[test]
+    fn atomic_replacement_failure_preserves_original_after_backup() {
+        let store = test_store("replacement-failure");
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let original = b"not-toml";
+        fs::write(store.paths().config_file(), original).unwrap();
+        let incompatible = IncompatibleConfig::new(
+            ConfigIncompatibilityKind::Parse,
+            PureError::ConfigError("invalid test config".to_string()),
+        );
+
+        let error = store
+            .replace_incompatible_for_startup_with(
+                original,
+                incompatible,
+                |_config_path, _persisted| {
+                    Err(PureError::ConfigError(
+                        "injected replacement failure".to_string(),
+                    ))
+                },
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("injected replacement failure"));
+        assert_eq!(fs::read(store.paths().config_file()).unwrap(), original);
+        let backups = rejected_backups(&store);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read(&backups[0]).unwrap(), original);
     }
 
     #[test]
@@ -538,6 +813,30 @@ mod tests {
         }
         config.models.providers.insert(provider_id, provider);
         config
+    }
+
+    #[derive(Default)]
+    struct RecordingCredentialStore {
+        loads: Mutex<Vec<String>>,
+        saves: Mutex<Vec<String>>,
+        deletes: Mutex<Vec<String>>,
+    }
+
+    impl CredentialStore for RecordingCredentialStore {
+        fn load(&self, provider_id: &str) -> Result<Option<String>> {
+            self.loads.lock().unwrap().push(provider_id.to_string());
+            Ok(None)
+        }
+
+        fn save(&self, provider_id: &str, _secret: &str) -> Result<()> {
+            self.saves.lock().unwrap().push(provider_id.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, provider_id: &str) -> Result<()> {
+            self.deletes.lock().unwrap().push(provider_id.to_string());
+            Ok(())
+        }
     }
 
     #[derive(Default)]

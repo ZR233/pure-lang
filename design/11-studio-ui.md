@@ -245,8 +245,11 @@ typed recovery issue：健康内容继续可用，故障项显示错误与安全
 
 Bridge 只暴露一个 `startStudioRuntime` 启动 command。它完成 SQLite、ConfigRuntime、durable
 recovery、Thread framework/MCP owner 和 system Skills 固定目录的全量重建，随后发布 runtime ready。
-Flutter 再调用纯查询 `readStudioState`，本地选择健康 Project/root Thread，并通过一次
-`activateProject` 执行该 Project 的 LSP membership/probe 与 Skills discovery。
+启动结果同时携带 runtime snapshot 与可选的配置恢复报告；报告只包含逐字备份的绝对路径，不进入
+产品事件、SQLite 或长期 Recovery state。Flutter 再调用纯查询 `readStudioState`，把该报告一次性
+附加到进程内壳层状态，本地选择健康 Project/root Thread，并通过一次 `activateProject` 执行该
+Project 的 LSP membership/probe 与 Skills discovery。配置恢复横幅说明已恢复默认设置、展示备份
+路径并允许关闭；关闭后页面重建、状态刷新和 lag resync 不得再次显示，同次启动也不得重复消费。
 
 启动后的任何页面刷新、Widget 重建、窗口恢复和 product/thread lag resync 都只读取最新
 canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或默认 Thread 创建。

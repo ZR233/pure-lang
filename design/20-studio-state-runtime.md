@@ -129,7 +129,8 @@ FRB 的 `readStudioState` 与 HTTP 的 `GET /api/v1/state` 都只机械调用该
 ## 20.4 启动、Project 与 Thread
 
 每个宿主只允许一次启动，顺序固定为：解析绝对 Studio home；取得 `runtime.lock` 独占锁；打开并
-校验 SQLite；加载 `ConfigRuntime` 与 Usage/Updater last-known cache；从冷基线建立 Project 小集合
+校验 SQLite；加载 `ConfigRuntime`，若配置内容不兼容则先逐字备份、再原子替换为当前默认配置并
+生成一次性恢复报告；加载 Usage/Updater last-known cache；从冷基线建立 Project 小集合
 目录；执行持久任务恢复扫描并把非终态 Task 聚合分页装载到 TaskRuntime（终态 Task 是冷数据，
 不参与启动装载）；启动 Thread framework；只为钉住集合（queued input、pending
 Interaction、活动 Task 引用）恢复 ThreadActor、恢复交互并 materialize pending wake，其余 Thread
@@ -145,6 +146,11 @@ HTTP server 还必须成功绑定 loopback listener 才算 ready。`openapi` 子
 runtime、不取得实例锁。Ctrl-C/SIGTERM 首次触发停止接受请求、终止 SSE、完整 runtime shutdown
 并等待 persistence/MCP/LSP 收束；第二次信号才允许强制退出。FRB 的桌面生命周期使用同一个
 runtime 状态机，不保留第二套 `BridgeLifecycle`。
+
+配置启动恢复只处理旧/未知 schema、无法解析、内联 provider 凭据和当前 schema 校验失败；文件
+读取、默认 provider 凭据读取、备份或原子替换失败继续使启动失败并保留原配置。恢复不访问、迁移
+或删除旧 provider 凭据。`startStudioRuntime` 的桌面返回值携带可选恢复报告，HTTP 宿主只记录同一
+恢复事实；运行期 `reloadSettingsFromDisk` 保持严格校验且不触发该流程。
 
 注册 durable child Thread 时，其运行时身份就是该 child 的 `ThreadId`；只校验它不等于所属
 `rootThreadId`，不能把 child 自己的合法 `ThreadId` 误判成 root 身份。历史 closed child 也必须能

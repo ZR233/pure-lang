@@ -188,6 +188,11 @@ struct ProjectActivation {
 }
 
 impl StudioRuntime {
+    /// 返回本次启动构造阶段产生的配置恢复报告。
+    pub fn startup_config_recovery(&self) -> Option<crate::config::ConfigRecoveryReport> {
+        self.config_runtime.startup_recovery()
+    }
+
     pub(crate) fn ensure_persistence_accepts_new_work(&self) -> Result<()> {
         let snapshot = self.agent_facility.product_events.persistence_state();
         if snapshot.state.accepts_new_work() {

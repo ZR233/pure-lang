@@ -57,6 +57,64 @@ void registerRecoveryIssueTests() {
     },
   );
 
+  testWidgets(
+    'startup config recovery notice shows its backup once and can be dismissed',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      const backupPath = r'C:\Users\tester\.pure\config.toml.rejected.42.bak';
+      final api = _FakeStudioApi(
+        _noProjectState().copyWith(
+          configRecoveryNotice: const ConfigRecoveryNotice(
+            backupPath: backupPath,
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('config-recovery-banner')),
+        findsOneWidget,
+      );
+      expect(find.text('Backup: $backupPath'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('config-recovery-dismiss')));
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('config-recovery-banner')),
+        findsNothing,
+      );
+
+      api.emitGlobal(
+        const StudioBridgeEvent(
+          payload: PersistenceStateChangedPayload(
+            PersistenceStateSnapshot(
+              revision: 2,
+              state: ReadyPersistenceState(pendingCommits: 0),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('config-recovery-banner')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('zero-project bootstrap renders a healthy empty shell', (
     tester,
   ) async {
