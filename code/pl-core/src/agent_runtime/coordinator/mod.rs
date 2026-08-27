@@ -351,7 +351,7 @@ async fn restore_agent<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
     actors: &AgentRegistry,
-    agent: RestoredAgentRuntime,
+    mut agent: RestoredAgentRuntime,
     options: AgentRuntimeOptions,
 ) -> AgentRuntimeResult<AgentSnapshot>
 where
@@ -362,11 +362,10 @@ where
         return Ok(existing);
     }
     let thread_events = runtime.thread_events.clone();
-    if let Some(restored) = agent.thread_snapshot.as_ref() {
-        thread_events
-            .replace_snapshot(restored.snapshot.clone())
-            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-    }
+    let thread_snapshot = super::runtime::normalize_restored_thread_snapshot(&mut agent)?;
+    thread_events
+        .replace_snapshot(thread_snapshot)
+        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     let recovered = super::runtime::recover_interrupted_turns(host, &thread_events, vec![agent])
         .await?
         .pop()

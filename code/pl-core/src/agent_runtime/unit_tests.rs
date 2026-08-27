@@ -319,6 +319,40 @@ async fn registration_persists_non_empty_initial_transcript_as_baseline() {
     runtime.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn lazy_restore_without_thread_snapshot_initializes_subscription_channel() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let thread_id = ThreadId::new("lazy-root").unwrap();
+    repository.states.lock().unwrap().insert(
+        thread_id.clone(),
+        registration("lazy-root", "chat").into_durable_state(),
+    );
+    let restored = repository
+        .restore_thread(&thread_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    handle.restore_agent(restored).await.unwrap();
+    let mut subscription = handle
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread_id.to_string(),
+        })
+        .unwrap();
+
+    let update = subscription.recv().await.unwrap();
+    assert!(matches!(
+        update,
+        pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot }
+            if snapshot.thread.id == thread_id.as_str()
+                && snapshot.revision == 0
+    ));
+    runtime.shutdown().await.unwrap();
+}
+
 #[derive(Clone)]
 struct TestTurnFactory {
     mode: FactoryMode,

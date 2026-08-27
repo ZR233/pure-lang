@@ -68,40 +68,10 @@ where
         let thread_events = ThreadEventBus::new(options.thread_events);
         let thread_event_handle = thread_events.handle();
         for agent in &mut restored {
-            let snapshot = agent
-                .thread_snapshot
-                .take()
-                .map(|restored| restored.snapshot)
-                .unwrap_or_else(|| {
-                    let mut snapshot = pl_protocol::ThreadSnapshot::empty(
-                        agent.state.snapshot.identity.id.as_str(),
-                    );
-                    snapshot.revision = agent.state.session.thread_revision;
-                    snapshot
-                });
-            let thread_id = ThreadId::new(snapshot.thread.id.clone())
-                .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-            if agent.state.snapshot.identity.id != thread_id {
-                return Err(AgentRuntimeError::ThreadMismatch {
-                    agent_id: agent.state.snapshot.identity.id.clone(),
-                    expected: agent.state.snapshot.identity.id.clone(),
-                    actual: thread_id,
-                });
-            }
-            if agent.state.session.thread_revision != snapshot.revision {
-                tracing::warn!(
-                    agent_id = %agent.state.snapshot.identity.id,
-                    thread_id = %agent.state.snapshot.identity.id,
-                    checkpoint = agent.state.session.thread_revision,
-                    canonical = snapshot.revision,
-                    "repairing stale thread revision during restore"
-                );
-                agent.state.session.thread_revision = snapshot.revision;
-            }
+            let snapshot = normalize_restored_thread_snapshot(agent)?;
             thread_event_handle
                 .replace_snapshot(snapshot.clone())
                 .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-            agent.thread_snapshot = Some(super::RestoredThreadSnapshot { snapshot });
         }
         let restored = recover_interrupted_turns(&host, &thread_event_handle, restored).await?;
         let handle = spawn_coordinator(host.clone(), restored, options, thread_events)?;
@@ -122,6 +92,44 @@ where
     pub async fn shutdown(&self) -> AgentRuntimeResult<()> {
         self.handle.shutdown().await
     }
+}
+
+pub(super) fn normalize_restored_thread_snapshot(
+    agent: &mut RestoredAgentRuntime,
+) -> AgentRuntimeResult<pl_protocol::ThreadSnapshot> {
+    let snapshot = agent
+        .thread_snapshot
+        .take()
+        .map(|restored| restored.snapshot)
+        .unwrap_or_else(|| {
+            let mut snapshot =
+                pl_protocol::ThreadSnapshot::empty(agent.state.snapshot.identity.id.as_str());
+            snapshot.revision = agent.state.session.thread_revision;
+            snapshot
+        });
+    let thread_id = ThreadId::new(snapshot.thread.id.clone())
+        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+    if agent.state.snapshot.identity.id != thread_id {
+        return Err(AgentRuntimeError::ThreadMismatch {
+            agent_id: agent.state.snapshot.identity.id.clone(),
+            expected: agent.state.snapshot.identity.id.clone(),
+            actual: thread_id,
+        });
+    }
+    if agent.state.session.thread_revision != snapshot.revision {
+        tracing::warn!(
+            agent_id = %agent.state.snapshot.identity.id,
+            thread_id = %agent.state.snapshot.identity.id,
+            checkpoint = agent.state.session.thread_revision,
+            canonical = snapshot.revision,
+            "repairing stale thread revision during restore"
+        );
+        agent.state.session.thread_revision = snapshot.revision;
+    }
+    agent.thread_snapshot = Some(super::RestoredThreadSnapshot {
+        snapshot: snapshot.clone(),
+    });
+    Ok(snapshot)
 }
 
 /// 收束恢复出的遗留 active Turn/Claimed input，并派生 `RecoveryCancelledTurn`。

@@ -182,7 +182,10 @@ mail ID 的 durable hidden input 在 fresh Turn 继续，绝不复活已 termina
 
 重启无法恢复物理连接。repository 在 manager 启动前收束钉住集合遗留的 active Turn/Item、恢复
 queued input 和 pending Interaction；manager 只为钉住集合创建 idle ThreadActor，其余 Thread 惰性
-驻留（见 19.6），订阅、提交输入或 Task 恢复引用时按需恢复。任何恢复路径都不自动执行模型。
+驻留（见 19.6），订阅、提交输入或 Task 恢复引用时按需恢复。启动恢复与单 Thread 惰性恢复遵循
+同一初始化契约：durable document 没有独立 Thread snapshot 时，以 document 的 Thread revision
+创建空的 authoritative snapshot，并在 actor 对外可见前注册 ThreadEventBus channel。任何恢复路径
+都不自动执行模型。
 
 ThreadActor 另外提供 idle-only 的 conversation recovery 命令。Preview 读取 canonical session、
 working state、Turn 消费的 mailbox input 与 runtime/session revision，不产生 mutation；Apply 同时
