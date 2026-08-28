@@ -1535,6 +1535,50 @@ void registerTimelineToolTests() {
       );
     },
   );
+
+  testWidgets('reasoning summary equal to Thinking label is announced once', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-thinking-only',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Thinking'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromThreadItems([reasoning]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.thinking,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Thinking'), findsOneWidget);
+    expect(find.textContaining('Thinking · Thinking'), findsNothing);
+    expect(find.bySemanticsLabel('Thinking'), findsOneWidget);
+    expect(find.bySemanticsLabel('Thinking · Thinking'), findsNothing);
+  });
 }
 
 class _DisableAnimations extends StatelessWidget {

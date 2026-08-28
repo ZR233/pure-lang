@@ -609,7 +609,7 @@ class _ReasoningPart extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = _reasoningGroupLabel(context, group, isCurrentActivity);
     final secondary = isCurrentActivity
-        ? _reasoningCurrentSummary(group)
+        ? _reasoningCurrentSummary(group, label)
         : null;
     final semanticsLabel = secondary == null ? label : '$label · $secondary';
     final details = group.details;
@@ -704,9 +704,18 @@ String _reasoningGroupLabel(
 }
 
 /// 当前 thinking 活动块作为次要信息展示的最迟 reasoning 摘要；无有效摘要返回 null。
-String? _reasoningCurrentSummary(TimelineReasoningGroup group) {
+///
+/// 与本地化主标签大小写无关相同时视为重复（如摘要本身就是 “Thinking”），
+/// 返回 null 以避免 “Thinking · Thinking” 与重复 live-region 播报。
+String? _reasoningCurrentSummary(
+  TimelineReasoningGroup group,
+  String mainLabel,
+) {
   final latest = group.latestSummary?.trim();
   if (latest == null || latest.isEmpty) {
+    return null;
+  }
+  if (latest.toLowerCase() == mainLabel.toLowerCase()) {
     return null;
   }
   return latest;
