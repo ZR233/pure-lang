@@ -38,6 +38,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
           key: StudioDriverKeys.timelineToolGroupSummary(group.id),
           container: true,
           button: true,
+          liveRegion: widget.isCurrentActivity,
           expanded: expanded,
           label: activityLabel,
           onTap: _toggleExpanded,
@@ -55,10 +56,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                 isCurrentActivity: widget.isCurrentActivity,
                 isIssue: group.issueCount > 0,
                 expanded: expanded,
-                showWaitPulse:
-                    widget.isCurrentActivity &&
-                    !expanded &&
-                    group.items.any(_isExecutingToolItem),
+                showWaitPulse: widget.isCurrentActivity && !expanded,
               ),
             ),
           ),

@@ -620,6 +620,7 @@ class _ReasoningPart extends StatelessWidget {
         Semantics(
           container: true,
           button: true,
+          liveRegion: isCurrentActivity,
           expanded: expanded,
           label: semanticsLabel,
           onTap: onToggle,

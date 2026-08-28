@@ -1315,6 +1315,226 @@ void registerTimelineToolTests() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'collapsed current tool group keeps one pulse despite awaiting and terminal items',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final parts = [
+        _toolTimelinePart(
+          id: 'tool-await-collapse',
+          groupId: 'group-collapse',
+          turnId: 'turn-collapse',
+          name: 'exec',
+          status: 'awaitingApproval',
+          arguments: jsonEncode({'command': 'rm -rf'}),
+        ),
+        _toolTimelinePart(
+          id: 'tool-done-collapse',
+          groupId: 'group-collapse',
+          turnId: 'turn-collapse',
+          order: 1,
+          name: 'read_file',
+          status: 'succeeded',
+          arguments: jsonEncode({'path': 'lib/main.dart'}),
+        ),
+      ];
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts(parts),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-collapse',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 折叠态(current activity)仍应保留一个组级脉冲，不能因子项是
+      // awaitingApproval / 终态而消失。
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 展开后 item 脉冲仍只属于执行中状态，awaitingApproval 与终态不显示。
+      expect(
+        find.byKey(
+          const ValueKey('timeline-tool-item-pulse:tool-await-collapse'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('timeline-tool-item-pulse:tool-done-collapse'),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'current reasoning and tool group stay live regions while history is quiet',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final reasoning = _threadItemFixture(
+        id: 'reasoning-live',
+        threadId: 'session-1',
+        turnId: 'turn-live',
+        ordinal: 0,
+        kind: ThreadItemKind.reasoning,
+        channel: null,
+        reasoningSummary: const ['## Inspecting the live region'],
+        status: 'streaming',
+      );
+      final reasoningRows = timelineRowsFromThreadItems([reasoning]);
+
+      // 当前 thinking 的 reasoning 活动块是 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: reasoningRows,
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final currentReasoning = find.bySemanticsLabel(
+        'Thinking · Inspecting the live region',
+      );
+      expect(currentReasoning, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(currentReasoning)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+
+      // 历史(终态)reasoning 活动块不带 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: reasoningRows,
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const CompletedStudioTurnState(
+                    startedAt: 1,
+                    completedAt: 2,
+                    completion: StudioTurnCompletion.normal,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final historyReasoning = find.bySemanticsLabel(
+        'Inspecting the live region',
+      );
+      expect(historyReasoning, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(historyReasoning)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isFalse,
+      );
+
+      // 当前 runningTool 的工具组摘要也是 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts([
+                  _toolTimelinePart(
+                    id: 'tool-live',
+                    groupId: 'group-live',
+                    turnId: 'turn-live',
+                    name: 'exec',
+                    status: 'running',
+                    arguments: '{}',
+                  ),
+                ]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final currentToolGroup = find.bySemanticsLabel('exec running');
+      expect(currentToolGroup, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(currentToolGroup)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+    },
+  );
 }
 
 class _DisableAnimations extends StatelessWidget {
