@@ -687,7 +687,10 @@ mod tests {
         InteractionScope, ResolveUserInput, RunningTurnState, SkillActivation,
         THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadItemState, ThreadSnapshot,
     };
-    use pl_trace::{TracePartAction, TracePartCompletion};
+    use pl_trace::{
+        RunningTraceAgent, TraceAgentIdentity, TraceAgentPart, TraceAgentState, TracePartAction,
+        TracePartCompletion, TraceToolInvocation,
+    };
 
     use super::*;
 
@@ -981,6 +984,95 @@ mod tests {
             projected.notifications[0].notification,
             ThreadNotification::InteractionChanged { .. }
         ));
+    }
+
+    #[test]
+    fn inference_and_tool_starts_publish_wait_phases_before_items() {
+        let inference = started_trace(TracePart::running_inference(
+            "turn-1".to_string(),
+            "inference-1".to_string(),
+            1,
+            7,
+            "inf-1".to_string(),
+            "claude".to_string(),
+        ));
+        let tool = started_trace(TracePart::started_tool(
+            "turn-1".to_string(),
+            "tool-1".to_string(),
+            2,
+            8,
+            TraceToolInvocation::new(
+                "call-1".to_string(),
+                "read_file".to_string(),
+                "{}".to_string(),
+            ),
+        ));
+        let agent = started_trace(TracePart::agent(
+            "turn-1".to_string(),
+            "agent-1".to_string(),
+            3,
+            9,
+            TraceAgentPart::new(
+                TraceAgentIdentity::new(
+                    "agent-1".to_string(),
+                    "/sub".to_string(),
+                    "executor".to_string(),
+                    "do work".to_string(),
+                    1,
+                ),
+                TraceAgentState::Running(RunningTraceAgent),
+            ),
+        ));
+
+        // 每个外部等待 start 都必须先投影 canonical wait phase，再发布对应 ItemStarted；
+        // 客户端在请求发起到终态之间始终有 typed 活动状态，没有无状态窗口。
+        for (trace, expected_phase) in [
+            (inference, TurnPhase::Thinking),
+            (tool, TurnPhase::RunningTool),
+            (agent, TurnPhase::RunningTool),
+        ] {
+            let batch = project_trace_events("thread-1", &snapshot(), &[trace]);
+            assert_wait_phase_then_item(&batch, expected_phase);
+        }
+    }
+
+    fn started_trace(item: TracePart) -> TraceEvent {
+        TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: item.started_sequence(),
+            timestamp: item.created_at(),
+            kind: TraceEventKind::TracePartStarted { item },
+        }
+    }
+
+    fn assert_wait_phase_then_item(batch: &ThreadProjectionBatch, expected_phase: TurnPhase) {
+        assert_eq!(
+            batch.notifications.len(),
+            2,
+            "expected exactly TurnUpdated then ItemStarted, got {:?}",
+            batch
+                .notifications
+                .iter()
+                .map(|envelope| &envelope.notification)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            matches!(
+                &batch.notifications[0].notification,
+                ThreadNotification::TurnUpdated { turn }
+                    if turn.phase() == Some(expected_phase)
+            ),
+            "expected first notification to be TurnUpdated({expected_phase:?}), got {:?}",
+            batch.notifications[0].notification
+        );
+        assert!(
+            matches!(
+                &batch.notifications[1].notification,
+                ThreadNotification::ItemStarted { .. }
+            ),
+            "expected second notification to be ItemStarted, got {:?}",
+            batch.notifications[1].notification
+        );
     }
 
     fn snapshot() -> ThreadSnapshot {
