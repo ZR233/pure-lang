@@ -55,7 +55,7 @@ impl StudioRuntime {
                 ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
             }
         };
-        Self::with_runtime_state_and_lock(
+        let runtime = Self::with_runtime_state_and_lock(
             store,
             config_store,
             StudioRuntimeState::new(),
@@ -65,7 +65,12 @@ impl StudioRuntime {
         .map_err(|error| {
             tracing::error!(error = %error, "failed to initialize Studio runtime");
             pl_protocol::studio::StudioError::internal()
-        })
+        })?;
+        runtime.hydrate_ssh_servers().await.map_err(|error| {
+            tracing::error!(error = %error, "failed to initialize SSH server registry");
+            pl_protocol::studio::StudioError::storage()
+        })?;
+        Ok(runtime)
     }
 
     #[cfg(test)]
@@ -99,6 +104,30 @@ impl StudioRuntime {
             ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
         let task_runtime =
             TaskRuntime::with_writer(store.clone(), product_events.clone(), writer.clone());
+        let helper_cache = store
+            .attachments_dir()
+            .parent()
+            .map(|home| home.join("remote-helper"));
+        let aarch64_helper = remote_helper_path(
+            "PURE_REMOTE_HELPER_AARCH64",
+            "aarch64-unknown-linux-musl",
+            helper_cache.as_deref(),
+        );
+        let x86_64_helper = remote_helper_path(
+            "PURE_REMOTE_HELPER_X86_64",
+            "x86_64-unknown-linux-musl",
+            helper_cache.as_deref(),
+        );
+        let ssh_manager = std::sync::Arc::new(
+            match std::env::var("PURE_REMOTE_HELPER_MINISIGN_PUBLIC_KEY") {
+                Ok(public_key) => pl_core::remote::SshManager::new_signed(
+                    aarch64_helper,
+                    x86_64_helper,
+                    public_key,
+                )?,
+                Err(_) => pl_core::remote::SshManager::new(aarch64_helper, x86_64_helper),
+            },
+        );
         let persistence = StudioAgentRepository::with_writer_and_performance(
             store.clone(),
             writer,
@@ -109,6 +138,7 @@ impl StudioRuntime {
             store.clone(),
             task_runtime.clone(),
             interactions.clone(),
+            ssh_manager.clone(),
         ));
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
@@ -155,9 +185,29 @@ impl StudioRuntime {
             task_runtime,
             task_coordinator,
             attachment_drafts,
+            ssh_manager,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
             initialization_entry_barrier: None,
         })
     }
+}
+
+fn remote_helper_path(
+    variable: &str,
+    target: &str,
+    cache_root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let explicit = std::env::var_os(variable).map(std::path::PathBuf::from);
+    let cached = cache_root.map(|root| root.join(target).join("pl-remote-helper"));
+    let development = std::env::current_dir().ok().map(|root| {
+        root.join("dist/remote-helper")
+            .join(target)
+            .join("pl-remote-helper")
+    });
+    explicit
+        .into_iter()
+        .chain(cached)
+        .chain(development)
+        .find(|path| path.is_file() && path.with_extension("sha256").is_file())
 }

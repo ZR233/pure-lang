@@ -35,6 +35,13 @@ class _FakeStudioApi implements StudioApi {
   int bootstrapCount = 0;
   Object? bootstrapError;
   String? openedProjectPath;
+  List<SshServer> sshServers = const [];
+  SaveSshServerCommand? savedSshServer;
+  String? deletedSshServerId;
+  String? testedSshServerId;
+  String? reconnectedSshServerId;
+  ({String serverId, String? path})? browsedRemoteDirectory;
+  ({String serverId, String path})? openedRemoteProject;
   String? selectedProjectRequest;
   int activateCallCount = 0;
   String? activatedProjectId;
@@ -174,6 +181,86 @@ class _FakeStudioApi implements StudioApi {
   Future<StudioProject> openProject(String path) async {
     openedProjectPath = path;
     return _currentState.projects.first;
+  }
+
+  @override
+  Future<List<SshServer>> listSshServers() async => List.of(sshServers);
+
+  @override
+  Future<SshServer> saveSshServer(SaveSshServerCommand command) async {
+    savedSshServer = command;
+    final server = SshServer(
+      id: command.id ?? 'ssh-created',
+      name: command.name,
+      host: command.host,
+      port: command.port,
+      username: command.username,
+      authKind: command.authKind,
+      identityFile: command.identityFile,
+    );
+    sshServers = [
+      for (final current in sshServers)
+        if (current.id != server.id) current,
+      server,
+    ];
+    return server;
+  }
+
+  @override
+  Future<void> deleteSshServer(String serverId) async {
+    deletedSshServerId = serverId;
+    sshServers = [
+      for (final server in sshServers)
+        if (server.id != serverId) server,
+    ];
+  }
+
+  @override
+  Future<SshConnectionView> testSshConnection(String serverId) async {
+    testedSshServerId = serverId;
+    return SshConnectionView(
+      serverId: serverId,
+      state: 'ready',
+      helperVersion: '0.1.0',
+      architecture: 'aarch64',
+    );
+  }
+
+  @override
+  Future<SshConnectionView> reconnectSshServer(String serverId) async {
+    reconnectedSshServerId = serverId;
+    return SshConnectionView(
+      serverId: serverId,
+      state: 'ready',
+      helperVersion: '0.1.0',
+      architecture: 'aarch64',
+    );
+  }
+
+  @override
+  Future<RemoteDirectoryListing> browseRemoteDirectories(
+    String serverId, {
+    String? path,
+  }) async {
+    browsedRemoteDirectory = (serverId: serverId, path: path);
+    return RemoteDirectoryListing(
+      path: path ?? '/workspace',
+      parent: path == null ? '/' : null,
+      entries: const [
+        RemoteDirectoryEntry(name: 'project', path: '/workspace/project'),
+      ],
+    );
+  }
+
+  @override
+  Future<StudioProject> openRemoteProject(String serverId, String path) async {
+    openedRemoteProject = (serverId: serverId, path: path);
+    return StudioProject(
+      id: 'remote-project',
+      name: 'project',
+      path: path,
+      sshServerId: serverId,
+    );
   }
 
   @override

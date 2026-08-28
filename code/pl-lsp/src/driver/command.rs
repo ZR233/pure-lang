@@ -9,6 +9,7 @@ use super::{
     CommandProbeError, LspProbeOutcome, LspRepairError, LspResolvedCommand, LspServerDriver,
     PROBE_TIMEOUT, run_command_capture,
 };
+use crate::host::LspHostBackend;
 use crate::types::LspMissingComponent;
 
 /// 无特殊初始化需求的通用命令 driver。
@@ -27,13 +28,18 @@ impl Default for CommandDriver {
 }
 
 impl LspServerDriver for CommandDriver {
-    fn probe<'a>(&'a self, command: &'a LspResolvedCommand) -> BoxFuture<'a, LspProbeOutcome> {
+    fn probe<'a>(
+        &'a self,
+        command: &'a LspResolvedCommand,
+        host: Option<&'a dyn LspHostBackend>,
+    ) -> BoxFuture<'a, LspProbeOutcome> {
         async move {
             match run_command_capture(
                 &command.program,
                 &["--version"],
                 PROBE_TIMEOUT,
                 "version check",
+                host,
             )
             .await
             {
@@ -57,6 +63,7 @@ impl LspServerDriver for CommandDriver {
     fn repair<'a>(
         &'a self,
         _component: &'a LspMissingComponent,
+        _host: Option<&'a dyn LspHostBackend>,
     ) -> BoxFuture<'a, Result<(), LspRepairError>> {
         std::future::ready(Err(LspRepairError::NotSupported)).boxed()
     }
@@ -74,7 +81,7 @@ mod tests {
             repair_hint: "unused".to_string(),
         };
 
-        let error = driver.repair(&component).await.unwrap_err();
+        let error = driver.repair(&component, None).await.unwrap_err();
 
         assert!(matches!(&error, LspRepairError::NotSupported), "{error:?}");
     }
@@ -87,7 +94,7 @@ mod tests {
             args: Vec::new(),
         };
 
-        let outcome = driver.probe(&command).await;
+        let outcome = driver.probe(&command, None).await;
 
         assert!(
             matches!(&outcome, LspProbeOutcome::MissingCommand { .. }),

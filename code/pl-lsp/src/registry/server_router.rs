@@ -34,6 +34,7 @@ impl LspRuntimeRegistry {
             ))
         })?;
         let diagnostics = workspace.diagnostics.clone();
+        let host = workspace.host.clone();
         let server = workspace.servers.get_mut(&server_id).ok_or_else(|| {
             LspRuntimeError::Unavailable(format!("LSP server not configured: {server_id}"))
         })?;
@@ -65,6 +66,7 @@ impl LspRuntimeRegistry {
                     resolved.clone(),
                     server.driver.clone(),
                     sink,
+                    host,
                 ));
                 server.client = Some(client.clone());
                 client

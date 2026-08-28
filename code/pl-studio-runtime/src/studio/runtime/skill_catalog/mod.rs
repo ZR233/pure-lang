@@ -88,6 +88,12 @@ impl SkillCatalogRuntime {
             .unwrap_or_else(|| empty_snapshot(project_id))
     }
 
+    pub(in crate::studio) fn system_skills_dir(&self) -> Option<PathBuf> {
+        self.system_skills_dir
+            .as_ref()
+            .map(|path| path.as_ref().clone())
+    }
+
     /// 显式扫描并原子发布 Project catalog。
     pub async fn discover(
         &self,

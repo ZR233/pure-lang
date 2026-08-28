@@ -27,6 +27,11 @@ abstract final class StudioDriverKeys {
   static const lspRefresh = ValueKey<String>('lsp-refresh');
   static const lspProbe = ValueKey<String>('lsp-probe');
   static const lspResetWorkspace = ValueKey<String>('lsp-reset-workspace');
+  static const sshAddServer = ValueKey<String>('ssh-add-server');
+  static const sshDirectoryDialog = ValueKey<String>('ssh-directory-dialog');
+  static const sshOpenCurrentDirectory = ValueKey<String>(
+    'ssh-open-current-directory',
+  );
   static const composerInput = ValueKey<String>('composer-input');
   static const composerSubmit = ValueKey<String>('composer-submit');
   static const composerStop = ValueKey<String>('composer-stop');
@@ -80,6 +85,15 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> settingsTab(String id) =>
       ValueKey<String>('settings-tab-$id');
+
+  static ValueKey<String> sshTest(String id) =>
+      ValueKey<String>('ssh-test-$id');
+
+  static ValueKey<String> sshReconnect(String id) =>
+      ValueKey<String>('ssh-reconnect-$id');
+
+  static ValueKey<String> sshOpen(String id) =>
+      ValueKey<String>('ssh-open-$id');
 
   static ValueKey<String> projectRow(String id) =>
       ValueKey<String>('project-row-$id');

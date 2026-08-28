@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pl_core::path_safety::remove_dir_all_no_follow_async;
 use serde::{Deserialize, Serialize};
 
 use super::backend::{CreateFailureDisposition, LocalWorktreeBackend, WorktreeBackend};
@@ -157,11 +156,7 @@ impl WorktreeManager {
         }
         let path = spec.path;
         let branch = spec.branch;
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| WorktreeError::Io(error.to_string()))?;
-        }
+        self.inner.backend.create_parent(&path).await?;
         let handle = WorktreeHandle { path, branch };
         if let Err(failure) = self
             .inner
@@ -207,24 +202,15 @@ impl WorktreeManager {
             .await
             .err();
 
-        let leaf_error = match tokio::fs::symlink_metadata(&handle.path).await {
-            Ok(_) => {
-                let worktree_root = repo_root.join(WORKTREE_DIR);
-                remove_dir_all_no_follow_async(&worktree_root, &handle.path)
-                    .await
-                    .err()
-                    .map(|error| {
-                        WorktreeError::Io(format!(
-                            "failed to remove {}: {error}",
-                            handle.path.display()
-                        ))
-                    })
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => Some(WorktreeError::Io(format!(
-                "failed to inspect {}: {error}",
-                handle.path.display()
-            ))),
+        let leaf_error = match self.inner.backend.path_exists(&handle.path).await {
+            Ok(true) => self
+                .inner
+                .backend
+                .remove_leaf(&repo_root, &handle.path)
+                .await
+                .err(),
+            Ok(false) => None,
+            Err(error) => Some(error),
         };
 
         let branch_error = self

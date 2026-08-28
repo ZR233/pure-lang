@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::tool::command::CommandBackend;
+use crate::tool::command::ManagedCommand;
 
 use super::{CommandProcessEntry, CommandProcessTransition};
 
@@ -32,7 +33,7 @@ pub(super) async fn wait_for_process_activity(entry: &CommandProcessEntry, yield
 
 pub(super) fn spawn_lifecycle_task<B>(
     entry: Arc<CommandProcessEntry>,
-    mut child: tokio::process::Child,
+    mut child: ManagedCommand,
     timeout: Duration,
     cancellation_token: Option<CancellationToken>,
     backend: Arc<B>,
@@ -46,15 +47,13 @@ pub(super) fn spawn_lifecycle_task<B>(
             LifecycleOutcome::TimedOut => {
                 apply_transition(&entry, CommandProcessTransition::TimeOut).await;
                 close_stdin(&entry).await;
-                backend.terminate(&entry.process_id, child.id()).await;
-                let _ = child.start_kill();
+                backend.terminate(&entry.process_id, child.host_pid()).await;
                 child.wait().await
             }
             LifecycleOutcome::Interrupted => {
                 apply_transition(&entry, CommandProcessTransition::Cancel).await;
                 close_stdin(&entry).await;
-                backend.terminate(&entry.process_id, child.id()).await;
-                let _ = child.start_kill();
+                backend.terminate(&entry.process_id, child.host_pid()).await;
                 child.wait().await
             }
         };
@@ -67,7 +66,7 @@ pub(super) fn spawn_lifecycle_task<B>(
                 apply_transition(
                     &entry,
                     CommandProcessTransition::ProcessExited {
-                        exit_code: status.code(),
+                        exit_code: status.exit_code,
                     },
                 )
                 .await;
@@ -86,13 +85,13 @@ pub(super) fn spawn_lifecycle_task<B>(
 }
 
 enum LifecycleOutcome {
-    Exited(std::io::Result<std::process::ExitStatus>),
+    Exited(std::result::Result<crate::tool::command::CommandExit, String>),
     TimedOut,
     Interrupted,
 }
 
 async fn wait_for_lifecycle_outcome(
-    child: &mut tokio::process::Child,
+    child: &mut ManagedCommand,
     timeout: Duration,
     cancellation_token: Option<CancellationToken>,
 ) -> LifecycleOutcome {

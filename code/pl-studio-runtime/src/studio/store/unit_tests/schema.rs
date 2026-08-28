@@ -12,8 +12,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v15_with_six_state_tasks() {
-    let root = unique_test_root("schema-v15");
+async fn creates_canonical_schema_v16_with_six_state_tasks_and_remote_projects() {
+    let root = unique_test_root("schema-v16");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -23,6 +23,7 @@ async fn creates_canonical_schema_v15_with_six_state_tasks() {
     );
     for table in [
         "projects",
+        "ssh_servers",
         "threads",
         "thread_inputs",
         "thread_submissions",
@@ -311,6 +312,7 @@ async fn schema_v14_working_state_migrates_once_to_typed_objects() {
         ))
         .await
         .unwrap();
+    downgrade_remote_schema_to_v15(store.database()).await;
     store
         .database()
         .execute_unprepared("DROP TABLE studio_objects")
@@ -411,7 +413,45 @@ async fn schema_v14_working_state_migrates_once_to_typed_objects() {
 }
 
 #[tokio::test]
-async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v15() {
+async fn schema_v15_local_projects_migrate_once_to_remote_capable_v16() {
+    let root = unique_test_root("schema-v15-remote-project-migration");
+    let database_path = root.join("studio.sqlite");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open(&database_path).await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    downgrade_remote_schema_to_v15(store.database()).await;
+    drop(store);
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(table_exists(migrated.database(), "ssh_servers").await);
+    assert!(
+        table_columns(migrated.database(), "projects")
+            .await
+            .contains(&"ssh_server_id".to_string())
+    );
+    assert_eq!(
+        migrated
+            .list_projects()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![project.id]
+    );
+
+    drop(migrated);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v16() {
     let root = unique_test_root("schema-v13-attachment-migration");
     tokio::fs::create_dir_all(&root).await.unwrap();
     let database_path = root.join("studio.sqlite");
@@ -450,6 +490,7 @@ async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v15() {
         ))
         .await
         .unwrap();
+    downgrade_remote_schema_to_v15(store.database()).await;
     store
         .database()
         .execute_unprepared(
@@ -544,6 +585,7 @@ async fn failed_v13_attachment_migration_preserves_the_original_database() {
         ))
         .await
         .unwrap();
+    downgrade_remote_schema_to_v15(store.database()).await;
     store
         .database()
         .execute_unprepared(
@@ -596,6 +638,41 @@ async fn failed_v13_attachment_migration_preserves_the_original_database() {
     );
     untouched.close().await.unwrap();
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+async fn downgrade_remote_schema_to_v15(database: &DatabaseConnection) {
+    database
+        .execute_unprepared(
+            "PRAGMA foreign_keys = OFF;
+             PRAGMA legacy_alter_table = ON;
+             DROP INDEX idx_projects_closed_last_opened_at;
+             DROP INDEX idx_projects_local_path;
+             DROP INDEX idx_projects_remote_path;
+             ALTER TABLE projects RENAME TO projects_v15;
+             CREATE TABLE projects (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 name TEXT NOT NULL,
+                 path TEXT NOT NULL UNIQUE,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 last_opened_at INTEGER,
+                 closed INTEGER NOT NULL
+             );
+             INSERT INTO projects (
+                 id, name, path, created_at, updated_at, last_opened_at, closed
+             )
+             SELECT id, name, path, created_at, updated_at, last_opened_at, closed
+             FROM projects_v15;
+             DROP TABLE projects_v15;
+             DROP TABLE ssh_servers;
+             CREATE INDEX idx_projects_closed_last_opened_at
+             ON projects(closed, last_opened_at DESC, updated_at DESC, id DESC);
+             PRAGMA user_version = 15;
+             PRAGMA legacy_alter_table = OFF;
+             PRAGMA foreign_keys = ON;",
+        )
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

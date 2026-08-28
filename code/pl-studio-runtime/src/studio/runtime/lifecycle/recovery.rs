@@ -17,6 +17,9 @@ impl StudioRuntime {
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
         for project in self.store.list_projects().await? {
+            if project.ssh_server_id.is_some() {
+                continue;
+            }
             let Err(error) = resolve_workspace_root(Path::new(&project.path)) else {
                 continue;
             };

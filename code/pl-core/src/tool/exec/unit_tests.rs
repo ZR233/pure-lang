@@ -1,5 +1,8 @@
 use super::*;
-use crate::{CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest};
+use crate::{
+    CommandCaptureStream, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
+    ManagedCommand,
+};
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -125,7 +128,7 @@ async fn local_backend_resolves_native_non_verbatim_working_directory() {
 
     let resolved = backend.resolve_cwd(None, false).await.unwrap();
 
-    assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+    assert!(!resolved.starts_with(r"\\?\"));
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -136,7 +139,7 @@ impl CommandBackend for HostedContractBackend {
         &self,
         cwd: Option<&std::path::Path>,
         allow_workspace_escape: bool,
-    ) -> Result<PathBuf, Self::Error> {
+    ) -> Result<String, Self::Error> {
         self.local.resolve_cwd(cwd, allow_workspace_escape).await
     }
 
@@ -157,11 +160,28 @@ impl CommandBackend for HostedContractBackend {
         ))
     }
 
-    async fn spawn(
-        &self,
-        request: CommandSpawnRequest,
-    ) -> Result<tokio::process::Child, Self::Error> {
+    async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand, Self::Error> {
         self.local.spawn(request).await
+    }
+
+    async fn prepare_output(
+        &self,
+        target: &CommandOutputTarget,
+        command: &str,
+        working_directory: &str,
+    ) -> Result<(), Self::Error> {
+        self.local
+            .prepare_output(target, command, working_directory)
+            .await
+    }
+
+    async fn append_output_chunk(
+        &self,
+        target: &CommandOutputTarget,
+        stream: CommandCaptureStream,
+        chunk: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.local.append_output_chunk(target, stream, chunk).await
     }
 
     async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<(), Self::Error> {

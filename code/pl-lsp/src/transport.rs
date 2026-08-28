@@ -3,7 +3,6 @@ use std::thread::{self, JoinHandle};
 
 use lsp_server::Message;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::process::{ChildStdin, ChildStdout};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio_util::io::SyncIoBridge;
@@ -29,10 +28,14 @@ pub(crate) struct LspTransport {
 }
 
 impl LspTransport {
-    pub(crate) fn spawn(
-        stdin: ChildStdin,
-        stdout: ChildStdout,
-    ) -> LspResult<(Self, mpsc::Receiver<LspResult<Message>>)> {
+    pub(crate) fn spawn<W, R>(
+        stdin: W,
+        stdout: R,
+    ) -> LspResult<(Self, mpsc::Receiver<LspResult<Message>>)>
+    where
+        W: AsyncWrite + Unpin + Send + 'static,
+        R: AsyncRead + Unpin + Send + 'static,
+    {
         Self::spawn_io(stdin, stdout, Handle::current())
     }
 

@@ -18,6 +18,7 @@ use crate::driver::command::CommandDriver;
 use crate::driver::rust_analyzer::RustAnalyzerDriver;
 use crate::types::LspQueryOperation;
 
+pub(crate) use self::matching::glob_match;
 use self::matching::workspace_matches;
 
 /// 内置 rust-analyzer server id。

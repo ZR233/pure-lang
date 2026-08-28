@@ -8,6 +8,7 @@ mod backend;
 mod error;
 mod manager;
 mod reconcile;
+mod remote;
 pub use backend::{LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure};
 pub use error::{WorktreeError, WorktreeFailureCause, WorktreeFailureCauseKind};
 pub use manager::git_compatible_path;
@@ -18,6 +19,7 @@ pub use reconcile::{
     cleanup_task_worktree_resources, inspect_task_worktree_resources,
     reconcile_task_worktree_group, validate_task_worktree_resource_identities,
 };
+pub use remote::RemoteWorktreeBackend;
 
 /// Compares worktree paths using filesystem identity where available and
 /// platform path semantics otherwise.

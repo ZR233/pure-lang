@@ -7,7 +7,7 @@ pub mod worktree;
 
 pub use worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure, WorktreeCreateSpec,
-    WorktreeError, WorktreeHandle, WorktreeManager, WorktreeReconciliation, WorktreeRef,
-    reconcile_task_worktree_group, same_worktree_path,
+    LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeCreateFailure,
+    WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager, WorktreeReconciliation,
+    WorktreeRef, reconcile_task_worktree_group, same_worktree_path,
 };

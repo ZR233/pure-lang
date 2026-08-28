@@ -9,7 +9,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/api/studio/handlers/attachment.dart' as frb_attachment;
+import '../../rust/api/studio/handlers/ssh.dart' as frb_ssh;
 import '../../rust/api/studio/types/attachment.dart' as frb_attachment_types;
+import '../../rust/api/studio/types/ssh.dart' as frb_ssh_types;
 import '../../rust/api/studio/types/thread_stream/item.dart' as frb_item;
 import '../../rust/frb_generated.dart';
 import '../../shared/studio_driver_state.dart';

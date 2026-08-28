@@ -49,12 +49,16 @@ journal 和双库 projection 不再是公共或内部架构边界。
 - `TurnEngine`：模型采样、工具执行、interaction 和上下文压缩；
 - agent control tools：以 `agentPath` 定位 Thread；
 - 通用工具、effect、执行策略、MCP 与 Web Search runtime。
+- `remote::SshManager`：SSH 管理、helper bootstrap、连接状态机、远端 workspace host 与同名工具
+  backend；所有远端业务逻辑仍在本地 core，helper 只提供文件和可观察进程原语。
 
 核心 host 端口只有 `ThreadRepository`、`TurnFactory` 和 `ChildLifecycle`。普通 turn 命令由
 `ThreadHandle` 直接发送给 `ThreadActor`，不经过第二层 coordinator/loop 路由。
 
 `pl-core` 不依赖 SeaORM，不知道 Studio 路径、schema 或 Task 表；`TurnFactory` 直接返回可执行
 的 engine、request 和 policy，不保留只做转发的 kernel façade。
+SSH profile、进程内 secret lease 与 helper asset path 通过 `SshManager` 的 typed 输入注入；
+SQLite、可选 keyring、FRB 和发布缓存的具体实现仍属于 Studio runtime/bridge。
 
 `pl-core` 内部按变化原因拆分编排职责。ThreadActor 的 durable 变更可以在各领域步骤中准备
 不同 facts 和 mutation，但 queue admission、内存状态替换以及提交后事件发布必须经过同一条
@@ -167,6 +171,7 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 - `cargo xtask verify-gui [--integration] [--web-integration]`
 - `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean] [--check-generated]`
+- `cargo xtask build-remote-helper --target <target>|--all-targets`
 - `cargo xtask release-gui stage|finalize|verify --version <semver>`
 - `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release>
   --output-dir <path> [--target-dir <path>]`

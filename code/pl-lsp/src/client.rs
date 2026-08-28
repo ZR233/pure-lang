@@ -22,7 +22,8 @@ use crate::client_server::{
 };
 use crate::diagnostics::DiagnosticSink;
 use crate::driver::LspServerDriver;
-use crate::process::{ManagedChild, spawn_background};
+use crate::host::{LspHostBackend, LspHostSpawnRequest};
+use crate::process::{LspChild, spawn_background};
 use crate::resolved::ResolvedLspServer;
 use crate::rpc::RpcClient;
 use crate::status::{LspClientRuntimeStatus, LspClientStatus};
@@ -37,7 +38,8 @@ const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
 pub(crate) struct LspClient {
     server: ResolvedLspServer,
     driver: Arc<dyn LspServerDriver>,
-    child: Mutex<Option<ManagedChild>>,
+    host: Option<Arc<dyn LspHostBackend>>,
+    child: Mutex<Option<LspChild>>,
     transport: Mutex<Option<LspTransport>>,
     rpc: RwLock<Option<RpcClient>>,
     opened_files: Mutex<HashMap<PathBuf, OpenDocument>>,
@@ -76,10 +78,12 @@ impl LspClient {
         server: ResolvedLspServer,
         driver: Arc<dyn LspServerDriver>,
         diagnostics: DiagnosticSink,
+        host: Option<Arc<dyn LspHostBackend>>,
     ) -> Self {
         Self {
             server,
             driver,
+            host,
             child: Mutex::new(None),
             transport: Mutex::new(None),
             rpc: RwLock::new(None),
@@ -112,8 +116,7 @@ impl LspClient {
     }
 
     pub async fn open_document(&self, path: &Path, uri: &str) -> LspResult<()> {
-        let content = tokio::fs::read_to_string(path).await?;
-        let file_size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        let (content, file_size) = self.read_document(path).await?;
         if file_size > MAX_FILE_SIZE_BYTES {
             return Ok(());
         }
@@ -186,7 +189,7 @@ impl LspClient {
     }
 
     pub async fn change_document(&self, path: &Path) -> LspResult<()> {
-        let content = tokio::fs::read_to_string(path).await?;
+        let (content, _) = self.read_document(path).await?;
         let _sync = self.document_sync.lock().await;
         let document = self.opened_files.lock().await.get(path).cloned();
         if let Some(document) = document {
@@ -213,6 +216,22 @@ impl LspClient {
             }
         }
         Ok(())
+    }
+
+    pub async fn refresh_document(&self, path: &Path) -> LspResult<()> {
+        let is_file = if let Some(host) = &self.host {
+            host.stat(path)
+                .await
+                .map_err(|error| LspRuntimeError::Unavailable(error.to_string()))?
+                .is_some_and(|stat| stat.is_file)
+        } else {
+            path.is_file()
+        };
+        if is_file {
+            self.change_document(path).await
+        } else {
+            self.close_document(path).await
+        }
     }
 
     pub async fn file_changed(&self, path: &Path) -> LspResult<()> {
@@ -245,13 +264,11 @@ impl LspClient {
                 match tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(_)) | Err(_) => {
-                        let kill = child.kill();
-                        let _ = std::pin::Pin::from(kill).await;
+                        let _ = child.kill().await;
                     }
                 }
-            } else if !child.try_wait().is_ok_and(|status| status.is_some()) {
-                let kill = child.kill();
-                let _ = std::pin::Pin::from(kill).await;
+            } else if !child.has_exited() {
+                let _ = child.kill().await;
             }
         }
         self.connection_generation.fetch_add(1, Ordering::Relaxed);
@@ -326,23 +343,41 @@ impl LspClient {
         }
         self.stop_stale_connection_locked().await;
 
-        let mut command = Command::new(&self.server.program);
-        command.args(&self.server.args);
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        let mut child = spawn_background(command).map_err(|error| {
-            let message = format!("Failed to start LSP server '{}': {error}", self.server.id);
-            LspRuntimeError::Unavailable(message)
-        })?;
+        let mut child = if let Some(host) = &self.host {
+            LspChild::Hosted(
+                host.spawn(LspHostSpawnRequest {
+                    process_id: format!("lsp-{}", self.server.id),
+                    program: self.server.program.clone(),
+                    args: self.server.args.clone(),
+                    cwd: self.server.workspace_root.clone(),
+                })
+                .await
+                .map_err(|error| {
+                    LspRuntimeError::Unavailable(format!(
+                        "Failed to start LSP server '{}': {error}",
+                        self.server.id
+                    ))
+                })?,
+            )
+        } else {
+            let mut command = Command::new(&self.server.program);
+            command.args(&self.server.args);
+            command.stdin(Stdio::piped());
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
+            LspChild::Local(spawn_background(command).map_err(|error| {
+                let message = format!("Failed to start LSP server '{}': {error}", self.server.id);
+                LspRuntimeError::Unavailable(message)
+            })?)
+        };
 
-        let stdin = child.stdin().take().ok_or_else(|| {
+        let stdin = child.take_stdin().ok_or_else(|| {
             LspRuntimeError::Unavailable("LSP child stdin pipe is unavailable".to_string())
         })?;
-        let stdout = child.stdout().take().ok_or_else(|| {
+        let stdout = child.take_stdout().ok_or_else(|| {
             LspRuntimeError::Unavailable("LSP child stdout pipe is unavailable".to_string())
         })?;
-        let stderr = child.stderr().take();
+        let stderr = child.take_stderr();
         let (transport, inbound) = LspTransport::spawn(stdin, stdout)?;
         let rpc = RpcClient::new(transport.sender()?);
         let generation = self.connection_generation.fetch_add(1, Ordering::Relaxed) + 1;
@@ -519,6 +554,45 @@ impl LspClient {
             let _ = self.diagnostics.updates.send(());
         }
     }
+
+    async fn read_document(&self, path: &Path) -> LspResult<(String, u64)> {
+        if let Some(host) = &self.host {
+            let stat = host
+                .stat(path)
+                .await
+                .map_err(|error| LspRuntimeError::Unavailable(error.to_string()))?
+                .ok_or_else(|| {
+                    LspRuntimeError::Unavailable(format!(
+                        "LSP document does not exist: {}",
+                        path.display()
+                    ))
+                })?;
+            if !stat.is_file {
+                return Err(LspRuntimeError::Unavailable(format!(
+                    "LSP document is not a file: {}",
+                    path.display()
+                )));
+            }
+            if stat.byte_size > MAX_FILE_SIZE_BYTES {
+                return Ok((String::new(), stat.byte_size));
+            }
+            let bytes = host
+                .read_file(path, MAX_FILE_SIZE_BYTES)
+                .await
+                .map_err(|error| LspRuntimeError::Unavailable(error.to_string()))?;
+            let content = String::from_utf8(bytes).map_err(|error| {
+                LspRuntimeError::Unavailable(format!(
+                    "LSP document is not UTF-8 ({}): {error}",
+                    path.display()
+                ))
+            })?;
+            Ok((content, stat.byte_size))
+        } else {
+            let content = tokio::fs::read_to_string(path).await?;
+            let file_size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+            Ok((content, file_size))
+        }
+    }
 }
 
 fn generation_is_current(current: &AtomicU64, generation: u64) -> bool {
@@ -553,7 +627,11 @@ mod tests {
         command.stdout(Stdio::null());
         command.stderr(Stdio::null());
         let child = command.spawn().expect("spawn short-lived test child");
-        client.child.lock().await.replace(Box::new(child));
+        client
+            .child
+            .lock()
+            .await
+            .replace(LspChild::Local(Box::new(child)));
         drop(lifecycle_guard);
 
         tokio::time::timeout(Duration::from_secs(5), shutdown)
@@ -590,7 +668,7 @@ mod tests {
             Arc::new(Mutex::new(HashMap::new())),
             updates,
         );
-        LspClient::new(server, test_driver(), diagnostics)
+        LspClient::new(server, test_driver(), diagnostics, None)
     }
 
     fn test_driver() -> Arc<dyn LspServerDriver> {
@@ -600,6 +678,7 @@ mod tests {
             fn probe<'a>(
                 &'a self,
                 _command: &'a crate::driver::LspResolvedCommand,
+                _host: Option<&'a dyn crate::host::LspHostBackend>,
             ) -> futures::future::BoxFuture<'a, crate::driver::LspProbeOutcome> {
                 futures::FutureExt::boxed(std::future::ready(
                     crate::driver::LspProbeOutcome::Failed {
@@ -611,6 +690,7 @@ mod tests {
             fn repair<'a>(
                 &'a self,
                 _component: &'a crate::types::LspMissingComponent,
+                _host: Option<&'a dyn crate::host::LspHostBackend>,
             ) -> futures::future::BoxFuture<'a, Result<(), crate::driver::LspRepairError>>
             {
                 futures::FutureExt::boxed(std::future::ready(Err(

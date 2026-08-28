@@ -115,6 +115,7 @@ fn workspace_config() -> GitWorkspaceConfig {
         worktree: PathBuf::from("/workspace/repo"),
         git_binary: PathBuf::from("git"),
         policy: GitPolicy::default(),
+        native_credentials: false,
         default_push_branch: Some("mai-agent/test".to_string()),
         remote_url: None,
         workspace_info: BTreeMap::new(),

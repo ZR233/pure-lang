@@ -15,6 +15,7 @@ import 'api/studio/handlers/providers.dart';
 import 'api/studio/handlers/recovery.dart';
 import 'api/studio/handlers/settings.dart';
 import 'api/studio/handlers/snapshot.dart';
+import 'api/studio/handlers/ssh.dart';
 import 'api/studio/handlers/thread.dart';
 import 'api/studio/handlers/updater.dart';
 import 'api/studio/subscription.dart';
@@ -25,6 +26,7 @@ import 'api/studio/types/history.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
+import 'api/studio/types/ssh.dart';
 import 'api/studio/types/thread_stream.dart';
 import 'api/studio/types/thread_stream/item.dart';
 import 'api/studio/types/updater.dart';
@@ -647,6 +649,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderSettingsInput dco_decode_box_autoadd_provider_settings_input(
+    dynamic raw,
+  );
+
+  @protected
+  SaveSshServerRequest dco_decode_box_autoadd_save_ssh_server_request(
     dynamic raw,
   );
 
@@ -1962,10 +1969,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ProviderUsageDto> dco_decode_list_provider_usage_dto(dynamic raw);
 
   @protected
+  List<RemoteDirectoryEntryDto> dco_decode_list_remote_directory_entry_dto(
+    dynamic raw,
+  );
+
+  @protected
   List<RoleInput> dco_decode_list_role_input(dynamic raw);
 
   @protected
   List<SkillSummaryDto> dco_decode_list_skill_summary_dto(dynamic raw);
+
+  @protected
+  List<SshServerDto> dco_decode_list_ssh_server_dto(dynamic raw);
 
   @protected
   ListThreadTurnsRequest dco_decode_list_thread_turns_request(dynamic raw);
@@ -2092,10 +2107,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProviderUsageDto dco_decode_provider_usage_dto(dynamic raw);
 
   @protected
+  RemoteDirectoryEntryDto dco_decode_remote_directory_entry_dto(dynamic raw);
+
+  @protected
+  RemoteDirectoryListingDto dco_decode_remote_directory_listing_dto(
+    dynamic raw,
+  );
+
+  @protected
   RoleInput dco_decode_role_input(dynamic raw);
 
   @protected
   RuntimeSnapshot dco_decode_runtime_snapshot(dynamic raw);
+
+  @protected
+  SaveSshServerRequest dco_decode_save_ssh_server_request(dynamic raw);
 
   @protected
   SkillInvocationPolicyDto dco_decode_skill_invocation_policy_dto(dynamic raw);
@@ -2108,6 +2134,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillsSettingsInput dco_decode_skills_settings_input(dynamic raw);
+
+  @protected
+  SshAuthKindDto dco_decode_ssh_auth_kind_dto(dynamic raw);
+
+  @protected
+  SshConnectionSnapshotDto dco_decode_ssh_connection_snapshot_dto(dynamic raw);
+
+  @protected
+  SshServerDto dco_decode_ssh_server_dto(dynamic raw);
 
   @protected
   StartNewThreadResponse dco_decode_start_new_thread_response(dynamic raw);
@@ -2885,6 +2920,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderSettingsInput sse_decode_box_autoadd_provider_settings_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SaveSshServerRequest sse_decode_box_autoadd_save_ssh_server_request(
     SseDeserializer deserializer,
   );
 
@@ -4528,10 +4568,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<RemoteDirectoryEntryDto> sse_decode_list_remote_directory_entry_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RoleInput> sse_decode_list_role_input(SseDeserializer deserializer);
 
   @protected
   List<SkillSummaryDto> sse_decode_list_skill_summary_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SshServerDto> sse_decode_list_ssh_server_dto(
     SseDeserializer deserializer,
   );
 
@@ -4688,10 +4738,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProviderUsageDto sse_decode_provider_usage_dto(SseDeserializer deserializer);
 
   @protected
+  RemoteDirectoryEntryDto sse_decode_remote_directory_entry_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RemoteDirectoryListingDto sse_decode_remote_directory_listing_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RoleInput sse_decode_role_input(SseDeserializer deserializer);
 
   @protected
   RuntimeSnapshot sse_decode_runtime_snapshot(SseDeserializer deserializer);
+
+  @protected
+  SaveSshServerRequest sse_decode_save_ssh_server_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
   SkillInvocationPolicyDto sse_decode_skill_invocation_policy_dto(
@@ -4710,6 +4775,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SkillsSettingsInput sse_decode_skills_settings_input(
     SseDeserializer deserializer,
   );
+
+  @protected
+  SshAuthKindDto sse_decode_ssh_auth_kind_dto(SseDeserializer deserializer);
+
+  @protected
+  SshConnectionSnapshotDto sse_decode_ssh_connection_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SshServerDto sse_decode_ssh_server_dto(SseDeserializer deserializer);
 
   @protected
   StartNewThreadResponse sse_decode_start_new_thread_response(
@@ -5595,6 +5671,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_provider_settings_input(
     ProviderSettingsInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_save_ssh_server_request(
+    SaveSshServerRequest self,
     SseSerializer serializer,
   );
 
@@ -7594,6 +7676,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_remote_directory_entry_dto(
+    List<RemoteDirectoryEntryDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_role_input(
     List<RoleInput> self,
     SseSerializer serializer,
@@ -7602,6 +7690,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_skill_summary_dto(
     List<SkillSummaryDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ssh_server_dto(
+    List<SshServerDto> self,
     SseSerializer serializer,
   );
 
@@ -7786,11 +7880,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_remote_directory_entry_dto(
+    RemoteDirectoryEntryDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_remote_directory_listing_dto(
+    RemoteDirectoryListingDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_role_input(RoleInput self, SseSerializer serializer);
 
   @protected
   void sse_encode_runtime_snapshot(
     RuntimeSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_save_ssh_server_request(
+    SaveSshServerRequest self,
     SseSerializer serializer,
   );
 
@@ -7817,6 +7929,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     SkillsSettingsInput self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_ssh_auth_kind_dto(
+    SshAuthKindDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ssh_connection_snapshot_dto(
+    SshConnectionSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ssh_server_dto(SshServerDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_start_new_thread_response(

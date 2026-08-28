@@ -280,6 +280,7 @@ impl ProductEventBus {
                 id: project.id.clone(),
                 name: project.name.clone(),
                 path: project.path.clone(),
+                ssh_server_id: project.ssh_server_id.clone(),
                 updated_at: project.updated_at,
             })
             .await?;

@@ -10,6 +10,7 @@ use super::{
     CommandProbeError, LspProbeOutcome, LspRepairError, LspResolvedCommand, LspServerDriver,
     PROBE_TIMEOUT, run_command_capture,
 };
+use crate::host::LspHostBackend;
 use crate::types::LspMissingComponent;
 
 const RUST_ANALYZER_COMPONENT: &str = "rust-analyzer";
@@ -31,13 +32,18 @@ impl Default for RustAnalyzerDriver {
 }
 
 impl LspServerDriver for RustAnalyzerDriver {
-    fn probe<'a>(&'a self, command: &'a LspResolvedCommand) -> BoxFuture<'a, LspProbeOutcome> {
+    fn probe<'a>(
+        &'a self,
+        command: &'a LspResolvedCommand,
+        host: Option<&'a dyn LspHostBackend>,
+    ) -> BoxFuture<'a, LspProbeOutcome> {
         async move {
             match run_command_capture(
                 &command.program,
                 &["--version"],
                 PROBE_TIMEOUT,
                 "version check",
+                host,
             )
             .await
             {
@@ -62,12 +68,20 @@ impl LspServerDriver for RustAnalyzerDriver {
     fn repair<'a>(
         &'a self,
         component: &'a LspMissingComponent,
+        host: Option<&'a dyn LspHostBackend>,
     ) -> BoxFuture<'a, Result<(), LspRepairError>> {
         async move {
             if component.component != RUST_ANALYZER_COMPONENT {
                 return Err(LspRepairError::NotSupported);
             }
-            match run_command_capture("rustup", &["--version"], PROBE_TIMEOUT, "rustup check").await
+            match run_command_capture(
+                "rustup",
+                &["--version"],
+                PROBE_TIMEOUT,
+                "rustup check",
+                host,
+            )
+            .await
             {
                 Ok(_) | Err(CommandProbeError::Failed { .. }) => {}
                 Err(CommandProbeError::MissingCommand) => {
@@ -81,6 +95,7 @@ impl LspServerDriver for RustAnalyzerDriver {
                 &["component", "add", RUST_ANALYZER_COMPONENT],
                 RUSTUP_TIMEOUT,
                 "rustup component add",
+                host,
             )
             .await
             .map(|_| ())
@@ -158,7 +173,7 @@ mod tests {
             repair_hint: "unused".to_string(),
         };
 
-        let error = driver.repair(&component).await.unwrap_err();
+        let error = driver.repair(&component, None).await.unwrap_err();
 
         assert!(matches!(&error, LspRepairError::NotSupported), "{error:?}");
     }

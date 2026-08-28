@@ -43,6 +43,7 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
     skills: SkillCatalogRuntime,
+    ssh_manager: Arc<pl_core::remote::SshManager>,
 }
 
 impl StudioAgentTurnFactory {
@@ -58,6 +59,7 @@ impl StudioAgentTurnFactory {
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         skills: SkillCatalogRuntime,
+        ssh_manager: Arc<pl_core::remote::SshManager>,
     ) -> Self {
         Self {
             store,
@@ -70,6 +72,7 @@ impl StudioAgentTurnFactory {
             coordinator,
             resources,
             skills,
+            ssh_manager,
         }
     }
 }
@@ -152,17 +155,88 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .await
             .map_err(anyhow_error)?;
         let workspace_root = workspace.root().to_path_buf();
-        let skills = self
-            .skills
-            .discover_with_cancellation(
-                &thread_record.project_id,
-                &workspace_root,
-                &config.skills,
-                context.cancellation_token.clone(),
-            )
-            .await
-            .map_err(anyhow_error)?;
-        let skill_catalog = skills.catalog_for_turn();
+        let remote_host = match &project.ssh_server_id {
+            Some(server_id) => Some(
+                self.ssh_manager
+                    .open_workspace_host(server_id, workspace_root.to_string_lossy().into_owned())
+                    .await
+                    .map_err(|error| turn_error(error.to_string()))?,
+            ),
+            None => None,
+        };
+        if let Some(remote_host) = &remote_host {
+            self.lsp_runtime
+                .apply_user_servers(&config.lsp.servers)
+                .await
+                .map_err(|error| {
+                    turn_error(format!("invalid [lsp.servers] configuration: {error}"))
+                })?;
+            self.lsp_runtime
+                .reconcile_workspace_membership_with_host(
+                    &workspace_root,
+                    Arc::new(remote_host.clone()),
+                )
+                .await;
+            if self
+                .lsp_runtime
+                .active_server_names_for_workspace(&workspace_root)
+                .await
+                .is_empty()
+            {
+                self.lsp_runtime.probe_lsp_server(&workspace_root).await;
+            }
+        }
+        let skill_catalog = if let Some(remote_host) = &remote_host {
+            let registry = pl_core::skill::SkillRegistry::new();
+            let remote_provider = Arc::new(pl_core::remote::RemoteSkillProvider::new(Arc::new(
+                remote_host.files.clone(),
+            ))?);
+            let _remote_registration = registry.register(remote_provider)?;
+            let mut local_sources = Vec::new();
+            if let Ok(user_dir) = pl_core::skill::resolve_user_skills_dir(&config.skills) {
+                local_sources.push(pl_core::skill::SkillDirectorySource::new(
+                    user_dir,
+                    pl_core::skill::SkillSourceKind::User,
+                ));
+            }
+            if let Some(system_dir) = self.skills.system_skills_dir() {
+                local_sources.push(pl_core::skill::SkillDirectorySource::new(
+                    system_dir,
+                    pl_core::skill::SkillSourceKind::System,
+                ));
+            }
+            let _local_registration = if local_sources.is_empty() {
+                None
+            } else {
+                Some(registry.register(Arc::new(
+                    pl_core::skill::FileSystemSkillProvider::from_directories(
+                        "remote-local-skills",
+                        local_sources,
+                    )?,
+                ))?)
+            };
+            Some(Arc::new(
+                registry
+                    .discover(pl_core::skill::SkillProviderRequest {
+                        workspace_root: workspace_root.clone(),
+                        config: config.skills.clone(),
+                        system_dir: None,
+                        cancellation: context.cancellation_token.clone(),
+                    })
+                    .await?,
+            ))
+        } else {
+            self.skills
+                .discover_with_cancellation(
+                    &thread_record.project_id,
+                    &workspace_root,
+                    &config.skills,
+                    context.cancellation_token.clone(),
+                )
+                .await
+                .map_err(anyhow_error)?
+                .catalog_for_turn()
+        };
         let mut turn_skills_config = config.skills.clone();
         if skill_catalog.is_none() {
             turn_skills_config.enabled = false;
@@ -172,14 +246,23 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 workspace_root.join(&config.skills.project_dir),
             ))
         });
-        let workspace_instructions = load_workspace_instruction_documents(
-            &workspace_root,
-            &workspace_root,
-            config.instructions.project_doc_max_bytes,
-            &config.instructions.project_doc_fallback_filenames,
-        )
-        .map_err(anyhow_error)?
-        .content();
+        let workspace_instructions = if let Some(remote_host) = &remote_host {
+            pl_core::remote::load_remote_workspace_instructions(
+                &remote_host.files,
+                config.instructions.project_doc_max_bytes,
+                &config.instructions.project_doc_fallback_filenames,
+            )
+            .await?
+        } else {
+            load_workspace_instruction_documents(
+                &workspace_root,
+                &workspace_root,
+                config.instructions.project_doc_max_bytes,
+                &config.instructions.project_doc_fallback_filenames,
+            )
+            .map_err(anyhow_error)?
+            .content()
+        };
         let executor_handoff = if mode == StudioMode::Task
             && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
@@ -325,9 +408,13 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if !refresh_lsp {
             agent_tools.uninstall(&ToolGroupId::new("lsp"));
         }
-        let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
-            .with_workspace_instructions(workspace_instructions.clone())
-            .with_attachment_runtime(attachment_runtime);
+        let profile = if remote_host.is_some() {
+            CoreRuntimeProfile::minimal().with_agent_workspace(workspace.clone())
+        } else {
+            CoreRuntimeProfile::local_agent_workspace(workspace.clone())
+        }
+        .with_workspace_instructions(workspace_instructions.clone())
+        .with_attachment_runtime(attachment_runtime.clone());
         let task_name = self
             .resources
             .get(&context.snapshot.identity.id)
@@ -347,6 +434,44 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             for group in ["builtin", "skills", "lsp", "task", "collaboration", "mcp"] {
                 engine.agent_tools().uninstall(&ToolGroupId::new(group));
             }
+        } else if let Some(remote_host) = remote_host {
+            let tool_workspace = pl_core::ToolWorkspace::new(workspace.clone())
+                .with_lsp_runtime(Some(self.lsp_runtime.clone()));
+            let files = Arc::new(remote_host.files);
+            let commands = Arc::new(remote_host.commands);
+            let git = Arc::new(remote_host.git);
+            let mut additional_tools = if config.runtime.tool_capabilities.workspace_files {
+                pl_core::remote::remote_workspace_mutation_tools(
+                    files.clone(),
+                    tool_workspace.clone(),
+                )
+            } else {
+                Vec::new()
+            };
+            if let Some(tool) = pl_core::ViewImageTool::for_remote_model(
+                tool_workspace,
+                files.clone(),
+                &route.model,
+                attachment_runtime,
+            ) {
+                additional_tools.push(Arc::new(tool));
+            }
+            pl_core::BuiltinToolInstaller::host_provided(config.runtime.tool_capabilities.clone())
+                .with_git_tools(
+                    pl_core::GitWorkspaceConfig::local(workspace_root.clone())
+                        .with_native_credentials(),
+                    git,
+                    Arc::new(pl_core::NoGitCredentialProvider),
+                )
+                .with_command_backend(commands)
+                .with_workspace_file_backend(files)
+                .with_additional_tools(additional_tools)
+                .install_agent_workspace(
+                    &mut engine,
+                    workspace.clone(),
+                    Some(workspace_instructions.clone()),
+                )
+                .await?;
         } else {
             engine.install_profile_tools().await?;
         }

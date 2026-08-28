@@ -1,4 +1,5 @@
 use std::io;
+use std::pin::Pin;
 
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
@@ -6,6 +7,8 @@ use process_wrap::tokio::JobObject;
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::process::Command;
+
+use crate::host::{LspHostProcess, LspHostReader, LspHostWriter};
 
 #[cfg(windows)]
 #[derive(Debug)]
@@ -22,6 +25,86 @@ impl process_wrap::tokio::CommandWrapper for WindowsBackgroundCreationFlags {
 }
 
 pub(crate) type ManagedChild = Box<dyn ChildWrapper>;
+
+pub(crate) enum LspChild {
+    Local(ManagedChild),
+    Hosted(LspHostProcess),
+}
+
+impl LspChild {
+    pub(crate) fn take_stdin(&mut self) -> Option<LspHostWriter> {
+        match self {
+            Self::Local(child) => child
+                .stdin()
+                .take()
+                .map(|stdin| Box::pin(stdin) as LspHostWriter),
+            Self::Hosted(child) => child.take_stdin(),
+        }
+    }
+
+    pub(crate) fn take_stdout(&mut self) -> Option<LspHostReader> {
+        match self {
+            Self::Local(child) => child
+                .stdout()
+                .take()
+                .map(|stdout| Box::pin(stdout) as LspHostReader),
+            Self::Hosted(child) => child.take_stdout(),
+        }
+    }
+
+    pub(crate) fn take_stderr(&mut self) -> Option<LspHostReader> {
+        match self {
+            Self::Local(child) => child
+                .stderr()
+                .take()
+                .map(|stderr| Box::pin(stderr) as LspHostReader),
+            Self::Hosted(child) => child.take_stderr(),
+        }
+    }
+
+    pub(crate) async fn wait(&mut self) -> Result<(), String> {
+        match self {
+            Self::Local(child) => child
+                .wait()
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            Self::Hosted(child) => child
+                .wait()
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    pub(crate) async fn kill(&mut self) -> Result<(), String> {
+        match self {
+            Self::Local(child) => {
+                let kill = child.kill();
+                Pin::from(kill).await.map_err(|error| error.to_string())
+            }
+            Self::Hosted(child) => {
+                child.terminate().await;
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn has_exited(&mut self) -> bool {
+        match self {
+            Self::Local(child) => child.try_wait().is_ok_and(|status| status.is_some()),
+            Self::Hosted(_) => false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> Option<u32> {
+        match self {
+            Self::Local(child) => child.id(),
+            Self::Hosted(_) => None,
+        }
+    }
+}
 
 /// 派生 LSP server / rustup 探测等后台子进程的统一入口。
 ///

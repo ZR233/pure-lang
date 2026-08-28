@@ -11,6 +11,7 @@ mod client_server;
 mod diagnostics;
 mod driver;
 mod formatting;
+mod host;
 mod process;
 mod registry;
 mod resolved;
@@ -26,5 +27,9 @@ pub use catalog::{
     LspUserServerConfig, RUST_ANALYZER_ID,
 };
 pub use driver::{LspProbeOutcome, LspRepairError, LspResolvedCommand, LspServerDriver};
+pub use host::{
+    LspHostBackend, LspHostError, LspHostFileStat, LspHostProcess, LspHostProcessExit,
+    LspHostSpawnRequest,
+};
 pub use registry::LspRuntimeRegistry;
 pub use types::*;

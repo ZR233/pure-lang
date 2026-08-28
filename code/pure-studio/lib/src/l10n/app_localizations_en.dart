@@ -252,6 +252,92 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsGeneralTab => 'General';
 
   @override
+  String get settingsSshTab => 'SSH';
+
+  @override
+  String get settingsSshTitle => 'Remote development';
+
+  @override
+  String get settingsSshSubtitle =>
+      'Manage SSH workspaces. Connections and helper lifecycle are owned by the local core.';
+
+  @override
+  String get settingsSshAdd => 'Add server';
+
+  @override
+  String get settingsSshEmpty => 'No SSH servers yet.';
+
+  @override
+  String get settingsSshManagedByCore =>
+      'OpenSSH and the minimal remote helper are managed locally.';
+
+  @override
+  String get settingsSshTest => 'Test connection';
+
+  @override
+  String get settingsSshReconnect => 'Reconnect';
+
+  @override
+  String get settingsSshOpenProject => 'Open project';
+
+  @override
+  String get settingsSshEdit => 'Edit';
+
+  @override
+  String get settingsSshDelete => 'Delete';
+
+  @override
+  String get settingsSshReady => 'Ready';
+
+  @override
+  String get settingsSshDeleteTitle => 'Delete SSH server?';
+
+  @override
+  String settingsSshDeleteBody(String name) {
+    return 'Delete $name? Projects using this server must be removed first.';
+  }
+
+  @override
+  String get settingsSshName => 'Name';
+
+  @override
+  String get settingsSshHost => 'Host';
+
+  @override
+  String get settingsSshUsername => 'Username';
+
+  @override
+  String get settingsSshPort => 'Port';
+
+  @override
+  String get settingsSshAuth => 'Authentication';
+
+  @override
+  String get settingsSshAuthAgentOrKey => 'SSH agent or key';
+
+  @override
+  String get settingsSshAuthPassword => 'Password';
+
+  @override
+  String get settingsSshIdentityFile => 'Identity file (optional)';
+
+  @override
+  String get settingsSshPassword => 'Password';
+
+  @override
+  String get settingsSshPasswordLease =>
+      'Kept in core memory for this app session only.';
+
+  @override
+  String get settingsSshSave => 'Save';
+
+  @override
+  String get settingsSshChooseDirectory => 'Choose remote directory';
+
+  @override
+  String get settingsSshOpenThisDirectory => 'Open this directory';
+
+  @override
   String get composerHint => 'Describe what you need...';
 
   @override

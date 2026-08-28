@@ -45,13 +45,14 @@ impl StudioRuntime {
         let name = crate::studio::paths::project_name(path);
         let now = crate::studio::unix_seconds();
         // 聚合冷加载：按 path 找到既有行或分配新 id，然后内存先行提交目录 delta。
-        let existing = self.store.find_project_by_path(&path_text).await?;
+        let existing = self.store.find_project_by_path(&path_text, None).await?;
         let (record, delta_record) = match existing {
             Some(existing) => {
                 let delta_record = ProjectDirectoryRecord {
                     id: existing.id.clone(),
                     name: name.clone(),
                     path: path_text.clone(),
+                    ssh_server_id: None,
                     created_at: existing.created_at,
                     updated_at: now,
                     last_opened_at: Some(now),
@@ -61,6 +62,7 @@ impl StudioRuntime {
                     id: existing.id.clone(),
                     name,
                     path: path_text,
+                    ssh_server_id: None,
                     updated_at: now,
                 };
                 (public, delta_record)
@@ -71,6 +73,7 @@ impl StudioRuntime {
                     id: id.clone(),
                     name: name.clone(),
                     path: path_text.clone(),
+                    ssh_server_id: None,
                     created_at: now,
                     updated_at: now,
                     last_opened_at: Some(now),
@@ -80,6 +83,7 @@ impl StudioRuntime {
                     id,
                     name,
                     path: path_text,
+                    ssh_server_id: None,
                     updated_at: now,
                 };
                 (public, delta_record)

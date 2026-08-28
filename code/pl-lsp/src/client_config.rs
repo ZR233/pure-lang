@@ -144,6 +144,7 @@ mod tests {
         fn probe<'a>(
             &'a self,
             _command: &'a crate::driver::LspResolvedCommand,
+            _host: Option<&'a dyn crate::host::LspHostBackend>,
         ) -> futures::future::BoxFuture<'a, crate::driver::LspProbeOutcome> {
             futures::FutureExt::boxed(std::future::ready(crate::driver::LspProbeOutcome::Failed {
                 message: String::new(),
@@ -153,6 +154,7 @@ mod tests {
         fn repair<'a>(
             &'a self,
             _component: &'a crate::types::LspMissingComponent,
+            _host: Option<&'a dyn crate::host::LspHostBackend>,
         ) -> futures::future::BoxFuture<'a, Result<(), crate::driver::LspRepairError>> {
             futures::FutureExt::boxed(std::future::ready(Err(
                 crate::driver::LspRepairError::NotSupported,

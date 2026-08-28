@@ -37,6 +37,9 @@ where
     where
         S: AsRef<str>,
     {
+        if self.config.native_credentials {
+            return self.run_plain(args).await;
+        }
         let credential = self
             .credential_provider
             .credential(GitCredentialRequest { operation, remote })

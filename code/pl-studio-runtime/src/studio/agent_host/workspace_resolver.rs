@@ -25,6 +25,9 @@ impl AgentWorkspaceResolver {
         project: &ProjectRecord,
         active_task: Option<&LoadedTaskAggregate>,
     ) -> Result<AgentWorkspace> {
+        if project.ssh_server_id.is_some() {
+            return resolve_remote_workspace(identity, thread, project, active_task);
+        }
         let mode = thread.mode;
         if identity.parent_id.is_none() {
             return self
@@ -143,6 +146,125 @@ impl AgentWorkspaceResolver {
             WorkspaceMutability::ReadWrite,
         ))
     }
+}
+
+fn resolve_remote_workspace(
+    identity: &AgentIdentity,
+    thread: &ThreadRecord,
+    project: &ProjectRecord,
+    active_task: Option<&LoadedTaskAggregate>,
+) -> Result<AgentWorkspace> {
+    let project_root = normalized_remote_path(&project.path)?;
+    if identity.parent_id.is_none() {
+        if thread.mode == StudioMode::Task
+            && let Some(task) = active_task
+        {
+            ensure!(
+                normalized_remote_path(&task.run.workspace_root)? == project_root,
+                "TaskRun main workspace does not match the remote project workspace"
+            );
+        }
+        return Ok(AgentWorkspace::confined(
+            PathBuf::from(project_root),
+            WorkspaceMutability::ReadWrite,
+        ));
+    }
+    let path = match identity.role.as_str() {
+        role if role == StudioRole::Explorer.key() => project_root,
+        role if role == StudioRole::Executor.key() && thread.mode == StudioMode::Task => {
+            let task = active_task.context("remote executor has no resident Task aggregate")?;
+            let unit = task
+                .work_units
+                .iter()
+                .find(|unit| unit.executor_thread_id.as_deref() == Some(identity.id.as_str()))
+                .with_context(|| format!("executor {} has no hot WorkUnit owner", identity.id))?;
+            ensure!(
+                task.run.root_thread_id == thread.root_thread_id,
+                "executor WorkUnit belongs to another TaskRun root"
+            );
+            validate_remote_child_workspace(
+                &unit.worktree_path,
+                &unit.branch,
+                &task.run.workspace_root,
+            )?
+        }
+        role if role == StudioRole::Reviewer.key() && thread.mode == StudioMode::Task => {
+            let task = active_task.context("remote reviewer has no resident Task aggregate")?;
+            let round = task
+                .reviews
+                .iter()
+                .find(|round| round.reviewer_thread_id() == Some(identity.id.as_str()))
+                .with_context(|| {
+                    format!("reviewer {} has no hot ReviewRound owner", identity.id)
+                })?;
+            ensure!(
+                task.run.root_thread_id == thread.root_thread_id,
+                "review round belongs to another TaskRun root"
+            );
+            match round.scope {
+                ReviewScope::Integrated => normalized_remote_path(&task.run.workspace_root)?,
+                ReviewScope::Delivery => {
+                    let completion_id = round
+                        .completion_id
+                        .as_deref()
+                        .context("delivery review has no completion id")?;
+                    let completion = task
+                        .completions
+                        .iter()
+                        .find(|completion| completion.id == completion_id)
+                        .context("delivery review completion not found")?;
+                    validate_delivery_target(round, completion)?;
+                    validate_remote_child_workspace(
+                        &completion.worktree_path,
+                        &completion.branch,
+                        &task.run.workspace_root,
+                    )?
+                }
+            }
+        }
+        role => bail!("unsupported Studio child role for remote workspace resolution: {role}"),
+    };
+    Ok(AgentWorkspace::confined(
+        PathBuf::from(path),
+        WorkspaceMutability::ReadWrite,
+    ))
+}
+
+fn validate_remote_child_workspace(
+    stored_path: &str,
+    expected_branch: &str,
+    workspace_root: &str,
+) -> Result<String> {
+    ensure!(
+        expected_branch.starts_with("pure-task-") || expected_branch.starts_with("pure-agent-"),
+        "Task child branch is not Pure-owned"
+    );
+    let root = normalized_remote_path(stored_path)?;
+    let workspace = normalized_remote_path(workspace_root)?;
+    let worktree_root = format!("{}/.pure/worktrees", workspace.trim_end_matches('/'));
+    ensure!(
+        root.starts_with(&format!("{worktree_root}/")),
+        "Task child workspace is outside remote .pure/worktrees"
+    );
+    Ok(root)
+}
+
+fn normalized_remote_path(path: &str) -> Result<String> {
+    ensure!(
+        path.starts_with('/'),
+        "remote workspace path must be absolute"
+    );
+    ensure!(!path.contains('\\'), "remote workspace path must be POSIX");
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => bail!("remote workspace path must not contain parent traversal"),
+            value => parts.push(value),
+        }
+    }
+    ensure!(!parts.is_empty(), "remote workspace path must not be root");
+    Ok(format!("/{}", parts.join("/")))
 }
 
 fn project_workspace(project: &ProjectRecord) -> Result<PathBuf> {

@@ -8,9 +8,10 @@ pub mod types;
 // Re-exports from submodules
 pub use self::handlers::{
     BridgeStudioUpdateOperation, activate_project, admit_attachment_drafts, apply_task_recovery,
-    archive_project, archive_thread, check_provider_usage, check_studio_update, cleanup_project,
-    cleanup_recovery_issue, discover_skills, init_app, install_studio_update, interrupt_turn,
-    list_thread_turns, list_threads_page, load_provider_catalog, open_project,
+    archive_project, archive_thread, browse_remote_directories, check_provider_usage,
+    check_studio_update, cleanup_project, cleanup_recovery_issue, delete_ssh_server,
+    discover_skills, init_app, install_studio_update, interrupt_turn, list_ssh_servers,
+    list_thread_turns, list_threads_page, load_provider_catalog, open_project, open_remote_project,
     preview_project_cleanup, preview_recovery_issue_cleanup, preview_task_recovery,
     probe_lsp_server, read_attachment_draft, read_lsp_state, read_mcp_state,
     read_provider_usage_state, read_settings_state, read_skills_state, read_studio_state,
@@ -18,9 +19,9 @@ pub use self::handlers::{
     reload_settings_from_disk, remove_attachment_draft, repair_lsp_server, reset_lsp, reset_mcp,
     respond_interaction, retry_persistence, retry_recovery_issue, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
-    save_runtime_permission_mode, save_skills_settings, save_web_search_settings, set_model_role,
-    set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, start_turn,
-    steer_turn,
+    save_runtime_permission_mode, save_skills_settings, save_ssh_server, save_web_search_settings,
+    set_model_role, set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime,
+    start_turn, steer_turn, test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,

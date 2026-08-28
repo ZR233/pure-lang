@@ -56,10 +56,11 @@ void main() {
   testWidgets('provider settings and typed interactions expose stable keys', (
     tester,
   ) async {
+    final api = _RemoteDriverDemoStudioApi();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          studioApiProvider.overrideWithValue(DriverDemoStudioApi()),
+          studioApiProvider.overrideWithValue(api),
           studioUpdateEnabledProvider.overrideWithValue(false),
         ],
         child: const PureStudioApp(),
@@ -117,6 +118,26 @@ void main() {
     await tester.tap(find.byKey(StudioDriverKeys.threadRow('thread-main')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest('demo-ssh')));
+    await tester.pumpAndSettle();
+    expect(api.testedServerId, 'demo-ssh');
+    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect('demo-ssh')));
+    await tester.pumpAndSettle();
+    expect(api.reconnectedServerId, 'demo-ssh');
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen('demo-ssh')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+    expect(api.browsedServerId, 'demo-ssh');
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpenCurrentDirectory));
+    await tester.pumpAndSettle();
+    expect(api.openedRemoteProject, ('demo-ssh', '/home'));
+    expect(api.activatedProjectId, 'project-remote');
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('providers')));
     await tester.pumpAndSettle();
     expect(
       find.byKey(StudioDriverKeys.providerRow('future-provider')),
@@ -218,6 +239,46 @@ void main() {
       findsNothing,
     );
   });
+}
+
+class _RemoteDriverDemoStudioApi extends DriverDemoStudioApi {
+  String? testedServerId;
+  String? reconnectedServerId;
+  String? browsedServerId;
+  (String, String)? openedRemoteProject;
+  String? activatedProjectId;
+
+  @override
+  Future<SshConnectionView> testSshConnection(String serverId) async {
+    testedServerId = serverId;
+    return super.testSshConnection(serverId);
+  }
+
+  @override
+  Future<SshConnectionView> reconnectSshServer(String serverId) async {
+    reconnectedServerId = serverId;
+    return super.reconnectSshServer(serverId);
+  }
+
+  @override
+  Future<RemoteDirectoryListing> browseRemoteDirectories(
+    String serverId, {
+    String? path,
+  }) async {
+    browsedServerId = serverId;
+    return super.browseRemoteDirectories(serverId, path: path);
+  }
+
+  @override
+  Future<StudioProject> openRemoteProject(String serverId, String path) async {
+    openedRemoteProject = (serverId, path);
+    return super.openRemoteProject(serverId, path);
+  }
+
+  @override
+  Future<void> activateProject(String projectId) async {
+    activatedProjectId = projectId;
+  }
 }
 
 class _DegradedDemoStudioApi extends DriverDemoStudioApi {

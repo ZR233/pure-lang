@@ -220,7 +220,7 @@ impl TaskCoordinator {
             .operation_id()
             .context("merge cleanup attempt has no operation id")?
             .to_string();
-        let cleanup = cleanup_accepted_delivery(&scope, runtime).await;
+        let cleanup = cleanup_accepted_delivery(self, &scope, runtime).await;
         self.task_runtime
             .record_merge_cleanup(&scope.merge.id, &operation_id, cleanup)
             .await

@@ -9,6 +9,7 @@ import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_provider_tab.dart';
 import 'settings_statistics_tab.dart';
+import 'settings_ssh_tab.dart';
 import 'settings_system_tabs.dart';
 import 'settings_tabs.dart';
 
@@ -44,6 +45,7 @@ const _settingsTabs = [
   _SettingsTabInfo(Icons.badge_outlined, _SettingsTab.roles),
   _SettingsTabInfo(Icons.hub_outlined, _SettingsTab.mcp),
   _SettingsTabInfo(Icons.code_outlined, _SettingsTab.lsp),
+  _SettingsTabInfo(Icons.dns_outlined, _SettingsTab.ssh),
   _SettingsTabInfo(Icons.query_stats_outlined, _SettingsTab.statistics),
   _SettingsTabInfo(Icons.security_outlined, _SettingsTab.security),
   _SettingsTabInfo(Icons.tune_outlined, _SettingsTab.general),
@@ -63,6 +65,7 @@ class _SettingsTabInfo {
       _SettingsTab.roles => context.l10n.settingsRolesTab,
       _SettingsTab.mcp => context.l10n.settingsMcpTab,
       _SettingsTab.lsp => context.l10n.settingsLspTab,
+      _SettingsTab.ssh => context.l10n.settingsSshTab,
       _SettingsTab.statistics => context.l10n.settingsStatisticsTab,
       _SettingsTab.security => context.l10n.settingsSecurityTab,
       _SettingsTab.general => context.l10n.settingsGeneralTab,
@@ -77,6 +80,7 @@ enum _SettingsTab {
   roles,
   mcp,
   lsp,
+  ssh,
   statistics,
   security,
   general,
@@ -110,6 +114,7 @@ class _SettingsScaffold extends StatelessWidget {
       RolesTab(providers: state.providers, roles: state.roles),
       McpTab(settingsServers: state.mcpServers, state: state.mcpState),
       LspTab(projectId: state.selectedProjectId, state: state.lspState),
+      const SshTab(),
       StatisticsTab(snapshot: state.modelPerformance),
       SecurityTab(mode: state.permissionMode),
       GeneralTab(
@@ -196,9 +201,9 @@ class _SettingsNav extends StatelessWidget {
               children: [
                 const _SettingsBackTile(compact: false),
                 _SettingsNavGroupLabel(context.l10n.settingsWorkspaceGroup),
-                ...navItems.take(6),
+                ...navItems.take(7),
                 _SettingsNavGroupLabel(context.l10n.settingsSystemGroup),
-                ...navItems.skip(6),
+                ...navItems.skip(7),
               ],
             ),
           ),

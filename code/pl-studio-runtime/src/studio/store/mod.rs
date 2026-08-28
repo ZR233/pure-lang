@@ -11,6 +11,7 @@ mod interaction;
 pub(in crate::studio) mod object;
 mod project;
 pub(in crate::studio) mod settings;
+mod ssh_server;
 mod task;
 mod thread;
 

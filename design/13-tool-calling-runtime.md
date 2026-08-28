@@ -136,6 +136,11 @@ runtime failure，不能让模型在宿主观察未持久化时继续执行后�
 
 模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`list_files` 和 `apply_patch` 等通用入口。模型没有独立的内容搜索文件工具；文本搜索优先通过 `exec` 运行 `rg`，文件名或文件列表搜索优先运行 `rg --files`，当前平台没有 ripgrep 时才使用等价的平台命令。builtin installer 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`，把构造出的普通 `Tool` 注册到目标 `AgentToolSet`；Studio 注入本地实现，其他宿主可注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
 
+SSH host 复用上述入口：`RemoteWorkspaceHost` 把同名工具接到 helper 的最小文件/进程协议，
+不得注册 `remote_*` 工具。patch、glob、diff、Git/worktree、Skills、图片和 LSP 协议逻辑继续位于
+本地；helper 只返回远端文件事实与带全局 sequence 的 stdout/stderr/exit 事件，并在 channel EOF
+时回收全部子进程。断线使活动 tool 失败，任何带副作用请求都不得自动重放。
+
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
 主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只解析并约束 `cwd`，不分析命令正文的读写行为；`WorkspaceMutability::ReadOnly` 不阻止 shell 启动。因此 shell 技术上可以写 workspace，或在 permission mode 允许时访问 `cwd` 之外的显式路径；角色提示负责约束 Explorer 和 Reviewer 遵守只读职责，Task root Planner 的规划与待确认阶段则直接移除 Process effect，避免依赖提示词阻止确认前实施。cwd 解析、permission mode、超时、取消和进程回收语义不变。

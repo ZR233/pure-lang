@@ -28,6 +28,7 @@ struct ViewImageInput {
 #[derive(Debug, Clone)]
 pub struct ViewImageTool {
     workspace: ToolWorkspace,
+    remote_backend: Option<std::sync::Arc<crate::remote::RemoteWorkspaceFileBackend>>,
     capability: ModelInputCapability,
     attachment_runtime: AttachmentRuntime,
 }
@@ -50,6 +51,32 @@ impl ViewImageTool {
         }
         Some(Self {
             workspace,
+            remote_backend: None,
+            capability: capability.clone(),
+            attachment_runtime,
+        })
+    }
+
+    /// 为远端 workspace 构造同名图片工具；图片字节由 helper 读取，解码、压缩和附件落库
+    /// 仍全部在本地 core 完成。
+    pub fn for_remote_model(
+        workspace: ToolWorkspace,
+        backend: std::sync::Arc<crate::remote::RemoteWorkspaceFileBackend>,
+        model: &ModelInfo,
+        attachment_runtime: AttachmentRuntime,
+    ) -> Option<Self> {
+        let capability = model.capabilities.input_capability(ModelModality::Image)?;
+        let profile = model.request_profile.media_profile(ModelModality::Image)?;
+        if !capability.supports_source(ModelInputSource::Local)
+            || capability.limits.max_count == Some(0)
+            || profile.first_send.is_empty()
+            || !profile.replay.contains(&MediaRepresentation::DataUrl)
+        {
+            return None;
+        }
+        Some(Self {
+            workspace,
+            remote_backend: Some(backend),
             capability: capability.clone(),
             attachment_runtime,
         })
@@ -106,26 +133,34 @@ impl Tool for ViewImageTool {
                 return Err(tool_error(self.name(), "path must not be empty"));
             }
 
-            let backend = LocalWorkspaceFileBackend::for_call(&self.workspace, &context).await?;
-            let stat = backend
-                .stat(WorkspaceFileStatRequest {
-                    path: path.to_string(),
-                    cwd: None,
-                })
-                .await?;
+            let stat_request = WorkspaceFileStatRequest {
+                path: path.to_string(),
+                cwd: None,
+            };
+            let read_request = WorkspaceFileReadBytesRequest {
+                path: path.to_string(),
+                cwd: None,
+                max_bytes: MAX_SOURCE_BYTES,
+            };
+            let (stat, bytes) = if let Some(backend) = &self.remote_backend {
+                (
+                    backend.stat(stat_request).await?,
+                    backend.read_bytes(read_request).await?,
+                )
+            } else {
+                let backend =
+                    LocalWorkspaceFileBackend::for_call(&self.workspace, &context).await?;
+                (
+                    backend.stat(stat_request).await?,
+                    backend.read_bytes(read_request).await?,
+                )
+            };
             if !stat.is_file {
                 return Err(tool_error(
                     self.name(),
                     format!("'{path}' is not a regular file"),
                 ));
             }
-            let bytes = backend
-                .read_bytes(WorkspaceFileReadBytesRequest {
-                    path: path.to_string(),
-                    cwd: None,
-                    max_bytes: MAX_SOURCE_BYTES,
-                })
-                .await?;
             let limits = self.capability.clone();
             let normalized = tokio::task::spawn_blocking(move || {
                 normalize_tool_image(TOOL_VIEW_IMAGE, bytes, None, &limits)

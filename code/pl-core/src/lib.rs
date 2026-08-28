@@ -14,6 +14,7 @@ pub mod path_safety;
 mod permission;
 pub mod process;
 mod prompt_cache;
+pub mod remote;
 pub mod runtime_usage;
 pub mod session;
 pub mod skill;

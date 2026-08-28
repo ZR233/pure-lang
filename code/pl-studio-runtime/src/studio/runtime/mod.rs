@@ -31,6 +31,7 @@ mod residency;
 mod settings_api;
 mod shutdown_progress;
 mod skill_catalog;
+mod ssh;
 mod state_query;
 mod task_recovery;
 mod thread_service;
@@ -150,6 +151,7 @@ pub struct StudioRuntime {
     task_runtime: crate::studio::TaskRuntime,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
+    ssh_manager: std::sync::Arc<pl_core::remote::SshManager>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,

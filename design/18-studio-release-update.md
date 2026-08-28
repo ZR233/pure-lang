@@ -1,5 +1,11 @@
 # Pure Studio 发布与应用内升级
 
+SSH remote helper 的发布合同独立于 GUI 安装包。每个 Studio 版本必须提供 stripped 静态
+`aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` helper、SHA-256 和 Minisign 签名；
+Studio runtime 从已下载的本地资产路径/缓存取用并验签，再经 SSH 原子上传，远端不访问发布网络。
+开发构建命令只生成二进制与 SHA-256，不能作为生产信任资产。helper target 由 `uname -s/-m`
+穷尽映射，未知平台明确失败。
+
 本文定义 Pure Studio 稳定版的唯一发布渠道、Windows 打包格式和应用内更新信任边界。
 首版只支持 Windows x64。RC 构建只作为 GitHub Actions artifact，不进入稳定更新源。
 

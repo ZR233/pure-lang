@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use pl_protocol::PureError;
 use tokio::io::AsyncWriteExt;
-use tokio::process::ChildStdin;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 use super::backend::{
-    CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
+    CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest, CommandWriter,
 };
 use super::head_tail_buffer::HeadTailBuffer;
 use crate::tool::tool_error;
@@ -29,7 +28,7 @@ pub use state::{
     CommandTerminationReason, DrainingCommandProcess, FinalCommandProcess, RunningCommandProcess,
     TerminatingCommandProcess,
 };
-use stream_io::{prepare_output_file, read_stderr, read_stdout};
+use stream_io::{read_stderr, read_stdout};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
@@ -67,10 +66,9 @@ struct CommandProcessEntry {
     process_id: String,
     os_pid: Option<u32>,
     output_target: CommandOutputTarget,
-    stdin: Mutex<Option<ChildStdin>>,
+    stdin: Mutex<Option<CommandWriter>>,
     state: Mutex<CommandProcessState>,
     notify: Notify,
-    output_file_lock: Mutex<()>,
     output_observer: Option<Arc<dyn CommandOutputObserver>>,
 }
 
@@ -224,12 +222,10 @@ where
             )
             .await
             .map_err(|error| tool_error("exec", error))?;
-        prepare_output_file(
-            output_target.capture_file(),
-            &request.command,
-            &working_directory,
-        )
-        .await?;
+        self.backend
+            .prepare_output(&output_target, &request.command, &working_directory)
+            .await
+            .map_err(|error| tool_error("exec", error))?;
 
         let process_id = self.reserve_process_id().await?;
         let child = self
@@ -238,6 +234,7 @@ where
                 process_id: process_id.clone(),
                 command: request.command,
                 cwd: working_directory,
+                output_target: output_target.clone(),
             })
             .await;
         let mut child = match child {
@@ -247,19 +244,18 @@ where
                 return Err(tool_error("exec", error));
             }
         };
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        let stdout = child.take_stdout();
+        let stderr = child.take_stderr();
         let stdout_open = stdout.is_some();
         let stderr_open = stderr.is_some();
-        let stdin = child.stdin.take();
+        let stdin = child.take_stdin();
         let entry = Arc::new(CommandProcessEntry {
             process_id: process_id.clone(),
-            os_pid: child.id(),
+            os_pid: child.host_pid(),
             output_target,
             stdin: Mutex::new(stdin),
             state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
             notify: Notify::new(),
-            output_file_lock: Mutex::new(()),
             output_observer: request.output_observer,
         });
         {
@@ -276,10 +272,10 @@ where
         );
 
         if let Some(stdout) = stdout {
-            tokio::spawn(read_stdout(entry.clone(), stdout));
+            tokio::spawn(read_stdout(entry.clone(), stdout, self.backend.clone()));
         }
         if let Some(stderr) = stderr {
-            tokio::spawn(read_stderr(entry.clone(), stderr));
+            tokio::spawn(read_stderr(entry.clone(), stderr, self.backend.clone()));
         }
         self.snapshot_after_wait(&process_id, request.yield_time, request.max_output_chars)
             .await

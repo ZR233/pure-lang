@@ -774,7 +774,27 @@ AgentProgressView? _agentProgressFromFrb(frb.BridgeAgentProgressDto? progress) {
 }
 
 StudioProject _projectFromFrb(frb.ProjectDto project) {
-  return StudioProject(id: project.id, name: project.name, path: project.path);
+  return StudioProject(
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    sshServerId: project.sshServerId,
+  );
+}
+
+SshServer _sshServerFromFrb(frb_ssh_types.SshServerDto server) {
+  return SshServer(
+    id: server.id,
+    name: server.name,
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    authKind: switch (server.authKind) {
+      frb_ssh_types.SshAuthKindDto.agentOrKey => SshAuthKind.agentOrKey,
+      frb_ssh_types.SshAuthKindDto.password => SshAuthKind.password,
+    },
+    identityFile: server.identityFile,
+  );
 }
 
 McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {

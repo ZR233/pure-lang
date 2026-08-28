@@ -27,7 +27,7 @@ fn rule_matches(rule: &str, workspace_root: &Path) -> bool {
 }
 
 /// `*` 通配匹配：`*` 匹配任意（含空）字符序列，其余字符精确比较。
-fn glob_match(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     let parts = pattern.split('*').collect::<Vec<_>>();
     let Some((&first, middle)) = parts.split_first() else {
         return true;

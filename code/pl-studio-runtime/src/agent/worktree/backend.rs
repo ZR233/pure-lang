@@ -63,6 +63,49 @@ impl WorktreeCreateFailure {
 /// [`LocalWorktreeBackend`] 复用 pl-core 的 [`LocalExecutionBackend`] shell out
 /// `git`。需要自定义执行环境（如容器内 git）的宿主可注入自己的实现。
 pub trait WorktreeBackend: fmt::Debug + Send + Sync {
+    /// 为 worktree 目标创建父目录。
+    fn create_parent<'a>(
+        &'a self,
+        target_path: &'a Path,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        async move {
+            if let Some(parent) = target_path.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|error| WorktreeError::Io(error.to_string()))?;
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    /// 检查 worktree leaf 是否仍存在。
+    fn path_exists<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<bool, WorktreeError>> {
+        async move {
+            match tokio::fs::symlink_metadata(path).await {
+                Ok(_) => Ok(true),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(WorktreeError::Io(error.to_string())),
+            }
+        }
+        .boxed()
+    }
+
+    /// 删除 worktree leaf，且不得跟随越界链接。
+    fn remove_leaf<'a>(
+        &'a self,
+        repo_root: &'a Path,
+        target_path: &'a Path,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        async move {
+            let worktree_root = repo_root.join(".pure/worktrees");
+            pl_core::path_safety::remove_dir_all_no_follow_async(&worktree_root, target_path)
+                .await
+                .map_err(|error| WorktreeError::Io(error.to_string()))
+        }
+        .boxed()
+    }
+
     /// 在 `target_path` 创建基于 `repo_root`、分支 `branch` 的 worktree。
     ///
     /// 实现必须区分明确无副作用的失败与可能已创建本次 spec 资源的失败；manager 只会

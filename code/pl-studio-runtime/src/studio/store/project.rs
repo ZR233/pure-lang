@@ -21,7 +21,7 @@ use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{
     STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema, migrate_studio_schema_v13_to_v14,
-    migrate_studio_schema_v14_to_v15,
+    migrate_studio_schema_v14_to_v15, migrate_studio_schema_v15_to_v16,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,7 @@ enum ExistingDatabaseState {
     Current,
     MigrateV13,
     MigrateV14,
+    MigrateV15,
 }
 
 impl StudioStore {
@@ -72,8 +73,8 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        // 只接受精确 v13 附件来源与精确 v14 working-object 来源；更早或结构
-        // 不匹配的数据库仍按不兼容数据库重建，不引入兼容读路径。
+        // 只接受精确 v13 附件、v14 working-object 与 v15 本地 Project 来源；
+        // 更早或结构不匹配的数据库仍按不兼容数据库重建，不引入兼容读路径。
         let existing_state = if database_exists {
             match inspect_database(&path).await {
                 Ok(state) => Some(state),
@@ -105,23 +106,33 @@ impl StudioStore {
             .parent()
             .context("Studio database path has no parent directory")?
             .join("attachments");
-        let migrating_v13 = existing_state == Some(ExistingDatabaseState::MigrateV13);
-        let migrating_v14 = existing_state == Some(ExistingDatabaseState::MigrateV14);
+        let migrating = matches!(
+            existing_state,
+            Some(
+                ExistingDatabaseState::MigrateV13
+                    | ExistingDatabaseState::MigrateV14
+                    | ExistingDatabaseState::MigrateV15
+            )
+        );
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
-            } else if migrating_v13 {
+            } else if existing_state == Some(ExistingDatabaseState::MigrateV13) {
                 migrate_studio_schema_v13_to_v14(&db, &attachments_dir).await?;
                 migrate_studio_schema_v14_to_v15(&db).await?;
-            } else if migrating_v14 {
+                migrate_studio_schema_v15_to_v16(&db).await?;
+            } else if existing_state == Some(ExistingDatabaseState::MigrateV14) {
                 migrate_studio_schema_v14_to_v15(&db).await?;
+                migrate_studio_schema_v15_to_v16(&db).await?;
+            } else if existing_state == Some(ExistingDatabaseState::MigrateV15) {
+                migrate_studio_schema_v15_to_v16(&db).await?;
             }
             validate_database(&db).await
         }
         .await;
         if let Err(error) = initialization {
             let close = db.close().await;
-            if migrating_v13 || migrating_v14 {
+            if migrating {
                 return match close {
                     Ok(()) => Err(error)
                         .context("Studio schema migration failed; the original database was preserved"),
@@ -165,6 +176,7 @@ impl StudioStore {
         let name = project_name(path);
         if let Some(existing) = project::Entity::find()
             .filter(project::Column::Path.eq(path_text.clone()))
+            .filter(project::Column::SshServerId.is_null())
             .one(&self.db)
             .await?
         {
@@ -181,6 +193,7 @@ impl StudioStore {
             id: Set(new_id("project")),
             name: Set(name),
             path: Set(path_text),
+            ssh_server_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
             last_opened_at: Set(Some(now)),
@@ -207,10 +220,16 @@ impl StudioStore {
     pub(in crate::studio) async fn find_project_by_path(
         &self,
         path: &str,
+        ssh_server_id: Option<&str>,
     ) -> Result<Option<ProjectRow>> {
         use entities::project;
+        let server_filter = match ssh_server_id {
+            Some(server_id) => project::Column::SshServerId.eq(server_id.to_string()),
+            None => project::Column::SshServerId.is_null(),
+        };
         Ok(project::Entity::find()
             .filter(project::Column::Path.eq(path.to_string()))
+            .filter(server_filter)
             .one(&self.db)
             .await?
             .map(|model| ProjectRow {
@@ -283,6 +302,9 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(14) => validate_v14_migration_source(&database)
             .await
             .map(|()| ExistingDatabaseState::MigrateV14),
+        Ok(15) => validate_v15_migration_source(&database)
+            .await
+            .map(|()| ExistingDatabaseState::MigrateV15),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,
@@ -343,6 +365,8 @@ async fn validate_database_version(db: &DatabaseConnection, expected_version: i6
 
 async fn validate_v13_migration_source(db: &DatabaseConnection) -> Result<()> {
     validate_database_health(db).await?;
+    validate_legacy_project_table(db).await?;
+    ensure_ssh_server_table_absent(db).await?;
     let mut columns = table_columns(db, "attachments").await?;
     columns.sort();
     ensure!(
@@ -361,8 +385,8 @@ async fn validate_v13_migration_source(db: &DatabaseConnection) -> Result<()> {
             ],
         "Studio v13 attachment table does not match the only supported migration source"
     );
-    let expected = expected_schema_fingerprint_without_attachment_table().await?;
-    let actual = schema_fingerprint_without_attachment_table(db).await?;
+    let expected = expected_schema_fingerprint_without_attachment_or_remote_tables().await?;
+    let actual = schema_fingerprint_without_attachment_or_remote_tables(db).await?;
     ensure!(
         actual == expected,
         "Studio v13 schema outside attachments is incompatible"
@@ -377,6 +401,70 @@ async fn validate_v14_migration_source(db: &DatabaseConnection) -> Result<()> {
     ensure!(
         actual == expected,
         "Studio v14 schema does not match the only supported object migration source"
+    );
+    Ok(())
+}
+
+async fn validate_v15_migration_source(db: &DatabaseConnection) -> Result<()> {
+    validate_database_health(db).await?;
+    validate_legacy_project_table(db).await?;
+    ensure_ssh_server_table_absent(db).await?;
+    let expected = expected_schema_fingerprint_without_remote_tables().await?;
+    let actual = schema_fingerprint_without_remote_tables(db).await?;
+    ensure!(
+        actual == expected,
+        "Studio v15 schema outside SSH project ownership is incompatible"
+    );
+    Ok(())
+}
+
+async fn validate_legacy_project_table(db: &DatabaseConnection) -> Result<()> {
+    let mut columns = table_columns(db, "projects").await?;
+    columns.sort();
+    ensure!(
+        columns
+            == [
+                "closed",
+                "created_at",
+                "id",
+                "last_opened_at",
+                "name",
+                "path",
+                "updated_at",
+            ],
+        "Studio v15 project table does not match the only supported migration source"
+    );
+    let unique_path_rows = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT il.name
+             FROM pragma_index_list('projects') AS il
+             JOIN pragma_index_info(il.name) AS ii
+             WHERE il.\"unique\" = 1 AND ii.name = 'path'
+             GROUP BY il.name
+             HAVING COUNT(*) = 1"
+                .to_string(),
+        ))
+        .await?;
+    ensure!(
+        unique_path_rows.len() == 1,
+        "Studio v15 project path uniqueness is incompatible"
+    );
+    Ok(())
+}
+
+async fn ensure_ssh_server_table_absent(db: &DatabaseConnection) -> Result<()> {
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_schema
+             WHERE type = 'table' AND name = 'ssh_servers'"
+                .to_string(),
+        ))
+        .await?;
+    ensure!(
+        rows.is_empty(),
+        "Studio v15 schema unexpectedly contains ssh_servers"
     );
     Ok(())
 }
@@ -425,7 +513,7 @@ async fn expected_schema_fingerprint() -> Result<String> {
     fingerprint
 }
 
-async fn expected_schema_fingerprint_without_attachment_table() -> Result<String> {
+async fn expected_schema_fingerprint_without_attachment_or_remote_tables() -> Result<String> {
     let database = connect_sqlite(
         "sqlite::memory:",
         SqliteSynchronous::Normal,
@@ -437,7 +525,20 @@ async fn expected_schema_fingerprint_without_attachment_table() -> Result<String
     database
         .execute_unprepared("ALTER TABLE thread_inputs DROP COLUMN attachments_json;")
         .await?;
-    let fingerprint = schema_fingerprint_without_attachment_table(&database).await;
+    let fingerprint = schema_fingerprint_without_attachment_or_remote_tables(&database).await;
+    database.close().await?;
+    fingerprint
+}
+
+async fn expected_schema_fingerprint_without_remote_tables() -> Result<String> {
+    let database = connect_sqlite(
+        "sqlite::memory:",
+        SqliteSynchronous::Normal,
+        /* max_connections */ 1,
+    )
+    .await?;
+    initialize_studio_schema(&database).await?;
+    let fingerprint = schema_fingerprint_without_remote_tables(&database).await;
     database.close().await?;
     fingerprint
 }
@@ -457,6 +558,7 @@ async fn expected_v14_schema_fingerprint() -> Result<String> {
 }
 
 async fn downgrade_expected_schema_to_v14(db: &DatabaseConnection) -> Result<()> {
+    downgrade_expected_schema_to_v15(db).await?;
     db.execute_unprepared("DROP TABLE studio_objects").await?;
     Schema::new(db.get_database_backend())
         .builder()
@@ -466,12 +568,55 @@ async fn downgrade_expected_schema_to_v14(db: &DatabaseConnection) -> Result<()>
     Ok(())
 }
 
+async fn downgrade_expected_schema_to_v15(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared(
+        "PRAGMA foreign_keys = OFF;
+         PRAGMA legacy_alter_table = ON;
+         DROP INDEX idx_projects_closed_last_opened_at;
+         DROP INDEX idx_projects_local_path;
+         DROP INDEX idx_projects_remote_path;
+         ALTER TABLE projects RENAME TO projects_v16;
+         CREATE TABLE projects (
+             id TEXT PRIMARY KEY NOT NULL,
+             name TEXT NOT NULL,
+             path TEXT NOT NULL UNIQUE,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL,
+             last_opened_at INTEGER,
+             closed INTEGER NOT NULL
+         );
+         INSERT INTO projects (
+             id, name, path, created_at, updated_at, last_opened_at, closed
+         )
+         SELECT id, name, path, created_at, updated_at, last_opened_at, closed
+         FROM projects_v16;
+         DROP TABLE projects_v16;
+         DROP TABLE ssh_servers;
+         CREATE INDEX idx_projects_closed_last_opened_at
+         ON projects(closed, last_opened_at DESC, updated_at DESC, id DESC);
+         PRAGMA legacy_alter_table = OFF;
+         PRAGMA foreign_keys = ON;",
+    )
+    .await?;
+    Ok(())
+}
+
 async fn schema_fingerprint(db: &DatabaseConnection) -> Result<String> {
     schema_fingerprint_where(db, "1 = 1").await
 }
 
-async fn schema_fingerprint_without_attachment_table(db: &DatabaseConnection) -> Result<String> {
-    schema_fingerprint_where(db, "NOT (type = 'table' AND name = 'attachments')").await
+async fn schema_fingerprint_without_attachment_or_remote_tables(
+    db: &DatabaseConnection,
+) -> Result<String> {
+    schema_fingerprint_where(
+        db,
+        "tbl_name NOT IN ('attachments', 'projects', 'ssh_servers')",
+    )
+    .await
+}
+
+async fn schema_fingerprint_without_remote_tables(db: &DatabaseConnection) -> Result<String> {
+    schema_fingerprint_where(db, "tbl_name NOT IN ('projects', 'ssh_servers')").await
 }
 
 async fn schema_fingerprint_where(db: &DatabaseConnection, predicate: &str) -> Result<String> {

@@ -34,6 +34,7 @@ impl StudioRuntime {
             self.agent_facility.resources.clone(),
             self.agent_facility.product_events.clone(),
             self.skills.clone(),
+            self.ssh_manager.clone(),
         );
         let runtime = std::sync::Arc::new(
             StudioAgentRuntime::start(host, runtime_options())

@@ -6,7 +6,10 @@ use pl_core::{
     SpawnRollbackReason,
 };
 
-use crate::{PureError, Result, WorktreeError, WorktreeHandle, WorktreeManager};
+use crate::{
+    PureError, RemoteWorktreeBackend, Result, WorktreeBackend, WorktreeError, WorktreeHandle,
+    WorktreeManager,
+};
 
 use crate::studio::product_event_bus::ProductEventBus;
 use crate::studio::records::ThreadRecord;
@@ -27,6 +30,7 @@ pub(in crate::studio) struct StudioAgentLifecycle {
     product_events: ProductEventBus,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
+    ssh_manager: Arc<pl_core::remote::SshManager>,
 }
 
 pub(in crate::studio) struct StudioSpawnLease {
@@ -46,12 +50,14 @@ impl StudioAgentLifecycle {
         product_events: ProductEventBus,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
+        ssh_manager: Arc<pl_core::remote::SshManager>,
     ) -> Self {
         Self {
             store,
             product_events,
             coordinator,
             resources,
+            ssh_manager,
         }
     }
 }
@@ -107,7 +113,29 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .coordinator
             .prepare_agent_spawn(&studio_request)
             .await?;
-        let worktree = match create_worktree(&preparation, &studio_request).await {
+        let project = match self
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == parent_thread.project_id)
+        {
+            Some(project) => project,
+            None => self
+                .store
+                .read_project(&parent_thread.project_id)
+                .await
+                .map_err(|error| lifecycle_error(error.to_string()))?
+                .ok_or_else(|| lifecycle_error("spawn project does not exist"))?,
+        };
+        let worktree_backend = project.ssh_server_id.as_ref().map(|server_id| {
+            Arc::new(RemoteWorktreeBackend::new(
+                self.ssh_manager.clone(),
+                server_id.clone(),
+                std::path::PathBuf::from(&project.path),
+            )) as Arc<dyn WorktreeBackend>
+        });
+        let worktree = match create_worktree(&preparation, worktree_backend).await {
             Ok(worktree) => worktree,
             Err(error) => {
                 let failure = worktree_spawn_failure(&studio_request, &preparation, &error);
@@ -380,12 +408,15 @@ async fn record_prepared_spawn_failure(
 
 async fn create_worktree(
     preparation: &StudioTaskSpawnPreparation,
-    _request: &StudioTaskSpawnRequest,
+    backend: Option<Arc<dyn WorktreeBackend>>,
 ) -> std::result::Result<Option<(WorktreeManager, WorktreeHandle, String)>, WorktreeError> {
     let Some(spec) = preparation.worktree_spec().cloned() else {
         return Ok(None);
     };
-    let manager = WorktreeManager::local(spec.repo_root.clone());
+    let manager = match backend {
+        Some(backend) => WorktreeManager::with_backend(spec.repo_root.clone(), backend),
+        None => WorktreeManager::local(spec.repo_root.clone()),
+    };
     let handle = manager.create_from_spec(spec).await?;
     let actual_base_commit = match manager.resolve_head(&handle).await {
         Ok(commit) => commit,

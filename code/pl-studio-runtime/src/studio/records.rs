@@ -8,6 +8,7 @@ pub struct ProjectRecord {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub ssh_server_id: Option<String>,
     pub updated_at: i64,
 }
 

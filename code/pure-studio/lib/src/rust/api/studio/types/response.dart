@@ -1068,18 +1068,24 @@ class ProjectDto {
   final String id;
   final String name;
   final String path;
+  final String? sshServerId;
   final PlatformInt64 updatedAt;
 
   const ProjectDto({
     required this.id,
     required this.name,
     required this.path,
+    this.sshServerId,
     required this.updatedAt,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^ name.hashCode ^ path.hashCode ^ updatedAt.hashCode;
+      id.hashCode ^
+      name.hashCode ^
+      path.hashCode ^
+      sshServerId.hashCode ^
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1089,6 +1095,7 @@ class ProjectDto {
           id == other.id &&
           name == other.name &&
           path == other.path &&
+          sshServerId == other.sshServerId &&
           updatedAt == other.updatedAt;
 }
 

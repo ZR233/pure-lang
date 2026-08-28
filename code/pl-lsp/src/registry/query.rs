@@ -57,11 +57,7 @@ impl LspRuntimeRegistry {
         let Some(client) = self.open_client_for_path(path).await else {
             return;
         };
-        if path.is_file() {
-            let _ = client.change_document(path).await;
-        } else {
-            let _ = client.close_document(path).await;
-        }
+        let _ = client.refresh_document(path).await;
     }
 
     pub async fn notify_file_deleted(&self, path: impl AsRef<Path>) {

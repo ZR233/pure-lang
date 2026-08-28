@@ -8,6 +8,7 @@ members = [
     "code/pl-patch",
     "code/pl-skill-core",
     "code/pl-core",
+    "code/pl-remote-helper",
     "code/pl-studio-runtime",
     "code/pl-studio-server",
     "code/pure-studio/rust",

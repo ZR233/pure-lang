@@ -24,6 +24,7 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use crate::catalog::LspServerCatalog;
 use crate::client::LspClient;
 use crate::driver::LspServerDriver;
+use crate::host::LspHostBackend;
 use crate::resolved::ResolvedLspServer;
 use crate::types::{
     LspAvailabilityKind, LspDiagnostic, LspQuery, LspQueryResult, LspResult, LspServerSnapshot,
@@ -117,6 +118,7 @@ struct LspRuntimeState {
 struct LspWorkspaceState {
     servers: BTreeMap<String, LspRuntimeServerState>,
     diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
+    host: Option<Arc<dyn LspHostBackend>>,
 }
 
 /// 单个 workspace member 的运行态：解析后的定义、driver 与探测/连接状态。

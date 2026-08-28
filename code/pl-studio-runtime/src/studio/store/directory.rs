@@ -160,6 +160,7 @@ pub(in crate::studio) struct ProjectDirectoryRecord {
     pub(in crate::studio) id: String,
     pub(in crate::studio) name: String,
     pub(in crate::studio) path: String,
+    pub(in crate::studio) ssh_server_id: Option<String>,
     pub(in crate::studio) created_at: i64,
     pub(in crate::studio) updated_at: i64,
     pub(in crate::studio) last_opened_at: Option<i64>,
@@ -290,6 +291,7 @@ async fn upsert_project_directory_row(
             id: Set(record.id.clone()),
             name: Set(record.name.clone()),
             path: Set(record.path.clone()),
+            ssh_server_id: Set(record.ssh_server_id.clone()),
             created_at: Set(record.created_at),
             updated_at: Set(record.updated_at),
             last_opened_at: Set(record.last_opened_at),
@@ -299,7 +301,7 @@ async fn upsert_project_directory_row(
         .await?;
         return Ok(());
     };
-    if existing.path != record.path {
+    if existing.path != record.path || existing.ssh_server_id != record.ssh_server_id {
         bail!(
             "Project {} directory identity changed: persisted path {}, delta path {}",
             record.id,

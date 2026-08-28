@@ -519,6 +519,168 @@ abstract class AppLocalizations {
   /// **'General'**
   String get settingsGeneralTab;
 
+  /// No description provided for @settingsSshTab.
+  ///
+  /// In en, this message translates to:
+  /// **'SSH'**
+  String get settingsSshTab;
+
+  /// No description provided for @settingsSshTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote development'**
+  String get settingsSshTitle;
+
+  /// No description provided for @settingsSshSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage SSH workspaces. Connections and helper lifecycle are owned by the local core.'**
+  String get settingsSshSubtitle;
+
+  /// No description provided for @settingsSshAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add server'**
+  String get settingsSshAdd;
+
+  /// No description provided for @settingsSshEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No SSH servers yet.'**
+  String get settingsSshEmpty;
+
+  /// No description provided for @settingsSshManagedByCore.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenSSH and the minimal remote helper are managed locally.'**
+  String get settingsSshManagedByCore;
+
+  /// No description provided for @settingsSshTest.
+  ///
+  /// In en, this message translates to:
+  /// **'Test connection'**
+  String get settingsSshTest;
+
+  /// No description provided for @settingsSshReconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get settingsSshReconnect;
+
+  /// No description provided for @settingsSshOpenProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Open project'**
+  String get settingsSshOpenProject;
+
+  /// No description provided for @settingsSshEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get settingsSshEdit;
+
+  /// No description provided for @settingsSshDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get settingsSshDelete;
+
+  /// No description provided for @settingsSshReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready'**
+  String get settingsSshReady;
+
+  /// No description provided for @settingsSshDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete SSH server?'**
+  String get settingsSshDeleteTitle;
+
+  /// No description provided for @settingsSshDeleteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name}? Projects using this server must be removed first.'**
+  String settingsSshDeleteBody(String name);
+
+  /// No description provided for @settingsSshName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get settingsSshName;
+
+  /// No description provided for @settingsSshHost.
+  ///
+  /// In en, this message translates to:
+  /// **'Host'**
+  String get settingsSshHost;
+
+  /// No description provided for @settingsSshUsername.
+  ///
+  /// In en, this message translates to:
+  /// **'Username'**
+  String get settingsSshUsername;
+
+  /// No description provided for @settingsSshPort.
+  ///
+  /// In en, this message translates to:
+  /// **'Port'**
+  String get settingsSshPort;
+
+  /// No description provided for @settingsSshAuth.
+  ///
+  /// In en, this message translates to:
+  /// **'Authentication'**
+  String get settingsSshAuth;
+
+  /// No description provided for @settingsSshAuthAgentOrKey.
+  ///
+  /// In en, this message translates to:
+  /// **'SSH agent or key'**
+  String get settingsSshAuthAgentOrKey;
+
+  /// No description provided for @settingsSshAuthPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get settingsSshAuthPassword;
+
+  /// No description provided for @settingsSshIdentityFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Identity file (optional)'**
+  String get settingsSshIdentityFile;
+
+  /// No description provided for @settingsSshPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get settingsSshPassword;
+
+  /// No description provided for @settingsSshPasswordLease.
+  ///
+  /// In en, this message translates to:
+  /// **'Kept in core memory for this app session only.'**
+  String get settingsSshPasswordLease;
+
+  /// No description provided for @settingsSshSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get settingsSshSave;
+
+  /// No description provided for @settingsSshChooseDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose remote directory'**
+  String get settingsSshChooseDirectory;
+
+  /// No description provided for @settingsSshOpenThisDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Open this directory'**
+  String get settingsSshOpenThisDirectory;
+
   /// No description provided for @composerHint.
   ///
   /// In en, this message translates to:

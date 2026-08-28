@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v15；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v16；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
@@ -30,6 +30,7 @@ Thread、Task、Project 及其目录 owner 的内存聚合是活动状态唯一�
 核心表：
 
 - projects
+- ssh_servers
 - threads
 - thread_inputs
 - turns
@@ -181,17 +182,20 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 ## 19.3 不兼容库重建与一次性迁移
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。Studio 只读写当前版本 v15，不保留跨版本兼容读路径。精确匹配 canonical v13 时先
-执行既有 image attachment 迁移到 v14；精确匹配 v14 时再把 `thread_session_state` 事务迁移为
-`studio_objects` 的 `agentWorkingState` object。迁移校验每个 payload 的 JSON、revision 与 hash，
-失败时保留原数据库并阻断启动，不转入重建。
+fingerprint。Studio 只读写当前版本 v16，不保留跨版本兼容读路径。精确匹配 canonical v13 时，
+先验证旧 attachment blob 位于 attachments 目录且大小一致，再写入 content-addressed object 并提升
+到 v14；精确匹配 v14 时，把 `thread_session_state` 事务迁移为 `studio_objects` 的
+`agentWorkingState` object 并提升到 v15；精确匹配 v15 时，新增 `ssh_servers`、
+`projects.ssh_server_id`、对应外键与本地/远端 partial unique index 并提升到 v16。各阶段只允许沿
+canonical 链逐级迁移，并校验 schema fingerprint、payload JSON、revision、hash 与外键；失败时
+保留原数据库并阻断启动，不转入重建。
 
-除上述精确 v13/v14 来源外，任何非 v15 库一律按不兼容处理，不迁移、不归档、不导入：
+除上述精确 v13/v14/v15 来源外，任何非 v16 库一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v15 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v16 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建

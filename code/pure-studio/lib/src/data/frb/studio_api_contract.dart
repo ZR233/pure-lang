@@ -6,6 +6,16 @@ abstract class StudioApi {
   Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
   Future<void> activateProject(String projectId);
   Future<StudioProject> openProject(String path);
+  Future<List<SshServer>> listSshServers();
+  Future<SshServer> saveSshServer(SaveSshServerCommand command);
+  Future<void> deleteSshServer(String serverId);
+  Future<SshConnectionView> testSshConnection(String serverId);
+  Future<SshConnectionView> reconnectSshServer(String serverId);
+  Future<RemoteDirectoryListing> browseRemoteDirectories(
+    String serverId, {
+    String? path,
+  });
+  Future<StudioProject> openRemoteProject(String serverId, String path);
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
@@ -263,6 +273,108 @@ class FrbStudioApi implements StudioApi {
     await _ensureReady();
     return _projectFromFrb(
       await _bridgeCall(() => frb.openProject(path: path)),
+    );
+  }
+
+  @override
+  Future<List<SshServer>> listSshServers() async {
+    await _ensureReady();
+    final servers = await _bridgeCall(frb_ssh.listSshServers);
+    return servers.map(_sshServerFromFrb).toList(growable: false);
+  }
+
+  @override
+  Future<SshServer> saveSshServer(SaveSshServerCommand command) async {
+    await _ensureReady();
+    final server = await _bridgeCall(
+      () => frb_ssh.saveSshServer(
+        request: frb_ssh_types.SaveSshServerRequest(
+          id: command.id,
+          name: command.name,
+          host: command.host,
+          port: command.port,
+          username: command.username,
+          authKind: switch (command.authKind) {
+            SshAuthKind.agentOrKey => frb_ssh_types.SshAuthKindDto.agentOrKey,
+            SshAuthKind.password => frb_ssh_types.SshAuthKindDto.password,
+          },
+          identityFile: command.identityFile,
+          password: command.password,
+        ),
+      ),
+    );
+    return _sshServerFromFrb(server);
+  }
+
+  @override
+  Future<void> deleteSshServer(String serverId) async {
+    await _ensureReady();
+    await _bridgeCall(() => frb_ssh.deleteSshServer(serverId: serverId));
+  }
+
+  @override
+  Future<SshConnectionView> testSshConnection(String serverId) async {
+    await _ensureReady();
+    final snapshot = await _bridgeCall(
+      () => frb_ssh.testSshConnection(serverId: serverId),
+    );
+    return SshConnectionView(
+      serverId: snapshot.serverId,
+      state: snapshot.state,
+      helperVersion: snapshot.helperVersion,
+      architecture: snapshot.architecture,
+      attempt: snapshot.attempt,
+      delaySeconds: snapshot.delaySeconds?.toInt(),
+      errorCode: snapshot.errorCode,
+      errorMessage: snapshot.errorMessage,
+    );
+  }
+
+  @override
+  Future<SshConnectionView> reconnectSshServer(String serverId) async {
+    await _ensureReady();
+    final snapshot = await _bridgeCall(
+      () => frb_ssh.reconnectSshServer(serverId: serverId),
+    );
+    return SshConnectionView(
+      serverId: snapshot.serverId,
+      state: snapshot.state,
+      helperVersion: snapshot.helperVersion,
+      architecture: snapshot.architecture,
+      attempt: snapshot.attempt,
+      delaySeconds: snapshot.delaySeconds?.toInt(),
+      errorCode: snapshot.errorCode,
+      errorMessage: snapshot.errorMessage,
+    );
+  }
+
+  @override
+  Future<RemoteDirectoryListing> browseRemoteDirectories(
+    String serverId, {
+    String? path,
+  }) async {
+    await _ensureReady();
+    final listing = await _bridgeCall(
+      () => frb_ssh.browseRemoteDirectories(serverId: serverId, path: path),
+    );
+    return RemoteDirectoryListing(
+      path: listing.path,
+      parent: listing.parent,
+      entries: listing.entries
+          .map(
+            (entry) => RemoteDirectoryEntry(name: entry.name, path: entry.path),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Future<StudioProject> openRemoteProject(String serverId, String path) async {
+    await _ensureReady();
+    return _projectFromFrb(
+      await _bridgeCall(
+        () => frb_ssh.openRemoteProject(serverId: serverId, path: path),
+      ),
     );
   }
 

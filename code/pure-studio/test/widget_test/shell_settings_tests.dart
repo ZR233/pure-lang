@@ -1165,6 +1165,43 @@ void registerShellSettingsTests() {
     expect(api.resetAllMcpCount, 1);
   });
 
+  testWidgets('SSH settings delegate connection and project actions to core', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    expect(find.text('root@192.168.100.12:22'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.id)));
+    await tester.pumpAndSettle();
+    expect(api.testedSshServerId, server.id);
+    expect(find.text('aarch64 · helper 0.1.0'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect(server.id)));
+    await tester.pumpAndSettle();
+    expect(api.reconnectedSshServerId, server.id);
+
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+    expect(api.browsedRemoteDirectory?.serverId, server.id);
+    await tester.tap(find.text('Open this directory'));
+    await tester.pumpAndSettle();
+    expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
+  });
+
   testWidgets('MCP runtime errors stay scoped to the unavailable server', (
     tester,
   ) async {

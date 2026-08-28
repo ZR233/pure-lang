@@ -34,6 +34,7 @@ pub use container::*;
 pub use context::*;
 pub use contract::*;
 pub use exec::*;
+pub(crate) use file::path::matches_pattern;
 pub use file::*;
 pub use futures::future::BoxFuture;
 pub use git::*;

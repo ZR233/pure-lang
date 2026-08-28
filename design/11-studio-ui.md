@@ -306,8 +306,8 @@ canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或�
 
 ## 11.9 设置与视觉
 
-Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、Statistics、Security、
-General；Statistics 位于系统分组的 Security 前。
+Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、SSH、Statistics、
+Security、General；SSH 位于 workspace 分组，Statistics 位于系统分组的 Security 前。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
 secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
 Skills 页进入时只读取当前 catalog，并把返回的 canonical snapshot 应用到 GUI 状态；列表内容跨
@@ -316,6 +316,14 @@ Project 激活 command 才执行发现。
 MCP/LSP 页进入和“刷新”只读取各 owner 的 last-known snapshot；MCP 单 server“重新连接”、
 经确认的“全部重置”，以及 LSP probe、typed repair 和 reset 都必须调用各自的明确 command。
 这些操作使用稳定 `ValueKey`，其 command response 仍按领域 revision 应用，不能覆盖更晚事件。
+
+SSH 页只展示 `pl-core::remote::SshManager` 返回的服务器与连接 snapshot，并调用 typed 保存、测试、
+删除、连接和重连 command。Flutter 不构造 SSH argv、不选择 helper asset、不解析 stderr，也不实现
+重试。服务器编辑器支持 host、port、username、password 或 agent/key，以及可选 identity file。
+password 只通过 typed command 提交给 core 的进程内 secret lease，不回填到 canonical snapshot；
+系统 OpenSSH 经本地 Askpass 脚本读取该 lease。新建 Project 选择 SSH 时依次调用服务器选择、
+目录浏览与远端项目创建；创建完成后的 Thread、Timeline、Composer 和工具 UI 与本地 Project
+共用同一投影。
 
 Statistics 是只读实时页，上部按 Provider 实例与实际 API model 分组展示加权 t/s、样本数、累计
 completion token、平均 TTFT 和平均总响应时间；下部展示全局最近 1000 条完整成功调用，最新优先，

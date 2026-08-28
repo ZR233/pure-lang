@@ -26,11 +26,13 @@ class StudioProject {
     required this.id,
     required this.name,
     required this.path,
+    this.sshServerId,
   });
 
   final String id;
   final String name;
   final String path;
+  final String? sshServerId;
 }
 
 class StudioThread {

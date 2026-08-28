@@ -27,13 +27,18 @@ impl FakeDriver {
 }
 
 impl LspServerDriver for FakeDriver {
-    fn probe<'a>(&'a self, _command: &'a LspResolvedCommand) -> BoxFuture<'a, LspProbeOutcome> {
+    fn probe<'a>(
+        &'a self,
+        _command: &'a LspResolvedCommand,
+        _host: Option<&'a dyn crate::host::LspHostBackend>,
+    ) -> BoxFuture<'a, LspProbeOutcome> {
         FutureExt::boxed(std::future::ready(self.outcome.clone()))
     }
 
     fn repair<'a>(
         &'a self,
         _component: &'a LspMissingComponent,
+        _host: Option<&'a dyn crate::host::LspHostBackend>,
     ) -> BoxFuture<'a, Result<(), LspRepairError>> {
         FutureExt::boxed(std::future::ready(Err(LspRepairError::NotSupported)))
     }

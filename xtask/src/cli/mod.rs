@@ -43,6 +43,8 @@ pub(crate) enum Command {
     },
     /// Build and copy Windows Rust bridge artifacts.
     BuildRustBridge(BuildRustBridgeOptions),
+    /// Cross-compile the minimal Linux SSH remote helper.
+    BuildRemoteHelper(BuildRemoteHelperOptions),
     /// Refresh bundled upstream preset Skills inside pl-studio-runtime.
     SyncSkills,
 }
@@ -176,6 +178,16 @@ pub(crate) struct BuildRustBridgeOptions {
     /// Optional Cargo target directory.
     #[arg(long)]
     pub(crate) target_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub(crate) struct BuildRemoteHelperOptions {
+    /// Rust target triple for one helper artifact.
+    #[arg(long, value_name = "TARGET", conflicts_with = "all_targets")]
+    pub(crate) target: Option<String>,
+    /// Build every supported helper target.
+    #[arg(long, conflicts_with = "target")]
+    pub(crate) all_targets: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -315,6 +327,26 @@ mod tests {
         assert_eq!(
             parse(["xtask", "sync-skills"].map(OsString::from))?,
             ParseOutcome::Run(Command::SyncSkills)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn remote_helper_target_reaches_build_command() -> Result<()> {
+        assert_eq!(
+            parse(
+                [
+                    "xtask",
+                    "build-remote-helper",
+                    "--target",
+                    "aarch64-unknown-linux-musl",
+                ]
+                .map(OsString::from),
+            )?,
+            ParseOutcome::Run(Command::BuildRemoteHelper(BuildRemoteHelperOptions {
+                target: Some("aarch64-unknown-linux-musl".to_string()),
+                all_targets: false,
+            }))
         );
         Ok(())
     }

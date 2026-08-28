@@ -31,6 +31,7 @@ pub struct BuiltinToolInstaller<
     git_runtime: Option<GitToolRuntime<B, P>>,
     command_runtime: Option<CommandToolRuntime<E>>,
     workspace_file_runtime: Option<WorkspaceFileToolRuntime<W>>,
+    additional_tools: Vec<Arc<dyn Tool>>,
 }
 
 impl BuiltinToolInstaller {
@@ -41,6 +42,7 @@ impl BuiltinToolInstaller {
             git_runtime: None,
             command_runtime: None,
             workspace_file_runtime: None,
+            additional_tools: Vec::new(),
         }
     }
 
@@ -52,6 +54,7 @@ impl BuiltinToolInstaller {
             git_runtime: None,
             command_runtime: None,
             workspace_file_runtime: None,
+            additional_tools: Vec::new(),
         }
     }
 }
@@ -73,6 +76,7 @@ impl<B, P, E, W> BuiltinToolInstaller<B, P, E, W> {
             }),
             command_runtime: self.command_runtime,
             workspace_file_runtime: self.workspace_file_runtime,
+            additional_tools: self.additional_tools,
         }
     }
 
@@ -83,6 +87,7 @@ impl<B, P, E, W> BuiltinToolInstaller<B, P, E, W> {
             git_runtime: self.git_runtime,
             command_runtime: Some(CommandToolRuntime { backend }),
             workspace_file_runtime: self.workspace_file_runtime,
+            additional_tools: self.additional_tools,
         }
     }
 
@@ -96,7 +101,13 @@ impl<B, P, E, W> BuiltinToolInstaller<B, P, E, W> {
             git_runtime: self.git_runtime,
             command_runtime: self.command_runtime,
             workspace_file_runtime: Some(WorkspaceFileToolRuntime { backend }),
+            additional_tools: self.additional_tools,
         }
+    }
+
+    pub fn with_additional_tools(mut self, tools: Vec<Arc<dyn Tool>>) -> Self {
+        self.additional_tools.extend(tools);
+        self
     }
 
     pub fn capabilities(&self) -> &ToolCapabilityConfig {
@@ -172,6 +183,7 @@ where
                 Arc::new(WorkspaceFileTool::new(*kind, runtime.backend.clone())) as Arc<dyn Tool>
             }));
         }
+        tools.extend(self.additional_tools.iter().cloned());
         if self.capabilities.ask_user {
             tools.push(Arc::new(AskUserTool));
         }

@@ -7,6 +7,7 @@ pub mod providers;
 pub mod recovery;
 pub mod settings;
 pub mod snapshot;
+pub mod ssh;
 pub mod thread;
 pub mod updater;
 
@@ -19,5 +20,6 @@ pub use providers::*;
 pub use recovery::*;
 pub use settings::*;
 pub use snapshot::*;
+pub use ssh::*;
 pub use thread::*;
 pub use updater::*;

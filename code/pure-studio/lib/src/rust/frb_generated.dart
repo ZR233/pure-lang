@@ -12,6 +12,7 @@ import 'api/studio/handlers/providers.dart';
 import 'api/studio/handlers/recovery.dart';
 import 'api/studio/handlers/settings.dart';
 import 'api/studio/handlers/snapshot.dart';
+import 'api/studio/handlers/ssh.dart';
 import 'api/studio/handlers/thread.dart';
 import 'api/studio/handlers/updater.dart';
 import 'api/studio/subscription.dart';
@@ -22,6 +23,7 @@ import 'api/studio/types/history.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
+import 'api/studio/types/ssh.dart';
 import 'api/studio/types/thread_stream.dart';
 import 'api/studio/types/thread_stream/item.dart';
 import 'api/studio/types/updater.dart';
@@ -90,7 +92,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1253392544;
+  int get rustContentHash => -2096054816;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -173,6 +175,12 @@ abstract class RustLibApi extends BaseApi {
   Future<BridgeTaskNoDeliveryCompletion>
   crateApiStudioTypesRuntimeBridgeTaskNoDeliveryCompletionDefault();
 
+  Future<RemoteDirectoryListingDto>
+  crateApiStudioHandlersSshBrowseRemoteDirectories({
+    required String serverId,
+    String? path,
+  });
+
   Future<BridgeProviderUsageStateSnapshot>
   crateApiStudioHandlersProvidersCheckProviderUsage();
 
@@ -192,6 +200,10 @@ abstract class RustLibApi extends BaseApi {
   Future<BridgeEventSubscription>
   crateApiStudioSubscriptionCreateProductSubscription();
 
+  Future<void> crateApiStudioHandlersSshDeleteSshServer({
+    required String serverId,
+  });
+
   Future<BridgeSkillsStateSnapshot>
   crateApiStudioHandlersProvidersDiscoverSkills({required String projectId});
 
@@ -208,6 +220,8 @@ abstract class RustLibApi extends BaseApi {
     required String turnId,
   });
 
+  Future<List<SshServerDto>> crateApiStudioHandlersSshListSshServers();
+
   Future<BridgeThreadTurnPage> crateApiStudioHandlersHistoryListThreadTurns({
     required ListThreadTurnsRequest request,
   });
@@ -221,6 +235,11 @@ abstract class RustLibApi extends BaseApi {
   crateApiStudioHandlersSettingsLoadProviderCatalog();
 
   Future<ProjectDto> crateApiStudioHandlersLifecycleOpenProject({
+    required String path,
+  });
+
+  Future<ProjectDto> crateApiStudioHandlersSshOpenRemoteProject({
+    required String serverId,
     required String path,
   });
 
@@ -280,6 +299,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeWebSearchSettingsDto>
   crateApiStudioHandlersSettingsReadWebSearchSettings();
+
+  Future<SshConnectionSnapshotDto> crateApiStudioHandlersSshReconnectSshServer({
+    required String serverId,
+  });
 
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsReloadSettingsFromDisk({
@@ -353,6 +376,10 @@ abstract class RustLibApi extends BaseApi {
     required SkillsSettingsInput input,
   });
 
+  Future<SshServerDto> crateApiStudioHandlersSshSaveSshServer({
+    required SaveSshServerRequest request,
+  });
+
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveWebSearchSettings({
     required BigInt expectedSettingsRevision,
@@ -399,6 +426,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeEventSubscription> crateApiStudioSubscriptionSubscribeThread({
     required String threadId,
+  });
+
+  Future<SshConnectionSnapshotDto> crateApiStudioHandlersSshTestSshConnection({
+    required String serverId,
   });
 
   RustArcIncrementStrongCountFnType
@@ -1081,6 +1112,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<RemoteDirectoryListingDto>
+  crateApiStudioHandlersSshBrowseRemoteDirectories({
+    required String serverId,
+    String? path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(serverId, serializer);
+          sse_encode_opt_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 19,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_remote_directory_listing_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshBrowseRemoteDirectoriesConstMeta,
+        argValues: [serverId, path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersSshBrowseRemoteDirectoriesConstMeta =>
+      const TaskConstMeta(
+        debugName: "browse_remote_directories",
+        argNames: ["serverId", "path"],
+      );
+
+  @override
   Future<BridgeProviderUsageStateSnapshot>
   crateApiStudioHandlersProvidersCheckProviderUsage() {
     return handler.executeNormal(
@@ -1090,7 +1158,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 20,
             port: port_,
           );
         },
@@ -1119,7 +1187,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 21,
             port: port_,
           );
         },
@@ -1151,7 +1219,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 22,
             port: port_,
           );
         },
@@ -1186,7 +1254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 23,
             port: port_,
           );
         },
@@ -1218,7 +1286,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1243,6 +1311,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiStudioHandlersSshDeleteSshServer({
+    required String serverId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(serverId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 25,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshDeleteSshServerConstMeta,
+        argValues: [serverId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshDeleteSshServerConstMeta =>
+      const TaskConstMeta(
+        debugName: "delete_ssh_server",
+        argNames: ["serverId"],
+      );
+
+  @override
   Future<BridgeSkillsStateSnapshot>
   crateApiStudioHandlersProvidersDiscoverSkills({required String projectId}) {
     return handler.executeNormal(
@@ -1253,7 +1354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1283,7 +1384,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1316,7 +1417,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1353,7 +1454,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1375,6 +1476,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<SshServerDto>> crateApiStudioHandlersSshListSshServers() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 30,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_ssh_server_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshListSshServersConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshListSshServersConstMeta =>
+      const TaskConstMeta(debugName: "list_ssh_servers", argNames: []);
+
+  @override
   Future<BridgeThreadTurnPage> crateApiStudioHandlersHistoryListThreadTurns({
     required ListThreadTurnsRequest request,
   }) {
@@ -1386,7 +1514,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1423,7 +1551,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1454,7 +1582,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1485,7 +1613,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1504,6 +1632,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "open_project", argNames: ["path"]);
 
   @override
+  Future<ProjectDto> crateApiStudioHandlersSshOpenRemoteProject({
+    required String serverId,
+    required String path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(serverId, serializer);
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 35,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_project_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshOpenRemoteProjectConstMeta,
+        argValues: [serverId, path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshOpenRemoteProjectConstMeta =>
+      const TaskConstMeta(
+        debugName: "open_remote_project",
+        argNames: ["serverId", "path"],
+      );
+
+  @override
   Future<BridgeRecoveryCleanupPreviewDto>
   crateApiStudioHandlersRecoveryPreviewProjectCleanup({
     required String projectId,
@@ -1516,7 +1679,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1552,7 +1715,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1588,7 +1751,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1623,7 +1786,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1657,7 +1820,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1690,7 +1853,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1718,7 +1881,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1746,7 +1909,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1776,7 +1939,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 44,
             port: port_,
           );
         },
@@ -1805,7 +1968,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1836,7 +1999,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1864,7 +2027,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1895,7 +2058,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 48,
             port: port_,
           );
         },
@@ -1927,7 +2090,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 49,
             port: port_,
           );
         },
@@ -1960,7 +2123,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 50,
             port: port_,
           );
         },
@@ -1981,6 +2144,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "read_web_search_settings", argNames: []);
 
   @override
+  Future<SshConnectionSnapshotDto> crateApiStudioHandlersSshReconnectSshServer({
+    required String serverId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(serverId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 51,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_ssh_connection_snapshot_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshReconnectSshServerConstMeta,
+        argValues: [serverId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshReconnectSshServerConstMeta =>
+      const TaskConstMeta(
+        debugName: "reconnect_ssh_server",
+        argNames: ["serverId"],
+      );
+
+  @override
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsReloadSettingsFromDisk({
     required BigInt expectedSettingsRevision,
@@ -1993,7 +2189,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 52,
             port: port_,
           );
         },
@@ -2028,7 +2224,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 53,
             port: port_,
           );
         },
@@ -2066,7 +2262,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2100,7 +2296,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 55,
             port: port_,
           );
         },
@@ -2130,7 +2326,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2166,7 +2362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2197,7 +2393,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2227,7 +2423,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2264,7 +2460,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2301,7 +2497,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2339,7 +2535,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2375,7 +2571,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2412,7 +2608,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2450,7 +2646,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2473,6 +2669,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<SshServerDto> crateApiStudioHandlersSshSaveSshServer({
+    required SaveSshServerRequest request,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_save_ssh_server_request(request, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 66,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_ssh_server_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshSaveSshServerConstMeta,
+        argValues: [request],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshSaveSshServerConstMeta =>
+      const TaskConstMeta(debugName: "save_ssh_server", argNames: ["request"]);
+
+  @override
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveWebSearchSettings({
     required BigInt expectedSettingsRevision,
@@ -2487,7 +2713,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2531,7 +2757,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 68,
             port: port_,
           );
         },
@@ -2578,7 +2804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 69,
             port: port_,
           );
         },
@@ -2608,7 +2834,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 70,
             port: port_,
           );
         },
@@ -2642,7 +2868,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 71,
             port: port_,
           );
         },
@@ -2673,7 +2899,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 66,
+            funcId: 72,
             port: port_,
           );
         },
@@ -2706,7 +2932,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 67,
+            funcId: 73,
             port: port_,
           );
         },
@@ -2741,7 +2967,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 68,
+            funcId: 74,
             port: port_,
           );
         },
@@ -2778,7 +3004,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 69,
+              funcId: 75,
               port: port_,
             );
           },
@@ -2815,7 +3041,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 76,
             port: port_,
           );
         },
@@ -2835,6 +3061,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "subscribe_thread",
         argNames: ["threadId"],
+      );
+
+  @override
+  Future<SshConnectionSnapshotDto> crateApiStudioHandlersSshTestSshConnection({
+    required String serverId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(serverId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 77,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_ssh_connection_snapshot_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersSshTestSshConnectionConstMeta,
+        argValues: [serverId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersSshTestSshConnectionConstMeta =>
+      const TaskConstMeta(
+        debugName: "test_ssh_connection",
+        argNames: ["serverId"],
       );
 
   RustArcIncrementStrongCountFnType
@@ -3892,6 +4151,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_provider_settings_input(raw);
+  }
+
+  @protected
+  SaveSshServerRequest dco_decode_box_autoadd_save_ssh_server_request(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_save_ssh_server_request(raw);
   }
 
   @protected
@@ -9293,6 +9560,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RemoteDirectoryEntryDto> dco_decode_list_remote_directory_entry_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_remote_directory_entry_dto)
+        .toList();
+  }
+
+  @protected
   List<RoleInput> dco_decode_list_role_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_role_input).toList();
@@ -9302,6 +9579,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<SkillSummaryDto> dco_decode_list_skill_summary_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_skill_summary_dto).toList();
+  }
+
+  @protected
+  List<SshServerDto> dco_decode_list_ssh_server_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ssh_server_dto).toList();
   }
 
   @protected
@@ -9556,13 +9839,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProjectDto dco_decode_project_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return ProjectDto(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
       path: dco_decode_String(arr[2]),
-      updatedAt: dco_decode_i_64(arr[3]),
+      sshServerId: dco_decode_opt_String(arr[3]),
+      updatedAt: dco_decode_i_64(arr[4]),
     );
   }
 
@@ -9666,6 +9950,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RemoteDirectoryEntryDto dco_decode_remote_directory_entry_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return RemoteDirectoryEntryDto(
+      name: dco_decode_String(arr[0]),
+      path: dco_decode_String(arr[1]),
+      isDirectory: dco_decode_bool(arr[2]),
+    );
+  }
+
+  @protected
+  RemoteDirectoryListingDto dco_decode_remote_directory_listing_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return RemoteDirectoryListingDto(
+      path: dco_decode_String(arr[0]),
+      parent: dco_decode_opt_String(arr[1]),
+      entries: dco_decode_list_remote_directory_entry_dto(arr[2]),
+    );
+  }
+
+  @protected
   RoleInput dco_decode_role_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -9689,6 +10001,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: dco_decode_u_64(arr[0]),
       state: dco_decode_bridge_runtime_state(arr[1]),
       activeTurns: dco_decode_list_bridge_active_turn(arr[2]),
+    );
+  }
+
+  @protected
+  SaveSshServerRequest dco_decode_save_ssh_server_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return SaveSshServerRequest(
+      id: dco_decode_opt_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      host: dco_decode_String(arr[2]),
+      port: dco_decode_u_16(arr[3]),
+      username: dco_decode_String(arr[4]),
+      authKind: dco_decode_ssh_auth_kind_dto(arr[5]),
+      identityFile: dco_decode_opt_String(arr[6]),
+      password: dco_decode_opt_String(arr[7]),
     );
   }
 
@@ -9754,6 +10084,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       externalDirs: dco_decode_list_String(arr[5]),
       disabled: dco_decode_list_String(arr[6]),
       autoLearnMinToolCalls: dco_decode_u_32(arr[7]),
+    );
+  }
+
+  @protected
+  SshAuthKindDto dco_decode_ssh_auth_kind_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return SshAuthKindDto.values[raw as int];
+  }
+
+  @protected
+  SshConnectionSnapshotDto dco_decode_ssh_connection_snapshot_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return SshConnectionSnapshotDto(
+      serverId: dco_decode_String(arr[0]),
+      state: dco_decode_String(arr[1]),
+      helperVersion: dco_decode_opt_String(arr[2]),
+      architecture: dco_decode_opt_String(arr[3]),
+      attempt: dco_decode_opt_box_autoadd_u_32(arr[4]),
+      delaySeconds: dco_decode_opt_box_autoadd_u_64(arr[5]),
+      errorCode: dco_decode_opt_String(arr[6]),
+      errorMessage: dco_decode_opt_String(arr[7]),
+    );
+  }
+
+  @protected
+  SshServerDto dco_decode_ssh_server_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return SshServerDto(
+      id: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      host: dco_decode_String(arr[2]),
+      port: dco_decode_u_16(arr[3]),
+      username: dco_decode_String(arr[4]),
+      authKind: dco_decode_ssh_auth_kind_dto(arr[5]),
+      identityFile: dco_decode_opt_String(arr[6]),
     );
   }
 
@@ -11081,6 +11452,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_provider_settings_input(deserializer));
+  }
+
+  @protected
+  SaveSshServerRequest sse_decode_box_autoadd_save_ssh_server_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_save_ssh_server_request(deserializer));
   }
 
   @protected
@@ -18137,6 +18516,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RemoteDirectoryEntryDto> sse_decode_list_remote_directory_entry_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <RemoteDirectoryEntryDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_remote_directory_entry_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<RoleInput> sse_decode_list_role_input(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -18158,6 +18551,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <SkillSummaryDto>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_skill_summary_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<SshServerDto> sse_decode_list_ssh_server_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <SshServerDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ssh_server_dto(deserializer));
     }
     return ans_;
   }
@@ -18548,11 +18955,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_String(deserializer);
     var var_name = sse_decode_String(deserializer);
     var var_path = sse_decode_String(deserializer);
+    var var_sshServerId = sse_decode_opt_String(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     return ProjectDto(
       id: var_id,
       name: var_name,
       path: var_path,
+      sshServerId: var_sshServerId,
       updatedAt: var_updatedAt,
     );
   }
@@ -18680,6 +19089,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RemoteDirectoryEntryDto sse_decode_remote_directory_entry_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_name = sse_decode_String(deserializer);
+    var var_path = sse_decode_String(deserializer);
+    var var_isDirectory = sse_decode_bool(deserializer);
+    return RemoteDirectoryEntryDto(
+      name: var_name,
+      path: var_path,
+      isDirectory: var_isDirectory,
+    );
+  }
+
+  @protected
+  RemoteDirectoryListingDto sse_decode_remote_directory_listing_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_path = sse_decode_String(deserializer);
+    var var_parent = sse_decode_opt_String(deserializer);
+    var var_entries = sse_decode_list_remote_directory_entry_dto(deserializer);
+    return RemoteDirectoryListingDto(
+      path: var_path,
+      parent: var_parent,
+      entries: var_entries,
+    );
+  }
+
+  @protected
   RoleInput sse_decode_role_input(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_key = sse_decode_String(deserializer);
@@ -18704,6 +19143,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: var_revision,
       state: var_state,
       activeTurns: var_activeTurns,
+    );
+  }
+
+  @protected
+  SaveSshServerRequest sse_decode_save_ssh_server_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_host = sse_decode_String(deserializer);
+    var var_port = sse_decode_u_16(deserializer);
+    var var_username = sse_decode_String(deserializer);
+    var var_authKind = sse_decode_ssh_auth_kind_dto(deserializer);
+    var var_identityFile = sse_decode_opt_String(deserializer);
+    var var_password = sse_decode_opt_String(deserializer);
+    return SaveSshServerRequest(
+      id: var_id,
+      name: var_name,
+      host: var_host,
+      port: var_port,
+      username: var_username,
+      authKind: var_authKind,
+      identityFile: var_identityFile,
+      password: var_password,
     );
   }
 
@@ -18787,6 +19251,59 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       externalDirs: var_externalDirs,
       disabled: var_disabled,
       autoLearnMinToolCalls: var_autoLearnMinToolCalls,
+    );
+  }
+
+  @protected
+  SshAuthKindDto sse_decode_ssh_auth_kind_dto(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return SshAuthKindDto.values[inner];
+  }
+
+  @protected
+  SshConnectionSnapshotDto sse_decode_ssh_connection_snapshot_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_state = sse_decode_String(deserializer);
+    var var_helperVersion = sse_decode_opt_String(deserializer);
+    var var_architecture = sse_decode_opt_String(deserializer);
+    var var_attempt = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_delaySeconds = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_errorCode = sse_decode_opt_String(deserializer);
+    var var_errorMessage = sse_decode_opt_String(deserializer);
+    return SshConnectionSnapshotDto(
+      serverId: var_serverId,
+      state: var_state,
+      helperVersion: var_helperVersion,
+      architecture: var_architecture,
+      attempt: var_attempt,
+      delaySeconds: var_delaySeconds,
+      errorCode: var_errorCode,
+      errorMessage: var_errorMessage,
+    );
+  }
+
+  @protected
+  SshServerDto sse_decode_ssh_server_dto(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_host = sse_decode_String(deserializer);
+    var var_port = sse_decode_u_16(deserializer);
+    var var_username = sse_decode_String(deserializer);
+    var var_authKind = sse_decode_ssh_auth_kind_dto(deserializer);
+    var var_identityFile = sse_decode_opt_String(deserializer);
+    return SshServerDto(
+      id: var_id,
+      name: var_name,
+      host: var_host,
+      port: var_port,
+      username: var_username,
+      authKind: var_authKind,
+      identityFile: var_identityFile,
     );
   }
 
@@ -20252,6 +20769,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_provider_settings_input(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_save_ssh_server_request(
+    SaveSshServerRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_save_ssh_server_request(self, serializer);
   }
 
   @protected
@@ -25883,6 +26409,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_remote_directory_entry_dto(
+    List<RemoteDirectoryEntryDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_remote_directory_entry_dto(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_role_input(
     List<RoleInput> self,
     SseSerializer serializer,
@@ -25903,6 +26441,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_skill_summary_dto(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ssh_server_dto(
+    List<SshServerDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ssh_server_dto(item, serializer);
     }
   }
 
@@ -26269,6 +26819,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.name, serializer);
     sse_encode_String(self.path, serializer);
+    sse_encode_opt_String(self.sshServerId, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
   }
 
@@ -26360,6 +26911,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_remote_directory_entry_dto(
+    RemoteDirectoryEntryDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.path, serializer);
+    sse_encode_bool(self.isDirectory, serializer);
+  }
+
+  @protected
+  void sse_encode_remote_directory_listing_dto(
+    RemoteDirectoryListingDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.path, serializer);
+    sse_encode_opt_String(self.parent, serializer);
+    sse_encode_list_remote_directory_entry_dto(self.entries, serializer);
+  }
+
+  @protected
   void sse_encode_role_input(RoleInput self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.key, serializer);
@@ -26377,6 +26950,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.revision, serializer);
     sse_encode_bridge_runtime_state(self.state, serializer);
     sse_encode_list_bridge_active_turn(self.activeTurns, serializer);
+  }
+
+  @protected
+  void sse_encode_save_ssh_server_request(
+    SaveSshServerRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.host, serializer);
+    sse_encode_u_16(self.port, serializer);
+    sse_encode_String(self.username, serializer);
+    sse_encode_ssh_auth_kind_dto(self.authKind, serializer);
+    sse_encode_opt_String(self.identityFile, serializer);
+    sse_encode_opt_String(self.password, serializer);
   }
 
   @protected
@@ -26438,6 +27027,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.externalDirs, serializer);
     sse_encode_list_String(self.disabled, serializer);
     sse_encode_u_32(self.autoLearnMinToolCalls, serializer);
+  }
+
+  @protected
+  void sse_encode_ssh_auth_kind_dto(
+    SshAuthKindDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_ssh_connection_snapshot_dto(
+    SshConnectionSnapshotDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.state, serializer);
+    sse_encode_opt_String(self.helperVersion, serializer);
+    sse_encode_opt_String(self.architecture, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.attempt, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.delaySeconds, serializer);
+    sse_encode_opt_String(self.errorCode, serializer);
+    sse_encode_opt_String(self.errorMessage, serializer);
+  }
+
+  @protected
+  void sse_encode_ssh_server_dto(SshServerDto self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.host, serializer);
+    sse_encode_u_16(self.port, serializer);
+    sse_encode_String(self.username, serializer);
+    sse_encode_ssh_auth_kind_dto(self.authKind, serializer);
+    sse_encode_opt_String(self.identityFile, serializer);
   }
 
   @protected

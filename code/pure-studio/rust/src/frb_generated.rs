@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1253392544;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2096054816;
 
 // Section: executor
 
@@ -659,6 +659,48 @@ fn wire__crate__api__studio__types__runtime__bridge_task_no_delivery_completion_
         },
     )
 }
+fn wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "browse_remote_directories",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_path = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::browse_remote_directories(
+                                api_server_id,
+                                api_path,
+                            )
+                            .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__providers__check_provider_usage_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -850,6 +892,44 @@ fn wire__crate__api__studio__subscription__create_product_subscription_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "delete_ssh_server",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::delete_ssh_server(api_server_id)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__providers__discover_skills_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1006,6 +1086,42 @@ fn wire__crate__api__studio__handlers__prompt__interrupt_turn_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__ssh__list_ssh_servers_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "list_ssh_servers",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::list_ssh_servers().await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__history__list_thread_turns_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1152,6 +1268,47 @@ fn wire__crate__api__studio__handlers__lifecycle__open_project_impl(
                     (move || async move {
                         let output_ok =
                             crate::api::studio::handlers::lifecycle::open_project(api_path).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__ssh__open_remote_project_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "open_remote_project",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok = crate::api::studio::handlers::ssh::open_remote_project(
+                            api_server_id,
+                            api_path,
+                        )
+                        .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1725,6 +1882,44 @@ fn wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(
                     (move || async move {
                         let output_ok =
                             crate::api::studio::handlers::settings::read_web_search_settings()
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reconnect_ssh_server",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::reconnect_ssh_server(api_server_id)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -2317,6 +2512,45 @@ fn wire__crate__api__studio__handlers__settings__save_skills_settings_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "save_ssh_server",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request = <crate::api::studio::types::ssh::SaveSshServerRequest>::sse_decode(
+                &mut deserializer,
+            );
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::save_ssh_server(api_request).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2730,6 +2964,44 @@ fn wire__crate__api__studio__subscription__subscribe_thread_impl(
                     (move || async move {
                         let output_ok =
                             crate::api::studio::subscription::subscribe_thread(api_thread_id)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "test_ssh_connection",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::ssh::test_ssh_connection(api_server_id)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -10691,6 +10963,20 @@ impl SseDecode for Vec<crate::api::studio::types::response::ProviderUsageDto> {
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::ssh::RemoteDirectoryEntryDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::ssh::RemoteDirectoryEntryDto>::sse_decode(deserializer),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::studio::types::settings::RoleInput> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -10712,6 +10998,20 @@ impl SseDecode for Vec<crate::api::studio::types::response::SkillSummaryDto> {
             ans_.push(
                 <crate::api::studio::types::response::SkillSummaryDto>::sse_decode(deserializer),
             );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::ssh::SshServerDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::studio::types::ssh::SshServerDto>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -11111,11 +11411,13 @@ impl SseDecode for crate::api::studio::types::response::ProjectDto {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_sshServerId = <Option<String>>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::response::ProjectDto {
             id: var_id,
             name: var_name,
             path: var_path,
+            ssh_server_id: var_sshServerId,
             updated_at: var_updatedAt,
         };
     }
@@ -11256,6 +11558,37 @@ impl SseDecode for crate::api::studio::types::response::ProviderUsageDto {
     }
 }
 
+impl SseDecode for crate::api::studio::types::ssh::RemoteDirectoryEntryDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_isDirectory = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::ssh::RemoteDirectoryEntryDto {
+            name: var_name,
+            path: var_path,
+            is_directory: var_isDirectory,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::ssh::RemoteDirectoryListingDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_parent = <Option<String>>::sse_decode(deserializer);
+        let mut var_entries =
+            <Vec<crate::api::studio::types::ssh::RemoteDirectoryEntryDto>>::sse_decode(
+                deserializer,
+            );
+        return crate::api::studio::types::ssh::RemoteDirectoryListingDto {
+            path: var_path,
+            parent: var_parent,
+            entries: var_entries,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::settings::RoleInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11284,6 +11617,31 @@ impl SseDecode for crate::api::studio::types::runtime::RuntimeSnapshot {
             revision: var_revision,
             state: var_state,
             active_turns: var_activeTurns,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::ssh::SaveSshServerRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <Option<String>>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_port = <u16>::sse_decode(deserializer);
+        let mut var_username = <String>::sse_decode(deserializer);
+        let mut var_authKind =
+            <crate::api::studio::types::ssh::SshAuthKindDto>::sse_decode(deserializer);
+        let mut var_identityFile = <Option<String>>::sse_decode(deserializer);
+        let mut var_password = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::ssh::SaveSshServerRequest {
+            id: var_id,
+            name: var_name,
+            host: var_host,
+            port: var_port,
+            username: var_username,
+            auth_kind: var_authKind,
+            identity_file: var_identityFile,
+            password: var_password,
         };
     }
 }
@@ -11378,6 +11736,65 @@ impl SseDecode for crate::api::studio::types::settings::SkillsSettingsInput {
             external_dirs: var_externalDirs,
             disabled: var_disabled,
             auto_learn_min_tool_calls: var_autoLearnMinToolCalls,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::ssh::SshAuthKindDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::studio::types::ssh::SshAuthKindDto::AgentOrKey,
+            1 => crate::api::studio::types::ssh::SshAuthKindDto::Password,
+            _ => unreachable!("Invalid variant for SshAuthKindDto: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_serverId = <String>::sse_decode(deserializer);
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_helperVersion = <Option<String>>::sse_decode(deserializer);
+        let mut var_architecture = <Option<String>>::sse_decode(deserializer);
+        let mut var_attempt = <Option<u32>>::sse_decode(deserializer);
+        let mut var_delaySeconds = <Option<u64>>::sse_decode(deserializer);
+        let mut var_errorCode = <Option<String>>::sse_decode(deserializer);
+        let mut var_errorMessage = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::ssh::SshConnectionSnapshotDto {
+            server_id: var_serverId,
+            state: var_state,
+            helper_version: var_helperVersion,
+            architecture: var_architecture,
+            attempt: var_attempt,
+            delay_seconds: var_delaySeconds,
+            error_code: var_errorCode,
+            error_message: var_errorMessage,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::ssh::SshServerDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_port = <u16>::sse_decode(deserializer);
+        let mut var_username = <String>::sse_decode(deserializer);
+        let mut var_authKind =
+            <crate::api::studio::types::ssh::SshAuthKindDto>::sse_decode(deserializer);
+        let mut var_identityFile = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::ssh::SshServerDto {
+            id: var_id,
+            name: var_name,
+            host: var_host,
+            port: var_port,
+            username: var_username,
+            auth_kind: var_authKind,
+            identity_file: var_identityFile,
         };
     }
 }
@@ -11570,58 +11987,65 @@ fn pde_ffi_dispatcher_primary_impl(
 16 => wire__crate__api__studio__types__event__bridge_product_event_envelope_stale_impl(port, ptr, rust_vec_len, data_len),
 17 => wire__crate__api__studio__types__runtime__bridge_ready_for_review_completion_default_impl(port, ptr, rust_vec_len, data_len),
 18 => wire__crate__api__studio__types__runtime__bridge_task_no_delivery_completion_default_impl(port, ptr, rust_vec_len, data_len),
-19 => wire__crate__api__studio__handlers__providers__check_provider_usage_impl(port, ptr, rust_vec_len, data_len),
-20 => wire__crate__api__studio__handlers__updater__check_studio_update_impl(port, ptr, rust_vec_len, data_len),
-21 => wire__crate__api__studio__handlers__recovery__cleanup_project_impl(port, ptr, rust_vec_len, data_len),
-22 => wire__crate__api__studio__handlers__recovery__cleanup_recovery_issue_impl(port, ptr, rust_vec_len, data_len),
-23 => wire__crate__api__studio__subscription__create_product_subscription_impl(port, ptr, rust_vec_len, data_len),
-24 => wire__crate__api__studio__handlers__providers__discover_skills_impl(port, ptr, rust_vec_len, data_len),
-25 => wire__crate__api__studio__handlers__lifecycle__init_app_impl(port, ptr, rust_vec_len, data_len),
-26 => wire__crate__api__studio__handlers__updater__install_studio_update_impl(port, ptr, rust_vec_len, data_len),
-27 => wire__crate__api__studio__handlers__prompt__interrupt_turn_impl(port, ptr, rust_vec_len, data_len),
-28 => wire__crate__api__studio__handlers__history__list_thread_turns_impl(port, ptr, rust_vec_len, data_len),
-29 => wire__crate__api__studio__handlers__history__list_threads_page_impl(port, ptr, rust_vec_len, data_len),
-30 => wire__crate__api__studio__handlers__settings__load_provider_catalog_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__studio__handlers__recovery__preview_project_cleanup_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__recovery__preview_task_recovery_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
-43 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
-44 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
-45 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
-46 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-47 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
-48 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-49 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
-50 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
-51 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
-52 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
-53 => wire__crate__api__studio__handlers__recovery__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
-54 => wire__crate__api__studio__handlers__recovery__retry_recovery_issue_impl(port, ptr, rust_vec_len, data_len),
-55 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-56 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-57 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-58 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-59 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-60 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-61 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-62 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-63 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
-64 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-65 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
-66 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
-67 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
-68 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
-69 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
-70 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+19 => wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(port, ptr, rust_vec_len, data_len),
+20 => wire__crate__api__studio__handlers__providers__check_provider_usage_impl(port, ptr, rust_vec_len, data_len),
+21 => wire__crate__api__studio__handlers__updater__check_studio_update_impl(port, ptr, rust_vec_len, data_len),
+22 => wire__crate__api__studio__handlers__recovery__cleanup_project_impl(port, ptr, rust_vec_len, data_len),
+23 => wire__crate__api__studio__handlers__recovery__cleanup_recovery_issue_impl(port, ptr, rust_vec_len, data_len),
+24 => wire__crate__api__studio__subscription__create_product_subscription_impl(port, ptr, rust_vec_len, data_len),
+25 => wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+26 => wire__crate__api__studio__handlers__providers__discover_skills_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__studio__handlers__lifecycle__init_app_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__studio__handlers__updater__install_studio_update_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__studio__handlers__prompt__interrupt_turn_impl(port, ptr, rust_vec_len, data_len),
+30 => wire__crate__api__studio__handlers__ssh__list_ssh_servers_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__studio__handlers__history__list_thread_turns_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__studio__handlers__history__list_threads_page_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__settings__load_provider_catalog_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__ssh__open_remote_project_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__recovery__preview_project_cleanup_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__recovery__preview_task_recovery_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
+47 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
+48 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
+49 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
+50 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+51 => wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+52 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
+53 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
+54 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
+55 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
+56 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
+57 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
+58 => wire__crate__api__studio__handlers__recovery__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
+59 => wire__crate__api__studio__handlers__recovery__retry_recovery_issue_impl(port, ptr, rust_vec_len, data_len),
+60 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+61 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+62 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+63 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+64 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+65 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+66 => wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+67 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+68 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+69 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
+70 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+71 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
+72 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
+73 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
+74 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
+75 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
+76 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+77 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -19816,6 +20240,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Proj
             self.id.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.path.into_into_dart().into_dart(),
+            self.ssh_server_id.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -19994,6 +20419,50 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::Prov
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::RemoteDirectoryEntryDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.path.into_into_dart().into_dart(),
+            self.is_directory.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::RemoteDirectoryEntryDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::RemoteDirectoryEntryDto>
+    for crate::api::studio::types::ssh::RemoteDirectoryEntryDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::RemoteDirectoryEntryDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::RemoteDirectoryListingDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.parent.into_into_dart().into_dart(),
+            self.entries.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::RemoteDirectoryListingDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::RemoteDirectoryListingDto>
+    for crate::api::studio::types::ssh::RemoteDirectoryListingDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::RemoteDirectoryListingDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::RoleInput {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -20035,6 +20504,33 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Runti
     for crate::api::studio::types::runtime::RuntimeSnapshot
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::RuntimeSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SaveSshServerRequest {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.host.into_into_dart().into_dart(),
+            self.port.into_into_dart().into_dart(),
+            self.username.into_into_dart().into_dart(),
+            self.auth_kind.into_into_dart().into_dart(),
+            self.identity_file.into_into_dart().into_dart(),
+            self.password.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::SaveSshServerRequest
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SaveSshServerRequest>
+    for crate::api::studio::types::ssh::SaveSshServerRequest
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::SaveSshServerRequest {
         self
     }
 }
@@ -20143,6 +20639,80 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Skil
     for crate::api::studio::types::settings::SkillsSettingsInput
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::SkillsSettingsInput {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshAuthKindDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::AgentOrKey => 0.into_dart(),
+            Self::Password => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::SshAuthKindDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SshAuthKindDto>
+    for crate::api::studio::types::ssh::SshAuthKindDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::SshAuthKindDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.server_id.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+            self.helper_version.into_into_dart().into_dart(),
+            self.architecture.into_into_dart().into_dart(),
+            self.attempt.into_into_dart().into_dart(),
+            self.delay_seconds.into_into_dart().into_dart(),
+            self.error_code.into_into_dart().into_dart(),
+            self.error_message.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::SshConnectionSnapshotDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SshConnectionSnapshotDto>
+    for crate::api::studio::types::ssh::SshConnectionSnapshotDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::SshConnectionSnapshotDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshServerDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.host.into_into_dart().into_dart(),
+            self.port.into_into_dart().into_dart(),
+            self.username.into_into_dart().into_dart(),
+            self.auth_kind.into_into_dart().into_dart(),
+            self.identity_file.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::ssh::SshServerDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SshServerDto>
+    for crate::api::studio::types::ssh::SshServerDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::ssh::SshServerDto {
         self
     }
 }
@@ -26331,6 +26901,16 @@ impl SseEncode for Vec<crate::api::studio::types::response::ProviderUsageDto> {
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::ssh::RemoteDirectoryEntryDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::ssh::RemoteDirectoryEntryDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::studio::types::settings::RoleInput> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -26347,6 +26927,16 @@ impl SseEncode for Vec<crate::api::studio::types::response::SkillSummaryDto> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::studio::types::response::SkillSummaryDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::ssh::SshServerDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::ssh::SshServerDto>::sse_encode(item, serializer);
         }
     }
 }
@@ -26686,6 +27276,7 @@ impl SseEncode for crate::api::studio::types::response::ProjectDto {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.path, serializer);
+        <Option<String>>::sse_encode(self.ssh_server_id, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
 }
@@ -26785,6 +27376,27 @@ impl SseEncode for crate::api::studio::types::response::ProviderUsageDto {
     }
 }
 
+impl SseEncode for crate::api::studio::types::ssh::RemoteDirectoryEntryDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <String>::sse_encode(self.path, serializer);
+        <bool>::sse_encode(self.is_directory, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::ssh::RemoteDirectoryListingDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <Option<String>>::sse_encode(self.parent, serializer);
+        <Vec<crate::api::studio::types::ssh::RemoteDirectoryEntryDto>>::sse_encode(
+            self.entries,
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::RoleInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -26806,6 +27418,20 @@ impl SseEncode for crate::api::studio::types::runtime::RuntimeSnapshot {
             self.active_turns,
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::ssh::SaveSshServerRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <String>::sse_encode(self.host, serializer);
+        <u16>::sse_encode(self.port, serializer);
+        <String>::sse_encode(self.username, serializer);
+        <crate::api::studio::types::ssh::SshAuthKindDto>::sse_encode(self.auth_kind, serializer);
+        <Option<String>>::sse_encode(self.identity_file, serializer);
+        <Option<String>>::sse_encode(self.password, serializer);
     }
 }
 
@@ -26871,6 +27497,49 @@ impl SseEncode for crate::api::studio::types::settings::SkillsSettingsInput {
         <Vec<String>>::sse_encode(self.external_dirs, serializer);
         <Vec<String>>::sse_encode(self.disabled, serializer);
         <u32>::sse_encode(self.auto_learn_min_tool_calls, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::ssh::SshAuthKindDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::studio::types::ssh::SshAuthKindDto::AgentOrKey => 0,
+                crate::api::studio::types::ssh::SshAuthKindDto::Password => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.server_id, serializer);
+        <String>::sse_encode(self.state, serializer);
+        <Option<String>>::sse_encode(self.helper_version, serializer);
+        <Option<String>>::sse_encode(self.architecture, serializer);
+        <Option<u32>>::sse_encode(self.attempt, serializer);
+        <Option<u64>>::sse_encode(self.delay_seconds, serializer);
+        <Option<String>>::sse_encode(self.error_code, serializer);
+        <Option<String>>::sse_encode(self.error_message, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::ssh::SshServerDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <String>::sse_encode(self.host, serializer);
+        <u16>::sse_encode(self.port, serializer);
+        <String>::sse_encode(self.username, serializer);
+        <crate::api::studio::types::ssh::SshAuthKindDto>::sse_encode(self.auth_kind, serializer);
+        <Option<String>>::sse_encode(self.identity_file, serializer);
     }
 }
 

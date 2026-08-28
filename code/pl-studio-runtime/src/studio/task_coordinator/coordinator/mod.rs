@@ -61,6 +61,7 @@ pub(crate) struct TaskCoordinator {
     pub(super) store: StudioStore,
     pub(super) task_runtime: TaskRuntime,
     interactions: InteractionService,
+    pub(super) ssh_manager: Arc<pl_core::remote::SshManager>,
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
     branch_mutation_owner: Arc<()>,
@@ -176,11 +177,13 @@ impl TaskCoordinator {
         store: StudioStore,
         task_runtime: TaskRuntime,
         interactions: InteractionService,
+        ssh_manager: Arc<pl_core::remote::SshManager>,
     ) -> Self {
         Self {
             store,
             task_runtime,
             interactions,
+            ssh_manager,
             allocation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_owner: Arc::new(()),

@@ -95,6 +95,13 @@ class StudioController extends _$StudioController {
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
   }
 
+  Future<void> openRemoteProject(String serverId, String path) async {
+    if (!_acceptsNewWork(state.value)) return;
+    final project = await _api.openRemoteProject(serverId, path);
+    await _api.activateProject(project.id);
+    await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
+  }
+
   Future<void> selectProject(String projectId) async {
     final current = state.value;
     if (current == null ||

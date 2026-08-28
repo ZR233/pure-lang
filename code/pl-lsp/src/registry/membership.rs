@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::catalog::{LspCatalogError, LspCatalogServer, LspServerCatalog, LspUserServerConfig};
 use crate::client::LspClient;
 use crate::driver::LspServerDriver;
+use crate::host::LspHostBackend;
 use crate::resolved::ResolvedLspServer;
 use crate::types::LspAvailabilityKind;
 
@@ -22,7 +23,23 @@ impl LspRuntimeRegistry {
             return;
         }
         let _lifecycle_guard = self.lifecycle.read().await;
-        self.reconcile_membership_locked(&workspace_root).await;
+        self.reconcile_membership_locked(&workspace_root, None)
+            .await;
+    }
+
+    /// 使用宿主文件原语检测 membership，并把后续 LSP 文件/进程操作绑定到该宿主。
+    pub async fn reconcile_workspace_membership_with_host(
+        &self,
+        workspace_root: impl AsRef<Path>,
+        host: Arc<dyn LspHostBackend>,
+    ) {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        if self.state.lock().await.closed {
+            return;
+        }
+        let _lifecycle_guard = self.lifecycle.read().await;
+        self.reconcile_membership_locked(&workspace_root, Some(host))
+            .await;
     }
 
     /// 注册一条额外 server（宿主/测试扩展点）；重复 server id fail-loud。
@@ -74,12 +91,24 @@ impl LspRuntimeRegistry {
         }
         let _lifecycle_guard = self.lifecycle.read().await;
         for workspace_root in workspace_roots {
-            self.reconcile_membership_locked(&workspace_root).await;
+            let host = self
+                .state
+                .lock()
+                .await
+                .workspaces
+                .get(&workspace_root)
+                .and_then(|workspace| workspace.host.clone());
+            self.reconcile_membership_locked(&workspace_root, host)
+                .await;
         }
     }
 
     /// 生命周期锁已持有时执行 membership 合并；只做静态检测，不运行命令。
-    async fn reconcile_membership_locked(&self, workspace_root: &Path) {
+    async fn reconcile_membership_locked(
+        &self,
+        workspace_root: &Path,
+        host: Option<Arc<dyn LspHostBackend>>,
+    ) {
         let catalog = {
             let state = self.state.lock().await;
             if state.closed {
@@ -87,10 +116,10 @@ impl LspRuntimeRegistry {
             }
             state.catalog.clone()
         };
-        let desired = catalog
-            .iter()
-            .map(|server| desired_member(server, workspace_root))
-            .collect::<Vec<_>>();
+        let mut desired = Vec::new();
+        for server in catalog.iter() {
+            desired.push(desired_member(server, workspace_root, host.as_deref()).await);
+        }
         let retired_clients = {
             let mut state = self.state.lock().await;
             if state.closed {
@@ -101,6 +130,22 @@ impl LspRuntimeRegistry {
                 .workspaces
                 .entry(workspace_root.to_path_buf())
                 .or_default();
+            let previous_identity = workspace.host.as_ref().map(|host| host.identity());
+            let next_identity = host.as_ref().map(|host| host.identity());
+            if previous_identity != next_identity {
+                for server in workspace.servers.values_mut() {
+                    if let Some(client) = server.client.take() {
+                        retired_clients.push(client);
+                    }
+                    if server.availability_kind != LspAvailabilityKind::Disabled {
+                        server.availability_kind = LspAvailabilityKind::Checking;
+                        server.availability_message =
+                            Some("LSP host changed; server must be probed again".to_string());
+                        server.last_checked_at = None;
+                    }
+                }
+            }
+            workspace.host = host;
             retain_catalog_members(workspace, &desired, &mut retired_clients);
             for member in desired {
                 merge_desired_member(workspace, member, &mut retired_clients);
@@ -122,9 +167,19 @@ type DesiredMember = (
     Option<String>,
 );
 
-fn desired_member(server: &LspCatalogServer, workspace_root: &Path) -> DesiredMember {
+async fn desired_member(
+    server: &LspCatalogServer,
+    workspace_root: &Path,
+    host: Option<&dyn LspHostBackend>,
+) -> DesiredMember {
     let resolved = resolve_member(server, workspace_root);
-    if server.definition.matches_workspace(workspace_root) {
+    let matches = match host {
+        Some(host) => {
+            workspace_matches_host(&server.definition.detection, workspace_root, host).await
+        }
+        None => server.definition.matches_workspace(workspace_root),
+    };
+    if matches {
         (
             resolved,
             server.driver.clone(),
@@ -143,6 +198,39 @@ fn desired_member(server: &LspCatalogServer, workspace_root: &Path) -> DesiredMe
             Some(message),
         )
     }
+}
+
+async fn workspace_matches_host(
+    rules: &[String],
+    workspace_root: &Path,
+    host: &dyn LspHostBackend,
+) -> bool {
+    if rules.is_empty() {
+        return true;
+    }
+    let entries = if rules.iter().any(|rule| rule.contains('*')) {
+        host.list_directory(workspace_root).await.ok()
+    } else {
+        None
+    };
+    for rule in rules {
+        if rule.contains('*') {
+            if entries.as_ref().is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|name| crate::catalog::glob_match(rule, name))
+            }) {
+                return true;
+            }
+        } else if host
+            .stat(&workspace_root.join(rule))
+            .await
+            .is_ok_and(|stat| stat.is_some())
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) fn resolve_member(

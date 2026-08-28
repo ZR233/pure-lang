@@ -30,6 +30,7 @@ impl LspRuntimeRegistry {
                             server_id.clone(),
                             server.resolved.clone(),
                             server.driver.clone(),
+                            workspace.host.clone(),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -38,8 +39,8 @@ impl LspRuntimeRegistry {
         let Some(targets) = targets else {
             return;
         };
-        for (server_id, resolved, driver) in targets {
-            let outcome = driver.probe(&resolved.command()).await;
+        for (server_id, resolved, driver, host) in targets {
+            let outcome = driver.probe(&resolved.command(), host.as_deref()).await;
             let (kind, message) = probe_availability(outcome);
             let checked_at = unix_seconds();
             let mut state = self.state.lock().await;
@@ -93,12 +94,19 @@ impl LspRuntimeRegistry {
                     "LSP repair requires missingServerComponent state".to_string(),
                 ));
             };
-            (component, server.driver.clone())
+            (
+                component,
+                server.driver.clone(),
+                state
+                    .workspaces
+                    .get(&workspace_root)
+                    .and_then(|workspace| workspace.host.clone()),
+            )
         };
-        let (component, driver) = component;
+        let (component, driver, host) = component;
         let _lifecycle_guard = self.lifecycle.read().await;
         driver
-            .repair(&component)
+            .repair(&component, host.as_deref())
             .await
             .map_err(|error| LspRuntimeError::Unavailable(error.to_string()))?;
         self.probe_lsp_server(workspace_root).await;

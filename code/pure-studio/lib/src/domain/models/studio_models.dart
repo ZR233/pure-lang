@@ -8,6 +8,7 @@ export 'interaction_models.dart';
 export 'persistence_models.dart';
 export 'provider_models.dart';
 export 'recovery_models.dart';
+export 'remote_models.dart';
 export 'runtime_models.dart';
 export 'settings_models.dart';
 export 'studio_commands.dart';

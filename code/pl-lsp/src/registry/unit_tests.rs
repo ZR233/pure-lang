@@ -800,6 +800,7 @@ async fn repair_runs_driver_for_missing_server_component() {
         fn probe<'a>(
             &'a self,
             _command: &'a crate::driver::LspResolvedCommand,
+            _host: Option<&'a dyn crate::host::LspHostBackend>,
         ) -> futures::future::BoxFuture<'a, crate::driver::LspProbeOutcome> {
             futures::FutureExt::boxed(std::future::ready(crate::driver::LspProbeOutcome::Ready {
                 version: "repaired".to_string(),
@@ -809,6 +810,7 @@ async fn repair_runs_driver_for_missing_server_component() {
         fn repair<'a>(
             &'a self,
             component: &'a crate::types::LspMissingComponent,
+            _host: Option<&'a dyn crate::host::LspHostBackend>,
         ) -> futures::future::BoxFuture<'a, Result<(), crate::driver::LspRepairError>> {
             let component = component.clone();
             let repaired = &self.repaired;

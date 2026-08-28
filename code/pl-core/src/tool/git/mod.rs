@@ -40,6 +40,8 @@ pub struct GitWorkspaceConfig {
     pub worktree: PathBuf,
     pub git_binary: PathBuf,
     pub policy: GitPolicy,
+    /// 允许执行宿主直接使用其原生 Git 凭据链，而不注入本地 provider token。
+    pub native_credentials: bool,
     pub default_push_branch: Option<String>,
     pub remote_url: Option<String>,
     pub workspace_info: BTreeMap<String, Value>,
@@ -51,10 +53,16 @@ impl GitWorkspaceConfig {
             worktree: worktree.into(),
             git_binary: PathBuf::from("git"),
             policy: GitPolicy::default(),
+            native_credentials: false,
             default_push_branch: None,
             remote_url: None,
             workspace_info: BTreeMap::new(),
         }
+    }
+
+    pub fn with_native_credentials(mut self) -> Self {
+        self.native_credentials = true;
+        self
     }
 }
 

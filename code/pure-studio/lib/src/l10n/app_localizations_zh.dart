@@ -247,6 +247,89 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsGeneralTab => '通用';
 
   @override
+  String get settingsSshTab => 'SSH';
+
+  @override
+  String get settingsSshTitle => '远程开发';
+
+  @override
+  String get settingsSshSubtitle => '管理 SSH 工作区；连接与 helper 生命周期均由本地 core 负责。';
+
+  @override
+  String get settingsSshAdd => '添加服务器';
+
+  @override
+  String get settingsSshEmpty => '尚未配置 SSH 服务器。';
+
+  @override
+  String get settingsSshManagedByCore => 'OpenSSH 与最小远程 helper 由本地统一管理。';
+
+  @override
+  String get settingsSshTest => '测试连接';
+
+  @override
+  String get settingsSshReconnect => '重新连接';
+
+  @override
+  String get settingsSshOpenProject => '打开项目';
+
+  @override
+  String get settingsSshEdit => '编辑';
+
+  @override
+  String get settingsSshDelete => '删除';
+
+  @override
+  String get settingsSshReady => '已连接';
+
+  @override
+  String get settingsSshDeleteTitle => '删除 SSH 服务器？';
+
+  @override
+  String settingsSshDeleteBody(String name) {
+    return '确定删除 $name？请先移除使用该服务器的项目。';
+  }
+
+  @override
+  String get settingsSshName => '名称';
+
+  @override
+  String get settingsSshHost => '主机';
+
+  @override
+  String get settingsSshUsername => '用户名';
+
+  @override
+  String get settingsSshPort => '端口';
+
+  @override
+  String get settingsSshAuth => '认证方式';
+
+  @override
+  String get settingsSshAuthAgentOrKey => 'SSH agent 或私钥';
+
+  @override
+  String get settingsSshAuthPassword => '密码';
+
+  @override
+  String get settingsSshIdentityFile => '私钥文件（可选）';
+
+  @override
+  String get settingsSshPassword => '密码';
+
+  @override
+  String get settingsSshPasswordLease => '仅在本次应用会话保留于 core 内存。';
+
+  @override
+  String get settingsSshSave => '保存';
+
+  @override
+  String get settingsSshChooseDirectory => '选择远端目录';
+
+  @override
+  String get settingsSshOpenThisDirectory => '打开此目录';
+
+  @override
   String get composerHint => '描述你的需求...';
 
   @override
@@ -1974,6 +2057,89 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsGeneralTab => '通用';
+
+  @override
+  String get settingsSshTab => 'SSH';
+
+  @override
+  String get settingsSshTitle => '远程开发';
+
+  @override
+  String get settingsSshSubtitle => '管理 SSH 工作区；连接与 helper 生命周期均由本地 core 负责。';
+
+  @override
+  String get settingsSshAdd => '添加服务器';
+
+  @override
+  String get settingsSshEmpty => '尚未配置 SSH 服务器。';
+
+  @override
+  String get settingsSshManagedByCore => 'OpenSSH 与最小远程 helper 由本地统一管理。';
+
+  @override
+  String get settingsSshTest => '测试连接';
+
+  @override
+  String get settingsSshReconnect => '重新连接';
+
+  @override
+  String get settingsSshOpenProject => '打开项目';
+
+  @override
+  String get settingsSshEdit => '编辑';
+
+  @override
+  String get settingsSshDelete => '删除';
+
+  @override
+  String get settingsSshReady => '已连接';
+
+  @override
+  String get settingsSshDeleteTitle => '删除 SSH 服务器？';
+
+  @override
+  String settingsSshDeleteBody(String name) {
+    return '确定删除 $name？请先移除使用该服务器的项目。';
+  }
+
+  @override
+  String get settingsSshName => '名称';
+
+  @override
+  String get settingsSshHost => '主机';
+
+  @override
+  String get settingsSshUsername => '用户名';
+
+  @override
+  String get settingsSshPort => '端口';
+
+  @override
+  String get settingsSshAuth => '认证方式';
+
+  @override
+  String get settingsSshAuthAgentOrKey => 'SSH agent 或私钥';
+
+  @override
+  String get settingsSshAuthPassword => '密码';
+
+  @override
+  String get settingsSshIdentityFile => '私钥文件（可选）';
+
+  @override
+  String get settingsSshPassword => '密码';
+
+  @override
+  String get settingsSshPasswordLease => '仅在本次应用会话保留于 core 内存。';
+
+  @override
+  String get settingsSshSave => '保存';
+
+  @override
+  String get settingsSshChooseDirectory => '选择远端目录';
+
+  @override
+  String get settingsSshOpenThisDirectory => '打开此目录';
 
   @override
   String get composerHint => '描述你的需求...';

@@ -51,6 +51,10 @@ child 的 confined workspace 边界始终不能被权限模式放宽。
 
 当用户显式选择 `full-access` 时，Pure 放宽本地文件 backend 和 `exec.cwd` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍要求目标自身或其最近存在父目录可解析，只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权；容器或远程 backend 可以继续拒绝越界路径。
 
+SSH 远端 backend 始终拒绝 workspace 越界和符号链接入口，`full-access` 不放宽它。远端 helper
+依据远端文件系统事实做 canonicalize；但 `exec` 仍只约束 cwd，不分析命令正文，也不是 OS
+沙箱。远端命令拥有 SSH 用户权限，这一事实必须在连接与权限 UI 中可见。
+
 ## 4.4 凭据暴露面
 
 `config.toml` 仍为本地凭据来源，但方案乙收紧暴露面：
@@ -58,6 +62,12 @@ child 的 confined workspace 边界始终不能被权限模式放宽。
 - UI 默认不回显完整 token
 - 日志与事件 payload 不输出 token
 - 错误信息禁止拼接敏感字段
+
+SSH password 与 Askpass 回答只存在于系统凭据库或当前进程 secret lease，不进入
+SQLite、transport DTO、日志、helper argv/env 或远端协议；Askpass secret 只进入本地 OpenSSH
+子进程环境。系统 OpenSSH 继续使用用户的
+known_hosts、ssh config 与 agent；本地 provider token 不得通过 SSH 转发，远端 Git 使用远端
+原生凭据或用户显式配置的 agent forwarding。
 
 ## 4.5 桌面 WebView 边界
 

@@ -11,6 +11,7 @@ mod model_context;
 mod observed_state;
 mod permission;
 mod provider_catalog;
+pub mod remote;
 pub mod studio;
 mod thread;
 mod thread_item;

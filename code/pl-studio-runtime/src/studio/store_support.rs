@@ -9,9 +9,10 @@ use sha2::{Digest, Sha256};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 15;
+/// 唯一支持的 Studio schema 版本；v13-v15 只允许沿 canonical 链逐级迁移。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 16;
 const STUDIO_DATABASE_SCHEMA_VERSION_V14: i64 = 14;
+const STUDIO_DATABASE_SCHEMA_VERSION_V15: i64 = 15;
 
 pub(super) async fn migrate_studio_schema_v13_to_v14(
     db: &DatabaseConnection,
@@ -217,9 +218,71 @@ pub(super) async fn migrate_studio_schema_v14_to_v15(db: &DatabaseConnection) ->
     transaction
         .execute_unprepared("DROP TABLE thread_session_state")
         .await?;
-    set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION_V15).await?;
     transaction.commit().await?;
     Ok(())
+}
+
+/// 把 v15 的本地 Project schema 迁移为可关联 SSH server 的 v16 schema。
+pub(super) async fn migrate_studio_schema_v15_to_v16(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")
+        .await?;
+    let migration = async {
+        let transaction = db.begin().await?;
+        Schema::new(transaction.get_database_backend())
+            .builder()
+            .register(entity::ssh_server::Entity)
+            .apply(&transaction)
+            .await?;
+        transaction
+            .execute_unprepared("ALTER TABLE projects RENAME TO projects_v15")
+            .await?;
+        Schema::new(transaction.get_database_backend())
+            .builder()
+            .register(entity::project::Entity)
+            .apply(&transaction)
+            .await?;
+        transaction
+            .execute_unprepared(
+                "INSERT INTO projects (
+                     id, name, path, ssh_server_id, created_at, updated_at,
+                     last_opened_at, closed
+                 )
+                 SELECT id, name, path, NULL, created_at, updated_at,
+                        last_opened_at, closed
+                 FROM projects_v15;
+                 DROP TABLE projects_v15;",
+            )
+            .await?;
+        create_project_indexes(&transaction).await?;
+        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+        transaction.commit().await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let restore = db
+        .execute_unprepared("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;")
+        .await;
+    match (migration, restore) {
+        (Ok(()), Ok(_)) => {
+            let violations = db
+                .query_all_raw(Statement::from_string(
+                    DatabaseBackend::Sqlite,
+                    "PRAGMA foreign_key_check".to_string(),
+                ))
+                .await?;
+            ensure!(
+                violations.is_empty(),
+                "Studio v15 to v16 migration produced foreign-key violations"
+            );
+            Ok(())
+        }
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(()), Err(error)) => Err(error).context("failed to restore SQLite foreign keys"),
+        (Err(error), Err(restore_error)) => Err(error).context(format!(
+            "Studio v15 to v16 migration failed; restoring SQLite foreign keys also failed: {restore_error:#}"
+        )),
+    }
 }
 
 async fn cleanup_migration_blobs(paths: &[PathBuf]) {
@@ -239,6 +302,7 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
     create_thread_lifecycle_tables(db).await?;
     db.get_schema_builder()
         .register(entity::app_setting::Entity)
+        .register(entity::ssh_server::Entity)
         .register(entity::project::Entity)
         .register(entity::attachment::Entity)
         .register(entity::thread_submission::Entity)
@@ -631,6 +695,7 @@ async fn set_schema_version(db: &impl ConnectionTrait, version: i64) -> Result<(
 
 async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
     create_attachment_indexes(db).await?;
+    create_project_indexes(db).await?;
     let indexes = [
         Index::create()
             .name("idx_interactions_thread_state_updated")
@@ -651,14 +716,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::merge_record::Column::TaskRunId)
             .col((entity::merge_record::Column::UpdatedAt, IndexOrder::Desc))
             .col((entity::merge_record::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_projects_closed_last_opened_at")
-            .table(entity::project::Entity)
-            .col(entity::project::Column::Closed)
-            .col((entity::project::Column::LastOpenedAt, IndexOrder::Desc))
-            .col((entity::project::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::project::Column::Id, IndexOrder::Desc))
             .to_owned(),
         Index::create()
             .name("idx_review_rounds_run_round")
@@ -814,6 +871,26 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
         WHERE scope = 'integrated'
             AND state_kind IN ('pendingDispatch', 'dispatched', 'running');
         "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn create_project_indexes(db: &impl ConnectionTrait) -> Result<()> {
+    let recent = Index::create()
+        .name("idx_projects_closed_last_opened_at")
+        .table(entity::project::Entity)
+        .col(entity::project::Column::Closed)
+        .col((entity::project::Column::LastOpenedAt, IndexOrder::Desc))
+        .col((entity::project::Column::UpdatedAt, IndexOrder::Desc))
+        .col((entity::project::Column::Id, IndexOrder::Desc))
+        .to_owned();
+    db.execute(&recent).await?;
+    db.execute_unprepared(
+        "CREATE UNIQUE INDEX idx_projects_local_path
+         ON projects(path) WHERE ssh_server_id IS NULL;
+         CREATE UNIQUE INDEX idx_projects_remote_path
+         ON projects(ssh_server_id, path) WHERE ssh_server_id IS NOT NULL;",
     )
     .await?;
     Ok(())

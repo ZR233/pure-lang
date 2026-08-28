@@ -1,9 +1,11 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
 
 use pl_protocol::{PureError, Result};
 use serde_json::Value;
-use tokio::process::Child;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::process::{
     configure_background_command, terminate_process_tree, terminate_process_tree_sync,
@@ -17,7 +19,86 @@ use super::shell::shell_command;
 pub struct CommandSpawnRequest {
     pub process_id: String,
     pub command: String,
-    pub cwd: PathBuf,
+    pub cwd: String,
+    pub output_target: CommandOutputTarget,
+}
+
+pub type CommandReader = Pin<Box<dyn AsyncRead + Send>>;
+pub type CommandWriter = Pin<Box<dyn AsyncWrite + Send>>;
+type CommandWaitFuture =
+    Pin<Box<dyn Future<Output = std::result::Result<CommandExit, String>> + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandExit {
+    pub exit_code: Option<i32>,
+}
+
+pub struct ManagedCommand {
+    host_pid: Option<u32>,
+    stdin: Option<CommandWriter>,
+    stdout: Option<CommandReader>,
+    stderr: Option<CommandReader>,
+    wait: Option<CommandWaitFuture>,
+}
+
+impl std::fmt::Debug for ManagedCommand {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ManagedCommand")
+            .field("host_pid", &self.host_pid)
+            .field("stdin", &self.stdin.is_some())
+            .field("stdout", &self.stdout.is_some())
+            .field("stderr", &self.stderr.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ManagedCommand {
+    pub fn new(
+        host_pid: Option<u32>,
+        stdin: Option<CommandWriter>,
+        stdout: Option<CommandReader>,
+        stderr: Option<CommandReader>,
+        wait: impl Future<Output = std::result::Result<CommandExit, String>> + Send + 'static,
+    ) -> Self {
+        Self {
+            host_pid,
+            stdin,
+            stdout,
+            stderr,
+            wait: Some(Box::pin(wait)),
+        }
+    }
+
+    pub fn host_pid(&self) -> Option<u32> {
+        self.host_pid
+    }
+
+    pub fn take_stdin(&mut self) -> Option<CommandWriter> {
+        self.stdin.take()
+    }
+
+    pub fn take_stdout(&mut self) -> Option<CommandReader> {
+        self.stdout.take()
+    }
+
+    pub fn take_stderr(&mut self) -> Option<CommandReader> {
+        self.stderr.take()
+    }
+
+    pub async fn wait(&mut self) -> std::result::Result<CommandExit, String> {
+        let wait = self
+            .wait
+            .take()
+            .ok_or_else(|| "managed command was already awaited".to_string())?;
+        wait.await
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandCaptureStream {
+    Stdout,
+    Stderr,
 }
 
 /// 命令完整输出在宿主和模型 workspace 中的对应位置。
@@ -93,7 +174,7 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
         &self,
         cwd: Option<&Path>,
         allow_workspace_escape: bool,
-    ) -> impl std::future::Future<Output = std::result::Result<PathBuf, Self::Error>> + Send;
+    ) -> impl std::future::Future<Output = std::result::Result<String, Self::Error>> + Send;
 
     fn output_target(
         &self,
@@ -106,7 +187,21 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
     fn spawn(
         &self,
         request: CommandSpawnRequest,
-    ) -> impl std::future::Future<Output = std::result::Result<Child, Self::Error>> + Send;
+    ) -> impl std::future::Future<Output = std::result::Result<ManagedCommand, Self::Error>> + Send;
+
+    fn prepare_output(
+        &self,
+        target: &CommandOutputTarget,
+        command: &str,
+        working_directory: &str,
+    ) -> impl std::future::Future<Output = std::result::Result<(), Self::Error>> + Send;
+
+    fn append_output_chunk(
+        &self,
+        target: &CommandOutputTarget,
+        stream: CommandCaptureStream,
+        chunk: &[u8],
+    ) -> impl std::future::Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     fn publish_output(
         &self,
@@ -149,13 +244,14 @@ impl CommandBackend for LocalCommandBackend {
         &self,
         cwd: Option<&Path>,
         allow_workspace_escape: bool,
-    ) -> Result<PathBuf> {
+    ) -> Result<String> {
         let policy =
             ToolPathPolicy::new(self.workspace_root.clone(), allow_workspace_escape, "exec")?;
         match cwd {
             Some(dir) => policy.resolve_existing_directory(dir, &dir.display().to_string()),
             None => Ok(policy.root().to_path_buf()),
         }
+        .map(|path| path.to_string_lossy().into_owned())
     }
 
     async fn output_target(
@@ -172,7 +268,7 @@ impl CommandBackend for LocalCommandBackend {
         ))
     }
 
-    async fn spawn(&self, request: CommandSpawnRequest) -> Result<Child> {
+    async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
         let mut command = shell_command(&request.command);
         command.current_dir(&request.cwd);
         command
@@ -180,9 +276,110 @@ impl CommandBackend for LocalCommandBackend {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_background_command(&mut command);
-        command
+        let mut child = command
             .spawn()
-            .map_err(|error| command_error("exec", error))
+            .map_err(|error| command_error("exec", error))?;
+        let host_pid = child.id();
+        let stdin = child
+            .stdin
+            .take()
+            .map(|value| Box::pin(value) as CommandWriter);
+        let stdout = child
+            .stdout
+            .take()
+            .map(|value| Box::pin(value) as CommandReader);
+        let stderr = child
+            .stderr
+            .take()
+            .map(|value| Box::pin(value) as CommandReader);
+        Ok(ManagedCommand::new(
+            host_pid,
+            stdin,
+            stdout,
+            stderr,
+            async move {
+                child
+                    .wait()
+                    .await
+                    .map(|status| CommandExit {
+                        exit_code: status.code(),
+                    })
+                    .map_err(|error| format!("failed to wait for local process: {error}"))
+            },
+        ))
+    }
+
+    async fn prepare_output(
+        &self,
+        target: &CommandOutputTarget,
+        command: &str,
+        working_directory: &str,
+    ) -> Result<()> {
+        if let Some(parent) = target.capture_file().parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                command_error(
+                    "exec",
+                    format!("failed to create output directory: {error}"),
+                )
+            })?;
+        }
+        let header = format!("=== COMMAND ===\n{command}\n\n=== CWD ===\n{working_directory}\n\n");
+        tokio::fs::write(target.capture_file(), header.as_bytes())
+            .await
+            .map_err(|error| command_error("exec", format!("failed to write output file: {error}")))
+    }
+
+    async fn append_output_chunk(
+        &self,
+        target: &CommandOutputTarget,
+        stream: CommandCaptureStream,
+        chunk: &[u8],
+    ) -> Result<()> {
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(target.capture_file())
+            .await
+            .map_err(|error| {
+                command_error("exec", format!("failed to open output file: {error}"))
+            })?;
+        let label = match stream {
+            CommandCaptureStream::Stdout => "STDOUT",
+            CommandCaptureStream::Stderr => "STDERR",
+        };
+        file.write_all(format!("=== {label} ===\n").as_bytes())
+            .await
+            .map_err(|error| {
+                command_error("exec", format!("failed to write output label: {error}"))
+            })?;
+        file.write_all(chunk).await.map_err(|error| {
+            command_error("exec", format!("failed to write output chunk: {error}"))
+        })?;
+        if !chunk.ends_with(b"\n") {
+            file.write_all(b"\n").await.map_err(|error| {
+                command_error("exec", format!("failed to finish output chunk: {error}"))
+            })?;
+        }
+        if let Some(stream_file) = match stream {
+            CommandCaptureStream::Stdout => target.stdout_capture_file(),
+            CommandCaptureStream::Stderr => target.stderr_capture_file(),
+        } {
+            let mut capture = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(stream_file)
+                .await
+                .map_err(|error| {
+                    command_error(
+                        "exec",
+                        format!("failed to open stream capture file: {error}"),
+                    )
+                })?;
+            capture.write_all(chunk).await.map_err(|error| {
+                command_error("exec", format!("failed to write stream capture: {error}"))
+            })?;
+        }
+        Ok(())
     }
 
     async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<()> {

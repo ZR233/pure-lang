@@ -13,6 +13,7 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
         id: model.id,
         name: model.name,
         path: model.path,
+        ssh_server_id: model.ssh_server_id,
         updated_at: model.updated_at,
     }
 }

@@ -1,25 +1,39 @@
 use std::sync::Arc;
 
-use pl_protocol::PureError;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStderr, ChildStdout};
+use tokio::io::AsyncReadExt;
 
 use super::lifecycle::apply_transition;
-use super::{
-    CommandOutputStream, CommandProcessEntry, CommandProcessTransition, StreamKind, tool_error,
-};
+use super::{CommandOutputStream, CommandProcessEntry, CommandProcessTransition, StreamKind};
+use crate::tool::command::{CommandBackend, CommandCaptureStream, CommandReader};
 
-pub(super) async fn read_stdout(entry: Arc<CommandProcessEntry>, stdout: ChildStdout) {
-    read_stream(entry, stdout, StreamKind::Stdout).await;
+pub(super) async fn read_stdout<B>(
+    entry: Arc<CommandProcessEntry>,
+    stdout: CommandReader,
+    backend: Arc<B>,
+) where
+    B: CommandBackend,
+{
+    read_stream(entry, stdout, StreamKind::Stdout, backend).await;
 }
 
-pub(super) async fn read_stderr(entry: Arc<CommandProcessEntry>, stderr: ChildStderr) {
-    read_stream(entry, stderr, StreamKind::Stderr).await;
+pub(super) async fn read_stderr<B>(
+    entry: Arc<CommandProcessEntry>,
+    stderr: CommandReader,
+    backend: Arc<B>,
+) where
+    B: CommandBackend,
+{
+    read_stream(entry, stderr, StreamKind::Stderr, backend).await;
 }
 
-async fn read_stream<R>(entry: Arc<CommandProcessEntry>, mut reader: R, stream: StreamKind)
-where
+async fn read_stream<R, B>(
+    entry: Arc<CommandProcessEntry>,
+    mut reader: R,
+    stream: StreamKind,
+    backend: Arc<B>,
+) where
     R: tokio::io::AsyncRead + Unpin,
+    B: CommandBackend,
 {
     let mut buffer = [0_u8; 8192];
     loop {
@@ -34,9 +48,16 @@ where
                 if let Some(observer) = &entry.output_observer {
                     observer.output_chunk(stream.into(), chunk, revision);
                 }
-                if let Err(error) = append_output_chunk(&entry, stream, chunk).await {
+                let capture_stream = match stream {
+                    StreamKind::Stdout => CommandCaptureStream::Stdout,
+                    StreamKind::Stderr => CommandCaptureStream::Stderr,
+                };
+                if let Err(error) = backend
+                    .append_output_chunk(&entry.output_target, capture_stream, chunk)
+                    .await
+                {
                     let mut state = entry.state.lock().await;
-                    state.record_output_error(error);
+                    state.record_output_error(error.to_string());
                 }
                 entry.notify.notify_waiters();
             }
@@ -57,71 +78,4 @@ impl From<StreamKind> for CommandOutputStream {
             StreamKind::Stderr => Self::Stderr,
         }
     }
-}
-
-pub(super) async fn prepare_output_file(
-    output_file: &std::path::Path,
-    command: &str,
-    working_directory: &std::path::Path,
-) -> Result<(), PureError> {
-    if let Some(parent) = output_file.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|error| {
-            tool_error(
-                "exec",
-                format!("failed to create output directory: {error}"),
-            )
-        })?;
-    }
-    let header = format!(
-        "=== COMMAND ===\n{command}\n\n=== CWD ===\n{}\n\n",
-        working_directory.display()
-    );
-    tokio::fs::write(output_file, header.as_bytes())
-        .await
-        .map_err(|error| tool_error("exec", format!("failed to write output file: {error}")))
-}
-
-async fn append_output_chunk(
-    entry: &CommandProcessEntry,
-    stream: StreamKind,
-    chunk: &[u8],
-) -> Result<(), String> {
-    let _guard = entry.output_file_lock.lock().await;
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(entry.output_target.capture_file())
-        .await
-        .map_err(|error| format!("failed to open output file: {error}"))?;
-    let label = match stream {
-        StreamKind::Stdout => "STDOUT",
-        StreamKind::Stderr => "STDERR",
-    };
-    file.write_all(format!("=== {label} ===\n").as_bytes())
-        .await
-        .map_err(|error| format!("failed to write output label: {error}"))?;
-    file.write_all(chunk)
-        .await
-        .map_err(|error| format!("failed to write output chunk: {error}"))?;
-    if !chunk.ends_with(b"\n") {
-        file.write_all(b"\n")
-            .await
-            .map_err(|error| format!("failed to finish output chunk: {error}"))?;
-    }
-    if let Some(stream_file) = match stream {
-        StreamKind::Stdout => entry.output_target.stdout_capture_file(),
-        StreamKind::Stderr => entry.output_target.stderr_capture_file(),
-    } {
-        let mut stream_capture = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(stream_file)
-            .await
-            .map_err(|error| format!("failed to open stream capture file: {error}"))?;
-        stream_capture
-            .write_all(chunk)
-            .await
-            .map_err(|error| format!("failed to write stream capture: {error}"))?;
-    }
-    Ok(())
 }

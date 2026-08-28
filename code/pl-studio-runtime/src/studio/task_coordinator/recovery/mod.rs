@@ -80,7 +80,7 @@ impl TaskCoordinator {
             .operation_id()
             .context("merge cleanup replay has no operation id")?
             .to_string();
-        let cleanup = super::merge::cleanup_accepted_delivery(&scope, None).await;
+        let cleanup = super::merge::cleanup_accepted_delivery(self, &scope, None).await;
         self.task_runtime
             .record_merge_cleanup(merge_id, &operation_id, cleanup.clone())
             .await?;

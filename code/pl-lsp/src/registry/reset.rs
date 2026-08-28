@@ -36,6 +36,7 @@ impl LspRuntimeRegistry {
                         server.resolved.clone(),
                         server.driver.clone(),
                         workspace.diagnostics.clone(),
+                        workspace.host.clone(),
                         server.client.take(),
                     ));
                 }
@@ -43,7 +44,7 @@ impl LspRuntimeRegistry {
             }
             targets
         };
-        for (workspace_root, server_id, resolved, driver, diagnostics, previous) in targets {
+        for (workspace_root, server_id, resolved, driver, diagnostics, host, previous) in targets {
             let restart = previous.is_some();
             if let Some(client) = previous {
                 client.shutdown().await;
@@ -57,7 +58,7 @@ impl LspRuntimeRegistry {
                 diagnostics,
                 self.updates.clone(),
             );
-            let client = LspClient::new(resolved, driver, sink);
+            let client = LspClient::new(resolved, driver, sink, host);
             let client = std::sync::Arc::new(client);
             let start_result = client.start().await;
             let mut state = self.state.lock().await;
