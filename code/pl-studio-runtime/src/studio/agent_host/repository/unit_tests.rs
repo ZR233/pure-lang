@@ -212,6 +212,36 @@ async fn active_turn_fallback_preserves_canonical_phase() {
         tx.commit().await.expect("commit");
     }
     assert_phase(&store, &thread_id, "turn-missing", TurnPhase::Thinking).await;
+
+    // 同一 Turn id 已属于另一 Thread 时，持久化必须失败且不得修改该行。
+    let foreign = store
+        .create_thread(&project.id, "foreign", StudioMode::Simple)
+        .await
+        .expect("foreign thread");
+    seed_running_turn(&store, &foreign.id, "turn-foreign", 0, TurnPhase::Thinking).await;
+    let before = turn::Entity::find_by_id("turn-foreign")
+        .one(store.database())
+        .await
+        .expect("read foreign turn")
+        .expect("foreign turn exists");
+    {
+        let tx = store.database().begin().await.expect("begin");
+        let state = running_actor_state(&thread_id, "turn-foreign", 13);
+        let error = persist_state_turns(&tx, &state)
+            .await
+            .expect_err("must reject a Turn owned by another Thread");
+        assert!(
+            error.to_string().contains("belongs to another Thread"),
+            "unexpected error: {error}"
+        );
+        tx.rollback().await.ok();
+    }
+    let after = turn::Entity::find_by_id("turn-foreign")
+        .one(store.database())
+        .await
+        .expect("read foreign turn")
+        .expect("foreign turn exists");
+    assert_eq!(after, before, "foreign Turn row must be unchanged");
 }
 
 fn running_actor_state(thread_id: &str, turn_id: &str, updated_at: i64) -> ThreadActorState {

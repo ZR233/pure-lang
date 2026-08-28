@@ -261,28 +261,36 @@ pub(super) async fn persist_state_turns(
     if let Some(turn_id) = state.snapshot.active_turn_id()
         && let Some(turn_state) = active_turn_projection(state, turn_id)?
     {
-        // 只有缺失 Turn 行时，才用粗粒度 AgentState fallback 补建并写入
-        // 保守 phase；既有行由 canonical Thread notification 拥有精确 phase，
-        // 宿主的 active_turn_projection 不得反向覆盖它。
-        if turn::Entity::find_by_id(turn_id.to_string())
+        let existing = turn::Entity::find_by_id(turn_id.to_string())
             .one(tx)
             .await
-            .map_err(store_error)?
-            .is_none()
-        {
-            persist_turn_projection(
-                tx,
-                TurnProjection {
-                    id: turn_id.as_str(),
-                    thread_id,
-                    state: turn_state,
-                    usage: None,
-                    metadata: None,
-                    updated_at: state.snapshot.updated_at,
-                    revision: state.session.thread_revision,
-                },
-            )
-            .await?;
+            .map_err(store_error)?;
+        match existing {
+            Some(existing) => {
+                if existing.thread_id != thread_id {
+                    return Err(store_error(format!(
+                        "Turn {} belongs to another Thread",
+                        turn_id.as_str()
+                    )));
+                }
+                // 同 Thread 的既有行由 canonical Thread notification 拥有精确 phase，
+                // 宿主的 active_turn_projection 不得反向覆盖它。
+            }
+            None => {
+                persist_turn_projection(
+                    tx,
+                    TurnProjection {
+                        id: turn_id.as_str(),
+                        thread_id,
+                        state: turn_state,
+                        usage: None,
+                        metadata: None,
+                        updated_at: state.snapshot.updated_at,
+                        revision: state.session.thread_revision,
+                    },
+                )
+                .await?;
+            }
         }
     }
     if let Some(outcome) = &state.snapshot.last_turn {
