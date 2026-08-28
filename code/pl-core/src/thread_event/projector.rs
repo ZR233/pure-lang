@@ -343,10 +343,13 @@ pub(super) fn interaction_completion_turn(
 
 fn phase_for_item(item: &TracePart) -> Option<TurnPhase> {
     match item.state() {
-        TracePartState::Text(text) => Some(match text.channel() {
-            TraceTextChannel::Commentary | TraceTextChannel::Final => TurnPhase::Responding,
-            TraceTextChannel::User => TurnPhase::Thinking,
-        }),
+        // User inputs are projected exactly once from the durable mailbox event (see
+        // thread_item below). The internal User trace is model-visible diagnostics only
+        // and must not advance an active Turn out of Preparing.
+        TracePartState::Text(text) => match text.channel() {
+            TraceTextChannel::Commentary | TraceTextChannel::Final => Some(TurnPhase::Responding),
+            TraceTextChannel::User => None,
+        },
         TracePartState::Thinking(_) | TracePartState::Inference(_) => Some(TurnPhase::Thinking),
         TracePartState::Tool(_) | TracePartState::Agent(_) => Some(TurnPhase::RunningTool),
         TracePartState::Plan(_) => Some(TurnPhase::Planning),
@@ -1034,6 +1037,64 @@ mod tests {
             let batch = project_trace_events("thread-1", &snapshot(), &[trace]);
             assert_wait_phase_then_item(&batch, expected_phase);
         }
+    }
+
+    #[test]
+    fn user_trace_keeps_preparing_until_inference_starts() {
+        // 真实 Turn 先 start/complete 内部 User trace，再建立 Inference item。User 输入
+        // 只从 durable mailbox 投影一次（见 thread_item），其 trace 必须对展示 phase 完全
+        // 中性：active Turn 保持 Preparing，直到 Inference start 才切到 Thinking。
+        let user_item = TracePart::completed_text(
+            "turn-1",
+            "turn-1-user",
+            1,
+            TraceTextChannel::User,
+            "hello".to_string(),
+            Vec::new(),
+            1,
+        );
+        let user_start = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 1,
+            timestamp: 1,
+            kind: TraceEventKind::TracePartStarted {
+                item: user_item.clone(),
+            },
+        };
+        let user_complete = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 2,
+            timestamp: 2,
+            kind: TraceEventKind::TracePartCompleted { item: user_item },
+        };
+
+        // User trace 单独投影时零 notification：既不产生 TurnUpdated，也不产生 Item。
+        let user_only = project_trace_events(
+            "thread-1",
+            &snapshot(),
+            &[user_start.clone(), user_complete.clone()],
+        );
+        assert!(
+            user_only.notifications.is_empty(),
+            "user trace must not publish TurnUpdated or Item, got {:?}",
+            user_only.notifications
+        );
+
+        // 随后 Inference start 才先投影 TurnUpdated(Thinking)，再发布 ItemStarted。
+        let inference = started_trace(TracePart::running_inference(
+            "turn-1".to_string(),
+            "inference-1".to_string(),
+            3,
+            7,
+            "inf-1".to_string(),
+            "claude".to_string(),
+        ));
+        let batch = project_trace_events(
+            "thread-1",
+            &snapshot(),
+            &[user_start, user_complete, inference],
+        );
+        assert_wait_phase_then_item(&batch, TurnPhase::Thinking);
     }
 
     fn started_trace(item: TracePart) -> TraceEvent {
