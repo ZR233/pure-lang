@@ -120,11 +120,18 @@ List<TimelineRow> timelineRowsFromFixtureParts(
 Widget _localizedApp({
   required Widget home,
   Locale locale = const Locale('en'),
+  bool disableAnimations = false,
 }) {
   return MaterialApp(
     locale: locale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
+    builder: disableAnimations
+        ? (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          )
+        : null,
     home: home,
   );
 }

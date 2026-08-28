@@ -965,7 +965,8 @@ void registerTimelineToolTests() {
     await tester.pumpWidget(
       timelineFor(runningTool, StudioTurnActivity.runningTool),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
     final currentActivity = find.byKey(
       const ValueKey('timeline-current-activity'),
@@ -984,7 +985,8 @@ void registerTimelineToolTests() {
     await tester.pumpWidget(
       timelineFor(completedTool, StudioTurnActivity.thinking),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
     expect(currentActivity, findsOneWidget);
     expect(
@@ -996,4 +998,336 @@ void registerTimelineToolTests() {
     );
     expect(find.text('exec completed'), findsOneWidget);
   });
+
+  testWidgets(
+    'current reasoning shows Thinking label with an animated wait pulse',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final reasoning = _threadItemFixture(
+        id: 'reasoning-wait',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        ordinal: 0,
+        kind: ThreadItemKind.reasoning,
+        channel: null,
+        reasoningSummary: const ['## Inspecting the implementation'],
+        status: 'streaming',
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('Thinking'), findsOneWidget);
+      expect(find.text('Inspecting the implementation'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+      expect(tester.binding.hasScheduledFrame, isTrue);
+    },
+  );
+
+  testWidgets(
+    'running tool shows a single group pulse and expands to item pulses',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final toolPart = _toolTimelinePart(
+        id: 'tool-running',
+        groupId: 'group-running',
+        turnId: 'turn-running',
+        name: 'exec',
+        status: 'running',
+        arguments: jsonEncode({'command': 'cargo test'}),
+        workingDirectory: 'code/pure-studio',
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts([toolPart]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-running',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-tool-item-pulse:tool-running')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.byKey(const ValueKey('timeline-tool-group-details')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-tool-item-pulse:tool-running')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('completed turn removes the wait pulse', (tester) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final toolPart = _toolTimelinePart(
+      id: 'tool-done',
+      groupId: 'group-done',
+      turnId: 'turn-done',
+      name: 'exec',
+      status: 'succeeded',
+      arguments: jsonEncode({'command': 'cargo test'}),
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromFixtureParts([toolPart]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                state: const CompletedStudioTurnState(
+                  startedAt: 1,
+                  completedAt: 2,
+                  completion: StudioTurnCompletion.normal,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('awaiting approval and terminal tools show no item pulse', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-await',
+        groupId: 'group-mixed',
+        turnId: 'turn-mixed',
+        name: 'exec',
+        status: 'awaitingApproval',
+        arguments: jsonEncode({'command': 'rm -rf'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-succeeded',
+        groupId: 'group-mixed',
+        turnId: 'turn-mixed',
+        order: 1,
+        name: 'read_file',
+        status: 'succeeded',
+        arguments: jsonEncode({'path': 'lib/main.dart'}),
+      ),
+    ];
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromFixtureParts(parts),
+              turn: _testTurn(
+                threadId: 'session-1',
+                turnId: 'turn-mixed',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.runningTool,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-await')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-succeeded')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('reduced motion keeps the wait pulse static and quiet', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-static',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Static reasoning'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: _DisableAnimations(
+          disabled: true,
+          child: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('reasoning summary stays expandable under the current activity', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-expand',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Inspecting the details'],
+      reasoningContent: const ['Detailed reasoning body'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromThreadItems([reasoning]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.thinking,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-reasoning-group-details')),
+      findsNothing,
+    );
+    await tester.tap(find.text('Thinking'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-reasoning-group-details')),
+      findsOneWidget,
+    );
+  });
+}
+
+class _DisableAnimations extends StatelessWidget {
+  const _DisableAnimations({required this.disabled, required this.child});
+
+  final bool disabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: disabled),
+      child: child,
+    );
+  }
 }

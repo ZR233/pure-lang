@@ -608,6 +608,10 @@ class _ReasoningPart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = _reasoningGroupLabel(context, group, isCurrentActivity);
+    final secondary = isCurrentActivity
+        ? _reasoningCurrentSummary(group)
+        : null;
+    final semanticsLabel = secondary == null ? label : '$label · $secondary';
     final details = group.details;
 
     return Column(
@@ -617,7 +621,7 @@ class _ReasoningPart extends StatelessWidget {
           container: true,
           button: true,
           expanded: expanded,
-          label: label,
+          label: semanticsLabel,
           onTap: onToggle,
           excludeSemantics: true,
           child: Material(
@@ -630,6 +634,7 @@ class _ReasoningPart extends StatelessWidget {
               child: _TimelineActivitySummary(
                 icon: Icons.psychology_alt_outlined,
                 label: label,
+                secondary: secondary,
                 isCurrentActivity: isCurrentActivity,
                 muted: true,
                 isIssue: const {
@@ -685,7 +690,7 @@ String _reasoningGroupLabel(
   bool isCurrentActivity,
 ) {
   if (isCurrentActivity) {
-    return group.latestSummary ?? context.l10n.timelineReasoningActive;
+    return context.l10n.timelineReasoningActive;
   }
   final summaries = group.summaries.take(3).toList(growable: true);
   final hiddenCount = group.summaries.length - summaries.length;
@@ -697,6 +702,15 @@ String _reasoningGroupLabel(
       : summaries.join(' · ');
 }
 
+/// 当前 thinking 活动块作为次要信息展示的最迟 reasoning 摘要；无有效摘要返回 null。
+String? _reasoningCurrentSummary(TimelineReasoningGroup group) {
+  final latest = group.latestSummary?.trim();
+  if (latest == null || latest.isEmpty) {
+    return null;
+  }
+  return latest;
+}
+
 class _TimelineActivitySummary extends StatelessWidget {
   const _TimelineActivitySummary({
     required this.icon,
@@ -705,6 +719,8 @@ class _TimelineActivitySummary extends StatelessWidget {
     this.isIssue = false,
     this.muted = false,
     this.expanded,
+    this.secondary,
+    this.showWaitPulse,
   });
 
   final IconData icon;
@@ -713,6 +729,14 @@ class _TimelineActivitySummary extends StatelessWidget {
   final bool isIssue;
   final bool muted;
   final bool? expanded;
+
+  /// 可选的次要文案（例如 thinking 的最新 reasoning 摘要），跟随主标签滚动展开。
+  final String? secondary;
+
+  /// 是否显示等待脉冲；为 null 时跟随 [isCurrentActivity]。
+  final bool? showWaitPulse;
+
+  bool get _showPulse => showWaitPulse ?? isCurrentActivity;
 
   @override
   Widget build(BuildContext context) {
@@ -723,6 +747,7 @@ class _TimelineActivitySummary extends StatelessWidget {
         : isCurrentActivity
         ? context.studioInk
         : context.studioInkSoft;
+    final showPulse = _showPulse;
     return ConstrainedBox(
       key: isCurrentActivity
           ? const ValueKey('timeline-current-activity')
@@ -737,6 +762,12 @@ class _TimelineActivitySummary extends StatelessWidget {
               size: 16,
               color: color.withValues(alpha: isCurrentActivity ? 0.9 : 0.76),
             ),
+            if (showPulse) ...[
+              const SizedBox(width: 6),
+              const TimelineWaitIndicator(
+                key: ValueKey('timeline-current-activity-pulse'),
+              ),
+            ],
             const SizedBox(width: 8),
             Expanded(
               child: AnimatedSwitcher(
@@ -749,19 +780,7 @@ class _TimelineActivitySummary extends StatelessWidget {
                     children: [...previousChildren, ?currentChild],
                   );
                 },
-                child: Text(
-                  label,
-                  key: ValueKey(label),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.bodySmall?.copyWith(
-                    color: color,
-                    fontWeight: (isCurrentActivity && !muted) || isIssue
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                    height: 1.25,
-                  ),
-                ),
+                child: _activityLabel(context, color),
               ),
             ),
             if (expanded != null) ...[
@@ -776,6 +795,66 @@ class _TimelineActivitySummary extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _activityLabel(BuildContext context, Color color) {
+    final secondaryText = secondary?.trim();
+    final hasSecondary = secondaryText != null && secondaryText.isNotEmpty;
+    final baseStyle = context.text.bodySmall?.copyWith(
+      color: color,
+      fontWeight: (isCurrentActivity && !muted) || isIssue
+          ? FontWeight.w600
+          : FontWeight.w400,
+      height: 1.25,
+    );
+    if (hasSecondary) {
+      return Semantics(
+        key: ValueKey('$label::$secondaryText'),
+        liveRegion: isCurrentActivity,
+        label: '$label · $secondaryText',
+        excludeSemantics: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: baseStyle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                secondaryText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: context.text.bodySmall?.copyWith(
+                  color: context.studioInkSoft.withValues(alpha: 0.82),
+                  height: 1.25,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Semantics(
+      key: ValueKey(label),
+      liveRegion: isCurrentActivity,
+      label: label,
+      excludeSemantics: true,
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
+        style: baseStyle,
       ),
     );
   }
