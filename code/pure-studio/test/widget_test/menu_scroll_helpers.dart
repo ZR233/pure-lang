@@ -74,10 +74,10 @@ streaming line 14
 ''';
 
 ScrollPosition _timelinePosition(WidgetTester tester) {
-  final listView = tester.widget<ListView>(
+  final scrollView = tester.widget<CustomScrollView>(
     find.byKey(const ValueKey('timeline-scrollable')),
   );
-  return listView.controller!.position;
+  return scrollView.controller!.position;
 }
 
 double _timelineExtentAfter(WidgetTester tester) {

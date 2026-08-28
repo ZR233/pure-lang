@@ -15,6 +15,36 @@ class _EmptyTimeline extends StatelessWidget {
   }
 }
 
+/// Timeline 的收束区域：短内容时把活动块压到视口底部，长内容时自然接在末项后。
+class _TimelineTail extends StatelessWidget {
+  const _TimelineTail({this.activity});
+
+  final Widget? activity;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentActivity = activity;
+    final alignedActivity = currentActivity == null
+        ? null
+        : Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700),
+              child: currentActivity,
+            ),
+          );
+    return Column(
+      key: const ValueKey('timeline-tail'),
+      mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ?alignedActivity,
+        const SizedBox(key: ValueKey('timeline-tail-bottom-gap'), height: 14),
+      ],
+    );
+  }
+}
+
 class _TurnActivityBlock extends StatelessWidget {
   const _TurnActivityBlock({
     required this.turn,
@@ -36,36 +66,27 @@ class _TurnActivityBlock extends StatelessWidget {
     final activity = turn.state.activity;
     final reasoning = reasoningGroup;
     if (activity == StudioTurnActivity.thinking && reasoning != null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: _ReasoningPart(
-          threadId: turn.threadId,
-          group: reasoning,
-          isCurrentActivity: true,
-          expanded: reasoningExpanded,
-          onToggle: onToggleReasoning,
-        ),
+      return _ReasoningPart(
+        threadId: turn.threadId,
+        group: reasoning,
+        isCurrentActivity: true,
+        expanded: reasoningExpanded,
+        onToggle: onToggleReasoning,
       );
     }
     final tools = toolGroup;
     if (activity == StudioTurnActivity.runningTool && tools != null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: _ToolGroupPart(
-          threadId: turn.threadId,
-          group: tools,
-          isCurrentActivity: true,
-        ),
+      return _ToolGroupPart(
+        threadId: turn.threadId,
+        group: tools,
+        isCurrentActivity: true,
       );
     }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: _TimelineActivitySummary(
-        icon: activity?.icon ?? Icons.schedule_outlined,
-        label: _turnActivityLabel(context, turn.state),
-        isCurrentActivity: true,
-        muted: activity == StudioTurnActivity.thinking,
-      ),
+    return _TimelineActivitySummary(
+      icon: activity?.icon ?? Icons.schedule_outlined,
+      label: _turnActivityLabel(context, turn.state),
+      isCurrentActivity: true,
+      muted: activity == StudioTurnActivity.thinking,
     );
   }
 }
@@ -767,18 +788,19 @@ class _TimelineActivitySummary extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 16,
-              color: color.withValues(alpha: isCurrentActivity ? 0.9 : 0.76),
-            ),
             if (showPulse) ...[
-              const SizedBox(width: 6),
               const TimelineWaitIndicator(
                 key: ValueKey('timeline-current-activity-pulse'),
               ),
+              const SizedBox(width: 10),
+            ] else ...[
+              Icon(
+                icon,
+                size: 16,
+                color: color.withValues(alpha: isCurrentActivity ? 0.9 : 0.76),
+              ),
+              const SizedBox(width: 8),
             ],
-            const SizedBox(width: 8),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 140),
@@ -814,8 +836,10 @@ class _TimelineActivitySummary extends StatelessWidget {
     final hasSecondary = secondaryText != null && secondaryText.isNotEmpty;
     final baseStyle = context.text.bodySmall?.copyWith(
       color: color,
-      fontWeight: (isCurrentActivity && !muted) || isIssue
+      fontWeight: isIssue
           ? FontWeight.w600
+          : isCurrentActivity
+          ? FontWeight.w500
           : FontWeight.w400,
       height: 1.25,
     );
@@ -826,19 +850,16 @@ class _TimelineActivitySummary extends StatelessWidget {
         label: '$label · $secondaryText',
         excludeSemantics: true,
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                style: baseStyle,
-              ),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: baseStyle,
             ),
             const SizedBox(width: 6),
-            Flexible(
+            Expanded(
               child: Text(
                 secondaryText,
                 maxLines: 1,

@@ -244,12 +244,22 @@ runningTool、persisting。终态后移除活动块；失败和中断由 Turn �
 不是 Turn phase，而是由 Thread 上挂的 pending Interaction 派生的 UI 状态——交互 dock
 出现时 composer 锁定，Interaction 消失时解锁。
 
+活动块是 timeline 的尾部活动行，不是覆盖历史内容的 sticky overlay。历史内容不足一屏时，
+活动行下沉到 timeline 可视区底部并与下方状态栏保留紧凑留白；历史内容超过一屏时，活动行自然排在
+最后一项之后，继续服从 timeline 的底部跟随与“跳到最新”规则。收束后的历史活动块仍留在原始
+ordinal 位置，不能因视觉下沉改变 row identity 或投影顺序。
+
 queued Turn 与上述所有非终态 phase 都在活动块显示统一、克制的小型时间线脉冲，明确表示客户端
 仍在等待下一项 typed 事实。`thinking` 的主标签固定使用本地化“思考中 / Thinking”；已有
 reasoning summary 可以作为次要信息继续展示或展开，但不能替换该主标签。`runningTool` 的折叠组
 显示一次组级脉冲；展开后只有 `started | streaming | approved | running` 的具体工具显示紧凑
 脉冲，已终态工具和历史活动块保持静止。`awaitingApproval` 继续使用授权语义和 Interaction dock，
 不能伪装成模型思考。
+
+折叠态活动行以脉冲本身作为领先视觉锚点，不在主标签前同时堆叠 phase 图标；主状态使用稳定强调，
+可变 reasoning/tool 摘要作为低对比次级信息，展开控制保留在行尾。展开后组标题恢复类型图标，
+具体执行项各自承载脉冲，以免组级与子项动效重复。瞬时活动行保持透明，不使用通栏背景、边框或
+阴影；卡片层级只留给持久化的结构化内容和需要用户决策的 Interaction。
 
 动效沿用 Studio 的纸张、墨色与陶土强调色，在亮色和暗色主题中保持对比，并只强调当前活动，不给
 每个历史行增加装饰。系统启用 reduced motion 时不得启动循环 ticker，改为同尺寸静态时间线标记；

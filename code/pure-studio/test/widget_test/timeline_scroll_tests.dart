@@ -1,6 +1,38 @@
 part of '../widget_test.dart';
 
 void registerTimelineScrollTests() {
+  testWidgets('short timeline anchors current activity above its bottom edge', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    const threadId = 'session-short-activity';
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: threadId,
+        items: _scrollItems(threadId, 1),
+        turnState: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.thinking,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final timelineRect = tester.getRect(find.byKey(StudioDriverKeys.timeline));
+    final activityRect = tester.getRect(
+      find.byKey(const ValueKey('timeline-current-activity')),
+    );
+    expect(activityRect.left, closeTo(timelineRect.left + 24, 0.1));
+    expect(activityRect.width, lessThanOrEqualTo(700));
+    expect(activityRect.bottom, closeTo(timelineRect.bottom - 14, 0.1));
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('timeline follows appended messages from the bottom', (
     tester,
   ) async {
@@ -46,7 +78,10 @@ void registerTimelineScrollTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(ListView), const Offset(0, 260));
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 260),
+    );
     await tester.pumpAndSettle();
     final offsetBeforeAppend = _timelinePixels(tester);
     expect(_timelineExtentAfter(tester), greaterThan(80));
@@ -79,7 +114,10 @@ void registerTimelineScrollTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(ListView), const Offset(0, 260));
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 260),
+    );
     await tester.pumpAndSettle();
     await tester.pumpWidget(
       _timelineHarness(
@@ -138,7 +176,10 @@ void registerTimelineScrollTests() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, 260));
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 260),
+    );
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('timeline-jump-to-latest:0')),
@@ -185,7 +226,10 @@ void registerTimelineScrollTests() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, 260));
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 260),
+    );
     await tester.pumpAndSettle();
     final sessionAOffset = _timelinePixels(tester);
     expect(_timelineExtentAfter(tester), greaterThan(80));
@@ -277,7 +321,10 @@ void registerTimelineScrollTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(ListView), const Offset(0, 5000));
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 5000),
+    );
     await tester.pumpAndSettle();
     expect(loadCount, 1);
     final anchor = find.textContaining('message 8 for $threadId');

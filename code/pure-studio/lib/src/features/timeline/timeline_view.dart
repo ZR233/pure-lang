@@ -245,7 +245,23 @@ class _TimelineViewState extends State<TimelineView> {
       widget.rows,
       currentActivityRowId: currentActivityRow?.id,
     );
-    final activityCount = activeTurn == null ? 0 : 1;
+    final activity = activeTurn == null
+        ? null
+        : _TurnActivityBlock(
+            key: StudioDriverKeys.turnActivity(_turnActivityId(activeTurn)),
+            turn: activeTurn,
+            reasoningGroup: currentActivityRow?.reasoningGroup,
+            toolGroup: currentActivityRow?.toolGroup,
+            reasoningExpanded: _expandedReasoningGroups.contains(
+              currentActivityRow?.reasoningGroup?.id,
+            ),
+            onToggleReasoning: () {
+              final group = currentActivityRow?.reasoningGroup;
+              if (group != null) {
+                _toggleReasoning(group.id);
+              }
+            },
+          );
     return SelectionArea(
       onSelectionChanged: _handleTimelineSelectionChanged,
       contextMenuBuilder: _buildTimelineContextMenu,
@@ -259,62 +275,50 @@ class _TimelineViewState extends State<TimelineView> {
               ),
               child: NotificationListener<ScrollMetricsNotification>(
                 onNotification: _handleScrollMetricsChanged,
-                child: ListView.builder(
+                child: CustomScrollView(
                   key: StudioDriverKeys.timeline,
                   controller: _controller,
-                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-                  itemCount: blocks.length + activityCount + 1,
-                  findChildIndexCallback: (key) {
-                    if (key is! ValueKey<String>) {
-                      return null;
-                    }
-                    if (activeTurn != null &&
-                        key ==
-                            StudioDriverKeys.turnActivity(
-                              _turnActivityId(activeTurn),
-                            )) {
-                      return blocks.length;
-                    }
-                    final index = blocks.indexWhere(
-                      (block) =>
-                          StudioDriverKeys.timelineBlock(block.id) == key,
-                    );
-                    return index == -1 ? null : index;
-                  },
-                  itemBuilder: (context, index) {
-                    if (activeTurn != null && index == blocks.length) {
-                      return _TurnActivityBlock(
-                        key: StudioDriverKeys.turnActivity(
-                          _turnActivityId(activeTurn),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                      sliver: SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final block = blocks[index];
+                            return _TimelineRowBlock(
+                              key: StudioDriverKeys.timelineBlock(block.id),
+                              row: block.rows.single,
+                              isCurrentActivity: block.isCurrentActivity,
+                              isReasoningExpanded: _expandedReasoningGroups
+                                  .contains(
+                                    block.rows.single.reasoningGroup?.id,
+                                  ),
+                              onToggleReasoning: _toggleReasoning,
+                            );
+                          },
+                          childCount: blocks.length,
+                          findChildIndexCallback: (key) {
+                            if (key is! ValueKey<String>) {
+                              return null;
+                            }
+                            final index = blocks.indexWhere(
+                              (block) =>
+                                  StudioDriverKeys.timelineBlock(block.id) ==
+                                  key,
+                            );
+                            return index == -1 ? null : index;
+                          },
                         ),
-                        turn: activeTurn,
-                        reasoningGroup: currentActivityRow?.reasoningGroup,
-                        toolGroup: currentActivityRow?.toolGroup,
-                        reasoningExpanded: _expandedReasoningGroups.contains(
-                          currentActivityRow?.reasoningGroup?.id,
-                        ),
-                        onToggleReasoning: () {
-                          final group = currentActivityRow?.reasoningGroup;
-                          if (group != null) {
-                            _toggleReasoning(group.id);
-                          }
-                        },
-                      );
-                    }
-                    if (index == blocks.length + activityCount) {
-                      return const SizedBox(height: 24);
-                    }
-                    final block = blocks[index];
-                    return _TimelineRowBlock(
-                      key: StudioDriverKeys.timelineBlock(block.id),
-                      row: block.rows.single,
-                      isCurrentActivity: block.isCurrentActivity,
-                      isReasoningExpanded: _expandedReasoningGroups.contains(
-                        block.rows.single.reasoningGroup?.id,
                       ),
-                      onToggleReasoning: _toggleReasoning,
-                    );
-                  },
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      sliver: SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: _TimelineTail(activity: activity),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
