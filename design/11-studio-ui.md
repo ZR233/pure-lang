@@ -234,6 +234,18 @@ runningTool、persisting。终态后移除活动块；失败和中断由 Turn �
 不是 Turn phase，而是由 Thread 上挂的 pending Interaction 派生的 UI 状态——交互 dock
 出现时 composer 锁定，Interaction 消失时解锁。
 
+queued Turn 与上述所有非终态 phase 都在活动块显示统一、克制的小型时间线脉冲，明确表示客户端
+仍在等待下一项 typed 事实。`thinking` 的主标签固定使用本地化“思考中 / Thinking”；已有
+reasoning summary 可以作为次要信息继续展示或展开，但不能替换该主标签。`runningTool` 的折叠组
+显示一次组级脉冲；展开后只有 `started | streaming | approved | running` 的具体工具显示紧凑
+脉冲，已终态工具和历史活动块保持静止。`awaitingApproval` 继续使用授权语义和 Interaction dock，
+不能伪装成模型思考。
+
+动效沿用 Studio 的纸张、墨色与陶土强调色，在亮色和暗色主题中保持对比，并只强调当前活动，不给
+每个历史行增加装饰。系统启用 reduced motion 时不得启动循环 ticker，改为同尺寸静态时间线标记；
+装饰性节点不参与朗读，活动文案作为 live region 提供语义反馈。动效只消费 typed Turn/Item 状态，
+不生成伪 Item、不改变 row identity、ordinal、共享 SelectionArea 或滚动跟随规则。
+
 ## 11.7 Product stream 与恢复
 
 product stream 只负责 Project、Thread directory、Task、settings 和 health。选中 Thread 的高频

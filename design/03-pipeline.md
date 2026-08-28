@@ -23,6 +23,17 @@
 `preparing | thinking | responding | planning | runningTool | persisting`。
 Thread 没有 active Turn 即 idle，不持久化第二套 agent activity 或 last outcome。
 
+活动 phase 是 Thread stream 与持久化 Turn 投影中唯一的可展示活动事实：`preparing` 表示尚未
+建立本轮 inference，`thinking` 覆盖 inference Item 已开始后的模型请求在途、等待首个响应和
+reasoning 流式阶段，`responding` 表示可见 agent message 正在产生，`planning` 表示 plan 正在
+形成，`runningTool` 覆盖 tool 或 agent Item 已开始直至终态，`persisting` 表示 Turn 正在收尾。
+宿主的粗粒度 Agent lifecycle 只服务调度，不能反向覆盖 Thread notification 已确认的精确 phase；
+write-behind、冷读与重订阅都必须保留同一 canonical phase。
+
+inference、tool 和 agent Item 的 start 必须在等待对应外部边界前发布并进入 canonical snapshot，
+使客户端从请求发起到终态之间始终有 typed 活动状态。客户端不得从 progress 文案、工具参数、
+provider 私有事件或未终态正文推测等待种类；模型请求在途统一按 `thinking` 展示。
+
 pending Interaction 是一种成功的 completion boundary：当 Turn 因 pending
 Interaction 结束时，Turn 落 `completed`，不进入专门的“等待交互” phase。“是否
 等待用户”由 Thread 上挂的 pending Interaction 派生，不进 Turn 状态机。
